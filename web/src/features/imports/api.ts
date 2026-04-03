@@ -1,0 +1,216 @@
+import type {
+  ImportBatchType,
+  ImportSessionPayload,
+  ImportTemplate,
+  MatchingRunSummary,
+} from "./types";
+
+type ApiImportFile = {
+  id: string;
+  file_name: string;
+  template_code?: string | null;
+  batch_type?: "input_invoice" | "output_invoice" | "bank_transaction" | null;
+  status: string;
+  message: string;
+  row_count: number;
+  success_count: number;
+  error_count: number;
+  duplicate_count: number;
+  suspected_duplicate_count: number;
+  updated_count: number;
+  preview_batch_id?: string | null;
+  batch_id?: string | null;
+  stored_file_path?: string | null;
+  override_template_code?: string | null;
+  override_batch_type?: "input_invoice" | "output_invoice" | "bank_transaction" | null;
+  row_results?: Array<{
+    id: string;
+    row_no: number;
+    source_record_type: string;
+    decision: "created" | "status_updated" | "duplicate_skipped" | "suspected_duplicate" | "error";
+    decision_reason: string;
+  }>;
+};
+
+type ApiImportSessionPayload = {
+  session: {
+    id: string;
+    imported_by: string;
+    file_count: number;
+    status: string;
+    created_at: string;
+  };
+  files: ApiImportFile[];
+  matching_run?: {
+    id: string;
+    triggered_by: string;
+    result_count: number;
+    automatic_count: number;
+    suggested_count: number;
+    manual_review_count: number;
+  };
+};
+
+type ApiImportTemplatesPayload = {
+  templates: Array<{
+    template_code: string;
+    label: string;
+    file_extensions: string[];
+    record_type: "invoice" | "bank_transaction";
+    allowed_batch_types: Array<"input_invoice" | "output_invoice" | "bank_transaction">;
+    required_headers: string[];
+  }>;
+};
+
+async function requestJson<T>(url: string, init: RequestInit = {}) {
+  const response = await fetch(url, init);
+  const payload = (await response.json()) as T;
+  if (!response.ok) {
+    throw new Error(typeof payload === "object" && payload ? JSON.stringify(payload) : "request failed");
+  }
+  return payload;
+}
+
+function mapMatchingRun(payload?: ApiImportSessionPayload["matching_run"]): MatchingRunSummary | undefined {
+  if (!payload) {
+    return undefined;
+  }
+  return {
+    id: payload.id,
+    triggeredBy: payload.triggered_by,
+    resultCount: payload.result_count,
+    automaticCount: payload.automatic_count,
+    suggestedCount: payload.suggested_count,
+    manualReviewCount: payload.manual_review_count,
+  };
+}
+
+function mapImportPayload(payload: ApiImportSessionPayload): ImportSessionPayload {
+  return {
+    session: {
+      id: payload.session.id,
+      importedBy: payload.session.imported_by,
+      fileCount: payload.session.file_count,
+      status: payload.session.status,
+      createdAt: payload.session.created_at,
+    },
+    files: payload.files.map((file) => ({
+      id: file.id,
+      fileName: file.file_name,
+      templateCode: file.template_code,
+      batchType: file.batch_type,
+      status: file.status as ImportSessionPayload["files"][number]["status"],
+      message: file.message,
+      rowCount: file.row_count,
+      successCount: file.success_count,
+      errorCount: file.error_count,
+      duplicateCount: file.duplicate_count,
+      suspectedDuplicateCount: file.suspected_duplicate_count,
+      updatedCount: file.updated_count,
+      previewBatchId: file.preview_batch_id,
+      batchId: file.batch_id,
+      storedFilePath: file.stored_file_path,
+      overrideTemplateCode: file.override_template_code,
+      overrideBatchType: file.override_batch_type,
+      rowResults: (file.row_results ?? []).map((row) => ({
+        id: row.id,
+        rowNo: row.row_no,
+        sourceRecordType: row.source_record_type,
+        decision: row.decision,
+        decisionReason: row.decision_reason,
+      })),
+    })),
+    matchingRun: mapMatchingRun(payload.matching_run),
+  };
+}
+
+function mapImportTemplates(payload: ApiImportTemplatesPayload): ImportTemplate[] {
+  return payload.templates.map((template) => ({
+    templateCode: template.template_code,
+    label: template.label,
+    fileExtensions: template.file_extensions,
+    recordType: template.record_type,
+    allowedBatchTypes: template.allowed_batch_types,
+    requiredHeaders: template.required_headers,
+  }));
+}
+
+export async function previewImportFiles(files: File[], importedBy = "web_finance_user"): Promise<ImportSessionPayload> {
+  const formData = new FormData();
+  formData.append("imported_by", importedBy);
+  files.forEach((file) => formData.append("files", file));
+
+  const payload = await requestJson<ApiImportSessionPayload>("/imports/files/preview", {
+    method: "POST",
+    body: formData,
+  });
+  return mapImportPayload(payload);
+}
+
+export async function retryImportFiles(
+  sessionId: string,
+  selectedFileIds: string[],
+  overrides: Record<string, { templateCode?: string | null; batchType?: ImportBatchType | null }>,
+): Promise<ImportSessionPayload> {
+  const payload = await requestJson<ApiImportSessionPayload>("/imports/files/retry", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      session_id: sessionId,
+      selected_file_ids: selectedFileIds,
+      overrides: Object.fromEntries(
+        Object.entries(overrides).map(([fileId, override]) => [
+          fileId,
+          {
+            ...(override.templateCode ? { template_code: override.templateCode } : {}),
+            ...(override.batchType ? { batch_type: override.batchType } : {}),
+          },
+        ]),
+      ),
+    }),
+  });
+  return mapImportPayload(payload);
+}
+
+export async function confirmImportFiles(
+  sessionId: string,
+  selectedFileIds: string[],
+): Promise<ImportSessionPayload> {
+  const payload = await requestJson<ApiImportSessionPayload>("/imports/files/confirm", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      session_id: sessionId,
+      selected_file_ids: selectedFileIds,
+    }),
+  });
+  return mapImportPayload(payload);
+}
+
+export async function fetchImportSession(sessionId: string): Promise<ImportSessionPayload> {
+  const payload = await requestJson<ApiImportSessionPayload>(`/imports/files/sessions/${sessionId}`, {
+    method: "GET",
+  });
+  return mapImportPayload(payload);
+}
+
+export async function fetchImportTemplates(): Promise<ImportTemplate[]> {
+  const payload = await requestJson<ApiImportTemplatesPayload>("/imports/templates", {
+    method: "GET",
+  });
+  return mapImportTemplates(payload);
+}
+
+export async function revertImportBatch(batchId: string): Promise<void> {
+  await requestJson<{ batch: { id: string; status: string } }>(`/imports/batches/${batchId}/revert`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({}),
+  });
+}

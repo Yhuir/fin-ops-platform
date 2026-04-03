@@ -7,3 +7,8 @@ dist/
 build/
 .runtime/
 .worktrees/
+.impeccable.md
+.superpowers/
+*.tsbuildinfo
+/package-lock.json
+node_modules/

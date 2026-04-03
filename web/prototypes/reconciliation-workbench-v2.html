@@ -1,0 +1,4281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>银企核销工作台原型 V2</title>
+  <style>
+    :root {
+      --bg: #f3f6fb;
+      --panel: #ffffff;
+      --line: #d8e1eb;
+      --line-soft: #e9eef5;
+      --text: #243b53;
+      --muted: #5d6d7e;
+      --blue: #0f4c81;
+      --blue-soft: #eaf3ff;
+      --green: #206a46;
+      --green-soft: #ebf8f0;
+      --amber: #9a6700;
+      --amber-soft: #fff8e5;
+      --red: #b42318;
+      --red-soft: #fff0ee;
+      --purple: #6b21a8;
+      --shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
+      --radius: 18px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(15, 76, 129, 0.08), transparent 28%),
+        radial-gradient(circle at top right, rgba(32, 106, 70, 0.08), transparent 30%),
+        var(--bg);
+      color: var(--text);
+    }
+
+    .app {
+      min-height: 100vh;
+      padding: 22px;
+    }
+
+    .shell {
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .page {
+      display: none;
+    }
+
+    .page.active {
+      display: block;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      padding: 16px 18px 12px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #f9fbfe 0%, #f2f6fa 100%);
+    }
+
+    .title {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 0.01em;
+    }
+
+    .subtitle {
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .top-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .month-btn,
+    .ghost-btn,
+    .primary-btn,
+    .toggle-btn,
+    .chip-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      height: 36px;
+      padding: 0 12px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .primary-btn {
+      background: var(--blue);
+      border-color: var(--blue);
+      color: #fff;
+    }
+
+    .toggle-btn.active,
+    .chip-btn.active {
+      background: var(--blue-soft);
+      border-color: #cfe0ff;
+      color: #164c9b;
+    }
+
+    .month-input {
+      border: 0;
+      padding: 0;
+      margin: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      outline: none;
+      width: 96px;
+    }
+
+    .toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfe;
+      flex-wrap: wrap;
+    }
+
+    .toolbar-left,
+    .toolbar-right {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .field {
+      height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      color: var(--muted);
+      padding: 0 12px;
+      display: inline-flex;
+      align-items: center;
+      min-width: 170px;
+      font-size: 12px;
+    }
+
+    .stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 0 16px 14px;
+      background: linear-gradient(180deg, #f9fbfe 0%, #f2f6fa 100%);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .stat {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: #fff;
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--text);
+    }
+
+    .stat.good {
+      background: var(--green-soft);
+      border-color: #cde8d7;
+      color: var(--green);
+    }
+
+    .stat.warn {
+      background: var(--amber-soft);
+      border-color: #f0d8a2;
+      color: var(--amber);
+    }
+
+    .zones {
+      padding: 14px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .zone {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      overflow: hidden;
+      background: #fff;
+    }
+
+    .zone-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .zone-head.top {
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .zone-head.bottom {
+      background: var(--amber-soft);
+      color: var(--amber);
+    }
+
+    .zone-meta {
+      font-size: 11px;
+      font-weight: 700;
+      opacity: 0.85;
+    }
+
+    .tri-layout {
+      display: grid;
+      gap: 0;
+      background: #fff;
+      min-height: 0;
+    }
+
+    .pane {
+      min-width: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--line);
+    }
+
+    .pane:last-child {
+      border-right: 0;
+    }
+
+    .pane.is-hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .splitter {
+      width: 10px;
+      min-width: 10px;
+      background:
+        linear-gradient(180deg, #eef3f8 0%, #e3ebf4 100%);
+      border-left: 1px solid #d7e0ea;
+      border-right: 1px solid #d7e0ea;
+      position: relative;
+      cursor: col-resize;
+    }
+
+    .splitter.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .splitter::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 4px;
+      height: 40px;
+      border-radius: 999px;
+      background:
+        repeating-linear-gradient(
+          180deg,
+          #90a4b8 0 3px,
+          transparent 3px 6px
+        );
+    }
+
+    .pane-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 10px 8px;
+      border-bottom: 1px solid var(--line);
+      background: #f8fafc;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .pane-head.oa {
+      color: #7c4d00;
+    }
+
+    .pane-head.bank {
+      color: var(--blue);
+    }
+
+    .pane-head.invoice {
+      color: var(--purple);
+    }
+
+    .pane-tag {
+      padding: 2px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      font-size: 10px;
+      color: var(--muted);
+    }
+
+    .table-wrap {
+      overflow: auto;
+      max-height: 230px;
+    }
+
+    .zone.open-zone .table-wrap {
+      max-height: 360px;
+    }
+
+    table {
+      border-collapse: separate;
+      border-spacing: 0;
+      min-width: 100%;
+      width: max-content;
+      font-size: 11px;
+    }
+
+    th,
+    td {
+      padding: 8px 8px;
+      white-space: nowrap;
+      border-right: 1px solid var(--line-soft);
+      border-bottom: 1px solid var(--line-soft);
+      vertical-align: middle;
+      background: #fff;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: #f3f6fb;
+      color: var(--muted);
+      font-weight: 800;
+      text-align: left;
+    }
+
+    td:last-child,
+    th:last-child {
+      border-right: 0;
+    }
+
+    tr.row-open td {
+      background: #fffef9;
+    }
+
+    tr.row-paired td {
+      background: #f7fcf9;
+    }
+
+    tr.row-linked td {
+      background: #edf4ff;
+      box-shadow: inset 3px 0 0 #2c64d8;
+    }
+
+    tr.row-selected td {
+      background: #dfeaff;
+      box-shadow:
+        inset 3px 0 0 #0f4c81,
+        inset 0 0 0 1px #bfd4fb;
+    }
+
+    tr:hover td {
+      background: #f7faff;
+    }
+
+    tr[data-row] {
+      cursor: pointer;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    .badge.good {
+      background: #daf5e5;
+      color: #136f3a;
+    }
+
+    .badge.warn {
+      background: #fff1cc;
+      color: #a25a00;
+    }
+
+    .badge.risk {
+      background: #ffe1dc;
+      color: var(--red);
+    }
+
+    .bank-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 7px;
+      border-radius: 999px;
+      border: 1px solid #cfd9e4;
+      background: #fff;
+      font-size: 10px;
+      font-weight: 800;
+      color: #39506a;
+    }
+
+    .inline-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .mini-btn,
+    .mini-select {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 24px;
+      padding: 0 8px;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: #fff;
+      font-size: 10px;
+      font-weight: 800;
+      color: var(--muted);
+      cursor: pointer;
+    }
+
+    .mini-btn.primary {
+      background: var(--blue);
+      color: #fff;
+      border-color: var(--blue);
+    }
+
+    .mini-btn.danger {
+      background: #fff5f3;
+      color: var(--red);
+      border-color: #f2c5bf;
+    }
+
+    .mini-select {
+      min-width: 96px;
+      justify-content: space-between;
+    }
+
+    .table-footer {
+      padding: 7px 8px;
+      font-size: 10px;
+      color: #758395;
+      background: #fbfcfe;
+      border-top: 1px dashed var(--line-soft);
+    }
+
+    .drawer {
+      position: fixed;
+      top: 24px;
+      right: 24px;
+      width: 420px;
+      max-width: calc(100vw - 48px);
+      height: calc(100vh - 48px);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: #fff;
+      box-shadow: 0 30px 80px rgba(15, 23, 42, 0.22);
+      transform: translateX(calc(100% + 36px));
+      transition: transform 0.22s ease;
+      z-index: 30;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    body.has-context-panel .drawer {
+      right: 400px;
+    }
+
+    .drawer.open {
+      transform: translateX(0);
+    }
+
+    .context-panel {
+      position: fixed;
+      top: 24px;
+      right: 24px;
+      width: 352px;
+      max-width: calc(100vw - 48px);
+      height: calc(100vh - 48px);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: #fff;
+      box-shadow: 0 30px 80px rgba(15, 23, 42, 0.18);
+      transform: translateX(calc(100% + 36px));
+      transition: transform 0.22s ease;
+      z-index: 26;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .context-panel.open {
+      transform: translateX(0);
+    }
+
+    .context-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 18px 12px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #fbfdff 0%, #f4f7fb 100%);
+    }
+
+    .context-title {
+      font-size: 15px;
+      font-weight: 800;
+    }
+
+    .context-subtitle {
+      margin-top: 5px;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .context-body {
+      padding: 16px 18px 20px;
+      overflow: auto;
+      display: grid;
+      gap: 14px;
+    }
+
+    .context-card {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #fff;
+      overflow: hidden;
+    }
+
+    .context-card-head {
+      padding: 10px 12px;
+      font-size: 12px;
+      font-weight: 800;
+      border-bottom: 1px solid var(--line);
+      background: #f8fafc;
+    }
+
+    .context-card-body {
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .selection-group {
+      display: grid;
+      gap: 8px;
+    }
+
+    .selection-label {
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--muted);
+    }
+
+    .selection-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .selection-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: #fbfcfe;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .selection-chip button {
+      border: 0;
+      background: transparent;
+      color: #7b8794;
+      cursor: pointer;
+      font-size: 11px;
+      padding: 0;
+    }
+
+    .selection-empty {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .mode-tabs {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+      gap: 8px;
+    }
+
+    .mode-tab {
+      height: 34px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: #fff;
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--muted);
+      cursor: pointer;
+    }
+
+    .mode-tab.active {
+      background: var(--blue-soft);
+      border-color: #cfe0ff;
+      color: #164c9b;
+    }
+
+    .context-form {
+      display: grid;
+      gap: 10px;
+    }
+
+    .context-input,
+    .context-select,
+    .context-textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+      padding: 9px 10px;
+    }
+
+    .context-textarea {
+      min-height: 92px;
+      resize: vertical;
+    }
+
+    .context-help {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .context-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .history-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .history-item {
+      border: 1px solid var(--line-soft);
+      border-radius: 12px;
+      background: #fbfcfe;
+      padding: 10px;
+      display: grid;
+      gap: 5px;
+    }
+
+    .history-item strong {
+      font-size: 12px;
+    }
+
+    .history-item span {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .drawer-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      padding: 16px 18px 12px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #fbfdff 0%, #f4f7fb 100%);
+    }
+
+    .drawer-title {
+      font-size: 16px;
+      font-weight: 800;
+    }
+
+    .drawer-subtitle {
+      margin-top: 5px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .drawer-body {
+      padding: 16px 18px 22px;
+      overflow: auto;
+      display: grid;
+      gap: 16px;
+    }
+
+    .drawer-section {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      overflow: hidden;
+      background: #fff;
+    }
+
+    .drawer-section h3 {
+      margin: 0;
+      padding: 10px 12px;
+      font-size: 12px;
+      font-weight: 800;
+      background: #f8fafc;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+    }
+
+    .detail-item {
+      padding: 10px 12px;
+      border-right: 1px solid var(--line-soft);
+      border-bottom: 1px solid var(--line-soft);
+      min-width: 0;
+    }
+
+    .detail-item:nth-child(2n) {
+      border-right: 0;
+    }
+
+    .detail-label {
+      font-size: 10px;
+      font-weight: 800;
+      color: var(--muted);
+      margin-bottom: 5px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .detail-value {
+      font-size: 12px;
+      color: var(--text);
+      line-height: 1.45;
+      word-break: break-all;
+    }
+
+    .drawer-empty {
+      padding: 24px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .tax-page-body {
+      padding: 16px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .tax-summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .summary-card {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: linear-gradient(180deg, #ffffff 0%, #f9fbfe 100%);
+      padding: 14px;
+    }
+
+    .summary-card .label {
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--muted);
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .summary-card .value {
+      font-size: 24px;
+      font-weight: 800;
+      color: var(--text);
+    }
+
+    .summary-card .hint {
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .tax-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 300px;
+      gap: 12px;
+    }
+
+    .tax-panel {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: #fff;
+      overflow: hidden;
+    }
+
+    .tax-panel-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      background: #f8fafc;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .tax-result {
+      padding: 14px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .ledger-page-body {
+      padding: 16px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .ledger-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.7fr) minmax(300px, 0.9fr);
+      gap: 12px;
+    }
+
+    .ledger-stack {
+      display: grid;
+      gap: 12px;
+    }
+
+    .ledger-panel {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: #fff;
+      overflow: hidden;
+    }
+
+    .ledger-panel-body {
+      padding: 14px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .ledger-hint {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .ledger-kpis {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .ledger-kpi {
+      border: 1px solid var(--line-soft);
+      border-radius: 14px;
+      background: #fbfcff;
+      padding: 12px;
+    }
+
+    .ledger-kpi .label {
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--muted);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .ledger-kpi .value {
+      font-size: 22px;
+      font-weight: 800;
+      color: var(--text);
+    }
+
+    .ledger-kpi .hint {
+      margin-top: 6px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .status-select {
+      height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      color: var(--text);
+      padding: 0 12px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .mini-btn.soft {
+      background: var(--blue-soft);
+      color: #164c9b;
+      border-color: #cfe0ff;
+    }
+
+    .reminder-item {
+      border: 1px solid var(--line-soft);
+      border-radius: 14px;
+      background: #fbfcfe;
+      padding: 12px;
+      display: grid;
+      gap: 6px;
+    }
+
+    .reminder-item strong {
+      font-size: 12px;
+    }
+
+    .reminder-item span {
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .page-empty {
+      padding: 18px;
+      border: 1px dashed var(--line);
+      border-radius: 14px;
+      background: #fbfcfe;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    .result-box {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      background: #fbfcff;
+    }
+
+    .result-box strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 12px;
+    }
+
+    .result-box .big {
+      font-size: 22px;
+      font-weight: 800;
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 28px;
+      transform: translateX(-50%) translateY(20px);
+      background: rgba(36, 59, 83, 0.95);
+      color: #fff;
+      padding: 10px 14px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.18s ease;
+      z-index: 40;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    @media (max-width: 1280px) {
+      .tax-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .tax-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .ledger-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 920px) {
+      .app {
+        padding: 12px;
+      }
+
+      .topbar,
+      .toolbar,
+      .stats {
+        padding-left: 12px;
+        padding-right: 12px;
+      }
+
+      .drawer {
+        top: 12px;
+        right: 12px;
+        width: calc(100vw - 24px);
+        height: calc(100vh - 24px);
+      }
+
+      .tax-summary {
+        grid-template-columns: 1fr;
+      }
+
+      .ledger-kpis {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="shell">
+      <section id="workbenchPage" class="page active"></section>
+      <section id="oaPage" class="page"></section>
+      <section id="projectPage" class="page"></section>
+      <section id="ledgerPage" class="page"></section>
+      <section id="taxPage" class="page"></section>
+    </div>
+  </div>
+
+  <aside id="contextPanel" class="context-panel"></aside>
+  <aside id="detailDrawer" class="drawer"></aside>
+  <div id="toast" class="toast"></div>
+
+  <script>
+    const monthData = {
+      "2026-03": {
+        summary: { oa: 286, bank: 412, invoice: 305, paired: 198, open: 127, exceptions: 21 },
+        paired: {
+          oa: [
+            {
+              id: "oa-p-1",
+              type: "oa",
+              caseId: "PAIR-001",
+              applicant: "王丽",
+              project: "上海门店改造",
+              applyType: "差旅报销",
+              amount: 8520,
+              counterparty: "上海航空服务有限公司",
+              reason: "项目巡店机酒报销",
+              relation: { text: "完全关联", tone: "good" },
+              details: {
+                "审批单号": "OA-202603-028",
+                "申请部门": "运营管理部",
+                "申请日期": "2026-03-06",
+                "预算科目": "差旅费",
+                "支付计划": "2026-03-08",
+                "审批状态": "已付款"
+              }
+            },
+            {
+              id: "oa-p-2",
+              type: "oa",
+              caseId: "PAIR-002",
+              applicant: "周敏",
+              project: "苏州设备升级",
+              applyType: "采购付款",
+              amount: 16800,
+              counterparty: "苏州智远技术有限公司",
+              reason: "运维服务季度结算",
+              relation: { text: "一个OA多个流水", tone: "good" },
+              details: {
+                "审批单号": "OA-202603-040",
+                "申请部门": "信息技术部",
+                "申请日期": "2026-03-14",
+                "预算科目": "技术服务费",
+                "支付计划": "2026-03-18",
+                "审批状态": "已付款"
+              }
+            }
+          ],
+          bank: [
+            {
+              id: "bk-p-1",
+              type: "bank",
+              caseId: "PAIR-001",
+              tradeTime: "2026-03-08 10:05",
+              debit: 8520,
+              credit: "",
+              counterparty: "上海航空服务有限公司",
+              payAccount: "招行基本户 8821",
+              invoiceRelation: { text: "已核销", tone: "good" },
+              payReceiveTime: "2026-03-08 10:05",
+              remark: "差旅报销已闭环",
+              repayDate: "—",
+              details: {
+                "账号": "6214 8350 0000 8821",
+                "账户名称": "杭州溯源科技有限公司",
+                "余额": "483,200.56",
+                "币种": "CNY",
+                "对方账号": "3100 0001 8832",
+                "对方开户机构": "招商银行上海徐汇支行",
+                "记账日期": "2026-03-08",
+                "摘要": "转账支付",
+                "备注": "OA-202603-028",
+                "账户明细编号-交易流水号": "B202603080001",
+                "企业流水号": "ENT202603080028",
+                "凭证种类": "网银转账",
+                "凭证号": "VCH-92831"
+              }
+            },
+            {
+              id: "bk-p-2",
+              type: "bank",
+              caseId: "PAIR-002",
+              tradeTime: "2026-03-18 16:21",
+              debit: 16800,
+              credit: "",
+              counterparty: "苏州智远技术有限公司",
+              payAccount: "工行税户 14082",
+              invoiceRelation: { text: "拆分匹配", tone: "good" },
+              payReceiveTime: "2026-03-18 16:21",
+              remark: "两笔流水合并核销",
+              repayDate: "—",
+              details: {
+                "账号": "6222 1000 0000 14082",
+                "账户名称": "杭州溯源科技有限公司税户",
+                "余额": "129,003.22",
+                "币种": "CNY",
+                "对方账号": "3200 1200 9988",
+                "对方开户机构": "工商银行苏州工业园支行",
+                "记账日期": "2026-03-18",
+                "摘要": "对公付款",
+                "备注": "OA-202603-040",
+                "账户明细编号-交易流水号": "B202603180045",
+                "企业流水号": "ENT202603180040",
+                "凭证种类": "企业付款",
+                "凭证号": "VCH-94011"
+              }
+            }
+          ],
+          invoice: [
+            {
+              id: "iv-p-1",
+              type: "invoice",
+              caseId: "PAIR-001",
+              sellerTaxNo: "91310100MA1H0X1F4A",
+              sellerName: "上海航空服务有限公司",
+              buyerTaxNo: "91330106589876543T",
+              buyerName: "杭州溯源科技有限公司",
+              issueDate: "2026-03-07",
+              amount: 8040,
+              taxRate: "6%",
+              taxAmount: 480,
+              totalWithTax: 8520,
+              invoiceType: "进项普票",
+              details: {
+                "序号": "1",
+                "发票代码": "031002600211",
+                "发票号码": "84590321",
+                "数电发票号码": "DZ-20260307-001",
+                "税收分类编码": "304050101",
+                "特定业务类型": "交通服务",
+                "货物或应税劳务名称": "机票服务",
+                "规格型号": "—",
+                "单位": "次",
+                "数量": "1",
+                "单价": "8040.00",
+                "发票来源": "税局导入",
+                "发票票种": "电子发票",
+                "发票状态": "有效",
+                "是否正数发票": "是",
+                "发票风险等级": "低",
+                "开票人": "李静",
+                "备注": "关联 OA-202603-028"
+              }
+            },
+            {
+              id: "iv-p-2",
+              type: "invoice",
+              caseId: "PAIR-002",
+              sellerTaxNo: "91320594MA20X99K3P",
+              sellerName: "苏州智远技术有限公司",
+              buyerTaxNo: "91330106589876543T",
+              buyerName: "杭州溯源科技有限公司",
+              issueDate: "2026-03-17",
+              amount: 15849.06,
+              taxRate: "6%",
+              taxAmount: 950.94,
+              totalWithTax: 16800,
+              invoiceType: "进项专票",
+              details: {
+                "序号": "2",
+                "发票代码": "032002600844",
+                "发票号码": "22349128",
+                "数电发票号码": "DZ-20260317-014",
+                "税收分类编码": "304020200",
+                "特定业务类型": "技术服务",
+                "货物或应税劳务名称": "系统运维服务",
+                "规格型号": "季度版",
+                "单位": "项",
+                "数量": "1",
+                "单价": "15849.06",
+                "发票来源": "税局导入",
+                "发票票种": "数电专票",
+                "发票状态": "有效",
+                "是否正数发票": "是",
+                "发票风险等级": "低",
+                "开票人": "周强",
+                "备注": "拆分匹配流水"
+              }
+            }
+          ]
+        },
+        open: {
+          oa: [
+            {
+              id: "oa-o-1",
+              type: "oa",
+              caseId: "MKT-001",
+              applicant: "刘晨",
+              project: "品牌广告投放",
+              applyType: "市场费用",
+              amount: 6000,
+              counterparty: "杭州张三广告有限公司",
+              reason: "3 月品牌投放尾款",
+              relation: { text: "待找流水与发票", tone: "warn" },
+              details: {
+                "审批单号": "OA-202603-051",
+                "申请部门": "品牌市场部",
+                "申请日期": "2026-03-19",
+                "预算科目": "广告宣传费",
+                "支付计划": "2026-03-20",
+                "审批状态": "已批待付"
+              }
+            },
+            {
+              id: "oa-o-2",
+              type: "oa",
+              caseId: "LOAN-001",
+              applicant: "陈哲",
+              project: "运营周转",
+              applyType: "借款申请",
+              amount: 5000,
+              counterparty: "陈哲",
+              reason: "临时垫资冲回",
+              relation: { text: "疑似金额偏差", tone: "risk" },
+              details: {
+                "审批单号": "OA-202603-052",
+                "申请部门": "综合管理部",
+                "申请日期": "2026-03-20",
+                "预算科目": "员工借款",
+                "支付计划": "2026-03-21",
+                "审批状态": "待核查"
+              }
+            },
+            {
+              id: "oa-o-3",
+              type: "oa",
+              caseId: "PUR-001",
+              applicant: "许婷",
+              project: "办公备品采购",
+              applyType: "采购付款",
+              amount: 9480,
+              counterparty: "杭州优选办公用品商行",
+              reason: "3 月办公用品采购",
+              relation: { text: "待找进项票", tone: "warn" },
+              details: {
+                "审批单号": "OA-202603-054",
+                "申请部门": "行政部",
+                "申请日期": "2026-03-21",
+                "预算科目": "办公费",
+                "支付计划": "2026-03-23",
+                "审批状态": "已付款待票"
+              }
+            }
+          ],
+          bank: [
+            {
+              id: "bk-o-1",
+              type: "bank",
+              caseId: "MKT-001",
+              tradeTime: "2026-03-20 09:15",
+              debit: 6000,
+              credit: "",
+              counterparty: "杭州张三广告有限公司",
+              payAccount: "招行基本户 8821",
+              invoiceRelation: { text: "待关联广告票", tone: "warn" },
+              payReceiveTime: "2026-03-20 09:15",
+              remark: "应付 6000，候选 OA-051",
+              repayDate: "—",
+              details: {
+                "账号": "6214 8350 0000 8821",
+                "账户名称": "杭州溯源科技有限公司",
+                "余额": "451,220.56",
+                "币种": "CNY",
+                "对方账号": "6222 9033 1200",
+                "对方开户机构": "中国银行杭州分行",
+                "记账日期": "2026-03-20",
+                "摘要": "广告投放尾款",
+                "备注": "候选 OA-202603-051",
+                "账户明细编号-交易流水号": "B202603200019",
+                "企业流水号": "ENT202603200051",
+                "凭证种类": "转账支付",
+                "凭证号": "VCH-95112"
+              }
+            },
+            {
+              id: "bk-o-2",
+              type: "bank",
+              caseId: "FEE-001",
+              tradeTime: "2026-03-20 11:40",
+              debit: 120,
+              credit: "",
+              counterparty: "招商银行",
+              payAccount: "招行基本户 8821",
+              invoiceRelation: { text: "无票可豁免", tone: "warn" },
+              payReceiveTime: "2026-03-20 11:40",
+              remark: "手续费自动归类",
+              repayDate: "—",
+              details: {
+                "账号": "6214 8350 0000 8821",
+                "账户名称": "杭州溯源科技有限公司",
+                "余额": "451,100.56",
+                "币种": "CNY",
+                "对方账号": "—",
+                "对方开户机构": "招商银行杭州湖滨支行",
+                "记账日期": "2026-03-20",
+                "摘要": "网银服务费",
+                "备注": "自动标签：补手续费",
+                "账户明细编号-交易流水号": "B202603200028",
+                "企业流水号": "ENT202603200028",
+                "凭证种类": "银行手续费",
+                "凭证号": "VCH-95129"
+              }
+            },
+            {
+              id: "bk-o-3",
+              type: "bank",
+              caseId: "INNER-001",
+              tradeTime: "2026-03-22 14:18",
+              debit: "",
+              credit: 10000,
+              counterparty: "杭州溯源信息科技有限公司",
+              payAccount: "民生一般户 7097",
+              invoiceRelation: { text: "内部往来待判定", tone: "warn" },
+              payReceiveTime: "2026-03-22 14:18",
+              remark: "借款统计：待冲内部往来",
+              repayDate: "2026-04-10",
+              details: {
+                "账号": "6226 0990 0000 7097",
+                "账户名称": "杭州溯源科技有限公司",
+                "余额": "210,508.00",
+                "币种": "CNY",
+                "对方账号": "6226 0990 8899 0033",
+                "对方开户机构": "民生银行杭州西湖支行",
+                "记账日期": "2026-03-22",
+                "摘要": "内部往来收款",
+                "备注": "命中内部关联公司白名单",
+                "账户明细编号-交易流水号": "B202603220011",
+                "企业流水号": "ENT202603220011",
+                "凭证种类": "内部往来",
+                "凭证号": "VCH-96003"
+              }
+            }
+          ],
+          invoice: [
+            {
+              id: "iv-o-1",
+              type: "invoice",
+              caseId: "MKT-001",
+              sellerTaxNo: "91330102MA8T32A2X7",
+              sellerName: "杭州张三广告有限公司",
+              buyerTaxNo: "91330106589876543T",
+              buyerName: "杭州溯源科技有限公司",
+              issueDate: "2026-03-20",
+              amount: 5660.38,
+              taxRate: "6%",
+              taxAmount: 339.62,
+              totalWithTax: 6000,
+              invoiceType: "进项专票",
+              details: {
+                "序号": "3",
+                "发票代码": "033002611245",
+                "发票号码": "11203490",
+                "数电发票号码": "DZ-20260320-022",
+                "税收分类编码": "307030103",
+                "特定业务类型": "广告服务",
+                "货物或应税劳务名称": "品牌投放服务",
+                "规格型号": "3 月批次",
+                "单位": "项",
+                "数量": "1",
+                "单价": "5660.38",
+                "发票来源": "税局导入",
+                "发票票种": "数电专票",
+                "发票状态": "有效",
+                "是否正数发票": "是",
+                "发票风险等级": "中",
+                "开票人": "何佳",
+                "备注": "候选 OA-051 / 银行流水"
+              }
+            },
+            {
+              id: "iv-o-2",
+              type: "invoice",
+              caseId: "ISSUE-001",
+              sellerTaxNo: "91330106589876543T",
+              sellerName: "杭州溯源科技有限公司",
+              buyerTaxNo: "91310000MA1K90HF6M",
+              buyerName: "上海辰屹商贸有限公司",
+              issueDate: "2026-03-24",
+              amount: 8490.57,
+              taxRate: "6%",
+              taxAmount: 509.43,
+              totalWithTax: 9000,
+              invoiceType: "销项普票",
+              details: {
+                "序号": "4",
+                "发票代码": "051002602120",
+                "发票号码": "90342011",
+                "数电发票号码": "DZ-20260324-011",
+                "税收分类编码": "304030301",
+                "特定业务类型": "技术服务",
+                "货物或应税劳务名称": "技术服务费",
+                "规格型号": "基础版",
+                "单位": "项",
+                "数量": "1",
+                "单价": "8490.57",
+                "发票来源": "税局导入",
+                "发票票种": "电子普通发票",
+                "发票状态": "待确认",
+                "是否正数发票": "是",
+                "发票风险等级": "低",
+                "开票人": "邓琳",
+                "备注": "有款无票待开票"
+              }
+            },
+            {
+              id: "iv-o-3",
+              type: "invoice",
+              caseId: "PUR-001",
+              sellerTaxNo: "91330104MA2F11B6P8",
+              sellerName: "杭州优选办公用品商行",
+              buyerTaxNo: "91330106589876543T",
+              buyerName: "杭州溯源科技有限公司",
+              issueDate: "2026-03-23",
+              amount: 8943.40,
+              taxRate: "6%",
+              taxAmount: 536.60,
+              totalWithTax: 9480,
+              invoiceType: "进项普票",
+              details: {
+                "序号": "5",
+                "发票代码": "033002601562",
+                "发票号码": "73291011",
+                "数电发票号码": "DZ-20260323-005",
+                "税收分类编码": "305020201",
+                "特定业务类型": "办公用品",
+                "货物或应税劳务名称": "办公用品采购",
+                "规格型号": "综合清单",
+                "单位": "批",
+                "数量": "1",
+                "单价": "8943.40",
+                "发票来源": "税局导入",
+                "发票票种": "电子普通发票",
+                "发票状态": "待核销",
+                "是否正数发票": "是",
+                "发票风险等级": "低",
+                "开票人": "方梅",
+                "备注": "候选 OA-054"
+              }
+            }
+          ]
+        },
+        tax: {
+          output: [
+            { id: "to-1", buyer: "上海辰屹商贸有限公司", issueDate: "2026-03-24", invoiceNo: "90342011", taxAmount: 509.43, total: 9000, type: "销项普票" },
+            { id: "to-2", buyer: "南京川禾科技有限公司", issueDate: "2026-03-18", invoiceNo: "90341872", taxAmount: 820.75, total: 14500, type: "销项专票" },
+            { id: "to-3", buyer: "苏州瑞商科技有限公司", issueDate: "2026-03-11", invoiceNo: "90341005", taxAmount: 625.54, total: 11050, type: "销项普票" }
+          ],
+          input: [
+            { id: "ti-1", seller: "杭州张三广告有限公司", issueDate: "2026-03-20", invoiceNo: "11203490", taxAmount: 339.62, total: 6000, risk: "中" },
+            { id: "ti-2", seller: "苏州智远技术有限公司", issueDate: "2026-03-17", invoiceNo: "22349128", taxAmount: 950.94, total: 16800, risk: "低" },
+            { id: "ti-3", seller: "杭州优选办公用品商行", issueDate: "2026-03-23", invoiceNo: "73291011", taxAmount: 536.60, total: 9480, risk: "低" }
+          ]
+        }
+      },
+      "2026-02": {
+        summary: { oa: 244, bank: 367, invoice: 261, paired: 172, open: 96, exceptions: 14 },
+        paired: {
+          oa: [
+            {
+              id: "oa2-p-1",
+              type: "oa",
+              caseId: "FEB-PAIR-1",
+              applicant: "林珊",
+              project: "无锡门店升级",
+              applyType: "采购付款",
+              amount: 12800,
+              counterparty: "无锡恒创设备有限公司",
+              reason: "展示设备采购",
+              relation: { text: "完全关联", tone: "good" },
+              details: {
+                "审批单号": "OA-202602-019",
+                "申请部门": "工程部",
+                "申请日期": "2026-02-10",
+                "预算科目": "固定资产",
+                "支付计划": "2026-02-12",
+                "审批状态": "已付款"
+              }
+            }
+          ],
+          bank: [
+            {
+              id: "bk2-p-1",
+              type: "bank",
+              caseId: "FEB-PAIR-1",
+              tradeTime: "2026-02-12 13:20",
+              debit: 12800,
+              credit: "",
+              counterparty: "无锡恒创设备有限公司",
+              payAccount: "建行基本户 0011",
+              invoiceRelation: { text: "已核销", tone: "good" },
+              payReceiveTime: "2026-02-12 13:20",
+              remark: "设备采购已闭环",
+              repayDate: "—",
+              details: {
+                "账号": "6227 3000 0000 0011",
+                "账户名称": "杭州溯源科技有限公司",
+                "余额": "390,208.31",
+                "币种": "CNY",
+                "对方账号": "6228 2200 6611",
+                "对方开户机构": "建设银行无锡新区支行",
+                "记账日期": "2026-02-12",
+                "摘要": "采购付款",
+                "备注": "OA-202602-019",
+                "账户明细编号-交易流水号": "B202602120021",
+                "企业流水号": "ENT202602120019",
+                "凭证种类": "对公付款",
+                "凭证号": "VCH-88119"
+              }
+            }
+          ],
+          invoice: [
+            {
+              id: "iv2-p-1",
+              type: "invoice",
+              caseId: "FEB-PAIR-1",
+              sellerTaxNo: "91320211MA29H12D0L",
+              sellerName: "无锡恒创设备有限公司",
+              buyerTaxNo: "91330106589876543T",
+              buyerName: "杭州溯源科技有限公司",
+              issueDate: "2026-02-11",
+              amount: 12075.47,
+              taxRate: "6%",
+              taxAmount: 724.53,
+              totalWithTax: 12800,
+              invoiceType: "进项专票",
+              details: {
+                "序号": "1",
+                "发票代码": "033002600315",
+                "发票号码": "11335001",
+                "数电发票号码": "DZ-20260211-008",
+                "税收分类编码": "305010101",
+                "特定业务类型": "设备采购",
+                "货物或应税劳务名称": "展示设备",
+                "规格型号": "标准套装",
+                "单位": "套",
+                "数量": "1",
+                "单价": "12075.47",
+                "发票来源": "税局导入",
+                "发票票种": "数电专票",
+                "发票状态": "有效",
+                "是否正数发票": "是",
+                "发票风险等级": "低",
+                "开票人": "王希",
+                "备注": "设备采购"
+              }
+            }
+          ]
+        },
+        open: {
+          oa: [
+            {
+              id: "oa2-o-1",
+              type: "oa",
+              caseId: "FEB-OPEN-1",
+              applicant: "赵宇",
+              project: "客户回款跟进",
+              applyType: "销售回款",
+              amount: 12000,
+              counterparty: "宁波泽恒商贸有限公司",
+              reason: "2 月合同回款",
+              relation: { text: "待找收款流水", tone: "warn" },
+              details: {
+                "审批单号": "OA-202602-033",
+                "申请部门": "销售部",
+                "申请日期": "2026-02-22",
+                "预算科目": "应收账款",
+                "支付计划": "2026-02-28",
+                "审批状态": "待收款"
+              }
+            }
+          ],
+          bank: [
+            {
+              id: "bk2-o-1",
+              type: "bank",
+              caseId: "FEB-OPEN-1",
+              tradeTime: "2026-02-28 15:01",
+              debit: "",
+              credit: 12000,
+              counterparty: "宁波泽恒商贸有限公司",
+              payAccount: "平安一般户 3128",
+              invoiceRelation: { text: "待找销项票", tone: "warn" },
+              payReceiveTime: "2026-02-28 15:01",
+              remark: "应收 12000 已到账",
+              repayDate: "—",
+              details: {
+                "账号": "6217 8800 0000 3128",
+                "账户名称": "杭州溯源科技有限公司",
+                "余额": "204,116.40",
+                "币种": "CNY",
+                "对方账号": "6225 9900 7711",
+                "对方开户机构": "平安银行宁波分行",
+                "记账日期": "2026-02-28",
+                "摘要": "客户回款",
+                "备注": "候选 OA-202602-033",
+                "账户明细编号-交易流水号": "B202602280050",
+                "企业流水号": "ENT202602280033",
+                "凭证种类": "收款",
+                "凭证号": "VCH-89920"
+              }
+            }
+          ],
+          invoice: [
+            {
+              id: "iv2-o-1",
+              type: "invoice",
+              caseId: "FEB-OPEN-1",
+              sellerTaxNo: "91330106589876543T",
+              sellerName: "杭州溯源科技有限公司",
+              buyerTaxNo: "91330206MA2G3P1R8Q",
+              buyerName: "宁波泽恒商贸有限公司",
+              issueDate: "2026-02-26",
+              amount: 11320.75,
+              taxRate: "6%",
+              taxAmount: 679.25,
+              totalWithTax: 12000,
+              invoiceType: "销项专票",
+              details: {
+                "序号": "2",
+                "发票代码": "051002601108",
+                "发票号码": "88321011",
+                "数电发票号码": "DZ-20260226-013",
+                "税收分类编码": "304030301",
+                "特定业务类型": "销售服务",
+                "货物或应税劳务名称": "项目服务费",
+                "规格型号": "—",
+                "单位": "项",
+                "数量": "1",
+                "单价": "11320.75",
+                "发票来源": "税局导入",
+                "发票票种": "数电专票",
+                "发票状态": "待核销",
+                "是否正数发票": "是",
+                "发票风险等级": "低",
+                "开票人": "金雯",
+                "备注": "候选银行收款"
+              }
+            }
+          ]
+        },
+        tax: {
+          output: [
+            { id: "to2-1", buyer: "宁波泽恒商贸有限公司", issueDate: "2026-02-26", invoiceNo: "88321011", taxAmount: 679.25, total: 12000, type: "销项专票" },
+            { id: "to2-2", buyer: "常州迈科有限公司", issueDate: "2026-02-19", invoiceNo: "88320804", taxAmount: 452.83, total: 8000, type: "销项普票" }
+          ],
+          input: [
+            { id: "ti2-1", seller: "无锡恒创设备有限公司", issueDate: "2026-02-11", invoiceNo: "11335001", taxAmount: 724.53, total: 12800, risk: "低" },
+            { id: "ti2-2", seller: "苏州研光设计有限公司", issueDate: "2026-02-16", invoiceNo: "11335029", taxAmount: 301.89, total: 5333.33, risk: "低" }
+          ]
+        }
+      }
+    };
+
+    const columns = {
+      oa: [
+        { key: "applicant", label: "申请人" },
+        { key: "project", label: "项目名称" },
+        { key: "applyType", label: "申请类型" },
+        { key: "amount", label: "金额" },
+        { key: "counterparty", label: "对方户名" },
+        { key: "reason", label: "申请事由" },
+        { key: "relation", label: "OA和流水关联情况" },
+        { key: "actions", label: "行内操作" }
+      ],
+      bank: [
+        { key: "tradeTime", label: "交易时间" },
+        { key: "debit", label: "借方发生额（支取）" },
+        { key: "credit", label: "贷方发生额（收入）" },
+        { key: "counterparty", label: "对方户名" },
+        { key: "payAccount", label: "支付账户" },
+        { key: "invoiceRelation", label: "和发票关联情况" },
+        { key: "payReceiveTime", label: "支付/收款时间" },
+        { key: "remark", label: "备注（应收应付欠借款统计）" },
+        { key: "repayDate", label: "还借款日期" },
+        { key: "actions", label: "行内操作" }
+      ],
+      invoice: [
+        { key: "sellerTaxNo", label: "销方识别号" },
+        { key: "sellerName", label: "销方名称" },
+        { key: "buyerTaxNo", label: "购方识别号" },
+        { key: "buyerName", label: "购买方名称" },
+        { key: "issueDate", label: "开票日期" },
+        { key: "amount", label: "金额" },
+        { key: "taxRate", label: "税率" },
+        { key: "taxAmount", label: "税额" },
+        { key: "totalWithTax", label: "价税合计" },
+        { key: "invoiceType", label: "发票类型" },
+        { key: "actions", label: "行内操作" }
+      ]
+    };
+
+    const DEFAULT_CONTEXT_OPTIONS = {
+      receivable_exceptions: [
+        { code: "SO-A", title: "客户欠款" },
+        { code: "SO-B", title: "待开销项票" },
+        { code: "SO-C", title: "甲方多付 / 预付" },
+        { code: "SO-D", title: "一票多收" },
+        { code: "SO-E", title: "别人借入" },
+        { code: "SO-F", title: "别人还款" },
+        { code: "SO-G", title: "非税收入" },
+        { code: "SO-H", title: "内部往来 / 其他核查" }
+      ],
+      payable_exceptions: [
+        { code: "PI-A", title: "多票合并付款" },
+        { code: "PI-B", title: "供应商漏开发票" },
+        { code: "PI-C", title: "付款出错（多付）" },
+        { code: "PI-D", title: "纯采购未开票" },
+        { code: "PI-E", title: "借钱给别人" },
+        { code: "PI-F", title: "偿还借款" },
+        { code: "PI-G", title: "待付款（欠供应商）" },
+        { code: "PI-H", title: "现金混付 / 分期付款" }
+      ]
+    };
+
+    const ledgerMockData = {
+      all: [
+        {
+          id: "ledger-demo-001",
+          ledger_type: "payment_collection",
+          source_object_type: "reconciliation_case",
+          source_object_id: "case-demo-001",
+          source_case_id: "case-demo-001",
+          counterparty_id: "cp-demo-client",
+          open_amount: "4000.00",
+          expected_date: "2026-04-02",
+          owner_id: "user_finance_01",
+          status: "open",
+          project_id: "proj-market-01",
+          latest_note: "客户只回款一部分，剩余待继续催收",
+          last_reminded_at: null,
+          created_at: "2026-03-26T09:30:00+00:00"
+        },
+        {
+          id: "ledger-demo-002",
+          ledger_type: "output_invoice_issue",
+          source_object_type: "reconciliation_case",
+          source_object_id: "case-demo-002",
+          source_case_id: "case-demo-002",
+          counterparty_id: "cp-demo-prepay",
+          open_amount: "8800.00",
+          expected_date: "2026-03-30",
+          owner_id: "user_finance_02",
+          status: "in_progress",
+          project_id: "proj-sales-02",
+          latest_note: "已收款待开销项票，财务正在跟销售核开票信息",
+          last_reminded_at: "2026-03-29T08:00:00+00:00",
+          created_at: "2026-03-27T10:20:00+00:00"
+        }
+      ],
+      open: [],
+      due: [],
+      overdue: [],
+      remindersPending: [
+        {
+          id: "rem-demo-001",
+          ledger_id: "ledger-demo-001",
+          remind_at: "2026-04-01",
+          channel: "in_app",
+          status: "pending",
+          sent_result: null,
+          sent_at: null,
+          created_at: "2026-03-31T09:00:00+00:00"
+        }
+      ],
+      remindersSent: [
+        {
+          id: "rem-demo-002",
+          ledger_id: "ledger-demo-002",
+          remind_at: "2026-03-29",
+          channel: "in_app",
+          status: "sent",
+          sent_result: "simulated:ledger-demo-002",
+          sent_at: "2026-03-29T08:00:00+00:00",
+          created_at: "2026-03-28T12:00:00+00:00"
+        }
+      ]
+    };
+    ledgerMockData.open = ledgerMockData.all.filter(item => item.status !== "resolved" && item.status !== "cancelled");
+    ledgerMockData.due = ledgerMockData.all.filter(item => item.expected_date >= "2026-03-31" && item.expected_date <= "2026-04-07");
+    ledgerMockData.overdue = ledgerMockData.all.filter(item => item.expected_date < "2026-03-31" && item.status !== "resolved" && item.status !== "cancelled");
+
+    const oaMockData = {
+      source_system: "oa",
+      adapter: "mock_oa",
+      supported_scopes: ["all", "counterparties", "projects", "approval_forms", "payment_requests", "expense_claims"],
+      summary: {
+        mapping_count: 8,
+        project_count: 2,
+        document_count: 4,
+        run_count: 1,
+        latest_run_id: "oa_sync_demo_001"
+      },
+      runs: [
+        {
+          id: "oa_sync_demo_001",
+          scope: "all",
+          status: "succeeded",
+          pulled_count: 8,
+          success_count: 8,
+          failed_count: 0,
+          retry_of_run_id: null,
+          issue_count: 0,
+          started_at: "2026-03-26T09:00:00+08:00",
+          finished_at: "2026-03-26T09:00:05+08:00"
+        }
+      ],
+      mappings: [
+        {
+          id: "oa_map_demo_001",
+          source_system: "oa",
+          object_type: "counterparty",
+          external_id: "OA-CP-001",
+          internal_object_type: "counterparty",
+          internal_object_id: "cp_imported_0001",
+          display_name: "Acme Supplies"
+        },
+        {
+          id: "oa_map_demo_002",
+          source_system: "oa",
+          object_type: "project",
+          external_id: "OA-PROJ-001",
+          internal_object_type: "project",
+          internal_object_id: "proj_oa_0001",
+          display_name: "华东改造项目"
+        },
+        {
+          id: "oa_map_demo_003",
+          source_system: "oa",
+          object_type: "payment_request",
+          external_id: "OA-PR-001",
+          internal_object_type: "oa_document",
+          internal_object_id: "oa_doc_0002",
+          display_name: "供应商付款申请"
+        }
+      ],
+      projects: [
+        {
+          id: "proj_oa_0001",
+          project_code: "PJT-001",
+          project_name: "华东改造项目",
+          project_status: "active",
+          oa_external_id: "OA-PROJ-001",
+          department_name: "交付中心",
+          owner_name: "张三"
+        },
+        {
+          id: "proj_oa_0002",
+          project_code: "PJT-002",
+          project_name: "智能工厂项目",
+          project_status: "active",
+          oa_external_id: "OA-PROJ-002",
+          department_name: "制造事业部",
+          owner_name: "李四"
+        }
+      ],
+      documents: [
+        {
+          id: "oa_doc_0001",
+          document_type: "approval_form",
+          oa_external_id: "OA-AF-001",
+          form_no: "SP-202603-001",
+          title: "办公用品采购审批",
+          applicant_name: "王敏",
+          amount: "1200.00",
+          counterparty_name: "Acme Supplies",
+          project_external_id: "OA-PROJ-001",
+          project_name: "华东改造项目",
+          form_status: "approved",
+          submitted_at: "2026-03-24T09:00:00+08:00",
+          completed_at: "2026-03-24T11:00:00+08:00"
+        },
+        {
+          id: "oa_doc_0002",
+          document_type: "payment_request",
+          oa_external_id: "OA-PR-001",
+          form_no: "FKSQ-202603-001",
+          title: "供应商付款申请",
+          applicant_name: "赵华",
+          amount: "300.00",
+          counterparty_name: "Acme Supplies",
+          project_external_id: "OA-PROJ-001",
+          project_name: "华东改造项目",
+          form_status: "approved",
+          submitted_at: "2026-03-25T09:30:00+08:00",
+          completed_at: "2026-03-25T14:00:00+08:00"
+        }
+      ]
+    };
+
+    const projectMockData = {
+      projects: [
+        {
+          id: "proj_manual_0001",
+          project_code: "PJT-MKT-001",
+          project_name: "华东改造项目",
+          project_status: "active",
+          department_name: "交付中心",
+          owner_name: "张三"
+        },
+        {
+          id: "proj_manual_0002",
+          project_code: "PJT-SLS-002",
+          project_name: "智能工厂项目",
+          project_status: "active",
+          department_name: "制造事业部",
+          owner_name: "李四"
+        }
+      ],
+      summaries: [
+        {
+          project_id: "proj_manual_0001",
+          project_code: "PJT-MKT-001",
+          project_name: "华东改造项目",
+          income_amount: "16800.00",
+          expense_amount: "8200.00",
+          reconciled_amount: "12000.00",
+          open_ledger_amount: "4800.00",
+          invoice_count: 3,
+          transaction_count: 2,
+          case_count: 2,
+          ledger_count: 1
+        },
+        {
+          project_id: "proj_manual_0002",
+          project_code: "PJT-SLS-002",
+          project_name: "智能工厂项目",
+          income_amount: "9200.00",
+          expense_amount: "3600.00",
+          reconciled_amount: "6600.00",
+          open_ledger_amount: "1400.00",
+          invoice_count: 2,
+          transaction_count: 1,
+          case_count: 1,
+          ledger_count: 1
+        }
+      ],
+      totals: {
+        income_amount: "26000.00",
+        expense_amount: "11800.00",
+        reconciled_amount: "18600.00",
+        open_ledger_amount: "6200.00"
+      },
+      assignable_objects: [
+        {
+          object_type: "invoice",
+          object_id: "inv-proj-demo-001",
+          title: "PROJ-INV-001",
+          counterparty: "Project Client",
+          amount: "16800.00",
+          status: "partially_reconciled",
+          current_project_id: "proj_manual_0001",
+          effective_project_id: "proj_manual_0001"
+        },
+        {
+          object_type: "bank_transaction",
+          object_id: "txn-proj-demo-001",
+          title: "BANK-PROJ-001",
+          counterparty: "Project Client",
+          amount: "12000.00",
+          status: "partially_reconciled",
+          current_project_id: "proj_manual_0001",
+          effective_project_id: "proj_manual_0001"
+        },
+        {
+          object_type: "follow_up_ledger",
+          object_id: "ledger-proj-demo-001",
+          title: "LEDGER-PROJ-001",
+          counterparty: "Project Client",
+          amount: "4800.00",
+          status: "open",
+          current_project_id: "proj_manual_0001",
+          effective_project_id: "proj_manual_0001"
+        },
+        {
+          object_type: "invoice",
+          object_id: "inv-proj-demo-002",
+          title: "PROJ-INV-002",
+          counterparty: "Project Vendor",
+          amount: "3600.00",
+          status: "pending",
+          current_project_id: null,
+          effective_project_id: null
+        }
+      ]
+    };
+
+    const API_BASE = window.RECONCILIATION_API_BASE || (location.pathname === "/workbench/prototype" ? "" : "http://127.0.0.1:8000");
+
+    const state = {
+      currentMonth: "2026-03",
+      currentView: "workbench",
+      visible: { oa: true, bank: true, invoice: true },
+      widths: { oa: 32, bank: 36, invoice: 32 },
+      selectedRows: { oa: [], bank: [], invoice: [] },
+      drawerRow: null,
+      drawerOpen: false,
+      toastTimer: null,
+      taxSelections: {
+        output: {},
+        input: {}
+      },
+      workbenchCache: {},
+      loadingWorkbench: false,
+      workbenchError: "",
+      ledgerData: {
+        all: [],
+        open: [],
+        due: [],
+        overdue: [],
+        remindersPending: [],
+        remindersSent: []
+      },
+      oaData: null,
+      loadingOA: false,
+      oaError: "",
+      projectData: null,
+      loadingProjects: false,
+      projectError: "",
+      selectedProjectId: "",
+      loadingLedgers: false,
+      ledgerError: "",
+      ledgerView: "open",
+      ledgerStatus: "all",
+      contextMode: "confirm",
+      form: {
+        confirmRemark: "",
+        exceptionCode: "",
+        exceptionNote: "",
+        differenceReason: "fee",
+        differenceNote: "",
+        offlineAmount: "",
+        offlineMethod: "cash",
+        offlineDate: "2026-03-25",
+        offlineNote: "",
+        projectCode: "",
+        projectName: "",
+        offsetAmount: "",
+        offsetReason: "same_counterparty_setoff",
+        offsetNote: ""
+      }
+    };
+
+    function apiUrl(path) {
+      return API_BASE ? API_BASE + path : path;
+    }
+
+    async function fetchJson(path, options = {}) {
+      const response = await fetch(apiUrl(path), options);
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.message || payload.error || "接口请求失败");
+      }
+      return payload;
+    }
+
+    function formatMoney(value) {
+      if (value === "" || value === null || value === undefined) return "—";
+      return Number(value).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function badgeHtml(config) {
+      if (!config) return "—";
+      return `<span class="badge ${config.tone}">${config.text}</span>`;
+    }
+
+    function getServerWorkbench() {
+      return state.workbenchCache[state.currentMonth] || null;
+    }
+
+    function hasServerFinanceData(bundle) {
+      if (!bundle || !bundle.summary) return false;
+      return Number(bundle.summary.bank || 0) > 0 || Number(bundle.summary.invoice || 0) > 0 || Number(bundle.summary.case_count || 0) > 0;
+    }
+
+    function getMonthBundle() {
+      const fallback = monthData[state.currentMonth] || monthData["2026-03"];
+      const serverBundle = getServerWorkbench();
+      const useServerFinance = hasServerFinanceData(serverBundle);
+      const paired = {
+        oa: fallback.paired.oa,
+        bank: useServerFinance ? (serverBundle.paired.bank || []) : fallback.paired.bank,
+        invoice: useServerFinance ? (serverBundle.paired.invoice || []) : fallback.paired.invoice
+      };
+      const open = {
+        oa: fallback.open.oa,
+        bank: useServerFinance ? (serverBundle.open.bank || []) : fallback.open.bank,
+        invoice: useServerFinance ? (serverBundle.open.invoice || []) : fallback.open.invoice
+      };
+      return {
+        summary: {
+          oa: paired.oa.length + open.oa.length,
+          bank: paired.bank.length + open.bank.length,
+          invoice: paired.invoice.length + open.invoice.length,
+          paired: paired.oa.length + paired.bank.length + paired.invoice.length,
+          open: open.oa.length + open.bank.length + open.invoice.length,
+          exceptions: useServerFinance ? Number(serverBundle.summary.exceptions || 0) : fallback.summary.exceptions
+        },
+        paired,
+        open,
+        tax: fallback.tax,
+        history: useServerFinance ? (serverBundle.history || { cases: [], audit_logs: [] }) : { cases: [], audit_logs: [] },
+        contextOptions: useServerFinance ? (serverBundle.context_options || DEFAULT_CONTEXT_OPTIONS) : DEFAULT_CONTEXT_OPTIONS,
+        source: useServerFinance ? "api" : "mock"
+      };
+    }
+
+    function hasLiveWorkbenchData() {
+      return getMonthBundle().source === "api";
+    }
+
+    function getMonthEnd(monthValue) {
+      const [yearText, monthText] = (monthValue || state.currentMonth).split("-");
+      const year = Number(yearText);
+      const month = Number(monthText);
+      const lastDay = new Date(year, month, 0).getDate();
+      return `${yearText}-${monthText}-${String(lastDay).padStart(2, "0")}`;
+    }
+
+    function formatDateTime(value) {
+      if (!value) return "—";
+      const raw = String(value).replace("T", " ");
+      return raw.replace("+00:00", " UTC");
+    }
+
+    function ledgerTypeLabel(value) {
+      const labels = {
+        payment_collection: "催款",
+        invoice_collection: "催票",
+        refund: "退款",
+        advance_receipt: "预收",
+        prepayment: "预付",
+        output_invoice_issue: "待开销项票",
+        payment_reminder: "待付款提醒",
+        external_receivable_payable: "外部往来登记",
+        non_tax_income: "非税收入登记"
+      };
+      return labels[value] || value || "—";
+    }
+
+    function ledgerStatusBadge(status) {
+      const map = {
+        open: { text: "待处理", tone: "warn" },
+        in_progress: { text: "跟进中", tone: "good" },
+        waiting_external_feedback: { text: "待外部反馈", tone: "warn" },
+        resolved: { text: "已解决", tone: "good" },
+        cancelled: { text: "已取消", tone: "risk" }
+      };
+      return badgeHtml(map[status] || { text: status || "—", tone: "warn" });
+    }
+
+    function reminderStatusBadge(status) {
+      const map = {
+        pending: { text: "待发送", tone: "warn" },
+        sent: { text: "已发送", tone: "good" },
+        skipped: { text: "已跳过", tone: "warn" },
+        cancelled: { text: "已取消", tone: "risk" }
+      };
+      return badgeHtml(map[status] || { text: status || "—", tone: "warn" });
+    }
+
+    function oaSyncStatusBadge(status) {
+      const map = {
+        succeeded: { text: "成功", tone: "good" },
+        partial: { text: "部分成功", tone: "warn" },
+        failed: { text: "失败", tone: "risk" }
+      };
+      return badgeHtml(map[status] || { text: status || "—", tone: "warn" });
+    }
+
+    function getAllRows() {
+      const data = getMonthBundle();
+      return [
+        ...data.paired.oa, ...data.paired.bank, ...data.paired.invoice,
+        ...data.open.oa, ...data.open.bank, ...data.open.invoice
+      ];
+    }
+
+    function getLedgerBundle() {
+      const hasServerData = state.ledgerData.all.length > 0 || state.ledgerData.remindersPending.length > 0 || state.ledgerData.remindersSent.length > 0;
+      return hasServerData
+        ? { ...state.ledgerData, source: "api" }
+        : { ...ledgerMockData, source: "mock" };
+    }
+
+    function getOABundle() {
+      const hasServerData = state.oaData && state.oaData.summary;
+      return hasServerData
+        ? { ...state.oaData, source: "api" }
+        : { ...oaMockData, source: "mock" };
+    }
+
+    function getProjectBundle() {
+      const hasServerData = state.projectData && (
+        (state.projectData.projects || []).length > 0
+        || (state.projectData.assignable_objects || []).length > 0
+        || (state.projectData.summaries || []).length > 0
+      );
+      return hasServerData
+        ? { ...state.projectData, source: "api" }
+        : { ...projectMockData, source: "mock" };
+    }
+
+    function hasLiveLedgerData() {
+      return getLedgerBundle().source === "api";
+    }
+
+    function hasLiveOAData() {
+      return getOABundle().source === "api";
+    }
+
+    function hasLiveProjectData() {
+      return getProjectBundle().source === "api";
+    }
+
+    function getRowById(rowId) {
+      return getAllRows().find(item => item.id === rowId);
+    }
+
+    function getSelectedRows(type) {
+      return state.selectedRows[type]
+        .map(getRowById)
+        .filter(Boolean);
+    }
+
+    function getAllSelectedRows() {
+      return [
+        ...getSelectedRows("oa"),
+        ...getSelectedRows("bank"),
+        ...getSelectedRows("invoice")
+      ];
+    }
+
+    function getSelectedLinkIds() {
+      return new Set(
+        getAllSelectedRows()
+          .map(row => row.caseId || row.candidateResultId)
+          .filter(Boolean)
+      );
+    }
+
+    function sanitizeSelections() {
+      ["oa", "bank", "invoice"].forEach(type => {
+        state.selectedRows[type] = state.selectedRows[type].filter(rowId => Boolean(getRowById(rowId)));
+      });
+    }
+
+    function showToast(message) {
+      const toast = document.getElementById("toast");
+      toast.textContent = message;
+      toast.classList.add("show");
+      clearTimeout(state.toastTimer);
+      state.toastTimer = setTimeout(() => toast.classList.remove("show"), 1800);
+    }
+
+    function openDrawer(target) {
+      const row = typeof target === "string" ? getRowById(target) : target;
+      if (!row) return;
+      state.drawerRow = row;
+      state.drawerOpen = true;
+      renderDrawer();
+    }
+
+    function closeDrawer() {
+      state.drawerOpen = false;
+      renderDrawer();
+    }
+
+    function toggleRowSelection(rowId) {
+      const row = getRowById(rowId);
+      if (!row) return;
+      const bucket = state.selectedRows[row.type];
+      if (bucket.includes(rowId)) {
+        state.selectedRows[row.type] = bucket.filter(item => item !== rowId);
+      } else {
+        state.selectedRows[row.type] = [...bucket, rowId];
+      }
+      if ((row.type === "bank" || row.type === "invoice") && !state.form.exceptionCode) {
+        state.form.exceptionCode = getDefaultExceptionCode();
+      }
+      render();
+    }
+
+    function clearSelections() {
+      state.selectedRows = { oa: [], bank: [], invoice: [] };
+      render();
+    }
+
+    function removeSelection(type, rowId) {
+      state.selectedRows[type] = state.selectedRows[type].filter(item => item !== rowId);
+      render();
+    }
+
+    function ensureSelected(rowId) {
+      const row = getRowById(rowId);
+      if (!row) return;
+      if (!state.selectedRows[row.type].includes(rowId)) {
+        state.selectedRows[row.type] = [...state.selectedRows[row.type], rowId];
+      }
+    }
+
+    function autoSelectCandidates(row) {
+      if (!row) return;
+      if (row.type === "bank" && row.candidateInvoiceIds) {
+        state.selectedRows.invoice = [...new Set([...state.selectedRows.invoice, ...row.candidateInvoiceIds])];
+      }
+      if (row.type === "invoice" && row.candidateTransactionIds) {
+        state.selectedRows.bank = [...new Set([...state.selectedRows.bank, ...row.candidateTransactionIds])];
+      }
+    }
+
+    function prepareConfirm(rowId) {
+      const row = getRowById(rowId);
+      if (!row) return;
+      ensureSelected(rowId);
+      autoSelectCandidates(row);
+      state.contextMode = "confirm";
+      render();
+      showToast("已带入右侧操作区，可直接确认关联");
+    }
+
+    function prepareException(rowId) {
+      ensureSelected(rowId);
+      state.contextMode = "exception";
+      state.form.exceptionCode = getDefaultExceptionCode();
+      render();
+    }
+
+    function prepareRelation(rowId) {
+      const row = getRowById(rowId);
+      if (!row) return;
+      ensureSelected(rowId);
+      autoSelectCandidates(row);
+      state.contextMode = "confirm";
+      render();
+      showToast("已加载候选关联，请在右侧操作区确认");
+    }
+
+    function handleAction(rowId, action) {
+      const row = getRowById(rowId);
+      if (!row) return;
+      if (action === "detail") {
+        openDrawer(rowId);
+        return;
+      }
+      if (action === "confirm") {
+        prepareConfirm(rowId);
+        return;
+      }
+      if (action === "exception") {
+        prepareException(rowId);
+        return;
+      }
+      if (action === "relation") {
+        prepareRelation(rowId);
+        return;
+      }
+      if (action === "cancel") {
+        showToast("当前版本暂未开放取消关联");
+      }
+    }
+
+    function inferBizSide() {
+      const invoice = getSelectedRows("invoice")[0];
+      if (invoice) return invoice.bizSide || (String(invoice.invoiceType || "").includes("销项") ? "receivable" : "payable");
+      const bank = getSelectedRows("bank")[0];
+      if (bank) return bank.bizSide || (bank.credit !== "" ? "receivable" : "payable");
+      return "receivable";
+    }
+
+    function getContextOptions() {
+      return getMonthBundle().contextOptions || DEFAULT_CONTEXT_OPTIONS;
+    }
+
+    function getDefaultExceptionCode() {
+      const options = inferBizSide() === "receivable"
+        ? getContextOptions().receivable_exceptions
+        : getContextOptions().payable_exceptions;
+      return options[0] ? options[0].code : "";
+    }
+
+    function getSelectedOffsetInvoiceBuckets() {
+      const invoices = getSelectedRows("invoice");
+      return {
+        receivable: invoices.filter(row => String(row.invoiceType || "").includes("销项")),
+        payable: invoices.filter(row => String(row.invoiceType || "").includes("进项"))
+      };
+    }
+
+    function getCommonSourceResultId() {
+      const resultIds = getAllSelectedRows()
+        .map(row => row.candidateResultId)
+        .filter(Boolean);
+      if (resultIds.length === 0) return null;
+      return Array.from(new Set(resultIds))[0];
+    }
+
+    async function loadWorkbench(month) {
+      state.loadingWorkbench = true;
+      state.workbenchError = "";
+      render();
+      try {
+        state.workbenchCache[month] = await fetchJson(`/workbench?month=${encodeURIComponent(month)}`);
+      } catch (error) {
+        state.workbenchError = error.message || "工作台接口加载失败";
+      } finally {
+        state.loadingWorkbench = false;
+        sanitizeSelections();
+        render();
+      }
+    }
+
+    async function loadLedgerHub() {
+      state.loadingLedgers = true;
+      state.ledgerError = "";
+      render();
+      const asOf = getMonthEnd(state.currentMonth);
+      try {
+        const [allPayload, openPayload, duePayload, overduePayload, pendingPayload, sentPayload] = await Promise.all([
+          fetchJson("/ledgers?view=all"),
+          fetchJson("/ledgers?view=open"),
+          fetchJson(`/ledgers?view=due&as_of=${encodeURIComponent(asOf)}`),
+          fetchJson(`/ledgers?view=overdue&as_of=${encodeURIComponent(asOf)}`),
+          fetchJson("/reminders?status=pending"),
+          fetchJson("/reminders?status=sent")
+        ]);
+        state.ledgerData = {
+          all: allPayload.ledgers || [],
+          open: openPayload.ledgers || [],
+          due: duePayload.ledgers || [],
+          overdue: overduePayload.ledgers || [],
+          remindersPending: pendingPayload.reminders || [],
+          remindersSent: sentPayload.reminders || []
+        };
+      } catch (error) {
+        state.ledgerError = error.message || "台账接口加载失败";
+      } finally {
+        state.loadingLedgers = false;
+        render();
+      }
+    }
+
+    async function loadOADashboard() {
+      state.loadingOA = true;
+      state.oaError = "";
+      render();
+      try {
+        state.oaData = await fetchJson("/integrations/oa");
+      } catch (error) {
+        state.oaError = error.message || "OA 同步接口加载失败";
+      } finally {
+        state.loadingOA = false;
+        render();
+      }
+    }
+
+    async function triggerOASync(scope = "all", retryRunId = null) {
+      try {
+        const payload = await fetchJson("/integrations/oa/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            actor_id: "user_finance_01",
+            scope,
+            retry_run_id: retryRunId
+          })
+        });
+        state.oaData = payload.dashboard;
+        await loadProjectHub();
+        render();
+        showToast(retryRunId ? `已重试 ${payload.run.scope} 同步` : `已执行 ${payload.run.scope} 同步`);
+      } catch (error) {
+        showToast(error.message || "OA 同步执行失败");
+      }
+    }
+
+    async function loadProjectHub() {
+      state.loadingProjects = true;
+      state.projectError = "";
+      render();
+      try {
+        state.projectData = await fetchJson("/projects");
+        const projects = state.projectData.projects || [];
+        if (projects.length && !projects.some(item => item.id === state.selectedProjectId)) {
+          state.selectedProjectId = projects[0].id;
+        }
+      } catch (error) {
+        state.projectError = error.message || "项目归集接口加载失败";
+      } finally {
+        state.loadingProjects = false;
+        render();
+      }
+    }
+
+    async function submitProjectCreate() {
+      if (!state.form.projectCode || !state.form.projectName) {
+        showToast("请输入项目编码和项目名称");
+        return;
+      }
+      try {
+        const payload = await fetchJson("/projects", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            actor_id: "user_finance_01",
+            project_code: state.form.projectCode,
+            project_name: state.form.projectName
+          })
+        });
+        state.projectData = payload.hub;
+        state.selectedProjectId = payload.project.id;
+        state.form.projectCode = "";
+        state.form.projectName = "";
+        render();
+        showToast(`已创建项目 ${payload.project.project_name}`);
+      } catch (error) {
+        showToast(error.message || "创建项目失败");
+      }
+    }
+
+    async function assignObjectToProject(objectType, objectId, projectId) {
+      if (!projectId) {
+        showToast("请选择项目");
+        return;
+      }
+      try {
+        const payload = await fetchJson("/projects/assign", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            actor_id: "user_finance_01",
+            object_type: objectType,
+            object_id: objectId,
+            project_id: projectId,
+            note: "通过项目归集页指定项目"
+          })
+        });
+        state.selectedProjectId = payload.project.id;
+        await Promise.all([loadProjectHub(), loadWorkbench(state.currentMonth), loadLedgerHub()]);
+        showToast(`已将 ${objectType} 归属到项目 ${payload.project.project_name}`);
+      } catch (error) {
+        showToast(error.message || "项目归属失败");
+      }
+    }
+
+    async function submitConfirm() {
+      if (!hasLiveWorkbenchData()) {
+        showToast("当前仍是样例财务数据，先导入真实发票 / 流水后再执行核销");
+        return;
+      }
+      const invoiceIds = getSelectedRows("invoice").map(row => row.id);
+      const transactionIds = getSelectedRows("bank").map(row => row.id);
+      const oaIds = getSelectedRows("oa").map(row => row.id);
+      if (!invoiceIds.length || !transactionIds.length) {
+        showToast("确认关联至少需要选择发票和银行流水");
+        return;
+      }
+      try {
+        const payload = await fetchJson("/workbench/actions/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            actor_id: "user_finance_01",
+            invoice_ids: invoiceIds,
+            transaction_ids: transactionIds,
+            oa_ids: oaIds,
+            source_result_id: getCommonSourceResultId(),
+            remark: state.form.confirmRemark || "通过工作台确认关联"
+          })
+        });
+        state.form.confirmRemark = "";
+        state.selectedRows.bank = [];
+        state.selectedRows.invoice = [];
+        showToast(`已生成核销单 ${payload.case.id}`);
+        await Promise.all([loadWorkbench(state.currentMonth), loadLedgerHub(), loadProjectHub()]);
+      } catch (error) {
+        showToast(error.message || "确认关联失败");
+      }
+    }
+
+    async function submitException() {
+      if (!hasLiveWorkbenchData()) {
+        showToast("当前仍是样例财务数据，先导入真实发票 / 流水后再执行异常处理");
+        return;
+      }
+      const invoiceIds = getSelectedRows("invoice").map(row => row.id);
+      const transactionIds = getSelectedRows("bank").map(row => row.id);
+      const oaIds = getSelectedRows("oa").map(row => row.id);
+      if (!invoiceIds.length && !transactionIds.length) {
+        showToast("异常处理至少需要选中一条发票或流水");
+        return;
+      }
+      try {
+        const payload = await fetchJson("/workbench/actions/exception", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            actor_id: "user_finance_01",
+            biz_side: inferBizSide(),
+            invoice_ids: invoiceIds,
+            transaction_ids: transactionIds,
+            oa_ids: oaIds,
+            exception_code: state.form.exceptionCode || getDefaultExceptionCode(),
+            resolution_action: "create_follow_up_ledger",
+            note: state.form.exceptionNote || "通过工作台标记异常"
+          })
+        });
+        state.form.exceptionNote = "";
+        showToast(`已记录异常 ${payload.exception_record.exception_code}`);
+        await Promise.all([loadWorkbench(state.currentMonth), loadLedgerHub(), loadProjectHub()]);
+      } catch (error) {
+        showToast(error.message || "异常处理失败");
+      }
+    }
+
+    async function submitOffline() {
+      if (!hasLiveWorkbenchData()) {
+        showToast("当前仍是样例财务数据，先导入真实发票 / 流水后再补录线下核销");
+        return;
+      }
+      const invoiceIds = getSelectedRows("invoice").map(row => row.id);
+      const transactionIds = getSelectedRows("bank").map(row => row.id);
+      const oaIds = getSelectedRows("oa").map(row => row.id);
+      if (!invoiceIds.length && !transactionIds.length) {
+        showToast("线下核销至少需要选中一条发票或流水");
+        return;
+      }
+      if (!state.form.offlineAmount) {
+        showToast("请输入线下核销金额");
+        return;
+      }
+      try {
+        const payload = await fetchJson("/workbench/actions/offline", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            actor_id: "user_finance_01",
+            biz_side: inferBizSide(),
+            invoice_ids: invoiceIds,
+            transaction_ids: transactionIds,
+            oa_ids: oaIds,
+            amount: state.form.offlineAmount,
+            payment_method: state.form.offlineMethod,
+            occurred_on: state.form.offlineDate,
+            note: state.form.offlineNote || "通过工作台补录线下核销"
+          })
+        });
+        state.form.offlineAmount = "";
+        state.form.offlineNote = "";
+        showToast(`已补录线下核销 ${payload.offline_record.id}`);
+        await Promise.all([loadWorkbench(state.currentMonth), loadLedgerHub(), loadProjectHub()]);
+      } catch (error) {
+        showToast(error.message || "线下核销失败");
+      }
+    }
+
+    async function submitDifference() {
+      if (!hasLiveWorkbenchData()) {
+        showToast("当前仍是样例财务数据，先导入真实发票 / 流水后再执行差额核销");
+        return;
+      }
+      const invoiceIds = getSelectedRows("invoice").map(row => row.id);
+      const transactionIds = getSelectedRows("bank").map(row => row.id);
+      const oaIds = getSelectedRows("oa").map(row => row.id);
+      if (!invoiceIds.length || !transactionIds.length) {
+        showToast("差额核销需要同时选择发票和银行流水");
+        return;
+      }
+      try {
+        const payload = await fetchJson("/workbench/actions/difference", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            actor_id: "user_finance_01",
+            invoice_ids: invoiceIds,
+            transaction_ids: transactionIds,
+            oa_ids: oaIds,
+            source_result_id: getCommonSourceResultId(),
+            difference_reason: state.form.differenceReason,
+            difference_note: state.form.differenceNote || "通过工作台执行差额核销"
+          })
+        });
+        state.form.differenceNote = "";
+        state.selectedRows.bank = [];
+        state.selectedRows.invoice = [];
+        showToast(`已完成差额核销 ${payload.case.id}`);
+        await Promise.all([loadWorkbench(state.currentMonth), loadLedgerHub(), loadProjectHub()]);
+      } catch (error) {
+        showToast(error.message || "差额核销失败");
+      }
+    }
+
+    async function submitOffset() {
+      if (!hasLiveWorkbenchData()) {
+        showToast("当前仍是样例财务数据，先导入真实发票后再执行内部抵扣");
+        return;
+      }
+      const buckets = getSelectedOffsetInvoiceBuckets();
+      const oaIds = getSelectedRows("oa").map(row => row.id);
+      if (!buckets.receivable.length || !buckets.payable.length) {
+        showToast("内部抵扣需要同时选择销项票和进项票");
+        return;
+      }
+      try {
+        const payload = await fetchJson("/workbench/actions/offset", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            actor_id: "user_finance_01",
+            receivable_invoice_ids: buckets.receivable.map(row => row.id),
+            payable_invoice_ids: buckets.payable.map(row => row.id),
+            amount: state.form.offsetAmount || undefined,
+            reason: state.form.offsetReason,
+            note: state.form.offsetNote || "通过工作台执行内部抵扣",
+            oa_ids: oaIds
+          })
+        });
+        state.form.offsetAmount = "";
+        state.form.offsetNote = "";
+        state.selectedRows.invoice = [];
+        showToast(`已生成内部抵扣单 ${payload.offset_note.id}`);
+        openDrawer({ ...payload.offset_note, drawerType: "offset", detailFields: buildOffsetDetailFields(payload.offset_note) });
+        await Promise.all([loadWorkbench(state.currentMonth), loadLedgerHub(), loadProjectHub()]);
+      } catch (error) {
+        showToast(error.message || "内部抵扣失败");
+      }
+    }
+
+    function renderActionCell(row, sectionKey) {
+      const buttons = [`<button class="mini-btn" data-action="detail" data-row="${row.id}">详情</button>`];
+      if (sectionKey === "open") {
+        if (row.type === "bank") {
+          buttons.push(`<button class="mini-btn" data-action="relation" data-row="${row.id}">关联情况</button>`);
+          buttons.push(`<button class="mini-select" data-action="exception" data-row="${row.id}">异常处理 ▾</button>`);
+          buttons.push(`<button class="mini-btn danger" data-action="cancel" data-row="${row.id}">取消关联</button>`);
+        } else {
+          buttons.push(`<button class="mini-btn primary" data-action="confirm" data-row="${row.id}">确认关联</button>`);
+          buttons.push(`<button class="mini-btn danger" data-action="exception" data-row="${row.id}">标记异常</button>`);
+        }
+      } else {
+        buttons.push(`<button class="mini-btn danger" data-action="cancel" data-row="${row.id}">取消关联</button>`);
+      }
+      return `<div class="inline-actions">${buttons.join("")}</div>`;
+    }
+
+    function renderCell(row, column, sectionKey) {
+      const key = column.key;
+      if (key === "amount" || key === "debit" || key === "credit" || key === "taxAmount" || key === "totalWithTax") {
+        return formatMoney(row[key]);
+      }
+      if (key === "relation" || key === "invoiceRelation") {
+        return badgeHtml(row[key]);
+      }
+      if (key === "payAccount") {
+        return `<span class="bank-pill">${row[key]}</span>`;
+      }
+      if (key === "actions") {
+        return renderActionCell(row, sectionKey);
+      }
+      return row[key] || "—";
+    }
+
+    function renderPane(paneKey, sectionKey) {
+      const data = getMonthBundle()[sectionKey][paneKey];
+      const paneClass = paneKey === "oa" ? "oa" : paneKey === "bank" ? "bank" : "invoice";
+      const title = paneKey === "oa" ? "OA" : paneKey === "bank" ? "银行流水" : "进项 / 销项发票";
+      const footerText = paneKey === "oa"
+        ? "OA 当前仍使用既有样例数据，银行与发票已切到真实接口。"
+        : paneKey === "bank"
+          ? "银行栏已接工作台接口，支持候选带入、异常处理与详情抽屉。"
+          : "发票栏已接工作台接口，税额与价税合计来自真实后端模型。";
+      const linkedIds = getSelectedLinkIds();
+
+      const rowsHtml = data.map(row => {
+        const selected = state.selectedRows[row.type].includes(row.id);
+        const linked = !selected && linkedIds.size > 0 && linkedIds.has(row.caseId || row.candidateResultId);
+        const rowClass = [
+          sectionKey === "paired" ? "row-paired" : "row-open",
+          selected ? "row-selected" : "",
+          linked ? "row-linked" : ""
+        ].filter(Boolean).join(" ");
+        const cells = columns[paneKey].map(column => `<td>${renderCell(row, column, sectionKey)}</td>`).join("");
+        return `<tr class="${rowClass}" data-row="${row.id}">${cells}</tr>`;
+      }).join("");
+
+      const headHtml = columns[paneKey].map(column => `<th>${column.label}</th>`).join("");
+
+      return [
+        `<div class="pane ${state.visible[paneKey] ? "" : "is-hidden"}" data-pane="${paneKey}">`,
+        `<div class="pane-head ${paneClass}"><span>${title}</span><span class="pane-tag">${data.length} 条</span></div>`,
+        '<div class="table-wrap">',
+        `<table><thead><tr>${headHtml}</tr></thead><tbody>${rowsHtml}</tbody></table>`,
+        "</div>",
+        `<div class="table-footer">${footerText}</div>`,
+        "</div>"
+      ].join("");
+    }
+
+    function composeGridTemplate() {
+      const split1 = state.visible.oa && state.visible.bank ? "10px" : "0px";
+      const split2 = state.visible.bank && state.visible.invoice ? "10px" : "0px";
+      return [
+        state.visible.oa ? `minmax(0, ${state.widths.oa}fr)` : "0px",
+        split1,
+        state.visible.bank ? `minmax(0, ${state.widths.bank}fr)` : "0px",
+        split2,
+        state.visible.invoice ? `minmax(0, ${state.widths.invoice}fr)` : "0px"
+      ].join(" ");
+    }
+
+    function renderWorkbench() {
+      const bundle = getMonthBundle();
+      const grid = composeGridTemplate();
+      const page = document.getElementById("workbenchPage");
+      page.innerHTML = [
+        '<div class="topbar">',
+        `<div><div class="title">OA & 银行流水 & 进销项发票关联台</div><div class="subtitle">${state.loadingWorkbench ? "正在从真实接口刷新银行流水与发票数据..." : state.workbenchError ? `真实接口未就绪，暂回退样例数据：${state.workbenchError}` : bundle.source === "api" ? "银行与发票已接入 02 + 03 + 04 的真实接口；OA 仍保留当前样例数据。" : "当前展示样例数据；若本地 API 已启动，将自动切换到真实银行与发票数据。"} </div></div>`,
+        '<div class="top-actions">',
+        `<label class="month-btn">📅 <input id="workbenchMonth" class="month-input" type="month" value="${state.currentMonth}"></label>`,
+        '<button id="refreshWorkbenchBtn" class="ghost-btn">刷新接口</button>',
+        '<button id="oaEntryBtn" class="ghost-btn">OA同步</button>',
+        '<button id="projectEntryBtn" class="ghost-btn">项目归集</button>',
+        '<button id="ledgerEntryBtn" class="ghost-btn">台账提醒</button>',
+        '<button id="taxEntryBtn" class="primary-btn">税金抵扣</button>',
+        "</div>",
+        "</div>",
+        '<div class="toolbar">',
+        '<div class="toolbar-left">',
+        '<div class="field">搜索 OA 单号 / 户名 / 发票号 / 摘要</div>',
+        '<div class="field">状态：全部 / 完全关联 / 待处理 / 异常</div>',
+        `<div class="field">数据源：${bundle.source === "api" ? "真实接口" : "样例回退"}</div>`,
+        "</div>",
+        '<div class="toolbar-right">',
+        `<button class="toggle-btn ${state.visible.oa ? "active" : ""}" data-toggle-pane="oa">OA</button>`,
+        `<button class="toggle-btn ${state.visible.bank ? "active" : ""}" data-toggle-pane="bank">银行流水</button>`,
+        `<button class="toggle-btn ${state.visible.invoice ? "active" : ""}" data-toggle-pane="invoice">发票</button>`,
+        "</div>",
+        "</div>",
+        '<div class="stats">',
+        `<div class="stat">OA ${bundle.summary.oa}</div>`,
+        `<div class="stat">流水 ${bundle.summary.bank}</div>`,
+        `<div class="stat">发票 ${bundle.summary.invoice}</div>`,
+        `<div class="stat good">已配对 ${bundle.summary.paired}</div>`,
+        `<div class="stat warn">未配对 ${bundle.summary.open}</div>`,
+        `<div class="stat warn">异常 ${bundle.summary.exceptions}</div>`,
+        "</div>",
+        '<div class="zones">',
+        '<div class="zone paired-zone">',
+        '<div class="zone-head top"><span>已配对</span><span class="zone-meta">历史核销区，显示已经形成核销单的记录</span></div>',
+        `<div class="tri-layout" style="grid-template-columns:${grid};">`,
+        renderPane("oa", "paired"),
+        `<div class="splitter ${state.visible.oa && state.visible.bank ? "" : "hidden"}" data-splitter="0"></div>`,
+        renderPane("bank", "paired"),
+        `<div class="splitter ${state.visible.bank && state.visible.invoice ? "" : "hidden"}" data-splitter="1"></div>`,
+        renderPane("invoice", "paired"),
+        "</div>",
+        "</div>",
+        '<div class="zone open-zone">',
+        '<div class="zone-head bottom"><span>未配对</span><span class="zone-meta">主操作区，点击行只选中；每行“详情”单独打开详情抽屉</span></div>',
+        `<div class="tri-layout" style="grid-template-columns:${grid};">`,
+        renderPane("oa", "open"),
+        `<div class="splitter ${state.visible.oa && state.visible.bank ? "" : "hidden"}" data-splitter="0"></div>`,
+        renderPane("bank", "open"),
+        `<div class="splitter ${state.visible.bank && state.visible.invoice ? "" : "hidden"}" data-splitter="1"></div>`,
+        renderPane("invoice", "open"),
+        "</div>",
+        "</div>",
+        "</div>"
+      ].join("");
+
+      page.querySelectorAll("[data-row]").forEach(rowEl => {
+        rowEl.addEventListener("click", event => {
+          if (event.target.closest("button")) return;
+          toggleRowSelection(rowEl.dataset.row);
+        });
+      });
+
+      page.querySelectorAll("[data-action]").forEach(button => {
+        button.addEventListener("click", event => {
+          event.stopPropagation();
+          handleAction(button.dataset.row, button.dataset.action);
+        });
+      });
+
+      page.querySelector("#workbenchMonth").addEventListener("change", async event => {
+        state.currentMonth = event.target.value || "2026-03";
+        state.selectedRows = { oa: [], bank: [], invoice: [] };
+        seedTaxSelections();
+        render();
+        await Promise.all([loadWorkbench(state.currentMonth), loadLedgerHub()]);
+      });
+
+      page.querySelector("#refreshWorkbenchBtn").addEventListener("click", async () => {
+        await Promise.all([loadWorkbench(state.currentMonth), loadLedgerHub()]);
+        showToast("工作台已刷新");
+      });
+
+      page.querySelector("#oaEntryBtn").addEventListener("click", async () => {
+        state.currentView = "oa";
+        render();
+        await loadOADashboard();
+      });
+
+      page.querySelector("#projectEntryBtn").addEventListener("click", async () => {
+        state.currentView = "project";
+        render();
+        await loadProjectHub();
+      });
+
+      page.querySelector("#ledgerEntryBtn").addEventListener("click", async () => {
+        state.currentView = "ledger";
+        render();
+        await loadLedgerHub();
+      });
+
+      page.querySelector("#taxEntryBtn").addEventListener("click", () => {
+        state.currentView = "tax";
+        render();
+      });
+
+      page.querySelectorAll("[data-toggle-pane]").forEach(button => {
+        button.addEventListener("click", () => {
+          const key = button.dataset.togglePane;
+          const visibleCount = Object.values(state.visible).filter(Boolean).length;
+          if (state.visible[key] && visibleCount === 1) {
+            showToast("至少保留一栏显示");
+            return;
+          }
+          state.visible[key] = !state.visible[key];
+          if (state.visible[key] && state.widths[key] === 0) {
+            state.widths[key] = key === "bank" ? 36 : 32;
+          }
+          render();
+        });
+      });
+
+      attachSplitterEvents(page);
+    }
+
+    function renderDrawer() {
+      const drawer = document.getElementById("detailDrawer");
+      drawer.className = "drawer" + (state.drawerOpen ? " open" : "");
+      if (!state.drawerOpen || !state.drawerRow) {
+        drawer.innerHTML = [
+          '<div class="drawer-head"><div><div class="drawer-title">详情抽屉</div><div class="drawer-subtitle">点击行只选中记录，点每行的“详情”按钮才打开这里。</div></div>',
+          '<button class="ghost-btn" id="closeDrawerBtn">关闭</button></div>',
+          '<div class="drawer-empty">主表保持 Excel 密度，详情字段统一收纳在这里，避免三栏被撑乱。</div>'
+        ].join("");
+      } else {
+        const row = state.drawerRow;
+        const summaryPairs = [];
+        const rowType = row.drawerType || row.type;
+        if (rowType === "oa") {
+          summaryPairs.push(["申请人", row.applicant], ["项目名称", row.project], ["申请类型", row.applyType], ["金额", formatMoney(row.amount)]);
+          summaryPairs.push(["对方户名", row.counterparty], ["申请事由", row.reason], ["关联情况", row.relation ? row.relation.text : "—"]);
+        }
+        if (rowType === "bank") {
+          summaryPairs.push(["交易时间", row.tradeTime], ["借方发生额", formatMoney(row.debit)], ["贷方发生额", formatMoney(row.credit)], ["对方户名", row.counterparty]);
+          summaryPairs.push(["支付账户", row.payAccount], ["和发票关联情况", row.invoiceRelation ? row.invoiceRelation.text : "—"], ["支付/收款时间", row.payReceiveTime], ["还借款日期", row.repayDate]);
+        }
+        if (rowType === "invoice") {
+          summaryPairs.push(["销方识别号", row.sellerTaxNo], ["销方名称", row.sellerName], ["购方识别号", row.buyerTaxNo], ["购买方名称", row.buyerName]);
+          summaryPairs.push(["开票日期", row.issueDate], ["金额", formatMoney(row.amount)], ["税率", row.taxRate], ["税额", formatMoney(row.taxAmount)]);
+          summaryPairs.push(["价税合计", formatMoney(row.totalWithTax)], ["发票类型", row.invoiceType]);
+        }
+        if (rowType === "ledger") {
+          summaryPairs.push(["台账类型", ledgerTypeLabel(row.ledger_type)], ["未闭环金额", formatMoney(row.open_amount)], ["预计处理日期", row.expected_date], ["状态", row.status]);
+          summaryPairs.push(["责任人", row.owner_id], ["来源核销单", row.source_case_id || row.source_object_id], ["对手方", row.counterparty_id], ["项目", row.project_id || "—"]);
+          summaryPairs.push(["最新备注", row.latest_note || "—"], ["最近提醒", formatDateTime(row.last_reminded_at)]);
+        }
+        if (rowType === "reminder") {
+          summaryPairs.push(["提醒编号", row.id], ["关联台账", row.ledger_id], ["提醒日期", row.remind_at], ["渠道", row.channel]);
+          summaryPairs.push(["提醒状态", row.status], ["发送结果", row.sent_result || "—"], ["发送时间", formatDateTime(row.sent_at)], ["创建时间", formatDateTime(row.created_at)]);
+        }
+        if (rowType === "offset") {
+          summaryPairs.push(["抵扣单编号", row.id], ["对手方", row.counterparty_id], ["应收金额", formatMoney(row.receivable_amount)], ["应付金额", formatMoney(row.payable_amount)]);
+          summaryPairs.push(["抵扣金额", formatMoney(row.offset_amount)], ["抵扣原因", row.reason], ["备注", row.note || "—"], ["创建人", row.created_by || "—"]);
+          summaryPairs.push(["创建时间", formatDateTime(row.created_at)]);
+        }
+        if (rowType === "oa_sync_run") {
+          summaryPairs.push(["同步批次", row.id], ["同步范围", row.scope], ["状态", row.status], ["拉取数量", row.pulled_count]);
+          summaryPairs.push(["成功数量", row.success_count], ["失败数量", row.failed_count], ["重试来源", row.retry_of_run_id || "—"], ["问题数", row.issue_count || 0]);
+        }
+        if (rowType === "oa_project") {
+          summaryPairs.push(["项目编码", row.project_code], ["项目名称", row.project_name], ["项目状态", row.project_status], ["OA 项目ID", row.oa_external_id]);
+          summaryPairs.push(["部门", row.department_name || "—"], ["负责人", row.owner_name || "—"]);
+        }
+        if (rowType === "oa_document") {
+          summaryPairs.push(["单据类型", row.document_type], ["OA 单据ID", row.oa_external_id], ["单据编号", row.form_no], ["标题", row.title]);
+          summaryPairs.push(["申请人", row.applicant_name], ["金额", formatMoney(row.amount)], ["对手方", row.counterparty_name || "—"], ["项目", row.project_name || "—"]);
+          summaryPairs.push(["状态", row.form_status], ["提交时间", row.submitted_at || "—"], ["完成时间", row.completed_at || "—"]);
+        }
+        if (rowType === "oa_mapping") {
+          summaryPairs.push(["映射编号", row.id], ["对象类型", row.object_type], ["外部ID", row.external_id], ["内部对象类型", row.internal_object_type || "—"]);
+          summaryPairs.push(["内部对象ID", row.internal_object_id || "—"], ["显示名称", row.display_name || "—"], ["来源系统", row.source_system]);
+        }
+
+        const summaryHtml = summaryPairs.map(([label, value]) => {
+          return `<div class="detail-item"><div class="detail-label">${label}</div><div class="detail-value">${value || "—"}</div></div>`;
+        }).join("");
+
+        const detailSource = row.details || row.detailFields || {};
+        const detailHtml = Object.entries(detailSource).map(([label, value]) => {
+          return `<div class="detail-item"><div class="detail-label">${label}</div><div class="detail-value">${value || "—"}</div></div>`;
+        }).join("");
+
+        const typeLabel = rowType === "oa"
+          ? "OA 详情"
+          : rowType === "bank"
+            ? "银行流水详情"
+            : rowType === "invoice"
+              ? "发票详情"
+              : rowType === "ledger"
+                ? "跟进台账详情"
+                : rowType === "offset"
+                  ? "内部抵扣详情"
+                  : rowType === "oa_sync_run"
+                    ? "OA 同步详情"
+                    : rowType === "oa_project"
+                      ? "OA 项目详情"
+                      : rowType === "oa_document"
+                        ? "OA 单据详情"
+                        : rowType === "oa_mapping"
+                          ? "OA 映射详情"
+                          : "提醒记录详情";
+
+        drawer.innerHTML = [
+          '<div class="drawer-head">',
+          `<div><div class="drawer-title">${typeLabel}</div><div class="drawer-subtitle">当前月份：${state.currentMonth} ｜ 记录编号：${row.id}</div></div>`,
+          '<button class="ghost-btn" id="closeDrawerBtn">关闭</button>',
+          "</div>",
+          '<div class="drawer-body">',
+          `<div class="drawer-section"><h3>主表直接字段</h3><div class="detail-grid">${summaryHtml}</div></div>`,
+          `<div class="drawer-section"><h3>点击后查看详情字段</h3><div class="detail-grid">${detailHtml}</div></div>`,
+          "</div>"
+        ].join("");
+      }
+
+      const closeBtn = drawer.querySelector("#closeDrawerBtn");
+      if (closeBtn) closeBtn.addEventListener("click", closeDrawer);
+    }
+
+    function selectionChipHtml(type, row) {
+      const label = row.type === "oa"
+        ? `${row.applicant} / ${row.project}`
+        : row.type === "bank"
+          ? `${row.counterparty} / ${formatMoney(row.debit || row.credit)}`
+          : `${row.sellerName || row.buyerName} / ${formatMoney(row.totalWithTax || row.amount)}`;
+      return `<span class="selection-chip">${label}<button data-remove-selection="${type}" data-row-id="${row.id}">✕</button></span>`;
+    }
+
+    function renderContextPanel() {
+      const panel = document.getElementById("contextPanel");
+      const hasSelection = state.currentView === "workbench" && getAllSelectedRows().length > 0;
+      document.body.classList.toggle("has-context-panel", hasSelection);
+      panel.className = "context-panel" + (hasSelection ? " open" : "");
+      if (!hasSelection) {
+        panel.innerHTML = "";
+        return;
+      }
+
+      const oaRows = getSelectedRows("oa");
+      const bankRows = getSelectedRows("bank");
+      const invoiceRows = getSelectedRows("invoice");
+      const historyCases = (getMonthBundle().history.cases || []).slice(-5).reverse();
+      const bizSide = inferBizSide();
+      const options = bizSide === "receivable"
+        ? getContextOptions().receivable_exceptions
+        : getContextOptions().payable_exceptions;
+      if (!state.form.exceptionCode) {
+        state.form.exceptionCode = options[0] ? options[0].code : "";
+      }
+
+      panel.innerHTML = [
+        '<div class="context-head">',
+        `<div><div class="context-title">上下文操作区</div><div class="context-subtitle">当前按 ${bizSide === "receivable" ? "销项应收" : "进项应付"} 模式展示动作。点击行只选中，详情仍走“详情”按钮。</div></div>`,
+        '<button id="contextClearBtn" class="ghost-btn">清空选择</button>',
+        '</div>',
+        '<div class="context-body">',
+        '<div class="context-card"><div class="context-card-head">当前选择</div><div class="context-card-body">',
+        `<div class="selection-group"><div class="selection-label">OA ${oaRows.length} 条</div><div class="selection-chips">${oaRows.length ? oaRows.map(row => selectionChipHtml("oa", row)).join("") : '<div class="selection-empty">未选择 OA 记录</div>'}</div></div>`,
+        `<div class="selection-group"><div class="selection-label">银行流水 ${bankRows.length} 条</div><div class="selection-chips">${bankRows.length ? bankRows.map(row => selectionChipHtml("bank", row)).join("") : '<div class="selection-empty">未选择银行流水</div>'}</div></div>`,
+        `<div class="selection-group"><div class="selection-label">发票 ${invoiceRows.length} 张</div><div class="selection-chips">${invoiceRows.length ? invoiceRows.map(row => selectionChipHtml("invoice", row)).join("") : '<div class="selection-empty">未选择发票</div>'}</div></div>`,
+        '</div></div>',
+        '<div class="context-card"><div class="context-card-head">动作模式</div><div class="context-card-body">',
+        `<div class="mode-tabs">
+          <button class="mode-tab ${state.contextMode === "confirm" ? "active" : ""}" data-context-mode="confirm">确认核销</button>
+          <button class="mode-tab ${state.contextMode === "difference" ? "active" : ""}" data-context-mode="difference">差额核销</button>
+          <button class="mode-tab ${state.contextMode === "exception" ? "active" : ""}" data-context-mode="exception">异常处理</button>
+          <button class="mode-tab ${state.contextMode === "offline" ? "active" : ""}" data-context-mode="offline">线下核销</button>
+          <button class="mode-tab ${state.contextMode === "offset" ? "active" : ""}" data-context-mode="offset">内部抵扣</button>
+        </div>`,
+        renderContextModeBody(options),
+        '</div></div>',
+        '<div class="context-card"><div class="context-card-head">最近核销记录</div><div class="context-card-body">',
+        historyCases.length
+          ? `<div class="history-list">${historyCases.map(item => `
+              <div class="history-item">
+                <strong>${item.id}</strong>
+                <span>类型：${item.case_type} ｜ 状态：${item.status}</span>
+                <span>差额：${formatMoney(item.difference_amount)}</span>
+              </div>
+            `).join("")}</div>`
+          : '<div class="selection-empty">当前月份还没有真实核销记录。</div>',
+        '</div></div>',
+        '</div>'
+      ].join("");
+
+      const clearBtn = panel.querySelector("#contextClearBtn");
+      if (clearBtn) clearBtn.addEventListener("click", clearSelections);
+
+      panel.querySelectorAll("[data-remove-selection]").forEach(button => {
+        button.addEventListener("click", () => {
+          removeSelection(button.dataset.removeSelection, button.dataset.rowId);
+        });
+      });
+
+      panel.querySelectorAll("[data-context-mode]").forEach(button => {
+        button.addEventListener("click", () => {
+          state.contextMode = button.dataset.contextMode;
+          renderContextPanel();
+        });
+      });
+
+      const confirmRemark = panel.querySelector("#confirmRemark");
+      if (confirmRemark) {
+        confirmRemark.addEventListener("input", event => {
+          state.form.confirmRemark = event.target.value;
+        });
+      }
+
+      const exceptionCode = panel.querySelector("#exceptionCode");
+      if (exceptionCode) {
+        exceptionCode.addEventListener("change", event => {
+          state.form.exceptionCode = event.target.value;
+        });
+      }
+
+      const exceptionNote = panel.querySelector("#exceptionNote");
+      if (exceptionNote) {
+        exceptionNote.addEventListener("input", event => {
+          state.form.exceptionNote = event.target.value;
+        });
+      }
+
+      const differenceReason = panel.querySelector("#differenceReason");
+      if (differenceReason) {
+        differenceReason.addEventListener("change", event => {
+          state.form.differenceReason = event.target.value;
+        });
+      }
+
+      const differenceNote = panel.querySelector("#differenceNote");
+      if (differenceNote) {
+        differenceNote.addEventListener("input", event => {
+          state.form.differenceNote = event.target.value;
+        });
+      }
+
+      const offlineAmount = panel.querySelector("#offlineAmount");
+      if (offlineAmount) {
+        offlineAmount.addEventListener("input", event => {
+          state.form.offlineAmount = event.target.value;
+        });
+      }
+
+      const offlineMethod = panel.querySelector("#offlineMethod");
+      if (offlineMethod) {
+        offlineMethod.addEventListener("change", event => {
+          state.form.offlineMethod = event.target.value;
+        });
+      }
+
+      const offlineDate = panel.querySelector("#offlineDate");
+      if (offlineDate) {
+        offlineDate.addEventListener("change", event => {
+          state.form.offlineDate = event.target.value;
+        });
+      }
+
+      const offlineNote = panel.querySelector("#offlineNote");
+      if (offlineNote) {
+        offlineNote.addEventListener("input", event => {
+          state.form.offlineNote = event.target.value;
+        });
+      }
+
+      const offsetAmount = panel.querySelector("#offsetAmount");
+      if (offsetAmount) {
+        offsetAmount.addEventListener("input", event => {
+          state.form.offsetAmount = event.target.value;
+        });
+      }
+
+      const offsetReason = panel.querySelector("#offsetReason");
+      if (offsetReason) {
+        offsetReason.addEventListener("change", event => {
+          state.form.offsetReason = event.target.value;
+        });
+      }
+
+      const offsetNote = panel.querySelector("#offsetNote");
+      if (offsetNote) {
+        offsetNote.addEventListener("input", event => {
+          state.form.offsetNote = event.target.value;
+        });
+      }
+
+      const confirmBtn = panel.querySelector("#contextConfirmBtn");
+      if (confirmBtn) confirmBtn.addEventListener("click", submitConfirm);
+
+      const differenceBtn = panel.querySelector("#contextDifferenceBtn");
+      if (differenceBtn) differenceBtn.addEventListener("click", submitDifference);
+
+      const exceptionBtn = panel.querySelector("#contextExceptionBtn");
+      if (exceptionBtn) exceptionBtn.addEventListener("click", submitException);
+
+      const offlineBtn = panel.querySelector("#contextOfflineBtn");
+      if (offlineBtn) offlineBtn.addEventListener("click", submitOffline);
+
+      const offsetBtn = panel.querySelector("#contextOffsetBtn");
+      if (offsetBtn) offsetBtn.addEventListener("click", submitOffset);
+    }
+
+    function renderContextModeBody(options) {
+      if (state.contextMode === "confirm") {
+        return [
+          '<div class="context-form">',
+          '<div class="context-help">确认核销会生成 `ReconciliationCase + ReconciliationLine`，并把选中发票与流水写入审计日志。</div>',
+          `<input id="confirmRemark" class="context-input" type="text" placeholder="备注，例如：按候选建议确认" value="${state.form.confirmRemark}">`,
+          '<div class="context-actions"><button id="contextConfirmBtn" class="primary-btn">确认核销</button></div>',
+          '</div>'
+        ].join("");
+      }
+      if (state.contextMode === "difference") {
+        return [
+          '<div class="context-form">',
+          '<div class="context-help">差额核销用于手续费、抹零、汇率差、税差等尾差闭环。系统会保留结构化差额原因和备注依据。</div>',
+          `<select id="differenceReason" class="context-select">
+            <option value="fee" ${state.form.differenceReason === "fee" ? "selected" : ""}>手续费</option>
+            <option value="rounding" ${state.form.differenceReason === "rounding" ? "selected" : ""}>抹零</option>
+            <option value="fx" ${state.form.differenceReason === "fx" ? "selected" : ""}>汇率差</option>
+            <option value="tax" ${state.form.differenceReason === "tax" ? "selected" : ""}>税差</option>
+            <option value="other" ${state.form.differenceReason === "other" ? "selected" : ""}>其他</option>
+          </select>`,
+          `<textarea id="differenceNote" class="context-textarea" placeholder="补充差额依据，例如：银行代扣手续费 0.50">${state.form.differenceNote}</textarea>`,
+          '<div class="context-actions"><button id="contextDifferenceBtn" class="primary-btn">确认差额核销</button></div>',
+          '</div>'
+        ].join("");
+      }
+      if (state.contextMode === "exception") {
+        return [
+          '<div class="context-form">',
+          '<div class="context-help">异常处理会生成结构化异常记录，不再只是自由备注。当前可直接落 `SO-* / PI-*` 编码。</div>',
+          `<select id="exceptionCode" class="context-select">${options.map(item => `<option value="${item.code}" ${state.form.exceptionCode === item.code ? "selected" : ""}>${item.code} ${item.title}</option>`).join("")}</select>`,
+          `<textarea id="exceptionNote" class="context-textarea" placeholder="说明异常原因与后续动作">${state.form.exceptionNote}</textarea>`,
+          '<div class="context-actions"><button id="contextExceptionBtn" class="primary-btn">提交异常</button></div>',
+          '</div>'
+        ].join("");
+      }
+      if (state.contextMode === "offline") {
+        return [
+        '<div class="context-form">',
+        '<div class="context-help">线下核销用于现金支付、个人垫付等场景，会额外生成 `offline_record`。</div>',
+        `<input id="offlineAmount" class="context-input" type="number" min="0" step="0.01" placeholder="线下核销金额" value="${state.form.offlineAmount}">`,
+        `<select id="offlineMethod" class="context-select">
+          <option value="cash" ${state.form.offlineMethod === "cash" ? "selected" : ""}>现金</option>
+          <option value="personal_advance" ${state.form.offlineMethod === "personal_advance" ? "selected" : ""}>个人垫付</option>
+          <option value="manual_transfer" ${state.form.offlineMethod === "manual_transfer" ? "selected" : ""}>线下转账</option>
+        </select>`,
+        `<input id="offlineDate" class="context-input" type="date" value="${state.form.offlineDate}">`,
+        `<textarea id="offlineNote" class="context-textarea" placeholder="线下核销备注">${state.form.offlineNote}</textarea>`,
+        '<div class="context-actions"><button id="contextOfflineBtn" class="primary-btn">补录线下核销</button></div>',
+        '</div>'
+        ].join("");
+      }
+      return [
+        '<div class="context-form">',
+        '<div class="context-help">内部抵扣用于同一客商同时存在销项应收和进项应付时的跨板块平账，不依赖真实银行流水。</div>',
+        `<input id="offsetAmount" class="context-input" type="number" min="0" step="0.01" placeholder="留空则按最小未核销金额自动抵扣" value="${state.form.offsetAmount}">`,
+        `<select id="offsetReason" class="context-select">
+          <option value="same_counterparty_setoff" ${state.form.offsetReason === "same_counterparty_setoff" ? "selected" : ""}>同客商往来互抵</option>
+          <option value="internal_settlement" ${state.form.offsetReason === "internal_settlement" ? "selected" : ""}>内部结算抵扣</option>
+          <option value="other_offset" ${state.form.offsetReason === "other_offset" ? "selected" : ""}>其他抵扣</option>
+        </select>`,
+        `<textarea id="offsetNote" class="context-textarea" placeholder="补充抵扣依据">${state.form.offsetNote}</textarea>`,
+        '<div class="context-actions"><button id="contextOffsetBtn" class="primary-btn">生成内部抵扣单</button></div>',
+        '</div>'
+      ].join("");
+    }
+
+    function getLedgerRowsForView() {
+      const rows = getLedgerBundle()[state.ledgerView] || [];
+      if (state.ledgerStatus === "all") return rows;
+      return rows.filter(item => item.status === state.ledgerStatus);
+    }
+
+    async function updateLedgerStatus(ledgerId, status) {
+      if (!hasLiveLedgerData()) {
+        showToast("当前展示的是演示台账，生成真实核销动作后才可修改状态");
+        return;
+      }
+      try {
+        await fetchJson(`/ledgers/${ledgerId}/status`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            actor_id: "user_finance_01",
+            status,
+            note: status === "resolved" ? "通过台账页标记已解决" : "通过台账页转为跟进中"
+          })
+        });
+        await loadLedgerHub();
+        showToast(status === "resolved" ? "台账已标记为已解决" : "台账已转为跟进中");
+      } catch (error) {
+        showToast(error.message || "更新台账状态失败");
+      }
+    }
+
+    async function runReminderBatch() {
+      if (!hasLiveLedgerData()) {
+        showToast("当前展示的是演示台账，生成真实台账后才可执行提醒");
+        return;
+      }
+      try {
+        const payload = await fetchJson("/reminders/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ as_of: getMonthEnd(state.currentMonth) })
+        });
+        await loadLedgerHub();
+        showToast(`提醒任务已执行，发送 ${payload.sent_reminders.length} 条`);
+      } catch (error) {
+        showToast(error.message || "提醒执行失败");
+      }
+    }
+
+    function buildLedgerDetailFields(ledger) {
+      return {
+        "台账编号": ledger.id,
+        "来源对象类型": ledger.source_object_type,
+        "来源对象编号": ledger.source_object_id,
+        "来源核销单": ledger.source_case_id || "—",
+        "对手方": ledger.counterparty_id || "—",
+        "责任人": ledger.owner_id || "—",
+        "项目": ledger.project_id || "—",
+        "创建时间": formatDateTime(ledger.created_at),
+        "最近提醒时间": formatDateTime(ledger.last_reminded_at),
+        "最新备注": ledger.latest_note || "—"
+      };
+    }
+
+    function buildReminderDetailFields(reminder) {
+      return {
+        "提醒编号": reminder.id,
+        "关联台账": reminder.ledger_id,
+        "提醒日期": reminder.remind_at,
+        "提醒渠道": reminder.channel,
+        "提醒状态": reminder.status,
+        "发送结果": reminder.sent_result || "—",
+        "发送时间": formatDateTime(reminder.sent_at),
+        "创建时间": formatDateTime(reminder.created_at)
+      };
+    }
+
+    function buildOffsetDetailFields(offsetNote) {
+      return {
+        "抵扣单编号": offsetNote.id,
+        "对手方": offsetNote.counterparty_id || "—",
+        "应收金额": formatMoney(offsetNote.receivable_amount),
+        "应付金额": formatMoney(offsetNote.payable_amount),
+        "抵扣金额": formatMoney(offsetNote.offset_amount),
+        "抵扣原因": offsetNote.reason || "—",
+        "备注": offsetNote.note || "—",
+        "创建人": offsetNote.created_by || "—",
+        "创建时间": formatDateTime(offsetNote.created_at)
+      };
+    }
+
+    function buildOARunDetailFields(run) {
+      return {
+        "同步批次": run.id,
+        "同步范围": run.scope,
+        "同步状态": run.status,
+        "拉取数量": run.pulled_count,
+        "成功数量": run.success_count,
+        "失败数量": run.failed_count,
+        "重试来源": run.retry_of_run_id || "—",
+        "问题数量": run.issue_count || 0,
+        "开始时间": formatDateTime(run.started_at),
+        "完成时间": formatDateTime(run.finished_at)
+      };
+    }
+
+    function buildOAProjectDetailFields(project) {
+      return {
+        "项目ID": project.id,
+        "项目编码": project.project_code,
+        "项目名称": project.project_name,
+        "项目状态": project.project_status,
+        "OA 项目ID": project.oa_external_id || "—",
+        "所属部门": project.department_name || "—",
+        "负责人": project.owner_name || "—"
+      };
+    }
+
+    function buildOADocumentDetailFields(document) {
+      return {
+        "单据ID": document.id,
+        "单据类型": document.document_type,
+        "OA 单据ID": document.oa_external_id,
+        "单据编号": document.form_no,
+        "标题": document.title,
+        "申请人": document.applicant_name,
+        "金额": formatMoney(document.amount),
+        "对手方": document.counterparty_name || "—",
+        "项目ID": document.project_external_id || "—",
+        "项目名称": document.project_name || "—",
+        "单据状态": document.form_status || "—",
+        "提交时间": document.submitted_at || "—",
+        "完成时间": document.completed_at || "—"
+      };
+    }
+
+    function buildOAMappingDetailFields(mapping) {
+      return {
+        "映射ID": mapping.id,
+        "来源系统": mapping.source_system,
+        "对象类型": mapping.object_type,
+        "外部ID": mapping.external_id,
+        "内部对象类型": mapping.internal_object_type || "—",
+        "内部对象ID": mapping.internal_object_id || "—",
+        "显示名称": mapping.display_name || "—"
+      };
+    }
+
+    function renderOARunsTable(runs) {
+      if (!runs.length) {
+        return '<div class="page-empty">当前还没有 OA 同步记录。</div>';
+      }
+      const body = runs.map(run => {
+        return [
+          "<tr>",
+          `<td>${run.id}</td>`,
+          `<td>${run.scope}</td>`,
+          `<td>${oaSyncStatusBadge(run.status)}</td>`,
+          `<td>${run.pulled_count}</td>`,
+          `<td>${run.success_count}</td>`,
+          `<td>${run.failed_count}</td>`,
+          `<td>${formatDateTime(run.finished_at)}</td>`,
+          `<td><div class="inline-actions"><button class="mini-btn" data-oa-run-detail="${run.id}">详情</button><button class="mini-btn soft" data-oa-retry="${run.id}">重试</button></div></td>`,
+          "</tr>"
+        ].join("");
+      }).join("");
+      return [
+        '<div class="table-wrap">',
+        '<table>',
+        '<thead><tr><th>同步批次</th><th>范围</th><th>状态</th><th>拉取</th><th>成功</th><th>失败</th><th>完成时间</th><th>操作</th></tr></thead>',
+        `<tbody>${body}</tbody>`,
+        '</table>',
+        '</div>'
+      ].join("");
+    }
+
+    function renderOAMappingsTable(mappings) {
+      if (!mappings.length) {
+        return '<div class="page-empty">当前还没有 OA 映射记录。</div>';
+      }
+      const body = mappings.map(mapping => {
+        return [
+          "<tr>",
+          `<td>${mapping.object_type}</td>`,
+          `<td>${mapping.display_name || "—"}</td>`,
+          `<td>${mapping.external_id}</td>`,
+          `<td>${mapping.internal_object_type || "—"}</td>`,
+          `<td>${mapping.internal_object_id || "—"}</td>`,
+          `<td><div class="inline-actions"><button class="mini-btn" data-oa-mapping-detail="${mapping.id}">详情</button></div></td>`,
+          "</tr>"
+        ].join("");
+      }).join("");
+      return [
+        '<div class="table-wrap">',
+        '<table>',
+        '<thead><tr><th>对象类型</th><th>名称</th><th>外部ID</th><th>内部对象</th><th>内部ID</th><th>操作</th></tr></thead>',
+        `<tbody>${body}</tbody>`,
+        '</table>',
+        '</div>'
+      ].join("");
+    }
+
+    function renderOAProjectsTable(projects) {
+      if (!projects.length) {
+        return '<div class="page-empty">当前还没有项目主数据。</div>';
+      }
+      const body = projects.map(project => {
+        return [
+          "<tr>",
+          `<td>${project.project_code}</td>`,
+          `<td>${project.project_name}</td>`,
+          `<td>${project.project_status}</td>`,
+          `<td>${project.department_name || "—"}</td>`,
+          `<td>${project.owner_name || "—"}</td>`,
+          `<td><div class="inline-actions"><button class="mini-btn" data-oa-project-detail="${project.id}">详情</button></div></td>`,
+          "</tr>"
+        ].join("");
+      }).join("");
+      return [
+        '<div class="table-wrap">',
+        '<table>',
+        '<thead><tr><th>项目编码</th><th>项目名称</th><th>状态</th><th>部门</th><th>负责人</th><th>操作</th></tr></thead>',
+        `<tbody>${body}</tbody>`,
+        '</table>',
+        '</div>'
+      ].join("");
+    }
+
+    function renderOADocumentsTable(documents) {
+      if (!documents.length) {
+        return '<div class="page-empty">当前还没有 OA 单据。</div>';
+      }
+      const body = documents.map(document => {
+        return [
+          "<tr>",
+          `<td>${document.document_type}</td>`,
+          `<td>${document.form_no}</td>`,
+          `<td>${document.title}</td>`,
+          `<td>${document.applicant_name}</td>`,
+          `<td>${formatMoney(document.amount)}</td>`,
+          `<td>${document.project_name || "—"}</td>`,
+          `<td>${document.form_status || "—"}</td>`,
+          `<td><div class="inline-actions"><button class="mini-btn" data-oa-document-detail="${document.id}">详情</button></div></td>`,
+          "</tr>"
+        ].join("");
+      }).join("");
+      return [
+        '<div class="table-wrap">',
+        '<table>',
+        '<thead><tr><th>类型</th><th>单据编号</th><th>标题</th><th>申请人</th><th>金额</th><th>项目</th><th>状态</th><th>操作</th></tr></thead>',
+        `<tbody>${body}</tbody>`,
+        '</table>',
+        '</div>'
+      ].join("");
+    }
+
+    function renderOAPage() {
+      const page = document.getElementById("oaPage");
+      const oaBundle = getOABundle();
+      const runs = oaBundle.runs || [];
+      const mappings = oaBundle.mappings || [];
+      const projects = oaBundle.projects || [];
+      const documents = oaBundle.documents || [];
+
+      page.innerHTML = [
+        '<div class="topbar">',
+        `<div><div class="title">OA 同步</div><div class="subtitle">${state.loadingOA ? "正在拉取 OA 主数据与单据..." : state.oaError ? `OA 接口未就绪，暂回退演示数据：${state.oaError}` : oaBundle.source === "api" ? "当前展示 Integration Hub 的真实同步结果；这里只读查看，不直接进入核销动作。" : "当前展示演示同步视图；当本地 API 可用时会自动切到真实同步结果。"} </div></div>`,
+        '<div class="top-actions">',
+        '<button id="oaRefreshBtn" class="ghost-btn">刷新结果</button>',
+        '<button id="oaSyncAllBtn" class="primary-btn">同步全部</button>',
+        '<button id="oaProjectBtn" class="ghost-btn">项目归集</button>',
+        '<button id="oaBackWorkbenchBtn" class="ghost-btn">返回关联台</button>',
+        '</div>',
+        '</div>',
+        '<div class="ledger-page-body">',
+        '<div class="tax-summary">',
+        `<div class="summary-card"><div class="label">映射总数</div><div class="value">${oaBundle.summary.mapping_count || 0}</div><div class="hint">external_id 对 internal_id 的挂接记录</div></div>`,
+        `<div class="summary-card"><div class="label">项目主数据</div><div class="value">${oaBundle.summary.project_count || 0}</div><div class="hint">后续项目成本测算的主数据入口</div></div>`,
+        `<div class="summary-card"><div class="label">OA 单据</div><div class="value">${oaBundle.summary.document_count || 0}</div><div class="hint">审批单、付款申请、报销单只读入站</div></div>`,
+        `<div class="summary-card"><div class="label">最近同步</div><div class="value">${oaBundle.summary.latest_run_id || "—"}</div><div class="hint">数据源：${oaBundle.source === "api" ? "真实接口" : "演示回退"}</div></div>`,
+        '</div>',
+        '<div class="toolbar">',
+        '<div class="toolbar-left">',
+        '<div class="field">集成源：OA / Mock Adapter</div>',
+        `<div class="field">支持范围：${(oaBundle.supported_scopes || []).join(" / ")}</div>`,
+        '</div>',
+        '<div class="toolbar-right">',
+        '<button class="chip-btn" data-oa-sync-scope="counterparties">同步客商</button>',
+        '<button class="chip-btn" data-oa-sync-scope="projects">同步项目</button>',
+        '<button class="chip-btn" data-oa-sync-scope="approval_forms">同步审批单</button>',
+        '<button class="chip-btn" data-oa-sync-scope="payment_requests">同步付款申请</button>',
+        '<button class="chip-btn" data-oa-sync-scope="expense_claims">同步报销单</button>',
+        '</div>',
+        '</div>',
+        '<div class="ledger-grid">',
+        `<div class="ledger-panel"><div class="tax-panel-head"><span>最近同步记录</span><span>${runs.length} 条</span></div>${renderOARunsTable(runs)}</div>`,
+        '<div class="ledger-stack">',
+        `<div class="ledger-panel"><div class="tax-panel-head"><span>主数据映射</span><span>${mappings.length} 条</span></div>${renderOAMappingsTable(mappings)}</div>`,
+        `<div class="ledger-panel"><div class="tax-panel-head"><span>项目主数据</span><span>${projects.length} 条</span></div>${renderOAProjectsTable(projects)}</div>`,
+        `<div class="ledger-panel"><div class="tax-panel-head"><span>OA 单据</span><span>${documents.length} 条</span></div>${renderOADocumentsTable(documents)}</div>`,
+        '</div>',
+        '</div>',
+        '</div>'
+      ].join("");
+
+      page.querySelector("#oaRefreshBtn").addEventListener("click", loadOADashboard);
+      page.querySelector("#oaSyncAllBtn").addEventListener("click", () => triggerOASync("all"));
+      page.querySelector("#oaProjectBtn").addEventListener("click", async () => {
+        state.currentView = "project";
+        render();
+        await loadProjectHub();
+      });
+      page.querySelector("#oaBackWorkbenchBtn").addEventListener("click", () => {
+        state.currentView = "workbench";
+        render();
+      });
+
+      page.querySelectorAll("[data-oa-sync-scope]").forEach(button => {
+        button.addEventListener("click", () => {
+          triggerOASync(button.dataset.oaSyncScope);
+        });
+      });
+
+      page.querySelectorAll("[data-oa-retry]").forEach(button => {
+        button.addEventListener("click", () => {
+          triggerOASync("all", button.dataset.oaRetry);
+        });
+      });
+
+      page.querySelectorAll("[data-oa-run-detail]").forEach(button => {
+        button.addEventListener("click", () => {
+          const run = runs.find(item => item.id === button.dataset.oaRunDetail);
+          if (!run) return;
+          openDrawer({ ...run, drawerType: "oa_sync_run", detailFields: buildOARunDetailFields(run) });
+        });
+      });
+
+      page.querySelectorAll("[data-oa-mapping-detail]").forEach(button => {
+        button.addEventListener("click", () => {
+          const mapping = mappings.find(item => item.id === button.dataset.oaMappingDetail);
+          if (!mapping) return;
+          openDrawer({ ...mapping, drawerType: "oa_mapping", detailFields: buildOAMappingDetailFields(mapping) });
+        });
+      });
+
+      page.querySelectorAll("[data-oa-project-detail]").forEach(button => {
+        button.addEventListener("click", () => {
+          const project = projects.find(item => item.id === button.dataset.oaProjectDetail);
+          if (!project) return;
+          openDrawer({ ...project, drawerType: "oa_project", detailFields: buildOAProjectDetailFields(project) });
+        });
+      });
+
+      page.querySelectorAll("[data-oa-document-detail]").forEach(button => {
+        button.addEventListener("click", () => {
+          const document = documents.find(item => item.id === button.dataset.oaDocumentDetail);
+          if (!document) return;
+          openDrawer({ ...document, drawerType: "oa_document", detailFields: buildOADocumentDetailFields(document) });
+        });
+      });
+    }
+
+    function projectObjectTypeLabel(value) {
+      const labels = {
+        invoice: "发票",
+        bank_transaction: "流水",
+        reconciliation_case: "核销单",
+        follow_up_ledger: "台账"
+      };
+      return labels[value] || value || "—";
+    }
+
+    function renderProjectSummaryTable(projects, summaries) {
+      if (!projects.length) {
+        return '<div class="page-empty">当前还没有项目主数据。</div>';
+      }
+      const summaryMap = Object.fromEntries((summaries || []).map(item => [item.project_id, item]));
+      const body = projects.map(project => {
+        const summary = summaryMap[project.id] || {};
+        const selected = state.selectedProjectId === project.id;
+        return [
+          `<tr class="${selected ? "row-selected" : ""}">`,
+          `<td>${project.project_code}</td>`,
+          `<td>${project.project_name}</td>`,
+          `<td>${formatMoney(summary.income_amount)}</td>`,
+          `<td>${formatMoney(summary.expense_amount)}</td>`,
+          `<td>${formatMoney(summary.open_ledger_amount)}</td>`,
+          `<td><div class="inline-actions"><button class="mini-btn ${selected ? "primary" : ""}" data-project-select="${project.id}">${selected ? "当前项目" : "查看"}</button></div></td>`,
+          '</tr>'
+        ].join("");
+      }).join("");
+      return [
+        '<div class="table-wrap">',
+        '<table>',
+        '<thead><tr><th>项目编码</th><th>项目名称</th><th>收入</th><th>支出</th><th>未闭环</th><th>操作</th></tr></thead>',
+        `<tbody>${body}</tbody>`,
+        '</table>',
+        '</div>'
+      ].join("");
+    }
+
+    function renderProjectDetailPanel(projects, summaries, objects) {
+      if (!projects.length) {
+        return '<div class="page-empty">先创建项目或同步 OA 项目后，再查看归集详情。</div>';
+      }
+      const project = projects.find(item => item.id === state.selectedProjectId) || projects[0];
+      if (project && !state.selectedProjectId) state.selectedProjectId = project.id;
+      const summary = (summaries || []).find(item => item.project_id === project.id) || {
+        income_amount: 0,
+        expense_amount: 0,
+        reconciled_amount: 0,
+        open_ledger_amount: 0,
+        invoice_count: 0,
+        transaction_count: 0,
+        case_count: 0,
+        ledger_count: 0
+      };
+      const relatedObjects = (objects || []).filter(item => item.effective_project_id === project.id);
+      return [
+        '<div class="ledger-panel-body">',
+        '<div class="ledger-kpis">',
+        `<div class="ledger-kpi"><div class="label">项目名称</div><div class="value">${project.project_name}</div><div class="hint">${project.project_code} ｜ ${project.project_status}</div></div>`,
+        `<div class="ledger-kpi"><div class="label">收入 / 支出</div><div class="value">${formatMoney(summary.income_amount)}</div><div class="hint">支出 ${formatMoney(summary.expense_amount)}</div></div>`,
+        `<div class="ledger-kpi"><div class="label">已核销金额</div><div class="value">${formatMoney(summary.reconciled_amount)}</div><div class="hint">核销单 ${summary.case_count || 0} 条</div></div>`,
+        `<div class="ledger-kpi"><div class="label">未闭环金额</div><div class="value">${formatMoney(summary.open_ledger_amount)}</div><div class="hint">台账 ${summary.ledger_count || 0} 条</div></div>`,
+        '</div>',
+        `<div class="ledger-hint">负责人：${project.owner_name || "—"} ｜ 部门：${project.department_name || "—"} ｜ 归集对象 ${relatedObjects.length} 条</div>`,
+        relatedObjects.length
+          ? renderProjectObjectsTable(relatedObjects, projects, true)
+          : '<div class="page-empty">当前项目还没有归集对象。</div>',
+        '</div>'
+      ].join("");
+    }
+
+    function renderProjectObjectsTable(objects, projects, compact = false) {
+      if (!objects.length) {
+        return '<div class="page-empty">当前没有可归属对象。</div>';
+      }
+      const body = objects.map(item => {
+        const currentValue = item.effective_project_id || item.current_project_id || state.selectedProjectId || (projects[0] ? projects[0].id : "");
+        return [
+          "<tr>",
+          `<td>${projectObjectTypeLabel(item.object_type)}</td>`,
+          `<td>${item.object_id}</td>`,
+          `<td>${item.title || "—"}</td>`,
+          `<td>${item.counterparty || "—"}</td>`,
+          `<td>${formatMoney(item.amount)}</td>`,
+          `<td>${item.status || "—"}</td>`,
+          `<td>${item.effective_project_id || item.current_project_id || "未归属"}</td>`,
+          compact
+            ? `<td>已归属</td>`
+            : `<td><div class="inline-actions"><select class="mini-select" data-project-assignment-select="${item.object_type}:${item.object_id}">${projects.map(project => `<option value="${project.id}" ${currentValue === project.id ? "selected" : ""}>${project.project_name}</option>`).join("")}</select><button class="mini-btn primary" data-project-assign="${item.object_type}:${item.object_id}">归属</button></div></td>`,
+          "</tr>"
+        ].join("");
+      }).join("");
+
+      return [
+        '<div class="table-wrap">',
+        '<table>',
+        compact
+          ? '<thead><tr><th>类型</th><th>对象ID</th><th>标题</th><th>对手方</th><th>金额</th><th>状态</th><th>归属项目</th><th>说明</th></tr></thead>'
+          : '<thead><tr><th>类型</th><th>对象ID</th><th>标题</th><th>对手方</th><th>金额</th><th>状态</th><th>当前归属</th><th>操作</th></tr></thead>',
+        `<tbody>${body}</tbody>`,
+        '</table>',
+        '</div>'
+      ].join("");
+    }
+
+    function renderProjectPage() {
+      const page = document.getElementById("projectPage");
+      const bundle = getProjectBundle();
+      const projects = bundle.projects || [];
+      const summaries = bundle.summaries || [];
+      const totals = bundle.totals || {};
+      const assignableObjects = bundle.assignable_objects || [];
+      if (!state.selectedProjectId && projects.length) {
+        state.selectedProjectId = projects[0].id;
+      }
+
+      page.innerHTML = [
+        '<div class="topbar">',
+        `<div><div class="title">项目归集</div><div class="subtitle">${state.loadingProjects ? "正在加载项目归集结果..." : state.projectError ? `项目接口未就绪，暂回退演示数据：${state.projectError}` : bundle.source === "api" ? "当前展示项目维度底座的真实归集结果；不包含成本分摊算法。" : "当前展示演示项目归集；当本地 API 可用时会自动切换到真实结果。"} </div></div>`,
+        '<div class="top-actions">',
+        '<button id="projectRefreshBtn" class="ghost-btn">刷新项目</button>',
+        '<button id="projectOABtn" class="ghost-btn">OA同步</button>',
+        '<button id="projectBackWorkbenchBtn" class="primary-btn">返回关联台</button>',
+        '</div>',
+        '</div>',
+        '<div class="ledger-page-body">',
+        '<div class="tax-summary">',
+        `<div class="summary-card"><div class="label">项目数</div><div class="value">${projects.length}</div><div class="hint">已注册项目主数据</div></div>`,
+        `<div class="summary-card"><div class="label">项目收入</div><div class="value">${formatMoney(totals.income_amount)}</div><div class="hint">按销项票归集</div></div>`,
+        `<div class="summary-card"><div class="label">项目支出</div><div class="value">${formatMoney(totals.expense_amount)}</div><div class="hint">按进项票归集</div></div>`,
+        `<div class="summary-card"><div class="label">未闭环金额</div><div class="value">${formatMoney(totals.open_ledger_amount)}</div><div class="hint">按项目台账统计</div></div>`,
+        '</div>',
+        '<div class="ledger-grid">',
+        `<div class="ledger-panel"><div class="tax-panel-head"><span>项目汇总</span><span>${projects.length} 个</span></div>${renderProjectSummaryTable(projects, summaries)}</div>`,
+        `<div class="ledger-panel"><div class="tax-panel-head"><span>当前项目详情</span><span>${state.selectedProjectId || "未选择"}</span></div>${renderProjectDetailPanel(projects, summaries, assignableObjects)}</div>`,
+        '</div>',
+        '<div class="ledger-panel">',
+        '<div class="tax-panel-head"><span>手工创建项目</span><span>用于没有 OA 项目时的最小底座</span></div>',
+        '<div class="ledger-panel-body">',
+        '<div class="toolbar">',
+        '<div class="toolbar-left">',
+        `<input id="projectCodeInput" class="context-input" type="text" placeholder="项目编码" value="${state.form.projectCode}">`,
+        `<input id="projectNameInput" class="context-input" type="text" placeholder="项目名称" value="${state.form.projectName}">`,
+        '</div>',
+        '<div class="toolbar-right"><button id="projectCreateBtn" class="primary-btn">创建项目</button></div>',
+        '</div>',
+        '</div>',
+        '</div>',
+        `<div class="ledger-panel"><div class="tax-panel-head"><span>待归属对象</span><span>${assignableObjects.length} 条</span></div><div class="ledger-panel-body">${renderProjectObjectsTable(assignableObjects, projects, false)}</div></div>`,
+        '</div>'
+      ].join("");
+
+      page.querySelector("#projectRefreshBtn").addEventListener("click", loadProjectHub);
+      page.querySelector("#projectOABtn").addEventListener("click", async () => {
+        state.currentView = "oa";
+        render();
+        await loadOADashboard();
+      });
+      page.querySelector("#projectBackWorkbenchBtn").addEventListener("click", () => {
+        state.currentView = "workbench";
+        render();
+      });
+
+      const codeInput = page.querySelector("#projectCodeInput");
+      const nameInput = page.querySelector("#projectNameInput");
+      if (codeInput) {
+        codeInput.addEventListener("input", event => {
+          state.form.projectCode = event.target.value;
+        });
+      }
+      if (nameInput) {
+        nameInput.addEventListener("input", event => {
+          state.form.projectName = event.target.value;
+        });
+      }
+      page.querySelector("#projectCreateBtn").addEventListener("click", submitProjectCreate);
+
+      page.querySelectorAll("[data-project-select]").forEach(button => {
+        button.addEventListener("click", () => {
+          state.selectedProjectId = button.dataset.projectSelect;
+          renderProjectPage();
+        });
+      });
+
+      page.querySelectorAll("[data-project-assign]").forEach(button => {
+        button.addEventListener("click", () => {
+          const key = button.dataset.projectAssign;
+          const [objectType, objectId] = key.split(":");
+          const select = page.querySelector(`[data-project-assignment-select="${key}"]`);
+          assignObjectToProject(objectType, objectId, select ? select.value : "");
+        });
+      });
+    }
+
+    function renderReminderItems(rows) {
+      if (!rows.length) {
+        return '<div class="page-empty">当前筛选下没有提醒记录。</div>';
+      }
+      return rows.map(item => {
+        return [
+          '<div class="reminder-item">',
+          `<strong>${item.id}</strong>`,
+          `<span>关联台账：${item.ledger_id}</span>`,
+          `<span>提醒日期：${item.remind_at} ｜ 渠道：${item.channel}</span>`,
+          `<span>状态：${item.status} ｜ 发送时间：${formatDateTime(item.sent_at)}</span>`,
+          `<div class="inline-actions"><button class="mini-btn" data-reminder-detail="${item.id}">详情</button></div>`,
+          '</div>'
+        ].join("");
+      }).join("");
+    }
+
+    function renderLedgerTable(rows) {
+      if (!rows.length) {
+        return '<div class="page-empty">当前筛选下没有待跟进台账。</div>';
+      }
+      const body = rows.map(item => {
+        return [
+          "<tr>",
+          `<td>${item.id}</td>`,
+          `<td>${ledgerTypeLabel(item.ledger_type)}</td>`,
+          `<td>${formatMoney(item.open_amount)}</td>`,
+          `<td>${item.expected_date || "—"}</td>`,
+          `<td>${ledgerStatusBadge(item.status)}</td>`,
+          `<td>${item.owner_id || "—"}</td>`,
+          `<td>${item.source_case_id || item.source_object_id || "—"}</td>`,
+          `<td>${item.latest_note || "—"}</td>`,
+          `<td>${formatDateTime(item.last_reminded_at)}</td>`,
+          `<td><div class="inline-actions"><button class="mini-btn" data-ledger-detail="${item.id}">详情</button><button class="mini-btn soft" data-ledger-progress="${item.id}">跟进中</button><button class="mini-btn primary" data-ledger-resolve="${item.id}">已解决</button></div></td>`,
+          "</tr>"
+        ].join("");
+      }).join("");
+      return [
+        '<div class="table-wrap">',
+        '<table>',
+        '<thead><tr><th>台账编号</th><th>台账类型</th><th>未闭环金额</th><th>预计处理日期</th><th>状态</th><th>责任人</th><th>来源核销单</th><th>跟进备注</th><th>最近提醒</th><th>操作</th></tr></thead>',
+        `<tbody>${body}</tbody>`,
+        '</table>',
+        '</div>'
+      ].join("");
+    }
+
+    function renderLedgerPage() {
+      const page = document.getElementById("ledgerPage");
+      const ledgerBundle = getLedgerBundle();
+      const rows = getLedgerRowsForView();
+      const pendingReminders = ledgerBundle.remindersPending || [];
+      const sentReminders = ledgerBundle.remindersSent || [];
+      page.innerHTML = [
+        '<div class="topbar">',
+        `<div><div class="title">台账与提醒</div><div class="subtitle">${state.loadingLedgers ? "正在加载跟进台账与提醒队列..." : state.ledgerError ? `台账接口未就绪，暂回退演示数据：${state.ledgerError}` : ledgerBundle.source === "api" ? "所有台账都来自真实核销动作；这里不提供孤立手工录入。" : "当前展示演示台账；一旦生成真实核销动作，将自动切换到真实台账与提醒。"} </div></div>`,
+        '<div class="top-actions">',
+        `<label class="month-btn">📅 <input id="ledgerMonth" class="month-input" type="month" value="${state.currentMonth}"></label>`,
+        '<button id="ledgerRefreshBtn" class="ghost-btn">刷新台账</button>',
+        '<button id="runReminderBtn" class="ghost-btn">执行提醒</button>',
+        '<button id="ledgerToOABtn" class="ghost-btn">OA同步</button>',
+        '<button id="ledgerToProjectBtn" class="ghost-btn">项目归集</button>',
+        '<button id="ledgerToTaxBtn" class="ghost-btn">税金抵扣</button>',
+        '<button id="backWorkbenchFromLedgerBtn" class="primary-btn">返回关联台</button>',
+        "</div>",
+        "</div>",
+        '<div class="ledger-page-body">',
+        '<div class="tax-summary">',
+        `<div class="summary-card"><div class="label">全部台账</div><div class="value">${ledgerBundle.all.length}</div><div class="hint">所有来源于核销动作的跟进事项</div></div>`,
+        `<div class="summary-card"><div class="label">待处理</div><div class="value">${ledgerBundle.open.length}</div><div class="hint">未解决且未取消</div></div>`,
+        `<div class="summary-card"><div class="label">七日内到期</div><div class="value">${ledgerBundle.due.length}</div><div class="hint">按 ${getMonthEnd(state.currentMonth)} 视角计算</div></div>`,
+        `<div class="summary-card"><div class="label">已逾期</div><div class="value">${ledgerBundle.overdue.length}</div><div class="hint">预计处理日期早于当前视角</div></div>`,
+        '</div>',
+        '<div class="toolbar">',
+        '<div class="toolbar-left">',
+        `<button class="chip-btn ${state.ledgerView === "open" ? "active" : ""}" data-ledger-view="open">待处理</button>`,
+        `<button class="chip-btn ${state.ledgerView === "due" ? "active" : ""}" data-ledger-view="due">七日内到期</button>`,
+        `<button class="chip-btn ${state.ledgerView === "overdue" ? "active" : ""}" data-ledger-view="overdue">已逾期</button>`,
+        `<button class="chip-btn ${state.ledgerView === "all" ? "active" : ""}" data-ledger-view="all">全部</button>`,
+        `<select id="ledgerStatusFilter" class="status-select">
+          <option value="all" ${state.ledgerStatus === "all" ? "selected" : ""}>状态：全部</option>
+          <option value="open" ${state.ledgerStatus === "open" ? "selected" : ""}>状态：待处理</option>
+          <option value="in_progress" ${state.ledgerStatus === "in_progress" ? "selected" : ""}>状态：跟进中</option>
+          <option value="waiting_external_feedback" ${state.ledgerStatus === "waiting_external_feedback" ? "selected" : ""}>状态：待外部反馈</option>
+          <option value="resolved" ${state.ledgerStatus === "resolved" ? "selected" : ""}>状态：已解决</option>
+          <option value="cancelled" ${state.ledgerStatus === "cancelled" ? "selected" : ""}>状态：已取消</option>
+        </select>`,
+        '</div>',
+        '<div class="toolbar-right">',
+        `<div class="field">当前月份视角：${state.currentMonth}</div>`,
+        `<div class="field">数据源：${ledgerBundle.source === "api" ? "真实接口" : "演示回退"}</div>`,
+        `<div class="field">提醒待发送：${pendingReminders.length} 条</div>`,
+        `<div class="field">提醒已发送：${sentReminders.length} 条</div>`,
+        '</div>',
+        '</div>',
+        '<div class="ledger-grid">',
+        `<div class="ledger-panel"><div class="tax-panel-head"><span>跟进台账</span><span>${rows.length} 条</span></div>${renderLedgerTable(rows)}</div>`,
+        '<div class="ledger-stack">',
+        `<div class="ledger-panel"><div class="tax-panel-head"><span>提醒队列</span><span>${pendingReminders.length} 条待发送</span></div><div class="ledger-panel-body"><div class="ledger-hint">提醒可重复执行，但不会为同一台账重复创建活跃提醒；发送后会写回最近提醒时间。</div>${renderReminderItems(pendingReminders)}</div></div>`,
+        `<div class="ledger-panel"><div class="tax-panel-head"><span>已发送提醒</span><span>${sentReminders.length} 条</span></div><div class="ledger-panel-body">${renderReminderItems(sentReminders)}</div></div>`,
+        '</div>',
+        '</div>',
+        '</div>'
+      ].join("");
+
+      page.querySelector("#ledgerMonth").addEventListener("change", async event => {
+        state.currentMonth = event.target.value || "2026-03";
+        seedTaxSelections();
+        render();
+        await Promise.all([loadWorkbench(state.currentMonth), loadLedgerHub()]);
+      });
+
+      page.querySelector("#ledgerRefreshBtn").addEventListener("click", async () => {
+        await loadLedgerHub();
+        showToast("台账已刷新");
+      });
+
+      page.querySelector("#runReminderBtn").addEventListener("click", runReminderBatch);
+
+      page.querySelector("#ledgerToOABtn").addEventListener("click", async () => {
+        state.currentView = "oa";
+        render();
+        await loadOADashboard();
+      });
+
+      page.querySelector("#ledgerToProjectBtn").addEventListener("click", async () => {
+        state.currentView = "project";
+        render();
+        await loadProjectHub();
+      });
+
+      page.querySelector("#ledgerToTaxBtn").addEventListener("click", () => {
+        state.currentView = "tax";
+        render();
+      });
+
+      page.querySelector("#backWorkbenchFromLedgerBtn").addEventListener("click", () => {
+        state.currentView = "workbench";
+        render();
+      });
+
+      page.querySelectorAll("[data-ledger-view]").forEach(button => {
+        button.addEventListener("click", () => {
+          state.ledgerView = button.dataset.ledgerView;
+          renderLedgerPage();
+        });
+      });
+
+      page.querySelector("#ledgerStatusFilter").addEventListener("change", event => {
+        state.ledgerStatus = event.target.value;
+        renderLedgerPage();
+      });
+
+      page.querySelectorAll("[data-ledger-detail]").forEach(button => {
+        button.addEventListener("click", () => {
+          const ledger = ledgerBundle.all.find(item => item.id === button.dataset.ledgerDetail);
+          if (!ledger) return;
+          openDrawer({ ...ledger, drawerType: "ledger", detailFields: buildLedgerDetailFields(ledger) });
+        });
+      });
+
+      page.querySelectorAll("[data-ledger-progress]").forEach(button => {
+        button.addEventListener("click", () => updateLedgerStatus(button.dataset.ledgerProgress, "in_progress"));
+      });
+
+      page.querySelectorAll("[data-ledger-resolve]").forEach(button => {
+        button.addEventListener("click", () => updateLedgerStatus(button.dataset.ledgerResolve, "resolved"));
+      });
+
+      page.querySelectorAll("[data-reminder-detail]").forEach(button => {
+        button.addEventListener("click", () => {
+          const allReminders = [...pendingReminders, ...sentReminders];
+          const reminder = allReminders.find(item => item.id === button.dataset.reminderDetail);
+          if (!reminder) return;
+          openDrawer({ ...reminder, drawerType: "reminder", detailFields: buildReminderDetailFields(reminder) });
+        });
+      });
+    }
+
+    function seedTaxSelections() {
+      const bundle = getMonthBundle();
+      state.taxSelections = { output: {}, input: {} };
+      bundle.tax.output.forEach(item => { state.taxSelections.output[item.id] = true; });
+      bundle.tax.input.forEach((item, index) => { state.taxSelections.input[item.id] = index < 2; });
+    }
+
+    function getTaxTotals() {
+      const bundle = getMonthBundle();
+      const output = bundle.tax.output
+        .filter(item => state.taxSelections.output[item.id])
+        .reduce((sum, item) => sum + item.taxAmount, 0);
+      const input = bundle.tax.input
+        .filter(item => state.taxSelections.input[item.id])
+        .reduce((sum, item) => sum + item.taxAmount, 0);
+      return {
+        output,
+        input,
+        deductible: Math.min(output, input),
+        payable: Math.max(output - input, 0),
+        carryForward: Math.max(input - output, 0)
+      };
+    }
+
+    function renderTaxTable(kind, rows) {
+      const checkedMap = state.taxSelections[kind];
+      const head = kind === "output"
+        ? "<tr><th>纳入</th><th>开票日期</th><th>购方名称</th><th>发票号码</th><th>税额</th><th>价税合计</th><th>类型</th></tr>"
+        : "<tr><th>抵扣</th><th>开票日期</th><th>销方名称</th><th>发票号码</th><th>税额</th><th>价税合计</th><th>风险</th></tr>";
+      const body = rows.map(item => {
+        return kind === "output"
+          ? `<tr><td><input type="checkbox" data-tax-kind="${kind}" data-tax-id="${item.id}" ${checkedMap[item.id] ? "checked" : ""}></td><td>${item.issueDate}</td><td>${item.buyer}</td><td>${item.invoiceNo}</td><td>${formatMoney(item.taxAmount)}</td><td>${formatMoney(item.total)}</td><td>${item.type}</td></tr>`
+          : `<tr><td><input type="checkbox" data-tax-kind="${kind}" data-tax-id="${item.id}" ${checkedMap[item.id] ? "checked" : ""}></td><td>${item.issueDate}</td><td>${item.seller}</td><td>${item.invoiceNo}</td><td>${formatMoney(item.taxAmount)}</td><td>${formatMoney(item.total)}</td><td>${item.risk}</td></tr>`;
+      }).join("");
+      return `<div class="table-wrap"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+    }
+
+    function renderTaxPage() {
+      const bundle = getMonthBundle();
+      const total = getTaxTotals();
+      const page = document.getElementById("taxPage");
+      page.innerHTML = [
+        '<div class="topbar">',
+        '<div><div class="title">销项票税金 - 进项票税金</div><div class="subtitle">按月份汇总销项与进项税额，支持勾选抵扣范围并查看当月应纳 / 留抵结果。</div></div>',
+        '<div class="top-actions">',
+        `<label class="month-btn">📅 <input id="taxMonth" class="month-input" type="month" value="${state.currentMonth}"></label>`,
+        '<button id="taxOABtn" class="ghost-btn">OA同步</button>',
+        '<button id="taxProjectBtn" class="ghost-btn">项目归集</button>',
+        '<button id="taxLedgerBtn" class="ghost-btn">台账提醒</button>',
+        '<button id="backWorkbenchBtn" class="ghost-btn">返回关联台</button>',
+        "</div>",
+        "</div>",
+        '<div class="tax-page-body">',
+        '<div class="tax-summary">',
+        `<div class="summary-card"><div class="label">销项税额</div><div class="value">${formatMoney(total.output)}</div><div class="hint">纳入本月销项票税金</div></div>`,
+        `<div class="summary-card"><div class="label">进项税额</div><div class="value">${formatMoney(total.input)}</div><div class="hint">当前勾选可抵扣进项税</div></div>`,
+        `<div class="summary-card"><div class="label">本月抵扣额</div><div class="value">${formatMoney(total.deductible)}</div><div class="hint">销项票税金 - 进项票税金</div></div>`,
+        `<div class="summary-card"><div class="label">结果</div><div class="value">${formatMoney(total.payable || total.carryForward)}</div><div class="hint">${total.payable > 0 ? "本月应纳税额" : "本月留抵税额"}</div></div>`,
+        "</div>",
+        '<div class="tax-grid">',
+        `<div class="tax-panel"><div class="tax-panel-head"><span>销项票税金清单</span><span>${bundle.tax.output.length} 张</span></div>${renderTaxTable("output", bundle.tax.output)}</div>`,
+        `<div class="tax-panel"><div class="tax-panel-head"><span>进项票税金清单</span><span>${bundle.tax.input.length} 张</span></div>${renderTaxTable("input", bundle.tax.input)}</div>`,
+        `<div class="tax-panel"><div class="tax-panel-head"><span>抵扣结果</span><span>按月测算</span></div><div class="tax-result">
+          <div class="result-box"><strong>公式</strong><div class="detail-value">销项税额 - 进项税额 = 应纳税额；若结果小于 0，则转为留抵税额。</div></div>
+          <div class="result-box"><strong>本月应纳税额</strong><div class="big">${formatMoney(total.payable)}</div></div>
+          <div class="result-box"><strong>本月留抵税额</strong><div class="big">${formatMoney(total.carryForward)}</div></div>
+          <button id="taxComputeBtn" class="primary-btn">生成本月抵扣结果</button>
+        </div></div>`,
+        "</div>",
+        "</div>"
+      ].join("");
+
+      page.querySelector("#backWorkbenchBtn").addEventListener("click", () => {
+        state.currentView = "workbench";
+        render();
+      });
+
+      page.querySelector("#taxOABtn").addEventListener("click", async () => {
+        state.currentView = "oa";
+        render();
+        await loadOADashboard();
+      });
+
+      page.querySelector("#taxProjectBtn").addEventListener("click", async () => {
+        state.currentView = "project";
+        render();
+        await loadProjectHub();
+      });
+
+      page.querySelector("#taxLedgerBtn").addEventListener("click", async () => {
+        state.currentView = "ledger";
+        render();
+        await loadLedgerHub();
+      });
+
+      page.querySelector("#taxMonth").addEventListener("change", async event => {
+        state.currentMonth = event.target.value || "2026-03";
+        seedTaxSelections();
+        render();
+        await Promise.all([loadWorkbench(state.currentMonth), loadLedgerHub()]);
+      });
+
+      page.querySelectorAll("[data-tax-kind]").forEach(input => {
+        input.addEventListener("change", () => {
+          state.taxSelections[input.dataset.taxKind][input.dataset.taxId] = input.checked;
+          renderTaxPage();
+        });
+      });
+
+      page.querySelector("#taxComputeBtn").addEventListener("click", () => {
+        const totalNow = getTaxTotals();
+        showToast(`已生成 ${state.currentMonth} 税金抵扣结果，应纳：${formatMoney(totalNow.payable)}，留抵：${formatMoney(totalNow.carryForward)}`);
+      });
+    }
+
+    function attachSplitterEvents(root) {
+      root.querySelectorAll(".splitter").forEach(splitter => {
+        splitter.addEventListener("pointerdown", event => {
+          const index = Number(splitter.dataset.splitter);
+          const config = index === 0 ? ["oa", "bank"] : ["bank", "invoice"];
+          const [leftKey, rightKey] = config;
+          if (!state.visible[leftKey] || !state.visible[rightKey]) return;
+
+          const startX = event.clientX;
+          const container = splitter.parentElement;
+          const width = container.getBoundingClientRect().width;
+          const startLeft = state.widths[leftKey];
+          const startRight = state.widths[rightKey];
+          const total = startLeft + startRight;
+          const snap = 4;
+
+          function onMove(moveEvent) {
+            const delta = ((moveEvent.clientX - startX) / width) * 100;
+            let nextLeft = Math.max(0, Math.min(total, startLeft + delta));
+            if (nextLeft < snap) nextLeft = 0;
+            if (total - nextLeft < snap) nextLeft = total;
+            const nextRight = total - nextLeft;
+            state.widths[leftKey] = nextLeft;
+            state.widths[rightKey] = nextRight;
+            document.querySelectorAll(".tri-layout").forEach(layout => {
+              layout.style.gridTemplateColumns = composeGridTemplate();
+            });
+          }
+
+          function onUp() {
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", onUp);
+          }
+
+          window.addEventListener("pointermove", onMove);
+          window.addEventListener("pointerup", onUp);
+        });
+      });
+    }
+
+    function render() {
+      sanitizeSelections();
+      document.getElementById("workbenchPage").classList.toggle("active", state.currentView === "workbench");
+      document.getElementById("oaPage").classList.toggle("active", state.currentView === "oa");
+      document.getElementById("projectPage").classList.toggle("active", state.currentView === "project");
+      document.getElementById("ledgerPage").classList.toggle("active", state.currentView === "ledger");
+      document.getElementById("taxPage").classList.toggle("active", state.currentView === "tax");
+      renderWorkbench();
+      renderOAPage();
+      renderProjectPage();
+      renderLedgerPage();
+      renderTaxPage();
+      renderContextPanel();
+      renderDrawer();
+    }
+
+    seedTaxSelections();
+    render();
+    loadWorkbench(state.currentMonth);
+    loadOADashboard();
+    loadProjectHub();
+    loadLedgerHub();
+  </script>
+</body>
+</html>
