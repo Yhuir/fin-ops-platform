@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fin_ops_platform.services.access_control_service import DEFAULT_ADMIN_USERNAME
+from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.state_store import ApplicationStateStore
 
@@ -12,9 +13,11 @@ class AppSettingsService:
         self,
         state_store: ApplicationStateStore | None,
         project_costing_service: ProjectCostingService,
+        oa_role_sync_service: OARoleSyncService | None = None,
     ) -> None:
         self._state_store = state_store
         self._project_costing_service = project_costing_service
+        self._oa_role_sync_service = oa_role_sync_service
         self._snapshot = self._normalize_settings(
             state_store.load_app_settings() if state_store is not None else {}
         )
@@ -65,7 +68,7 @@ class AppSettingsService:
         readonly_export_usernames: list[str] | None = None,
         admin_usernames: list[str] | None = None,
     ) -> dict[str, Any]:
-        self._snapshot = self._normalize_settings(
+        normalized_snapshot = self._normalize_settings(
             {
                 "completed_project_ids": completed_project_ids,
                 "bank_account_mappings": bank_account_mappings,
@@ -74,8 +77,17 @@ class AppSettingsService:
                 "admin_usernames": admin_usernames or [],
             }
         )
-        if self._state_store is not None:
-            self._state_store.save_app_settings(self._snapshot)
+        previous_snapshot = dict(self._snapshot)
+        if self._oa_role_sync_service is not None:
+            self._oa_role_sync_service.sync_access_control(normalized_snapshot)
+        try:
+            if self._state_store is not None:
+                self._state_store.save_app_settings(normalized_snapshot)
+        except Exception:
+            if self._oa_role_sync_service is not None:
+                self._oa_role_sync_service.sync_access_control(previous_snapshot)
+            raise
+        self._snapshot = normalized_snapshot
         return self.get_settings_payload()
 
     def get_bank_account_mapping_dict(self) -> dict[str, str]:

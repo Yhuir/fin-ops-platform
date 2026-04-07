@@ -4,6 +4,27 @@ import unittest
 from pathlib import Path
 
 from fin_ops_platform.app.server import build_application
+from fin_ops_platform.services.oa_role_sync_service import OARoleAssignment
+
+
+class RecordingSyncService:
+    def __init__(self) -> None:
+        self.assignments: list[OARoleAssignment] | None = None
+
+    def sync_access_control(self, snapshot: dict[str, object]) -> None:
+        readonly = [
+            OARoleAssignment(username=str(username), tier="read_export_only")
+            for username in list(snapshot.get("readonly_export_usernames") or [])
+        ]
+        full_access = [
+            OARoleAssignment(username=str(username), tier="full_access")
+            for username in list(snapshot.get("full_access_usernames") or [])
+        ]
+        admin = [
+            OARoleAssignment(username=str(username), tier="admin")
+            for username in list(snapshot.get("admin_usernames") or [])
+        ]
+        self.assignments = [*readonly, *full_access, *admin]
 
 
 class AppSettingsServiceTests(unittest.TestCase):
@@ -47,6 +68,29 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(access_control["readonly_export_usernames"], [])
         self.assertEqual(access_control["admin_usernames"], ["YNSYLP005"])
         self.assertEqual(access_control["full_access_usernames"], ["FULL001"])
+
+    def test_update_settings_triggers_oa_role_sync_with_normalized_assignments(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            sync_service = RecordingSyncService()
+            app._app_settings_service._oa_role_sync_service = sync_service
+
+            app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[],
+                allowed_usernames=["FULL001", "READONLY001"],
+                readonly_export_usernames=["READONLY001"],
+                admin_usernames=[],
+            )
+
+        self.assertEqual(
+            sync_service.assignments,
+            [
+                OARoleAssignment(username="READONLY001", tier="read_export_only"),
+                OARoleAssignment(username="FULL001", tier="full_access"),
+                OARoleAssignment(username="YNSYLP005", tier="admin"),
+            ],
+        )
 
     def test_workbench_settings_api_accepts_and_returns_access_control_lists(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

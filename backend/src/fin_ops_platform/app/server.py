@@ -39,6 +39,7 @@ from fin_ops_platform.services.oa_identity_service import (
     OAIdentityServiceError,
     OASessionExpiredError,
 )
+from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError, OARoleSyncService
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
 from fin_ops_platform.services.search_service import MONTH_RE as SEARCH_MONTH_RE, SUPPORTED_SCOPES as SEARCH_SUPPORTED_SCOPES, SUPPORTED_STATUSES as SEARCH_SUPPORTED_STATUSES, SearchService
@@ -129,9 +130,11 @@ class Application:
             self._integration_service,
             self._audit_service,
         )
+        self._oa_role_sync_service = OARoleSyncService.from_environment()
         self._app_settings_service = AppSettingsService(
             self._state_store,
             self._project_costing_service,
+            oa_role_sync_service=self._oa_role_sync_service,
         )
         self._oa_identity_service = OAIdentityService()
         self._access_control_service = AccessControlService.from_environment(
@@ -755,15 +758,24 @@ class Application:
                     ),
                 },
             )
-        updated_payload = self._app_settings_service.update_settings(
-            completed_project_ids=[str(item) for item in completed_project_ids],
-            bank_account_mappings=[item for item in bank_account_mappings if isinstance(item, dict)],
-            allowed_usernames=[str(item).strip() for item in allowed_usernames if str(item).strip()],
-            readonly_export_usernames=[
-                str(item).strip() for item in readonly_export_usernames if str(item).strip()
-            ],
-            admin_usernames=[str(item).strip() for item in admin_usernames if str(item).strip()],
-        )
+        try:
+            updated_payload = self._app_settings_service.update_settings(
+                completed_project_ids=[str(item) for item in completed_project_ids],
+                bank_account_mappings=[item for item in bank_account_mappings if isinstance(item, dict)],
+                allowed_usernames=[str(item).strip() for item in allowed_usernames if str(item).strip()],
+                readonly_export_usernames=[
+                    str(item).strip() for item in readonly_export_usernames if str(item).strip()
+                ],
+                admin_usernames=[str(item).strip() for item in admin_usernames if str(item).strip()],
+            )
+        except OARoleSyncError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_GATEWAY,
+                {
+                    "error": "oa_role_sync_failed",
+                    "message": f"OA 角色同步失败：{exc}",
+                },
+            )
         self._search_service.clear_cache()
         return self._json_response(HTTPStatus.OK, updated_payload)
 

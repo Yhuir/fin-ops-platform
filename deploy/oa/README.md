@@ -141,6 +141,10 @@ VITE_APP_BASE_PATH=/fin-ops/
 - `FIN_OPS_OA_REQUIRED_PERMISSION` 默认就是 `finops:app:view`
 - `FIN_OPS_ALLOWED_USERNAMES / FIN_OPS_READONLY_EXPORT_USERNAMES / FIN_OPS_ADMIN_USERNAMES`
   是启动期兜底配置，真实长期口径仍以 app 设置持久化为准
+- 如果希望“访问账户管理”保存后自动同步 OA 菜单角色，还需要配置：
+  - `FIN_OPS_OA_ROLE_SYNC_ENABLED=1`
+  - `FIN_OPS_OA_ROLE_SYNC_HOST / PORT / DATABASE / USERNAME / PASSWORD`
+  - `FIN_OPS_OA_ROLE_SYNC_READONLY_ROLE_KEY / FULL_ACCESS_ROLE_KEY / ADMIN_ROLE_KEY`
 - `VITE_APP_BASE_PATH` 必须是 `/fin-ops/`
 - 业务数据相关的 Mongo 配置仍按现有 `fin-ops` 运行说明提供，不在这里重复展开
 
@@ -195,8 +199,9 @@ VITE_APP_BASE_PATH=/fin-ops/
 
 注意：
 
-- 当前 app 设置保存后，不会自动改 OA 数据库角色绑定
-- 因此每次权限变更后，还需要同步 OA 用户角色，见下文“权限同步操作顺序”
+- 默认情况下，当前 app 设置保存后不会自动改 OA 数据库角色绑定
+- 如果已配置 `FIN_OPS_OA_ROLE_SYNC_ENABLED=1` 和 OA MySQL 连接参数，则保存后会自动同步 OA 用户角色
+- 未启用自动同步时，仍需要按下文“权限同步操作顺序”手工同步
 
 权限与菜单的 SQL 模板：
 
