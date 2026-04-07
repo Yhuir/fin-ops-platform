@@ -51,6 +51,14 @@ textarea {
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
 }
 
+.global-header.embedded-header {
+  border-radius: 0;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
 .eyebrow {
   font-size: 12px;
   font-weight: 800;
@@ -3016,6 +3024,26 @@ textarea {
 
 .workbench-settings-modal {
   width: min(1080px, calc(100vw - 40px));
+}
+
+.settings-session-account {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 10px;
+  color: #243b53;
+  font-size: 13px;
+}
+
+.settings-session-account-label {
+  color: #486581;
+  font-weight: 700;
+}
+
+.settings-session-account strong {
+  color: #102a43;
+  font-weight: 800;
 }
 
 .workbench-settings-body {

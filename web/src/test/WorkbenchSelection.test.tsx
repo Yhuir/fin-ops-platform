@@ -243,6 +243,7 @@ describe("Workbench row selection and detail modal", () => {
     const fetchMock = installMockApiFetch({
       sessionAccessTier: "admin",
       sessionUsername: "YNSYLP005",
+      sessionDisplayName: "杨南山",
     });
     renderAppAt("/");
 
@@ -250,6 +251,8 @@ describe("Workbench row selection and detail modal", () => {
 
     expect(await screen.findByRole("dialog", { name: "关联台设置" })).toBeInTheDocument();
     expect(screen.getByText("访问账户管理")).toBeInTheDocument();
+    expect(screen.getByText("登录账户：")).toBeInTheDocument();
+    expect(screen.getByText("杨南山（YNSYLP005）")).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("新增访问账户"), "READONLY001");
     await user.selectOptions(screen.getByLabelText("新增账户权限"), "read_export_only");

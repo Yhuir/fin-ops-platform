@@ -22,6 +22,7 @@ type MockApiOptions = {
   sessionMode?: "authorized" | "forbidden" | "expired" | "error";
   sessionAccessTier?: "admin" | "full_access" | "read_export_only" | "denied";
   sessionUsername?: string;
+  sessionDisplayName?: string;
   actionDelayMs?: number;
   searchDelayMs?: number;
   searchErrorQueries?: string[];
@@ -2412,8 +2413,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           user: {
             user_id: "101",
             username: options.sessionUsername ?? "liuji",
-            nickname: "刘际涛",
-            display_name: "刘际涛",
+            nickname: options.sessionDisplayName ?? "刘际涛",
+            display_name: options.sessionDisplayName ?? "刘际涛",
             dept_id: "88",
             dept_name: "财务部",
             avatar: null,

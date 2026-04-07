@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import App from "../app/App";
 import { installMockApiFetch } from "./apiMock";
 
-describe("Workbench V2 web foundation", () => {
+describe("Finance operations shell", () => {
   test("scopes the month picker to the workbench page instead of sharing it across routes", async () => {
     window.history.pushState({}, "", "/");
     const user = userEvent.setup();
@@ -13,7 +13,8 @@ describe("Workbench V2 web foundation", () => {
     render(<App />);
 
     expect(await screen.findByText("赵华")).toBeInTheDocument();
-    expect(screen.getByText("财务工作台正式前端工程")).toBeInTheDocument();
+    expect(screen.getByText("财务运营平台")).toBeInTheDocument();
+    expect(screen.getByText("溯源办公系统")).toBeInTheDocument();
     expect(
       screen.queryByRole("heading", {
         name: "OA & 银行流水 & 进销项发票关联台",
@@ -43,11 +44,11 @@ describe("Workbench V2 web foundation", () => {
     render(<App />);
 
     expect(await screen.findByText("赵华")).toBeInTheDocument();
-    expect(screen.getByText("财务工作台正式前端工程")).toBeInTheDocument();
+    expect(screen.getByText("财务运营平台")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "放大 未配对" }));
 
-    expect(screen.queryByText("财务工作台正式前端工程")).not.toBeInTheDocument();
+    expect(screen.queryByText("财务运营平台")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "关联台" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "导入中心" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "税金抵扣" })).not.toBeInTheDocument();
@@ -55,19 +56,20 @@ describe("Workbench V2 web foundation", () => {
 
     await user.click(screen.getByRole("button", { name: "恢复 未配对" }));
 
-    expect(screen.getByText("财务工作台正式前端工程")).toBeInTheDocument();
+    expect(screen.getByText("财务运营平台")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "年月选择" })).toBeInTheDocument();
   });
 
-  test("uses embedded shell mode inside the OA iframe", async () => {
+  test("keeps the shell header visible inside the OA iframe", async () => {
     window.history.pushState({}, "", "/?embedded=oa");
     installMockApiFetch();
 
     render(<App />);
 
     expect(await screen.findByText("赵华")).toBeInTheDocument();
-    expect(screen.queryByText("财务工作台正式前端工程")).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "关联台" })).not.toBeInTheDocument();
+    expect(screen.getByText("财务运营平台")).toBeInTheDocument();
+    expect(screen.getByText("溯源办公系统")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "关联台" })).toBeInTheDocument();
     expect(document.querySelector(".app-shell.embedded-shell")).not.toBeNull();
     expect(document.querySelector(".page-body.embedded")).not.toBeNull();
   });

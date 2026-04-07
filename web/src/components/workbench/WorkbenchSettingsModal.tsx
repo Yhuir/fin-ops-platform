@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 
+import { useSession } from "../../contexts/SessionContext";
 import type {
   BankAccountMapping,
   WorkbenchAccessRole,
@@ -75,6 +76,7 @@ export default function WorkbenchSettingsModal({
   onClose,
   onSave,
 }: WorkbenchSettingsModalProps) {
+  const session = useSession();
   const [completedProjectIds, setCompletedProjectIds] = useState<string[]>(settings.projects.completedProjectIds);
   const [mappings, setMappings] = useState<BankAccountMapping[]>(settings.bankAccountMappings);
   const [managedAccessAccounts, setManagedAccessAccounts] = useState<ManagedAccessAccount[]>(
@@ -104,6 +106,11 @@ export default function WorkbenchSettingsModal({
   const canAddMapping =
     last4Draft.trim().length === 4 && /^\d{4}$/.test(last4Draft.trim()) && bankNameDraft.trim().length > 0;
   const canAddAccessAccount = accessUsernameDraft.trim().length > 0;
+  const currentSessionUser =
+    session.status === "authenticated" || session.status === "forbidden" ? session.session.user : null;
+  const currentAccountLabel = currentSessionUser
+    ? `${currentSessionUser.displayName}（${currentSessionUser.username}）`
+    : "--";
 
   function handleAddMapping() {
     if (!canAddMapping || controlsDisabled) {
@@ -179,6 +186,10 @@ export default function WorkbenchSettingsModal({
           <div>
             <h2 id="workbench-settings-modal-title">关联台设置</h2>
             <p>管理项目完工状态、银行账户映射，以及受控账号的访问权限。</p>
+            <div className="settings-session-account">
+              <span className="settings-session-account-label">登录账户：</span>
+              <strong>{currentAccountLabel}</strong>
+            </div>
           </div>
           <button className="secondary-button" type="button" onClick={onClose} disabled={isSaving}>
             关闭

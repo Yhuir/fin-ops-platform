@@ -16,11 +16,11 @@ function AppShell() {
 
   return (
     <div className={`app-shell${embedded ? " embedded-shell" : ""}`}>
-      {!isWorkbenchFocusMode && !embedded ? (
-        <header className="global-header">
+      {!isWorkbenchFocusMode ? (
+        <header className={`global-header${embedded ? " embedded-header" : ""}`}>
           <div>
-            <div className="eyebrow">Workbench V2 Web Foundation</div>
-            <div className="global-title">财务工作台正式前端工程</div>
+            <div className="eyebrow">溯源办公系统</div>
+            <div className="global-title">财务运营平台</div>
           </div>
           <div className="header-actions">
             {progress ? (
