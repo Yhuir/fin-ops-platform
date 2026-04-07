@@ -155,7 +155,7 @@ describe("Workbench columns and inline actions", () => {
     expect(timeTag?.closest(".compound-cell-secondary")).toBe(relationStatus.closest(".compound-cell-secondary"));
   });
 
-  test("renders a bank direction tag beside the amount instead of a dedicated direction column", async () => {
+  test("renders a bank direction tag on the second line under the amount instead of a dedicated direction column", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
     await screen.findByText("赵华");
@@ -171,6 +171,7 @@ describe("Workbench columns and inline actions", () => {
       .find((row) => row.classList.contains("record-card-bank"));
     const directionTag = within(pairedGroup).getAllByText("支出")[0];
     const moneyValueRow = directionTag.closest(".money-cell-value");
+    const moneyMetaRow = directionTag.closest(".money-cell-meta-row");
     const oaAmountHeader = within(oaPane).getByRole("columnheader", { name: "金额" });
     const bankAmountHeader = within(bankPane).getByRole("columnheader", { name: "金额" });
     const oaAmountCell = within(oaRow as HTMLElement).getByText("128,000.00").closest(".record-card-cell");
@@ -179,15 +180,16 @@ describe("Workbench columns and inline actions", () => {
     expect(directionTag).toHaveClass("direction-tag");
     expect(directionTag).toHaveClass("direction-tag-outflow");
     expect(within(pairedGroup).queryByText("资金方向")).not.toBeInTheDocument();
-    expect(moneyValueRow).not.toBeNull();
-    expect(within(moneyValueRow as HTMLElement).getByText("128,000.00")).toBeInTheDocument();
+    expect(moneyValueRow).toBeNull();
+    expect(moneyMetaRow).not.toBeNull();
+    expect(within(bankAmountCell as HTMLElement).getByText("128,000.00")).toBeInTheDocument();
     expect(oaAmountHeader).toHaveClass("column-money-centered");
     expect(bankAmountHeader).toHaveClass("column-money-centered");
     expect(oaAmountCell).toHaveClass("column-money-centered");
     expect(bankAmountCell).toHaveClass("column-money-centered");
   });
 
-  test("renders bank payment account tags on the second line under the amount", async () => {
+  test("renders bank direction and payment account on the same second line under the amount", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
     await screen.findByText("赵华");
@@ -199,11 +201,9 @@ describe("Workbench columns and inline actions", () => {
     expect(bankName.closest(".bank-account-tag")).not.toBeNull();
     expect(within(pairedGroup).getByText("9123")).toBeInTheDocument();
     const directionTag = within(pairedGroup).getAllByText("支出")[0];
-    const moneyValueRow = directionTag.closest(".money-cell-value");
     const moneyMetaRow = bankName.closest(".money-cell-meta-row");
-    expect(moneyValueRow).not.toBeNull();
     expect(moneyMetaRow).not.toBeNull();
-    expect(within(moneyValueRow as HTMLElement).queryByText("招商银行")).not.toBeInTheDocument();
+    expect(directionTag.closest(".money-cell-meta-row")).toBe(moneyMetaRow);
     expect(within(moneyMetaRow as HTMLElement).getByText("招商银行")).toBeInTheDocument();
   });
 

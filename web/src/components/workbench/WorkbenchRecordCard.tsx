@@ -243,14 +243,16 @@ function renderBankMoneyValue(columnKey: string, value: string, direction: strin
   return (
     <span className="money-cell-stack">
       <span className="money-cell-value">
-        {shouldShowDirectionTag ? <DirectionTag direction={normalizedDirection} /> : null}
         <span>{hasValue ? value : "--"}</span>
       </span>
-      {shouldShowAccount ? (
+      {shouldShowDirectionTag || shouldShowAccount ? (
         <span className="money-cell-meta-row">
-          <span className="money-cell-account">
-            <BankAccountValue value={paymentAccount} variant="tag" />
-          </span>
+          {shouldShowDirectionTag ? <DirectionTag direction={normalizedDirection} /> : null}
+          {shouldShowAccount ? (
+            <span className="money-cell-account">
+              <BankAccountValue value={paymentAccount} variant="tag" />
+            </span>
+          ) : null}
         </span>
       ) : null}
     </span>
