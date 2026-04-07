@@ -13,9 +13,15 @@ from typing import Callable
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from fin_ops_platform import __version__
+from fin_ops_platform.app.auth import (
+    ForbiddenOAAccessError,
+    UnauthorizedOASessionError,
+    resolve_oa_request_session,
+)
 from fin_ops_platform.app.routes_tax import TaxApiRoutes
 from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes
 from fin_ops_platform.domain.enums import BatchType
+from fin_ops_platform.services.access_control_service import AccessControlService
 from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
@@ -27,6 +33,12 @@ from fin_ops_platform.services.ledgers import LedgerReminderService
 from fin_ops_platform.services.live_workbench_service import LiveWorkbenchService
 from fin_ops_platform.services.matching import MatchingEngineService
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, load_mongo_oa_settings
+from fin_ops_platform.services.oa_identity_service import (
+    OAIdentityConfigurationError,
+    OAIdentityService,
+    OAIdentityServiceError,
+    OASessionExpiredError,
+)
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
 from fin_ops_platform.services.search_service import MONTH_RE as SEARCH_MONTH_RE, SUPPORTED_SCOPES as SEARCH_SUPPORTED_SCOPES, SUPPORTED_STATUSES as SEARCH_SUPPORTED_STATUSES, SearchService
@@ -120,6 +132,10 @@ class Application:
             self._state_store,
             self._project_costing_service,
         )
+        self._oa_identity_service = OAIdentityService()
+        self._access_control_service = AccessControlService.from_environment(
+            dynamic_allowed_usernames_provider=self._app_settings_service.get_allowed_usernames,
+        )
         bank_account_resolver = BankAccountResolver(self._app_settings_service.get_bank_account_mapping_dict)
         self._candidate_grouping_service = WorkbenchCandidateGroupingService()
         self._workbench_query_service = WorkbenchQueryService(oa_adapter=oa_adapter)
@@ -163,6 +179,9 @@ class Application:
             return Response(status_code=int(HTTPStatus.NO_CONTENT), body="")
         if method == "GET" and route_path == "/foundation/seed":
             return self._json_response(HTTPStatus.OK, self._seed_payload)
+        auth_error = self._enforce_route_access(route_path, headers)
+        if auth_error is not None:
+            return auth_error
         if method == "GET" and route_path == "/api/workbench":
             month = query.get("month", [None])[0]
             return self._handle_api_workbench(month)
@@ -181,6 +200,8 @@ class Application:
                 status=status,
                 limit=limit,
             )
+        if method == "GET" and route_path == "/api/session/me":
+            return self._handle_api_session_me(headers)
         if method == "GET" and route_path == "/api/workbench/ignored":
             month = query.get("month", [None])[0]
             return self._handle_api_workbench_ignored(month)
@@ -400,6 +421,7 @@ class Application:
                 "/matching/results",
                 "/api/workbench",
                 "/api/search",
+                "/api/session/me",
                 "/api/workbench/ignored",
                 "/api/workbench/settings",
                 "/api/workbench/rows/{row_id}",
@@ -447,6 +469,7 @@ class Application:
                 "reminder_scheduler",
                 "advanced_exceptions",
                 "oa_integration_foundation",
+                "oa_session_foundation",
                 "project_costing_foundation",
                 "workbench_v2_backend_contracts",
                 "workbench_global_search_foundation",
@@ -543,6 +566,133 @@ class Application:
         )
         return self._json_response(HTTPStatus.OK, payload)
 
+    def _handle_api_session_me(self, headers: dict[str, str] | None) -> Response:
+        try:
+            session = resolve_oa_request_session(
+                headers,
+                identity_service=self._oa_identity_service,
+                access_control_service=self._access_control_service,
+            )
+        except OASessionExpiredError as error:
+            return self._json_response(
+                HTTPStatus.UNAUTHORIZED,
+                {
+                    "error": "invalid_oa_session",
+                    "message": str(error) or "OA 登录状态已过期。",
+                },
+            )
+        except OAIdentityConfigurationError as error:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "oa_identity_unavailable",
+                    "message": str(error) or "OA 身份服务未配置。",
+                },
+            )
+        except OAIdentityServiceError as error:
+            return self._json_response(
+                HTTPStatus.BAD_GATEWAY,
+                {
+                    "error": "oa_identity_lookup_failed",
+                    "message": str(error) or "OA 身份解析失败。",
+                },
+            )
+        except UnauthorizedOASessionError as error:
+            return self._json_response(
+                HTTPStatus.UNAUTHORIZED,
+                {
+                    "error": "invalid_oa_session",
+                    "message": str(error) or "缺少 OA 登录态，请从 OA 系统进入。",
+                },
+            )
+
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "user": {
+                    "user_id": session.identity.user_id,
+                    "username": session.identity.username,
+                    "nickname": session.identity.nickname,
+                    "display_name": session.identity.display_name,
+                    "dept_id": session.identity.dept_id,
+                    "dept_name": session.identity.dept_name,
+                    "avatar": session.identity.avatar,
+                },
+                "roles": list(session.identity.roles),
+                "permissions": list(session.identity.permissions),
+                "allowed": session.allowed,
+            },
+        )
+
+    def _route_requires_oa_access(self, route_path: str) -> bool:
+        if route_path == "/api/session/me":
+            return False
+        protected_prefixes = (
+            "/api/",
+            "/workbench",
+            "/integrations",
+            "/projects",
+            "/ledgers",
+            "/reminders",
+            "/reconciliation",
+            "/imports",
+            "/matching",
+        )
+        return route_path.startswith(protected_prefixes)
+
+    def _enforce_route_access(self, route_path: str, headers: dict[str, str] | None) -> Response | None:
+        if not self._route_requires_oa_access(route_path):
+            return None
+        try:
+            session = resolve_oa_request_session(
+                headers,
+                identity_service=self._oa_identity_service,
+                access_control_service=self._access_control_service,
+            )
+            if not session.allowed:
+                raise ForbiddenOAAccessError("当前 OA 账户未被授权访问财务运营平台。")
+        except UnauthorizedOASessionError as error:
+            return self._json_response(
+                HTTPStatus.UNAUTHORIZED,
+                {
+                    "error": "invalid_oa_session",
+                    "message": str(error) or "缺少 OA 登录态，请从 OA 系统进入。",
+                },
+            )
+        except OASessionExpiredError as error:
+            return self._json_response(
+                HTTPStatus.UNAUTHORIZED,
+                {
+                    "error": "invalid_oa_session",
+                    "message": str(error) or "OA 登录状态已过期。",
+                },
+            )
+        except ForbiddenOAAccessError as error:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {
+                    "error": "forbidden",
+                    "message": str(error) or "当前 OA 账户未被授权访问财务运营平台。",
+                },
+            )
+        except OAIdentityConfigurationError as error:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "oa_identity_unavailable",
+                    "message": str(error) or "OA 身份服务未配置。",
+                },
+            )
+        except OAIdentityServiceError as error:
+            return self._json_response(
+                HTTPStatus.BAD_GATEWAY,
+                {
+                    "error": "oa_identity_lookup_failed",
+                    "message": str(error) or "OA 身份解析失败。",
+                },
+            )
+        return None
+
     def _handle_api_workbench_ignored(self, month: str | None) -> Response:
         current_month = month or datetime.now().strftime("%Y-%m")
         raw_payload = self._build_raw_workbench_payload(current_month)
@@ -564,17 +714,23 @@ class Application:
             return error
         completed_project_ids = payload.get("completed_project_ids", [])
         bank_account_mappings = payload.get("bank_account_mappings", [])
-        if not isinstance(completed_project_ids, list) or not isinstance(bank_account_mappings, list):
+        allowed_usernames = payload.get("allowed_usernames", [])
+        if (
+            not isinstance(completed_project_ids, list)
+            or not isinstance(bank_account_mappings, list)
+            or not isinstance(allowed_usernames, list)
+        ):
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
                     "error": "invalid_workbench_settings_request",
-                    "message": "completed_project_ids and bank_account_mappings must be arrays.",
+                    "message": "completed_project_ids, bank_account_mappings, and allowed_usernames must be arrays.",
                 },
             )
         updated_payload = self._app_settings_service.update_settings(
             completed_project_ids=[str(item) for item in completed_project_ids],
             bank_account_mappings=[item for item in bank_account_mappings if isinstance(item, dict)],
+            allowed_usernames=[str(item).strip() for item in allowed_usernames if str(item).strip()],
         )
         self._search_service.clear_cache()
         return self._json_response(HTTPStatus.OK, updated_payload)

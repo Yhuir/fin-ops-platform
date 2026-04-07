@@ -103,6 +103,9 @@ type ApiWorkbenchSettings = {
     last4: string;
     bank_name: string;
   }>;
+  access_control?: {
+    allowed_usernames?: string[];
+  };
 };
 
 type ApiWorkbenchGroup = {
@@ -179,6 +182,7 @@ type CancelExceptionPayload = {
 type WorkbenchSettingsUpdatePayload = {
   completedProjectIds: string[];
   bankAccountMappings: BankAccountMapping[];
+  allowedUsernames: string[];
 };
 
 function toDisplayValue(value: string | null | undefined, fallback = "--") {
@@ -380,6 +384,11 @@ function mapWorkbenchSettings(payload: ApiWorkbenchSettings): WorkbenchSettings 
       last4: mapping.last4,
       bankName: mapping.bank_name,
     })),
+    accessControl: {
+      allowedUsernames: (payload.access_control?.allowed_usernames ?? [])
+        .map((item) => String(item).trim())
+        .filter(Boolean),
+    },
   };
 }
 
@@ -456,6 +465,7 @@ export async function saveWorkbenchSettings(
         last4: mapping.last4,
         bank_name: mapping.bankName,
       })),
+      allowed_usernames: settings.allowedUsernames,
     }),
   });
   return mapWorkbenchSettings(payload);

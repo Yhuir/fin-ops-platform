@@ -19,6 +19,7 @@ type MockApiOptions = {
   taxErrorMonths?: string[];
   costErrorMonths?: string[];
   costExportErrorViews?: string[];
+  sessionMode?: "authorized" | "forbidden" | "expired" | "error";
   actionDelayMs?: number;
   searchDelayMs?: number;
   searchErrorQueries?: string[];
@@ -2188,9 +2189,48 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         bank_name: "建设银行",
       },
     ],
+    access_control: {
+      allowed_usernames: [],
+    },
   };
 
   const handlers: Record<string, MockFetchHandler> = {
+    "/api/session/me": () => {
+      if (options.sessionMode === "expired") {
+        return {
+          status: 401,
+          body: {
+            error: "invalid_oa_session",
+            message: "请返回 OA 系统重新登录后再进入财务运营平台。",
+          },
+        };
+      }
+      if (options.sessionMode === "error") {
+        return {
+          status: 500,
+          body: {
+            error: "oa_identity_lookup_failed",
+            message: "会话校验失败，请稍后重试。",
+          },
+        };
+      }
+      return {
+        body: {
+          user: {
+            user_id: "101",
+            username: "liuji",
+            nickname: "刘际涛",
+            display_name: "刘际涛",
+            dept_id: "88",
+            dept_name: "财务部",
+            avatar: null,
+          },
+          roles: ["finance"],
+          permissions: options.sessionMode === "forbidden" ? [] : ["finops:app:view"],
+          allowed: options.sessionMode !== "forbidden",
+        },
+      };
+    },
     "/imports/templates": () => ({
       body: {
         templates: templateRegistry,
@@ -2230,6 +2270,11 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             last4: item.last4 ?? "0000",
             bank_name: item.bank_name ?? item.bankName ?? "未识别银行",
           })),
+          access_control: {
+            allowed_usernames: Array.isArray(jsonBody.allowed_usernames)
+              ? (jsonBody.allowed_usernames as string[]).map((item) => String(item).trim()).filter(Boolean)
+              : workbenchSettingsState.access_control.allowed_usernames,
+          },
         };
       }
       return { body: cloneJson(workbenchSettingsState) };

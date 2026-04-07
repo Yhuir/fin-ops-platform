@@ -58,4 +58,17 @@ describe("Workbench V2 web foundation", () => {
     expect(screen.getByText("财务工作台正式前端工程")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "年月选择" })).toBeInTheDocument();
   });
+
+  test("uses embedded shell mode inside the OA iframe", async () => {
+    window.history.pushState({}, "", "/?embedded=oa");
+    installMockApiFetch();
+
+    render(<App />);
+
+    expect(await screen.findByText("赵华")).toBeInTheDocument();
+    expect(screen.queryByText("财务工作台正式前端工程")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "关联台" })).not.toBeInTheDocument();
+    expect(document.querySelector(".app-shell.embedded-shell")).not.toBeNull();
+    expect(document.querySelector(".page-body.embedded")).not.toBeNull();
+  });
 });

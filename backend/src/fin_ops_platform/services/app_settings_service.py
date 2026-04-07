@@ -47,6 +47,9 @@ class AppSettingsService:
                 "completed_project_ids": sorted(completed_ids),
             },
             "bank_account_mappings": mappings,
+            "access_control": {
+                "allowed_usernames": list(self._snapshot["allowed_usernames"]),
+            },
         }
 
     def update_settings(
@@ -54,11 +57,13 @@ class AppSettingsService:
         *,
         completed_project_ids: list[str],
         bank_account_mappings: list[dict[str, Any]],
+        allowed_usernames: list[str],
     ) -> dict[str, Any]:
         self._snapshot = self._normalize_settings(
             {
                 "completed_project_ids": completed_project_ids,
                 "bank_account_mappings": bank_account_mappings,
+                "allowed_usernames": allowed_usernames,
             }
         )
         if self._state_store is not None:
@@ -73,6 +78,9 @@ class AppSettingsService:
 
     def get_completed_project_ids(self) -> set[str]:
         return set(self._snapshot["completed_project_ids"])
+
+    def get_allowed_usernames(self) -> list[str]:
+        return list(self._snapshot["allowed_usernames"])
 
     @staticmethod
     def _normalize_settings(payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -103,7 +111,15 @@ class AppSettingsService:
                     "bank_name": bank_name,
                 }
             )
+        allowed_usernames = sorted(
+            {
+                str(username).strip()
+                for username in list(raw_payload.get("allowed_usernames") or [])
+                if str(username).strip()
+            }
+        )
         return {
             "completed_project_ids": completed_ids,
             "bank_account_mappings": mappings,
+            "allowed_usernames": allowed_usernames,
         }

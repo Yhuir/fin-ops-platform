@@ -237,6 +237,29 @@ describe("Workbench row selection and detail modal", () => {
     expect(exceptionButton).toBeEnabled();
   });
 
+  test("workbench settings can manage allowed app accounts", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderWorkbenchPage();
+
+    await user.click(await screen.findByRole("button", { name: "设置" }));
+
+    expect(await screen.findByRole("dialog", { name: "关联台设置" })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("允许访问账户"), "YNSYLP005");
+    await user.click(screen.getByRole("button", { name: "新增账户" }));
+    await user.click(screen.getByRole("button", { name: "保存设置" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/settings",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining("\"allowed_usernames\":[\"YNSYLP005\"]"),
+      }),
+    );
+    expect(await screen.findByText("已保存关联台设置。")).toBeInTheDocument();
+  });
+
   test("paired zone cancel action stays disabled until at least two rows are selected", async () => {
     const user = userEvent.setup();
     renderWorkbenchPage();

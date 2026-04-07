@@ -28,15 +28,24 @@
 - `docs/dev/oa-integration-foundation.md`：Prompt 07 的 OA 集成底座说明
 - `docs/dev/project-costing-foundation.md`：Prompt 08 的项目归集与项目成本测算底座说明
 - `docs/dev/cost-statistics-workbench.md`：成本统计页面的数据口径、页面层级、接口建议和导出要求
+- `docs/dev/oa-menu-iframe-integration.md`：OA 菜单 iframe 集成说明，包含菜单配置、嵌入地址和 `/fin-ops/` 子路径部署约定
+- `deploy/oa/README.md`：OA 同域部署、发布顺序、联调验收和回滚说明
+- `deploy/oa/nginx.fin-ops.conf.example`：`/fin-ops/` 与 `/fin-ops-api/` 反向代理示例
+- `deploy/oa/fin_ops.env.example`：OA 集成相关环境变量模板
+- `deploy/oa/fin_ops_menu.mysql.sql`：OA 菜单 SQL 模板
+- `deploy/oa/fin_ops_role_binding.mysql.sql`：OA 角色与菜单绑定 SQL 模板
 - `docs/dev/`：税金抵扣 25-27 现已按“计划 / 已认证结果 / 试算”口径重构，重点是只读销项、可编辑进项计划和右侧已认证抽屉
 - `docs/dev/reconciliation-workbench-v2-backend.md`：已更新 Prompt 14 的 Workbench V2 后端契约与税金 API
 - `docs/superpowers/specs/2026-04-01-cost-statistics-workbench-design.md`：成本统计页面设计文档
 - `docs/superpowers/specs/2026-04-01-cost-statistics-project-export-design.md`：项目明细强导出设计文档
 - `docs/superpowers/specs/2026-04-02-workbench-global-search-design.md`：关联台强搜索设计文档
 - `docs/superpowers/specs/2026-04-03-tax-offset-certified-plan-design.md`：税金抵扣“计划 vs 已认证结果”设计文档
+- `docs/superpowers/specs/2026-04-03-oa-shell-auth-visibility-design.md`：OA 页面壳体接入、登录复用和仅少数账户可见的设计文档
 - `docs/superpowers/plans/2026-04-01-cost-statistics-workbench.md`：成本统计页面实施计划
 - `docs/superpowers/plans/2026-04-02-workbench-global-search.md`：关联台强搜索实施计划
 - `docs/superpowers/plans/2026-04-03-tax-offset-certified-plan.md`：税金抵扣“计划 vs 已认证结果”实施计划
+- `docs/superpowers/plans/2026-04-03-oa-shell-auth-visibility.md`：OA 页面壳体接入、登录复用和可见性控制实施计划
+- `OA 集成当前 app 技术方案.md`：基于真实 OA 源码分析的总接入方案
 - `docs/superpowers/specs/2026-03-26-import-formalization-design.md`：导入正式化 A 的设计文档
 - `docs/superpowers/plans/2026-03-26-import-formalization.md`：导入正式化 A 的实施计划
 - `docs/superpowers/plans/`：面向执行的实现计划

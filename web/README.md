@@ -57,6 +57,15 @@ cd web
 npm run build
 ```
 
+OA 集成部署补充：
+
+- 正式子路径：`/fin-ops/`
+- 嵌入态地址：`/fin-ops/?embedded=oa`
+- 页面启动会先请求 `/api/session/me`
+- 只有通过 OA 会话和 `finops:app:view` 权限校验后，业务页面才会继续渲染
+- 详细部署说明见：
+  - `/Users/yu/Desktop/fin-ops-platform/deploy/oa/README.md`
+
 当前工作台拖拽口径：
 
 - `已配对` 与 `未配对` 各自独立拖拽

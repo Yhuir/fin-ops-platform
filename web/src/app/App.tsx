@@ -1,18 +1,22 @@
 import { BrowserRouter, NavLink } from "react-router-dom";
 
+import SessionGate from "../components/auth/SessionGate";
 import { AppChromeProvider, useAppChrome } from "../contexts/AppChromeContext";
 import { ImportProgressProvider, useImportProgress } from "../contexts/ImportProgressContext";
 import { MonthProvider } from "../contexts/MonthContext";
+import { SessionProvider } from "../contexts/SessionContext";
 import AppRouter from "./router";
+import { APP_BASE_PATH, isOaEmbeddedMode } from "./runtime";
 import "./styles.css";
 
 function AppShell() {
   const { isWorkbenchFocusMode } = useAppChrome();
   const { progress } = useImportProgress();
+  const embedded = isOaEmbeddedMode();
 
   return (
-    <div className="app-shell">
-      {!isWorkbenchFocusMode ? (
+    <div className={`app-shell${embedded ? " embedded-shell" : ""}`}>
+      {!isWorkbenchFocusMode && !embedded ? (
         <header className="global-header">
           <div>
             <div className="eyebrow">Workbench V2 Web Foundation</div>
@@ -49,7 +53,9 @@ function AppShell() {
           </div>
         </header>
       ) : null}
-      <main className={`page-body${isWorkbenchFocusMode ? " focus-mode" : ""}`}>
+      <main
+        className={`page-body${isWorkbenchFocusMode ? " focus-mode" : ""}${embedded ? " embedded" : ""}`}
+      >
         <AppRouter />
       </main>
     </div>
@@ -58,14 +64,21 @@ function AppShell() {
 
 export default function App() {
   return (
-    <MonthProvider>
-      <ImportProgressProvider>
-        <AppChromeProvider>
-          <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-            <AppShell />
-          </BrowserRouter>
-        </AppChromeProvider>
-      </ImportProgressProvider>
-    </MonthProvider>
+    <BrowserRouter
+      basename={APP_BASE_PATH === "/" ? undefined : APP_BASE_PATH}
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
+      <MonthProvider>
+        <ImportProgressProvider>
+          <SessionProvider>
+            <AppChromeProvider>
+              <SessionGate>
+                <AppShell />
+              </SessionGate>
+            </AppChromeProvider>
+          </SessionProvider>
+        </ImportProgressProvider>
+      </MonthProvider>
+    </BrowserRouter>
   );
 }

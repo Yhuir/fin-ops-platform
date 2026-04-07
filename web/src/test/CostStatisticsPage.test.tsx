@@ -56,7 +56,7 @@ describe("Cost statistics page", () => {
 
     expect(await screen.findByRole("heading", { name: "成本统计" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "按时间" })).toHaveClass("active");
-    const timeTable = screen.getByRole("table", { name: "按时间统计表" });
+    const timeTable = await screen.findByRole("table", { name: "按时间统计表" });
     expect(within(timeTable).getByRole("button", { name: "查看流水 cost-txn-004" })).toBeInTheDocument();
     expect(within(timeTable).queryByRole("columnheader", { name: "资金方向" })).not.toBeInTheDocument();
     expect(within(timeTable).getAllByText("支出")[0]).toHaveClass("direction-tag");

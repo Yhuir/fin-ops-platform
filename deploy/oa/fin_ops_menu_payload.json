@@ -1,0 +1,16 @@
+{
+  "menuName": "财务运营平台",
+  "parentId": 0,
+  "orderNum": 90,
+  "path": "https://www.yn-sourcing.com/fin-ops/?embedded=oa",
+  "component": "",
+  "query": "",
+  "isFrame": "1",
+  "isCache": "1",
+  "isBlank": "1",
+  "menuType": "C",
+  "visible": "0",
+  "status": "0",
+  "perms": "finops:app:view",
+  "icon": "money"
+}

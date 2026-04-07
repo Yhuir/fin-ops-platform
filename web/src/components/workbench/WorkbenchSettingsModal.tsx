@@ -6,7 +6,7 @@ type WorkbenchSettingsModalProps = {
   settings: WorkbenchSettings;
   isSaving: boolean;
   onClose: () => void;
-  onSave: (payload: { completedProjectIds: string[]; bankAccountMappings: BankAccountMapping[] }) => void;
+  onSave: (payload: { completedProjectIds: string[]; bankAccountMappings: BankAccountMapping[]; allowedUsernames: string[] }) => void;
 };
 
 function toggleCompleted(projectId: string, completedProjectIds: string[]) {
@@ -27,8 +27,10 @@ export default function WorkbenchSettingsModal({
 }: WorkbenchSettingsModalProps) {
   const [completedProjectIds, setCompletedProjectIds] = useState<string[]>(settings.projects.completedProjectIds);
   const [mappings, setMappings] = useState<BankAccountMapping[]>(settings.bankAccountMappings);
+  const [allowedUsernames, setAllowedUsernames] = useState<string[]>(settings.accessControl.allowedUsernames);
   const [bankNameDraft, setBankNameDraft] = useState("");
   const [last4Draft, setLast4Draft] = useState("");
+  const [allowedUsernameDraft, setAllowedUsernameDraft] = useState("");
 
   const activeProjects = useMemo(
     () => sortProjects(settings.projects.active.filter((project) => !completedProjectIds.includes(project.id))),
@@ -44,6 +46,7 @@ export default function WorkbenchSettingsModal({
   );
 
   const canAddMapping = last4Draft.trim().length === 4 && /^\d{4}$/.test(last4Draft.trim()) && bankNameDraft.trim().length > 0;
+  const canAddAllowedUsername = allowedUsernameDraft.trim().length > 0;
 
   function handleAddMapping() {
     if (!canAddMapping) {
@@ -66,6 +69,20 @@ export default function WorkbenchSettingsModal({
     }
     setLast4Draft("");
     setBankNameDraft("");
+  }
+
+  function handleAddAllowedUsername() {
+    const nextUsername = allowedUsernameDraft.trim();
+    if (!nextUsername) {
+      return;
+    }
+    setAllowedUsernames((current) => {
+      if (current.includes(nextUsername)) {
+        return current;
+      }
+      return [...current, nextUsername].sort((left, right) => left.localeCompare(right, "zh-CN"));
+    });
+    setAllowedUsernameDraft("");
   }
 
   return (
@@ -126,6 +143,47 @@ export default function WorkbenchSettingsModal({
                   ))}
                 </div>
               </div>
+            </div>
+          </section>
+
+          <section className="export-center-section">
+            <div className="export-center-section-header">
+              <h3>访问账户管理</h3>
+            </div>
+            <div className="settings-bank-mapping-form">
+              <label className="project-export-select-field">
+                <span>允许访问账户</span>
+                <input value={allowedUsernameDraft} onChange={(event) => setAllowedUsernameDraft(event.currentTarget.value)} />
+              </label>
+              <button className="primary-button" type="button" disabled={!canAddAllowedUsername} onClick={handleAddAllowedUsername}>
+                新增账户
+              </button>
+            </div>
+
+            <div className="settings-bank-mapping-list">
+              {allowedUsernames.length === 0 ? <div className="cost-explorer-empty">当前没有单独放行的 OA 账户。</div> : null}
+              {allowedUsernames.map((username) => (
+                <div key={username} className="settings-bank-mapping-row">
+                  <label className="project-export-select-field">
+                    <span>账户</span>
+                    <input
+                      value={username}
+                      onChange={(event) =>
+                        setAllowedUsernames((current) =>
+                          current.map((item) => (item === username ? event.currentTarget.value.trim() : item)).filter(Boolean),
+                        )
+                      }
+                    />
+                  </label>
+                  <button
+                    className="secondary-button danger-button"
+                    type="button"
+                    onClick={() => setAllowedUsernames((current) => current.filter((item) => item !== username))}
+                  >
+                    删除
+                  </button>
+                </div>
+              ))}
             </div>
           </section>
 
@@ -197,12 +255,13 @@ export default function WorkbenchSettingsModal({
             type="button"
             disabled={isSaving}
             onClick={() =>
-              onSave({
-                completedProjectIds,
-                bankAccountMappings: mappings,
-              })
-            }
-          >
+            onSave({
+              completedProjectIds,
+              bankAccountMappings: mappings,
+              allowedUsernames,
+            })
+          }
+        >
             {isSaving ? "保存中..." : "保存设置"}
           </button>
         </footer>

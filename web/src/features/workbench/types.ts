@@ -46,6 +46,9 @@ export type WorkbenchSettings = {
     completedProjectIds: string[];
   };
   bankAccountMappings: BankAccountMapping[];
+  accessControl: {
+    allowedUsernames: string[];
+  };
 };
 
 export type WorkbenchPaneRows = {

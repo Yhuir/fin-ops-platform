@@ -552,6 +552,7 @@ export default function ReconciliationWorkbenchPage() {
   const handleSaveSettings = async (payload: {
     completedProjectIds: string[];
     bankAccountMappings: WorkbenchSettings["bankAccountMappings"];
+    allowedUsernames: string[];
   }) => {
     setIsSettingsSaving(true);
     try {

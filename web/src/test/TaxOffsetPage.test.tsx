@@ -117,6 +117,8 @@ describe("Tax offset workbench", () => {
 
     render(<App />);
 
+    expect(await screen.findByText("销项税额")).toBeInTheDocument();
+
     await user.click(screen.getByRole("button", { name: "年月选择" }));
     await user.click(screen.getByRole("button", { name: "2026年" }));
     await user.click(screen.getByRole("button", { name: "5月" }));
@@ -280,6 +282,27 @@ describe("Tax offset workbench", () => {
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url === "/api/session/me") {
+        return new Response(
+          JSON.stringify({
+            user: {
+              user_id: "101",
+              username: "liuji",
+              nickname: "刘际涛",
+              display_name: "刘际涛",
+              dept_id: "88",
+              dept_name: "财务部",
+            },
+            roles: ["finance"],
+            permissions: ["finops:app:view"],
+            allowed: true,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
       if (url === "/api/tax-offset?month=2026-03") {
         currentSnapshot = responses.length > 1 ? responses.shift() ?? responses[0] : responses[0];
         return new Response(JSON.stringify(currentSnapshot), {

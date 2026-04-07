@@ -133,6 +133,67 @@ python -m pip install -r backend/requirements.txt
   - 工作台原型已新增只读 `OA 同步` 视图，可执行同步和重试
   - 健康检查中已暴露 `oa_integration_foundation` 能力
 
+## OA 页面壳体 / 登录复用接入方案
+
+已新增一套基于真实 OA 源码分析的接入文档，用于把当前 app 放到公司 OA 页面下，并复用 OA 登录与菜单权限：
+
+- 总方案：[OA 集成当前 app 技术方案.md](/Users/yu/Desktop/fin-ops-platform/OA%20%E9%9B%86%E6%88%90%E5%BD%93%E5%89%8D%20app%20%E6%8A%80%E6%9C%AF%E6%96%B9%E6%A1%88.md)
+- 菜单接入说明：[oa-menu-iframe-integration.md](/Users/yu/Desktop/fin-ops-platform/docs/dev/oa-menu-iframe-integration.md)
+- 设计文档：[2026-04-03-oa-shell-auth-visibility-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-03-oa-shell-auth-visibility-design.md)
+- 实施计划：[2026-04-03-oa-shell-auth-visibility.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-03-oa-shell-auth-visibility.md)
+- Prompt 28：[28-oa-shell-auth-foundation.md](/Users/yu/Desktop/fin-ops-platform/prompts/28-oa-shell-auth-foundation.md)
+- Prompt 29：[29-oa-menu-iframe-integration.md](/Users/yu/Desktop/fin-ops-platform/prompts/29-oa-menu-iframe-integration.md)
+- Prompt 30：[30-oa-visibility-and-access-control.md](/Users/yu/Desktop/fin-ops-platform/prompts/30-oa-visibility-and-access-control.md)
+- Prompt 31：[31-oa-integration-deployment-and-qa.md](/Users/yu/Desktop/fin-ops-platform/prompts/31-oa-integration-deployment-and-qa.md)
+- 部署说明：[deploy/oa/README.md](/Users/yu/Desktop/fin-ops-platform/deploy/oa/README.md)
+- Nginx 示例：[deploy/oa/nginx.fin-ops.conf.example](/Users/yu/Desktop/fin-ops-platform/deploy/oa/nginx.fin-ops.conf.example)
+- 环境模板：[deploy/oa/fin_ops.env.example](/Users/yu/Desktop/fin-ops-platform/deploy/oa/fin_ops.env.example)
+- 菜单 SQL：[deploy/oa/fin_ops_menu.mysql.sql](/Users/yu/Desktop/fin-ops-platform/deploy/oa/fin_ops_menu.mysql.sql)
+- 角色绑定 SQL：[deploy/oa/fin_ops_role_binding.mysql.sql](/Users/yu/Desktop/fin-ops-platform/deploy/oa/fin_ops_role_binding.mysql.sql)
+
+## Prompt 30 已落地内容
+
+- `finops:app:view` 作为统一访问口径
+- `GET /api/session/me` 继续用于会话识别和前端 `403` 展示
+- 所有核心业务接口现在都要求有效 OA 会话与访问授权：
+  - `/api/*`
+  - `/imports/*`
+  - `/matching/*`
+  - `/workbench*`
+  - `/integrations/*`
+  - `/projects*`
+  - `/ledgers*`
+  - `/reminders*`
+  - `/reconciliation/*`
+- 未登录或 token 失效：返回 `401`
+- 已登录但无权限：返回 `403`
+- 不再依赖“只隐藏菜单”的前端可见性控制
+
+## Prompt 31 已落地内容
+
+- OA 集成已经补齐真实部署资产：
+  - `/fin-ops/`
+  - `/fin-ops-api/`
+- 已新增：
+  - 同域部署与回滚文档
+  - OA 集成环境变量模板
+  - Nginx 反向代理示例
+- 已补齐发布顺序：
+  - 后端
+  - 前端
+  - 权限
+  - 菜单
+  - 联调
+- 已补齐联调验收清单：
+  - 登录复用
+  - 菜单可见性
+  - 403 拦截
+  - workbench / tax / cost / export / search 可用性
+- 已补齐关键鉴权链路测试：
+  - `Admin-Token` cookie 复用
+  - `session/me`
+  - 受保护 API 的 `401/403`
+
 ## Prompt 08 已落地内容
 
 - 项目接口：

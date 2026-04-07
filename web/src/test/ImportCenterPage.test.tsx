@@ -15,7 +15,7 @@ describe("Import center", () => {
 
     renderAppAt("/imports");
 
-    expect(screen.getByRole("heading", { name: "导入中心" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "导入中心" })).toBeInTheDocument();
 
     const input = screen.getByLabelText("上传文件") as HTMLInputElement;
     const invoiceFile = new File(["invoice-demo"], "全量发票查询导出结果-2026年1月.xlsx", {
@@ -57,7 +57,7 @@ describe("Import center", () => {
 
     renderAppAt("/imports");
 
-    const input = screen.getByLabelText("上传文件") as HTMLInputElement;
+    const input = (await screen.findByLabelText("上传文件")) as HTMLInputElement;
     const invoiceFile = new File(["invoice-demo"], "全量发票查询导出结果-2026年1月.xlsx", {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       lastModified: 1,
@@ -95,7 +95,7 @@ describe("Import center", () => {
 
     renderAppAt("/imports");
 
-    const input = screen.getByLabelText("上传文件") as HTMLInputElement;
+    const input = (await screen.findByLabelText("上传文件")) as HTMLInputElement;
     const invoiceFile = new File(["invoice-demo"], "全量发票查询导出结果-2026年1月.xlsx", {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
@@ -171,7 +171,7 @@ describe("Import center", () => {
 
     renderAppAt("/imports");
 
-    const input = screen.getByLabelText("上传文件") as HTMLInputElement;
+    const input = (await screen.findByLabelText("上传文件")) as HTMLInputElement;
     const invoiceFile = new File(["invoice-demo"], "全量发票查询导出结果-2026年1月.xlsx", {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });

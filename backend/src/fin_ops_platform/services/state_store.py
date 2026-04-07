@@ -209,6 +209,7 @@ class ApplicationStateStore:
         default_payload = {
             "completed_project_ids": [],
             "bank_account_mappings": [],
+            "allowed_usernames": [],
         }
         if self._mongo_database is not None:
             document = self._mongo_detailed_collections["app_settings"].find_one({"_id": APP_SETTINGS_DOCUMENT_ID})
@@ -217,6 +218,7 @@ class ApplicationStateStore:
                 return {
                     "completed_project_ids": list(payload.get("completed_project_ids") or []),
                     "bank_account_mappings": list(payload.get("bank_account_mappings") or []),
+                    "allowed_usernames": list(payload.get("allowed_usernames") or []),
                 }
             return default_payload
 
@@ -231,12 +233,14 @@ class ApplicationStateStore:
         return {
             "completed_project_ids": list(loaded.get("completed_project_ids") or []),
             "bank_account_mappings": list(loaded.get("bank_account_mappings") or []),
+            "allowed_usernames": list(loaded.get("allowed_usernames") or []),
         }
 
     def save_app_settings(self, payload: dict[str, Any]) -> None:
         normalized_payload = {
             "completed_project_ids": list(payload.get("completed_project_ids") or []),
             "bank_account_mappings": list(payload.get("bank_account_mappings") or []),
+            "allowed_usernames": list(payload.get("allowed_usernames") or []),
         }
         if self._mongo_database is not None:
             self._mongo_detailed_collections["app_settings"].update_one(
