@@ -1,5 +1,9 @@
 # OA Shell/Auth/Visibility Integration Plan
 
+> 注：本文档对应 OA 接入第一阶段。  
+> 如果要继续实现“只可看和只可导出 / 所有操作均可 / `YNSYLP005` 独占管理”的新权限模型，请改用
+> [2026-04-07-oa-access-role-management.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-07-oa-access-role-management.md)。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Integrate `fin-ops-platform` into the existing OA system so the app opens inside the OA shell, reuses OA login, and is fully hidden from unauthorized users.

@@ -6,7 +6,7 @@ import os
 import sys
 from typing import Mapping
 
-from fin_ops_platform.services.access_control_service import AccessControlService
+from fin_ops_platform.services.access_control_service import AccessControlService, AccessTier
 from fin_ops_platform.services.oa_identity_service import OAIdentityService, OAUserIdentity
 
 
@@ -33,6 +33,10 @@ class OARequestSession:
     token: str
     identity: OAUserIdentity
     allowed: bool
+    access_tier: AccessTier
+    can_access_app: bool
+    can_mutate_data: bool
+    can_admin_access: bool
 
 
 def _should_enable_default_test_auth() -> bool:
@@ -97,7 +101,16 @@ def resolve_oa_request_session(
                 roles=access_control_service.allowed_roles or ["finance"],
                 permissions=[access_control_service.required_permission],
             )
-            return OARequestSession(token="local-dev-token", identity=synthetic_identity, allowed=True)
+            decision = access_control_service.evaluate(synthetic_identity)
+            return OARequestSession(
+                token="local-dev-token",
+                identity=synthetic_identity,
+                allowed=decision.allowed,
+                access_tier=decision.access_tier,
+                can_access_app=decision.can_access_app,
+                can_mutate_data=decision.can_mutate_data,
+                can_admin_access=decision.can_admin_access,
+            )
         if _should_enable_default_test_auth():
             synthetic_identity = OAUserIdentity(
                 user_id="test-user-id",
@@ -107,9 +120,26 @@ def resolve_oa_request_session(
                 roles=access_control_service.allowed_roles or ["finance"],
                 permissions=[access_control_service.required_permission],
             )
-            return OARequestSession(token="test-default-token", identity=synthetic_identity, allowed=True)
+            decision = access_control_service.evaluate(synthetic_identity)
+            return OARequestSession(
+                token="test-default-token",
+                identity=synthetic_identity,
+                allowed=decision.allowed,
+                access_tier=decision.access_tier,
+                can_access_app=decision.can_access_app,
+                can_mutate_data=decision.can_mutate_data,
+                can_admin_access=decision.can_admin_access,
+            )
         raise UnauthorizedOASessionError("缺少 OA 登录态，请从 OA 系统进入。")
 
     identity = identity_service.resolve_identity(token)
-    allowed = access_control_service.is_allowed(identity)
-    return OARequestSession(token=token, identity=identity, allowed=allowed)
+    decision = access_control_service.evaluate(identity)
+    return OARequestSession(
+        token=token,
+        identity=identity,
+        allowed=decision.allowed,
+        access_tier=decision.access_tier,
+        can_access_app=decision.can_access_app,
+        can_mutate_data=decision.can_mutate_data,
+        can_admin_access=decision.can_admin_access,
+    )

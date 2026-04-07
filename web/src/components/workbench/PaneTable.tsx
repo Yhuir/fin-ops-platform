@@ -7,6 +7,7 @@ type PaneTableProps = {
   paneId: WorkbenchRecordType;
   title: string;
   rows: WorkbenchRecord[];
+  canMutateData?: boolean;
   getRowState: (row: WorkbenchRecord) => WorkbenchRowState;
   onSelectRow: (row: WorkbenchRecord) => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
@@ -17,6 +18,7 @@ export default function PaneTable({
   paneId,
   title,
   rows,
+  canMutateData = true,
   getRowState,
   onSelectRow,
   onOpenDetail,
@@ -78,6 +80,7 @@ export default function PaneTable({
                   <td className="action-cell">
                     <RowActions
                       availableActions={row.availableActions}
+                      canMutateData={canMutateData}
                       recordType={row.recordType}
                       showWorkflowActions
                       variant={row.actionVariant}

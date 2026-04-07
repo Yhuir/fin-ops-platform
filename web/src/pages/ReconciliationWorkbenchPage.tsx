@@ -14,6 +14,7 @@ import WorkbenchSettingsModal from "../components/workbench/WorkbenchSettingsMod
 import WorkbenchZone from "../components/workbench/WorkbenchZone";
 import type { WorkbenchPane } from "../components/workbench/ResizableTriPane";
 import { useAppChrome } from "../contexts/AppChromeContext";
+import { useSessionPermissions } from "../contexts/SessionContext";
 import {
   cancelWorkbenchLink,
   cancelWorkbenchException,
@@ -92,10 +93,13 @@ function normalizeSearchKeyword(value: string) {
   return value.replace(/\s+/g, "").trim();
 }
 
+const READONLY_ACTION_MESSAGE = "当前账号仅支持查看和导出，不能执行写操作。";
+
 export default function ReconciliationWorkbenchPage() {
   const navigate = useNavigate();
   const { currentMonth, setCurrentMonth } = useMonth();
   const { setWorkbenchFocusMode } = useAppChrome();
+  const { canMutateData, canAdminAccess } = useSessionPermissions();
   const {
     detailRow,
     getRowState,
@@ -553,7 +557,13 @@ export default function ReconciliationWorkbenchPage() {
     completedProjectIds: string[];
     bankAccountMappings: WorkbenchSettings["bankAccountMappings"];
     allowedUsernames: string[];
+    readonlyExportUsernames: string[];
+    adminUsernames: string[];
   }) => {
+    if (!canMutateData) {
+      openActionResultDialog(READONLY_ACTION_MESSAGE);
+      return;
+    }
     setIsSettingsSaving(true);
     try {
       const saved = await saveWorkbenchSettings(payload);
@@ -587,6 +597,10 @@ export default function ReconciliationWorkbenchPage() {
   };
 
   const openOaBankExceptionDialog = (rows: WorkbenchRecord[]) => {
+    if (!canMutateData) {
+      openActionResultDialog(READONLY_ACTION_MESSAGE);
+      return;
+    }
     const summary = summarizeOaBankRows(rows);
     const optionState = buildOaBankExceptionOptions(summary);
     if (summary.invoiceCount > 0) {
@@ -660,6 +674,10 @@ export default function ReconciliationWorkbenchPage() {
     exceptionLabel: string;
     comment: string;
   }) => {
+    if (!canMutateData) {
+      openActionResultDialog(READONLY_ACTION_MESSAGE);
+      return;
+    }
     setOaBankExceptionDialog(null);
     await runBlockingAction({
       loadingMessage: "正在执行异常处理...",
@@ -679,6 +697,10 @@ export default function ReconciliationWorkbenchPage() {
   };
 
   const handleConfirmFromOaBankException = async (rows: WorkbenchRecord[]) => {
+    if (!canMutateData) {
+      openActionResultDialog(READONLY_ACTION_MESSAGE);
+      return;
+    }
     setOaBankExceptionDialog(null);
     await runBlockingAction({
       loadingMessage: "正在确认关联...",
@@ -698,6 +720,11 @@ export default function ReconciliationWorkbenchPage() {
   const handleRowAction = async (row: WorkbenchRecord, action: WorkbenchInlineAction) => {
     if (action === "relation-status") {
       openActionResultDialog(`当前关联情况：${row.status}`, "关联情况");
+      return;
+    }
+
+    if (!canMutateData) {
+      openActionResultDialog(READONLY_ACTION_MESSAGE);
       return;
     }
 
@@ -794,6 +821,10 @@ export default function ReconciliationWorkbenchPage() {
   };
 
   const handleConfirmOpenSelection = async () => {
+    if (!canMutateData) {
+      openActionResultDialog(READONLY_ACTION_MESSAGE);
+      return;
+    }
     if (openSelectionSummary.total === 0) {
       openActionResultDialog("请先选择待处理记录。");
       return;
@@ -827,6 +858,10 @@ export default function ReconciliationWorkbenchPage() {
   };
 
   const handleOpenSelectionException = async () => {
+    if (!canMutateData) {
+      openActionResultDialog(READONLY_ACTION_MESSAGE);
+      return;
+    }
     if (!canHandleOpenSelectionException) {
       openActionResultDialog("请先选择待处理记录。");
       return;
@@ -870,6 +905,10 @@ export default function ReconciliationWorkbenchPage() {
   };
 
   const handleCancelPairedSelection = async () => {
+    if (!canMutateData) {
+      openActionResultDialog(READONLY_ACTION_MESSAGE);
+      return;
+    }
     if (pairedSelectionSummary.total === 0) {
       openActionResultDialog("请先选择已配对记录。");
       return;
@@ -905,6 +944,10 @@ export default function ReconciliationWorkbenchPage() {
   };
 
   const handleUnignoreRow = async (row: WorkbenchRecord) => {
+    if (!canMutateData) {
+      openActionResultDialog(READONLY_ACTION_MESSAGE);
+      return;
+    }
     setIgnoredModalOpen(false);
     await runBlockingAction({
       loadingMessage: "正在撤回忽略...",
@@ -920,6 +963,10 @@ export default function ReconciliationWorkbenchPage() {
   };
 
   const handleConfirmCancelProcessedException = async () => {
+    if (!canMutateData) {
+      openActionResultDialog(READONLY_ACTION_MESSAGE);
+      return;
+    }
     if (!cancelProcessedExceptionDialog) {
       return;
     }
@@ -967,18 +1014,22 @@ export default function ReconciliationWorkbenchPage() {
             <button className="secondary-button" type="button" onClick={handleOpenSettingsModal}>
               设置
             </button>
-            <button className="secondary-button" type="button" onClick={() => navigate("/imports?intent=bank_transaction")}>
-              银行流水导入
-            </button>
-            <button className="secondary-button" type="button" onClick={() => navigate("/imports?intent=output_invoice")}>
-              销项发票导入
-            </button>
-            <button className="secondary-button" type="button" onClick={() => navigate("/imports?intent=input_invoice")}>
-              进项发票导入
-            </button>
-            <button className="secondary-button" type="button" onClick={() => navigate("/imports?intent=etc_invoice")}>
-              ETC发票导入
-            </button>
+            {canMutateData ? (
+              <>
+                <button className="secondary-button" type="button" onClick={() => navigate("/imports?intent=bank_transaction")}>
+                  银行流水导入
+                </button>
+                <button className="secondary-button" type="button" onClick={() => navigate("/imports?intent=output_invoice")}>
+                  销项发票导入
+                </button>
+                <button className="secondary-button" type="button" onClick={() => navigate("/imports?intent=input_invoice")}>
+                  进项发票导入
+                </button>
+                <button className="secondary-button" type="button" onClick={() => navigate("/imports?intent=etc_invoice")}>
+                  ETC发票导入
+                </button>
+              </>
+            ) : null}
           </div>
           <WorkbenchSearchBox onOpen={handleOpenSearchModal} />
           <MonthPicker value={currentMonth} onChange={setCurrentMonth} />
@@ -1011,13 +1062,14 @@ export default function ReconciliationWorkbenchPage() {
           <>
             {shouldRenderPairedZone ? (
               <WorkbenchZone
+                canMutateData={canMutateData}
                 getRowState={getRowState}
                 isExpanded={expandedZoneId === "paired"}
                 meta="自动闭环与人工确认后的记录"
                 onClearSelection={handleClearPairedSelection}
                 onOpenDetail={handleOpenDetail}
                 onPrimarySelectionAction={handleCancelPairedSelection}
-                primarySelectionActionDisabled={isPairedCancelSelectionDisabled}
+                primarySelectionActionDisabled={isPairedCancelSelectionDisabled || !canMutateData}
                 onRowAction={handleRowAction}
                 onSelectRow={handleSelectRow}
                 onToggleExpand={() => setExpandedZoneId((current) => (current === "paired" ? null : "paired"))}
@@ -1046,17 +1098,18 @@ export default function ReconciliationWorkbenchPage() {
                     tone: "warning",
                   },
                 ]}
+                canMutateData={canMutateData}
                 getRowState={getRowState}
                 isExpanded={expandedZoneId === "open"}
                 meta="等待人工处理、台账跟进或后续单据补齐"
                 onClearSelection={handleClearOpenSelection}
                 onOpenDetail={handleOpenDetail}
                 onPrimarySelectionAction={handleConfirmOpenSelection}
-                primarySelectionActionDisabled={isOpenConfirmSelectionDisabled}
+                primarySelectionActionDisabled={isOpenConfirmSelectionDisabled || !canMutateData}
                 onRowAction={handleRowAction}
                 onSelectRow={handleSelectRow}
                 onSecondarySelectionAction={handleOpenSelectionException}
-                secondarySelectionActionDisabled={isOpenExceptionSelectionDisabled}
+                secondarySelectionActionDisabled={isOpenExceptionSelectionDisabled || !canMutateData}
                 onToggleExpand={() => setExpandedZoneId((current) => (current === "open" ? null : "open"))}
                 groups={visibleOpenGroups}
                 highlightedRowId={highlightedRowId}
@@ -1075,6 +1128,8 @@ export default function ReconciliationWorkbenchPage() {
 
       {settingsModalOpen && workbenchSettings ? (
         <WorkbenchSettingsModal
+          canManageAccessControl={canAdminAccess}
+          canSave={canMutateData}
           isSaving={isSettingsSaving}
           settings={workbenchSettings}
           onClose={handleCloseSettingsModal}
@@ -1092,6 +1147,7 @@ export default function ReconciliationWorkbenchPage() {
       ) : null}
       {ignoredModalOpen ? (
         <IgnoredItemsModal
+          canMutateData={canMutateData}
           highlightedRowId={highlightedRowId}
           rows={ignoredData.rows}
           onClose={handleCloseIgnoredModal}
@@ -1100,6 +1156,7 @@ export default function ReconciliationWorkbenchPage() {
       ) : null}
       {processedExceptionsModalOpen ? (
         <ProcessedExceptionsModal
+          canMutateData={canMutateData}
           groups={processedExceptionGroups}
           highlightedRowId={highlightedRowId}
           panes={[

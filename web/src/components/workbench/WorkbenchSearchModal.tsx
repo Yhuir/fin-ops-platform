@@ -59,7 +59,7 @@ export default function WorkbenchSearchModal({
   return (
     <div aria-modal="true" className="detail-modal-backdrop detail-modal-backdrop-foreground" role="presentation" onClick={onClose}>
       <div
-        aria-label="关联台搜索弹窗"
+        aria-label="关联台搜索"
         className="detail-modal workbench-search-modal"
         role="dialog"
         onClick={(event) => event.stopPropagation()}
@@ -69,7 +69,7 @@ export default function WorkbenchSearchModal({
             <h2>关联台搜索</h2>
             <p>统一搜索 OA、银行流水、发票，并可直接跳回关联台定位到对应记录。</p>
           </div>
-          <button aria-label="关闭关联台搜索弹窗" className="detail-close-btn" type="button" onClick={onClose}>
+          <button aria-label="关闭搜索" className="detail-close-btn" type="button" onClick={onClose}>
             关闭
           </button>
         </header>

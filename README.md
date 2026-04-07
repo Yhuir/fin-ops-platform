@@ -145,11 +145,17 @@ python -m pip install -r backend/requirements.txt
 - Prompt 29：[29-oa-menu-iframe-integration.md](/Users/yu/Desktop/fin-ops-platform/prompts/29-oa-menu-iframe-integration.md)
 - Prompt 30：[30-oa-visibility-and-access-control.md](/Users/yu/Desktop/fin-ops-platform/prompts/30-oa-visibility-and-access-control.md)
 - Prompt 31：[31-oa-integration-deployment-and-qa.md](/Users/yu/Desktop/fin-ops-platform/prompts/31-oa-integration-deployment-and-qa.md)
+- 访问账户分层权限设计：[2026-04-07-oa-access-role-management-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-07-oa-access-role-management-design.md)
+- 访问账户分层权限计划：[2026-04-07-oa-access-role-management.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-07-oa-access-role-management.md)
+- Prompt 35：[35-oa-access-role-backend-foundation.md](/Users/yu/Desktop/fin-ops-platform/prompts/35-oa-access-role-backend-foundation.md)
+- Prompt 36：[36-oa-access-role-ui-and-action-gating.md](/Users/yu/Desktop/fin-ops-platform/prompts/36-oa-access-role-ui-and-action-gating.md)
+- Prompt 37：[37-oa-access-role-sync-and-qa.md](/Users/yu/Desktop/fin-ops-platform/prompts/37-oa-access-role-sync-and-qa.md)
 - 部署说明：[deploy/oa/README.md](/Users/yu/Desktop/fin-ops-platform/deploy/oa/README.md)
 - Nginx 示例：[deploy/oa/nginx.fin-ops.conf.example](/Users/yu/Desktop/fin-ops-platform/deploy/oa/nginx.fin-ops.conf.example)
 - 环境模板：[deploy/oa/fin_ops.env.example](/Users/yu/Desktop/fin-ops-platform/deploy/oa/fin_ops.env.example)
 - 菜单 SQL：[deploy/oa/fin_ops_menu.mysql.sql](/Users/yu/Desktop/fin-ops-platform/deploy/oa/fin_ops_menu.mysql.sql)
 - 角色绑定 SQL：[deploy/oa/fin_ops_role_binding.mysql.sql](/Users/yu/Desktop/fin-ops-platform/deploy/oa/fin_ops_role_binding.mysql.sql)
+- 用户角色同步 SQL：[deploy/oa/fin_ops_user_role_sync.mysql.sql](/Users/yu/Desktop/fin-ops-platform/deploy/oa/fin_ops_user_role_sync.mysql.sql)
 
 ## Prompt 30 已落地内容
 
@@ -193,6 +199,39 @@ python -m pip install -r backend/requirements.txt
   - `Admin-Token` cookie 复用
   - `session/me`
   - 受保护 API 的 `401/403`
+
+## Prompt 37 已落地内容
+
+- OA 菜单可见性同步口径已升级为三类账户模型：
+  - `不可见`
+  - `只可看和只可导出`
+  - `所有操作均可`
+  - 管理员固定为 `YNSYLP005`
+- 部署文档已明确：
+  - `allowed_usernames` 之外的账户必须在 OA 菜单中也不可见
+  - `readonly_export_usernames` 与全操作用户都属于可访问账户
+  - app 设置保存后，还需要手工同步 OA 用户角色
+- 已补充：
+  - OA 角色绑定 SQL 模板升级
+  - OA 用户角色同步 SQL 模板
+  - 分账户类型 QA 清单
+  - 自动化回归建议
+
+## OA 权限模型后续升级方向
+
+当前仓库已经补了一版更细的权限重构方案，用于替换“只有单一 `finops:app:view`”的旧口径。目标模型是：
+
+- 不可见且不可访问
+- 可见且可访问，但细分为：
+  - `所有操作均可`
+  - `只可看和只可导出`
+- 只有 `YNSYLP005` 可管理权限
+
+后续开发入口：
+
+- [35-oa-access-role-backend-foundation.md](/Users/yu/Desktop/fin-ops-platform/prompts/35-oa-access-role-backend-foundation.md)
+- [36-oa-access-role-ui-and-action-gating.md](/Users/yu/Desktop/fin-ops-platform/prompts/36-oa-access-role-ui-and-action-gating.md)
+- [37-oa-access-role-sync-and-qa.md](/Users/yu/Desktop/fin-ops-platform/prompts/37-oa-access-role-sync-and-qa.md)
 
 ## Prompt 08 已落地内容
 
@@ -281,10 +320,10 @@ python -m pip install -r backend/requirements.txt
   - `web/src/components/tax/TaxResultPanel.tsx`
 - 已落地能力：
   - `税金抵扣` 页面已切成按月份驱动的独立工作台
-  - 销项票税金清单和进项票税金清单已支持逐行勾选
-  - 销项税额、进项税额、本月抵扣额、应纳税额 / 留抵税额会随勾选实时重算
-  - 页面内已新增 `返回关联台` 入口，并保持全局月份上下文不变
-  - 当前税金页仍使用前端月度 mock 数据，尚未接真实后端税金接口
+  - 销项票开票情况只读展示，进项票认证计划支持勾选试算
+  - 右侧 `已认证结果` 抽屉展示已匹配计划和未进入计划的已认证票
+  - `已认证发票导入` 已接入真实预览 / 确认导入链路，导入后会刷新摘要、计划锁灰状态和抽屉
+  - 销项税额、已认证进项税额、计划进项税额、本月抵扣额、应纳税额 / 留抵税额会随当前状态重算
 
 ## Prompt 14 已落地内容
 

@@ -6,6 +6,7 @@ type ProcessedExceptionsModalProps = {
   groups: WorkbenchCandidateGroup[];
   panes: WorkbenchPane[];
   highlightedRowId?: string | null;
+  canMutateData: boolean;
   onClose: () => void;
   onCancelException: (row: WorkbenchRecord) => void;
 };
@@ -14,6 +15,7 @@ export default function ProcessedExceptionsModal({
   groups,
   panes,
   highlightedRowId,
+  canMutateData,
   onClose,
   onCancelException,
 }: ProcessedExceptionsModalProps) {
@@ -53,6 +55,7 @@ export default function ProcessedExceptionsModal({
               onSelectRow={() => undefined}
               panes={panes}
               rowTemplateColumns="minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)"
+              canMutateData={canMutateData}
               zoneId="paired"
             />
           )}

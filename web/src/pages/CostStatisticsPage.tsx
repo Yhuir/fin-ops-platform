@@ -511,7 +511,11 @@ export default function CostStatisticsPage() {
       key: "amount",
       header: "金额",
       cellClassName: "cost-table-cell-money",
-      render: (row: CostTimeRow) => ({ amount: row.amount, direction: row.direction }),
+      render: (row: CostTimeRow) => ({
+        amount: row.amount,
+        direction: row.direction,
+        paymentAccountLabel: row.paymentAccountLabel,
+      }),
     },
     { key: "expenseContent", header: "费用内容", render: (row: CostTimeRow) => row.expenseContent },
   ];
@@ -525,7 +529,11 @@ export default function CostStatisticsPage() {
       key: "amount",
       header: "金额",
       cellClassName: "cost-table-cell-money",
-      render: (row: CostTimeRow) => ({ amount: row.amount, direction: row.direction }),
+      render: (row: CostTimeRow) => ({
+        amount: row.amount,
+        direction: row.direction,
+        paymentAccountLabel: row.paymentAccountLabel,
+      }),
     },
     { key: "expenseContent", header: "费用内容", render: (row: CostTimeRow) => row.expenseContent },
   ];

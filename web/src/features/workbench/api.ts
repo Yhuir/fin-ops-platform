@@ -105,6 +105,9 @@ type ApiWorkbenchSettings = {
   }>;
   access_control?: {
     allowed_usernames?: string[];
+    readonly_export_usernames?: string[];
+    admin_usernames?: string[];
+    full_access_usernames?: string[];
   };
 };
 
@@ -183,6 +186,8 @@ type WorkbenchSettingsUpdatePayload = {
   completedProjectIds: string[];
   bankAccountMappings: BankAccountMapping[];
   allowedUsernames: string[];
+  readonlyExportUsernames: string[];
+  adminUsernames: string[];
 };
 
 function toDisplayValue(value: string | null | undefined, fallback = "--") {
@@ -224,7 +229,7 @@ function rowLabel(row: ApiWorkbenchRow) {
 
 function rowAmount(row: ApiWorkbenchRow) {
   if (row.type === "bank") {
-    return toDisplayValue(row.debit_amount ?? row.credit_amount);
+    return resolveBankAmount(row);
   }
   return toDisplayValue(row.amount);
 }
@@ -256,6 +261,7 @@ function mapTableValues(row: ApiWorkbenchRow): Record<string, string> {
     return {
       transactionTime: toDisplayValue(row.trade_time),
       direction,
+      amount: resolveBankAmount(row),
       debitAmount: toDisplayValue(row.debit_amount),
       creditAmount: toDisplayValue(row.credit_amount),
       counterparty: toDisplayValue(row.counterparty_name),
@@ -289,7 +295,7 @@ function mapDetailFields(detailFields?: Record<string, string>): WorkbenchDetail
   return Object.entries(detailFields)
     .filter(([label]) => label !== "资金方向")
     .map(([label, value]) => ({
-      label,
+      label: label === "和发票关联情况" ? "和发票OA关联情况" : label,
       value: toDisplayValue(value, "—"),
     }));
 }
@@ -306,6 +312,18 @@ function resolveBankDirection(row: ApiWorkbenchRow) {
     return "收入";
   }
   return "未识别";
+}
+
+function resolveBankAmount(row: ApiWorkbenchRow) {
+  const debitAmount = toDisplayValue(row.debit_amount, "");
+  if (debitAmount !== "") {
+    return debitAmount;
+  }
+  const creditAmount = toDisplayValue(row.credit_amount, "");
+  if (creditAmount !== "") {
+    return creditAmount;
+  }
+  return "--";
 }
 
 function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
@@ -388,6 +406,15 @@ function mapWorkbenchSettings(payload: ApiWorkbenchSettings): WorkbenchSettings 
       allowedUsernames: (payload.access_control?.allowed_usernames ?? [])
         .map((item) => String(item).trim())
         .filter(Boolean),
+      readonlyExportUsernames: (payload.access_control?.readonly_export_usernames ?? [])
+        .map((item) => String(item).trim())
+        .filter(Boolean),
+      adminUsernames: (payload.access_control?.admin_usernames ?? [])
+        .map((item) => String(item).trim())
+        .filter(Boolean),
+      fullAccessUsernames: (payload.access_control?.full_access_usernames ?? [])
+        .map((item) => String(item).trim())
+        .filter(Boolean),
     },
   };
 }
@@ -466,6 +493,8 @@ export async function saveWorkbenchSettings(
         bank_name: mapping.bankName,
       })),
       allowed_usernames: settings.allowedUsernames,
+      readonly_export_usernames: settings.readonlyExportUsernames,
+      admin_usernames: settings.adminUsernames,
     }),
   });
   return mapWorkbenchSettings(payload);

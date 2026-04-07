@@ -23,6 +23,7 @@ type ResizableTriPaneProps = {
   onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "open") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
+  canMutateData: boolean;
 };
 
 export default function ResizableTriPane({
@@ -37,6 +38,7 @@ export default function ResizableTriPane({
   onSelectRow,
   onOpenDetail,
   onRowAction,
+  canMutateData,
 }: ResizableTriPaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -102,6 +104,7 @@ export default function ResizableTriPane({
         onSelectRow={onSelectRow}
         panes={visiblePanes}
         rowTemplateColumns={rowTemplateColumns}
+        canMutateData={canMutateData}
         zoneId={zoneId}
       />
     </div>

@@ -18,6 +18,7 @@ type CandidateGroupGridProps = {
   onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "open") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
+  canMutateData: boolean;
 };
 
 export default function CandidateGroupGrid({
@@ -31,6 +32,7 @@ export default function CandidateGroupGrid({
   onSelectRow,
   onOpenDetail,
   onRowAction,
+  canMutateData,
 }: CandidateGroupGridProps) {
   const gridRef = useRef<HTMLDivElement | null>(null);
   const syncInFlightRef = useRef<Record<WorkbenchRecordType, boolean>>({
@@ -80,6 +82,10 @@ export default function CandidateGroupGrid({
     });
   };
 
+  const paneHasActionColumn = (paneId: WorkbenchRecordType) => actionMode === "cancel-exception-only" || paneId === "invoice";
+  const paneLayoutClass = (paneId: WorkbenchRecordType) =>
+    paneHasActionColumn(paneId) ? "pane-layout-with-action" : "pane-layout-no-action";
+
   return (
     <div ref={gridRef} className="candidate-grid">
       <div className="candidate-grid-head" style={{ gridTemplateColumns: rowTemplateColumns }}>
@@ -95,7 +101,10 @@ export default function CandidateGroupGrid({
               data-testid={`pane-scroll-head-${zoneId}-${pane.id}`}
               onScroll={(event) => handleSyncScroll(pane.id, event.currentTarget)}
             >
-              <div className={`candidate-pane-columnheaders candidate-pane-columnheaders-${pane.id}`} role="row">
+              <div
+                className={`candidate-pane-columnheaders candidate-pane-columnheaders-${pane.id} ${paneLayoutClass(pane.id)}`}
+                role="row"
+              >
                 {workbenchColumns[pane.id].map((column) => (
                   <div
                     key={column.key}
@@ -105,9 +114,11 @@ export default function CandidateGroupGrid({
                     {column.label}
                   </div>
                 ))}
-                <div className="candidate-columnheader action-column" role="columnheader">
-                  操作
-                </div>
+                {paneHasActionColumn(pane.id) ? (
+                  <div className="candidate-columnheader action-column" role="columnheader">
+                    操作
+                  </div>
+                ) : null}
               </div>
             </div>
           </section>
@@ -137,6 +148,7 @@ export default function CandidateGroupGrid({
                   scrollPaneId={pane.id as WorkbenchRecordType}
                   scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${pane.id}`}
                   showWorkflowActions={zoneId !== "open"}
+                  canMutateData={canMutateData}
                   zoneId={zoneId}
                 />
               </div>
@@ -154,11 +166,14 @@ export default function CandidateGroupGrid({
               data-testid={`pane-scrollbar-${zoneId}-${pane.id}`}
               onScroll={(event) => handleSyncScroll(pane.id, event.currentTarget)}
             >
-              <div className={`candidate-pane-scrollbar-track candidate-pane-columnheaders-${pane.id}`} aria-hidden="true">
+              <div
+                className={`candidate-pane-scrollbar-track candidate-pane-columnheaders-${pane.id} ${paneLayoutClass(pane.id)}`}
+                aria-hidden="true"
+              >
                 {workbenchColumns[pane.id].map((column) => (
                   <div key={column.key} className="candidate-scrollbar-track-cell" />
                 ))}
-                <div className="candidate-scrollbar-track-cell action-column" />
+                {paneHasActionColumn(pane.id) ? <div className="candidate-scrollbar-track-cell action-column" /> : null}
               </div>
             </div>
           </div>

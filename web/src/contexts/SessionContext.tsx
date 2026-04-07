@@ -2,18 +2,18 @@ import { createContext, startTransition, useContext, useEffect, useMemo, useStat
 
 import { fetchSessionMe, SessionApiError, type SessionPayload } from "../features/session/api";
 
-type SessionState =
+export type SessionState =
   | { status: "loading" }
   | { status: "authenticated"; session: SessionPayload }
   | { status: "forbidden"; session: SessionPayload }
   | { status: "expired"; message: string }
   | { status: "error"; message: string };
 
-type SessionContextValue = SessionState & {
+export type SessionContextValue = SessionState & {
   refresh: () => void;
 };
 
-const SessionContext = createContext<SessionContextValue | null>(null);
+export const SessionContext = createContext<SessionContextValue | null>(null);
 
 function normalizeSessionFailure(error: unknown): Extract<SessionState, { status: "expired" | "error" }> {
   if (error instanceof SessionApiError) {
@@ -83,4 +83,15 @@ export function useSession() {
     throw new Error("useSession must be used within SessionProvider.");
   }
   return context;
+}
+
+export function useSessionPermissions() {
+  const session = useSession();
+  const authenticatedSession = session.status === "authenticated" ? session.session : null;
+  return {
+    accessTier: authenticatedSession?.accessTier ?? "denied",
+    canAccessApp: authenticatedSession?.canAccessApp ?? false,
+    canMutateData: authenticatedSession?.canMutateData ?? false,
+    canAdminAccess: authenticatedSession?.canAdminAccess ?? false,
+  } as const;
 }

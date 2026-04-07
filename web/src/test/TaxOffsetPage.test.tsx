@@ -28,10 +28,43 @@ describe("Tax offset workbench", () => {
 
     const outputTable = screen.getByRole("table", { name: "销项票开票情况" });
     expect(within(outputTable).queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(within(outputTable).queryByText("发票类型")).not.toBeInTheDocument();
+    expect(within(outputTable).getByText("销")).toBeInTheDocument();
+    expect(within(outputTable).getAllByRole("columnheader").map((header) => header.textContent?.trim())).toEqual([
+      "发票编号",
+      "税额",
+      "对方名称",
+      "金额（税率）",
+    ]);
+    expect(within(outputTable).queryByText("开票日期")).not.toBeInTheDocument();
+    expect(within(outputTable).getAllByText("2026-03-25").length).toBeGreaterThan(0);
+    expect(within(outputTable).getByText("(13%)")).toBeInTheDocument();
+    expect(screen.queryByLabelText("销项票开票情况横向滚动")).not.toBeInTheDocument();
 
     const inputTable = screen.getByRole("table", { name: "进项票认证计划" });
-    expect(within(inputTable).getByRole("checkbox", { name: /11203490/ })).toBeDisabled();
+    expect(within(inputTable).getByRole("checkbox", { name: /11203490/ })).not.toBeDisabled();
     expect(within(inputTable).getByRole("checkbox", { name: /11203491/ })).not.toBeDisabled();
+    expect(within(inputTable).queryByText("发票类型")).not.toBeInTheDocument();
+    expect(within(inputTable).getAllByText("进").length).toBeGreaterThan(0);
+    expect(within(inputTable).getAllByRole("columnheader").map((header) => header.textContent?.trim())).toEqual([
+      "选择",
+      "发票编号",
+      "税额",
+      "对方名称",
+      "金额（税率）",
+    ]);
+    expect(within(inputTable).queryByText("状态")).not.toBeInTheDocument();
+    expect(within(inputTable).queryByText("开票日期")).not.toBeInTheDocument();
+    expect(within(inputTable).getAllByText("待认证").length).toBeGreaterThan(0);
+    expect(within(inputTable).getAllByText("2026-03-22").length).toBeGreaterThan(0);
+    expect(within(inputTable).getByText("(13%)")).toBeInTheDocument();
+    expect(within(inputTable).getByText("(6%)")).toBeInTheDocument();
+    const invoiceMetaRow = within(inputTable).getAllByText("待认证")[0]?.closest(".tax-invoice-meta-row");
+    expect(invoiceMetaRow).not.toBeNull();
+    expect(within(invoiceMetaRow as HTMLElement).getByText("进")).toBeInTheDocument();
+    expect(within(invoiceMetaRow as HTMLElement).getByText("2026-03-22")).toBeInTheDocument();
+    expect(screen.queryByLabelText("进项票认证计划横向滚动")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("税金抵扣表格横向滚动")).toBeInTheDocument();
 
     expect(screen.getByRole("complementary", { name: "已认证结果" })).toBeInTheDocument();
     expect(screen.getByText("已匹配计划")).toBeInTheDocument();
@@ -45,20 +78,63 @@ describe("Tax offset workbench", () => {
     expect(screen.getByRole("button", { name: /展开已认证结果/ })).toBeInTheDocument();
   });
 
-  test("opens certified invoice import in a page modal instead of navigating to the import page", async () => {
+  test("read-only export users can view tax offset data but cannot import certified invoices", async () => {
+    window.history.pushState({}, "", "/tax-offset");
+    installMockApiFetch({
+      sessionAccessTier: "read_export_only",
+      sessionUsername: "READONLY001",
+    });
+    render(<App />);
+
+    expect(await screen.findByText("销项税额")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "已认证发票导入" })).not.toBeInTheDocument();
+  });
+
+  test("previews and confirms certified invoice import inside the page modal, then refreshes plan and summary", async () => {
     window.history.pushState({}, "", "/tax-offset");
     const user = userEvent.setup();
     installMockApiFetch();
     render(<App />);
 
     expect(await screen.findByText("销项税额")).toBeInTheDocument();
+    expect(within(getStatCard("已认证结果进项税额")).getByText("0.00")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "已认证发票导入" }));
 
-    expect(screen.getByRole("dialog", { name: "已认证发票导入" })).toBeInTheDocument();
-    expect(screen.getByText("税金抵扣页内的专用导入窗口。后续真实识别与回写逻辑会直接接在这里，不再跳转到关联台导入界面。")).toBeInTheDocument();
+    const modal = screen.getByRole("dialog", { name: "已认证发票导入" });
+    expect(modal).toBeInTheDocument();
     expect(window.location.pathname).toBe("/tax-offset");
     expect(screen.queryByRole("heading", { name: "导入中心" })).not.toBeInTheDocument();
+
+    const certifiedFile = new File(["mock-xlsx"], "2026年3月 进项认证结果  用途确认信息.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    await user.upload(within(modal).getByLabelText("选择已认证发票文件"), certifiedFile);
+
+    expect(within(modal).getByText(/2026年3月.*用途确认信息\.xlsx/)).toBeInTheDocument();
+
+    await user.click(within(modal).getByRole("button", { name: "预览识别结果" }));
+
+    expect(await within(modal).findByText(/识别记录\s*2\s*条/)).toBeInTheDocument();
+    expect(within(modal).getAllByText(/匹配计划\s*1\s*条/).length).toBeGreaterThan(0);
+    expect(within(modal).getAllByText(/未进入计划\s*1\s*条/).length).toBeGreaterThan(0);
+    expect(within(modal).getByText(/无效记录\s*0\s*条/)).toBeInTheDocument();
+
+    await user.click(within(modal).getByRole("button", { name: "确认导入" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "已认证发票导入" })).not.toBeInTheDocument();
+    });
+
+    expect(await screen.findByText("已导入 2 条已认证记录，并已刷新当前税金抵扣页面。")).toBeInTheDocument();
+    expect(within(getStatCard("已认证结果进项税额")).getByText("14,080.00")).toBeInTheDocument();
+
+    const inputTable = screen.getByRole("table", { name: "进项票认证计划" });
+    expect(within(inputTable).getByRole("checkbox", { name: /11203490/ })).toBeDisabled();
+
+    const drawer = screen.getByRole("complementary", { name: "已认证结果" });
+    expect(within(drawer).getByText("11203490")).toBeInTheDocument();
+    expect(within(drawer).getByText("11203999")).toBeInTheDocument();
   });
 
   test("recalculates using certified invoices plus selected uncertified plan rows", async () => {
@@ -70,17 +146,17 @@ describe("Tax offset workbench", () => {
 
     expect(await screen.findByText("销项税额")).toBeInTheDocument();
     expect(within(getStatCard("销项税额")).getByText("41,600.00")).toBeInTheDocument();
-    expect(within(getStatCard("已认证结果进项税额")).getByText("14,080.00")).toBeInTheDocument();
-    expect(within(getStatCard("计划进项税额")).getByText("5,760.00")).toBeInTheDocument();
-    expect(within(getStatCard("本月抵扣额")).getByText("19,840.00")).toBeInTheDocument();
-    expect(within(getStatCard("本月应纳税额")).getByText("21,760.00")).toBeInTheDocument();
+    expect(within(getStatCard("已认证结果进项税额")).getByText("0.00")).toBeInTheDocument();
+    expect(within(getStatCard("计划进项税额")).getByText("18,240.00")).toBeInTheDocument();
+    expect(within(getStatCard("本月抵扣额")).getByText("18,240.00")).toBeInTheDocument();
+    expect(within(getStatCard("本月应纳税额")).getByText("23,360.00")).toBeInTheDocument();
 
     await user.click(screen.getByRole("checkbox", { name: /11203491/ }));
 
-    expect(await within(getStatCard("计划进项税额")).findByText("0.00")).toBeInTheDocument();
-    expect(within(getStatCard("已认证结果进项税额")).getByText("14,080.00")).toBeInTheDocument();
-    expect(within(getStatCard("本月抵扣额")).getByText("14,080.00")).toBeInTheDocument();
-    expect(within(getStatCard("本月应纳税额")).getByText("27,520.00")).toBeInTheDocument();
+    expect(await within(getStatCard("计划进项税额")).findByText("12,480.00")).toBeInTheDocument();
+    expect(within(getStatCard("已认证结果进项税额")).getByText("0.00")).toBeInTheDocument();
+    expect(within(getStatCard("本月抵扣额")).getByText("12,480.00")).toBeInTheDocument();
+    expect(within(getStatCard("本月应纳税额")).getByText("29,120.00")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/tax-offset/calculate",
       expect.objectContaining({
@@ -88,10 +164,37 @@ describe("Tax offset workbench", () => {
         body: JSON.stringify({
           month: "2026-03",
           selected_output_ids: ["to-202603-001"],
-          selected_input_ids: [],
+          selected_input_ids: ["ti-202603-001"],
         }),
       }),
     );
+  });
+
+  test("supports select all and clear actions for the input plan table", async () => {
+    window.history.pushState({}, "", "/tax-offset");
+    const user = userEvent.setup();
+    installMockApiFetch();
+
+    render(<App />);
+
+    expect(await screen.findByText("销项税额")).toBeInTheDocument();
+
+    const inputTable = screen.getByRole("table", { name: "进项票认证计划" });
+    const firstCheckbox = within(inputTable).getByRole("checkbox", { name: /11203490/ }) as HTMLInputElement;
+    const secondCheckbox = within(inputTable).getByRole("checkbox", { name: /11203491/ }) as HTMLInputElement;
+
+    expect(firstCheckbox.checked).toBe(true);
+    expect(secondCheckbox.checked).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "清空" }));
+
+    expect(firstCheckbox.checked).toBe(false);
+    expect(secondCheckbox.checked).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: "全选" }));
+
+    expect(firstCheckbox.checked).toBe(true);
+    expect(secondCheckbox.checked).toBe(true);
   });
 
   test("clicking a matched certified row highlights the corresponding input plan row", async () => {
@@ -101,6 +204,19 @@ describe("Tax offset workbench", () => {
     render(<App />);
 
     expect(await screen.findByText("销项税额")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "已认证发票导入" }));
+    const modal = screen.getByRole("dialog", { name: "已认证发票导入" });
+    const certifiedFile = new File(["mock-xlsx"], "2026年3月 进项认证结果  用途确认信息.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    await user.upload(within(modal).getByLabelText("选择已认证发票文件"), certifiedFile);
+    await user.click(within(modal).getByRole("button", { name: "预览识别结果" }));
+    await screen.findByText(/识别记录\s*2\s*条/);
+    await user.click(within(modal).getByRole("button", { name: "确认导入" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "已认证发票导入" })).not.toBeInTheDocument();
+    });
 
     const drawer = screen.getByRole("complementary", { name: "已认证结果" });
     await user.click(within(drawer).getByRole("button", { name: /11203490/ }));

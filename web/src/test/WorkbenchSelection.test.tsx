@@ -1,8 +1,9 @@
 import { screen, within } from "@testing-library/react";
+import { waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { installMockApiFetch } from "./apiMock";
-import { renderWorkbenchPage } from "./renderHelpers";
+import { renderAppAt, renderWorkbenchPage } from "./renderHelpers";
 
 describe("Workbench row selection and detail modal", () => {
   test("clicking an open row toggles multi-selection without opening the detail modal", async () => {
@@ -239,14 +240,19 @@ describe("Workbench row selection and detail modal", () => {
 
   test("workbench settings can manage allowed app accounts", async () => {
     const user = userEvent.setup();
-    const fetchMock = installMockApiFetch();
-    renderWorkbenchPage();
+    const fetchMock = installMockApiFetch({
+      sessionAccessTier: "admin",
+      sessionUsername: "YNSYLP005",
+    });
+    renderAppAt("/");
 
     await user.click(await screen.findByRole("button", { name: "设置" }));
 
     expect(await screen.findByRole("dialog", { name: "关联台设置" })).toBeInTheDocument();
+    expect(screen.getByText("访问账户管理")).toBeInTheDocument();
 
-    await user.type(screen.getByLabelText("允许访问账户"), "YNSYLP005");
+    await user.type(screen.getByLabelText("新增访问账户"), "READONLY001");
+    await user.selectOptions(screen.getByLabelText("新增账户权限"), "read_export_only");
     await user.click(screen.getByRole("button", { name: "新增账户" }));
     await user.click(screen.getByRole("button", { name: "保存设置" }));
 
@@ -254,14 +260,80 @@ describe("Workbench row selection and detail modal", () => {
       "/api/workbench/settings",
       expect.objectContaining({
         method: "POST",
-        body: expect.stringContaining("\"allowed_usernames\":[\"YNSYLP005\"]"),
+        body: expect.stringContaining("\"allowed_usernames\":[\"READONLY001\"]"),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/settings",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining("\"readonly_export_usernames\":[\"READONLY001\"]"),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/settings",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining("\"admin_usernames\":[\"YNSYLP005\"]"),
       }),
     );
     expect(await screen.findByText("已保存关联台设置。")).toBeInTheDocument();
   });
 
+  test("non-admin users do not see access account management in settings", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({
+      sessionAccessTier: "full_access",
+      sessionUsername: "FULL001",
+    });
+    renderAppAt("/");
+
+    await user.click(await screen.findByRole("button", { name: "设置" }));
+
+    expect(await screen.findByRole("dialog", { name: "关联台设置" })).toBeInTheDocument();
+    expect(screen.queryByText("访问账户管理")).not.toBeInTheDocument();
+  });
+
+  test("read-only export users can search and view details but cannot see write actions", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({
+      sessionAccessTier: "read_export_only",
+      sessionUsername: "READONLY001",
+    });
+    renderAppAt("/");
+
+    const openZone = await screen.findByTestId("zone-open");
+    const pairedZone = await screen.findByTestId("zone-paired");
+
+    expect(screen.queryByRole("button", { name: "银行流水导入" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "销项发票导入" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "进项发票导入" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "ETC发票导入" })).not.toBeInTheDocument();
+    expect(within(openZone).getByRole("button", { name: "确认关联" })).toBeDisabled();
+    expect(within(openZone).getByRole("button", { name: "异常处理" })).toBeDisabled();
+    expect(within(pairedZone).getByRole("button", { name: "取消配对" })).toBeDisabled();
+
+    const invoiceRow = within(openZone).getByRole("row", {
+      name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
+    });
+    expect(within(invoiceRow).queryByRole("button", { name: "忽略" })).not.toBeInTheDocument();
+    await user.click(within(invoiceRow).getByRole("button", { name: "详情" }));
+    expect(await screen.findByRole("dialog", { name: "详情弹窗" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭详情" }));
+
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    expect(await screen.findByRole("dialog", { name: "关联台搜索" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "关闭搜索" }));
+
+    await user.click(screen.getByRole("button", { name: "设置" }));
+    const settingsDialog = await screen.findByRole("dialog", { name: "关联台设置" });
+    expect(within(settingsDialog).getByRole("button", { name: "保存设置" })).toBeDisabled();
+  });
+
   test("paired zone cancel action stays disabled until at least two rows are selected", async () => {
     const user = userEvent.setup();
+    installMockApiFetch();
     renderWorkbenchPage();
 
     const pairedZone = await screen.findByTestId("zone-paired");
@@ -281,7 +353,9 @@ describe("Workbench row selection and detail modal", () => {
     });
 
     await user.click(pairedInvoiceRow);
-    expect(cancelButton).toBeEnabled();
+    await waitFor(() => {
+      expect(within(pairedZone).getByRole("button", { name: "取消配对" })).toBeEnabled();
+    });
   });
 
   test("invoice rows can be ignored into the ignored modal and restored back to open", async () => {

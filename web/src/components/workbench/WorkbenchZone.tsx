@@ -17,6 +17,7 @@ type WorkbenchZoneProps = {
   onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "open") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
+  canMutateData: boolean;
   highlightedRowId?: string | null;
   selectionSummary?: {
     total: number;
@@ -51,6 +52,7 @@ export default function WorkbenchZone({
   onSelectRow,
   onOpenDetail,
   onRowAction,
+  canMutateData,
   highlightedRowId,
   selectionSummary,
   onClearSelection,
@@ -201,6 +203,7 @@ export default function WorkbenchZone({
         panes={panes}
         visibleIndices={visibleIndices}
         widths={widths}
+        canMutateData={canMutateData}
         onStartDrag={startDrag}
         zoneId={zoneId}
       />

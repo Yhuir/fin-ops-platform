@@ -35,6 +35,12 @@
 29. `29-oa-menu-iframe-integration.md`
 30. `30-oa-visibility-and-access-control.md`
 31. `31-oa-integration-deployment-and-qa.md`
+32. `32-tax-offset-certified-import-parser-and-storage.md`
+33. `33-tax-offset-certified-import-matching-and-refresh.md`
+34. `34-tax-offset-certified-import-ui-and-qa.md`
+35. `35-oa-access-role-backend-foundation.md`
+36. `36-oa-access-role-ui-and-action-gating.md`
+37. `37-oa-access-role-sync-and-qa.md`
 
 使用方式建议：
 
@@ -70,6 +76,15 @@ Workbench V2 这一组 prompt 对应的需求与文档：
 - 实施计划：[2026-04-03-tax-offset-certified-plan.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-03-tax-offset-certified-plan.md)
 - 当前实现口径：销项票只读、进项票做认证计划、已认证结果进入右侧抽屉并自动计入试算
 
+税金抵扣“真实已认证模板导入”这一组 prompt 对应的需求与文档：
+
+- 参考文件：
+  - [2026年1月 进项认证结果  用途确认信息.xlsx](/Users/yu/Desktop/fin-ops-platform/测试数据/2026年1月%20进项认证结果%20%20用途确认信息.xlsx)
+  - [2026年2月 进项认证结果  用途确认信息.xlsx](/Users/yu/Desktop/fin-ops-platform/测试数据/2026年2月%20进项认证结果%20%20用途确认信息.xlsx)
+- 设计文档：[2026-04-07-tax-offset-certified-import-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-07-tax-offset-certified-import-design.md)
+- 实施计划：[2026-04-07-tax-offset-certified-import.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-07-tax-offset-certified-import.md)
+- 当前目标：让已认证结果来自真实 Excel 导入与持久化，而不是后端写死样例
+
 OA 页面壳体 / 登录复用 / 可见性控制这一组 prompt 对应的需求与文档：
 
 - 总方案文档：[OA 集成当前 app 技术方案.md](/Users/yu/Desktop/fin-ops-platform/OA%20%E9%9B%86%E6%88%90%E5%BD%93%E5%89%8D%20app%20%E6%8A%80%E6%9C%AF%E6%96%B9%E6%A1%88.md)
@@ -77,3 +92,14 @@ OA 页面壳体 / 登录复用 / 可见性控制这一组 prompt 对应的需求
 - 实施计划：[2026-04-03-oa-shell-auth-visibility.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-03-oa-shell-auth-visibility.md)
 - 外部 OA 前端源码：`/Users/yu/Desktop/sy/smart-oa-ui`
 - 外部 OA 后端源码：`/Users/yu/Desktop/sy/smart_oa`
+
+OA “访问账户管理 / 只读导出 / 管理员独占权限”这一组 prompt 对应的需求与文档：
+
+- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/银企核销需求.md)
+- 总方案文档：[OA 集成当前 app 技术方案.md](/Users/yu/Desktop/fin-ops-platform/OA%20%E9%9B%86%E6%88%90%E5%BD%93%E5%89%8D%20app%20%E6%8A%80%E6%9C%AF%E6%96%B9%E6%A1%88.md)
+- 设计文档：[2026-04-07-oa-access-role-management-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-07-oa-access-role-management-design.md)
+- 实施计划：[2026-04-07-oa-access-role-management.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-07-oa-access-role-management.md)
+- 关键业务口径：
+  - 不可见且不可访问
+  - 可见且可访问，但分为 `所有操作均可` / `只可看和只可导出`
+  - 只有 `YNSYLP005` 可管理权限

@@ -110,9 +110,12 @@ describe("Cost statistics page", () => {
     const dialog = await screen.findByRole("dialog", { name: "流水详情" });
     expect(dialog).toBeInTheDocument();
     expect(screen.getAllByText("PLC 模块采购").length).toBeGreaterThan(0);
-    expect(within(dialog).getByText("工商银行")).toBeInTheDocument();
+    const detailBankName = within(dialog).getByText("工商银行");
+    expect(detailBankName).toBeInTheDocument();
+    expect(detailBankName.closest(".bank-account-tag")).not.toBeNull();
     expect(within(dialog).getByText("0001")).toBeInTheDocument();
     expect(within(dialog).queryByText("工商银行 账户 0001")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("支付账户")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("资金方向")).not.toBeInTheDocument();
     expect(within(dialog).getByText("支出")).toHaveClass("direction-tag");
     await user.click(within(dialog).getByRole("button", { name: "关闭" }));
@@ -142,9 +145,12 @@ describe("Cost statistics page", () => {
     await user.click(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-003" }));
     const dialog = await screen.findByRole("dialog", { name: "流水详情" });
     expect(dialog).toBeInTheDocument();
-    expect(within(dialog).getByText("招商银行")).toBeInTheDocument();
+    const expenseDetailBankName = within(dialog).getByText("招商银行");
+    expect(expenseDetailBankName).toBeInTheDocument();
+    expect(expenseDetailBankName.closest(".bank-account-tag")).not.toBeNull();
     expect(within(dialog).getByText("2201")).toBeInTheDocument();
     expect(within(dialog).queryByText("招商银行 账户 2201")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("支付账户")).not.toBeInTheDocument();
   });
 
   test("shows empty state when the selected month has no cost statistics", async () => {

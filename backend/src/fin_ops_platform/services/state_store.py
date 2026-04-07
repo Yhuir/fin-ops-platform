@@ -41,6 +41,10 @@ MATCHING_RESULTS_COLLECTION = "matching_results"
 WORKBENCH_OVERRIDES_META_COLLECTION = "workbench_overrides_meta"
 WORKBENCH_ROW_OVERRIDES_COLLECTION = "workbench_row_overrides"
 APP_SETTINGS_COLLECTION = "app_settings"
+TAX_CERTIFIED_IMPORTS_META_COLLECTION = "tax_certified_imports_meta"
+TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION = "tax_certified_import_sessions"
+TAX_CERTIFIED_IMPORT_BATCHES_COLLECTION = "tax_certified_import_batches"
+TAX_CERTIFIED_IMPORT_RECORDS_COLLECTION = "tax_certified_import_records"
 STATE_DOCUMENT_ID = "current_state"
 META_DOCUMENT_ID = "_meta"
 APP_SETTINGS_DOCUMENT_ID = "settings"
@@ -137,6 +141,7 @@ class ApplicationStateStore:
         self._legacy_state_path = root / "state.pkl"
         self._import_file_root = root / "import_files"
         self._app_settings_path = root / "app_settings.json"
+        self._tax_certified_imports_path = root / "tax_certified_imports.pkl"
         self._data_dir.mkdir(parents=True, exist_ok=True)
 
         self._mongo_settings = load_mongo_state_settings(root)
@@ -183,6 +188,10 @@ class ApplicationStateStore:
                 "workbench_overrides_meta": self._mongo_database[WORKBENCH_OVERRIDES_META_COLLECTION],
                 "workbench_row_overrides": self._mongo_database[WORKBENCH_ROW_OVERRIDES_COLLECTION],
                 "app_settings": self._mongo_database[APP_SETTINGS_COLLECTION],
+                "tax_certified_imports_meta": self._mongo_database[TAX_CERTIFIED_IMPORTS_META_COLLECTION],
+                "tax_certified_import_sessions": self._mongo_database[TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION],
+                "tax_certified_import_batches": self._mongo_database[TAX_CERTIFIED_IMPORT_BATCHES_COLLECTION],
+                "tax_certified_import_records": self._mongo_database[TAX_CERTIFIED_IMPORT_RECORDS_COLLECTION],
             }
             self._mongo_file_bucket = GridFSBucket(self._mongo_database, bucket_name=GRIDFS_BUCKET_NAME)
             self._ensure_mongo_metadata()
@@ -210,6 +219,8 @@ class ApplicationStateStore:
             "completed_project_ids": [],
             "bank_account_mappings": [],
             "allowed_usernames": [],
+            "readonly_export_usernames": [],
+            "admin_usernames": [],
         }
         if self._mongo_database is not None:
             document = self._mongo_detailed_collections["app_settings"].find_one({"_id": APP_SETTINGS_DOCUMENT_ID})
@@ -219,6 +230,8 @@ class ApplicationStateStore:
                     "completed_project_ids": list(payload.get("completed_project_ids") or []),
                     "bank_account_mappings": list(payload.get("bank_account_mappings") or []),
                     "allowed_usernames": list(payload.get("allowed_usernames") or []),
+                    "readonly_export_usernames": list(payload.get("readonly_export_usernames") or []),
+                    "admin_usernames": list(payload.get("admin_usernames") or []),
                 }
             return default_payload
 
@@ -234,6 +247,8 @@ class ApplicationStateStore:
             "completed_project_ids": list(loaded.get("completed_project_ids") or []),
             "bank_account_mappings": list(loaded.get("bank_account_mappings") or []),
             "allowed_usernames": list(loaded.get("allowed_usernames") or []),
+            "readonly_export_usernames": list(loaded.get("readonly_export_usernames") or []),
+            "admin_usernames": list(loaded.get("admin_usernames") or []),
         }
 
     def save_app_settings(self, payload: dict[str, Any]) -> None:
@@ -241,6 +256,8 @@ class ApplicationStateStore:
             "completed_project_ids": list(payload.get("completed_project_ids") or []),
             "bank_account_mappings": list(payload.get("bank_account_mappings") or []),
             "allowed_usernames": list(payload.get("allowed_usernames") or []),
+            "readonly_export_usernames": list(payload.get("readonly_export_usernames") or []),
+            "admin_usernames": list(payload.get("admin_usernames") or []),
         }
         if self._mongo_database is not None:
             self._mongo_detailed_collections["app_settings"].update_one(
@@ -249,6 +266,9 @@ class ApplicationStateStore:
                     "$set": {
                         "completed_project_ids": normalized_payload["completed_project_ids"],
                         "bank_account_mappings": normalized_payload["bank_account_mappings"],
+                        "allowed_usernames": normalized_payload["allowed_usernames"],
+                        "readonly_export_usernames": normalized_payload["readonly_export_usernames"],
+                        "admin_usernames": normalized_payload["admin_usernames"],
                         "payload": Binary(pickle.dumps(normalized_payload)),
                         "updated_at": datetime.now(UTC),
                     }
@@ -263,6 +283,40 @@ class ApplicationStateStore:
             json.dumps(normalized_payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+    def load_tax_certified_imports(self) -> dict[str, Any]:
+        if self._mongo_database is not None:
+            meta_document = self._mongo_detailed_collections["tax_certified_imports_meta"].find_one({"_id": STATE_DOCUMENT_ID})
+            meta_payload = self._load_binary_payload(meta_document)
+            sessions = self._load_entities_by_id(self._mongo_detailed_collections["tax_certified_import_sessions"])
+            batches = self._load_entities_by_id(self._mongo_detailed_collections["tax_certified_import_batches"])
+            records = self._load_entities_by_id(self._mongo_detailed_collections["tax_certified_import_records"])
+            if not meta_payload and not sessions and not batches and not records:
+                return {}
+            payload = meta_payload if isinstance(meta_payload, dict) else {}
+            payload["sessions"] = sessions
+            payload["batches"] = batches
+            payload["records"] = records
+            return payload
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        if not self._tax_certified_imports_path.exists():
+            return {}
+        with self._tax_certified_imports_path.open("rb") as handle:
+            loaded = pickle.load(handle)  # noqa: S301 - trusted local application state
+        return loaded if isinstance(loaded, dict) else {}
+
+    def save_tax_certified_imports(self, snapshot: dict[str, Any]) -> None:
+        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
+        if self._mongo_database is not None:
+            self._save_tax_certified_imports_detailed(normalized_snapshot, datetime.now(UTC))
+            return
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        with self._tax_certified_imports_path.open("wb") as handle:
+            pickle.dump(normalized_snapshot, handle)
 
     def load(self) -> dict[str, Any]:
         if self._mongo_database is not None:
@@ -378,6 +432,10 @@ class ApplicationStateStore:
                         "matching_results": MATCHING_RESULTS_COLLECTION,
                         "workbench_overrides_meta": WORKBENCH_OVERRIDES_META_COLLECTION,
                         "workbench_row_overrides": WORKBENCH_ROW_OVERRIDES_COLLECTION,
+                        "tax_certified_imports_meta": TAX_CERTIFIED_IMPORTS_META_COLLECTION,
+                        "tax_certified_import_sessions": TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION,
+                        "tax_certified_import_batches": TAX_CERTIFIED_IMPORT_BATCHES_COLLECTION,
+                        "tax_certified_import_records": TAX_CERTIFIED_IMPORT_RECORDS_COLLECTION,
                     },
                     "file_metadata_collection": FILE_METADATA_COLLECTION,
                     "gridfs_bucket": GRIDFS_BUCKET_NAME,
@@ -800,6 +858,93 @@ class ApplicationStateStore:
                     }
                 )
         self._replace_collection_documents(self._mongo_detailed_collections["workbench_row_overrides"], override_documents)
+
+    def _save_tax_certified_imports_detailed(self, snapshot: dict[str, Any], updated_at: datetime) -> None:
+        meta_payload = {
+            key: value
+            for key, value in snapshot.items()
+            if key not in {"sessions", "batches", "records"}
+        }
+        sessions = snapshot.get("sessions", {})
+        batches = snapshot.get("batches", {})
+        records = snapshot.get("records", {})
+
+        self._mongo_detailed_collections["tax_certified_imports_meta"].update_one(
+            {"_id": STATE_DOCUMENT_ID},
+            {
+                "$set": {
+                    **meta_payload,
+                    "session_count": len(sessions) if isinstance(sessions, dict) else 0,
+                    "batch_count": len(batches) if isinstance(batches, dict) else 0,
+                    "record_count": len(records) if isinstance(records, dict) else 0,
+                    "payload": Binary(pickle.dumps(meta_payload)),
+                    "updated_at": updated_at,
+                }
+            },
+            upsert=True,
+        )
+
+        session_documents = []
+        if isinstance(sessions, dict):
+            for session_id, session in sessions.items():
+                serialized_session = self._serialize_value(session)
+                session_documents.append(
+                    {
+                        "_id": str(session_id),
+                        "imported_by": serialized_session.get("imported_by"),
+                        "status": serialized_session.get("status"),
+                        "file_count": serialized_session.get("file_count"),
+                        "created_at": serialized_session.get("created_at"),
+                        "payload": Binary(pickle.dumps(session)),
+                        "updated_at": updated_at,
+                    }
+                )
+
+        batch_documents = []
+        if isinstance(batches, dict):
+            for batch_id, batch in batches.items():
+                serialized_batch = self._serialize_value(batch)
+                batch_documents.append(
+                    {
+                        "_id": str(batch_id),
+                        "session_id": serialized_batch.get("session_id"),
+                        "imported_by": serialized_batch.get("imported_by"),
+                        "file_count": serialized_batch.get("file_count"),
+                        "months": serialized_batch.get("months"),
+                        "persisted_record_count": serialized_batch.get("persisted_record_count"),
+                        "created_at": serialized_batch.get("created_at"),
+                        "payload": Binary(pickle.dumps(batch)),
+                        "updated_at": updated_at,
+                    }
+                )
+
+        record_documents = []
+        if isinstance(records, dict):
+            for record_id, record in records.items():
+                serialized_record = self._serialize_value(record)
+                record_documents.append(
+                    {
+                        "_id": str(record_id),
+                        "month": serialized_record.get("month"),
+                        "invoice_no": serialized_record.get("invoice_no"),
+                        "digital_invoice_no": serialized_record.get("digital_invoice_no"),
+                        "invoice_code": serialized_record.get("invoice_code"),
+                        "seller_tax_no": serialized_record.get("seller_tax_no"),
+                        "seller_name": serialized_record.get("seller_name"),
+                        "issue_date": serialized_record.get("issue_date"),
+                        "tax_amount": serialized_record.get("tax_amount"),
+                        "selection_status": serialized_record.get("selection_status"),
+                        "invoice_status": serialized_record.get("invoice_status"),
+                        "source_file_name": serialized_record.get("source_file_name"),
+                        "source_row_number": serialized_record.get("source_row_number"),
+                        "payload": Binary(pickle.dumps(record)),
+                        "updated_at": updated_at,
+                    }
+                )
+
+        self._replace_collection_documents(self._mongo_detailed_collections["tax_certified_import_sessions"], session_documents)
+        self._replace_collection_documents(self._mongo_detailed_collections["tax_certified_import_batches"], batch_documents)
+        self._replace_collection_documents(self._mongo_detailed_collections["tax_certified_import_records"], record_documents)
 
     def _extract_file_import_metadata(self, file_import_snapshot: Any) -> dict[str, Any]:
         sessions_by_id = {}

@@ -1,5 +1,6 @@
 type BankAccountValueProps = {
   value: string;
+  variant?: "plain" | "tag";
 };
 
 export function splitBankAccountLabel(value: string) {
@@ -33,14 +34,25 @@ export function splitBankAccountLabel(value: string) {
   return null;
 }
 
-export default function BankAccountValue({ value }: BankAccountValueProps) {
+export default function BankAccountValue({ value, variant = "plain" }: BankAccountValueProps) {
   const parts = splitBankAccountLabel(value);
+  const className = variant === "tag" ? "bank-account-value bank-account-tag" : "bank-account-value";
+
   if (!parts) {
-    return <span className="bank-account-value">{value}</span>;
+    return <span className={className}>{value}</span>;
+  }
+
+  if (variant === "tag") {
+    return (
+      <span className={className}>
+        <span className="bank-account-primary">{parts.primary}</span>
+        <span className="bank-account-secondary">{parts.secondary}</span>
+      </span>
+    );
   }
 
   return (
-    <span className="bank-account-value">
+    <span className={className}>
       <span className="bank-account-primary">{parts.primary}</span>
       <span className="bank-account-secondary">{parts.secondary}</span>
     </span>

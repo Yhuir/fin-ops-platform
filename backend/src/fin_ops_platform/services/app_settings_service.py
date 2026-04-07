@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from fin_ops_platform.services.access_control_service import DEFAULT_ADMIN_USERNAME
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.state_store import ApplicationStateStore
 
@@ -49,6 +50,9 @@ class AppSettingsService:
             "bank_account_mappings": mappings,
             "access_control": {
                 "allowed_usernames": list(self._snapshot["allowed_usernames"]),
+                "readonly_export_usernames": list(self._snapshot["readonly_export_usernames"]),
+                "admin_usernames": list(self._snapshot["admin_usernames"]),
+                "full_access_usernames": list(self._snapshot["full_access_usernames"]),
             },
         }
 
@@ -58,12 +62,16 @@ class AppSettingsService:
         completed_project_ids: list[str],
         bank_account_mappings: list[dict[str, Any]],
         allowed_usernames: list[str],
+        readonly_export_usernames: list[str] | None = None,
+        admin_usernames: list[str] | None = None,
     ) -> dict[str, Any]:
         self._snapshot = self._normalize_settings(
             {
                 "completed_project_ids": completed_project_ids,
                 "bank_account_mappings": bank_account_mappings,
                 "allowed_usernames": allowed_usernames,
+                "readonly_export_usernames": readonly_export_usernames or [],
+                "admin_usernames": admin_usernames or [],
             }
         )
         if self._state_store is not None:
@@ -81,6 +89,22 @@ class AppSettingsService:
 
     def get_allowed_usernames(self) -> list[str]:
         return list(self._snapshot["allowed_usernames"])
+
+    def get_readonly_export_usernames(self) -> list[str]:
+        return list(self._snapshot["readonly_export_usernames"])
+
+    def get_admin_usernames(self) -> list[str]:
+        return list(self._snapshot["admin_usernames"])
+
+    @staticmethod
+    def _normalize_username_list(values: list[Any] | None) -> list[str]:
+        return sorted(
+            {
+                str(username).strip()
+                for username in list(values or [])
+                if str(username).strip()
+            }
+        )
 
     @staticmethod
     def _normalize_settings(payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -111,15 +135,30 @@ class AppSettingsService:
                     "bank_name": bank_name,
                 }
             )
-        allowed_usernames = sorted(
-            {
-                str(username).strip()
-                for username in list(raw_payload.get("allowed_usernames") or [])
-                if str(username).strip()
-            }
+        admin_usernames = set(
+            AppSettingsService._normalize_username_list(raw_payload.get("admin_usernames"))
+        )
+        admin_usernames.add(DEFAULT_ADMIN_USERNAME)
+
+        allowed_usernames = set(
+            AppSettingsService._normalize_username_list(raw_payload.get("allowed_usernames"))
+        )
+        allowed_usernames.update(admin_usernames)
+
+        readonly_export_usernames = set(
+            AppSettingsService._normalize_username_list(raw_payload.get("readonly_export_usernames"))
+        )
+        readonly_export_usernames.intersection_update(allowed_usernames)
+        readonly_export_usernames.difference_update(admin_usernames)
+
+        full_access_usernames = sorted(
+            allowed_usernames.difference(readonly_export_usernames).difference(admin_usernames)
         )
         return {
             "completed_project_ids": completed_ids,
             "bank_account_mappings": mappings,
-            "allowed_usernames": allowed_usernames,
+            "allowed_usernames": sorted(allowed_usernames),
+            "readonly_export_usernames": sorted(readonly_export_usernames),
+            "admin_usernames": sorted(admin_usernames),
+            "full_access_usernames": full_access_usernames,
         }

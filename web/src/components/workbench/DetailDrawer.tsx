@@ -117,16 +117,26 @@ export default function DetailDrawer({ row, loading, error, onClose }: DetailDra
 
 function renderSummaryValue(row: WorkbenchRecord, key: string) {
   const value = row.tableValues[key] ?? "--";
-  if (row.recordType === "bank" && key === "paymentAccount") {
-    return <BankAccountValue value={value} />;
-  }
-  if (row.recordType === "bank" && (key === "debitAmount" || key === "creditAmount")) {
-    const direction = resolveDirectionForMoneyCell(key, row.tableValues.direction ?? "", value);
+  if (row.recordType === "bank" && key === "amount") {
+    const direction = resolveDirectionForMoneyCell(row.tableValues.direction ?? "", value);
     const hasValue = value !== "--" && value !== "—" && value !== "";
+    const paymentAccount = row.tableValues.paymentAccount ?? "";
+    const shouldShowAccount = hasValue && paymentAccount !== "--" && paymentAccount !== "—" && paymentAccount !== "";
     return (
-      <span className="money-detail-value">
-        <span>{hasValue ? value : "--"}</span>
-        {hasValue && direction ? <DirectionTag direction={direction} /> : null}
+      <span className="money-cell-stack money-detail-stack">
+        <span className="money-detail-value">
+          <span>{hasValue ? value : "--"}</span>
+        </span>
+        {(Boolean(hasValue && direction) || shouldShowAccount) ? (
+          <span className="money-cell-meta-row">
+            {hasValue && direction ? <DirectionTag direction={direction} /> : null}
+            {shouldShowAccount ? (
+              <span className="money-cell-account">
+                <BankAccountValue value={paymentAccount} variant="tag" />
+              </span>
+            ) : null}
+          </span>
+        ) : null}
       </span>
     );
   }
@@ -135,24 +145,18 @@ function renderSummaryValue(row: WorkbenchRecord, key: string) {
 
 function renderDetailFieldValue(label: string, value: string) {
   if (label === "支付账户" || label === "收款账户") {
-    return <BankAccountValue value={value} />;
+    return <BankAccountValue value={value} variant="tag" />;
   }
   return value;
 }
 
-function resolveDirectionForMoneyCell(key: string, direction: string, value: string) {
+function resolveDirectionForMoneyCell(direction: string, value: string) {
   const hasValue = value !== "--" && value !== "—" && value !== "";
   if (!hasValue) {
     return null;
   }
   if (direction === "支出" || direction === "收入") {
     return direction;
-  }
-  if (key === "debitAmount") {
-    return "支出";
-  }
-  if (key === "creditAmount") {
-    return "收入";
   }
   return null;
 }

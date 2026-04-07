@@ -1,6 +1,9 @@
 # OA 集成当前 app 技术方案
 
-日期：2026-04-03
+日期：2026-04-07
+
+> 注：本文档现已升级到 `2026-04-07` 的权限分层口径。  
+> 旧的“只有单一 `finops:app:view` 就够了”的方案，只能作为 OA 接入第一阶段的历史背景，不能再作为当前真实执行标准。
 
 ## 1. 目标
 
@@ -217,13 +220,29 @@ Python 后端新增鉴权中间层：
 
 推荐权限模型：
 
-### 7.1 OA 权限码
+### 7.1 两层权限模型
 
-在 OA 新增一个权限码：
+接入 OA 后，权限不再只有“能不能进”这一层，而是拆成两层：
+
+1. **可见性 / 访问层**
+   - `在 OA 系统看得见并可访问此 app`
+   - `在 OA 系统看不见且访问不了此 app`
+2. **操作能力层**
+   - `所有操作均可`
+   - `只可看和只可导出`
+
+### 7.2 OA 侧可见性
+
+OA 菜单层仍然负责“看得见 / 看不见”：
+
+- 有访问权限的账户：看得见菜单，并能进入 app
+- 无访问权限的账户：在 OA 中看不见菜单
+
+建议继续保留一个菜单可见性权限，例如：
 
 - `finops:app:view`
 
-并新增一个菜单：
+并新增菜单：
 
 - 名称：`财务运营平台`
 - 归属：建议挂在 `财务管理`
@@ -232,26 +251,99 @@ Python 后端新增鉴权中间层：
 - 组件：由 OA 内链逻辑处理
 - 权限标识：`finops:app:view`
 
-### 7.2 OA 侧可见性
-
-只把这个权限分配给少数用户对应角色。
-
-这样未授权用户：
-
-- 根本看不到菜单入口
-
 ### 7.3 app 后端二次校验
 
-`fin-ops-platform` 后端对每个 API 继续校验：
+`fin-ops-platform` 后端对每个 API 继续校验两件事：
 
-- 当前用户是否拥有 `finops:app:view`
+1. 当前用户是否具备 app 访问资格
+2. 当前用户属于哪种操作能力等级
 
-这样未授权用户即使：
+也就是说：
 
-- 直接输入 iframe 地址
-- 直接访问 `/fin-ops-api/*`
+- 无 app 访问资格：
+  - 页面 `403`
+  - API `403`
+- 有 app 访问资格，但只有 `只可看和只可导出`：
+  - 允许查看、搜索、导出
+  - 禁止导入、确认关联、异常处理、忽略、设置修改等写操作
 
-也只能拿到 `403`
+### 7.4 推荐权限结构
+
+推荐把后端实际判断口径整理成：
+
+- `finops:app:view`
+  - 负责 OA 菜单可见性与基础访问资格
+- `finops:app:operate`
+  - 负责是否拥有“所有操作均可”
+- `finops:app:admin`
+  - 负责是否可管理访问账户与权限模型
+
+如果 OA 现阶段不方便一次性加全三种权限，也可以采用：
+
+- OA 只保留 `finops:app:view`
+- app 自己维护：
+  - `allowed_usernames`
+  - `readonly_export_usernames`
+  - `admin_usernames`
+
+当前正式执行标准最少要确保：
+
+- `YNSYLP005` 是唯一管理员
+- 只读用户不能触发任何写操作
+- 非白名单用户看不见且进不来
+- OA 菜单可见性必须和 `allowed_usernames` 同步
+
+### 7.5 `YNSYLP005` 的特殊角色
+
+当前业务要求里，只有 OA 账户 `YNSYLP005` 可以管理以下内容：
+
+- 哪些账户可访问此 app
+- 这些可访问账户属于：
+  - `所有操作均可`
+  - `只可看和只可导出`
+
+因此，`YNSYLP005` 在系统中需要被视为唯一初始管理员，而且是当前唯一允许管理权限的账户。
+
+建议：
+
+- OA 侧给 `YNSYLP005` 分配最高级别 app 权限
+- app 后端再额外校验 `YNSYLP005` 或管理员名单
+- 关联台 `设置` 中只有管理员能看到“访问账户管理”
+
+### 7.6 设置页中的账户管理能力
+
+关联台 `设置` 应新增/重构为：
+
+- `可访问账户`
+  - 这些账户在 OA 中看得见并可访问此 app
+- `只读导出账户`
+  - 这些账户属于“只可看和只可导出”
+- `全操作账户`
+  - 这些账户属于“所有操作均可”
+- `管理员账户`
+  - 第一阶段固定仅 `YNSYLP005`
+
+后端保存后，真实环境必须同步两个方向：
+
+1. app 自己的访问控制数据
+2. OA 菜单可见性所依赖的角色/权限绑定
+
+建议把 OA 侧角色固定成三类：
+
+- `finops_read_export`
+- `finops_full_access`
+- `finops_admin`
+
+同步规则：
+
+- `allowed_usernames` 之外的账户：
+  - 从 OA 这三类角色全部移除
+- `readonly_export_usernames`：
+  - 绑定到 `finops_read_export`
+- 全操作账户：
+  - 绑定到 `finops_full_access`
+- `YNSYLP005`：
+  - 绑定到 `finops_admin`
 
 ### 7.4 需要保护的范围
 
@@ -429,6 +521,9 @@ Python 后端新增鉴权中间层：
 5. 所有 `/api/*` 都有权限保护
 6. 登出 OA 后，再访问 app 会失效
 7. 关联台、税金抵扣、成本统计、导出均在授权链路下正常工作
+8. 只读导出用户无法执行任何写操作
+9. 只有 `YNSYLP005` 能管理访问账户权限
+10. app 配置与 OA 菜单可见性同步后，不出现“看得见但进不去”或“进得去但看不见菜单”的不一致
 
 ## 15. 对应实施文档
 
@@ -443,6 +538,7 @@ Python 后端新增鉴权中间层：
 - 环境变量模板：[/Users/yu/Desktop/fin-ops-platform/deploy/oa/fin_ops.env.example](/Users/yu/Desktop/fin-ops-platform/deploy/oa/fin_ops.env.example)
 - 菜单 SQL 模板：[/Users/yu/Desktop/fin-ops-platform/deploy/oa/fin_ops_menu.mysql.sql](/Users/yu/Desktop/fin-ops-platform/deploy/oa/fin_ops_menu.mysql.sql)
 - 角色绑定 SQL 模板：[/Users/yu/Desktop/fin-ops-platform/deploy/oa/fin_ops_role_binding.mysql.sql](/Users/yu/Desktop/fin-ops-platform/deploy/oa/fin_ops_role_binding.mysql.sql)
+- 用户角色同步 SQL 模板：[/Users/yu/Desktop/fin-ops-platform/deploy/oa/fin_ops_user_role_sync.mysql.sql](/Users/yu/Desktop/fin-ops-platform/deploy/oa/fin_ops_user_role_sync.mysql.sql)
 
 ## 16. Prompt 31 已落地内容
 

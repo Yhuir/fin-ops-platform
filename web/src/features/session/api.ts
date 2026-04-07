@@ -1,3 +1,5 @@
+export type SessionAccessTier = "denied" | "read_export_only" | "full_access" | "admin";
+
 export type SessionUser = {
   userId: string;
   username: string;
@@ -13,6 +15,10 @@ export type SessionPayload = {
   roles: string[];
   permissions: string[];
   allowed: boolean;
+  accessTier: SessionAccessTier;
+  canAccessApp: boolean;
+  canMutateData: boolean;
+  canAdminAccess: boolean;
 };
 
 type ApiSessionPayload = {
@@ -28,6 +34,10 @@ type ApiSessionPayload = {
   roles?: string[];
   permissions?: string[];
   allowed?: boolean;
+  access_tier?: SessionAccessTier;
+  can_access_app?: boolean;
+  can_mutate_data?: boolean;
+  can_admin_access?: boolean;
 };
 
 type ApiErrorPayload = {
@@ -129,5 +139,9 @@ export async function fetchSessionMe(signal?: AbortSignal): Promise<SessionPaylo
     roles: normalizeArray(sessionPayload.roles),
     permissions: normalizeArray(sessionPayload.permissions),
     allowed: Boolean(sessionPayload.allowed),
+    accessTier: (sessionPayload.access_tier ?? "denied") as SessionAccessTier,
+    canAccessApp: Boolean(sessionPayload.can_access_app ?? sessionPayload.allowed),
+    canMutateData: Boolean(sessionPayload.can_mutate_data),
+    canAdminAccess: Boolean(sessionPayload.can_admin_access),
   };
 }

@@ -48,6 +48,9 @@ export type WorkbenchSettings = {
   bankAccountMappings: BankAccountMapping[];
   accessControl: {
     allowedUsernames: string[];
+    readonlyExportUsernames: string[];
+    adminUsernames: string[];
+    fullAccessUsernames: string[];
   };
 };
 
@@ -94,3 +97,5 @@ export type IgnoredWorkbenchData = {
   month: string;
   rows: WorkbenchRecord[];
 };
+
+export type WorkbenchAccessRole = "full_access" | "read_export_only";

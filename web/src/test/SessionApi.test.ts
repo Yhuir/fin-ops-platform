@@ -28,6 +28,10 @@ describe("session api", () => {
           roles: ["finance"],
           permissions: ["finops:app:view"],
           allowed: true,
+          access_tier: "read_export_only",
+          can_access_app: true,
+          can_mutate_data: false,
+          can_admin_access: false,
         }),
         {
           status: 200,
@@ -53,5 +57,9 @@ describe("session api", () => {
     );
     expect(payload.user.username).toBe("liuji");
     expect(payload.allowed).toBe(true);
+    expect(payload.accessTier).toBe("read_export_only");
+    expect(payload.canAccessApp).toBe(true);
+    expect(payload.canMutateData).toBe(false);
+    expect(payload.canAdminAccess).toBe(false);
   });
 });

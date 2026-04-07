@@ -722,51 +722,60 @@ textarea {
   border-top: 1px solid #e9eef5;
 }
 
-.candidate-pane-columnheaders-oa,
-.record-card-oa {
+.candidate-pane-columnheaders-oa.pane-layout-no-action,
+.record-card-oa.record-card-no-action {
   grid-template-columns:
     76px
-    minmax(124px, 1.1fr)
-    minmax(94px, 0.8fr)
+    minmax(156px, 1.28fr)
     92px
     minmax(124px, 1fr)
-    minmax(156px, 1.15fr)
-    128px
-    168px;
-  min-width: 962px;
+    minmax(152px, 1.12fr);
+  min-width: 608px;
 }
 
-.candidate-pane-columnheaders-bank,
-.record-card-bank {
+.candidate-pane-columnheaders-oa.pane-layout-with-action,
+.record-card-oa.record-card-has-action {
   grid-template-columns:
-    96px
-    96px
-    96px
+    76px
+    minmax(156px, 1.2fr)
+    92px
     minmax(124px, 1fr)
-    minmax(126px, 1fr)
-    132px
-    96px
-    minmax(136px, 1fr)
-    96px
+    minmax(152px, 1.12fr)
     168px;
-  min-width: 1166px;
+  min-width: 776px;
 }
 
-.candidate-pane-columnheaders-invoice,
-.record-card-invoice {
+.candidate-pane-columnheaders-bank.pane-layout-no-action,
+.record-card-bank.record-card-no-action {
   grid-template-columns:
-    minmax(116px, 1fr)
-    minmax(116px, 1fr)
-    minmax(116px, 1fr)
-    minmax(116px, 1fr)
-    96px
-    92px
-    72px
-    92px
-    96px
+    minmax(176px, 1.24fr)
+    144px
+    minmax(172px, 1.08fr)
+    96px;
+  min-width: 588px;
+}
+
+.candidate-pane-columnheaders-bank.pane-layout-with-action,
+.record-card-bank.record-card-has-action {
+  grid-template-columns:
+    minmax(176px, 1.2fr)
+    144px
+    minmax(148px, 1fr)
     96px
     168px;
-  min-width: 1176px;
+  min-width: 732px;
+}
+
+.candidate-pane-columnheaders-invoice.pane-layout-with-action,
+.record-card-invoice.record-card-has-action {
+  grid-template-columns:
+    minmax(156px, 1.1fr)
+    minmax(156px, 1.1fr)
+    96px
+    108px
+    84px
+    92px;
+  min-width: 692px;
 }
 
 .candidate-columnheader,
@@ -774,8 +783,8 @@ textarea {
   padding: 5px 7px;
   border-right: 1px solid #e9eef5;
   border-bottom: 1px solid #e9eef5;
-  text-align: left;
-  vertical-align: top;
+  text-align: center;
+  vertical-align: middle;
   font-size: 12px;
   line-height: 1.25;
 }
@@ -786,9 +795,13 @@ textarea {
 }
 
 .candidate-columnheader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: #f9fbfe;
   color: #486581;
   font-weight: 800;
+  text-align: center;
   white-space: nowrap;
 }
 
@@ -796,6 +809,14 @@ textarea {
   white-space: normal;
   line-height: 1.18;
   overflow-wrap: anywhere;
+}
+
+.candidate-columnheader.column-money-centered {
+  text-align: center;
+}
+
+.candidate-columnheader.column-content-centered {
+  text-align: center;
 }
 
 .candidate-grid-body {
@@ -896,18 +917,61 @@ textarea {
 }
 
 .record-card-cell.cell-money {
-  text-align: right;
+  text-align: center;
   white-space: nowrap;
+}
+
+.record-card-cell-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  text-align: center;
+}
+
+.record-card-cell.column-money-centered {
+  text-align: center;
+}
+
+.record-card-cell.column-content-centered {
+  text-align: center;
 }
 
 .money-cell-value,
 .money-detail-value {
   display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: center;
   gap: 6px;
   max-width: 100%;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+
+.money-cell-stack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  max-width: 100%;
+}
+
+.money-cell-meta-row {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  max-width: 100%;
+}
+
+.money-cell-account {
+  display: inline-flex;
+  justify-content: center;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .bank-account-value {
@@ -930,6 +994,38 @@ textarea {
   font-size: 11px;
 }
 
+.bank-account-tag {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid #d8e1eb;
+  border-radius: 10px;
+  background: #f8fbff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.bank-account-tag .bank-account-primary {
+  display: inline;
+  color: #243b53;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bank-account-tag .bank-account-secondary {
+  display: inline;
+  color: #486581;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .record-card-cell.column-compact {
   min-width: 0;
 }
@@ -940,6 +1036,110 @@ textarea {
   line-height: 1.22;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.invoice-tax-id-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.compound-cell-value {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.compound-cell-primary,
+.compound-cell-secondary,
+.compound-cell-tertiary {
+  min-width: 0;
+}
+
+.compound-cell-secondary,
+.compound-cell-tertiary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.compound-cell-secondary-nowrap {
+  flex-wrap: nowrap;
+}
+
+.inline-cell-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.inline-meta-tag {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #eef4fb;
+  color: #35506b;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.inline-meta-tag-muted {
+  background: #f3f6fa;
+  color: #52667a;
+}
+
+.inline-meta-tag-datetime {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.1;
+}
+
+.inline-meta-tag-datetime-date,
+.inline-meta-tag-datetime-time {
+  display: block;
+  white-space: nowrap;
+}
+
+.cell-subtext-value {
+  color: #52667a;
+  font-size: 11px;
+}
+
+.invoice-flow-tag {
+  display: inline-flex;
+  min-width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.invoice-flow-tag-input {
+  background: #e6f4ea;
+  color: #257942;
+}
+
+.invoice-flow-tag-output {
+  background: #fff1df;
+  color: #b35f00;
 }
 
 .record-card-cell.cell-status,
@@ -966,6 +1166,59 @@ textarea {
   min-width: 92px;
   width: 92px;
   max-width: 92px;
+}
+
+.record-card-bank .record-card-cell.column-money-compact {
+  min-width: 144px;
+  width: 144px;
+  max-width: 144px;
+}
+
+.record-card-bank .record-card-cell.column-counterparty-compact {
+  min-width: 176px;
+  width: 176px;
+  max-width: 176px;
+}
+
+.record-card-invoice .record-card-cell.column-name-compact {
+  min-width: 156px;
+  width: 156px;
+  max-width: 156px;
+}
+
+.record-card-invoice .record-card-cell.column-invoice-amount-compact {
+  min-width: 108px;
+  width: 108px;
+  max-width: 108px;
+}
+
+.record-card-invoice .record-card-cell.column-invoice-gross-compact {
+  min-width: 84px;
+  width: 84px;
+  max-width: 84px;
+}
+
+.record-card-cell.column-content-centered .compound-cell-value,
+.record-card-cell.column-content-centered .money-cell-stack,
+.record-card-cell.column-money-centered .compound-cell-value,
+.record-card-cell.column-money-centered .money-cell-stack {
+  align-items: center;
+}
+
+.record-card-cell.column-content-centered .compound-cell-secondary,
+.record-card-cell.column-content-centered .compound-cell-tertiary,
+.record-card-cell.column-content-centered .inline-cell-action-row,
+.record-card-cell.column-money-centered .compound-cell-secondary,
+.record-card-cell.column-money-centered .money-cell-meta-row,
+.record-card-cell.column-money-centered .money-cell-value {
+  justify-content: center;
+}
+
+.record-card-cell.column-content-centered .cell-text-value-full,
+.record-card-cell.column-content-centered .cell-subtext-value,
+.record-card-cell.column-money-centered .cell-text-value-full,
+.record-card-cell.column-money-centered .cell-subtext-value {
+  text-align: center;
 }
 
 .record-card-cell.column-applicant-compact {
@@ -1014,6 +1267,7 @@ textarea {
 .pane-header,
 .tax-panel-header {
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
   padding: 10px 12px;
@@ -1021,6 +1275,20 @@ textarea {
   background: #f7fafc;
   font-size: 12px;
   font-weight: 800;
+}
+
+.tax-panel-header-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.tax-panel-header-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .pane-table-wrap,
@@ -1189,6 +1457,13 @@ textarea {
   line-height: 1;
 }
 
+.row-action-btn-inline {
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 7px;
+  font-size: 10px;
+}
+
 .row-action-btn.primary {
   border-color: #0f4c81;
   background: #0f4c81;
@@ -1314,13 +1589,23 @@ textarea {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
+  height: clamp(520px, calc(100dvh - 320px), 820px);
+}
+
+.tax-left-workspace {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 10px;
 }
 
 .tax-layout {
+  flex: 1;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 16px;
+  min-height: 0;
 }
 
 .tax-result-panel {
@@ -1374,20 +1659,88 @@ textarea {
 }
 
 .tax-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
   border: 1px solid #d8e1eb;
   border-radius: 18px;
   overflow: hidden;
   background: #ffffff;
 }
 
+.tax-table-wrap {
+  flex: 1;
+  min-height: 0;
+}
+
 .tax-grid-table {
-  min-width: 860px;
+  min-width: 700px;
+}
+
+.tax-grid-table th {
+  text-align: center;
+  vertical-align: middle;
+}
+
+.tax-invoice-no-value {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.tax-invoice-meta-row {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  max-width: 100%;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.tax-invoice-number {
+  display: block;
+  max-width: 100%;
+  line-height: 1.22;
+  text-align: center;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .tax-check-column {
-  width: 72px;
-  min-width: 72px;
+  width: 60px;
+  min-width: 60px;
   text-align: center;
+}
+
+.tax-column-invoice-no {
+  width: 160px;
+  min-width: 160px;
+}
+
+.tax-column-tax-amount,
+.tax-column-amount {
+  width: 92px;
+  min-width: 92px;
+  white-space: nowrap;
+}
+
+.tax-column-amount-rate {
+  width: 112px;
+  min-width: 112px;
+  white-space: nowrap;
+}
+
+.tax-column-counterparty {
+  min-width: 132px;
+  max-width: 152px;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 .tax-grid-table input[type="checkbox"] {
@@ -1395,6 +1748,23 @@ textarea {
   height: 16px;
   accent-color: #0f4c81;
   cursor: pointer;
+}
+
+.tax-grid-table td {
+  text-align: center;
+  vertical-align: middle;
+}
+
+.tax-amount-rate-value {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.tax-amount-rate-primary {
+  display: block;
 }
 
 .tax-row-selected {
@@ -1412,10 +1782,94 @@ textarea {
   background: #eef6ff;
 }
 
+.tax-status-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.tax-status-tag-certified {
+  background: #eefaf2;
+  color: #1f7a3f;
+}
+
+.tax-status-tag-pending {
+  background: #fff4e5;
+  color: #b35f00;
+}
+
+.tax-status-tag-default {
+  background: #edf2f7;
+  color: #486581;
+}
+
+.tax-date-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #eef4fb;
+  color: #486581;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.tax-rate-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #eef4fb;
+  color: #486581;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.tax-horizontal-scrollbar {
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 16px;
+  border-top: 1px solid #d8e1eb;
+  background: #f7fafc;
+  scrollbar-gutter: stable;
+}
+
+.tax-horizontal-scrollbar-inner {
+  height: 1px;
+}
+
+.tax-layout-scrollbar {
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 16px;
+  border: 1px solid #d8e1eb;
+  border-radius: 999px;
+  background: #f7fafc;
+  scrollbar-gutter: stable;
+}
+
+.tax-layout-scrollbar-inner {
+  height: 1px;
+}
+
 .tax-certified-drawer {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 12px;
   align-self: stretch;
+  min-height: 0;
   padding: 14px;
   border: 1px solid #d8e1eb;
   border-radius: 18px;
@@ -1444,7 +1898,10 @@ textarea {
 
 .tax-certified-drawer-body {
   display: grid;
+  align-content: start;
   gap: 12px;
+  min-height: 0;
+  overflow: auto;
 }
 
 .tax-certified-group {
@@ -1575,6 +2032,63 @@ textarea {
   color: #61758a;
   font-size: 12px;
   white-space: nowrap;
+}
+
+.certified-import-summary {
+  gap: 10px;
+}
+
+.certified-import-preview-files {
+  display: grid;
+  gap: 10px;
+}
+
+.certified-import-preview-file {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid #d8e1eb;
+  border-radius: 16px;
+  background: #ffffff;
+}
+
+.certified-import-preview-file-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.certified-import-preview-file-header strong {
+  color: #102a43;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.certified-import-preview-file-header span {
+  color: #164c9b;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.certified-import-preview-file-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.certified-import-preview-file-meta span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #f5f9fc;
+  color: #486581;
+  border: 1px solid #d8e1eb;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .detail-modal-backdrop {
@@ -2584,6 +3098,30 @@ textarea {
   align-items: end;
 }
 
+.settings-access-admin-note {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #e7edf5;
+  border-radius: 16px;
+  background: #f8fbff;
+}
+
+.settings-access-admin-note strong {
+  color: #102a43;
+  font-size: 13px;
+}
+
+.settings-access-admin-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-access-form {
+  margin-top: 2px;
+}
+
 .settings-bank-mapping-list {
   display: grid;
   gap: 12px;
@@ -3463,6 +4001,11 @@ textarea {
   margin-top: 8px;
 }
 
+.cost-detail-summary-item strong.money-detail-stack {
+  display: inline-flex;
+  margin-top: 8px;
+}
+
 .cost-detail-section {
   padding: 16px;
 }
@@ -3576,6 +4119,11 @@ textarea {
   .cost-toolbar,
   .tax-layout {
     grid-template-columns: 1fr;
+  }
+
+  .tax-offset-workspace {
+    grid-template-columns: 1fr;
+    height: auto;
   }
 
   .cost-toolbar {

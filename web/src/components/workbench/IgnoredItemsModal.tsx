@@ -4,11 +4,18 @@ import type { WorkbenchRecord } from "../../features/workbench/types";
 type IgnoredItemsModalProps = {
   rows: WorkbenchRecord[];
   highlightedRowId?: string | null;
+  canMutateData: boolean;
   onClose: () => void;
   onUnignore: (row: WorkbenchRecord) => void;
 };
 
-export default function IgnoredItemsModal({ rows, highlightedRowId, onClose, onUnignore }: IgnoredItemsModalProps) {
+export default function IgnoredItemsModal({
+  rows,
+  highlightedRowId,
+  canMutateData,
+  onClose,
+  onUnignore,
+}: IgnoredItemsModalProps) {
   const columns = workbenchColumns.invoice;
 
   return (
@@ -58,9 +65,11 @@ export default function IgnoredItemsModal({ rows, highlightedRowId, onClose, onU
                     </div>
                   ))}
                   <div className="ignored-items-cell ignored-items-action-cell" role="cell">
-                    <button className="row-action-btn primary" type="button" onClick={() => onUnignore(row)}>
-                      撤回忽略
-                    </button>
+                    {canMutateData ? (
+                      <button className="row-action-btn primary" type="button" onClick={() => onUnignore(row)}>
+                        撤回忽略
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               ))}

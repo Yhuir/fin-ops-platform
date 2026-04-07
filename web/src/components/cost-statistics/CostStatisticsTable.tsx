@@ -1,10 +1,12 @@
 import type { ReactNode } from "react";
 
+import BankAccountValue from "../BankAccountValue";
 import DirectionTag from "../DirectionTag";
 
 type CostStatisticsAmountCell = {
   amount: string;
   direction: string;
+  paymentAccountLabel?: string;
 };
 
 type CostStatisticsTableColumn<Row> = {
@@ -102,10 +104,23 @@ function renderTableCellContent(content: ReactNode | CostStatisticsAmountCell) {
   ) {
     const amount = String((content as { amount: string }).amount ?? "--");
     const direction = String((content as { direction: string }).direction ?? "");
+    const paymentAccountLabel = String((content as { paymentAccountLabel?: string }).paymentAccountLabel ?? "");
+    const shouldShowAccount = paymentAccountLabel !== "" && paymentAccountLabel !== "--" && paymentAccountLabel !== "—";
     return (
-      <span className="money-cell-value">
-        <span>{amount}</span>
-        <DirectionTag direction={direction} />
+      <span className="money-cell-stack">
+        <span className="money-cell-value">
+          <span>{amount}</span>
+        </span>
+        {direction || shouldShowAccount ? (
+          <span className="money-cell-meta-row">
+            {direction ? <DirectionTag direction={direction} /> : null}
+            {shouldShowAccount ? (
+              <span className="money-cell-account">
+                <BankAccountValue value={paymentAccountLabel} variant="tag" />
+              </span>
+            ) : null}
+          </span>
+        ) : null}
       </span>
     );
   }

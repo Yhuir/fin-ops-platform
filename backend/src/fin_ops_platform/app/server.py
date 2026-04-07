@@ -43,6 +43,7 @@ from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
 from fin_ops_platform.services.search_service import MONTH_RE as SEARCH_MONTH_RE, SUPPORTED_SCOPES as SEARCH_SUPPORTED_SCOPES, SUPPORTED_STATUSES as SEARCH_SUPPORTED_STATUSES, SearchService
 from fin_ops_platform.services.state_store import ApplicationStateStore
+from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService, UploadedCertifiedImportFile
 from fin_ops_platform.services.tax_offset_service import TaxOffsetService
 from fin_ops_platform.services.workbench_candidate_grouping import WorkbenchCandidateGroupingService
 from fin_ops_platform.services.workbench_action_service import WorkbenchActionService
@@ -135,6 +136,8 @@ class Application:
         self._oa_identity_service = OAIdentityService()
         self._access_control_service = AccessControlService.from_environment(
             dynamic_allowed_usernames_provider=self._app_settings_service.get_allowed_usernames,
+            dynamic_readonly_export_usernames_provider=self._app_settings_service.get_readonly_export_usernames,
+            dynamic_admin_usernames_provider=self._app_settings_service.get_admin_usernames,
         )
         bank_account_resolver = BankAccountResolver(self._app_settings_service.get_bank_account_mapping_dict)
         self._candidate_grouping_service = WorkbenchCandidateGroupingService()
@@ -145,7 +148,11 @@ class Application:
             self._matching_service,
             bank_account_resolver=bank_account_resolver,
         )
-        self._tax_offset_service = TaxOffsetService()
+        self._tax_certified_import_service = TaxCertifiedImportService(state_store=self._state_store)
+        self._tax_offset_service = TaxOffsetService(
+            import_service=self._import_service,
+            certified_records_loader=self._tax_certified_import_service.list_records_for_month,
+        )
         self._cost_statistics_service = CostStatisticsService(
             self._import_service,
             grouped_workbench_loader=self._build_api_workbench_payload,
@@ -231,6 +238,13 @@ class Application:
         if method == "GET" and route_path == "/api/tax-offset":
             month = query.get("month", [None])[0]
             return self._handle_api_tax_offset(month)
+        if method == "POST" and route_path == "/api/tax-offset/certified-import/preview":
+            return self._handle_api_tax_certified_import_preview(body, headers)
+        if method == "POST" and route_path == "/api/tax-offset/certified-import/confirm":
+            return self._handle_api_tax_certified_import_confirm(body)
+        if method == "GET" and route_path == "/api/tax-offset/certified-imports":
+            month = query.get("month", [None])[0]
+            return self._handle_api_tax_certified_imports(month)
         if method == "POST" and route_path == "/api/tax-offset/calculate":
             return self._handle_api_tax_offset_calculate(body)
         if method == "GET" and route_path == "/api/cost-statistics":
@@ -434,6 +448,9 @@ class Application:
                 "/api/workbench/actions/ignore-row",
                 "/api/workbench/actions/unignore-row",
                 "/api/tax-offset",
+                "/api/tax-offset/certified-import/preview",
+                "/api/tax-offset/certified-import/confirm",
+                "/api/tax-offset/certified-imports",
                 "/api/tax-offset/calculate",
                 "/api/cost-statistics",
                 "/api/cost-statistics/explorer",
@@ -621,6 +638,10 @@ class Application:
                 "roles": list(session.identity.roles),
                 "permissions": list(session.identity.permissions),
                 "allowed": session.allowed,
+                "access_tier": session.access_tier,
+                "can_access_app": session.can_access_app,
+                "can_mutate_data": session.can_mutate_data,
+                "can_admin_access": session.can_admin_access,
             },
         )
 
@@ -715,22 +736,33 @@ class Application:
         completed_project_ids = payload.get("completed_project_ids", [])
         bank_account_mappings = payload.get("bank_account_mappings", [])
         allowed_usernames = payload.get("allowed_usernames", [])
+        readonly_export_usernames = payload.get("readonly_export_usernames", [])
+        admin_usernames = payload.get("admin_usernames", [])
         if (
             not isinstance(completed_project_ids, list)
             or not isinstance(bank_account_mappings, list)
             or not isinstance(allowed_usernames, list)
+            or not isinstance(readonly_export_usernames, list)
+            or not isinstance(admin_usernames, list)
         ):
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
                     "error": "invalid_workbench_settings_request",
-                    "message": "completed_project_ids, bank_account_mappings, and allowed_usernames must be arrays.",
+                    "message": (
+                        "completed_project_ids, bank_account_mappings, allowed_usernames, "
+                        "readonly_export_usernames, and admin_usernames must be arrays."
+                    ),
                 },
             )
         updated_payload = self._app_settings_service.update_settings(
             completed_project_ids=[str(item) for item in completed_project_ids],
             bank_account_mappings=[item for item in bank_account_mappings if isinstance(item, dict)],
             allowed_usernames=[str(item).strip() for item in allowed_usernames if str(item).strip()],
+            readonly_export_usernames=[
+                str(item).strip() for item in readonly_export_usernames if str(item).strip()
+            ],
+            admin_usernames=[str(item).strip() for item in admin_usernames if str(item).strip()],
         )
         self._search_service.clear_cache()
         return self._json_response(HTTPStatus.OK, updated_payload)
@@ -959,6 +991,104 @@ class Application:
     def _handle_api_tax_offset(self, month: str | None) -> Response:
         current_month = month or datetime.now().strftime("%Y-%m")
         return self._json_response(HTTPStatus.OK, self._tax_api_routes.get_tax_offset(current_month))
+
+    def _handle_api_tax_certified_import_preview(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        fields, files, error = self._load_multipart_body(body, headers)
+        if error is not None:
+            return error
+        imported_by = (fields.get("imported_by") or ["system"])[0]
+        if not files:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "invalid_tax_certified_import_request",
+                    "message": "至少上传一个已认证发票文件。",
+                },
+            )
+        session = self._tax_certified_import_service.preview_files(
+            imported_by=imported_by,
+            uploads=[UploadedCertifiedImportFile(file_name=file.file_name, content=file.content) for file in files],
+        )
+        preview_files = []
+        total_matched_plan_count = 0
+        total_outside_plan_count = 0
+        for preview_file in session.files:
+            preview_counts = self._tax_offset_service.summarize_certified_preview_rows(
+                preview_file.month,
+                preview_file.rows,
+            )
+            total_matched_plan_count += preview_counts["matched_plan_count"]
+            total_outside_plan_count += preview_counts["outside_plan_count"]
+            preview_files.append(
+                {
+                    **asdict(preview_file),
+                    **preview_counts,
+                }
+            )
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "session": session,
+                "files": preview_files,
+                "summary": {
+                    "recognized_count": sum(file["recognized_count"] for file in preview_files),
+                    "invalid_count": sum(file["invalid_count"] for file in preview_files),
+                    "matched_plan_count": total_matched_plan_count,
+                    "outside_plan_count": total_outside_plan_count,
+                },
+            },
+        )
+
+    def _handle_api_tax_certified_import_confirm(self, body: str | bytes | None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        session_id = payload.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "invalid_tax_certified_import_confirm_request",
+                    "message": "session_id is required.",
+                },
+            )
+        try:
+            batch = self._tax_certified_import_service.confirm_session(session_id)
+        except KeyError as exc:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "tax_certified_import_session_not_found", "message": str(exc)},
+            )
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "success": True,
+                "batch": batch,
+            },
+        )
+
+    def _handle_api_tax_certified_imports(self, month: str | None) -> Response:
+        if month is None or not month.strip():
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "invalid_tax_certified_import_request",
+                    "message": "month is required.",
+                },
+            )
+        current_month = month.strip()
+        records = self._tax_certified_import_service.list_records_for_month(current_month)
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "month": current_month,
+                "records": records,
+            },
+        )
 
     def _handle_api_tax_offset_calculate(self, body: str | bytes | None) -> Response:
         payload, error = self._load_json_body(body)

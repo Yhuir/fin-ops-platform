@@ -16,6 +16,7 @@ type CandidateGroupCellProps = {
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
   showWorkflowActions: boolean;
+  canMutateData: boolean;
 };
 
 export default function CandidateGroupCell({
@@ -31,6 +32,7 @@ export default function CandidateGroupCell({
   onOpenDetail,
   onRowAction,
   showWorkflowActions,
+  canMutateData,
 }: CandidateGroupCellProps) {
   if (records.length === 0) {
     return (
@@ -63,6 +65,7 @@ export default function CandidateGroupCell({
             row={row}
             rowState={getRowState(row, zoneId)}
             showWorkflowActions={showWorkflowActions}
+            canMutateData={canMutateData}
             zoneId={zoneId}
           />
         ))}

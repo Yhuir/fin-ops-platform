@@ -1,0 +1,88 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from fin_ops_platform.app.server import build_application
+
+
+class AppSettingsServiceTests(unittest.TestCase):
+    def test_update_settings_normalizes_access_control_lists_and_keeps_admin_in_allowed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            payload = app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[],
+                allowed_usernames=["FULL001", "READONLY001"],
+                readonly_export_usernames=["READONLY001", "OUTSIDER001", "YNSYLP005"],
+                admin_usernames=["ADMIN002"],
+            )
+
+        access_control = payload["access_control"]
+        self.assertEqual(
+            access_control["allowed_usernames"],
+            ["ADMIN002", "FULL001", "READONLY001", "YNSYLP005"],
+        )
+        self.assertEqual(access_control["readonly_export_usernames"], ["READONLY001"])
+        self.assertEqual(access_control["admin_usernames"], ["ADMIN002", "YNSYLP005"])
+        self.assertEqual(access_control["full_access_usernames"], ["FULL001"])
+
+    def test_update_settings_persists_access_control_lists(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[],
+                allowed_usernames=["FULL001"],
+                readonly_export_usernames=[],
+                admin_usernames=[],
+            )
+
+            reloaded_app = build_application(data_dir=Path(temp_dir))
+            payload = reloaded_app._app_settings_service.get_settings_payload()
+
+        access_control = payload["access_control"]
+        self.assertEqual(access_control["allowed_usernames"], ["FULL001", "YNSYLP005"])
+        self.assertEqual(access_control["readonly_export_usernames"], [])
+        self.assertEqual(access_control["admin_usernames"], ["YNSYLP005"])
+        self.assertEqual(access_control["full_access_usernames"], ["FULL001"])
+
+    def test_workbench_settings_api_accepts_and_returns_access_control_lists(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            update_response = app.handle_request(
+                "POST",
+                "/api/workbench/settings",
+                body=json.dumps(
+                    {
+                        "completed_project_ids": [],
+                        "bank_account_mappings": [],
+                        "allowed_usernames": ["FULL001", "READONLY001"],
+                        "readonly_export_usernames": ["READONLY001"],
+                        "admin_usernames": [],
+                    }
+                ),
+            )
+            updated_payload = json.loads(update_response.body)
+
+            get_response = app.handle_request("GET", "/api/workbench/settings")
+            get_payload = json.loads(get_response.body)
+
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(
+            updated_payload["access_control"],
+            {
+                "allowed_usernames": ["FULL001", "READONLY001", "YNSYLP005"],
+                "readonly_export_usernames": ["READONLY001"],
+                "admin_usernames": ["YNSYLP005"],
+                "full_access_usernames": ["FULL001"],
+            },
+        )
+        self.assertEqual(get_response.status_code, 200)
+        self.assertEqual(get_payload["access_control"], updated_payload["access_control"])
+
+
+if __name__ == "__main__":
+    unittest.main()

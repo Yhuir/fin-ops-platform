@@ -2,6 +2,11 @@
 
 日期：2026-04-03
 
+> 注：本文档定义的是 OA 接入的第一阶段“登录复用 + 菜单可见性 + 基础 401/403”方案。  
+> 关于后续升级后的“可访问 / 只读导出 / 全操作 / `YNSYLP005` 独占管理”模型，请以
+> [2026-04-07-oa-access-role-management-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-07-oa-access-role-management-design.md)
+> 为准。
+
 ## Goal
 
 Integrate `fin-ops-platform` into the existing OA system as a protected finance sub-application that:

@@ -17,7 +17,7 @@ function renderFieldRows(fields: Record<string, string>) {
       {entries.map(([label, value]) => (
         <div key={label} className="cost-detail-item">
           <dt>{label}</dt>
-          <dd>{label === "支付账户" || label === "收款账户" ? <BankAccountValue value={value} /> : value}</dd>
+          <dd>{label === "支付账户" || label === "收款账户" ? <BankAccountValue value={value} variant="tag" /> : value}</dd>
         </div>
       ))}
     </dl>
@@ -38,9 +38,16 @@ export default function CostTransactionDetailPanel({ detail }: CostTransactionDe
         </div>
         <div className="cost-detail-summary-item">
           <span>金额</span>
-          <strong className="money-detail-value">
-            <span>{detail.amount}</span>
-            <DirectionTag direction={detail.direction} />
+          <strong className="money-cell-stack money-detail-stack">
+            <span className="money-detail-value">
+              <span>{detail.amount}</span>
+            </span>
+            <span className="money-cell-meta-row">
+              <DirectionTag direction={detail.direction} />
+              <span className="money-cell-account">
+                <BankAccountValue value={detail.paymentAccountLabel} variant="tag" />
+              </span>
+            </span>
           </strong>
         </div>
         <div className="cost-detail-summary-item">
@@ -66,12 +73,6 @@ export default function CostTransactionDetailPanel({ detail }: CostTransactionDe
           <div className="cost-detail-item">
             <dt>对方户名</dt>
             <dd>{detail.counterpartyName}</dd>
-          </div>
-          <div className="cost-detail-item">
-            <dt>支付账户</dt>
-            <dd>
-              <BankAccountValue value={detail.paymentAccountLabel} />
-            </dd>
           </div>
           <div className="cost-detail-item">
             <dt>备注</dt>

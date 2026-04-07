@@ -1,6 +1,6 @@
 # OA 同域部署与联调说明
 
-日期：2026-04-03
+日期：2026-04-07
 
 ## 目标
 
@@ -10,7 +10,8 @@
 - Python 后端挂载在 `/fin-ops-api/`
 - 页面通过 OA 菜单 iframe 进入
 - 直接复用 OA 的 `Admin-Token`
-- 没有 `finops:app:view` 的用户在菜单和 API 两层都被拒绝
+- 账户按“不可见 / 只读导出 / 全操作 / 管理员”分层
+- 菜单可见性与 app 内权限模型保持同步
 
 ## 部署路径约定
 
@@ -41,6 +42,64 @@
 
 不建议作为第一阶段方案。
 
+## 账户类型与同步总规则
+
+从 `2026-04-07` 开始，真实口径不再是“只有一个 `finops:app:view` 权限”。
+
+现在必须同时维护：
+
+1. OA 菜单是否可见
+2. app 内是否允许访问
+3. app 内是只读导出还是全操作
+4. 是否是唯一管理员 `YNSYLP005`
+
+统一规则如下：
+
+| 账户类型 | OA 菜单 | app 访问 | app 写操作 | 权限管理 |
+| --- | --- | --- | --- | --- |
+| 不可见用户 | 不可见 | 不可访问 | 不允许 | 不允许 |
+| 只读导出用户 | 可见 | 可访问 | 不允许 | 不允许 |
+| 全操作用户 | 可见 | 可访问 | 允许 | 不允许 |
+| 管理员 `YNSYLP005` | 可见 | 可访问 | 允许 | 允许 |
+
+运行时存储与 OA 同步规则：
+
+- `allowed_usernames`：所有可访问账户的并集
+- `readonly_export_usernames`：只读导出账户子集
+- `admin_usernames`：第一阶段固定只允许 `YNSYLP005`
+- `full_access_usernames`：由后端自动推导，不单独保存
+
+强制要求：
+
+- `allowed_usernames` 之外的账户，必须同时从 OA 菜单角色中移除
+- `readonly_export_usernames` 与全操作用户都属于可访问账户
+- `YNSYLP005` 必须同时存在于：
+  - OA 可见角色
+  - app `allowed_usernames`
+  - app `admin_usernames`
+
+## OA 菜单可见性角色建议
+
+推荐在 OA 中准备三类角色，并全部绑定同一个 `财务运营平台` 菜单：
+
+- `finops_read_export`
+  - 只负责“在 OA 看得见并能进入”
+- `finops_full_access`
+  - 负责普通全操作用户的菜单可见性
+- `finops_admin`
+  - 负责管理员 `YNSYLP005`
+
+说明：
+
+- 这三个角色都应绑定 `finops:app:view` 对应菜单
+- 是否是只读 / 全操作 / 管理员，最终仍以 `fin-ops` 后端运行时判断为准
+- OA 菜单层只负责“看不看得见入口”
+
+已提供模板：
+
+- `deploy/oa/fin_ops_role_binding.mysql.sql`
+- `deploy/oa/fin_ops_user_role_sync.mysql.sql`
+
 ## OA token 复用链路
 
 当前代码已经按这条链路工作：
@@ -69,6 +128,10 @@ FIN_OPS_OA_USER_INFO_PATH=/system/user/getInfo
 FIN_OPS_OA_REQUIRED_PERMISSION=finops:app:view
 FIN_OPS_OA_REQUEST_TIMEOUT_MS=5000
 FIN_OPS_OA_SESSION_CACHE_TTL_SECONDS=30
+FIN_OPS_ALLOWED_USERNAMES=YNSYLP005
+FIN_OPS_READONLY_EXPORT_USERNAMES=
+FIN_OPS_ADMIN_USERNAMES=YNSYLP005
+FIN_OPS_ALLOWED_ROLES=
 VITE_APP_BASE_PATH=/fin-ops/
 ```
 
@@ -76,6 +139,8 @@ VITE_APP_BASE_PATH=/fin-ops/
 
 - `FIN_OPS_OA_BASE_URL` 必须指向 OA 网关对外地址
 - `FIN_OPS_OA_REQUIRED_PERMISSION` 默认就是 `finops:app:view`
+- `FIN_OPS_ALLOWED_USERNAMES / FIN_OPS_READONLY_EXPORT_USERNAMES / FIN_OPS_ADMIN_USERNAMES`
+  是启动期兜底配置，真实长期口径仍以 app 设置持久化为准
 - `VITE_APP_BASE_PATH` 必须是 `/fin-ops/`
 - 业务数据相关的 Mongo 配置仍按现有 `fin-ops` 运行说明提供，不在这里重复展开
 
@@ -117,11 +182,21 @@ VITE_APP_BASE_PATH=/fin-ops/
 - 不会改 OA Java/Vue 源码
 - 也不会自动改 OA 数据库菜单；菜单和角色仍按本文后面的 SQL/菜单配置执行
 
-按当前业务要求，初始放行账号可先配置为：
+按当前业务要求，初始配置至少要包含：
 
 - `FIN_OPS_ALLOWED_USERNAMES=YNSYLP005`
+- `FIN_OPS_ADMIN_USERNAMES=YNSYLP005`
 
-后续再通过关联台里的“访问账户管理”继续维护白名单。
+后续再通过关联台里的“访问账户管理”维护：
+
+- 可访问账户
+- 只读导出账户
+- 全操作账户
+
+注意：
+
+- 当前 app 设置保存后，不会自动改 OA 数据库角色绑定
+- 因此每次权限变更后，还需要同步 OA 用户角色，见下文“权限同步操作顺序”
 
 权限与菜单的 SQL 模板：
 
@@ -165,6 +240,28 @@ OA 菜单仍然按 Prompt 29 的口径配置：
 
 - `deploy/oa/fin_ops_menu.mysql.sql`
 - `deploy/oa/fin_ops_role_binding.mysql.sql`
+- `deploy/oa/fin_ops_user_role_sync.mysql.sql`
+
+## 权限同步操作顺序
+
+当 `YNSYLP005` 在 app 的“访问账户管理”里修改权限后，生产环境必须按这个顺序同步：
+
+1. 先保存 app 设置
+2. 记录本次变更后的三类名单：
+   - 只读导出账户
+   - 全操作账户
+   - 管理员账户（当前固定 `YNSYLP005`）
+3. 在 OA 数据库或 OA 角色管理后台同步用户角色：
+   - 只读导出账户 -> `finops_read_export`
+   - 全操作账户 -> `finops_full_access`
+   - `YNSYLP005` -> `finops_admin`
+4. 把不再出现在 `allowed_usernames` 内的账户，从以上三类 OA 角色全部移除
+5. 用对应账号重新登录 OA 验证菜单和页面行为
+
+如果只改了 app 设置、没同步 OA 角色，会出现两类不一致：
+
+- 账户在 OA 菜单里还能看见，但进 app 后被拒绝
+- 账户在 app 里已被放行，但 OA 菜单里还看不见
 
 ## 发布顺序
 
@@ -183,6 +280,13 @@ OA 菜单仍然按 Prompt 29 的口径配置：
 
 ## 联调验收清单
 
+### 账户分层前置检查
+
+- [ ] `allowed_usernames` 与 OA 三类 fin-ops 角色成员一致
+- [ ] `readonly_export_usernames` 是 `allowed_usernames` 子集
+- [ ] `admin_usernames` 只有 `YNSYLP005`
+- [ ] `YNSYLP005` 同时存在于 app 管理员名单与 OA `finops_admin` 角色
+
 ### 会话与权限
 
 - [ ] 已登录 OA 后，访问 `/fin-ops/?embedded=oa` 不出现自己的登录页
@@ -200,6 +304,42 @@ OA 菜单仍然按 Prompt 29 的口径配置：
 - [ ] `fin-ops` 嵌入态不显示自己的全局头部
 - [ ] 收起/展开 OA 左侧菜单后，iframe 高度正常
 
+### QA：不可见用户
+
+- [ ] 在 OA 菜单里看不到 `财务运营平台`
+- [ ] 直接访问 `/fin-ops/` 或核心 API 返回 `403`
+- [ ] 搜索、导出、详情、工作台都无法进入
+
+### QA：只读导出用户
+
+- [ ] 在 OA 菜单里能看到 `财务运营平台`
+- [ ] 能进入 `关联台 / 税金抵扣 / 成本统计`
+- [ ] 能搜索、看详情、导出
+- [ ] 看不到导入按钮
+- [ ] `确认关联 / 取消配对 / 异常处理 / 忽略 / 撤回忽略 / 保存设置` 均不可用
+- [ ] 税金抵扣 `已认证发票导入` 不可用
+- [ ] 任意写接口返回 `403`
+
+### QA：全操作用户
+
+- [ ] 在 OA 菜单里能看到 `财务运营平台`
+- [ ] 关联台、税金抵扣、成本统计均可正常读写
+- [ ] 能导入、确认关联、异常处理、忽略、保存普通设置
+- [ ] 看不到或不能使用“访问账户管理”
+- [ ] 权限管理接口返回 `403`
+
+### QA：管理员 `YNSYLP005`
+
+- [ ] 在 OA 菜单里能看到 `财务运营平台`
+- [ ] 具备所有业务写操作能力
+- [ ] 能进入 `设置 -> 访问账户管理`
+- [ ] 能维护：
+  - 可访问账户
+  - 只读导出账户
+  - 全操作账户
+- [ ] 保存后 app 内权限立即生效
+- [ ] 保存后按手工同步步骤更新 OA 角色，再验证菜单可见性一致
+
 ### 功能可用性
 
 - [ ] 关联台可正常加载
@@ -208,6 +348,27 @@ OA 菜单仍然按 Prompt 29 的口径配置：
 - [ ] 成本统计可正常加载与导出
 - [ ] 工作台导出、成本统计导出都可正常下载
 - [ ] 已授权用户可访问 `workbench / tax / cost / export / search`
+
+## 自动化回归建议
+
+当前这轮变更主要依赖：
+
+- 后端：
+  - `tests.test_session_api`
+  - `tests.test_app_settings_service`
+- 前端：
+  - `web/src/test/SessionApi.test.ts`
+  - `web/src/test/SessionGate.test.tsx`
+  - `web/src/test/WorkbenchSelection.test.tsx`
+  - `web/src/test/TaxOffsetPage.test.tsx`
+
+建议在每次权限模型变更后至少执行：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_session_api tests.test_app_settings_service -v
+cd web && npm run test -- --run src/test/SessionApi.test.ts src/test/SessionGate.test.tsx src/test/WorkbenchSelection.test.tsx src/test/TaxOffsetPage.test.tsx
+cd web && npm run build
+```
 
 ## 回滚方案
 
@@ -229,6 +390,8 @@ OA 菜单仍然按 Prompt 29 的口径配置：
 
 - OA 当前账号是否具备 `finops:app:view`
 - `FIN_OPS_OA_REQUIRED_PERMISSION` 是否被改掉
+- 当前账号是否仍在 `allowed_usernames`
+- 当前账号是否仍然绑定了 OA 的 fin-ops 可见角色
 - `/api/session/me` 返回的 `permissions` 是否包含目标权限
 
 ### 显示 OA 会话已失效

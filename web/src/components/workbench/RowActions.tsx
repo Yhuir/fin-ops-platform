@@ -18,6 +18,7 @@ type RowActionsProps = {
   recordType: WorkbenchRecordType;
   variant: WorkbenchActionVariant;
   showWorkflowActions: boolean;
+  canMutateData: boolean;
   availableActions: string[];
   mode?: RowActionsMode;
   onOpenDetail: (event: MouseEvent<HTMLButtonElement>) => void;
@@ -28,6 +29,7 @@ export default function RowActions({
   recordType,
   variant,
   showWorkflowActions,
+  canMutateData,
   availableActions = [],
   mode = "default",
   onOpenDetail,
@@ -102,9 +104,11 @@ export default function RowActions({
   if (mode === "cancel-exception-only") {
     return (
       <div className="row-actions" onClick={(event) => event.stopPropagation()}>
-        <button className="row-action-btn warning" type="button" onClick={handleAction("cancel-exception")}>
-          取消异常处理
-        </button>
+        {canMutateData ? (
+          <button className="row-action-btn warning" type="button" onClick={handleAction("cancel-exception")}>
+            取消异常处理
+          </button>
+        ) : null}
       </div>
     );
   }
@@ -115,13 +119,13 @@ export default function RowActions({
         详情
       </button>
 
-      {canIgnore ? (
+      {canMutateData && canIgnore ? (
         <button className="row-action-btn warning" type="button" onClick={handleAction("ignore-row")}>
           忽略
         </button>
       ) : null}
 
-      {showWorkflowActions && variant === "confirm-exception" ? (
+      {canMutateData && showWorkflowActions && variant === "confirm-exception" ? (
         <>
           <button className="row-action-btn primary" type="button" onClick={handleAction("confirm-match")}>
             确认关联
@@ -132,7 +136,7 @@ export default function RowActions({
         </>
       ) : null}
 
-      {showWorkflowActions && variant === "bank-review" ? (
+      {canMutateData && showWorkflowActions && variant === "bank-review" ? (
         <div ref={menuWrapRef} className="row-menu-wrap">
           <button
             aria-expanded={menuOpen}

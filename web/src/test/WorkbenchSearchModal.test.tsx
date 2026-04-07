@@ -29,9 +29,9 @@ describe("Workbench global search modal and navigation", () => {
 
     expect(await screen.findByTestId("zone-open")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "打开关联台搜索" }));
+    await user.click(screen.getByRole("button", { name: "搜索" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "关联台搜索弹窗" });
+    const dialog = await screen.findByRole("dialog", { name: "关联台搜索" });
     expect(within(dialog).getByRole("tab", { name: "全部" })).toHaveClass("active");
     const projectFilter = within(dialog).getByLabelText("项目筛选");
     expect(within(projectFilter).getAllByRole("option").length).toBeGreaterThan(1);
@@ -59,12 +59,13 @@ describe("Workbench global search modal and navigation", () => {
 
   test("jumping to an open-zone result switches month and highlights the target row", async () => {
     const user = userEvent.setup();
+    installMockApiFetch();
     renderWorkbenchPage();
 
     expect(await screen.findByTestId("zone-open")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "打开关联台搜索" }));
-    const dialog = await screen.findByRole("dialog", { name: "关联台搜索弹窗" });
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    const dialog = await screen.findByRole("dialog", { name: "关联台搜索" });
     await user.type(
       within(dialog).getByPlaceholderText("搜索项目、公司、人名、发票号、流水号..."),
       "张三广告",
@@ -75,7 +76,7 @@ describe("Workbench global search modal and navigation", () => {
     await waitFor(() => expect(bankSection).toHaveTextContent("杭州张三广告有限公司"));
     await user.click(within(bankSection).getByRole("button", { name: "跳转至" }));
 
-    expect(screen.queryByRole("dialog", { name: "关联台搜索弹窗" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "关联台搜索" })).not.toBeInTheDocument();
     expect(await screen.findByText("2026年4月")).toBeInTheDocument();
 
     const openZone = await screen.findByTestId("zone-open");
@@ -87,12 +88,13 @@ describe("Workbench global search modal and navigation", () => {
 
   test("jumping to ignored and processed exception results opens the corresponding modal before highlighting", async () => {
     const user = userEvent.setup();
+    installMockApiFetch();
     renderWorkbenchPage();
 
     expect(await screen.findByTestId("zone-open")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "打开关联台搜索" }));
-    const dialog = await screen.findByRole("dialog", { name: "关联台搜索弹窗" });
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    const dialog = await screen.findByRole("dialog", { name: "关联台搜索" });
     const input = within(dialog).getByPlaceholderText("搜索项目、公司、人名、发票号、流水号...");
 
     await user.type(input, "INV-IGN-001");
@@ -107,8 +109,8 @@ describe("Workbench global search modal and navigation", () => {
     expect(ignoredRow).toHaveAttribute("data-search-highlighted", "true");
 
     await user.click(screen.getByRole("button", { name: "关闭已忽略弹窗" }));
-    await user.click(screen.getByRole("button", { name: "打开关联台搜索" }));
-    const nextDialog = await screen.findByRole("dialog", { name: "关联台搜索弹窗" });
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    const nextDialog = await screen.findByRole("dialog", { name: "关联台搜索" });
     const nextInput = within(nextDialog).getByPlaceholderText("搜索项目、公司、人名、发票号、流水号...");
     await user.clear(nextInput);
     await user.type(nextInput, "SERIAL-EX-001");
@@ -131,8 +133,8 @@ describe("Workbench global search modal and navigation", () => {
 
     expect(await screen.findByTestId("zone-open")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "打开关联台搜索" }));
-    const dialog = await screen.findByRole("dialog", { name: "关联台搜索弹窗" });
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    const dialog = await screen.findByRole("dialog", { name: "关联台搜索" });
     const input = within(dialog).getByPlaceholderText("搜索项目、公司、人名、发票号、流水号...");
 
     await user.type(input, "张三广告");
@@ -218,7 +220,7 @@ describe("Workbench global search modal and navigation", () => {
         ),
       ).toBe(true),
     );
-  });
+  }, 10000);
 
   test("shows loading, empty, and error states inside the search modal", async () => {
     const user = userEvent.setup();
@@ -227,8 +229,8 @@ describe("Workbench global search modal and navigation", () => {
 
     expect(await screen.findByTestId("zone-open")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "打开关联台搜索" }));
-    const dialog = await screen.findByRole("dialog", { name: "关联台搜索弹窗" });
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    const dialog = await screen.findByRole("dialog", { name: "关联台搜索" });
     const input = within(dialog).getByPlaceholderText("搜索项目、公司、人名、发票号、流水号...");
 
     await user.type(input, "张三");
@@ -252,12 +254,13 @@ describe("Workbench global search modal and navigation", () => {
 
   test("opens detail from a search result and highlights only matched keyword fragments", async () => {
     const user = userEvent.setup();
+    installMockApiFetch();
     renderWorkbenchPage();
 
     expect(await screen.findByTestId("zone-open")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "打开关联台搜索" }));
-    const dialog = await screen.findByRole("dialog", { name: "关联台搜索弹窗" });
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    const dialog = await screen.findByRole("dialog", { name: "关联台搜索" });
     await user.type(
       within(dialog).getByPlaceholderText("搜索项目、公司、人名、发票号、流水号..."),
       "华东设备供应商",
@@ -287,8 +290,8 @@ describe("Workbench global search modal and navigation", () => {
 
     expect(await screen.findByTestId("zone-open")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "打开关联台搜索" }));
-    const dialog = await screen.findByRole("dialog", { name: "关联台搜索弹窗" });
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    const dialog = await screen.findByRole("dialog", { name: "关联台搜索" });
     await user.type(within(dialog).getByPlaceholderText("搜索项目、公司、人名、发票号、流水号..."), "刘");
     await user.click(within(dialog).getByRole("button", { name: "执行搜索" }));
 

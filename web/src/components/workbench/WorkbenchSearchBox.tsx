@@ -5,7 +5,7 @@ type WorkbenchSearchBoxProps = {
 export default function WorkbenchSearchBox({ onOpen }: WorkbenchSearchBoxProps) {
   return (
     <button
-      aria-label="打开关联台搜索"
+      aria-label="搜索"
       className="workbench-search-entry"
       type="button"
       onClick={onOpen}

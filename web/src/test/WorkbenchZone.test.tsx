@@ -41,7 +41,9 @@ const panes = [
         counterparty: "华东设备供应商",
         actionVariant: "bank-review",
         tableValues: {
+          direction: "支出",
           transactionTime: "2026-03-25 14:22",
+          amount: "128,000.00",
           debitAmount: "128,000.00",
           creditAmount: "--",
           counterparty: "华东设备供应商",

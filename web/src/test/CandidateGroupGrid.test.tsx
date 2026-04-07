@@ -13,7 +13,7 @@ describe("Workbench candidate grouping layout", () => {
     expect(within(groupRow).getByText("陈涛")).toBeInTheDocument();
     expect(within(groupRow).getAllByText("智能工厂设备商").length).toBeGreaterThan(0);
     expect(within(groupRow).getAllByText("58,000.00").length).toBeGreaterThan(0);
-    expect(within(groupRow).getByText("进项专票")).toBeInTheDocument();
+    expect(within(groupRow).getByText("进")).toBeInTheDocument();
   });
 
   test("renders blank cells when a candidate group is missing bank and invoice records", async () => {
