@@ -20,8 +20,12 @@ class WorkbenchQueryService:
         self._seed_all_rows()
 
     def get_workbench(self, month: str) -> dict[str, Any]:
-        self._sync_oa_rows(month)
-        month_rows = [row for row in self._records_by_id.values() if row["_month"] == month]
+        if month == "all":
+            self._sync_all_oa_rows()
+            month_rows = list(self._records_by_id.values())
+        else:
+            self._sync_oa_rows(month)
+            month_rows = [row for row in self._records_by_id.values() if row["_month"] == month]
         paired_rows = [row for row in month_rows if row["_section"] == "paired"]
         open_rows = [row for row in month_rows if row["_section"] == "open"]
 
@@ -38,6 +42,10 @@ class WorkbenchQueryService:
             "paired": self._group_rows(paired_rows),
             "open": self._group_rows(open_rows),
         }
+
+    def _sync_all_oa_rows(self) -> None:
+        for month in self.list_available_months():
+            self._sync_oa_rows(month)
 
     def list_available_months(self) -> list[str]:
         months = {
@@ -63,6 +71,8 @@ class WorkbenchQueryService:
         return payload
 
     def get_row_record(self, row_id: str) -> dict[str, Any]:
+        if row_id not in self._records_by_id:
+            self._sync_all_oa_rows()
         return self._records_by_id[row_id]
 
     def serialize_row(self, row: dict[str, Any]) -> dict[str, Any]:

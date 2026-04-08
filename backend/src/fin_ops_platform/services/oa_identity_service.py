@@ -59,7 +59,7 @@ class OAIdentitySettings:
     base_url: str | None
     user_info_path: str = "/system/user/getInfo"
     request_timeout_ms: int = 5000
-    cache_ttl_seconds: int = 30
+    cache_ttl_seconds: int = 300
 
     @classmethod
     def from_environment(cls) -> "OAIdentitySettings":
@@ -67,7 +67,7 @@ class OAIdentitySettings:
             base_url=os.getenv("FIN_OPS_OA_BASE_URL"),
             user_info_path=os.getenv("FIN_OPS_OA_USER_INFO_PATH", "/system/user/getInfo").strip() or "/system/user/getInfo",
             request_timeout_ms=int(os.getenv("FIN_OPS_OA_REQUEST_TIMEOUT_MS", "5000")),
-            cache_ttl_seconds=max(int(os.getenv("FIN_OPS_OA_SESSION_CACHE_TTL_SECONDS", "30")), 0),
+            cache_ttl_seconds=max(int(os.getenv("FIN_OPS_OA_SESSION_CACHE_TTL_SECONDS", "300")), 0),
         )
 
 

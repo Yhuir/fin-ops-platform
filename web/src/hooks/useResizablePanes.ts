@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 const DEFAULT_WIDTHS = [0.32, 0.36, 0.32];
 const COLLAPSE_EPSILON = 0.0001;
@@ -129,7 +129,7 @@ export function useResizablePanes(initialWidths = DEFAULT_WIDTHS) {
     };
   }, [dragState]);
 
-  const togglePane = (index: number) => {
+  const togglePane = useCallback((index: number) => {
     setWidths((currentWidths) => {
       if (currentWidths[index] > COLLAPSE_EPSILON) {
         const activeCount = currentWidths.filter((width) => width > COLLAPSE_EPSILON).length;
@@ -141,9 +141,9 @@ export function useResizablePanes(initialWidths = DEFAULT_WIDTHS) {
 
       return restoreWidth(currentWidths, index, initialWidths);
     });
-  };
+  }, [initialWidths]);
 
-  const startDrag = (leftIndex: number, rightIndex: number, clientX: number, containerWidth: number) => {
+  const startDrag = useCallback((leftIndex: number, rightIndex: number, clientX: number, containerWidth: number) => {
     if (!Number.isFinite(clientX)) {
       return;
     }
@@ -155,7 +155,7 @@ export function useResizablePanes(initialWidths = DEFAULT_WIDTHS) {
       startWidths: widths,
       containerWidth,
     });
-  };
+  }, [widths]);
 
   return {
     widths,

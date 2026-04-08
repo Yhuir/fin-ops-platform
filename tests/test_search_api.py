@@ -1,5 +1,6 @@
 import json
 import unittest
+from unittest.mock import patch
 
 from fin_ops_platform.app.server import build_application
 
@@ -37,6 +38,52 @@ class SearchApiTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["invoice"], 1)
         self.assertEqual(payload["invoice_results"][0]["zone_hint"], "ignored")
         self.assertEqual(payload["invoice_results"][0]["status_label"], "已忽略")
+
+    def test_search_api_uses_cached_read_model_and_ignored_rows_without_raw_rebuild(self) -> None:
+        app = build_application()
+        app._workbench_read_model_service.upsert_read_model(
+            scope_key="2026-03",
+            payload={
+                "month": "2026-03",
+                "summary": {
+                    "oa_count": 0,
+                    "bank_count": 0,
+                    "invoice_count": 0,
+                    "paired_count": 0,
+                    "open_count": 0,
+                    "exception_count": 0,
+                },
+                "paired": {"groups": []},
+                "open": {"groups": []},
+            },
+            ignored_rows=[
+                {
+                    "id": "iv-ignored-001",
+                    "type": "invoice",
+                    "seller_name": "云南服务商有限公司",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "amount": "600.00",
+                    "issue_date": "2026-03-20",
+                    "invoice_type": "进项发票",
+                    "ignored": True,
+                    "detail_fields": {
+                        "发票号码": "12561048",
+                        "发票代码": "5300261130",
+                    },
+                }
+            ],
+            generated_at="2026-04-08T12:00:00+00:00",
+        )
+
+        with patch.object(app, "_build_raw_workbench_payload", side_effect=AssertionError("should not rebuild raw payload")):
+            response = app.handle_request("GET", "/api/search?q=12561048&month=2026-03&status=ignored")
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["summary"]["total"], 1)
+        self.assertEqual(payload["summary"]["invoice"], 1)
+        self.assertEqual(payload["invoice_results"][0]["row_id"], "iv-ignored-001")
+        self.assertEqual(payload["invoice_results"][0]["zone_hint"], "ignored")
 
 
 if __name__ == "__main__":

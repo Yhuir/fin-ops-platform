@@ -233,6 +233,99 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual(group["invoice_rows"][0]["invoice_bank_relation"]["label"], "已关联流水")
         self.assertEqual(group["invoice_rows"][0]["available_actions"], ["detail"])
 
+    def test_keeps_single_bank_salary_auto_match_in_paired_section(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-02",
+            oa_rows=[],
+            bank_rows=[
+                {
+                    "id": "bk-salary-001",
+                    "type": "bank",
+                    "case_id": "salary_auto_bk-salary-001",
+                    "debit_amount": "9.00",
+                    "credit_amount": "",
+                    "counterparty_name": "李四",
+                    "invoice_relation": {"code": "salary_personal_auto_match", "label": "已匹配：工资", "tone": "success"},
+                    "available_actions": ["detail"],
+                }
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 1)
+        self.assertEqual(payload["summary"]["open_count"], 0)
+        group = payload["paired"]["groups"][0]
+        self.assertEqual(group["group_type"], "auto_closed")
+        self.assertEqual(group["bank_rows"][0]["invoice_relation"]["code"], "salary_personal_auto_match")
+        self.assertEqual(group["bank_rows"][0]["invoice_relation"]["label"], "已匹配：工资")
+
+    def test_keeps_internal_transfer_pair_together_in_paired_section_only_when_both_bank_rows_exist(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-03",
+            oa_rows=[],
+            bank_rows=[
+                {
+                    "id": "bk-transfer-001",
+                    "type": "bank",
+                    "case_id": "internal_transfer_case_001",
+                    "trade_time": "2026-03-19 11:15:00",
+                    "debit_amount": "",
+                    "credit_amount": "13000.00",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "invoice_relation": {"code": "internal_transfer_pair", "label": "已匹配：内部往来款", "tone": "success"},
+                    "available_actions": ["detail"],
+                },
+                {
+                    "id": "bk-transfer-002",
+                    "type": "bank",
+                    "case_id": "internal_transfer_case_001",
+                    "trade_time": "2026-03-19 11:16:00",
+                    "debit_amount": "13000.00",
+                    "credit_amount": "",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "invoice_relation": {"code": "internal_transfer_pair", "label": "已匹配：内部往来款", "tone": "success"},
+                    "available_actions": ["detail"],
+                },
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 1)
+        self.assertEqual(payload["summary"]["open_count"], 0)
+        group = payload["paired"]["groups"][0]
+        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bk-transfer-001", "bk-transfer-002"])
+
+    def test_demotes_single_sided_internal_transfer_row_back_to_open_section(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-03",
+            oa_rows=[],
+            bank_rows=[
+                {
+                    "id": "bk-transfer-001",
+                    "type": "bank",
+                    "case_id": "internal_transfer_case_001",
+                    "trade_time": "2026-03-19 11:15:00",
+                    "debit_amount": "",
+                    "credit_amount": "13000.00",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "invoice_relation": {"code": "internal_transfer_pair", "label": "已匹配：内部往来款", "tone": "success"},
+                    "available_actions": ["detail"],
+                }
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(payload["summary"]["open_count"], 1)
+        self.assertEqual(len(payload["paired"]["groups"]), 0)
+        self.assertEqual(len(payload["open"]["groups"]), 1)
+        group = payload["open"]["groups"][0]
+        self.assertEqual(group["group_type"], "candidate")
+        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bk-transfer-001"])
+
     def test_separates_same_counterparty_rows_when_amount_buckets_differ(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(

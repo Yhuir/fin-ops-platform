@@ -1,21 +1,21 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 
 type AppChromeContextValue = {
-  isWorkbenchFocusMode: boolean;
-  setWorkbenchFocusMode: (nextValue: boolean) => void;
+  workbenchStatusText: string | null;
+  setWorkbenchStatusText: (nextValue: string | null) => void;
 };
 
 const AppChromeContext = createContext<AppChromeContextValue | null>(null);
 
 export function AppChromeProvider({ children }: { children: ReactNode }) {
-  const [isWorkbenchFocusMode, setWorkbenchFocusMode] = useState(false);
+  const [workbenchStatusText, setWorkbenchStatusText] = useState<string | null>(null);
 
   const value = useMemo(
     () => ({
-      isWorkbenchFocusMode,
-      setWorkbenchFocusMode,
+      workbenchStatusText,
+      setWorkbenchStatusText,
     }),
-    [isWorkbenchFocusMode],
+    [workbenchStatusText],
   );
 
   return <AppChromeContext.Provider value={value}>{children}</AppChromeContext.Provider>;

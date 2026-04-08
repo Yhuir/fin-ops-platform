@@ -24,6 +24,10 @@ type MockApiOptions = {
   sessionUsername?: string;
   sessionDisplayName?: string;
   actionDelayMs?: number;
+  workbenchLoadDelayMs?: number;
+  workbenchPrimaryDelayMs?: number;
+  workbenchIgnoredDelayMs?: number;
+  workbenchSettingsDelayMs?: number;
   searchDelayMs?: number;
   searchErrorQueries?: string[];
   emptyBodyPaths?: string[];
@@ -562,14 +566,68 @@ function groupHasDanger(group: {
   });
 }
 
+const WORKBENCH_STATE_MONTHS = ["2026-03", "2026-04"] as const;
+
 function createWorkbenchStateStore() {
   const store = new Map<string, RawWorkbenchPayload>();
+  const ensureMonth = (month: string) => {
+    if (!store.has(month)) {
+      store.set(month, cloneJson(buildWorkbenchRowPayload(month)));
+    }
+    return store.get(month)!;
+  };
+  const buildAllPayload = (): RawWorkbenchPayload => {
+    const merged: RawWorkbenchPayload = {
+      month: "all",
+      summary: {
+        oa_count: 0,
+        bank_count: 0,
+        invoice_count: 0,
+        paired_count: 0,
+        open_count: 0,
+        exception_count: 0,
+      },
+      paired: { oa: [], bank: [], invoice: [] },
+      open: { oa: [], bank: [], invoice: [] },
+    };
+
+    for (const month of WORKBENCH_STATE_MONTHS) {
+      const payload = ensureMonth(month);
+      merged.summary.oa_count += payload.summary.oa_count;
+      merged.summary.bank_count += payload.summary.bank_count;
+      merged.summary.invoice_count += payload.summary.invoice_count;
+      merged.summary.paired_count += payload.summary.paired_count;
+      merged.summary.open_count += payload.summary.open_count;
+      merged.summary.exception_count += payload.summary.exception_count;
+      merged.paired.oa.push(...cloneJson(payload.paired.oa));
+      merged.paired.bank.push(...cloneJson(payload.paired.bank));
+      merged.paired.invoice.push(...cloneJson(payload.paired.invoice));
+      merged.open.oa.push(...cloneJson(payload.open.oa));
+      merged.open.bank.push(...cloneJson(payload.open.bank));
+      merged.open.invoice.push(...cloneJson(payload.open.invoice));
+    }
+
+    return merged;
+  };
   return {
     get(month: string) {
-      if (!store.has(month)) {
-        store.set(month, cloneJson(buildWorkbenchRowPayload(month)));
+      if (month === "all") {
+        return buildAllPayload();
       }
-      return store.get(month)!;
+      return ensureMonth(month);
+    },
+    resolveMonthForRow(rowId: string) {
+      for (const month of WORKBENCH_STATE_MONTHS) {
+        const payload = ensureMonth(month);
+        for (const section of ["paired", "open"] as const) {
+          for (const pane of ["oa", "bank", "invoice"] as const) {
+            if (payload[section][pane].some((row) => String(row.id) === rowId)) {
+              return month;
+            }
+          }
+        }
+      }
+      return undefined;
     },
   };
 }
@@ -605,10 +663,22 @@ function createIgnoredRowStore() {
   ]);
   return {
     get(month: string) {
+      if (month === "all") {
+        return WORKBENCH_STATE_MONTHS.flatMap((candidateMonth) => cloneJson(store.get(candidateMonth) ?? []));
+      }
       if (!store.has(month)) {
         store.set(month, []);
       }
       return store.get(month)!;
+    },
+    resolveMonthForRow(rowId: string) {
+      for (const month of WORKBENCH_STATE_MONTHS) {
+        const rows = store.get(month) ?? [];
+        if (rows.some((row) => String(row.id) === rowId)) {
+          return month;
+        }
+      }
+      return undefined;
     },
   };
 }
@@ -651,7 +721,7 @@ function buildSearchPayload({
   ignoredRowStore: ReturnType<typeof createIgnoredRowStore>;
 }) {
   const normalizedQuery = query.trim().toLowerCase();
-  const months = month === "all" ? ["2026-03", "2026-04", "2026-05"] : [month];
+  const months = month === "all" ? [...WORKBENCH_STATE_MONTHS] : [month];
   const groupedResults = {
     oa: [] as MockSearchResult[],
     bank: [] as MockSearchResult[],
@@ -2685,13 +2755,25 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     },
     "/api/workbench/actions/confirm-link": ({ jsonBody }) => {
       const rowIds = Array.isArray(jsonBody?.row_ids) ? (jsonBody.row_ids as string[]) : [];
+      const month = String(jsonBody?.month ?? "");
+      const touchedMonths = new Set(
+        rowIds
+          .map((rowId) => (month === "all" ? workbenchStateStore.resolveMonthForRow(rowId) : month))
+          .filter(Boolean) as string[],
+      );
+      for (const resolvedMonth of touchedMonths) {
+        const payload = workbenchStateStore.get(resolvedMonth);
+        for (const rowId of rowIds) {
+          moveWorkbenchGroup(payload, "open", "paired", rowId);
+        }
+      }
       return {
         body: {
           success: true,
           action: "confirm_link",
-          month: String(jsonBody?.month ?? ""),
+          month,
           affected_row_ids: rowIds,
-          updated_rows: rowIds.map((id) => ({ id })),
+          case_id: typeof jsonBody?.case_id === "string" ? jsonBody.case_id : undefined,
           message: `已确认 ${rowIds.length} 条记录关联。`,
         },
       };
@@ -2709,14 +2791,14 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     "/api/workbench/actions/cancel-link": ({ jsonBody }) => {
       const month = String(jsonBody?.month ?? "");
       const rowId = String(jsonBody?.row_id ?? "");
-      moveWorkbenchGroup(workbenchStateStore.get(month), "paired", "open", rowId);
+      const resolvedMonth = month === "all" ? workbenchStateStore.resolveMonthForRow(rowId) ?? month : month;
+      moveWorkbenchGroup(workbenchStateStore.get(resolvedMonth), "paired", "open", rowId);
       return {
         body: {
           success: true,
           action: "cancel_link",
           month,
           affected_row_ids: [rowId],
-          updated_rows: [{ id: rowId }],
           message: "已取消关联并回退为待处理。",
         },
       };
@@ -2737,32 +2819,37 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const exceptionCode = String(jsonBody?.exception_code ?? "");
       const exceptionLabel = String(jsonBody?.exception_label ?? "");
       const comment = typeof jsonBody?.comment === "string" ? jsonBody.comment : exceptionLabel;
-      const payload = workbenchStateStore.get(month);
+      const touchedMonths = new Set(
+        rowIds.map((rowId) => (month === "all" ? workbenchStateStore.resolveMonthForRow(rowId) : month)).filter(Boolean) as string[],
+      );
 
-      for (const pane of ["oa", "bank", "invoice"] as const) {
-        payload.open[pane] = payload.open[pane].map((row) => {
-          if (!rowIds.includes(String(row.id))) {
+      for (const resolvedMonth of touchedMonths) {
+        const payload = workbenchStateStore.get(resolvedMonth);
+        for (const pane of ["oa", "bank", "invoice"] as const) {
+          payload.open[pane] = payload.open[pane].map((row) => {
+            if (!rowIds.includes(String(row.id))) {
+              return row;
+            }
+            if (row.type === "oa") {
+              return {
+                ...row,
+                handled_exception: true,
+                oa_bank_relation: { code: exceptionCode, label: exceptionLabel, tone: "danger" },
+                available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+              };
+            }
+            if (row.type === "bank") {
+              return {
+                ...row,
+                handled_exception: true,
+                invoice_relation: { code: exceptionCode, label: exceptionLabel, tone: "danger" },
+                available_actions: ["detail", "view_relation", "cancel_link", "handle_exception"],
+                remark: comment,
+              };
+            }
             return row;
-          }
-          if (row.type === "oa") {
-            return {
-              ...row,
-              handled_exception: true,
-              oa_bank_relation: { code: exceptionCode, label: exceptionLabel, tone: "danger" },
-              available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
-            };
-          }
-          if (row.type === "bank") {
-            return {
-              ...row,
-              handled_exception: true,
-              invoice_relation: { code: exceptionCode, label: exceptionLabel, tone: "danger" },
-              available_actions: ["detail", "view_relation", "cancel_link", "handle_exception"],
-              remark: comment,
-            };
-          }
-          return row;
-        });
+          });
+        }
       }
 
       return {
@@ -2779,36 +2866,41 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     "/api/workbench/actions/cancel-exception": ({ jsonBody }) => {
       const month = String(jsonBody?.month ?? "");
       const rowIds = Array.isArray(jsonBody?.row_ids) ? (jsonBody.row_ids as string[]) : [];
-      const payload = workbenchStateStore.get(month);
+      const touchedMonths = new Set(
+        rowIds.map((rowId) => (month === "all" ? workbenchStateStore.resolveMonthForRow(rowId) : month)).filter(Boolean) as string[],
+      );
 
-      for (const pane of ["oa", "bank", "invoice"] as const) {
-        payload.open[pane] = payload.open[pane].map((row) => {
-          if (!rowIds.includes(String(row.id))) {
-            return row;
-          }
-          if (row.type === "oa") {
+      for (const resolvedMonth of touchedMonths) {
+        const payload = workbenchStateStore.get(resolvedMonth);
+        for (const pane of ["oa", "bank", "invoice"] as const) {
+          payload.open[pane] = payload.open[pane].map((row) => {
+            if (!rowIds.includes(String(row.id))) {
+              return row;
+            }
+            if (row.type === "oa") {
+              return {
+                ...row,
+                handled_exception: false,
+                oa_bank_relation: { code: "pending_match", label: "待找流水与发票", tone: "warn" },
+                available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+              };
+            }
+            if (row.type === "bank") {
+              return {
+                ...row,
+                handled_exception: false,
+                invoice_relation: { code: "pending_invoice_match", label: "待关联设备票", tone: "warn" },
+                available_actions: ["detail", "view_relation", "cancel_link", "handle_exception"],
+              };
+            }
             return {
               ...row,
               handled_exception: false,
-              oa_bank_relation: { code: "pending_match", label: "待找流水与发票", tone: "warn" },
+              invoice_bank_relation: { code: "pending_collection", label: "待匹配流水", tone: "warn" },
               available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
             };
-          }
-          if (row.type === "bank") {
-            return {
-              ...row,
-              handled_exception: false,
-              invoice_relation: { code: "pending_invoice_match", label: "待关联设备票", tone: "warn" },
-              available_actions: ["detail", "view_relation", "cancel_link", "handle_exception"],
-            };
-          }
-          return {
-            ...row,
-            handled_exception: false,
-            invoice_bank_relation: { code: "pending_collection", label: "待匹配流水", tone: "warn" },
-            available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
-          };
-        });
+          });
+        }
       }
 
       return {
@@ -2825,7 +2917,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     "/api/workbench/actions/ignore-row": ({ jsonBody }) => {
       const month = String(jsonBody?.month ?? "");
       const rowId = String(jsonBody?.row_id ?? "");
-      moveInvoiceToIgnored(workbenchStateStore.get(month), ignoredRowStore.get(month), rowId);
+      const resolvedMonth = month === "all" ? workbenchStateStore.resolveMonthForRow(rowId) ?? month : month;
+      moveInvoiceToIgnored(workbenchStateStore.get(resolvedMonth), ignoredRowStore.get(resolvedMonth), rowId);
       return {
         body: {
           success: true,
@@ -2840,7 +2933,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     "/api/workbench/actions/unignore-row": ({ jsonBody }) => {
       const month = String(jsonBody?.month ?? "");
       const rowId = String(jsonBody?.row_id ?? "");
-      restoreIgnoredInvoice(workbenchStateStore.get(month), ignoredRowStore.get(month), rowId);
+      const resolvedMonth = month === "all" ? ignoredRowStore.resolveMonthForRow(rowId) ?? month : month;
+      restoreIgnoredInvoice(workbenchStateStore.get(resolvedMonth), ignoredRowStore.get(resolvedMonth), rowId);
       return {
         body: {
           success: true,
@@ -2999,6 +3093,23 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     }
 
     const response = await handler({ url, init, jsonBody, formData });
+    const workbenchSpecificDelay =
+      (url.pathname === "/api/workbench" ? options.workbenchPrimaryDelayMs : undefined)
+      ?? (url.pathname === "/api/workbench/ignored" ? options.workbenchIgnoredDelayMs : undefined)
+      ?? (url.pathname === "/api/workbench/settings" ? options.workbenchSettingsDelayMs : undefined);
+
+    if (workbenchSpecificDelay) {
+      await new Promise((resolve) => window.setTimeout(resolve, workbenchSpecificDelay));
+    } else if (
+      options.workbenchLoadDelayMs
+      && (
+        url.pathname === "/api/workbench"
+        || url.pathname === "/api/workbench/ignored"
+        || url.pathname === "/api/workbench/settings"
+      )
+    ) {
+      await new Promise((resolve) => window.setTimeout(resolve, options.workbenchLoadDelayMs));
+    }
     if (options.searchDelayMs && url.pathname === "/api/search") {
       await new Promise((resolve) => window.setTimeout(resolve, options.searchDelayMs));
     }

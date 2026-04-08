@@ -5,12 +5,16 @@ from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 import json
+import re
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Callable
+from threading import Lock, Thread
+from time import monotonic
+from typing import Callable, Iterable
 from urllib.parse import parse_qs, quote, unquote, urlparse
+from uuid import uuid4
 
 from fin_ops_platform import __version__
 from fin_ops_platform.app.auth import (
@@ -49,14 +53,17 @@ from fin_ops_platform.services.tax_offset_service import TaxOffsetService
 from fin_ops_platform.services.workbench_candidate_grouping import WorkbenchCandidateGroupingService
 from fin_ops_platform.services.workbench_action_service import WorkbenchActionService
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
+from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
+from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
 from fin_ops_platform.services.seeds import build_demo_seed
 
 
 @dataclass(slots=True)
 class Response:
     status_code: int
-    body: str | bytes
+    body: str | bytes | Iterable[bytes]
+    stream: bool = False
     headers: dict[str, str] = field(
         default_factory=lambda: {
             "Content-Type": "application/json; charset=utf-8",
@@ -88,6 +95,9 @@ def _build_content_disposition(filename: str) -> str:
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded_name}"
 
 
+ROW_ID_MONTH_RE = re.compile(r"(20\d{2})(\d{2})")
+
+
 class Application:
     def __init__(self, *, data_dir: Path | None = None) -> None:
         self._state_store = ApplicationStateStore(data_dir) if data_dir is not None else None
@@ -105,6 +115,12 @@ class Application:
         )
         self._workbench_override_service = WorkbenchOverrideService.from_snapshot(
             persisted_state.get("workbench_overrides"),
+        )
+        self._workbench_pair_relation_service = WorkbenchPairRelationService.from_snapshot(
+            persisted_state.get("workbench_pair_relations"),
+        )
+        self._workbench_read_model_service = WorkbenchReadModelService.from_snapshot(
+            persisted_state.get("workbench_read_models"),
         )
         mongo_oa_settings = load_mongo_oa_settings(self._state_store.data_dir if self._state_store is not None else None)
         oa_adapter = MongoOAAdapter(settings=mongo_oa_settings) if mongo_oa_settings is not None else None
@@ -164,8 +180,13 @@ class Application:
         )
         self._search_service = SearchService(
             known_months_loader=self._list_search_months,
-            raw_workbench_loader=self._build_raw_workbench_payload,
+            grouped_workbench_loader=self._build_api_workbench_payload,
+            ignored_rows_loader=self._build_api_workbench_ignored_rows_payload,
         )
+        self._workbench_read_model_persist_version = 0
+        self._workbench_read_model_persist_version_lock = Lock()
+        self._workbench_pair_relation_persist_version = 0
+        self._workbench_pair_relation_persist_version_lock = Lock()
         self._workbench_api_routes = WorkbenchApiRoutes(
             self._workbench_query_service,
             self._workbench_action_service,
@@ -179,9 +200,12 @@ class Application:
         body: str | bytes | None = None,
         headers: dict[str, str] | None = None,
     ) -> Response:
+        request_started_at = monotonic()
         parsed = urlparse(path)
         route_path = parsed.path
         query = parse_qs(parsed.query)
+        timed_action = self._workbench_timed_action_for_route(method=method, route_path=route_path)
+        request_id = uuid4().hex[:12] if timed_action is not None else None
 
         if method == "GET" and route_path == "/health":
             return self._json_response(HTTPStatus.OK, self._health_payload())
@@ -189,8 +213,21 @@ class Application:
             return Response(status_code=int(HTTPStatus.NO_CONTENT), body="")
         if method == "GET" and route_path == "/foundation/seed":
             return self._json_response(HTTPStatus.OK, self._seed_payload)
-        auth_error = self._enforce_route_access(route_path, headers)
+        auth_error = self._enforce_route_access(
+            route_path,
+            headers,
+            request_id=request_id,
+            action_name=timed_action,
+        )
         if auth_error is not None:
+            if request_id is not None and timed_action is not None:
+                self._emit_workbench_action_timing(
+                    request_id=request_id,
+                    action_name=timed_action,
+                    phase="request_total",
+                    duration_ms=self._duration_ms(request_started_at),
+                    status="auth_error",
+                )
             return auth_error
         if method == "GET" and route_path == "/api/workbench":
             month = query.get("month", [None])[0]
@@ -223,11 +260,27 @@ class Application:
             row_id = route_path.rsplit("/", 1)[-1]
             return self._handle_api_workbench_row_detail(row_id)
         if method == "POST" and route_path == "/api/workbench/actions/confirm-link":
-            return self._handle_api_workbench_confirm_link(body)
+            response = self._handle_api_workbench_confirm_link(body, request_id=request_id)
+            self._emit_workbench_action_timing(
+                request_id=request_id or "no-request-id",
+                action_name="confirm_link",
+                phase="request_total",
+                duration_ms=self._duration_ms(request_started_at),
+                status=response.status_code,
+            )
+            return response
         if method == "POST" and route_path == "/api/workbench/actions/mark-exception":
             return self._handle_api_workbench_mark_exception(body)
         if method == "POST" and route_path == "/api/workbench/actions/cancel-link":
-            return self._handle_api_workbench_cancel_link(body)
+            response = self._handle_api_workbench_cancel_link(body, request_id=request_id)
+            self._emit_workbench_action_timing(
+                request_id=request_id or "no-request-id",
+                action_name="cancel_link",
+                phase="request_total",
+                duration_ms=self._duration_ms(request_started_at),
+                status=response.status_code,
+            )
+            return response
         if method == "POST" and route_path == "/api/workbench/actions/update-bank-exception":
             return self._handle_api_workbench_update_bank_exception(body)
         if method == "POST" and route_path == "/api/workbench/actions/oa-bank-exception":
@@ -535,7 +588,7 @@ class Application:
         )
 
     def _handle_api_workbench(self, month: str | None) -> Response:
-        current_month = month or datetime.now().strftime("%Y-%m")
+        current_month = month or "all"
         return self._json_response(HTTPStatus.OK, self._build_api_workbench_payload(current_month))
 
     def _handle_api_search(
@@ -664,9 +717,53 @@ class Application:
         )
         return route_path.startswith(protected_prefixes)
 
-    def _enforce_route_access(self, route_path: str, headers: dict[str, str] | None) -> Response | None:
+    @staticmethod
+    def _duration_ms(started_at: float) -> float:
+        return round((monotonic() - started_at) * 1000, 3)
+
+    @staticmethod
+    def _workbench_timed_action_for_route(*, method: str, route_path: str) -> str | None:
+        if method == "POST" and route_path == "/api/workbench/actions/confirm-link":
+            return "confirm_link"
+        if method == "POST" and route_path == "/api/workbench/actions/cancel-link":
+            return "cancel_link"
+        return None
+
+    def _emit_workbench_action_timing(
+        self,
+        *,
+        request_id: str,
+        action_name: str,
+        phase: str,
+        duration_ms: float,
+        status: str | int | None = None,
+        detail: str | None = None,
+    ) -> None:
+        payload: dict[str, object] = {
+            "kind": "workbench_action_timing",
+            "request_id": request_id,
+            "action": action_name,
+            "phase": phase,
+            "duration_ms": round(float(duration_ms), 3),
+            "timestamp": datetime.now().isoformat(),
+        }
+        if status is not None:
+            payload["status"] = status
+        if detail is not None and detail.strip():
+            payload["detail"] = detail.strip()
+        print(json.dumps(payload, ensure_ascii=False), flush=True)
+
+    def _enforce_route_access(
+        self,
+        route_path: str,
+        headers: dict[str, str] | None,
+        *,
+        request_id: str | None = None,
+        action_name: str | None = None,
+    ) -> Response | None:
         if not self._route_requires_oa_access(route_path):
             return None
+        auth_started_at = monotonic()
         try:
             session = resolve_oa_request_session(
                 headers,
@@ -715,17 +812,23 @@ class Application:
                     "message": str(error) or "OA 身份解析失败。",
                 },
             )
+        finally:
+            if request_id is not None and action_name is not None:
+                self._emit_workbench_action_timing(
+                    request_id=request_id,
+                    action_name=action_name,
+                    phase="oa_auth",
+                    duration_ms=self._duration_ms(auth_started_at),
+                )
         return None
 
     def _handle_api_workbench_ignored(self, month: str | None) -> Response:
-        current_month = month or datetime.now().strftime("%Y-%m")
-        raw_payload = self._build_raw_workbench_payload(current_month)
-        ignored_rows = self._extract_ignored_rows(raw_payload)
+        current_month = month or "all"
         return self._json_response(
             HTTPStatus.OK,
             {
                 "month": current_month,
-                "rows": ignored_rows,
+                "rows": self._build_api_workbench_ignored_rows_payload(current_month),
             },
         )
 
@@ -930,14 +1033,11 @@ class Application:
             )
         return self._json_response(HTTPStatus.OK, payload)
 
-    def _handle_api_workbench_confirm_link(self, body: str | None) -> Response:
+    def _handle_api_workbench_confirm_link(self, body: str | None, *, request_id: str | None = None) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        month = str(payload.get("month", ""))
-        if self._live_workbench_service.has_rows_for_month(month):
-            return self._handle_live_workbench_confirm_link(payload)
-        return self._handle_api_workbench_action_payload(payload, self._workbench_api_routes.confirm_link, "invalid_confirm_link_request")
+        return self._handle_live_workbench_confirm_link(payload, request_id=request_id)
 
     def _handle_api_workbench_mark_exception(self, body: str | None) -> Response:
         payload, error = self._load_json_body(body)
@@ -948,14 +1048,11 @@ class Application:
             return self._handle_live_workbench_mark_exception(payload)
         return self._handle_api_workbench_action_payload(payload, self._workbench_api_routes.mark_exception, "invalid_mark_exception_request")
 
-    def _handle_api_workbench_cancel_link(self, body: str | None) -> Response:
+    def _handle_api_workbench_cancel_link(self, body: str | None, *, request_id: str | None = None) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        month = str(payload.get("month", ""))
-        if self._live_workbench_service.has_rows_for_month(month):
-            return self._handle_live_workbench_cancel_link(payload)
-        return self._handle_api_workbench_action_payload(payload, self._workbench_api_routes.cancel_link, "invalid_cancel_link_request")
+        return self._handle_live_workbench_cancel_link(payload, request_id=request_id)
 
     def _handle_api_workbench_update_bank_exception(self, body: str | None) -> Response:
         payload, error = self._load_json_body(body)
@@ -1151,10 +1248,16 @@ class Application:
             )
         return self._json_response(HTTPStatus.OK, result)
 
-    def _handle_live_workbench_confirm_link(self, payload: dict[str, object]) -> Response:
+    def _handle_live_workbench_confirm_link(
+        self,
+        payload: dict[str, object],
+        *,
+        request_id: str | None = None,
+    ) -> Response:
+        action_name = "confirm_link"
         try:
             month = str(payload["month"])
-            row_ids = [str(row_id) for row_id in list(payload["row_ids"])]
+            row_ids = self._normalize_row_ids(list(payload["row_ids"]))
             case_id = str(payload["case_id"]) if payload.get("case_id") is not None else None
         except (KeyError, TypeError, ValueError) as exc:
             return self._json_response(
@@ -1162,26 +1265,72 @@ class Application:
                 {"error": "invalid_confirm_link_request", "message": str(exc)},
             )
 
-        grouped_payload = self._build_api_workbench_payload(month)
-        try:
-            rows = [self._resolve_live_row(grouped_payload, row_id) for row_id in row_ids]
-        except KeyError as exc:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "workbench_row_not_found", "message": str(exc)},
+        resolve_rows_started_at = monotonic()
+        if request_id is not None:
+            self._emit_workbench_action_timing(
+                request_id=request_id,
+                action_name=action_name,
+                phase="resolve_rows",
+                duration_ms=self._duration_ms(resolve_rows_started_at),
+                detail=f"rows={len(row_ids)}",
             )
 
-        _, updated_rows = self._workbench_override_service.confirm_link(rows=rows, case_id=case_id)
-        self._persist_workbench_overrides()
+        resolved_case_id = case_id or self._workbench_override_service._next_case_id()
+        pair_relation_started_at = monotonic()
+        self._workbench_pair_relation_service.create_active_relation(
+            case_id=resolved_case_id,
+            row_ids=row_ids,
+            row_types=self._row_types_for_row_ids(row_ids),
+            relation_mode="manual_confirmed",
+            created_by="system",
+            month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
+        )
+        if request_id is not None:
+            self._emit_workbench_action_timing(
+                request_id=request_id,
+                action_name=action_name,
+                phase="pair_relation_update",
+                duration_ms=self._duration_ms(pair_relation_started_at),
+                detail=f"case_id={resolved_case_id}",
+            )
+        changed_scope_keys = list(self._scope_keys_for_row_ids(month=month, row_ids=row_ids))
+        invalidate_started_at = monotonic()
+        self._invalidate_workbench_read_model_scopes(changed_scope_keys)
+        if request_id is not None:
+            self._emit_workbench_action_timing(
+                request_id=request_id,
+                action_name=action_name,
+                phase="invalidate_read_model_scopes",
+                duration_ms=self._duration_ms(invalidate_started_at),
+                detail=",".join(changed_scope_keys),
+            )
+        schedule_started_at = monotonic()
+        self._schedule_workbench_pair_relation_persist(
+            changed_case_ids=[resolved_case_id],
+            request_id=request_id,
+            action_name=action_name,
+        )
+        self._schedule_workbench_read_model_persist(
+            changed_scope_keys=changed_scope_keys,
+            request_id=request_id,
+            action_name=action_name,
+        )
+        if request_id is not None:
+            self._emit_workbench_action_timing(
+                request_id=request_id,
+                action_name=action_name,
+                phase="schedule_background_persist",
+                duration_ms=self._duration_ms(schedule_started_at),
+            )
         return self._json_response(
             HTTPStatus.OK,
             {
                 "success": True,
                 "action": "confirm_link",
                 "month": month,
-                "affected_row_ids": [row["id"] for row in updated_rows],
-                "updated_rows": updated_rows,
-                "message": f"已确认 {len(updated_rows)} 条记录关联。",
+                "case_id": resolved_case_id,
+                "affected_row_ids": row_ids,
+                "message": f"已确认 {len(row_ids)} 条记录关联。",
             },
         )
 
@@ -1210,7 +1359,7 @@ class Application:
             exception_code=exception_code,
             comment=comment,
         )
-        self._persist_workbench_overrides()
+        self._persist_workbench_overrides(changed_row_ids=[str(updated_row["id"])])
         return self._json_response(
             HTTPStatus.OK,
             {
@@ -1223,7 +1372,13 @@ class Application:
             },
         )
 
-    def _handle_live_workbench_cancel_link(self, payload: dict[str, object]) -> Response:
+    def _handle_live_workbench_cancel_link(
+        self,
+        payload: dict[str, object],
+        *,
+        request_id: str | None = None,
+    ) -> Response:
+        action_name = "cancel_link"
         try:
             month = str(payload["month"])
             row_id = str(payload["row_id"])
@@ -1234,28 +1389,78 @@ class Application:
                 {"error": "invalid_cancel_link_request", "message": str(exc)},
             )
 
-        grouped_payload = self._build_api_workbench_payload(month)
-        group = self._resolve_live_group(grouped_payload, row_id)
-        if group is None:
+        resolve_rows_started_at = monotonic()
+        active_relation = self._workbench_pair_relation_service.get_active_relation_by_row_id(row_id)
+        if not isinstance(active_relation, dict):
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
-                {"error": "workbench_row_not_found", "message": row_id},
+                {"error": "workbench_pair_relation_not_found", "message": row_id},
             )
-        group_rows = [
-            *group.get("oa_rows", []),
-            *group.get("bank_rows", []),
-            *group.get("invoice_rows", []),
-        ]
-        updated_rows = self._workbench_override_service.cancel_link(rows=group_rows, comment=comment)
-        self._persist_workbench_overrides()
+        affected_row_ids = self._normalize_row_ids(list(active_relation.get("row_ids") or []))
+        if request_id is not None:
+            self._emit_workbench_action_timing(
+                request_id=request_id,
+                action_name=action_name,
+                phase="resolve_rows",
+                duration_ms=self._duration_ms(resolve_rows_started_at),
+                detail=f"rows={len(affected_row_ids)}",
+            )
+        pair_relation_started_at = monotonic()
+        cancelled_relation = self._workbench_pair_relation_service.cancel_relation_for_row_id(row_id)
+        if request_id is not None:
+            self._emit_workbench_action_timing(
+                request_id=request_id,
+                action_name=action_name,
+                phase="pair_relation_update",
+                duration_ms=self._duration_ms(pair_relation_started_at),
+                detail=f"row_id={row_id}",
+            )
+        changed_scope_keys = list(
+            self._scope_keys_for_row_ids(
+                month=month,
+                row_ids=affected_row_ids,
+                month_scope=str(active_relation.get("month_scope") or ""),
+            )
+        )
+        invalidate_started_at = monotonic()
+        self._invalidate_workbench_read_model_scopes(changed_scope_keys)
+        if request_id is not None:
+            self._emit_workbench_action_timing(
+                request_id=request_id,
+                action_name=action_name,
+                phase="invalidate_read_model_scopes",
+                duration_ms=self._duration_ms(invalidate_started_at),
+                detail=",".join(changed_scope_keys),
+            )
+        changed_case_ids = []
+        if isinstance(cancelled_relation, dict):
+            changed_case_ids.append(str(cancelled_relation.get("case_id", "")))
+        schedule_started_at = monotonic()
+        self._schedule_workbench_pair_relation_persist(
+            changed_case_ids=changed_case_ids,
+            request_id=request_id,
+            action_name=action_name,
+        )
+        self._schedule_workbench_read_model_persist(
+            changed_scope_keys=changed_scope_keys,
+            request_id=request_id,
+            action_name=action_name,
+        )
+        if request_id is not None:
+            self._emit_workbench_action_timing(
+                request_id=request_id,
+                action_name=action_name,
+                phase="schedule_background_persist",
+                duration_ms=self._duration_ms(schedule_started_at),
+            )
         return self._json_response(
             HTTPStatus.OK,
             {
                 "success": True,
                 "action": "cancel_link",
                 "month": month,
-                "affected_row_ids": [row["id"] for row in updated_rows],
-                "updated_rows": updated_rows,
+                "case_id": str(active_relation.get("case_id") or ""),
+                "affected_row_ids": affected_row_ids,
                 "message": "已取消关联并回退为待处理。",
             },
         )
@@ -1292,7 +1497,7 @@ class Application:
             relation_label=relation_label,
             comment=comment,
         )
-        self._persist_workbench_overrides()
+        self._persist_workbench_overrides(changed_row_ids=[str(updated_row["id"])])
         return self._json_response(
             HTTPStatus.OK,
             {
@@ -1354,7 +1559,7 @@ class Application:
                 {"error": "invalid_oa_bank_exception_request", "message": str(exc)},
             )
 
-        self._persist_workbench_overrides()
+        self._persist_workbench_overrides(changed_row_ids=[str(row["id"]) for row in updated_rows])
         return self._json_response(
             HTTPStatus.OK,
             {
@@ -1394,7 +1599,7 @@ class Application:
             )
 
         updated_rows = self._workbench_override_service.cancel_exception(rows=rows, comment=comment)
-        self._persist_workbench_overrides()
+        self._persist_workbench_overrides(changed_row_ids=[str(row["id"]) for row in updated_rows])
         return self._json_response(
             HTTPStatus.OK,
             {
@@ -1418,9 +1623,9 @@ class Application:
                 {"error": "invalid_ignore_row_request", "message": str(exc)},
             )
 
-        raw_payload = self._build_raw_workbench_payload(month)
+        grouped_payload = self._build_api_workbench_payload(month)
         try:
-            row = self._resolve_live_row(self._group_row_payload(raw_payload), row_id)
+            row = self._resolve_live_row(grouped_payload, row_id)
         except KeyError:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
@@ -1432,7 +1637,7 @@ class Application:
                 {"error": "invalid_ignore_row_request", "message": "ignore_row only supports invoice rows."},
             )
         updated_row = self._workbench_override_service.ignore_row(row=row, comment=comment)
-        self._persist_workbench_overrides()
+        self._persist_workbench_overrides(changed_row_ids=[str(updated_row["id"])])
         return self._json_response(
             HTTPStatus.OK,
             {
@@ -1455,8 +1660,10 @@ class Application:
                 {"error": "invalid_unignore_row_request", "message": str(exc)},
             )
 
-        raw_payload = self._build_raw_workbench_payload(month)
-        ignored_rows = {str(row["id"]): row for row in self._extract_ignored_rows(raw_payload)}
+        ignored_rows = {
+            str(row["id"]): row
+            for row in self._build_api_workbench_ignored_rows_payload(month)
+        }
         row = ignored_rows.get(row_id)
         if row is None:
             return self._json_response(
@@ -1464,7 +1671,7 @@ class Application:
                 {"error": "workbench_row_not_found", "message": row_id},
             )
         updated_row = self._workbench_override_service.unignore_row(row=row)
-        self._persist_workbench_overrides()
+        self._persist_workbench_overrides(changed_row_ids=[str(updated_row["id"])])
         return self._json_response(
             HTTPStatus.OK,
             {
@@ -1941,7 +2148,7 @@ class Application:
             imported_by=imported_by,
             rows=rows,
         )
-        self._persist_state()
+        self._persist_state_with_workbench_invalidation()
         return self._json_response(HTTPStatus.OK, self._serialize_preview(preview))
 
     def _handle_import_confirm(self, body: str | bytes | None) -> Response:
@@ -1966,7 +2173,7 @@ class Application:
                 HTTPStatus.NOT_FOUND,
                 {"error": "batch_not_found", "batch_id": batch_id},
             )
-        self._persist_state()
+        self._persist_state_with_workbench_invalidation()
         return self._json_response(
             HTTPStatus.OK,
             {
@@ -2015,7 +2222,7 @@ class Application:
                 {"error": "batch_not_found", "batch_id": batch_id},
             )
         self._file_import_service.mark_batch_reverted(batch_id)
-        self._persist_state()
+        self._persist_state_with_workbench_invalidation()
         return self._json_response(HTTPStatus.OK, {"batch": self._serialize_value(batch)})
 
     def _handle_import_templates(self) -> Response:
@@ -2046,7 +2253,7 @@ class Application:
                 {"error": "invalid_import_file_preview_request", "message": "At least one file is required."},
             )
         session = self._file_import_service.preview_files(imported_by=imported_by, uploads=files)
-        self._persist_state()
+        self._persist_state_with_workbench_invalidation()
         return self._json_response(HTTPStatus.OK, self._serialize_file_session(session))
 
     def _handle_import_file_confirm(self, body: str | bytes | None) -> Response:
@@ -2076,7 +2283,7 @@ class Application:
         matching_run = None
         if any(file.status == "confirmed" for file in session.files):
             matching_run = self._matching_service.run(triggered_by=f"import_session:{session.id}")
-        self._persist_state()
+        self._persist_state_with_workbench_invalidation()
         response_payload = self._serialize_file_session(session)
         if matching_run is not None:
             response_payload["matching_run"] = self._serialize_matching_run(matching_run)
@@ -2179,14 +2386,184 @@ class Application:
                 "file_imports": self._file_import_service.snapshot(),
                 "matching": self._matching_service.snapshot(),
                 "workbench_overrides": self._workbench_override_service.snapshot(),
+                "workbench_pair_relations": self._workbench_pair_relation_service.snapshot(),
+                "workbench_read_models": self._workbench_read_model_service.snapshot(),
             }
         )
 
-    def _persist_workbench_overrides(self) -> None:
+    def _persist_state_with_workbench_invalidation(self) -> None:
+        self._search_service.clear_cache()
+        self._invalidate_workbench_read_models()
+        self._persist_state()
+
+    def _persist_workbench_pair_relations(
+        self,
+        *,
+        changed_case_ids: list[str] | None = None,
+    ) -> None:
         self._search_service.clear_cache()
         if self._state_store is None:
             return
-        self._state_store.save_workbench_overrides(self._workbench_override_service.snapshot())
+        snapshot = (
+            self._workbench_pair_relation_service.snapshot_case_ids(changed_case_ids)
+            if changed_case_ids is not None
+            else self._workbench_pair_relation_service.snapshot()
+        )
+        self._state_store.save_workbench_pair_relations(
+            snapshot,
+            changed_case_ids=changed_case_ids,
+        )
+
+    def _schedule_workbench_pair_relation_persist(
+        self,
+        *,
+        changed_case_ids: list[str] | None = None,
+        request_id: str | None = None,
+        action_name: str | None = None,
+    ) -> None:
+        if self._state_store is None:
+            return
+        normalized_case_ids = [
+            str(case_id)
+            for case_id in list(changed_case_ids or [])
+            if str(case_id).strip()
+        ]
+        if not normalized_case_ids:
+            return
+        with self._workbench_pair_relation_persist_version_lock:
+            self._workbench_pair_relation_persist_version += 1
+            version = self._workbench_pair_relation_persist_version
+        Thread(
+            target=self._persist_workbench_pair_relations_in_background,
+            kwargs={
+                "version": version,
+                "case_ids": normalized_case_ids,
+                "request_id": request_id,
+                "action_name": action_name,
+            },
+            daemon=True,
+        ).start()
+
+    def _persist_workbench_pair_relations_in_background(
+        self,
+        *,
+        version: int,
+        case_ids: list[str],
+        request_id: str | None = None,
+        action_name: str | None = None,
+    ) -> None:
+        if self._state_store is None:
+            return
+        with self._workbench_pair_relation_persist_version_lock:
+            if version != self._workbench_pair_relation_persist_version:
+                return
+        persist_started_at = monotonic()
+        self._persist_workbench_pair_relations(changed_case_ids=case_ids)
+        if request_id is not None and action_name is not None:
+            self._emit_workbench_action_timing(
+                request_id=request_id,
+                action_name=action_name,
+                phase="persist_pair_relations",
+                duration_ms=self._duration_ms(persist_started_at),
+                detail=",".join(case_ids),
+            )
+
+    def _schedule_workbench_read_model_persist(
+        self,
+        *,
+        changed_scope_keys: list[str] | None = None,
+        request_id: str | None = None,
+        action_name: str | None = None,
+    ) -> None:
+        if self._state_store is None:
+            return
+        normalized_scope_keys = [
+            str(scope_key)
+            for scope_key in list(changed_scope_keys or [])
+            if str(scope_key).strip()
+        ]
+        if not normalized_scope_keys:
+            return
+        with self._workbench_read_model_persist_version_lock:
+            self._workbench_read_model_persist_version += 1
+            version = self._workbench_read_model_persist_version
+        Thread(
+            target=self._rebuild_workbench_read_models_in_background,
+            kwargs={
+                "version": version,
+                "scope_keys": normalized_scope_keys,
+                "request_id": request_id,
+                "action_name": action_name,
+            },
+            daemon=True,
+        ).start()
+
+    def _rebuild_workbench_read_models_in_background(
+        self,
+        *,
+        version: int,
+        scope_keys: list[str],
+        request_id: str | None = None,
+        action_name: str | None = None,
+    ) -> None:
+        if self._state_store is None:
+            return
+        with self._workbench_read_model_persist_version_lock:
+            if version != self._workbench_read_model_persist_version:
+                return
+        rebuild_started_at = monotonic()
+        for scope_key in scope_keys:
+            scope_started_at = monotonic()
+            raw_payload = self._build_raw_workbench_payload(scope_key)
+            grouped_payload = self._group_row_payload(raw_payload)
+            ignored_rows = self._extract_ignored_rows(raw_payload)
+            self._workbench_read_model_service.upsert_read_model(
+                scope_key=scope_key,
+                payload=grouped_payload,
+                ignored_rows=ignored_rows,
+            )
+            if request_id is not None and action_name is not None:
+                self._emit_workbench_action_timing(
+                    request_id=request_id,
+                    action_name=action_name,
+                    phase="rebuild_read_model_scope",
+                    duration_ms=self._duration_ms(scope_started_at),
+                    detail=scope_key,
+                )
+        persist_started_at = monotonic()
+        snapshot = self._workbench_read_model_service.snapshot_scope_keys(scope_keys)
+        self._state_store.save_workbench_read_models(
+            snapshot,
+            changed_scope_keys=scope_keys,
+        )
+        if request_id is not None and action_name is not None:
+            self._emit_workbench_action_timing(
+                request_id=request_id,
+                action_name=action_name,
+                phase="persist_read_models",
+                duration_ms=self._duration_ms(persist_started_at),
+                detail=",".join(scope_keys),
+            )
+            self._emit_workbench_action_timing(
+                request_id=request_id,
+                action_name=action_name,
+                phase="background_total",
+                duration_ms=self._duration_ms(rebuild_started_at),
+                detail=",".join(scope_keys),
+            )
+
+    def _persist_workbench_overrides(self, *, changed_row_ids: list[str] | None = None) -> None:
+        self._search_service.clear_cache()
+        self._invalidate_workbench_read_models()
+        if self._state_store is None:
+            return
+        self._state_store.save_workbench_overrides(
+            self._workbench_override_service.snapshot(),
+            changed_row_ids=changed_row_ids,
+        )
+        self._state_store.save_workbench_read_models(
+            self._workbench_read_model_service.snapshot(),
+        )
 
     def _list_search_months(self) -> list[str]:
         months = set(self._workbench_query_service.list_available_months())
@@ -2227,20 +2604,53 @@ class Application:
         payload["issue_count"] = run.issue_count
         return payload
 
+    def _get_or_build_workbench_read_model(self, month: str) -> dict[str, object]:
+        cached_read_model = self._workbench_read_model_service.get_read_model(month)
+        if isinstance(cached_read_model, dict):
+            cached_payload = cached_read_model.get("payload")
+            cached_ignored_rows = cached_read_model.get("ignored_rows")
+            if isinstance(cached_payload, dict) and isinstance(cached_ignored_rows, list):
+                return cached_read_model
+
+        raw_payload = self._build_raw_workbench_payload(month)
+        grouped_payload = self._group_row_payload(raw_payload)
+        ignored_rows = self._extract_ignored_rows(raw_payload)
+        read_model = self._workbench_read_model_service.upsert_read_model(
+            scope_key=month,
+            payload=grouped_payload,
+            ignored_rows=ignored_rows,
+        )
+        if self._state_store is not None:
+            self._state_store.save_workbench_read_models(
+                self._workbench_read_model_service.snapshot(),
+                changed_scope_keys=[month],
+            )
+        return read_model
+
     def _build_api_workbench_payload(self, month: str) -> dict[str, object]:
-        return self._group_row_payload(self._build_raw_workbench_payload(month))
+        read_model = self._get_or_build_workbench_read_model(month)
+        payload = read_model.get("payload")
+        return self._serialize_value(payload if isinstance(payload, dict) else {})
+
+    def _build_api_workbench_ignored_rows_payload(self, month: str) -> list[dict[str, object]]:
+        read_model = self._get_or_build_workbench_read_model(month)
+        ignored_rows = read_model.get("ignored_rows")
+        return self._serialize_value(ignored_rows if isinstance(ignored_rows, list) else [])
 
     def _build_raw_workbench_payload(self, month: str) -> dict[str, object]:
         if self._live_workbench_service.has_rows_for_month(month):
-            return self._build_live_workbench_row_payload(month)
-        payload = self._workbench_api_routes.get_workbench(month)
-        return self._workbench_override_service.apply_to_payload(self._serialize_value(payload))
+            self._sync_live_auto_pair_relations()
+            payload = self._build_live_workbench_row_payload(month)
+        else:
+            payload = self._serialize_value(self._workbench_api_routes.get_workbench(month))
+        paired_payload = self._apply_pair_relations_to_payload(payload)
+        return self._workbench_override_service.apply_to_payload(paired_payload)
 
     def _build_live_workbench_row_payload(self, month: str) -> dict[str, object]:
         live_payload = self._live_workbench_service.get_workbench(month)
         oa_payload = self._workbench_api_routes.get_workbench(month)
         merged = self._merge_live_workbench_with_oa_rows(live_payload, oa_payload)
-        return self._workbench_override_service.apply_to_payload(merged)
+        return self._serialize_value(merged)
 
     @staticmethod
     def _merge_live_workbench_with_oa_rows(
@@ -2273,6 +2683,113 @@ class Application:
             bank_rows=bank_rows,
             invoice_rows=invoice_rows,
         )
+
+    def _apply_pair_relations_to_payload(self, payload: dict[str, object]) -> dict[str, object]:
+        result = self._serialize_value(payload)
+        paired_section = result.setdefault("paired", {})
+        open_section = result.setdefault("open", {})
+        for row_type in ("oa", "bank", "invoice"):
+            source_paired_rows = list(paired_section.get(row_type, []))
+            source_open_rows = list(open_section.get(row_type, []))
+            patched_paired_rows: list[dict[str, object]] = []
+            patched_open_rows: list[dict[str, object]] = []
+            for row in [*source_paired_rows, *source_open_rows]:
+                relation = self._workbench_pair_relation_service.get_active_relation_by_row_id(str(row.get("id", "")))
+                if isinstance(relation, dict):
+                    patched_paired_rows.append(self._apply_pair_relation_to_row(row, relation))
+                elif row in source_paired_rows:
+                    patched_paired_rows.append(self._serialize_value(row))
+                else:
+                    patched_open_rows.append(self._serialize_value(row))
+            paired_section[row_type] = patched_paired_rows
+            open_section[row_type] = patched_open_rows
+        return result
+
+    def _apply_pair_relation_to_row(self, row: dict[str, object], relation: dict[str, object]) -> dict[str, object]:
+        payload = self._serialize_value(row)
+        payload["case_id"] = str(relation.get("case_id", ""))
+        relation_field = self._workbench_override_service.relation_field_name(str(payload["type"]))
+        linked_relation = self._pair_relation_display_payload(relation_mode=str(relation.get("relation_mode", "")))
+        payload[relation_field] = self._serialize_value(linked_relation)
+        self._workbench_override_service._sync_summary_relation(payload, str(linked_relation.get("label", "")))
+        if str(relation.get("relation_mode")) == "internal_transfer_pair" and str(payload.get("type")) == "bank":
+            self._apply_internal_transfer_pair_metadata(payload, relation)
+        payload["available_actions"] = ["detail"]
+        payload["handled_exception"] = False
+        return payload
+
+    def _invalidate_workbench_read_models(self) -> None:
+        snapshot = self._workbench_read_model_service.snapshot()
+        for scope_key in list(snapshot.get("read_models", {}).keys()):
+            self._workbench_read_model_service.delete_read_model(str(scope_key))
+
+    def _invalidate_workbench_read_model_scopes(self, scope_keys: list[str]) -> None:
+        for scope_key in {
+            str(scope_key).strip()
+            for scope_key in list(scope_keys or [])
+            if str(scope_key).strip()
+        }:
+            self._workbench_read_model_service.delete_read_model(scope_key)
+
+    def _scope_keys_for_row_ids(
+        self,
+        *,
+        month: str,
+        row_ids: list[str],
+        month_scope: str | None = None,
+    ) -> set[str]:
+        scope_keys = {"all"}
+        if month and month != "all":
+            scope_keys.add(month)
+        if month_scope and month_scope != "all":
+            scope_keys.add(month_scope)
+        for row_id in row_ids:
+            row_month = self._row_month_scope_from_row_id(row_id)
+            if row_month:
+                scope_keys.add(row_month)
+        return scope_keys
+
+    @staticmethod
+    def _row_month_scope_from_row_id(row_id: str) -> str | None:
+        match = ROW_ID_MONTH_RE.search(str(row_id))
+        if match is not None:
+            return f"{match.group(1)}-{match.group(2)}"
+        return None
+
+    def _row_month_scope(self, row: dict[str, object]) -> str | None:
+        row_type = str(row.get("type", ""))
+        if row_type == "bank":
+            for value in (row.get("trade_time"), row.get("pay_receive_time")):
+                resolved_month = self._normalize_month_from_value(value)
+                if resolved_month is not None:
+                    return resolved_month
+        elif row_type == "invoice":
+            resolved_month = self._normalize_month_from_value(row.get("issue_date"))
+            if resolved_month is not None:
+                return resolved_month
+        elif row_type == "oa":
+            summary_fields = row.get("summary_fields")
+            if isinstance(summary_fields, dict):
+                for key in ("申请日期", "日期"):
+                    resolved_month = self._normalize_month_from_value(summary_fields.get(key))
+                    if resolved_month is not None:
+                        return resolved_month
+            detail_fields = row.get("detail_fields")
+            if isinstance(detail_fields, dict):
+                for key in ("申请日期", "单据日期"):
+                    resolved_month = self._normalize_month_from_value(detail_fields.get(key))
+                    if resolved_month is not None:
+                        return resolved_month
+        return self._row_month_scope_from_row_id(str(row.get("id", "")))
+
+    @staticmethod
+    def _normalize_month_from_value(value: object) -> str | None:
+        if value in (None, ""):
+            return None
+        resolved = str(value).strip()
+        if len(resolved) >= 7 and resolved[4] == "-" and resolved[5:7].isdigit():
+            return resolved[:7]
+        return None
 
     def _apply_grouped_row_overrides(self, payload: dict[str, object]) -> dict[str, object]:
         result = self._serialize_value(payload)
@@ -2310,23 +2827,90 @@ class Application:
                         return group
         return None
 
+    def _resolve_live_row_direct(self, row_id: str) -> dict[str, object]:
+        return self._resolve_live_rows_direct([row_id])[0]
+
+    @staticmethod
+    def _normalize_row_ids(row_ids: list[object]) -> list[str]:
+        normalized_row_ids: list[str] = []
+        seen_row_ids: set[str] = set()
+        for row_id in row_ids:
+            if row_id is None:
+                continue
+            normalized_row_id = str(row_id).strip()
+            if not normalized_row_id or normalized_row_id in seen_row_ids:
+                continue
+            seen_row_ids.add(normalized_row_id)
+            normalized_row_ids.append(normalized_row_id)
+        if not normalized_row_ids:
+            raise ValueError("at least one row_id is required.")
+        return normalized_row_ids
+
+    @staticmethod
+    def _row_type_for_row_id(row_id: str) -> str:
+        lowered_row_id = str(row_id).strip().lower()
+        if lowered_row_id.startswith("oa-"):
+            return "oa"
+        if lowered_row_id.startswith("bk-") or lowered_row_id.startswith("txn-") or lowered_row_id.startswith("bank-"):
+            return "bank"
+        if lowered_row_id.startswith("iv-") or lowered_row_id.startswith("invoice-"):
+            return "invoice"
+        return "unknown"
+
+    def _row_types_for_row_ids(self, row_ids: list[str]) -> list[str]:
+        return [self._row_type_for_row_id(row_id) for row_id in row_ids]
+
+    def _month_scope_for_selected_row_ids(self, *, month: str, row_ids: list[str]) -> str:
+        if month != "all":
+            return month
+        row_months = {
+            resolved_month
+            for resolved_month in (self._row_month_scope_from_row_id(row_id) for row_id in row_ids)
+            if resolved_month
+        }
+        if len(row_months) == 1:
+            return next(iter(row_months))
+        return "all"
+
+    def _resolve_live_rows_direct(self, row_ids: list[str]) -> list[dict[str, object]]:
+        normalized_row_ids = [str(row_id) for row_id in row_ids]
+        resolved_rows: dict[str, dict[str, object]] = {}
+        unresolved_live_row_ids: list[str] = []
+
+        for row_id in normalized_row_ids:
+            try:
+                oa_row = self._workbench_query_service.serialize_row(self._workbench_query_service.get_row_record(row_id))
+                pair_relation = self._workbench_pair_relation_service.get_active_relation_by_row_id(row_id)
+                paired_row = self._apply_pair_relation_to_row(oa_row, pair_relation) if isinstance(pair_relation, dict) else oa_row
+                resolved_rows[row_id] = self._workbench_override_service.apply_to_row(paired_row)
+            except KeyError:
+                unresolved_live_row_ids.append(row_id)
+
+        if unresolved_live_row_ids:
+            get_rows_detail = getattr(self._live_workbench_service, "get_rows_detail", None)
+            if callable(get_rows_detail):
+                live_rows = get_rows_detail(unresolved_live_row_ids)
+            else:
+                live_rows = {
+                    row_id: self._live_workbench_service.get_row_detail(row_id)
+                    for row_id in unresolved_live_row_ids
+                }
+            for row_id in unresolved_live_row_ids:
+                live_row = live_rows.get(row_id)
+                if live_row is None:
+                    raise KeyError(row_id)
+                pair_relation = self._workbench_pair_relation_service.get_active_relation_by_row_id(row_id)
+                paired_row = self._apply_pair_relation_to_row(live_row, pair_relation) if isinstance(pair_relation, dict) else live_row
+                resolved_rows[row_id] = self._workbench_override_service.apply_to_row(paired_row)
+
+        return [resolved_rows[row_id] for row_id in normalized_row_ids]
+
     def _resolve_live_row(self, grouped_payload: dict[str, object], row_id: str) -> dict[str, object]:
         rows_by_id = self._grouped_rows_by_id(grouped_payload)
         row = rows_by_id.get(row_id)
         if row is not None:
             return row
-
-        try:
-            oa_row = self._workbench_query_service.serialize_row(self._workbench_query_service.get_row_record(row_id))
-            return self._workbench_override_service.apply_to_row(oa_row)
-        except KeyError:
-            pass
-
-        try:
-            live_row = self._live_workbench_service.get_row_detail(row_id)
-            return self._workbench_override_service.apply_to_row(live_row)
-        except KeyError as exc:
-            raise KeyError(row_id) from exc
+        return self._resolve_live_row_direct(row_id)
 
     def _resolve_live_group(self, grouped_payload: dict[str, object], row_id: str) -> dict[str, object] | None:
         group = self._group_for_row_id(grouped_payload, row_id)
@@ -2375,6 +2959,143 @@ class Application:
                     if row.get("ignored"):
                         rows.append(row)
         return rows
+
+    def _sync_live_auto_pair_relations(self) -> None:
+        if not hasattr(self._live_workbench_service, "list_auto_pair_candidates"):
+            return
+        desired_relations: dict[str, dict[str, object]] = {}
+        for result in self._live_workbench_service.list_auto_pair_candidates("all"):
+            row_ids = [str(row_id).strip() for row_id in list(result.transaction_ids or []) if str(row_id).strip()]
+            if not row_ids:
+                continue
+            if self._auto_pair_conflicts_with_manual_relation(row_ids):
+                continue
+            desired_relations[str(result.id)] = {
+                "case_id": str(result.id),
+                "row_ids": row_ids,
+                "row_types": ["bank"] * len(row_ids),
+                "relation_mode": str(result.rule_code),
+                "month_scope": self._month_scope_for_auto_relation(row_ids),
+            }
+
+        active_auto_relations = {
+            str(relation.get("case_id")): relation
+            for relation in self._workbench_pair_relation_service.list_active_relations()
+            if str(relation.get("relation_mode")) in {"salary_personal_auto_match", "internal_transfer_pair"}
+        }
+        changed = False
+
+        for case_id, desired_relation in desired_relations.items():
+            existing_relation = active_auto_relations.get(case_id)
+            if (
+                isinstance(existing_relation, dict)
+                and list(existing_relation.get("row_ids") or []) == desired_relation["row_ids"]
+                and str(existing_relation.get("relation_mode")) == str(desired_relation["relation_mode"])
+                and str(existing_relation.get("month_scope")) == str(desired_relation["month_scope"])
+                and str(existing_relation.get("status")) == "active"
+            ):
+                continue
+
+            self._workbench_pair_relation_service.create_active_relation(
+                case_id=case_id,
+                row_ids=list(desired_relation["row_ids"]),
+                row_types=list(desired_relation["row_types"]),
+                relation_mode=str(desired_relation["relation_mode"]),
+                created_by="system_auto_match",
+                month_scope=str(desired_relation["month_scope"]),
+            )
+            changed = True
+
+        for case_id in set(active_auto_relations).difference(desired_relations):
+            self._workbench_pair_relation_service.cancel_relation(case_id)
+            changed = True
+
+        if changed:
+            self._search_service.clear_cache()
+            self._invalidate_workbench_read_models()
+            if self._state_store is not None:
+                changed_case_ids = list(desired_relations.keys())
+                changed_case_ids.extend(set(active_auto_relations).difference(desired_relations))
+                changed_scope_keys = {"all"}
+                changed_scope_keys.update(
+                    str(relation["month_scope"])
+                    for relation in desired_relations.values()
+                    if relation.get("month_scope")
+                )
+                self._state_store.save_workbench_pair_relations(
+                    self._workbench_pair_relation_service.snapshot(),
+                    changed_case_ids=changed_case_ids,
+                )
+                self._state_store.save_workbench_read_models(
+                    self._workbench_read_model_service.snapshot(),
+                    changed_scope_keys=list(changed_scope_keys),
+                )
+
+    def _auto_pair_conflicts_with_manual_relation(self, row_ids: list[str]) -> bool:
+        for row_id in row_ids:
+            active_relation = self._workbench_pair_relation_service.get_active_relation_by_row_id(row_id)
+            if not isinstance(active_relation, dict):
+                continue
+            if str(active_relation.get("relation_mode")) not in {"salary_personal_auto_match", "internal_transfer_pair"}:
+                return True
+        return False
+
+    def _month_scope_for_auto_relation(self, row_ids: list[str]) -> str:
+        row_months = {
+            self._row_month_scope(self._resolve_live_row_direct(row_id))
+            for row_id in row_ids
+        }
+        normalized_months = {month for month in row_months if month}
+        if len(normalized_months) == 1:
+            return next(iter(normalized_months))
+        return "all"
+
+    @staticmethod
+    def _pair_relation_display_payload(*, relation_mode: str) -> dict[str, str]:
+        if relation_mode == "internal_transfer_pair":
+            return {"code": "internal_transfer_pair", "label": "已匹配：内部往来款", "tone": "success"}
+        if relation_mode == "salary_personal_auto_match":
+            return {"code": "salary_personal_auto_match", "label": "已匹配：工资", "tone": "success"}
+        return {"code": "fully_linked", "label": "完全关联", "tone": "success"}
+
+    def _apply_internal_transfer_pair_metadata(self, payload: dict[str, object], relation: dict[str, object]) -> None:
+        row_id = str(payload.get("id", ""))
+        counterpart_row_ids = [
+            str(candidate_id)
+            for candidate_id in list(relation.get("row_ids") or [])
+            if str(candidate_id) and str(candidate_id) != row_id
+        ]
+        if not counterpart_row_ids:
+            return
+        try:
+            counterpart_row = self._live_workbench_service.get_row_detail(counterpart_row_ids[0])
+        except KeyError:
+            return
+
+        compact_label = self._compact_bank_account_label(str(counterpart_row.get("payment_account_label") or ""))
+        if not compact_label:
+            return
+
+        prefix = "支付账户" if str(payload.get("direction")) == "收入" else "收款账户"
+        counterpart_text = f"{prefix}：{compact_label}"
+        base_remark = str(payload.get("remark") or "").strip()
+        if counterpart_text not in base_remark:
+            base_remark = counterpart_text if not base_remark else f"{base_remark}；{counterpart_text}"
+
+        payload["remark"] = base_remark
+        summary_fields = payload.get("summary_fields")
+        if isinstance(summary_fields, dict):
+            summary_fields["备注"] = base_remark or "—"
+        detail_fields = payload.get("detail_fields")
+        if isinstance(detail_fields, dict):
+            detail_fields["备注"] = base_remark or "—"
+
+    @staticmethod
+    def _compact_bank_account_label(label: str) -> str:
+        compact_label = str(label or "").strip()
+        for marker in (" 基本户 ", " 一般户 ", " 专户 ", " 账户 "):
+            compact_label = compact_label.replace(marker, " ")
+        return " ".join(compact_label.split())
 
     @staticmethod
     def _load_json_body(body: str | bytes | None) -> tuple[dict[str, object], Response | None]:
@@ -2554,10 +3275,19 @@ def _build_handler_factory(app: Application) -> Callable[..., BaseHTTPRequestHan
                 content_length = int(self.headers.get("Content-Length", "0"))
                 body = self.rfile.read(content_length) if content_length > 0 else None
             response = app.handle_request(method, self.path, body, dict(self.headers.items()))
-            encoded = response.body.encode("utf-8") if isinstance(response.body, str) else response.body
             self.send_response(response.status_code)
             for key, value in response.headers.items():
                 self.send_header(key, value)
+            if response.stream:
+                self.end_headers()
+                for chunk in response.body:
+                    encoded_chunk = chunk.encode("utf-8") if isinstance(chunk, str) else chunk
+                    if not encoded_chunk:
+                        continue
+                    self.wfile.write(encoded_chunk)
+                    self.wfile.flush()
+                return
+            encoded = response.body.encode("utf-8") if isinstance(response.body, str) else response.body
             self.send_header("Content-Length", str(len(encoded)))
             self.end_headers()
             self.wfile.write(encoded)

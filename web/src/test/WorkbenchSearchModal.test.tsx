@@ -57,7 +57,7 @@ describe("Workbench global search modal and navigation", () => {
     );
   });
 
-  test("jumping to an open-zone result switches month and highlights the target row", async () => {
+  test("jumping to an open-zone result highlights the target row in the all-time workbench", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     renderWorkbenchPage();
@@ -77,8 +77,6 @@ describe("Workbench global search modal and navigation", () => {
     await user.click(within(bankSection).getByRole("button", { name: "跳转至" }));
 
     expect(screen.queryByRole("dialog", { name: "关联台搜索" })).not.toBeInTheDocument();
-    expect(await screen.findByText("2026年4月")).toBeInTheDocument();
-
     const openZone = await screen.findByTestId("zone-open");
     const row = within(openZone).getByRole("row", {
       name: /2026-04-20.*杭州张三广告有限公司/,

@@ -1,9 +1,11 @@
-import { Fragment, useMemo, useRef } from "react";
+import { Fragment, memo, useMemo, useRef } from "react";
 
 import type { WorkbenchCandidateGroup, WorkbenchRecord, WorkbenchRecordType } from "../../features/workbench/types";
 import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import CandidateGroupGrid from "./CandidateGroupGrid";
 import type { WorkbenchInlineAction } from "./RowActions";
+
+const COLLAPSE_EPSILON = 0.0001;
 
 export type WorkbenchPane = {
   id: WorkbenchRecordType;
@@ -26,7 +28,7 @@ type ResizableTriPaneProps = {
   canMutateData: boolean;
 };
 
-export default function ResizableTriPane({
+function ResizableTriPane({
   zoneId,
   panes,
   groups,
@@ -49,7 +51,7 @@ export default function ResizableTriPane({
   const headerTemplateColumns = useMemo(() => {
     return visibleIndices
       .flatMap((paneIndex, order) => {
-        const parts = [`minmax(0, ${Math.max(widths[paneIndex], 0.0001)}fr)`];
+        const parts = [`minmax(0, ${Math.max(widths[paneIndex], COLLAPSE_EPSILON)}fr)`];
         if (order < visibleIndices.length - 1) {
           parts.push("10px");
         }
@@ -59,10 +61,9 @@ export default function ResizableTriPane({
   }, [visibleIndices, widths]);
 
   const rowTemplateColumns = useMemo(
-    () => visibleIndices.map((paneIndex) => `minmax(0, ${Math.max(widths[paneIndex], 0.0001)}fr)`).join(" "),
+    () => visibleIndices.map((paneIndex) => `minmax(0, ${Math.max(widths[paneIndex], COLLAPSE_EPSILON)}fr)`).join(" "),
     [visibleIndices, widths],
   );
-
   const visiblePanes = visibleIndices.map((paneIndex) => panes[paneIndex]);
   const effectiveGroups = useMemo(() => groups ?? buildFallbackGroups(panes), [groups, panes]);
 
@@ -110,6 +111,8 @@ export default function ResizableTriPane({
     </div>
   );
 }
+
+export default memo(ResizableTriPane);
 
 function buildFallbackGroups(panes: WorkbenchPane[]): WorkbenchCandidateGroup[] {
   const maxRows = Math.max(...panes.map((pane) => pane.rows.length), 0);

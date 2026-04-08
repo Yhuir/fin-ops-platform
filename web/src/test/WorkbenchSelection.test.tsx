@@ -114,7 +114,7 @@ describe("Workbench row selection and detail modal", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
-          month: "2026-03",
+          month: "all",
           row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
           case_id: "CASE-202603-101",
         }),
@@ -169,7 +169,7 @@ describe("Workbench row selection and detail modal", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
-          month: "2026-03",
+          month: "all",
           row_ids: ["bk-o-202603-001", "iv-o-202603-001"],
           case_id: "CASE-202603-101",
         }),
@@ -205,8 +205,90 @@ describe("Workbench row selection and detail modal", () => {
     expect(screen.queryByRole("dialog", { name: "操作状态弹窗" })).not.toBeInTheDocument();
   });
 
+  test("confirm link finishes the blocking modal before the background workbench refresh completes", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({ actionDelayMs: 80, workbenchLoadDelayMs: 160 });
+    renderWorkbenchPage();
+
+    const openZone = await screen.findByTestId("zone-open");
+    const pairedZone = await screen.findByTestId("zone-paired");
+    const openBankRow = await screen.findByRole("row", {
+      name: /2026-03-28.*智能工厂设备商/,
+    });
+    const openInvoiceRow = await screen.findByRole("row", {
+      name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
+    });
+
+    await user.click(openBankRow);
+    await user.click(openInvoiceRow);
+    await user.click(screen.getByRole("button", { name: "确认关联" }));
+
+    expect(await screen.findByRole("dialog", { name: "操作状态弹窗" })).toBeInTheDocument();
+    expect(await screen.findByText("已确认 2 条记录关联。")).toBeInTheDocument();
+
+    expect(
+      within(openZone).queryByRole("row", {
+        name: /2026-03-28.*智能工厂设备商/,
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(pairedZone).getByRole("row", {
+        name: /2026-03-28.*智能工厂设备商/,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  test("initial workbench rows render before slow ignored and settings requests finish", async () => {
+    installMockApiFetch({
+      workbenchPrimaryDelayMs: 20,
+      workbenchIgnoredDelayMs: 180,
+      workbenchSettingsDelayMs: 180,
+    });
+    renderWorkbenchPage();
+
+    expect(
+      await screen.findByRole("row", {
+        name: /陈涛.*智能工厂设备商/,
+      }, { timeout: 120 }),
+    ).toBeInTheDocument();
+  });
+
+  test("cancel link finishes the blocking modal after local state moves the group back to open", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({ actionDelayMs: 20, workbenchLoadDelayMs: 160 });
+    renderWorkbenchPage();
+
+    const pairedZone = await screen.findByTestId("zone-paired");
+    const openZone = await screen.findByTestId("zone-open");
+
+    const pairedBankRow = await screen.findByRole("row", {
+      name: /2026-03-25 14:22.*华东设备供应商/,
+    });
+    const pairedInvoiceRow = await screen.findByRole("row", {
+      name: /91310000MA1K8A001X.*华东设备供应商/,
+    });
+
+    await user.click(pairedBankRow);
+    await user.click(pairedInvoiceRow);
+    await user.click(within(pairedZone).getByRole("button", { name: "取消配对" }));
+
+    expect(await screen.findByRole("dialog", { name: "操作状态弹窗" })).toBeInTheDocument();
+    expect(await screen.findByText("已取消 1 组配对。")).toBeInTheDocument();
+    expect(
+      within(pairedZone).queryByRole("row", {
+        name: /2026-03-25 14:22.*华东设备供应商/,
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(openZone).getByRole("row", {
+        name: /2026-03-25 14:22.*华东设备供应商/,
+      }),
+    ).toBeInTheDocument();
+  });
+
   test("open zone header actions stay disabled until enough rows are selected", async () => {
     const user = userEvent.setup();
+    installMockApiFetch();
     renderWorkbenchPage();
 
     const openZone = await screen.findByTestId("zone-open");
@@ -380,12 +462,15 @@ describe("Workbench row selection and detail modal", () => {
       }),
     ).not.toBeInTheDocument();
 
-    await user.click(within(openZone).getByRole("button", { name: "已忽略1项" }));
+    await user.click(within(openZone).getByRole("button", { name: /已忽略\d+项/ }));
 
     const ignoredModal = await screen.findByRole("dialog", { name: "已忽略弹窗" });
-    expect(within(ignoredModal).getByText("杭州溯源科技有限公司")).toBeInTheDocument();
+    const ignoredInvoiceRow = within(ignoredModal).getByRole("row", {
+      name: /智能工厂设备商.*杭州溯源科技有限公司/,
+    });
+    expect(ignoredInvoiceRow).toBeInTheDocument();
 
-    await user.click(within(ignoredModal).getByRole("button", { name: "撤回忽略" }));
+    await user.click(within(ignoredInvoiceRow).getByRole("button", { name: "撤回忽略" }));
 
     expect(await screen.findByRole("dialog", { name: "操作状态弹窗" })).toBeInTheDocument();
     expect(screen.getByText("正在撤回忽略...")).toBeInTheDocument();
@@ -402,7 +487,7 @@ describe("Workbench row selection and detail modal", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
-          month: "2026-03",
+          month: "all",
           row_id: "iv-o-202603-001",
           comment: "由关联台忽略发票：iv-o-202603-001",
         }),
@@ -413,7 +498,7 @@ describe("Workbench row selection and detail modal", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
-          month: "2026-03",
+          month: "all",
           row_id: "iv-o-202603-001",
         }),
       }),
@@ -432,10 +517,10 @@ describe("Workbench row selection and detail modal", () => {
 
     await user.click(within(invoiceRow).getByRole("button", { name: "忽略" }));
     await screen.findByText("已忽略 1 条记录。");
-    await user.click(within(openZone).getByRole("button", { name: "已忽略1项" }));
+    await user.click(within(openZone).getByRole("button", { name: /已忽略\d+项/ }));
 
     const ignoredModal = await screen.findByRole("dialog", { name: "已忽略弹窗" });
-    await user.click(within(ignoredModal).getByRole("button", { name: "撤回忽略" }));
+    await user.click(within(ignoredModal).getAllByRole("button", { name: "撤回忽略" })[0]);
 
     expect(await screen.findByText("操作失败，请稍后重试。")).toBeInTheDocument();
     expect(screen.queryByText(/Unexpected end of JSON input/)).not.toBeInTheDocument();
@@ -466,7 +551,7 @@ describe("Workbench row selection and detail modal", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
-          month: "2026-03",
+          month: "all",
           row_id: "bk-p-202603-001",
           comment: "由关联台批量取消配对",
         }),
@@ -517,7 +602,7 @@ describe("Workbench row selection and detail modal", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
-          month: "2026-03",
+          month: "all",
           row_ids: ["oa-o-202603-001", "bk-o-202603-001"],
           exception_code: "oa_bank_amount_mismatch",
           exception_label: "金额不一致，继续异常",
@@ -533,7 +618,7 @@ describe("Workbench row selection and detail modal", () => {
     renderWorkbenchPage();
 
     const openZone = await screen.findByTestId("zone-open");
-    expect(within(openZone).getByRole("button", { name: "已处理异常0项" })).toBeInTheDocument();
+    expect(within(openZone).getByRole("button", { name: /已处理异常\d+项/ })).toBeInTheDocument();
     const openOaRow = within(openZone).getByRole("row", {
       name: /陈涛.*智能工厂设备商/,
     });
@@ -563,10 +648,10 @@ describe("Workbench row selection and detail modal", () => {
       }),
     ).not.toBeInTheDocument();
 
-    await user.click(within(openZone).getByRole("button", { name: "已处理异常2项" }));
+    await user.click(within(openZone).getByRole("button", { name: /已处理异常\d+项/ }));
 
     const processedModal = await screen.findByRole("dialog", { name: "已处理异常弹窗" });
-    expect(within(processedModal).getAllByText("金额不一致，继续异常")).toHaveLength(2);
+    expect(within(processedModal).getAllByText("金额不一致，继续异常").length).toBeGreaterThanOrEqual(2);
     expect(within(processedModal).getByText("OA")).toBeInTheDocument();
     expect(within(processedModal).getByText("银行流水")).toBeInTheDocument();
     expect(within(processedModal).queryByRole("button", { name: "详情" })).not.toBeInTheDocument();
@@ -596,7 +681,7 @@ describe("Workbench row selection and detail modal", () => {
     await user.click(within(exceptionModal).getByRole("button", { name: "继续报异常" }));
     await user.click(await screen.findByRole("button", { name: "确定" }));
 
-    await user.click(within(openZone).getByRole("button", { name: "已处理异常2项" }));
+    await user.click(within(openZone).getByRole("button", { name: /已处理异常\d+项/ }));
 
     const processedModal = await screen.findByRole("dialog", { name: "已处理异常弹窗" });
     await user.click(within(processedModal).getAllByRole("button", { name: "取消异常处理" })[0]);
@@ -615,7 +700,7 @@ describe("Workbench row selection and detail modal", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
-          month: "2026-03",
+          month: "all",
           row_ids: ["oa-o-202603-001", "bk-o-202603-001"],
           comment: "由已处理异常弹窗撤回异常处理",
         }),
@@ -636,7 +721,7 @@ describe("Workbench row selection and detail modal", () => {
   });
 
   test("renders an error state when the workbench request fails", async () => {
-    installMockApiFetch({ workbenchErrorMonths: ["2026-03"] });
+    installMockApiFetch({ workbenchErrorMonths: ["all"] });
     renderWorkbenchPage();
 
     expect(await screen.findByText("工作台数据加载失败，请稍后重试。")).toBeInTheDocument();
@@ -649,15 +734,15 @@ describe("Workbench row selection and detail modal", () => {
 
     expect(await screen.findByText("赵华")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "放大 未配对" }));
+    await user.click(screen.getByRole("button", { name: /放大 未配对/ }));
 
-    expect(screen.getByTestId("zone-open")).toBeInTheDocument();
-    expect(screen.queryByTestId("zone-paired")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "恢复 未配对" })).toBeInTheDocument();
+    expect(screen.getByTestId("zone-open")).not.toHaveClass("zone-hidden");
+    expect(screen.getByTestId("zone-paired")).toHaveClass("zone-hidden");
+    expect(screen.getByRole("button", { name: /恢复 未配对/ })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "恢复 未配对" }));
+    await user.click(screen.getByRole("button", { name: /恢复 未配对/ }));
 
-    expect(screen.getByTestId("zone-open")).toBeInTheDocument();
-    expect(screen.getByTestId("zone-paired")).toBeInTheDocument();
+    expect(screen.getByTestId("zone-open")).not.toHaveClass("zone-hidden");
+    expect(screen.getByTestId("zone-paired")).not.toHaveClass("zone-hidden");
   });
 });

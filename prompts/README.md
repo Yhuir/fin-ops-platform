@@ -41,6 +41,12 @@
 35. `35-oa-access-role-backend-foundation.md`
 36. `36-oa-access-role-ui-and-action-gating.md`
 37. `37-oa-access-role-sync-and-qa.md`
+38. `38-workbench-pair-relations-foundation.md`
+39. `39-workbench-pair-relations-actions-and-read-model.md`
+40. `40-workbench-pair-relations-ui-perf-and-qa.md`
+41. `41-workbench-read-model-foundation.md`
+42. `42-workbench-read-model-actions-and-refresh.md`
+43. `43-workbench-read-model-ui-perf-and-qa.md`
 
 使用方式建议：
 
@@ -103,3 +109,23 @@ OA “访问账户管理 / 只读导出 / 管理员独占权限”这一组 prom
   - 不可见且不可访问
   - 可见且可访问，但分为 `所有操作均可` / `只可看和只可导出`
   - 只有 `YNSYLP005` 可管理权限
+
+关联台“pair relations 轻量写模型 / 确认关联取消配对加速”这一组 prompt 对应的需求与文档：
+
+- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/银企核销需求.md)
+- 设计文档：[2026-04-08-workbench-pair-relations-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-08-workbench-pair-relations-design.md)
+- 实施计划：[2026-04-08-workbench-pair-relations.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-08-workbench-pair-relations.md)
+- 当前目标：
+  - 配对关系独立建模
+  - `确认关联 / 取消配对` 只改 pair relation
+  - 前端成功后立即局部更新，后台静默刷新兜底
+
+关联台“pair relations + 物化 read model”这一组 prompt 对应的需求与文档：
+
+- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/银企核销需求.md)
+- 设计文档：[2026-04-08-workbench-materialized-read-model-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-08-workbench-materialized-read-model-design.md)
+- 实施计划：[2026-04-08-workbench-materialized-read-model.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-08-workbench-materialized-read-model.md)
+- 当前目标：
+  - 写动作只改最小状态
+  - 页面加载优先读缓存好的关联台快照
+  - `确认关联 / 取消配对` 与整页 load 都明显提速

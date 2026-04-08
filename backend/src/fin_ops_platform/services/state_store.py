@@ -40,6 +40,10 @@ MATCHING_RUNS_COLLECTION = "matching_runs"
 MATCHING_RESULTS_COLLECTION = "matching_results"
 WORKBENCH_OVERRIDES_META_COLLECTION = "workbench_overrides_meta"
 WORKBENCH_ROW_OVERRIDES_COLLECTION = "workbench_row_overrides"
+WORKBENCH_PAIR_RELATIONS_META_COLLECTION = "workbench_pair_relations_meta"
+WORKBENCH_PAIR_RELATIONS_COLLECTION = "workbench_pair_relations"
+WORKBENCH_READ_MODELS_META_COLLECTION = "workbench_read_models_meta"
+WORKBENCH_READ_MODELS_COLLECTION = "workbench_read_models"
 APP_SETTINGS_COLLECTION = "app_settings"
 TAX_CERTIFIED_IMPORTS_META_COLLECTION = "tax_certified_imports_meta"
 TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION = "tax_certified_import_sessions"
@@ -187,6 +191,10 @@ class ApplicationStateStore:
                 "matching_results": self._mongo_database[MATCHING_RESULTS_COLLECTION],
                 "workbench_overrides_meta": self._mongo_database[WORKBENCH_OVERRIDES_META_COLLECTION],
                 "workbench_row_overrides": self._mongo_database[WORKBENCH_ROW_OVERRIDES_COLLECTION],
+                "workbench_pair_relations_meta": self._mongo_database[WORKBENCH_PAIR_RELATIONS_META_COLLECTION],
+                "workbench_pair_relations": self._mongo_database[WORKBENCH_PAIR_RELATIONS_COLLECTION],
+                "workbench_read_models_meta": self._mongo_database[WORKBENCH_READ_MODELS_META_COLLECTION],
+                "workbench_read_models": self._mongo_database[WORKBENCH_READ_MODELS_COLLECTION],
                 "app_settings": self._mongo_database[APP_SETTINGS_COLLECTION],
                 "tax_certified_imports_meta": self._mongo_database[TAX_CERTIFIED_IMPORTS_META_COLLECTION],
                 "tax_certified_import_sessions": self._mongo_database[TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION],
@@ -318,6 +326,70 @@ class ApplicationStateStore:
         with self._tax_certified_imports_path.open("wb") as handle:
             pickle.dump(normalized_snapshot, handle)
 
+    def load_workbench_pair_relations(self) -> dict[str, Any]:
+        if self._mongo_database is not None:
+            return self._load_workbench_pair_relations_detailed_payload()
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        current_payload = self._load_local_pickle()
+        snapshot = current_payload.get("workbench_pair_relations")
+        return snapshot if isinstance(snapshot, dict) else {}
+
+    def save_workbench_pair_relations(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        changed_case_ids: list[str] | None = None,
+    ) -> None:
+        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
+        if self._mongo_database is not None:
+            self._save_workbench_pair_relations_detailed(
+                normalized_snapshot,
+                datetime.now(UTC),
+                changed_case_ids=changed_case_ids,
+            )
+            return
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        current_payload = self._load_local_pickle()
+        current_payload["workbench_pair_relations"] = normalized_snapshot
+        with self._legacy_state_path.open("wb") as handle:
+            pickle.dump(current_payload, handle)
+
+    def load_workbench_read_models(self) -> dict[str, Any]:
+        if self._mongo_database is not None:
+            return self._load_workbench_read_models_detailed_payload()
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        current_payload = self._load_local_pickle()
+        snapshot = current_payload.get("workbench_read_models")
+        return snapshot if isinstance(snapshot, dict) else {}
+
+    def save_workbench_read_models(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        changed_scope_keys: list[str] | None = None,
+    ) -> None:
+        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
+        if self._mongo_database is not None:
+            self._save_workbench_read_models_detailed(
+                normalized_snapshot,
+                datetime.now(UTC),
+                changed_scope_keys=changed_scope_keys,
+            )
+            return
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        current_payload = self._load_local_pickle()
+        current_payload["workbench_read_models"] = normalized_snapshot
+        with self._legacy_state_path.open("wb") as handle:
+            pickle.dump(current_payload, handle)
+
     def load(self) -> dict[str, Any]:
         if self._mongo_database is not None:
             detailed_payload = self._load_detailed_mongo_payload()
@@ -352,6 +424,10 @@ class ApplicationStateStore:
             self._save_file_imports_detailed(payload.get("file_imports", {}), updated_at)
             self._save_matching_detailed(payload.get("matching", {}), updated_at)
             self._save_workbench_overrides_detailed(payload.get("workbench_overrides", {}), updated_at)
+            if "workbench_pair_relations" in payload:
+                self._save_workbench_pair_relations_detailed(payload.get("workbench_pair_relations", {}), updated_at)
+            if "workbench_read_models" in payload:
+                self._save_workbench_read_models_detailed(payload.get("workbench_read_models", {}), updated_at)
             self._save_file_import_metadata(payload.get("file_imports", {}), updated_at)
             if self._has_non_empty_state(payload):
                 self._clear_legacy_snapshot_collections()
@@ -362,9 +438,22 @@ class ApplicationStateStore:
         with self._legacy_state_path.open("wb") as handle:
             pickle.dump(payload, handle)
 
-    def save_workbench_overrides(self, workbench_overrides_snapshot: dict[str, Any]) -> None:
+    def save_workbench_overrides(
+        self,
+        workbench_overrides_snapshot: dict[str, Any],
+        *,
+        changed_row_ids: list[str] | None = None,
+    ) -> None:
         if self._mongo_database is not None:
-            self._save_workbench_overrides_detailed(workbench_overrides_snapshot, datetime.now(UTC))
+            updated_at = datetime.now(UTC)
+            if changed_row_ids is None:
+                self._save_workbench_overrides_detailed(workbench_overrides_snapshot, updated_at)
+            else:
+                self._save_workbench_overrides_detailed_incremental(
+                    workbench_overrides_snapshot,
+                    updated_at,
+                    changed_row_ids,
+                )
             return
 
         if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
@@ -432,6 +521,10 @@ class ApplicationStateStore:
                         "matching_results": MATCHING_RESULTS_COLLECTION,
                         "workbench_overrides_meta": WORKBENCH_OVERRIDES_META_COLLECTION,
                         "workbench_row_overrides": WORKBENCH_ROW_OVERRIDES_COLLECTION,
+                        "workbench_pair_relations_meta": WORKBENCH_PAIR_RELATIONS_META_COLLECTION,
+                        "workbench_pair_relations": WORKBENCH_PAIR_RELATIONS_COLLECTION,
+                        "workbench_read_models_meta": WORKBENCH_READ_MODELS_META_COLLECTION,
+                        "workbench_read_models": WORKBENCH_READ_MODELS_COLLECTION,
                         "tax_certified_imports_meta": TAX_CERTIFIED_IMPORTS_META_COLLECTION,
                         "tax_certified_import_sessions": TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION,
                         "tax_certified_import_batches": TAX_CERTIFIED_IMPORT_BATCHES_COLLECTION,
@@ -453,9 +546,18 @@ class ApplicationStateStore:
         file_imports_payload = self._load_file_imports_detailed_payload()
         matching_payload = self._load_matching_detailed_payload()
         workbench_overrides_payload = self._load_workbench_overrides_detailed_payload()
+        workbench_pair_relations_payload = self._load_workbench_pair_relations_detailed_payload()
+        workbench_read_models_payload = self._load_workbench_read_models_detailed_payload()
         found_any = any(
             bool(section)
-            for section in (imports_payload, file_imports_payload, matching_payload, workbench_overrides_payload)
+            for section in (
+                imports_payload,
+                file_imports_payload,
+                matching_payload,
+                workbench_overrides_payload,
+                workbench_pair_relations_payload,
+                workbench_read_models_payload,
+            )
         )
         if not found_any:
             return {}
@@ -466,6 +568,10 @@ class ApplicationStateStore:
         }
         if workbench_overrides_payload:
             payload["workbench_overrides"] = workbench_overrides_payload
+        if workbench_pair_relations_payload:
+            payload["workbench_pair_relations"] = workbench_pair_relations_payload
+        if workbench_read_models_payload:
+            payload["workbench_read_models"] = workbench_read_models_payload
         if self._migrate_legacy_file_refs_to_gridfs(payload):
             self.save(payload)
         return payload
@@ -826,6 +932,30 @@ class ApplicationStateStore:
         payload["row_overrides"] = row_overrides
         return payload
 
+    def _load_workbench_pair_relations_detailed_payload(self) -> dict[str, Any]:
+        meta_document = self._mongo_detailed_collections["workbench_pair_relations_meta"].find_one(
+            {"_id": STATE_DOCUMENT_ID}
+        )
+        meta_payload = self._load_binary_payload(meta_document)
+        pair_relations = self._load_entities_by_id(self._mongo_detailed_collections["workbench_pair_relations"])
+        if not meta_payload and not pair_relations:
+            return {}
+
+        payload = meta_payload if isinstance(meta_payload, dict) else {}
+        payload["pair_relations"] = pair_relations
+        return payload
+
+    def _load_workbench_read_models_detailed_payload(self) -> dict[str, Any]:
+        meta_document = self._mongo_detailed_collections["workbench_read_models_meta"].find_one({"_id": STATE_DOCUMENT_ID})
+        meta_payload = self._load_binary_payload(meta_document)
+        read_models = self._load_entities_by_id(self._mongo_detailed_collections["workbench_read_models"])
+        if not meta_payload and not read_models:
+            return {}
+
+        payload = meta_payload if isinstance(meta_payload, dict) else {}
+        payload["read_models"] = read_models
+        return payload
+
     def _save_workbench_overrides_detailed(self, workbench_overrides_snapshot: Any, updated_at: datetime) -> None:
         snapshot = workbench_overrides_snapshot if isinstance(workbench_overrides_snapshot, dict) else {}
         meta_payload = {
@@ -858,6 +988,212 @@ class ApplicationStateStore:
                     }
                 )
         self._replace_collection_documents(self._mongo_detailed_collections["workbench_row_overrides"], override_documents)
+
+    def _save_workbench_overrides_detailed_incremental(
+        self,
+        workbench_overrides_snapshot: Any,
+        updated_at: datetime,
+        changed_row_ids: list[str],
+    ) -> None:
+        snapshot = workbench_overrides_snapshot if isinstance(workbench_overrides_snapshot, dict) else {}
+        meta_payload = {
+            key: value
+            for key, value in snapshot.items()
+            if key not in {"row_overrides"}
+        }
+        row_overrides = snapshot.get("row_overrides", {})
+        self._mongo_detailed_collections["workbench_overrides_meta"].update_one(
+            {"_id": STATE_DOCUMENT_ID},
+            {
+                "$set": {
+                    **meta_payload,
+                    "row_override_count": len(row_overrides) if isinstance(row_overrides, dict) else 0,
+                    "payload": Binary(pickle.dumps(meta_payload)),
+                    "updated_at": updated_at,
+                }
+            },
+            upsert=True,
+        )
+
+        collection = self._mongo_detailed_collections["workbench_row_overrides"]
+        if not isinstance(row_overrides, dict):
+            row_overrides = {}
+        for row_id in {str(value) for value in changed_row_ids}:
+            override = row_overrides.get(row_id)
+            if isinstance(override, dict):
+                collection.replace_one(
+                    {"_id": row_id},
+                    {
+                        "_id": row_id,
+                        "payload": Binary(pickle.dumps(override)),
+                        "updated_at": updated_at,
+                    },
+                    upsert=True,
+                )
+            else:
+                collection.delete_many({"_id": row_id})
+
+    def _save_workbench_pair_relations_detailed(
+        self,
+        snapshot: dict[str, Any],
+        updated_at: datetime,
+        *,
+        changed_case_ids: list[str] | None = None,
+    ) -> None:
+        meta_payload = {
+            key: value
+            for key, value in snapshot.items()
+            if key not in {"pair_relations"}
+        }
+        pair_relations = snapshot.get("pair_relations", {})
+        collection = self._mongo_detailed_collections["workbench_pair_relations"]
+        if changed_case_ids is not None:
+            normalized_case_ids = {str(case_id) for case_id in changed_case_ids if str(case_id)}
+            for case_id in normalized_case_ids:
+                relation = pair_relations.get(case_id) if isinstance(pair_relations, dict) else None
+                if isinstance(relation, dict):
+                    serialized_relation = self._serialize_value(relation)
+                    collection.replace_one(
+                        {"_id": case_id},
+                        {
+                            "_id": case_id,
+                            "case_id": serialized_relation.get("case_id"),
+                            "row_ids": serialized_relation.get("row_ids"),
+                            "row_types": serialized_relation.get("row_types"),
+                            "status": serialized_relation.get("status"),
+                            "relation_mode": serialized_relation.get("relation_mode"),
+                            "month_scope": serialized_relation.get("month_scope"),
+                            "created_by": serialized_relation.get("created_by"),
+                            "created_at": serialized_relation.get("created_at"),
+                            "updated_at": serialized_relation.get("updated_at"),
+                            "payload": Binary(pickle.dumps(relation)),
+                        },
+                        upsert=True,
+                    )
+                else:
+                    collection.delete_many({"_id": case_id})
+            self._mongo_detailed_collections["workbench_pair_relations_meta"].update_one(
+                {"_id": STATE_DOCUMENT_ID},
+                {
+                    "$set": {
+                        **meta_payload,
+                        "pair_relation_count": collection.count_documents({}),
+                        "payload": Binary(pickle.dumps(meta_payload)),
+                        "updated_at": updated_at,
+                    }
+                },
+                upsert=True,
+            )
+            return
+
+        relation_documents = []
+        if isinstance(pair_relations, dict):
+            for case_id, relation in pair_relations.items():
+                serialized_relation = self._serialize_value(relation)
+                relation_documents.append(
+                    {
+                        "_id": str(case_id),
+                        "case_id": serialized_relation.get("case_id"),
+                        "row_ids": serialized_relation.get("row_ids"),
+                        "row_types": serialized_relation.get("row_types"),
+                        "status": serialized_relation.get("status"),
+                        "relation_mode": serialized_relation.get("relation_mode"),
+                        "month_scope": serialized_relation.get("month_scope"),
+                        "created_by": serialized_relation.get("created_by"),
+                        "created_at": serialized_relation.get("created_at"),
+                        "updated_at": serialized_relation.get("updated_at"),
+                        "payload": Binary(pickle.dumps(relation)),
+                    }
+                )
+        self._replace_collection_documents(collection, relation_documents)
+        self._mongo_detailed_collections["workbench_pair_relations_meta"].update_one(
+            {"_id": STATE_DOCUMENT_ID},
+            {
+                "$set": {
+                    **meta_payload,
+                    "pair_relation_count": len(pair_relations) if isinstance(pair_relations, dict) else 0,
+                    "payload": Binary(pickle.dumps(meta_payload)),
+                    "updated_at": updated_at,
+                }
+            },
+            upsert=True,
+        )
+
+    def _save_workbench_read_models_detailed(
+        self,
+        snapshot: dict[str, Any],
+        updated_at: datetime,
+        *,
+        changed_scope_keys: list[str] | None = None,
+    ) -> None:
+        meta_payload = {
+            key: value
+            for key, value in snapshot.items()
+            if key not in {"read_models"}
+        }
+        read_models = snapshot.get("read_models", {})
+        collection = self._mongo_detailed_collections["workbench_read_models"]
+        if changed_scope_keys is not None:
+            normalized_scope_keys = {str(scope_key) for scope_key in changed_scope_keys if str(scope_key)}
+            for scope_key in normalized_scope_keys:
+                read_model = read_models.get(scope_key) if isinstance(read_models, dict) else None
+                if isinstance(read_model, dict):
+                    serialized_read_model = self._serialize_value(read_model)
+                    collection.replace_one(
+                        {"_id": scope_key},
+                        {
+                            "_id": str(scope_key),
+                            "scope_key": serialized_read_model.get("scope_key"),
+                            "scope_type": serialized_read_model.get("scope_type"),
+                            "generated_at": serialized_read_model.get("generated_at"),
+                            "payload": Binary(pickle.dumps(read_model)),
+                            "updated_at": updated_at,
+                        },
+                        upsert=True,
+                    )
+                else:
+                    collection.delete_many({"_id": scope_key})
+            self._mongo_detailed_collections["workbench_read_models_meta"].update_one(
+                {"_id": STATE_DOCUMENT_ID},
+                {
+                    "$set": {
+                        **meta_payload,
+                        "read_model_count": collection.count_documents({}),
+                        "payload": Binary(pickle.dumps(meta_payload)),
+                        "updated_at": updated_at,
+                    }
+                },
+                upsert=True,
+            )
+            return
+
+        read_model_documents = []
+        if isinstance(read_models, dict):
+            for scope_key, read_model in read_models.items():
+                serialized_read_model = self._serialize_value(read_model)
+                read_model_documents.append(
+                    {
+                        "_id": str(scope_key),
+                        "scope_key": serialized_read_model.get("scope_key"),
+                        "scope_type": serialized_read_model.get("scope_type"),
+                        "generated_at": serialized_read_model.get("generated_at"),
+                        "payload": Binary(pickle.dumps(read_model)),
+                        "updated_at": updated_at,
+                    }
+                )
+        self._replace_collection_documents(collection, read_model_documents)
+        self._mongo_detailed_collections["workbench_read_models_meta"].update_one(
+            {"_id": STATE_DOCUMENT_ID},
+            {
+                "$set": {
+                    **meta_payload,
+                    "read_model_count": len(read_models) if isinstance(read_models, dict) else 0,
+                    "payload": Binary(pickle.dumps(meta_payload)),
+                    "updated_at": updated_at,
+                }
+            },
+            upsert=True,
+        )
 
     def _save_tax_certified_imports_detailed(self, snapshot: dict[str, Any], updated_at: datetime) -> None:
         meta_payload = {
@@ -1030,7 +1366,17 @@ class ApplicationStateStore:
 
     @staticmethod
     def _has_non_empty_state(payload: dict[str, Any]) -> bool:
-        return any(bool(payload.get(key)) for key in ("imports", "file_imports", "matching", "workbench_overrides"))
+        return any(
+            bool(payload.get(key))
+            for key in (
+                "imports",
+                "file_imports",
+                "matching",
+                "workbench_overrides",
+                "workbench_pair_relations",
+                "workbench_read_models",
+            )
+        )
 
     def _load_local_pickle(self) -> dict[str, Any]:
         if not self._legacy_state_path.exists():

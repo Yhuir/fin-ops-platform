@@ -44,12 +44,16 @@
 - `docs/superpowers/specs/2026-04-07-tax-offset-certified-import-design.md`：税金抵扣“已认证发票真实模板导入”设计文档
 - `docs/superpowers/specs/2026-04-03-oa-shell-auth-visibility-design.md`：OA 页面壳体接入、登录复用和仅少数账户可见的设计文档
 - `docs/superpowers/specs/2026-04-07-oa-access-role-management-design.md`：OA 接入后的访问账户管理、只读导出权限和 `YNSYLP005` 独占管理设计文档
+- `docs/superpowers/specs/2026-04-08-workbench-pair-relations-design.md`：关联台配对关系独立建模与 `确认关联 / 取消配对` 轻量写模型设计文档
+- `docs/superpowers/specs/2026-04-08-workbench-materialized-read-model-design.md`：关联台 `pair relations + 物化读模型` 的性能重构设计文档
 - `docs/superpowers/plans/2026-04-01-cost-statistics-workbench.md`：成本统计页面实施计划
 - `docs/superpowers/plans/2026-04-02-workbench-global-search.md`：关联台强搜索实施计划
 - `docs/superpowers/plans/2026-04-03-tax-offset-certified-plan.md`：税金抵扣“计划 vs 已认证结果”实施计划
 - `docs/superpowers/plans/2026-04-07-tax-offset-certified-import.md`：税金抵扣“已认证发票真实模板导入”实施计划
 - `docs/superpowers/plans/2026-04-03-oa-shell-auth-visibility.md`：OA 页面壳体接入、登录复用和可见性控制实施计划
 - `docs/superpowers/plans/2026-04-07-oa-access-role-management.md`：OA 接入后的访问账户管理与权限分层实施计划
+- `docs/superpowers/plans/2026-04-08-workbench-pair-relations.md`：关联台 pair relations 轻量写模型与动作性能重构实施计划
+- `docs/superpowers/plans/2026-04-08-workbench-materialized-read-model.md`：关联台 `pair relations + read model` 的读写分离实施计划
 - `OA 集成当前 app 技术方案.md`：基于真实 OA 源码分析的总接入方案
 - `docs/superpowers/specs/2026-03-26-import-formalization-design.md`：导入正式化 A 的设计文档
 - `docs/superpowers/plans/2026-03-26-import-formalization.md`：导入正式化 A 的实施计划

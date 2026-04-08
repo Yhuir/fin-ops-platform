@@ -1,5 +1,6 @@
-import { screen, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 
+import WorkbenchRecordCard from "../components/workbench/WorkbenchRecordCard";
 import { installMockApiFetch } from "./apiMock";
 import { renderWorkbenchPage } from "./renderHelpers";
 
@@ -128,6 +129,101 @@ describe("Workbench columns and inline actions", () => {
     expect(bankRow).toBeDefined();
     expect(within(bankRow as HTMLElement).getByText("2026-03-25")).toBeInTheDocument();
     expect(within(bankRow as HTMLElement).getByText("14:22")).toBeInTheDocument();
+  });
+
+  test("renders internal transfer bank remarks with account tag on the first line and note on the second line", () => {
+    render(
+      <WorkbenchRecordCard
+        actionMode="default"
+        canMutateData
+        onOpenDetail={() => {}}
+        onRowAction={() => {}}
+        onSelectRow={() => {}}
+        paneId="bank"
+        row={{
+          id: "bank-internal-transfer-1",
+          caseId: "case:internal-transfer-1",
+          recordType: "bank",
+          label: "银行流水",
+          status: "已配对",
+          statusCode: "paired",
+          statusTone: "success",
+          exceptionHandled: false,
+          amount: "9.00",
+          counterparty: "云南溯源科技有限公司",
+          actionVariant: "detail-only",
+          availableActions: ["detail"],
+          detailFields: [],
+          tableValues: {
+            counterparty: "云南溯源科技有限公司",
+            transactionTime: "2026-03-20 16:05:40",
+            invoiceRelationStatus: "已匹配：内部往来款",
+            amount: "9.00",
+            direction: "支出",
+            paymentAccount: "民生 9486",
+            note: "本公司帐户；收款账户：民生 9486",
+            repaymentDate: "--",
+          },
+        }}
+        rowState="idle"
+        showWorkflowActions
+        zoneId="paired"
+      />,
+    );
+
+    expect(screen.getByText("收款账户：民生 9486")).toHaveClass("inline-meta-tag");
+    expect(screen.getByText("本公司帐户")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "详情" })).toBeInTheDocument();
+    expect(screen.getByText("已匹配：")).toBeInTheDocument();
+    expect(screen.getByText("内部往来款")).toBeInTheDocument();
+  });
+
+  test("renders salary auto-match status as a two-line matched tag on the same metadata row as time", () => {
+    render(
+      <WorkbenchRecordCard
+        actionMode="default"
+        canMutateData
+        onOpenDetail={() => {}}
+        onRowAction={() => {}}
+        onSelectRow={() => {}}
+        paneId="bank"
+        row={{
+          id: "bank-salary-1",
+          caseId: "case:salary-1",
+          recordType: "bank",
+          label: "银行流水",
+          status: "已配对",
+          statusCode: "paired",
+          statusTone: "success",
+          exceptionHandled: false,
+          amount: "6,000.00",
+          counterparty: "张三",
+          actionVariant: "detail-only",
+          availableActions: ["detail"],
+          detailFields: [],
+          tableValues: {
+            counterparty: "张三",
+            transactionTime: "2026-03-20 16:05:40",
+            invoiceRelationStatus: "已匹配：工资",
+            amount: "6,000.00",
+            direction: "支出",
+            paymentAccount: "建行 8106",
+            note: "工资",
+            repaymentDate: "--",
+          },
+        }}
+        rowState="idle"
+        showWorkflowActions
+        zoneId="paired"
+      />,
+    );
+
+    const statusTag = screen.getByText("已匹配：").closest(".status-tag");
+    expect(statusTag).not.toBeNull();
+    expect(within(statusTag as HTMLElement).getByText("工资")).toBeInTheDocument();
+    const metadataRow = statusTag?.closest(".compound-cell-secondary");
+    expect(metadataRow).not.toBeNull();
+    expect(screen.getByText("2026-03-20").closest(".compound-cell-secondary")).toBe(metadataRow);
   });
 
   test("renders bank invoice relation status on the same metadata row as the two-line datetime tag", async () => {

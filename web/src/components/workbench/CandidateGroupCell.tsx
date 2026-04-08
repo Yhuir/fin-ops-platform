@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 import type { WorkbenchRecord, WorkbenchRecordType } from "../../features/workbench/types";
 import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import type { WorkbenchInlineAction } from "./RowActions";
@@ -19,7 +21,7 @@ type CandidateGroupCellProps = {
   canMutateData: boolean;
 };
 
-export default function CandidateGroupCell({
+function CandidateGroupCell({
   zoneId,
   paneId,
   records,
@@ -73,3 +75,5 @@ export default function CandidateGroupCell({
     </div>
   );
 }
+
+export default memo(CandidateGroupCell);

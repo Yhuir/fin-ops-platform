@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 import { workbenchColumns } from "../../features/workbench/tableConfig";
 import type { WorkbenchRecord, WorkbenchRecordType } from "../../features/workbench/types";
 import type { WorkbenchColumn } from "../../features/workbench/tableConfig";
@@ -20,7 +22,7 @@ type WorkbenchRecordCardProps = {
   canMutateData: boolean;
 };
 
-export default function WorkbenchRecordCard({
+function WorkbenchRecordCard({
   zoneId,
   paneId,
   row,
@@ -84,6 +86,20 @@ export default function WorkbenchRecordCard({
     </div>
   );
 }
+
+export default memo(WorkbenchRecordCard, (previousProps, nextProps) => (
+  previousProps.zoneId === nextProps.zoneId
+  && previousProps.paneId === nextProps.paneId
+  && previousProps.row === nextProps.row
+  && previousProps.rowState === nextProps.rowState
+  && previousProps.actionMode === nextProps.actionMode
+  && previousProps.highlighted === nextProps.highlighted
+  && previousProps.showWorkflowActions === nextProps.showWorkflowActions
+  && previousProps.canMutateData === nextProps.canMutateData
+  && previousProps.onSelectRow === nextProps.onSelectRow
+  && previousProps.onOpenDetail === nextProps.onOpenDetail
+  && previousProps.onRowAction === nextProps.onRowAction
+));
 
 function buildRowAriaLabel(row: WorkbenchRecord, paneId: WorkbenchRecordType, columns: WorkbenchColumn[]) {
   const values: string[] = [];
@@ -162,7 +178,7 @@ function renderCellValue(
   }
 
   if (paneId === "bank" && column.key === "note") {
-    return renderInlineDetailCellValue(value, showInlineDetail, onOpenDetail);
+    return renderBankNoteValue(value, row.tableValues.invoiceRelationStatus ?? "", showInlineDetail, onOpenDetail);
   }
 
   if (paneId === "bank" && column.key === "counterparty") {
@@ -208,6 +224,70 @@ function renderInlineDetailCellValue(value: string, showInlineDetail: boolean, o
       ) : null}
     </span>
   );
+}
+
+function renderBankNoteValue(value: string, relationStatus: string, showInlineDetail: boolean, onOpenDetail: () => void) {
+  const internalTransferRemark = parseInternalTransferRemark(value, relationStatus);
+
+  return (
+    <span className="compound-cell-value">
+      {internalTransferRemark ? (
+        <>
+          <span className="compound-cell-primary">
+            <span className="inline-meta-tag">{internalTransferRemark.accountLabel}</span>
+          </span>
+          {internalTransferRemark.note ? (
+            <span className="compound-cell-secondary">
+              <span className="cell-text-value cell-text-value-full">{internalTransferRemark.note}</span>
+            </span>
+          ) : null}
+        </>
+      ) : (
+        <span className="compound-cell-primary cell-text-value cell-text-value-full">{value}</span>
+      )}
+      {showInlineDetail ? (
+        <span className="inline-cell-action-row">
+          <button
+            className="row-action-btn row-action-btn-inline"
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenDetail();
+            }}
+          >
+            详情
+          </button>
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function parseInternalTransferRemark(value: string, relationStatus: string) {
+  if (relationStatus !== "已匹配：内部往来款") {
+    return null;
+  }
+
+  const normalizedValue = value.trim();
+  if (!normalizedValue || normalizedValue === "--" || normalizedValue === "—") {
+    return null;
+  }
+
+  const segments = normalizedValue
+    .split(/[；;]\s*/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  const accountSegment = segments.find((segment) => /^(支付账户|收款账户)：/.test(segment));
+
+  if (!accountSegment) {
+    return null;
+  }
+
+  const note = segments.filter((segment) => segment !== accountSegment).join("；");
+  return {
+    accountLabel: accountSegment,
+    note,
+  };
 }
 
 function buildTextValueClassName(column: WorkbenchColumn) {
@@ -296,18 +376,41 @@ function renderOaProjectValue(projectName: string, applicationType: string, reco
 function renderBankCounterpartyValue(counterparty: string, transactionTime: string, relationStatus: string) {
   const hasTransactionTime = transactionTime !== "--" && transactionTime !== "—" && transactionTime !== "";
   const hasRelationStatus = relationStatus !== "--" && relationStatus !== "—" && relationStatus !== "";
+  const relationTag = hasRelationStatus ? renderBankRelationStatusTag(relationStatus) : null;
 
   return (
     <span className="compound-cell-value">
       <span className="compound-cell-primary cell-text-value cell-text-value-full">{counterparty}</span>
       {hasTransactionTime || hasRelationStatus ? (
-        <span className="compound-cell-secondary">
+        <span className="compound-cell-secondary compound-cell-secondary-nowrap">
           {hasTransactionTime ? renderInlineDateTimeTag(transactionTime) : null}
-          {hasRelationStatus ? <span className="status-tag">{relationStatus}</span> : null}
+          {relationTag}
         </span>
       ) : null}
     </span>
   );
+}
+
+function renderBankRelationStatusTag(relationStatus: string) {
+  if (relationStatus === "已匹配：工资") {
+    return (
+      <span className="status-tag status-tag-split">
+        <span className="status-tag-line">已匹配：</span>
+        <span className="status-tag-line">工资</span>
+      </span>
+    );
+  }
+
+  if (relationStatus === "已匹配：内部往来款") {
+    return (
+      <span className="status-tag status-tag-split">
+        <span className="status-tag-line">已匹配：</span>
+        <span className="status-tag-line">内部往来款</span>
+      </span>
+    );
+  }
+
+  return <span className="status-tag">{relationStatus}</span>;
 }
 
 function renderInlineDateTimeTag(value: string) {

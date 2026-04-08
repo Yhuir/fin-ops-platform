@@ -13,6 +13,14 @@ import type {
   WorkbenchSummary,
 } from "./types";
 
+export type WorkbenchBootstrapProgress = {
+  label: string;
+  loadedBytes: number;
+  totalBytes: number;
+  percent: number | null;
+  indeterminate: boolean;
+};
+
 type ApiRelation = {
   code: string;
   label: string;
@@ -126,7 +134,8 @@ type ApiWorkbenchActionResult = {
   action: string;
   month: string;
   affected_row_ids: string[];
-  updated_rows: Array<{ id: string }>;
+  case_id?: string;
+  updated_rows?: Array<{ id: string }>;
   message: string;
 };
 
@@ -439,11 +448,153 @@ async function requestJson<T>(url: string, init: RequestInit = {}) {
   return ((payload ?? {}) as T);
 }
 
-export async function fetchWorkbench(month: string, signal?: AbortSignal): Promise<WorkbenchData> {
-  const payload = await requestJson<ApiWorkbenchPayload>(`/api/workbench?month=${month}`, {
-    method: "GET",
+function createAbortError() {
+  return new DOMException("The operation was aborted.", "AbortError");
+}
+
+function isMockedFetch(value: unknown): value is typeof fetch {
+  return typeof value === "function" && ("mock" in value || "getMockName" in value);
+}
+
+async function requestJsonWithByteProgress<T>(
+  url: string,
+  {
     signal,
+    onProgress,
+  }: {
+    signal?: AbortSignal;
+    onProgress?: (loadedBytes: number, totalBytes: number) => void;
+  } = {},
+) {
+  if (!onProgress || typeof XMLHttpRequest === "undefined" || isMockedFetch(globalThis.fetch)) {
+    return requestJson<T>(url, { method: "GET", signal });
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(createAbortError());
+      return;
+    }
+
+    const xhr = new XMLHttpRequest();
+    let settled = false;
+    let lastLoadedBytes = 0;
+    let lastTotalBytes = 0;
+
+    const finalizeReject = (error: unknown) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      reject(error);
+    };
+
+    const finalizeResolve = (value: T) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(value);
+    };
+
+    const handleAbort = () => {
+      xhr.abort();
+      finalizeReject(createAbortError());
+    };
+
+    signal?.addEventListener("abort", handleAbort, { once: true });
+
+    xhr.open("GET", url, true);
+    xhr.responseType = "text";
+
+    xhr.onprogress = (event) => {
+      lastLoadedBytes = event.loaded;
+      lastTotalBytes = event.lengthComputable ? event.total : lastTotalBytes;
+      onProgress(lastLoadedBytes, lastTotalBytes);
+    };
+
+    xhr.onerror = () => {
+      signal?.removeEventListener("abort", handleAbort);
+      finalizeReject(new Error("request failed"));
+    };
+
+    xhr.onabort = () => {
+      signal?.removeEventListener("abort", handleAbort);
+      finalizeReject(createAbortError());
+    };
+
+    xhr.onload = () => {
+      signal?.removeEventListener("abort", handleAbort);
+
+      const rawText = xhr.responseText ?? "";
+      const contentLengthHeader = xhr.getResponseHeader("Content-Length");
+      const headerTotalBytes = contentLengthHeader ? Number.parseInt(contentLengthHeader, 10) : 0;
+      const finalLoadedBytes = Math.max(lastLoadedBytes, rawText.length);
+      const finalTotalBytes = Math.max(lastTotalBytes, Number.isFinite(headerTotalBytes) ? headerTotalBytes : 0, finalLoadedBytes);
+      onProgress(finalLoadedBytes, finalTotalBytes);
+
+      let payload: T | null = null;
+      if (rawText.trim()) {
+        try {
+          payload = JSON.parse(rawText) as T;
+        } catch {
+          if (xhr.status < 200 || xhr.status >= 300) {
+            finalizeReject(new Error(rawText.trim() || "request failed"));
+            return;
+          }
+          finalizeReject(new Error("invalid_json_response"));
+          return;
+        }
+      }
+
+      if (xhr.status < 200 || xhr.status >= 300) {
+        finalizeReject(
+          new Error(typeof payload === "object" && payload ? JSON.stringify(payload) : rawText.trim() || "request failed"),
+        );
+        return;
+      }
+
+      finalizeResolve((payload ?? {}) as T);
+    };
+
+    xhr.send();
   });
+}
+
+export async function fetchWorkbench(month: string, signal?: AbortSignal): Promise<WorkbenchData> {
+  return fetchWorkbenchWithProgress(month, signal);
+}
+
+export async function fetchWorkbenchWithProgress(
+  month: string,
+  signal?: AbortSignal,
+  onProgress?: (progress: WorkbenchBootstrapProgress) => void,
+): Promise<WorkbenchData> {
+  const payload = await requestJsonWithByteProgress<ApiWorkbenchPayload>(`/api/workbench?month=${month}`, {
+    signal,
+    onProgress: onProgress
+      ? (loadedBytes, totalBytes) => {
+        const resolvedPercent = totalBytes > 0 ? clampPercent((loadedBytes / totalBytes) * 100) : null;
+        onProgress({
+          label: "正在加载关联台数据",
+          loadedBytes,
+          totalBytes,
+          percent: resolvedPercent,
+          indeterminate: totalBytes <= 0,
+        });
+      }
+      : undefined,
+  });
+
+  if (onProgress) {
+    onProgress({
+      label: "关联台数据已加载完成",
+      loadedBytes: 0,
+      totalBytes: 0,
+      percent: 100,
+      indeterminate: false,
+    });
+  }
 
   return {
     month: payload.month,
@@ -457,10 +608,25 @@ export async function fetchWorkbench(month: string, signal?: AbortSignal): Promi
   };
 }
 
-export async function fetchIgnoredWorkbenchRows(month: string, signal?: AbortSignal): Promise<IgnoredWorkbenchData> {
-  const payload = await requestJson<ApiIgnoredWorkbenchPayload>(`/api/workbench/ignored?month=${month}`, {
-    method: "GET",
+export async function fetchIgnoredWorkbenchRowsWithProgress(
+  month: string,
+  signal?: AbortSignal,
+  onProgress?: (progress: WorkbenchBootstrapProgress) => void,
+): Promise<IgnoredWorkbenchData> {
+  const payload = await requestJsonWithByteProgress<ApiIgnoredWorkbenchPayload>(`/api/workbench/ignored?month=${month}`, {
     signal,
+    onProgress: onProgress
+      ? (loadedBytes, totalBytes) => {
+        const resolvedPercent = totalBytes > 0 ? clampPercent((loadedBytes / totalBytes) * 100) : null;
+        onProgress({
+          label: "正在同步已忽略数据",
+          loadedBytes,
+          totalBytes,
+          percent: resolvedPercent,
+          indeterminate: totalBytes <= 0,
+        });
+      }
+      : undefined,
   });
 
   return {
@@ -469,12 +635,41 @@ export async function fetchIgnoredWorkbenchRows(month: string, signal?: AbortSig
   };
 }
 
-export async function fetchWorkbenchSettings(signal?: AbortSignal): Promise<WorkbenchSettings> {
-  const payload = await requestJson<ApiWorkbenchSettings>("/api/workbench/settings", {
-    method: "GET",
+export async function fetchWorkbenchSettingsWithProgress(
+  signal?: AbortSignal,
+  onProgress?: (progress: WorkbenchBootstrapProgress) => void,
+): Promise<WorkbenchSettings> {
+  const payload = await requestJsonWithByteProgress<ApiWorkbenchSettings>("/api/workbench/settings", {
     signal,
+    onProgress: onProgress
+      ? (loadedBytes, totalBytes) => {
+        const resolvedPercent = totalBytes > 0 ? clampPercent((loadedBytes / totalBytes) * 100) : null;
+        onProgress({
+          label: "正在同步关联台设置",
+          loadedBytes,
+          totalBytes,
+          percent: resolvedPercent,
+          indeterminate: totalBytes <= 0,
+        });
+      }
+      : undefined,
   });
   return mapWorkbenchSettings(payload);
+}
+
+export async function fetchIgnoredWorkbenchRows(month: string, signal?: AbortSignal): Promise<IgnoredWorkbenchData> {
+  return fetchIgnoredWorkbenchRowsWithProgress(month, signal);
+}
+
+export async function fetchWorkbenchSettings(signal?: AbortSignal): Promise<WorkbenchSettings> {
+  return fetchWorkbenchSettingsWithProgress(signal);
+}
+
+function clampPercent(value: number) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.min(100, Math.max(0, Math.round(value)));
 }
 
 export async function saveWorkbenchSettings(

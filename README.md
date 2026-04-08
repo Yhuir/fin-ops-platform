@@ -217,6 +217,22 @@ python -m pip install -r backend/requirements.txt
   - 分账户类型 QA 清单
   - 自动化回归建议
 
+## 关联台性能重构新方向
+
+针对当前 `确认关联 / 取消配对` 和整页 `关联台 load` 的性能问题，已新增一套“`pair relations + 物化 read model`”方案：
+
+- 新设计文档：[2026-04-08-workbench-materialized-read-model-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-08-workbench-materialized-read-model-design.md)
+- 新实施计划：[2026-04-08-workbench-materialized-read-model.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-08-workbench-materialized-read-model.md)
+- Prompt 41：[41-workbench-read-model-foundation.md](/Users/yu/Desktop/fin-ops-platform/prompts/41-workbench-read-model-foundation.md)
+- Prompt 42：[42-workbench-read-model-actions-and-refresh.md](/Users/yu/Desktop/fin-ops-platform/prompts/42-workbench-read-model-actions-and-refresh.md)
+- Prompt 43：[43-workbench-read-model-ui-perf-and-qa.md](/Users/yu/Desktop/fin-ops-platform/prompts/43-workbench-read-model-ui-perf-and-qa.md)
+
+目标是：
+
+- `确认关联 / 取消配对` 只改最小写模型
+- 关联台加载优先读取缓存好的快照
+- 前端动作成功后立即局部更新，后台再静默刷新兜底
+
 ## OA 权限模型后续升级方向
 
 当前仓库已经补了一版更细的权限重构方案，用于替换“只有单一 `finops:app:view`”的旧口径。目标模型是：
@@ -232,6 +248,21 @@ python -m pip install -r backend/requirements.txt
 - [35-oa-access-role-backend-foundation.md](/Users/yu/Desktop/fin-ops-platform/prompts/35-oa-access-role-backend-foundation.md)
 - [36-oa-access-role-ui-and-action-gating.md](/Users/yu/Desktop/fin-ops-platform/prompts/36-oa-access-role-ui-and-action-gating.md)
 - [37-oa-access-role-sync-and-qa.md](/Users/yu/Desktop/fin-ops-platform/prompts/37-oa-access-role-sync-and-qa.md)
+
+## 关联台动作性能重构后续方向
+
+当前仓库已经补了一版“pair relations 轻量写模型”方案，用于替换把配对关系混在 row overrides 里的旧口径。目标模型是：
+
+- 配对关系进入独立 `workbench_pair_relations`
+- `确认关联 / 取消配对` 只改 pair relation
+- 前端在后端成功后立即局部更新，后台静默刷新兜底
+- 自动工资 / 内部往来款逐步统一进入同一关系层
+
+后续开发入口：
+
+- [38-workbench-pair-relations-foundation.md](/Users/yu/Desktop/fin-ops-platform/prompts/38-workbench-pair-relations-foundation.md)
+- [39-workbench-pair-relations-actions-and-read-model.md](/Users/yu/Desktop/fin-ops-platform/prompts/39-workbench-pair-relations-actions-and-read-model.md)
+- [40-workbench-pair-relations-ui-perf-and-qa.md](/Users/yu/Desktop/fin-ops-platform/prompts/40-workbench-pair-relations-ui-perf-and-qa.md)
 
 ## Prompt 08 已落地内容
 

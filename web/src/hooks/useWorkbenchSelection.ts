@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import type { WorkbenchRecord } from "../features/workbench/types";
 
@@ -11,58 +11,61 @@ export default function useWorkbenchSelection() {
   const [selectedOpenRowIds, setSelectedOpenRowIds] = useState<string[]>([]);
 
   const selectedCaseId = useMemo(() => selectedRow?.caseId ?? null, [selectedRow]);
+  const selectedRowId = selectedRow?.id ?? null;
+  const selectedPairedRowIdSet = useMemo(() => new Set(selectedPairedRowIds), [selectedPairedRowIds]);
+  const selectedOpenRowIdSet = useMemo(() => new Set(selectedOpenRowIds), [selectedOpenRowIds]);
 
-  const togglePairedRowSelection = (row: WorkbenchRecord) => {
+  const togglePairedRowSelection = useCallback((row: WorkbenchRecord) => {
     setSelectedPairedRowIds((current) =>
       current.includes(row.id) ? current.filter((item) => item !== row.id) : [...current, row.id],
     );
-  };
+  }, []);
 
-  const toggleOpenRowSelection = (row: WorkbenchRecord) => {
+  const toggleOpenRowSelection = useCallback((row: WorkbenchRecord) => {
     setSelectedOpenRowIds((current) =>
       current.includes(row.id) ? current.filter((item) => item !== row.id) : [...current, row.id],
     );
-  };
+  }, []);
 
-  const openDetail = (row: WorkbenchRecord) => {
+  const openDetail = useCallback((row: WorkbenchRecord) => {
     setSelectedRow(row);
     setDetailRow(row);
-  };
+  }, []);
 
-  const replaceDetailRow = (row: WorkbenchRecord) => {
+  const replaceDetailRow = useCallback((row: WorkbenchRecord) => {
     setSelectedRow(row);
     setDetailRow(row);
-  };
+  }, []);
 
-  const closeDetail = () => {
+  const closeDetail = useCallback(() => {
     setDetailRow(null);
-  };
+  }, []);
 
-  const clearSelection = () => {
+  const clearSelection = useCallback(() => {
     setSelectedRow(null);
     setDetailRow(null);
     setSelectedPairedRowIds([]);
     setSelectedOpenRowIds([]);
-  };
+  }, []);
 
-  const clearPairedSelection = () => {
+  const clearPairedSelection = useCallback(() => {
     setSelectedPairedRowIds([]);
-  };
+  }, []);
 
-  const clearOpenSelection = () => {
+  const clearOpenSelection = useCallback(() => {
     setSelectedOpenRowIds([]);
-  };
+  }, []);
 
-  const getRowState = (row: WorkbenchRecord, zoneId: "paired" | "open"): WorkbenchRowState => {
+  const getRowState = useCallback((row: WorkbenchRecord, zoneId: "paired" | "open"): WorkbenchRowState => {
     if (zoneId === "open") {
-      return selectedOpenRowIds.includes(row.id) ? "selected" : "idle";
+      return selectedOpenRowIdSet.has(row.id) ? "selected" : "idle";
     }
 
-    if (selectedPairedRowIds.includes(row.id)) {
+    if (selectedPairedRowIdSet.has(row.id)) {
       return "selected";
     }
 
-    if (selectedPairedRowIds.length === 0 && selectedRow?.id === row.id) {
+    if (selectedPairedRowIds.length === 0 && selectedRowId === row.id) {
       return "selected";
     }
 
@@ -71,7 +74,7 @@ export default function useWorkbenchSelection() {
     }
 
     return "idle";
-  };
+  }, [selectedCaseId, selectedOpenRowIdSet, selectedPairedRowIdSet, selectedPairedRowIds.length, selectedRowId]);
 
   return {
     detailRow,

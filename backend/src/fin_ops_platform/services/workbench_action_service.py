@@ -110,7 +110,7 @@ class WorkbenchActionService:
 
     def _validated_row(self, row_id: str, *, month: str) -> dict[str, Any]:
         row = self._query_service.get_row_record(row_id)
-        if row["_month"] != month:
+        if month != "all" and row["_month"] != month:
             raise ValueError("row month does not match request month.")
         return row
 

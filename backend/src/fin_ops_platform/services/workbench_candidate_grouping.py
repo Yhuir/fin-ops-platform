@@ -13,6 +13,9 @@ from fin_ops_platform.services.imports import normalize_name
 
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
+SINGLE_BANK_AUTO_PAIRED_CODES = {"salary_personal_auto_match"}
+MULTI_BANK_AUTO_PAIRED_CODES = {"internal_transfer_pair"}
+AUTO_PAIRED_CODES = {*SINGLE_BANK_AUTO_PAIRED_CODES, *MULTI_BANK_AUTO_PAIRED_CODES}
 
 
 @dataclass(slots=True)
@@ -342,6 +345,8 @@ class WorkbenchCandidateGroupingService:
     def _paired_relation_payload(self, row: dict[str, Any], group: CandidateGroup) -> dict[str, str]:
         group_kind = self._paired_group_kind(group)
         row_type = str(row["type"])
+        original_relation = self._relation_payload(row)
+        original_code = str(original_relation.get("code", ""))
         if group_kind == "oa_bank_invoice":
             return {"code": "fully_linked", "label": "完全关联", "tone": "success"}
         if group_kind == "oa_bank":
@@ -352,6 +357,8 @@ class WorkbenchCandidateGroupingService:
             if row_type == "bank":
                 return {"code": "fully_linked", "label": "已关联发票", "tone": "success"}
             return {"code": "fully_linked", "label": "已关联流水", "tone": "success"}
+        if group_kind == "single" and row_type == "bank" and original_code in AUTO_PAIRED_CODES:
+            return deepcopy(original_relation)
         return {"code": "fully_linked", "label": "完全关联", "tone": "success"}
 
     @staticmethod
@@ -380,6 +387,15 @@ class WorkbenchCandidateGroupingService:
     @staticmethod
     def _paired_group_has_enough_row_types(group: CandidateGroup) -> bool:
         row_type_count = sum(1 for rows in (group.oa_rows, group.bank_rows, group.invoice_rows) if rows)
+        if row_type_count == 1 and group.bank_rows and not group.oa_rows and not group.invoice_rows:
+            relation_codes = {
+                str(row.get("invoice_relation", {}).get("code", ""))
+                for row in group.bank_rows
+            }
+            if relation_codes and relation_codes.issubset(SINGLE_BANK_AUTO_PAIRED_CODES) and len(group.bank_rows) == 1:
+                return True
+            if relation_codes and relation_codes.issubset(MULTI_BANK_AUTO_PAIRED_CODES) and len(group.bank_rows) >= 2:
+                return True
         return row_type_count >= 2
 
     def _group_counterparty(self, group: CandidateGroup) -> str | None:
@@ -435,12 +451,12 @@ class WorkbenchCandidateGroupingService:
         relation_codes = {self._relation_code(row) for row in rows}
         if "fully_linked" in relation_codes:
             return "manual_confirmed"
-        if "automatic_match" in relation_codes:
+        if relation_codes.intersection({"automatic_match", *AUTO_PAIRED_CODES}):
             return "auto_closed"
         return default_group_type
 
     def _is_paired_row(self, row: dict[str, Any]) -> bool:
-        return self._relation_code(row) in {"fully_linked", "automatic_match"}
+        return self._relation_code(row) in {"fully_linked", "automatic_match", *AUTO_PAIRED_CODES}
 
     def _relation_code(self, row: dict[str, Any]) -> str:
         relation = self._relation_payload(row)

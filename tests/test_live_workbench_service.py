@@ -1,5 +1,6 @@
 from decimal import Decimal
 import unittest
+from unittest.mock import patch
 
 from fin_ops_platform.domain.enums import BatchType, InvoiceType
 from fin_ops_platform.domain.models import Counterparty, Invoice
@@ -135,6 +136,143 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
         self.assertEqual(output_detail["summary_fields"]["购买方名称"], "云南客户有限公司")
         self.assertEqual(output_detail["detail_fields"]["发票号码"], "OUT-001")
         self.assertIn("ignore", output_row["available_actions"])
+
+    def test_get_rows_detail_uses_direct_lookup_without_rebuilding_cache(self) -> None:
+        import_service = ImportNormalizationService()
+        preview = import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="single-bank.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220003",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-03-18",
+                    "trade_time": "2026-03-18 10:00:00",
+                    "pay_receive_time": "2026-03-18 10:00:00",
+                    "counterparty_name": "测试对手方",
+                    "debit_amount": "9.00",
+                    "credit_amount": "",
+                    "summary": "测试单条明细",
+                },
+            ],
+        )
+        import_service.confirm_import(preview.id)
+        transaction_id = import_service.list_transactions()[0].id
+
+        service = LiveWorkbenchService(import_service, MatchingEngineService(import_service))
+        with patch.object(service, "_rebuild_cache", side_effect=AssertionError("should not rebuild cache")):
+            detail_rows = service.get_rows_detail([transaction_id])
+
+        self.assertIn(transaction_id, detail_rows)
+        self.assertEqual(detail_rows[transaction_id]["counterparty_name"], "测试对手方")
+
+    def test_get_row_detail_uses_direct_lookup_without_rebuilding_cache(self) -> None:
+        import_service = ImportNormalizationService()
+        preview = import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="single-bank.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220004",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-03-19",
+                    "trade_time": "2026-03-19 11:15:46",
+                    "pay_receive_time": "2026-03-19 11:15:46",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "debit_amount": "13000.00",
+                    "credit_amount": "",
+                    "summary": "内部往来支出",
+                },
+            ],
+        )
+        import_service.confirm_import(preview.id)
+        transaction_id = import_service.list_transactions()[0].id
+
+        service = LiveWorkbenchService(import_service, MatchingEngineService(import_service))
+        with patch.object(service, "_rebuild_cache", side_effect=AssertionError("should not rebuild cache")):
+            detail = service.get_row_detail(transaction_id)
+
+        self.assertEqual(detail["id"], transaction_id)
+        self.assertEqual(detail["summary_fields"]["对方户名"], "云南溯源科技有限公司")
+
+    def test_list_auto_pair_candidates_detects_internal_transfers_within_time_window(self) -> None:
+        import_service = ImportNormalizationService()
+        preview = import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="internal-transfer.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220001",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-02-03",
+                    "trade_time": "2026-02-03 09:15:00",
+                    "pay_receive_time": "2026-02-03 09:15:00",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "debit_amount": "50000.00",
+                    "credit_amount": "",
+                    "summary": "内部往来支出",
+                },
+                {
+                    "account_no": "62220002",
+                    "account_name": "云南溯源科技有限公司招商银行一般户",
+                    "txn_date": "2026-02-03",
+                    "trade_time": "2026-02-03 10:02:00",
+                    "pay_receive_time": "2026-02-03 10:02:00",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "debit_amount": "",
+                    "credit_amount": "50000.00",
+                    "summary": "内部往来收入",
+                },
+            ],
+        )
+        import_service.confirm_import(preview.id)
+
+        service = LiveWorkbenchService(import_service, MatchingEngineService(import_service))
+        payload = service.get_workbench("all")
+        auto_results = service.list_auto_pair_candidates("all")
+
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(len(payload["open"]["bank"]), 2)
+        self.assertEqual(len(auto_results), 1)
+        self.assertEqual(auto_results[0].rule_code, "internal_transfer_pair")
+        self.assertEqual(len(auto_results[0].transaction_ids), 2)
+
+    def test_list_auto_pair_candidates_detects_salary_transactions_for_personal_counterparties(self) -> None:
+        import_service = ImportNormalizationService()
+        preview = import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="salary-payment.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220003",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-02-28",
+                    "trade_time": "2026-02-28 17:08:00",
+                    "pay_receive_time": "2026-02-28 17:08:00",
+                    "counterparty_name": "李四",
+                    "debit_amount": "9.00",
+                    "credit_amount": "",
+                    "summary": "2月工资发放",
+                    "remark": "工资",
+                },
+            ],
+        )
+        import_service.confirm_import(preview.id)
+
+        service = LiveWorkbenchService(import_service, MatchingEngineService(import_service))
+        payload = service.get_workbench("all")
+        auto_results = service.list_auto_pair_candidates("all")
+
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(len(payload["open"]["bank"]), 1)
+        self.assertEqual(payload["open"]["bank"][0]["counterparty_name"], "李四")
+        self.assertEqual(len(auto_results), 1)
+        self.assertEqual(auto_results[0].rule_code, "salary_personal_auto_match")
+        self.assertEqual(auto_results[0].transaction_ids, [payload["open"]["bank"][0]["id"]])
 
 
 if __name__ == "__main__":

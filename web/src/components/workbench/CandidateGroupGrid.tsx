@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 
 import type { WorkbenchCandidateGroup, WorkbenchRecord, WorkbenchRecordType } from "../../features/workbench/types";
 import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
@@ -21,7 +21,7 @@ type CandidateGroupGridProps = {
   canMutateData: boolean;
 };
 
-export default function CandidateGroupGrid({
+function CandidateGroupGrid({
   zoneId,
   panes,
   groups,
@@ -182,3 +182,5 @@ export default function CandidateGroupGrid({
     </div>
   );
 }
+
+export default memo(CandidateGroupGrid);

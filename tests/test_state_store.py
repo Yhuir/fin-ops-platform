@@ -17,6 +17,8 @@ from fin_ops_platform.services.state_store import (
     LEGACY_APP_MONGO_COLLECTION,
     META_COLLECTION,
     STATE_COLLECTIONS,
+    WORKBENCH_READ_MODELS_COLLECTION,
+    WORKBENCH_PAIR_RELATIONS_COLLECTION,
     load_mongo_state_settings,
 )
 
@@ -74,6 +76,9 @@ class FakeCollection:
         ]
         for key in to_delete:
             self.documents.pop(key, None)
+
+    def count_documents(self, query: dict | None = None) -> int:
+        return len(self.find(query))
 
 
 class FakeDatabase:
@@ -342,6 +347,290 @@ class StateStoreTests(unittest.TestCase):
             self.assertEqual(db["import_batches"].delete_many_calls, 0)
             self.assertEqual(db["bank_transactions"].delete_many_calls, 0)
             self.assertEqual(db["matching_results"].delete_many_calls, 0)
+
+    def test_save_workbench_overrides_can_incrementally_update_changed_rows_only(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "app_mongo_config.json").write_text(
+                json.dumps({"host": "127.0.0.1", "database": "fin_ops_platform_app"}),
+                encoding="utf-8",
+            )
+            fake_client = FakeMongoClient()
+
+            with patch("fin_ops_platform.services.state_store.MongoClient", return_value=fake_client):
+                with patch(
+                    "fin_ops_platform.services.state_store.GridFSBucket",
+                    side_effect=lambda db, bucket_name: FakeGridFSBucket(db, bucket_name),
+                ):
+                    store = ApplicationStateStore(data_dir)
+                    db = fake_client["fin_ops_platform_app"]
+                    db["workbench_row_overrides"].documents["row_a"] = {
+                        "_id": "row_a",
+                        "payload": Binary(pickle.dumps({"case_id": "CASE-A", "detail_note": "old a"})),
+                    }
+                    db["workbench_row_overrides"].documents["row_b"] = {
+                        "_id": "row_b",
+                        "payload": Binary(pickle.dumps({"case_id": "CASE-B", "detail_note": "old b"})),
+                    }
+
+                    store.save_workbench_overrides(
+                        {
+                            "case_counter": 7,
+                            "row_overrides": {
+                                "row_a": {"case_id": "CASE-A", "detail_note": "new a"},
+                                "row_b": {"case_id": "CASE-B", "detail_note": "old b"},
+                            },
+                        },
+                        changed_row_ids=["row_a"],
+                    )
+
+            db = fake_client["fin_ops_platform_app"]
+            row_a = pickle.loads(bytes(db["workbench_row_overrides"].documents["row_a"]["payload"]))  # noqa: S301
+            row_b = pickle.loads(bytes(db["workbench_row_overrides"].documents["row_b"]["payload"]))  # noqa: S301
+            self.assertEqual(row_a["detail_note"], "new a")
+            self.assertEqual(row_b["detail_note"], "old b")
+            self.assertEqual(db["workbench_row_overrides"].delete_many_calls, 0)
+            self.assertEqual(db["workbench_row_overrides"].replace_one_calls, 1)
+
+    def test_save_workbench_pair_relations_persists_and_loads_snapshot(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "app_mongo_config.json").write_text(
+                json.dumps({"host": "127.0.0.1", "database": "fin_ops_platform_app"}),
+                encoding="utf-8",
+            )
+            fake_client = FakeMongoClient()
+
+            snapshot = {
+                "pair_relations": {
+                    "CASE-PAIR-001": {
+                        "case_id": "CASE-PAIR-001",
+                        "row_ids": ["oa-001", "bk-001"],
+                        "row_types": ["oa", "bank"],
+                        "status": "active",
+                        "relation_mode": "manual_confirmed",
+                        "month_scope": "all",
+                        "created_by": "YNSYLP005",
+                        "created_at": "2026-04-08T10:00:00+00:00",
+                        "updated_at": "2026-04-08T10:00:00+00:00",
+                    }
+                }
+            }
+
+            with patch("fin_ops_platform.services.state_store.MongoClient", return_value=fake_client):
+                with patch(
+                    "fin_ops_platform.services.state_store.GridFSBucket",
+                    side_effect=lambda db, bucket_name: FakeGridFSBucket(db, bucket_name),
+                ):
+                    store = ApplicationStateStore(data_dir)
+                    store.save_workbench_pair_relations(snapshot)
+                    loaded = store.load_workbench_pair_relations()
+
+            self.assertEqual(loaded, snapshot)
+            db = fake_client["fin_ops_platform_app"]
+            self.assertIn("CASE-PAIR-001", db[WORKBENCH_PAIR_RELATIONS_COLLECTION].documents)
+
+    def test_save_workbench_pair_relations_does_not_rewrite_unrelated_detailed_collections(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "app_mongo_config.json").write_text(
+                json.dumps({"host": "127.0.0.1", "database": "fin_ops_platform_app"}),
+                encoding="utf-8",
+            )
+            fake_client = FakeMongoClient()
+
+            with patch("fin_ops_platform.services.state_store.MongoClient", return_value=fake_client):
+                with patch(
+                    "fin_ops_platform.services.state_store.GridFSBucket",
+                    side_effect=lambda db, bucket_name: FakeGridFSBucket(db, bucket_name),
+                ):
+                    store = ApplicationStateStore(data_dir)
+                    db = fake_client["fin_ops_platform_app"]
+                    db["import_batches"].documents["batch_import_0001"] = {"_id": "batch_import_0001", "payload": Binary(b"seed")}
+                    db["matching_results"].documents["match_result_0001"] = {"_id": "match_result_0001", "payload": Binary(b"seed")}
+
+                    store.save_workbench_pair_relations(
+                        {
+                            "pair_relations": {
+                                "CASE-PAIR-001": {
+                                    "case_id": "CASE-PAIR-001",
+                                    "row_ids": ["oa-001", "bk-001"],
+                                    "row_types": ["oa", "bank"],
+                                    "status": "active",
+                                    "relation_mode": "manual_confirmed",
+                                    "month_scope": "all",
+                                    "created_by": "YNSYLP005",
+                                    "created_at": "2026-04-08T10:00:00+00:00",
+                                    "updated_at": "2026-04-08T10:00:00+00:00",
+                                }
+                            }
+                        }
+                    )
+
+            db = fake_client["fin_ops_platform_app"]
+            self.assertIn("CASE-PAIR-001", db[WORKBENCH_PAIR_RELATIONS_COLLECTION].documents)
+            self.assertIn("batch_import_0001", db["import_batches"].documents)
+            self.assertIn("match_result_0001", db["matching_results"].documents)
+            self.assertEqual(db["import_batches"].delete_many_calls, 0)
+            self.assertEqual(db["matching_results"].delete_many_calls, 0)
+
+    def test_save_workbench_pair_relations_can_incrementally_update_changed_case_only(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "app_mongo_config.json").write_text(
+                json.dumps({"host": "127.0.0.1", "database": "fin_ops_platform_app"}),
+                encoding="utf-8",
+            )
+            fake_client = FakeMongoClient()
+
+            with patch("fin_ops_platform.services.state_store.MongoClient", return_value=fake_client):
+                with patch(
+                    "fin_ops_platform.services.state_store.GridFSBucket",
+                    side_effect=lambda db, bucket_name: FakeGridFSBucket(db, bucket_name),
+                ):
+                    store = ApplicationStateStore(data_dir)
+                    db = fake_client["fin_ops_platform_app"]
+                    db["workbench_pair_relations"].documents["CASE-A"] = {
+                        "_id": "CASE-A",
+                        "payload": Binary(pickle.dumps({"case_id": "CASE-A", "status": "active"})),
+                    }
+                    db["workbench_pair_relations"].documents["CASE-B"] = {
+                        "_id": "CASE-B",
+                        "payload": Binary(pickle.dumps({"case_id": "CASE-B", "status": "active"})),
+                    }
+
+                    store.save_workbench_pair_relations(
+                        {
+                            "pair_relations": {
+                                "CASE-A": {"case_id": "CASE-A", "status": "cancelled"},
+                                "CASE-B": {"case_id": "CASE-B", "status": "active"},
+                            }
+                        },
+                        changed_case_ids=["CASE-A"],
+                    )
+
+            db = fake_client["fin_ops_platform_app"]
+            case_a = pickle.loads(bytes(db["workbench_pair_relations"].documents["CASE-A"]["payload"]))  # noqa: S301
+            case_b = pickle.loads(bytes(db["workbench_pair_relations"].documents["CASE-B"]["payload"]))  # noqa: S301
+            self.assertEqual(case_a["status"], "cancelled")
+            self.assertEqual(case_b["status"], "active")
+            self.assertEqual(db["workbench_pair_relations"].delete_many_calls, 0)
+            self.assertEqual(db["workbench_pair_relations"].replace_one_calls, 1)
+
+    def test_save_workbench_read_models_persists_and_loads_snapshot(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "app_mongo_config.json").write_text(
+                json.dumps({"host": "127.0.0.1", "database": "fin_ops_platform_app"}),
+                encoding="utf-8",
+            )
+            fake_client = FakeMongoClient()
+
+            snapshot = {
+                "read_models": {
+                    "all": {
+                        "scope_key": "all",
+                        "scope_type": "all_time",
+                        "generated_at": "2026-04-08T12:00:00+00:00",
+                        "payload": {"summary": {"paired_count": 3}},
+                    }
+                }
+            }
+
+            with patch("fin_ops_platform.services.state_store.MongoClient", return_value=fake_client):
+                with patch(
+                    "fin_ops_platform.services.state_store.GridFSBucket",
+                    side_effect=lambda db, bucket_name: FakeGridFSBucket(db, bucket_name),
+                ):
+                    store = ApplicationStateStore(data_dir)
+                    store.save_workbench_read_models(snapshot)
+                    loaded = store.load_workbench_read_models()
+
+            self.assertEqual(loaded, snapshot)
+            db = fake_client["fin_ops_platform_app"]
+            self.assertIn("all", db[WORKBENCH_READ_MODELS_COLLECTION].documents)
+
+    def test_save_workbench_read_models_does_not_rewrite_unrelated_detailed_collections(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "app_mongo_config.json").write_text(
+                json.dumps({"host": "127.0.0.1", "database": "fin_ops_platform_app"}),
+                encoding="utf-8",
+            )
+            fake_client = FakeMongoClient()
+
+            with patch("fin_ops_platform.services.state_store.MongoClient", return_value=fake_client):
+                with patch(
+                    "fin_ops_platform.services.state_store.GridFSBucket",
+                    side_effect=lambda db, bucket_name: FakeGridFSBucket(db, bucket_name),
+                ):
+                    store = ApplicationStateStore(data_dir)
+                    db = fake_client["fin_ops_platform_app"]
+                    db["import_batches"].documents["batch_import_0001"] = {"_id": "batch_import_0001", "payload": Binary(b"seed")}
+                    db["matching_results"].documents["match_result_0001"] = {"_id": "match_result_0001", "payload": Binary(b"seed")}
+
+                    store.save_workbench_read_models(
+                        {
+                            "read_models": {
+                                "2026-03": {
+                                    "scope_key": "2026-03",
+                                    "scope_type": "month",
+                                    "generated_at": "2026-04-08T12:00:00+00:00",
+                                    "payload": {"summary": {"paired_count": 2}},
+                                }
+                            }
+                        }
+                    )
+
+            db = fake_client["fin_ops_platform_app"]
+            self.assertIn("2026-03", db[WORKBENCH_READ_MODELS_COLLECTION].documents)
+            self.assertIn("batch_import_0001", db["import_batches"].documents)
+            self.assertIn("match_result_0001", db["matching_results"].documents)
+            self.assertEqual(db["import_batches"].delete_many_calls, 0)
+            self.assertEqual(db["matching_results"].delete_many_calls, 0)
+
+    def test_save_workbench_read_models_can_incrementally_update_changed_scope_only(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "app_mongo_config.json").write_text(
+                json.dumps({"host": "127.0.0.1", "database": "fin_ops_platform_app"}),
+                encoding="utf-8",
+            )
+            fake_client = FakeMongoClient()
+
+            with patch("fin_ops_platform.services.state_store.MongoClient", return_value=fake_client):
+                with patch(
+                    "fin_ops_platform.services.state_store.GridFSBucket",
+                    side_effect=lambda db, bucket_name: FakeGridFSBucket(db, bucket_name),
+                ):
+                    store = ApplicationStateStore(data_dir)
+                    db = fake_client["fin_ops_platform_app"]
+                    db["workbench_read_models"].documents["all"] = {
+                        "_id": "all",
+                        "payload": Binary(pickle.dumps({"scope_key": "all", "payload": {"summary": {"paired_count": 1}}})),
+                    }
+                    db["workbench_read_models"].documents["2026-03"] = {
+                        "_id": "2026-03",
+                        "payload": Binary(pickle.dumps({"scope_key": "2026-03", "payload": {"summary": {"paired_count": 2}}})),
+                    }
+
+                    store.save_workbench_read_models(
+                        {
+                            "read_models": {
+                                "all": {"scope_key": "all", "payload": {"summary": {"paired_count": 9}}},
+                                "2026-03": {"scope_key": "2026-03", "payload": {"summary": {"paired_count": 2}}},
+                            }
+                        },
+                        changed_scope_keys=["all"],
+                    )
+
+            db = fake_client["fin_ops_platform_app"]
+            all_scope = pickle.loads(bytes(db["workbench_read_models"].documents["all"]["payload"]))  # noqa: S301
+            month_scope = pickle.loads(bytes(db["workbench_read_models"].documents["2026-03"]["payload"]))  # noqa: S301
+            self.assertEqual(all_scope["payload"]["summary"]["paired_count"], 9)
+            self.assertEqual(month_scope["payload"]["summary"]["paired_count"], 2)
+            self.assertEqual(db["workbench_read_models"].delete_many_calls, 0)
+            self.assertEqual(db["workbench_read_models"].replace_one_calls, 1)
 
     def test_migrates_legacy_single_collection_snapshot_into_split_collections(self) -> None:
         with TemporaryDirectory() as temp_dir:

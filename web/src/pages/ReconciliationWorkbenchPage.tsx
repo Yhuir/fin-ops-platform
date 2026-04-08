@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import MonthPicker from "../components/MonthPicker";
 import ActionStatusModal from "../components/workbench/ActionStatusModal";
 import CancelProcessedExceptionModal from "../components/workbench/CancelProcessedExceptionModal";
 import DetailDrawer from "../components/workbench/DetailDrawer";
@@ -20,9 +19,9 @@ import {
   cancelWorkbenchException,
   confirmWorkbenchLink,
   fetchIgnoredWorkbenchRows,
-  fetchWorkbench,
-  fetchWorkbenchSettings,
   fetchWorkbenchRowDetail,
+  fetchWorkbenchSettings,
+  fetchWorkbenchWithProgress,
   ignoreWorkbenchRow,
   markWorkbenchException,
   saveWorkbenchSettings,
@@ -65,6 +64,14 @@ type SubmittedSearchState = {
   status: WorkbenchSearchStatus;
 };
 
+type WorkbenchLoadProgressState = {
+  label: string;
+  loadedBytes: number;
+  totalBytes: number;
+  percent: number | null;
+  indeterminate: boolean;
+};
+
 function actionErrorMessage(error: unknown) {
   if (error instanceof Error) {
     if (
@@ -94,11 +101,12 @@ function normalizeSearchKeyword(value: string) {
 }
 
 const READONLY_ACTION_MESSAGE = "当前账号仅支持查看和导出，不能执行写操作。";
+const WORKBENCH_VIEW_MONTH = "all";
 
 export default function ReconciliationWorkbenchPage() {
   const navigate = useNavigate();
-  const { currentMonth, setCurrentMonth } = useMonth();
-  const { setWorkbenchFocusMode } = useAppChrome();
+  const { currentMonth } = useMonth();
+  const { setWorkbenchStatusText } = useAppChrome();
   const { canMutateData, canAdminAccess } = useSessionPermissions();
   const {
     detailRow,
@@ -117,13 +125,21 @@ export default function ReconciliationWorkbenchPage() {
     useWorkbenchSelection();
   const [workbenchData, setWorkbenchData] = useState<WorkbenchData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [loadProgress, setLoadProgress] = useState<WorkbenchLoadProgressState>({
+    label: "正在加载关联台数据",
+    loadedBytes: 0,
+    totalBytes: 0,
+    percent: null,
+    indeterminate: true,
+  });
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [lastActionMessage, setLastActionMessage] = useState<string | null>(null);
   const [expandedZoneId, setExpandedZoneId] = useState<"paired" | "open" | null>(null);
   const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(null);
-  const [ignoredData, setIgnoredData] = useState<IgnoredWorkbenchData>({ month: currentMonth, rows: [] });
+  const [ignoredData, setIgnoredData] = useState<IgnoredWorkbenchData>({ month: WORKBENCH_VIEW_MONTH, rows: [] });
   const [workbenchSettings, setWorkbenchSettings] = useState<WorkbenchSettings | null>(null);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [isSettingsSaving, setIsSettingsSaving] = useState(false);
@@ -145,29 +161,95 @@ export default function ReconciliationWorkbenchPage() {
   const [oaBankExceptionDialog, setOaBankExceptionDialog] = useState<OaBankExceptionDialogState | null>(null);
   const [cancelProcessedExceptionDialog, setCancelProcessedExceptionDialog] = useState<CancelProcessedExceptionDialogState | null>(null);
 
-  async function loadWorkbenchData(month: string, signal?: AbortSignal) {
-    setIsLoading(true);
-    setLoadError(null);
+  const refreshWorkbenchDataInBackground = useCallback((month: string) => {
+    void loadWorkbenchData(month, undefined, { background: true, includeAuxiliary: false });
+  }, []);
 
+  const applyLocalConfirmLink = useCallback((rowIds: string[], caseId?: string) => {
+    setWorkbenchData((current) => (current ? updateWorkbenchAfterConfirmLink(current, rowIds, caseId) : current));
+  }, []);
+
+  const applyLocalCancelLink = useCallback((rowIds: string[]) => {
+    setWorkbenchData((current) => (current ? updateWorkbenchAfterCancelLink(current, rowIds) : current));
+  }, []);
+
+  const applyLocalIgnoreRow = useCallback((row: WorkbenchRecord) => {
+    setWorkbenchData((current) => (current ? updateWorkbenchAfterIgnoreRow(current, row.id) : current));
+    setIgnoredData((current) => updateIgnoredDataAfterIgnore(current, row));
+  }, []);
+
+  const applyLocalUnignoreRow = useCallback((row: WorkbenchRecord) => {
+    setIgnoredData((current) => updateIgnoredDataAfterUnignore(current, row.id));
+    setWorkbenchData((current) => (current ? updateWorkbenchAfterUnignoreRow(current, row) : current));
+  }, []);
+
+  async function loadWorkbenchAuxiliaryData(month: string, signal?: AbortSignal) {
     try {
-      const [payload, ignoredPayload, settingsPayload] = await Promise.all([
-        fetchWorkbench(month, signal),
+      const [ignoredRows, settings] = await Promise.all([
         fetchIgnoredWorkbenchRows(month, signal),
         fetchWorkbenchSettings(signal),
       ]);
-      setWorkbenchData(payload);
-      setIgnoredData(ignoredPayload);
-      setWorkbenchSettings(settingsPayload);
-    } catch (error) {
       if (signal?.aborted) {
         return;
       }
-      setWorkbenchData(null);
-      setIgnoredData({ month, rows: [] });
-      setLoadError("工作台数据加载失败，请稍后重试。");
-    } finally {
-      if (!signal?.aborted) {
+      setIgnoredData(ignoredRows);
+      setWorkbenchSettings(settings);
+    } catch {
+      if (signal?.aborted) {
+        return;
+      }
+    }
+  }
+
+  async function loadWorkbenchData(
+    month: string,
+    signal?: AbortSignal,
+    options?: { background?: boolean; includeAuxiliary?: boolean },
+  ) {
+    const background = options?.background ?? false;
+    const includeAuxiliary = options?.includeAuxiliary ?? false;
+
+    if (background) {
+      setIsRefreshing(true);
+    } else {
+      setIsLoading(true);
+      setLoadError(null);
+      setLoadProgress({
+        label: "正在加载关联台数据",
+        loadedBytes: 0,
+        totalBytes: 0,
+        percent: null,
+        indeterminate: true,
+      });
+    }
+
+    try {
+      const workbenchPayload = await fetchWorkbenchWithProgress(month, signal, (progress) => {
+        setLoadProgress(progress);
+      });
+      if (signal?.aborted) {
+        return;
+      }
+      setWorkbenchData(workbenchPayload);
+      if (!background) {
         setIsLoading(false);
+      } else {
+        setIsRefreshing(false);
+      }
+      if (includeAuxiliary) {
+        void loadWorkbenchAuxiliaryData(month, signal);
+      }
+    } catch {
+      if (signal?.aborted) {
+        return;
+      }
+      if (!background) {
+        setWorkbenchData(null);
+        setIgnoredData({ month, rows: [] });
+        setLoadError("工作台数据加载失败，请稍后重试。");
+        setIsLoading(false);
+      } else {
+        setIsRefreshing(false);
       }
     }
   }
@@ -177,14 +259,30 @@ export default function ReconciliationWorkbenchPage() {
     clearSelection();
     setLastActionMessage(null);
     setDetailError(null);
-    void loadWorkbenchData(currentMonth, controller.signal);
+    void loadWorkbenchData(WORKBENCH_VIEW_MONTH, controller.signal, { includeAuxiliary: true });
     return () => controller.abort();
-  }, [currentMonth]);
+  }, []);
 
   useEffect(() => {
-    setWorkbenchFocusMode(expandedZoneId !== null);
-    return () => setWorkbenchFocusMode(false);
-  }, [expandedZoneId, setWorkbenchFocusMode]);
+    document.body.classList.toggle("workbench-focus-mode", expandedZoneId !== null);
+    return () => {
+      document.body.classList.remove("workbench-focus-mode");
+    };
+  }, [expandedZoneId]);
+
+  useEffect(() => {
+    if (isLoading || isRefreshing) {
+      setWorkbenchStatusText(
+        loadProgress.percent === null
+          ? `${loadProgress.label}...`
+          : `${loadProgress.label} ${loadProgress.percent}%`,
+      );
+      return;
+    }
+    setWorkbenchStatusText(null);
+  }, [isLoading, isRefreshing, loadProgress.label, loadProgress.percent, setWorkbenchStatusText]);
+
+  useEffect(() => () => setWorkbenchStatusText(null), [setWorkbenchStatusText]);
 
   const searchNarrowingHint = useMemo(() => {
     if (!searchModalOpen) {
@@ -322,7 +420,7 @@ export default function ReconciliationWorkbenchPage() {
       return;
     }
 
-    if (currentMonth !== pendingSearchJump.month || isLoading) {
+    if (isLoading) {
       return;
     }
 
@@ -347,7 +445,6 @@ export default function ReconciliationWorkbenchPage() {
     setHighlightedRowId(pendingSearchJump.rowId);
     setPendingSearchJump(null);
   }, [
-    currentMonth,
     ignoredModalOpen,
     ignoredData.rows,
     isLoading,
@@ -425,7 +522,7 @@ export default function ReconciliationWorkbenchPage() {
   const isOpenExceptionSelectionDisabled = openSelectionSummary.total < 1;
   const isPairedCancelSelectionDisabled = pairedSelectionSummary.total < 2;
 
-  const collectCaseRowIds = (row: WorkbenchRecord) => {
+  const collectCaseRowIds = useCallback((row: WorkbenchRecord) => {
     const containingGroup = allGroups.find((group) =>
       [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice].some((candidate) => candidate.id === row.id),
     );
@@ -439,9 +536,9 @@ export default function ReconciliationWorkbenchPage() {
     }
     const relatedIds = allRows.filter((candidate) => candidate.caseId === row.caseId).map((candidate) => candidate.id);
     return relatedIds.length > 0 ? relatedIds : [row.id];
-  };
+  }, [allGroups, allRows]);
 
-  const handleOpenDetail = async (row: WorkbenchRecord) => {
+  const handleOpenDetail = useCallback(async (row: WorkbenchRecord) => {
     setDetailError(null);
     setIsDetailLoading(true);
     openDetail(row);
@@ -453,13 +550,13 @@ export default function ReconciliationWorkbenchPage() {
     } finally {
       setIsDetailLoading(false);
     }
-  };
+  }, [openDetail, replaceDetailRow]);
 
-  const handleCloseDetail = () => {
+  const handleCloseDetail = useCallback(() => {
     setDetailError(null);
     setIsDetailLoading(false);
     closeDetail();
-  };
+  }, [closeDetail]);
 
   const handleCloseActionDialog = () => {
     setActionDialog((current) => (current?.phase === "result" ? null : current));
@@ -527,9 +624,6 @@ export default function ReconciliationWorkbenchPage() {
     if (jumpTarget.zoneHint !== "processed_exception") {
       setProcessedExceptionsModalOpen(false);
     }
-    if (currentMonth !== jumpTarget.month) {
-      setCurrentMonth(jumpTarget.month);
-    }
   };
 
   const handleOpenSearchResultDetail = async (result: WorkbenchSearchResult) => {
@@ -569,7 +663,7 @@ export default function ReconciliationWorkbenchPage() {
       const saved = await saveWorkbenchSettings(payload);
       setWorkbenchSettings(saved);
       setSettingsModalOpen(false);
-      await loadWorkbenchData(currentMonth);
+      await loadWorkbenchData(WORKBENCH_VIEW_MONTH);
       setLastActionMessage("已保存关联台设置。");
     } catch {
       openActionResultDialog("保存设置失败，请稍后重试。");
@@ -578,7 +672,15 @@ export default function ReconciliationWorkbenchPage() {
     }
   };
 
-  const openCancelProcessedExceptionDialog = (row: WorkbenchRecord) => {
+  const openActionResultDialog = useCallback((message: string, title = "操作提示") => {
+    setActionDialog({
+      phase: "result",
+      title,
+      message,
+    });
+  }, []);
+
+  const openCancelProcessedExceptionDialog = useCallback((row: WorkbenchRecord) => {
     const group = processedExceptionGroups.find((candidateGroup) =>
       [...candidateGroup.rows.oa, ...candidateGroup.rows.bank, ...candidateGroup.rows.invoice].some(
         (candidateRow) => candidateRow.id === row.id,
@@ -590,13 +692,13 @@ export default function ReconciliationWorkbenchPage() {
     }
     setProcessedExceptionsModalOpen(false);
     setCancelProcessedExceptionDialog({ group });
-  };
+  }, [openActionResultDialog, processedExceptionGroups]);
 
   const handleCloseCancelProcessedExceptionDialog = () => {
     setCancelProcessedExceptionDialog(null);
   };
 
-  const openOaBankExceptionDialog = (rows: WorkbenchRecord[]) => {
+  const openOaBankExceptionDialog = useCallback((rows: WorkbenchRecord[]) => {
     if (!canMutateData) {
       openActionResultDialog(READONLY_ACTION_MESSAGE);
       return;
@@ -617,21 +719,13 @@ export default function ReconciliationWorkbenchPage() {
     }
     handleCloseDetail();
     setOaBankExceptionDialog({ rows });
-  };
+  }, [canMutateData, handleCloseDetail, openActionResultDialog]);
 
   const handleCloseOaBankExceptionDialog = () => {
     setOaBankExceptionDialog(null);
   };
 
-  const openActionResultDialog = (message: string, title = "操作提示") => {
-    setActionDialog({
-      phase: "result",
-      title,
-      message,
-    });
-  };
-
-  const runBlockingAction = async ({
+  const runBlockingAction = useCallback(async ({
     loadingMessage,
     successTitle = "处理完成",
     action,
@@ -661,7 +755,7 @@ export default function ReconciliationWorkbenchPage() {
         message: actionErrorMessage(error),
       });
     }
-  };
+  }, [handleCloseDetail]);
 
   const handleSubmitOaBankException = async ({
     rows,
@@ -683,14 +777,14 @@ export default function ReconciliationWorkbenchPage() {
       loadingMessage: "正在执行异常处理...",
       action: async () => {
         const result = await submitOaBankException({
-          month: currentMonth,
+          month: WORKBENCH_VIEW_MONTH,
           rowIds: rows.map((row) => row.id),
           exceptionCode,
           exceptionLabel,
           comment,
         });
         clearOpenSelection();
-        await loadWorkbenchData(currentMonth);
+        refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
         return result.message;
       },
     });
@@ -706,18 +800,21 @@ export default function ReconciliationWorkbenchPage() {
       loadingMessage: "正在确认关联...",
       action: async () => {
         const result = await confirmWorkbenchLink({
-          month: currentMonth,
+          month: WORKBENCH_VIEW_MONTH,
           rowIds: rows.map((row) => row.id),
           caseId: resolveSelectedCaseId(rows),
         });
         clearOpenSelection();
-        await loadWorkbenchData(currentMonth);
+        applyLocalConfirmLink(
+          rows.map((row) => row.id),
+          resolveSelectedCaseId(rows),
+        );
         return result.message;
       },
     });
   };
 
-  const handleRowAction = async (row: WorkbenchRecord, action: WorkbenchInlineAction) => {
+  const handleRowAction = useCallback(async (row: WorkbenchRecord, action: WorkbenchInlineAction) => {
     if (action === "relation-status") {
       openActionResultDialog(`当前关联情况：${row.status}`, "关联情况");
       return;
@@ -732,15 +829,15 @@ export default function ReconciliationWorkbenchPage() {
       await runBlockingAction({
         loadingMessage: "正在确认关联...",
         action: async () => {
-          const result = await confirmWorkbenchLink({
-            month: currentMonth,
-            rowIds: collectCaseRowIds(row),
-            caseId: row.caseId,
-          });
-          await loadWorkbenchData(currentMonth);
-          return result.message;
-        },
-      });
+        const result = await confirmWorkbenchLink({
+          month: WORKBENCH_VIEW_MONTH,
+          rowIds: collectCaseRowIds(row),
+          caseId: row.caseId,
+        });
+        applyLocalConfirmLink(collectCaseRowIds(row), row.caseId);
+        return result.message;
+      },
+    });
       return;
     }
 
@@ -753,12 +850,12 @@ export default function ReconciliationWorkbenchPage() {
         loadingMessage: "正在执行异常处理...",
         action: async () => {
           const result = await markWorkbenchException({
-            month: currentMonth,
+            month: WORKBENCH_VIEW_MONTH,
             rowId: row.id,
             exceptionCode: row.recordType === "invoice" ? "pending_collection" : "manual_review",
             comment: `由关联台标记异常：${row.id}`,
           });
-          await loadWorkbenchData(currentMonth);
+          refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
           return result.message;
         },
       });
@@ -770,11 +867,12 @@ export default function ReconciliationWorkbenchPage() {
         loadingMessage: "正在忽略记录...",
         action: async () => {
           const result = await ignoreWorkbenchRow({
-            month: currentMonth,
+            month: WORKBENCH_VIEW_MONTH,
             rowId: row.id,
             comment: `由关联台忽略发票：${row.id}`,
           });
-          await loadWorkbenchData(currentMonth);
+          applyLocalIgnoreRow(row);
+          refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
           return result.message;
         },
       });
@@ -785,15 +883,15 @@ export default function ReconciliationWorkbenchPage() {
       await runBlockingAction({
         loadingMessage: "正在取消配对...",
         action: async () => {
-          const result = await cancelWorkbenchLink({
-            month: currentMonth,
-            rowId: row.id,
-            comment: "由关联台取消关联",
-          });
-          await loadWorkbenchData(currentMonth);
-          return result.message;
-        },
-      });
+        const result = await cancelWorkbenchLink({
+          month: WORKBENCH_VIEW_MONTH,
+          rowId: row.id,
+          comment: "由关联台取消关联",
+        });
+        applyLocalCancelLink([row.id]);
+        return result.message;
+      },
+    });
       return;
     }
 
@@ -805,15 +903,27 @@ export default function ReconciliationWorkbenchPage() {
     if (action === "cancel-exception") {
       openCancelProcessedExceptionDialog(row);
     }
-  };
+  }, [
+    canMutateData,
+    clearOpenSelection,
+    collectCaseRowIds,
+    openActionResultDialog,
+    openCancelProcessedExceptionDialog,
+    openOaBankExceptionDialog,
+    applyLocalCancelLink,
+    applyLocalConfirmLink,
+    applyLocalIgnoreRow,
+    refreshWorkbenchDataInBackground,
+    runBlockingAction,
+  ]);
 
-  const handleSelectRow = (row: WorkbenchRecord, zoneId: "paired" | "open") => {
+  const handleSelectRow = useCallback((row: WorkbenchRecord, zoneId: "paired" | "open") => {
     if (zoneId === "open") {
       toggleOpenRowSelection(row);
       return;
     }
     togglePairedRowSelection(row);
-  };
+  }, [toggleOpenRowSelection, togglePairedRowSelection]);
 
   const resolveSelectedCaseId = (rows: WorkbenchRecord[]) => {
     const caseIds = Array.from(new Set(rows.map((row) => row.caseId).filter((caseId): caseId is string => Boolean(caseId))));
@@ -837,12 +947,15 @@ export default function ReconciliationWorkbenchPage() {
       loadingMessage: "正在确认关联...",
       action: async () => {
         const result = await confirmWorkbenchLink({
-          month: currentMonth,
+          month: WORKBENCH_VIEW_MONTH,
           rowIds: selectedOpenRows.map((row) => row.id),
           caseId: resolveSelectedCaseId(selectedOpenRows),
         });
         clearOpenSelection();
-        await loadWorkbenchData(currentMonth);
+        applyLocalConfirmLink(
+          selectedOpenRows.map((row) => row.id),
+          resolveSelectedCaseId(selectedOpenRows),
+        );
         return result.message;
       },
     });
@@ -879,14 +992,14 @@ export default function ReconciliationWorkbenchPage() {
           await Promise.all(
             selectedOpenRows.map((row) =>
               markWorkbenchException({
-                month: currentMonth,
+                month: WORKBENCH_VIEW_MONTH,
                 rowId: row.id,
                 exceptionCode: "pending_collection",
                 comment: `由关联台批量标记异常：${row.id}`,
               })),
           );
           clearOpenSelection();
-          await loadWorkbenchData(currentMonth);
+          refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
           return `已对 ${selectedOpenRows.length} 条记录执行异常处理。`;
         },
       });
@@ -930,14 +1043,16 @@ export default function ReconciliationWorkbenchPage() {
           selectedGroups.map((group) => {
             const representativeRow = [...group.rows.bank, ...group.rows.oa, ...group.rows.invoice][0];
             return cancelWorkbenchLink({
-              month: currentMonth,
+              month: WORKBENCH_VIEW_MONTH,
               rowId: representativeRow.id,
               comment: "由关联台批量取消配对",
             });
           }),
         );
         clearPairedSelection();
-        await loadWorkbenchData(currentMonth);
+        applyLocalCancelLink(
+          selectedGroups.flatMap((group) => [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice].map((row) => row.id)),
+        );
         return `已取消 ${selectedGroups.length} 组配对。`;
       },
     });
@@ -953,10 +1068,11 @@ export default function ReconciliationWorkbenchPage() {
       loadingMessage: "正在撤回忽略...",
       action: async () => {
         const result = await unignoreWorkbenchRow({
-          month: currentMonth,
+          month: WORKBENCH_VIEW_MONTH,
           rowId: row.id,
         });
-        await loadWorkbenchData(currentMonth);
+        applyLocalUnignoreRow(row);
+        refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
         return result.message;
       },
     });
@@ -980,31 +1096,115 @@ export default function ReconciliationWorkbenchPage() {
       loadingMessage: "正在取消异常处理...",
       action: async () => {
         const result = await cancelWorkbenchException({
-          month: currentMonth,
+          month: WORKBENCH_VIEW_MONTH,
           rowIds: rows.map((row) => row.id),
           comment: "由已处理异常弹窗撤回异常处理",
         });
-        await loadWorkbenchData(currentMonth);
+        refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
         return result.message;
       },
     });
   };
 
-  const pairedPanes: WorkbenchPane[] = [
-    { id: "oa", title: "OA", rows: workbenchData?.paired.groups.flatMap((group) => group.rows.oa) ?? [] },
-    { id: "bank", title: "银行流水", rows: workbenchData?.paired.groups.flatMap((group) => group.rows.bank) ?? [] },
-    { id: "invoice", title: "进销项发票", rows: workbenchData?.paired.groups.flatMap((group) => group.rows.invoice) ?? [] },
-  ];
+  const pairedPanes = useMemo<WorkbenchPane[]>(
+    () => [
+      { id: "oa", title: "OA", rows: workbenchData?.paired.groups.flatMap((group) => group.rows.oa) ?? [] },
+      { id: "bank", title: "银行流水", rows: workbenchData?.paired.groups.flatMap((group) => group.rows.bank) ?? [] },
+      { id: "invoice", title: "进销项发票", rows: workbenchData?.paired.groups.flatMap((group) => group.rows.invoice) ?? [] },
+    ],
+    [workbenchData],
+  );
 
-  const openPanes: WorkbenchPane[] = [
-    { id: "oa", title: "OA", rows: visibleOpenGroups.flatMap((group) => group.rows.oa) },
-    { id: "bank", title: "银行流水", rows: visibleOpenGroups.flatMap((group) => group.rows.bank) },
-    { id: "invoice", title: "进销项发票", rows: visibleOpenGroups.flatMap((group) => group.rows.invoice) },
-  ];
+  const openPanes = useMemo<WorkbenchPane[]>(
+    () => [
+      { id: "oa", title: "OA", rows: visibleOpenGroups.flatMap((group) => group.rows.oa) },
+      { id: "bank", title: "银行流水", rows: visibleOpenGroups.flatMap((group) => group.rows.bank) },
+      { id: "invoice", title: "进销项发票", rows: visibleOpenGroups.flatMap((group) => group.rows.invoice) },
+    ],
+    [visibleOpenGroups],
+  );
+
+  const togglePairedExpand = useCallback(() => {
+    setExpandedZoneId((current) => (current === "paired" ? null : "paired"));
+  }, []);
+
+  const toggleOpenExpand = useCallback(() => {
+    setExpandedZoneId((current) => (current === "open" ? null : "open"));
+  }, []);
+
+  const openAuxiliaryHeaderActions = useMemo(
+    () => [
+      {
+        label: `已处理异常${processedExceptionRows.length}项`,
+        onClick: handleOpenProcessedExceptionsModal,
+        tone: "danger" as const,
+      },
+      {
+        label: `已忽略${ignoredData.rows.length}项`,
+        onClick: handleOpenIgnoredModal,
+        tone: "warning" as const,
+      },
+    ],
+    [handleOpenIgnoredModal, handleOpenProcessedExceptionsModal, ignoredData.rows.length, processedExceptionRows.length],
+  );
 
   const isEmpty = (workbenchData?.summary.totalCount ?? 0) === 0;
-  const shouldRenderPairedZone = expandedZoneId === null || expandedZoneId === "paired";
-  const shouldRenderOpenZone = expandedZoneId === null || expandedZoneId === "open";
+  const isPairedVisible = expandedZoneId === null || expandedZoneId === "paired";
+  const isOpenVisible = expandedZoneId === null || expandedZoneId === "open";
+
+  const pairedZoneElement = (
+    <WorkbenchZone
+      canMutateData={canMutateData}
+      getRowState={getRowState}
+      isExpanded={expandedZoneId === "paired"}
+      isVisible={isPairedVisible}
+      meta="自动闭环与人工确认后的记录"
+      onClearSelection={handleClearPairedSelection}
+      onOpenDetail={handleOpenDetail}
+      onPrimarySelectionAction={handleCancelPairedSelection}
+      primarySelectionActionDisabled={isPairedCancelSelectionDisabled || !canMutateData}
+      onRowAction={handleRowAction}
+      onSelectRow={handleSelectRow}
+      onToggleExpand={togglePairedExpand}
+      groups={workbenchData?.paired.groups ?? []}
+      highlightedRowId={highlightedRowId}
+      panes={pairedPanes}
+      primarySelectionActionLabel="取消配对"
+      selectionSummary={pairedSelectionSummary}
+      title={`已配对 ${workbenchData?.summary.pairedCount ?? 0} 条`}
+      tone="success"
+      zoneId="paired"
+    />
+  );
+
+  const openZoneElement = (
+    <WorkbenchZone
+      auxiliaryHeaderActions={openAuxiliaryHeaderActions}
+      canMutateData={canMutateData}
+      getRowState={getRowState}
+      isExpanded={expandedZoneId === "open"}
+      isVisible={isOpenVisible}
+      meta="等待人工处理、台账跟进或后续单据补齐"
+      onClearSelection={handleClearOpenSelection}
+      onOpenDetail={handleOpenDetail}
+      onPrimarySelectionAction={handleConfirmOpenSelection}
+      primarySelectionActionDisabled={isOpenConfirmSelectionDisabled || !canMutateData}
+      onRowAction={handleRowAction}
+      onSelectRow={handleSelectRow}
+      onSecondarySelectionAction={handleOpenSelectionException}
+      secondarySelectionActionDisabled={isOpenExceptionSelectionDisabled || !canMutateData}
+      onToggleExpand={toggleOpenExpand}
+      groups={visibleOpenGroups}
+      highlightedRowId={highlightedRowId}
+      panes={openPanes}
+      primarySelectionActionLabel="确认关联"
+      secondarySelectionActionLabel="异常处理"
+      selectionSummary={openSelectionSummary}
+      title={`未配对 ${workbenchData?.summary.openCount ?? 0} 条`}
+      tone="warning"
+      zoneId="open"
+    />
+  );
 
   return (
     <div className="workbench-shell">
@@ -1032,97 +1232,26 @@ export default function ReconciliationWorkbenchPage() {
             ) : null}
           </div>
           <WorkbenchSearchBox onOpen={handleOpenSearchModal} />
-          <MonthPicker value={currentMonth} onChange={setCurrentMonth} />
         </div>
         {lastActionMessage ? <div className="action-feedback">{lastActionMessage}</div> : null}
-        {isLoading ? <div className="state-panel">正在加载 {currentMonth} 的工作台数据...</div> : null}
         {loadError ? <div className="state-panel error">{loadError}</div> : null}
         {!isLoading && !loadError && isEmpty ? (
-          <div className="state-panel">当前月份没有可展示的 OA / 银行流水 / 发票记录。</div>
-        ) : null}
-
-        {expandedZoneId === null ? (
-          <div className="stats-row">
-            <div className="stat-card">
-              <span>已配对</span>
-              <strong>{workbenchData?.summary.pairedCount ?? 0} 条</strong>
-            </div>
-            <div className="stat-card warn">
-              <span>未配对</span>
-              <strong>{workbenchData?.summary.openCount ?? 0} 条</strong>
-            </div>
-            <div className="stat-card">
-              <span>异常待处理</span>
-              <strong>{workbenchData?.summary.exceptionCount ?? 0} 条</strong>
-            </div>
-          </div>
+          <div className="state-panel">当前没有可展示的 OA / 银行流水 / 发票记录。</div>
         ) : null}
 
         {!loadError ? (
-          <>
-            {shouldRenderPairedZone ? (
-              <WorkbenchZone
-                canMutateData={canMutateData}
-                getRowState={getRowState}
-                isExpanded={expandedZoneId === "paired"}
-                meta="自动闭环与人工确认后的记录"
-                onClearSelection={handleClearPairedSelection}
-                onOpenDetail={handleOpenDetail}
-                onPrimarySelectionAction={handleCancelPairedSelection}
-                primarySelectionActionDisabled={isPairedCancelSelectionDisabled || !canMutateData}
-                onRowAction={handleRowAction}
-                onSelectRow={handleSelectRow}
-                onToggleExpand={() => setExpandedZoneId((current) => (current === "paired" ? null : "paired"))}
-                groups={workbenchData?.paired.groups ?? []}
-                highlightedRowId={highlightedRowId}
-                panes={pairedPanes}
-                primarySelectionActionLabel="取消配对"
-                selectionSummary={pairedSelectionSummary}
-                title="已配对"
-                tone="success"
-                zoneId="paired"
-              />
-            ) : null}
-
-            {shouldRenderOpenZone ? (
-              <WorkbenchZone
-                auxiliaryHeaderActions={[
-                  {
-                    label: `已处理异常${processedExceptionRows.length}项`,
-                    onClick: handleOpenProcessedExceptionsModal,
-                    tone: "danger",
-                  },
-                  {
-                    label: `已忽略${ignoredData.rows.length}项`,
-                    onClick: handleOpenIgnoredModal,
-                    tone: "warning",
-                  },
-                ]}
-                canMutateData={canMutateData}
-                getRowState={getRowState}
-                isExpanded={expandedZoneId === "open"}
-                meta="等待人工处理、台账跟进或后续单据补齐"
-                onClearSelection={handleClearOpenSelection}
-                onOpenDetail={handleOpenDetail}
-                onPrimarySelectionAction={handleConfirmOpenSelection}
-                primarySelectionActionDisabled={isOpenConfirmSelectionDisabled || !canMutateData}
-                onRowAction={handleRowAction}
-                onSelectRow={handleSelectRow}
-                onSecondarySelectionAction={handleOpenSelectionException}
-                secondarySelectionActionDisabled={isOpenExceptionSelectionDisabled || !canMutateData}
-                onToggleExpand={() => setExpandedZoneId((current) => (current === "open" ? null : "open"))}
-                groups={visibleOpenGroups}
-                highlightedRowId={highlightedRowId}
-                panes={openPanes}
-                primarySelectionActionLabel="确认关联"
-                secondarySelectionActionLabel="异常处理"
-                selectionSummary={openSelectionSummary}
-                title="未配对"
-                tone="warning"
-                zoneId="open"
-              />
-            ) : null}
-          </>
+          <div className="workbench-zone-stack">
+            <div
+              className={`workbench-zone-slot workbench-zone-slot-top${isPairedVisible ? "" : " workbench-zone-slot-hidden"}`}
+            >
+              {pairedZoneElement}
+            </div>
+            <div
+              className={`workbench-zone-slot workbench-zone-slot-bottom${isOpenVisible ? "" : " workbench-zone-slot-hidden"}`}
+            >
+              {openZoneElement}
+            </div>
+          </div>
         ) : null}
       </div>
 
@@ -1322,6 +1451,245 @@ function findSearchTargetElement(rowId: string) {
   return Array.from(document.querySelectorAll<HTMLElement>("[data-row-id]")).find(
     (element) => element.dataset.rowId === rowId,
   ) ?? null;
+}
+
+function updateWorkbenchAfterConfirmLink(data: WorkbenchData, rowIds: string[], caseId?: string) {
+  const targetRowIds = new Set(rowIds);
+  const selectedRows: WorkbenchRecord[] = [];
+  const nextOpenGroups = data.open.groups.flatMap((group) => {
+    const nextGroup: WorkbenchCandidateGroup = {
+      ...group,
+      rows: {
+        oa: group.rows.oa.filter((row) => {
+          const keep = !targetRowIds.has(row.id);
+          if (!keep) {
+            selectedRows.push(row);
+          }
+          return keep;
+        }),
+        bank: group.rows.bank.filter((row) => {
+          const keep = !targetRowIds.has(row.id);
+          if (!keep) {
+            selectedRows.push(row);
+          }
+          return keep;
+        }),
+        invoice: group.rows.invoice.filter((row) => {
+          const keep = !targetRowIds.has(row.id);
+          if (!keep) {
+            selectedRows.push(row);
+          }
+          return keep;
+        }),
+      },
+    };
+
+    return flattenGroups([nextGroup]).length > 0 ? [nextGroup] : [];
+  });
+
+  if (selectedRows.length === 0) {
+    return data;
+  }
+
+  const resolvedCaseId = caseId
+    || selectedRows.find((row) => row.caseId)?.caseId
+    || `LOCAL-CONFIRM-${selectedRows[0].id}`;
+  const nextPairedGroup: WorkbenchCandidateGroup = {
+    id: `local-paired-${resolvedCaseId}`,
+    groupType: "manual_confirmed",
+    matchConfidence: "high",
+    reason: "人工确认关联",
+    rows: {
+      oa: selectedRows
+        .filter((row) => row.recordType === "oa")
+        .map((row) => updateWorkbenchRowForLinked(row, resolvedCaseId)),
+      bank: selectedRows
+        .filter((row) => row.recordType === "bank")
+        .map((row) => updateWorkbenchRowForLinked(row, resolvedCaseId)),
+      invoice: selectedRows
+        .filter((row) => row.recordType === "invoice")
+        .map((row) => updateWorkbenchRowForLinked(row, resolvedCaseId)),
+    },
+  };
+
+  return rebuildWorkbenchSummary({
+    ...data,
+    paired: {
+      groups: [nextPairedGroup, ...data.paired.groups],
+    },
+    open: {
+      groups: nextOpenGroups,
+    },
+  });
+}
+
+function updateWorkbenchAfterCancelLink(data: WorkbenchData, rowIds: string[]) {
+  const targetRowIds = new Set(rowIds);
+  const reopenedGroups: WorkbenchCandidateGroup[] = [];
+  const nextPairedGroups = data.paired.groups.flatMap((group) => {
+    const groupRows = flattenGroups([group]);
+    const shouldMove = groupRows.some((row) => targetRowIds.has(row.id));
+    if (!shouldMove) {
+      return [group];
+    }
+    reopenedGroups.push({
+      id: `local-open-${group.id}`,
+      groupType: "candidate",
+      matchConfidence: group.matchConfidence,
+      reason: "取消关联后待重新处理",
+      rows: {
+        oa: group.rows.oa.map((row) => updateWorkbenchRowForOpen(row, "取消关联，待重新处理")),
+        bank: group.rows.bank.map((row) => updateWorkbenchRowForOpen(row, "取消关联，待重新处理")),
+        invoice: group.rows.invoice.map((row) => updateWorkbenchRowForOpen(row, "取消关联，待重新处理")),
+      },
+    });
+    return [];
+  });
+
+  if (reopenedGroups.length === 0) {
+    return data;
+  }
+
+  return rebuildWorkbenchSummary({
+    ...data,
+    paired: {
+      groups: nextPairedGroups,
+    },
+    open: {
+      groups: [...reopenedGroups, ...data.open.groups],
+    },
+  });
+}
+
+function updateWorkbenchAfterIgnoreRow(data: WorkbenchData, rowId: string) {
+  const nextOpenGroups = data.open.groups.flatMap((group) => {
+    const nextGroup: WorkbenchCandidateGroup = {
+      ...group,
+      rows: {
+        oa: group.rows.oa,
+        bank: group.rows.bank,
+        invoice: group.rows.invoice.filter((row) => row.id !== rowId),
+      },
+    };
+
+    return flattenGroups([nextGroup]).length > 0 ? [nextGroup] : [];
+  });
+
+  return rebuildWorkbenchSummary({
+    ...data,
+    open: {
+      groups: nextOpenGroups,
+    },
+  });
+}
+
+function updateWorkbenchAfterUnignoreRow(data: WorkbenchData, row: WorkbenchRecord) {
+  const reopenedRow = updateWorkbenchRowForOpen(row, "待重新处理");
+  return rebuildWorkbenchSummary({
+    ...data,
+    open: {
+      groups: [
+        {
+          id: `local-open-unignored-${row.id}`,
+          groupType: "candidate",
+          matchConfidence: "medium",
+          reason: "撤回忽略后待重新处理",
+          rows: {
+            oa: reopenedRow.recordType === "oa" ? [reopenedRow] : [],
+            bank: reopenedRow.recordType === "bank" ? [reopenedRow] : [],
+            invoice: reopenedRow.recordType === "invoice" ? [reopenedRow] : [],
+          },
+        },
+        ...data.open.groups,
+      ],
+    },
+  });
+}
+
+function updateIgnoredDataAfterIgnore(data: IgnoredWorkbenchData, row: WorkbenchRecord): IgnoredWorkbenchData {
+  if (data.rows.some((candidate) => candidate.id === row.id)) {
+    return data;
+  }
+
+  return {
+    ...data,
+    rows: [row, ...data.rows],
+  };
+}
+
+function updateIgnoredDataAfterUnignore(data: IgnoredWorkbenchData, rowId: string): IgnoredWorkbenchData {
+  return {
+    ...data,
+    rows: data.rows.filter((row) => row.id !== rowId),
+  };
+}
+
+function rebuildWorkbenchSummary(data: WorkbenchData): WorkbenchData {
+  const pairedRows = flattenGroups(data.paired.groups);
+  const openRows = flattenGroups(data.open.groups);
+  const visibleOpenRows = flattenGroups(removeProcessedExceptionRows(data.open.groups));
+  const exceptionRows = flattenGroups(collectProcessedExceptionGroups(data.open.groups));
+  const allRows = [...pairedRows, ...openRows];
+
+  return {
+    ...data,
+    summary: {
+      oaCount: allRows.filter((row) => row.recordType === "oa").length,
+      bankCount: allRows.filter((row) => row.recordType === "bank").length,
+      invoiceCount: allRows.filter((row) => row.recordType === "invoice").length,
+      pairedCount: pairedRows.length,
+      openCount: visibleOpenRows.length,
+      exceptionCount: exceptionRows.length,
+      totalCount: allRows.length,
+    },
+  };
+}
+
+function updateWorkbenchRowForLinked(row: WorkbenchRecord, caseId: string): WorkbenchRecord {
+  return {
+    ...row,
+    caseId,
+    status: "完全关联",
+    statusCode: "fully_linked",
+    statusTone: "success",
+    exceptionHandled: false,
+    availableActions: ["detail"],
+    actionVariant: "detail-only",
+    tableValues: {
+      ...row.tableValues,
+      reconciliationStatus: row.recordType === "oa" ? "完全关联" : row.tableValues.reconciliationStatus,
+      invoiceRelationStatus: row.recordType === "bank" ? "完全关联" : row.tableValues.invoiceRelationStatus,
+    },
+  };
+}
+
+function updateWorkbenchRowForOpen(row: WorkbenchRecord, label: string): WorkbenchRecord {
+  const pendingCode = row.recordType === "oa"
+    ? "pending_match"
+    : row.recordType === "bank"
+      ? "pending_invoice_match"
+      : "pending_collection";
+  const availableActions = row.recordType === "bank"
+    ? ["detail", "view_relation", "cancel_link", "handle_exception"]
+    : row.recordType === "invoice"
+      ? ["detail", "confirm_link", "mark_exception", "ignore"]
+      : ["detail", "confirm_link", "mark_exception"];
+
+  return {
+    ...row,
+    caseId: undefined,
+    status: label,
+    statusCode: pendingCode,
+    statusTone: "warn",
+    exceptionHandled: false,
+    availableActions,
+    actionVariant: row.recordType === "bank" ? "bank-review" : "confirm-exception",
+    tableValues: {
+      ...row.tableValues,
+      reconciliationStatus: row.recordType === "oa" ? label : row.tableValues.reconciliationStatus,
+      invoiceRelationStatus: row.recordType === "bank" ? label : row.tableValues.invoiceRelationStatus,
+    },
+  };
 }
 
 const LEGACY_HANDLED_EXCEPTION_CODES = new Set([

@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 import ResizableTriPane, { type WorkbenchPane } from "./ResizableTriPane";
 import { useResizablePanes } from "../../hooks/useResizablePanes";
 import type { WorkbenchCandidateGroup, WorkbenchRecord } from "../../features/workbench/types";
@@ -12,6 +14,7 @@ type WorkbenchZoneProps = {
   panes: WorkbenchPane[];
   groups?: WorkbenchCandidateGroup[];
   isExpanded: boolean;
+  isVisible: boolean;
   onToggleExpand: () => void;
   getRowState: (row: WorkbenchRecord, zoneId: "paired" | "open") => WorkbenchRowState;
   onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "open") => void;
@@ -39,7 +42,7 @@ type WorkbenchZoneProps = {
   }>;
 };
 
-export default function WorkbenchZone({
+function WorkbenchZone({
   zoneId,
   title,
   tone,
@@ -47,6 +50,7 @@ export default function WorkbenchZone({
   panes,
   groups,
   isExpanded,
+  isVisible,
   onToggleExpand,
   getRowState,
   onSelectRow,
@@ -69,7 +73,11 @@ export default function WorkbenchZone({
   const shouldShowSelectionToolbar = Boolean(selectionSummary);
 
   return (
-    <section className={`zone${isExpanded ? " zone-expanded" : ""}`} data-testid={`zone-${zoneId}`}>
+    <section
+      aria-hidden={!isVisible}
+      className={`zone${isExpanded ? " zone-expanded" : ""}${isVisible ? "" : " zone-hidden"}`}
+      data-testid={`zone-${zoneId}`}
+    >
       <header className={`zone-header ${tone}`}>
         <div className="zone-title-block">
           <div>{title}</div>
@@ -210,3 +218,5 @@ export default function WorkbenchZone({
     </section>
   );
 }
+
+export default memo(WorkbenchZone);

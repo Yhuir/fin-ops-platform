@@ -35,6 +35,24 @@ class WorkbenchOverrideService:
             "row_overrides": deepcopy(self._row_overrides),
         }
 
+    def case_id_for_row(self, row_id: str) -> str | None:
+        override = self._row_overrides.get(str(row_id))
+        if not isinstance(override, dict):
+            return None
+        case_id = override.get("case_id")
+        if case_id in (None, ""):
+            return None
+        return str(case_id)
+
+    def row_ids_for_case(self, case_id: str) -> list[str]:
+        if not case_id:
+            return []
+        return [
+            str(row_id)
+            for row_id, override in self._row_overrides.items()
+            if isinstance(override, dict) and override.get("case_id") == case_id
+        ]
+
     def apply_to_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         result = deepcopy(payload)
         for section in ("paired", "open"):

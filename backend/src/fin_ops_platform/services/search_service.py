@@ -30,11 +30,15 @@ class SearchService:
         self,
         *,
         known_months_loader: Callable[[], list[str]],
-        raw_workbench_loader: Callable[[str], dict[str, Any]],
+        raw_workbench_loader: Callable[[str], dict[str, Any]] | None = None,
+        grouped_workbench_loader: Callable[[str], dict[str, Any]] | None = None,
+        ignored_rows_loader: Callable[[str], list[dict[str, Any]]] | None = None,
         cache_ttl_seconds: float = 30.0,
     ) -> None:
         self._known_months_loader = known_months_loader
         self._raw_workbench_loader = raw_workbench_loader
+        self._grouped_workbench_loader = grouped_workbench_loader
+        self._ignored_rows_loader = ignored_rows_loader
         self._cache_ttl_seconds = max(float(cache_ttl_seconds), 0.0)
         self._now = monotonic
         self._known_months_cache: tuple[float, list[str]] | None = None
@@ -173,36 +177,101 @@ class SearchService:
             if now - cached_at < self._cache_ttl_seconds:
                 return index
 
-        raw_payload = self._safe_load_payload(self._raw_workbench_loader, month)
-        project_names_by_row_id = self._project_names_by_row_id(raw_payload)
-        index: dict[str, list[dict[str, Any]]] = {"oa": [], "bank": [], "invoice": []}
+        if self._grouped_workbench_loader is not None:
+            grouped_payload = self._safe_load_payload(self._grouped_workbench_loader, month)
+            ignored_rows = (
+                self._safe_load_rows(self._ignored_rows_loader, month)
+                if self._ignored_rows_loader is not None
+                else []
+            )
+            index = self._index_grouped_payload(grouped_payload, month=month, ignored_rows=ignored_rows)
+        else:
+            if self._raw_workbench_loader is None:
+                raise RuntimeError("SearchService requires either grouped_workbench_loader or raw_workbench_loader.")
+            raw_payload = self._safe_load_payload(self._raw_workbench_loader, month)
+            project_names_by_row_id = self._project_names_by_row_id(raw_payload)
+            index = {"oa": [], "bank": [], "invoice": []}
 
-        for section in ("paired", "open"):
-            section_payload = raw_payload.get(section, {})
-            if not isinstance(section_payload, dict):
-                continue
-
-            for row_type in ("oa", "bank", "invoice"):
-                rows = section_payload.get(row_type, [])
-                if not isinstance(rows, list):
+            for section in ("paired", "open"):
+                section_payload = raw_payload.get(section, {})
+                if not isinstance(section_payload, dict):
                     continue
 
-                for row in rows:
-                    if not isinstance(row, dict):
+                for row_type in ("oa", "bank", "invoice"):
+                    rows = section_payload.get(row_type, [])
+                    if not isinstance(rows, list):
                         continue
-                    row_id = str(row.get("id"))
-                    project_names = project_names_by_row_id.get(row_id, [])
-                    index[row_type].append(
-                        self._index_row(
-                            row=row,
-                            month=month,
-                            zone_hint=self._zone_hint(section, row),
-                            project_names=project_names,
+
+                    for row in rows:
+                        if not isinstance(row, dict):
+                            continue
+                        row_id = str(row.get("id"))
+                        project_names = project_names_by_row_id.get(row_id, [])
+                        index[row_type].append(
+                            self._index_row(
+                                row=row,
+                                month=month,
+                                zone_hint=self._zone_hint(section, row),
+                                project_names=project_names,
+                            )
                         )
-                    )
 
         if self._cache_ttl_seconds > 0:
             self._month_index_cache[month] = (now, index)
+        return index
+
+    def _index_grouped_payload(
+        self,
+        grouped_payload: dict[str, Any],
+        *,
+        month: str,
+        ignored_rows: list[dict[str, Any]],
+    ) -> dict[str, list[dict[str, Any]]]:
+        index: dict[str, list[dict[str, Any]]] = {"oa": [], "bank": [], "invoice": []}
+
+        for section in ("paired", "open"):
+            section_payload = grouped_payload.get(section, {})
+            if not isinstance(section_payload, dict):
+                continue
+            groups = section_payload.get("groups", [])
+            if not isinstance(groups, list):
+                continue
+
+            for group in groups:
+                if not isinstance(group, dict):
+                    continue
+                group_project_names = self._project_names_from_group(group)
+                for row_type in ("oa", "bank", "invoice"):
+                    rows = group.get(f"{row_type}_rows", [])
+                    if not isinstance(rows, list):
+                        continue
+                    for row in rows:
+                        if not isinstance(row, dict):
+                            continue
+                        index[row_type].append(
+                            self._index_row(
+                                row=row,
+                                month=month,
+                                zone_hint=self._zone_hint(section, row),
+                                project_names=self._row_project_names(row, group_project_names),
+                            )
+                        )
+
+        for row in ignored_rows:
+            if not isinstance(row, dict):
+                continue
+            row_type = str(row.get("type"))
+            if row_type not in index:
+                continue
+            index[row_type].append(
+                self._index_row(
+                    row=row,
+                    month=month,
+                    zone_hint="ignored",
+                    project_names=self._row_project_names(row, []),
+                )
+            )
+
         return index
 
     def _index_row(
@@ -274,6 +343,25 @@ class SearchService:
         return project_names_by_row_id
 
     @staticmethod
+    def _project_names_from_group(group: dict[str, Any]) -> list[str]:
+        project_names: set[str] = set()
+        for row in group.get("oa_rows", []):
+            if not isinstance(row, dict):
+                continue
+            project_name = str(row.get("project_name") or "").strip()
+            if project_name:
+                project_names.add(project_name)
+        return sorted(project_names)
+
+    @staticmethod
+    def _row_project_names(row: dict[str, Any], group_project_names: list[str]) -> list[str]:
+        resolved = set(group_project_names)
+        project_name = str(row.get("project_name") or "").strip()
+        if project_name:
+            resolved.add(project_name)
+        return sorted(resolved)
+
+    @staticmethod
     def _has_reached_limits(
         grouped_results: dict[str, list[dict[str, Any]]],
         row_types: tuple[str, ...],
@@ -288,6 +376,14 @@ class SearchService:
         except KeyError:
             return {"month": month, "paired": {"oa": [], "bank": [], "invoice": []}, "open": {"oa": [], "bank": [], "invoice": []}}
         return payload if isinstance(payload, dict) else {"month": month, "paired": {"oa": [], "bank": [], "invoice": []}, "open": {"oa": [], "bank": [], "invoice": []}}
+
+    @staticmethod
+    def _safe_load_rows(loader: Callable[[str], list[dict[str, Any]]], month: str) -> list[dict[str, Any]]:
+        try:
+            rows = loader(month)
+        except KeyError:
+            return []
+        return rows if isinstance(rows, list) else []
 
     @staticmethod
     def _zone_hint(section: str, row: dict[str, Any]) -> str:

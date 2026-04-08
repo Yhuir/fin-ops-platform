@@ -102,6 +102,7 @@ describe("WorkbenchZone", () => {
       <WorkbenchZone
         getRowState={() => "idle"}
         isExpanded={false}
+        isVisible
         title="已配对"
         tone="success"
         meta="自动闭环与人工确认后的记录"
@@ -130,6 +131,7 @@ describe("WorkbenchZone", () => {
     fireEvent.click(screen.getByRole("button", { name: "银行流水" }));
 
     expect(screen.getByTestId("pane-bank")).toBeInTheDocument();
+    expect(screen.getByTestId("pane-bank")).toBeInTheDocument();
     expect(screen.getAllByRole("separator")).toHaveLength(1);
   });
 
@@ -138,6 +140,7 @@ describe("WorkbenchZone", () => {
       <WorkbenchZone
         getRowState={() => "idle"}
         isExpanded={false}
+        isVisible
         title="未配对"
         tone="warning"
         meta="等待人工处理"
@@ -181,6 +184,7 @@ describe("WorkbenchZone", () => {
         onSelectRow={() => {}}
         panes={panes}
         isExpanded={false}
+        isVisible
         onToggleExpand={() => {}}
         zoneId="open"
       />,
