@@ -17,6 +17,7 @@
 - `solution-design.md`：面向开发的模块方案和扩展边界
 - `roadmap.md`：从 Reconciliation 到 OA / Project Costing 的路线图
 - `task-breakdown.md`：Epic 级任务拆解和依赖关系
+- `repo-layout.md`：仓库目录边界、样例数据归档和本地产物约定
 - `product/银企核销需求.md`：当前业务需求源
 - `architecture/OA 集成当前 app 技术方案.md`：OA 接入、登录复用、菜单权限与部署总方案
 
