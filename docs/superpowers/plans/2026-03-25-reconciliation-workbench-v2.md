@@ -157,7 +157,7 @@
 - Modify: `docs/README.md`
 - Modify: `prompts/README.md`
 
-- [ ] Step 1: Verify implementation matches `银企核销需求.md`
+- [ ] Step 1: Verify implementation matches `docs/product/银企核销需求.md`
 - [ ] Step 2: Verify row click does not open drawer
 - [ ] Step 3: Verify splitter can fully collapse panes
 - [ ] Step 4: Verify tax page monthly totals are correct

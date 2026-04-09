@@ -26,7 +26,7 @@
 
 - `README.md`
 - `docs/README.md`
-- `OA 集成当前 app 技术方案.md`
+- `docs/architecture/OA 集成当前 app 技术方案.md`
 - 相关 deploy / env 文档
 - `tests/`
 - `web/src/test/`

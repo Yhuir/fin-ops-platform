@@ -30,8 +30,8 @@
 
 Add tests that use the real sample files under:
 
-- `发票信息导出1-3月/`
-- `测试用银行流水下载/`
+- `fixtures/发票信息导出1-3月/`
+- `fixtures/测试用银行流水下载/`
 
 Cover:
 

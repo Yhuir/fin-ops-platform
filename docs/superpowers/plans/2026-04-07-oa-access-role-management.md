@@ -36,8 +36,8 @@
 
 ### Docs
 
-- Modify: `银企核销需求.md`
-- Modify: `OA 集成当前 app 技术方案.md`
+- Modify: `docs/product/银企核销需求.md`
+- Modify: `docs/architecture/OA 集成当前 app 技术方案.md`
 - Create: `docs/superpowers/specs/2026-04-07-oa-access-role-management-design.md`
 - Create: `docs/superpowers/plans/2026-04-07-oa-access-role-management.md`
 - Modify: `docs/README.md`

@@ -33,7 +33,7 @@
 
 ### Docs
 
-- Modify: `银企核销需求.md`
+- Modify: `docs/product/银企核销需求.md`
 - Create: `docs/superpowers/specs/2026-04-08-workbench-pane-search-filter-sort-design.md`
 - Create: `docs/superpowers/plans/2026-04-08-workbench-pane-search-filter-sort.md`
 - Modify: `docs/README.md`

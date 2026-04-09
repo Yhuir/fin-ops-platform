@@ -8,7 +8,7 @@ from fin_ops_platform.domain.enums import BatchType
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CERTIFIED_JAN = ROOT / "测试数据" / "2026年1月 进项认证结果  用途确认信息.xlsx"
+CERTIFIED_JAN = ROOT / "fixtures" / "测试数据" / "2026年1月 进项认证结果  用途确认信息.xlsx"
 
 
 def build_multipart_payload(

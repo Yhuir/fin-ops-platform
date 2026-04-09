@@ -5,7 +5,7 @@
 前提：
 
 - 阅读：
-  - `银企核销需求.md`
+  - `docs/product/银企核销需求.md`
   - `docs/superpowers/specs/2026-04-08-workbench-column-layout-drag-design.md`
   - `docs/superpowers/plans/2026-04-08-workbench-column-layout-drag.md`
 - 已完成：

@@ -63,13 +63,13 @@
 
 Workbench V2 这一组 prompt 对应的需求与文档：
 
-- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/银企核销需求.md)
+- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/docs/product/银企核销需求.md)
 - 开发文档：[docs/dev/README.md](/Users/yu/Desktop/fin-ops-platform/docs/dev/README.md)
 - 实现计划：[2026-03-25-reconciliation-workbench-v2.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-03-25-reconciliation-workbench-v2.md)
 
 成本统计这一组 prompt 对应的需求与文档：
 
-- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/银企核销需求.md)
+- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/docs/product/银企核销需求.md)
 - 开发文档：[cost-statistics-workbench.md](/Users/yu/Desktop/fin-ops-platform/docs/dev/cost-statistics-workbench.md)
 - 设计文档：[2026-04-01-cost-statistics-workbench-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-01-cost-statistics-workbench-design.md)
 - 强导出设计文档：[2026-04-01-cost-statistics-project-export-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-01-cost-statistics-project-export-design.md)
@@ -77,13 +77,13 @@ Workbench V2 这一组 prompt 对应的需求与文档：
 
 关联台强搜索这一组 prompt 对应的需求与文档：
 
-- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/银企核销需求.md)
+- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/docs/product/银企核销需求.md)
 - 设计文档：[2026-04-02-workbench-global-search-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-02-workbench-global-search-design.md)
 - 实施计划：[2026-04-02-workbench-global-search.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-02-workbench-global-search.md)
 
 税金抵扣“计划 vs 已认证结果”这一组 prompt 对应的需求与文档：
 
-- 参考文件：[发票认证模块.xlsx](/Users/yu/Desktop/fin-ops-platform/测试数据/发票认证模块.xlsx)
+- 参考文件：[发票认证模块.xlsx](/Users/yu/Desktop/fin-ops-platform/fixtures/测试数据/发票认证模块.xlsx)
 - 设计文档：[2026-04-03-tax-offset-certified-plan-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-03-tax-offset-certified-plan-design.md)
 - 实施计划：[2026-04-03-tax-offset-certified-plan.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-03-tax-offset-certified-plan.md)
 - 当前实现口径：销项票只读、进项票做认证计划、已认证结果进入右侧抽屉并自动计入试算
@@ -91,15 +91,15 @@ Workbench V2 这一组 prompt 对应的需求与文档：
 税金抵扣“真实已认证模板导入”这一组 prompt 对应的需求与文档：
 
 - 参考文件：
-  - [2026年1月 进项认证结果  用途确认信息.xlsx](/Users/yu/Desktop/fin-ops-platform/测试数据/2026年1月%20进项认证结果%20%20用途确认信息.xlsx)
-  - [2026年2月 进项认证结果  用途确认信息.xlsx](/Users/yu/Desktop/fin-ops-platform/测试数据/2026年2月%20进项认证结果%20%20用途确认信息.xlsx)
+  - [2026年1月 进项认证结果  用途确认信息.xlsx](/Users/yu/Desktop/fin-ops-platform/fixtures/测试数据/2026年1月%20进项认证结果%20%20用途确认信息.xlsx)
+  - [2026年2月 进项认证结果  用途确认信息.xlsx](/Users/yu/Desktop/fin-ops-platform/fixtures/测试数据/2026年2月%20进项认证结果%20%20用途确认信息.xlsx)
 - 设计文档：[2026-04-07-tax-offset-certified-import-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-07-tax-offset-certified-import-design.md)
 - 实施计划：[2026-04-07-tax-offset-certified-import.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-07-tax-offset-certified-import.md)
 - 当前目标：让已认证结果来自真实 Excel 导入与持久化，而不是后端写死样例
 
 OA 页面壳体 / 登录复用 / 可见性控制这一组 prompt 对应的需求与文档：
 
-- 总方案文档：[OA 集成当前 app 技术方案.md](/Users/yu/Desktop/fin-ops-platform/OA%20%E9%9B%86%E6%88%90%E5%BD%93%E5%89%8D%20app%20%E6%8A%80%E6%9C%AF%E6%96%B9%E6%A1%88.md)
+- 总方案文档：[OA 集成当前 app 技术方案.md](/Users/yu/Desktop/fin-ops-platform/docs/architecture/OA%20%E9%9B%86%E6%88%90%E5%BD%93%E5%89%8D%20app%20%E6%8A%80%E6%9C%AF%E6%96%B9%E6%A1%88.md)
 - 设计文档：[2026-04-03-oa-shell-auth-visibility-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-03-oa-shell-auth-visibility-design.md)
 - 实施计划：[2026-04-03-oa-shell-auth-visibility.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-03-oa-shell-auth-visibility.md)
 - 外部 OA 前端源码：`/Users/yu/Desktop/sy/smart-oa-ui`
@@ -107,8 +107,8 @@ OA 页面壳体 / 登录复用 / 可见性控制这一组 prompt 对应的需求
 
 OA “访问账户管理 / 只读导出 / 管理员独占权限”这一组 prompt 对应的需求与文档：
 
-- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/银企核销需求.md)
-- 总方案文档：[OA 集成当前 app 技术方案.md](/Users/yu/Desktop/fin-ops-platform/OA%20%E9%9B%86%E6%88%90%E5%BD%93%E5%89%8D%20app%20%E6%8A%80%E6%9C%AF%E6%96%B9%E6%A1%88.md)
+- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/docs/product/银企核销需求.md)
+- 总方案文档：[OA 集成当前 app 技术方案.md](/Users/yu/Desktop/fin-ops-platform/docs/architecture/OA%20%E9%9B%86%E6%88%90%E5%BD%93%E5%89%8D%20app%20%E6%8A%80%E6%9C%AF%E6%96%B9%E6%A1%88.md)
 - 设计文档：[2026-04-07-oa-access-role-management-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-07-oa-access-role-management-design.md)
 - 实施计划：[2026-04-07-oa-access-role-management.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-07-oa-access-role-management.md)
 - 关键业务口径：
@@ -118,7 +118,7 @@ OA “访问账户管理 / 只读导出 / 管理员独占权限”这一组 prom
 
 关联台“pair relations 轻量写模型 / 确认关联取消配对加速”这一组 prompt 对应的需求与文档：
 
-- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/银企核销需求.md)
+- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/docs/product/银企核销需求.md)
 - 设计文档：[2026-04-08-workbench-pair-relations-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-08-workbench-pair-relations-design.md)
 - 实施计划：[2026-04-08-workbench-pair-relations.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-08-workbench-pair-relations.md)
 - 当前目标：
@@ -128,7 +128,7 @@ OA “访问账户管理 / 只读导出 / 管理员独占权限”这一组 prom
 
 关联台“pair relations + 物化 read model”这一组 prompt 对应的需求与文档：
 
-- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/银企核销需求.md)
+- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/docs/product/银企核销需求.md)
 - 设计文档：[2026-04-08-workbench-materialized-read-model-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-08-workbench-materialized-read-model-design.md)
 - 实施计划：[2026-04-08-workbench-materialized-read-model.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-08-workbench-materialized-read-model.md)
 - 当前目标：
@@ -138,7 +138,7 @@ OA “访问账户管理 / 只读导出 / 管理员独占权限”这一组 prom
 
 关联台“三栏局部搜索 / 筛选 / 排序”这一组 prompt 对应的需求与文档：
 
-- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/银企核销需求.md)
+- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/docs/product/银企核销需求.md)
 - 设计文档：[2026-04-08-workbench-pane-search-filter-sort-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-08-workbench-pane-search-filter-sort-design.md)
 - 实施计划：[2026-04-08-workbench-pane-search-filter-sort.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-08-workbench-pane-search-filter-sort.md)
 - 当前目标：
@@ -149,7 +149,7 @@ OA “访问账户管理 / 只读导出 / 管理员独占权限”这一组 prom
 
 关联台“三栏列拖拽排序 / 持久化”这一组 prompt 对应的需求与文档：
 
-- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/银企核销需求.md)
+- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/docs/product/银企核销需求.md)
 - 设计文档：[2026-04-08-workbench-column-layout-drag-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-08-workbench-column-layout-drag-design.md)
 - 实施计划：[2026-04-08-workbench-column-layout-drag.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-08-workbench-column-layout-drag.md)
 - 当前目标：

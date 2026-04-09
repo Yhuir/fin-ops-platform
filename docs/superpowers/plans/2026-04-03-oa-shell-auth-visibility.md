@@ -49,7 +49,7 @@
 
 ### Docs
 
-- Create: `OA 集成当前 app 技术方案.md`
+- Create: `docs/architecture/OA 集成当前 app 技术方案.md`
 - Create: `docs/superpowers/specs/2026-04-03-oa-shell-auth-visibility-design.md`
 - Modify: `docs/README.md`
 - Modify: `prompts/README.md`

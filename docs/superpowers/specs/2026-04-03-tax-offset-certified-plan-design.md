@@ -23,7 +23,7 @@
 - 页面没有体现“计划”和“实际认证结果”的差异
 - 试算逻辑缺少“已认证自动纳入”的明确口径
 
-参考文件 [发票认证模块.xlsx](/Users/yu/Desktop/fin-ops-platform/测试数据/发票认证模块.xlsx) 后，可以看出业务本质分成三块：
+参考文件 [发票认证模块.xlsx](/Users/yu/Desktop/fin-ops-platform/fixtures/测试数据/发票认证模块.xlsx) 后，可以看出业务本质分成三块：
 
 - 导入销项票开票情况
 - 进项票认证计划

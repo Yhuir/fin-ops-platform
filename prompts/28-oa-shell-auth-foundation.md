@@ -4,7 +4,7 @@
 
 前提：
 
-- 已阅读：`OA 集成当前 app 技术方案.md`
+- 已阅读：`docs/architecture/OA 集成当前 app 技术方案.md`
 - 已阅读：`docs/superpowers/specs/2026-04-03-oa-shell-auth-visibility-design.md`
 
 要求：

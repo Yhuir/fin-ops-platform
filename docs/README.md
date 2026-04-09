@@ -17,6 +17,8 @@
 - `solution-design.md`：面向开发的模块方案和扩展边界
 - `roadmap.md`：从 Reconciliation 到 OA / Project Costing 的路线图
 - `task-breakdown.md`：Epic 级任务拆解和依赖关系
+- `product/银企核销需求.md`：当前业务需求源
+- `architecture/OA 集成当前 app 技术方案.md`：OA 接入、登录复用、菜单权限与部署总方案
 
 配套开发 prompt 在 `prompts/` 目录下，按编号顺序执行。
 
@@ -58,7 +60,7 @@
 - `docs/superpowers/plans/2026-04-08-workbench-materialized-read-model.md`：关联台 `pair relations + read model` 的读写分离实施计划
 - `docs/superpowers/plans/2026-04-08-workbench-pane-search-filter-sort.md`：关联台三栏局部搜索、多选筛选与按组时间排序实施计划
 - `docs/superpowers/plans/2026-04-08-workbench-column-layout-drag.md`：关联台三栏列拖拽排序、持久化与渲染接线实施计划
-- `OA 集成当前 app 技术方案.md`：基于真实 OA 源码分析的总接入方案
+- `docs/architecture/OA 集成当前 app 技术方案.md`：基于真实 OA 源码分析的总接入方案
 - `docs/superpowers/specs/2026-03-26-import-formalization-design.md`：导入正式化 A 的设计文档
 - `docs/superpowers/plans/2026-03-26-import-formalization.md`：导入正式化 A 的实施计划
 - `docs/superpowers/plans/`：面向执行的实现计划

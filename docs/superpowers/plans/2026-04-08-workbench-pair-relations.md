@@ -33,7 +33,7 @@
 
 ### Docs
 
-- Modify: `银企核销需求.md`
+- Modify: `docs/product/银企核销需求.md`
 - Create: `docs/superpowers/specs/2026-04-08-workbench-pair-relations-design.md`
 - Create: `docs/superpowers/plans/2026-04-08-workbench-pair-relations.md`
 - Modify: `docs/README.md`

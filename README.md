@@ -7,7 +7,10 @@
 
 ## 当前仓库结构
 
-- [`docs/`](/Users/yu/Desktop/fin-ops-platform/docs/README.md)：业务、领域、方案、路线图、任务拆解
+- [`docs/`](/Users/yu/Desktop/fin-ops-platform/docs/README.md)：业务需求、架构方案、路线图、任务拆解
+- [`docs/product/`](/Users/yu/Desktop/fin-ops-platform/docs/product/银企核销需求.md)：产品需求源文档
+- [`docs/architecture/`](/Users/yu/Desktop/fin-ops-platform/docs/architecture/OA%20集成当前%20app%20技术方案.md)：跨系统集成与总体方案
+- [`fixtures/`](/Users/yu/Desktop/fin-ops-platform/fixtures/README.md)：导入样例、测试数据、手工验收 Excel
 - `backend/`：Python 后端与导入解析服务
 - `web/`：正式 React 前端工程
 - `tests/`：基础单元测试
@@ -137,7 +140,7 @@ python -m pip install -r backend/requirements.txt
 
 已新增一套基于真实 OA 源码分析的接入文档，用于把当前 app 放到公司 OA 页面下，并复用 OA 登录与菜单权限：
 
-- 总方案：[OA 集成当前 app 技术方案.md](/Users/yu/Desktop/fin-ops-platform/OA%20%E9%9B%86%E6%88%90%E5%BD%93%E5%89%8D%20app%20%E6%8A%80%E6%9C%AF%E6%96%B9%E6%A1%88.md)
+- 总方案：[OA 集成当前 app 技术方案.md](/Users/yu/Desktop/fin-ops-platform/docs/architecture/OA%20%E9%9B%86%E6%88%90%E5%BD%93%E5%89%8D%20app%20%E6%8A%80%E6%9C%AF%E6%96%B9%E6%A1%88.md)
 - 菜单接入说明：[oa-menu-iframe-integration.md](/Users/yu/Desktop/fin-ops-platform/docs/dev/oa-menu-iframe-integration.md)
 - 设计文档：[2026-04-03-oa-shell-auth-visibility-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-03-oa-shell-auth-visibility-design.md)
 - 实施计划：[2026-04-03-oa-shell-auth-visibility.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-03-oa-shell-auth-visibility.md)

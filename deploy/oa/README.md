@@ -417,7 +417,7 @@ cd web && npm run build
 
 ## 相关文档
 
-- `OA 集成当前 app 技术方案.md`
+- `docs/architecture/OA 集成当前 app 技术方案.md`
 - `docs/dev/oa-menu-iframe-integration.md`
 - `docs/superpowers/specs/2026-04-03-oa-shell-auth-visibility-design.md`
 - `docs/superpowers/plans/2026-04-03-oa-shell-auth-visibility.md`

@@ -2,7 +2,7 @@
 
 这组文档面向真正开始实现 `OA & 银行流水 & 进销项发票关联台` 的工程阶段，默认建立在以下输入之上：
 
-- 业务需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/银企核销需求.md)
+- 业务需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/docs/product/银企核销需求.md)
 - 当前交互原型：[reconciliation-workbench-v2.html](/Users/yu/Desktop/fin-ops-platform/web/prototypes/reconciliation-workbench-v2.html)
 
 推荐阅读顺序：

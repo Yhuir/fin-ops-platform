@@ -25,8 +25,8 @@
 
 第一阶段仅支持以下模板：
 
-- [2026年1月 进项认证结果  用途确认信息.xlsx](/Users/yu/Desktop/fin-ops-platform/测试数据/2026年1月%20进项认证结果%20%20用途确认信息.xlsx)
-- [2026年2月 进项认证结果  用途确认信息.xlsx](/Users/yu/Desktop/fin-ops-platform/测试数据/2026年2月%20进项认证结果%20%20用途确认信息.xlsx)
+- [2026年1月 进项认证结果  用途确认信息.xlsx](/Users/yu/Desktop/fin-ops-platform/fixtures/测试数据/2026年1月%20进项认证结果%20%20用途确认信息.xlsx)
+- [2026年2月 进项认证结果  用途确认信息.xlsx](/Users/yu/Desktop/fin-ops-platform/fixtures/测试数据/2026年2月%20进项认证结果%20%20用途确认信息.xlsx)
 
 只处理其中的 `发票` sheet。
 

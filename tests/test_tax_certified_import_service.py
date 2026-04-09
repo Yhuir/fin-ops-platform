@@ -9,8 +9,8 @@ from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedI
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CERTIFIED_JAN = ROOT / "测试数据" / "2026年1月 进项认证结果  用途确认信息.xlsx"
-CERTIFIED_FEB = ROOT / "测试数据" / "2026年2月 进项认证结果  用途确认信息.xlsx"
+CERTIFIED_JAN = ROOT / "fixtures" / "测试数据" / "2026年1月 进项认证结果  用途确认信息.xlsx"
+CERTIFIED_FEB = ROOT / "fixtures" / "测试数据" / "2026年2月 进项认证结果  用途确认信息.xlsx"
 
 
 class TaxCertifiedImportServiceTests(unittest.TestCase):

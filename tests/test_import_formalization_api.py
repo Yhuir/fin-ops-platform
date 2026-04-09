@@ -11,8 +11,8 @@ from fin_ops_platform.app.server import build_application
 
 
 ROOT = Path(__file__).resolve().parents[1]
-INVOICE_JAN = ROOT / "发票信息导出1-3月" / "全量发票查询导出结果-2026年1月.xlsx"
-PINGAN_JAN = ROOT / "测试用银行流水下载" / "平安1-3月" / "2026-01-01至2026-01-31交易明细.xlsx"
+INVOICE_JAN = ROOT / "fixtures" / "发票信息导出1-3月" / "全量发票查询导出结果-2026年1月.xlsx"
+PINGAN_JAN = ROOT / "fixtures" / "测试用银行流水下载" / "平安1-3月" / "2026-01-01至2026-01-31交易明细.xlsx"
 
 
 def build_multipart_payload(

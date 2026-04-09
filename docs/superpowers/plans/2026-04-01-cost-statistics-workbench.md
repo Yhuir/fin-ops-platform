@@ -35,7 +35,7 @@
 
 ### Docs
 
-- Modify: `银企核销需求.md`
+- Modify: `docs/product/银企核销需求.md`
 - Modify: `docs/dev/README.md`
 - Modify: `docs/dev/project-costing-foundation.md`
 - Create: `docs/dev/cost-statistics-workbench.md`

@@ -8,12 +8,12 @@ from fin_ops_platform.app.server import build_application
 
 
 ROOT = Path(__file__).resolve().parents[1]
-INVOICE_JAN = ROOT / "发票信息导出1-3月" / "全量发票查询导出结果-2026年1月.xlsx"
-ICBC_JAN = ROOT / "测试用银行流水下载" / "工行税户1-3月" / "historydetail14080.xlsx"
-PINGAN_JAN = ROOT / "测试用银行流水下载" / "平安1-3月" / "2026-01-01至2026-01-31交易明细.xlsx"
-CEB_JAN = ROOT / "测试用银行流水下载" / "光大1-3月" / "billmx20260320-202601.xls"
-CCB_JAN = ROOT / "测试用银行流水下载" / "建行1-3月" / "A058171TB_ND94389000000501277800011_CN000_20260320150836_2091193_resp.xls"
-CMBC_JAN = ROOT / "测试用银行流水下载" / "民生1-3月" / "活期账户交易明细查询20260320165947097.xlsx"
+INVOICE_JAN = ROOT / "fixtures" / "发票信息导出1-3月" / "全量发票查询导出结果-2026年1月.xlsx"
+ICBC_JAN = ROOT / "fixtures" / "测试用银行流水下载" / "工行税户1-3月" / "historydetail14080.xlsx"
+PINGAN_JAN = ROOT / "fixtures" / "测试用银行流水下载" / "平安1-3月" / "2026-01-01至2026-01-31交易明细.xlsx"
+CEB_JAN = ROOT / "fixtures" / "测试用银行流水下载" / "光大1-3月" / "billmx20260320-202601.xls"
+CCB_JAN = ROOT / "fixtures" / "测试用银行流水下载" / "建行1-3月" / "A058171TB_ND94389000000501277800011_CN000_20260320150836_2091193_resp.xls"
+CMBC_JAN = ROOT / "fixtures" / "测试用银行流水下载" / "民生1-3月" / "活期账户交易明细查询20260320165947097.xlsx"
 UNSUPPORTED = ROOT / "README.md"
 
 

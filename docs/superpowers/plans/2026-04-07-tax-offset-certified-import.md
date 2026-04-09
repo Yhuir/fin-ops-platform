@@ -33,7 +33,7 @@
 
 ### Docs
 
-- Modify: `银企核销需求.md`
+- Modify: `docs/product/银企核销需求.md`
 - Modify: `docs/README.md`
 - Modify: `prompts/README.md`
 
