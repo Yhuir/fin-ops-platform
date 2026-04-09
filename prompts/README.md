@@ -47,6 +47,12 @@
 41. `41-workbench-read-model-foundation.md`
 42. `42-workbench-read-model-actions-and-refresh.md`
 43. `43-workbench-read-model-ui-perf-and-qa.md`
+44. `44-workbench-pane-search-filter-foundation.md`
+45. `45-workbench-pane-search-filter-ui.md`
+46. `46-workbench-pane-sort-and-qa.md`
+47. `47-workbench-column-layout-foundation.md`
+48. `48-workbench-column-layout-rendering-and-drag-ui.md`
+49. `49-workbench-column-layout-save-and-qa.md`
 
 使用方式建议：
 
@@ -129,3 +135,25 @@ OA “访问账户管理 / 只读导出 / 管理员独占权限”这一组 prom
   - 写动作只改最小状态
   - 页面加载优先读缓存好的关联台快照
   - `确认关联 / 取消配对` 与整页 load 都明显提速
+
+关联台“三栏局部搜索 / 筛选 / 排序”这一组 prompt 对应的需求与文档：
+
+- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/银企核销需求.md)
+- 设计文档：[2026-04-08-workbench-pane-search-filter-sort-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-08-workbench-pane-search-filter-sort-design.md)
+- 实施计划：[2026-04-08-workbench-pane-search-filter-sort.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-08-workbench-pane-search-filter-sort.md)
+- 当前目标：
+  - 三栏支持栏级实时搜索
+  - 列级多选筛选
+  - 银行流水 / 发票按组时间排序
+  - 当前栏驱动、整组三栏联动显示
+
+关联台“三栏列拖拽排序 / 持久化”这一组 prompt 对应的需求与文档：
+
+- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/银企核销需求.md)
+- 设计文档：[2026-04-08-workbench-column-layout-drag-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-08-workbench-column-layout-drag-design.md)
+- 实施计划：[2026-04-08-workbench-column-layout-drag.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-08-workbench-column-layout-drag.md)
+- 当前目标：
+  - 三栏列头支持拖拽重排
+  - 每栏列顺序独立保存
+  - 登录后恢复上次保存的列排列
+  - 列宽变化后表头、内容和滚动轨道继续对齐

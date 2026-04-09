@@ -2,9 +2,11 @@ import { memo } from "react";
 
 import ResizableTriPane, { type WorkbenchPane } from "./ResizableTriPane";
 import { useResizablePanes } from "../../hooks/useResizablePanes";
-import type { WorkbenchCandidateGroup, WorkbenchRecord } from "../../features/workbench/types";
+import type { WorkbenchZoneDisplayState } from "../../features/workbench/groupDisplayModel";
+import type { WorkbenchCandidateGroup, WorkbenchColumnLayouts, WorkbenchRecord } from "../../features/workbench/types";
 import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import type { WorkbenchInlineAction } from "./RowActions";
+import type { WorkbenchColumnDropPosition } from "../../features/workbench/columnLayout";
 
 type WorkbenchZoneProps = {
   zoneId: "paired" | "open";
@@ -13,6 +15,9 @@ type WorkbenchZoneProps = {
   meta: string;
   panes: WorkbenchPane[];
   groups?: WorkbenchCandidateGroup[];
+  sourceGroups?: WorkbenchCandidateGroup[];
+  displayState: WorkbenchZoneDisplayState;
+  columnLayouts?: WorkbenchColumnLayouts;
   isExpanded: boolean;
   isVisible: boolean;
   onToggleExpand: () => void;
@@ -40,6 +45,21 @@ type WorkbenchZoneProps = {
     onClick: () => void;
     tone?: "warning" | "danger";
   }>;
+  onTogglePaneSearch: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
+  onPaneSearchQueryChange: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice", query: string) => void;
+  onColumnFilterChange: (
+    zoneId: "paired" | "open",
+    paneId: "oa" | "bank" | "invoice",
+    columnKey: string,
+    selectedValues: string[],
+  ) => void;
+  onTogglePaneSort: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
+  onReorderPaneColumns: (
+    paneId: "oa" | "bank" | "invoice",
+    activeKey: string,
+    overKey: string,
+    position: WorkbenchColumnDropPosition,
+  ) => void;
 };
 
 function WorkbenchZone({
@@ -49,6 +69,9 @@ function WorkbenchZone({
   meta,
   panes,
   groups,
+  sourceGroups,
+  displayState,
+  columnLayouts,
   isExpanded,
   isVisible,
   onToggleExpand,
@@ -67,6 +90,11 @@ function WorkbenchZone({
   primarySelectionActionDisabled,
   secondarySelectionActionDisabled,
   auxiliaryHeaderActions,
+  onTogglePaneSearch,
+  onPaneSearchQueryChange,
+  onColumnFilterChange,
+  onTogglePaneSort,
+  onReorderPaneColumns,
 }: WorkbenchZoneProps) {
   const { widths, visibleIndices, visibleCount, togglePane, startDrag } = useResizablePanes();
   const expandLabel = `${isExpanded ? "恢复" : "放大"} ${title}`;
@@ -202,13 +230,21 @@ function WorkbenchZone({
         </div>
       </header>
       <ResizableTriPane
+        columnLayouts={columnLayouts}
+        displayState={displayState}
         getRowState={getRowState}
         groups={groups}
         highlightedRowId={highlightedRowId}
         onOpenDetail={onOpenDetail}
         onRowAction={onRowAction}
+        onColumnFilterChange={onColumnFilterChange}
+        onPaneSearchQueryChange={onPaneSearchQueryChange}
+        onReorderPaneColumns={onReorderPaneColumns}
         onSelectRow={onSelectRow}
+        onTogglePaneSearch={onTogglePaneSearch}
+        onTogglePaneSort={onTogglePaneSort}
         panes={panes}
+        sourceGroups={sourceGroups}
         visibleIndices={visibleIndices}
         widths={widths}
         canMutateData={canMutateData}

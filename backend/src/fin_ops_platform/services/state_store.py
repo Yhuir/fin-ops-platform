@@ -229,6 +229,7 @@ class ApplicationStateStore:
             "allowed_usernames": [],
             "readonly_export_usernames": [],
             "admin_usernames": [],
+            "workbench_column_layouts": {},
         }
         if self._mongo_database is not None:
             document = self._mongo_detailed_collections["app_settings"].find_one({"_id": APP_SETTINGS_DOCUMENT_ID})
@@ -240,6 +241,7 @@ class ApplicationStateStore:
                     "allowed_usernames": list(payload.get("allowed_usernames") or []),
                     "readonly_export_usernames": list(payload.get("readonly_export_usernames") or []),
                     "admin_usernames": list(payload.get("admin_usernames") or []),
+                    "workbench_column_layouts": dict(payload.get("workbench_column_layouts") or {}),
                 }
             return default_payload
 
@@ -257,6 +259,7 @@ class ApplicationStateStore:
             "allowed_usernames": list(loaded.get("allowed_usernames") or []),
             "readonly_export_usernames": list(loaded.get("readonly_export_usernames") or []),
             "admin_usernames": list(loaded.get("admin_usernames") or []),
+            "workbench_column_layouts": dict(loaded.get("workbench_column_layouts") or {}),
         }
 
     def save_app_settings(self, payload: dict[str, Any]) -> None:
@@ -266,6 +269,7 @@ class ApplicationStateStore:
             "allowed_usernames": list(payload.get("allowed_usernames") or []),
             "readonly_export_usernames": list(payload.get("readonly_export_usernames") or []),
             "admin_usernames": list(payload.get("admin_usernames") or []),
+            "workbench_column_layouts": dict(payload.get("workbench_column_layouts") or {}),
         }
         if self._mongo_database is not None:
             self._mongo_detailed_collections["app_settings"].update_one(
@@ -277,6 +281,7 @@ class ApplicationStateStore:
                         "allowed_usernames": normalized_payload["allowed_usernames"],
                         "readonly_export_usernames": normalized_payload["readonly_export_usernames"],
                         "admin_usernames": normalized_payload["admin_usernames"],
+                        "workbench_column_layouts": normalized_payload["workbench_column_layouts"],
                         "payload": Binary(pickle.dumps(normalized_payload)),
                         "updated_at": datetime.now(UTC),
                     }

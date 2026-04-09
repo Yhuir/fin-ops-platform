@@ -220,6 +220,15 @@ export default function TaxOffsetPage() {
       && monthData.certifiedOutsidePlanInvoices.length === 0
     : false;
   const selectableInputIds = getSelectableInputIds(monthData);
+  const hasVisibleMonthData = Boolean(monthData);
+  const headerStatusMessage = importFeedback
+    ?? (isCalculating
+      ? "正在根据计划勾选项重新试算税金抵扣结果..."
+      : isRefreshing
+        ? "正在同步最新已认证结果与计划状态..."
+        : hasVisibleMonthData && isLoading
+          ? `正在加载 ${currentMonth} 的税金抵扣计划与已认证结果...`
+          : null);
 
   const handleCertifiedImportComplete = useCallback(
     async (result: TaxCertifiedImportConfirmResult) => {
@@ -238,6 +247,9 @@ export default function TaxOffsetPage() {
           <p>围绕进项票认证计划与已认证结果，做本月税金抵扣试算与展示，不承担真实税务业务动作。</p>
         </div>
         <div className="page-header-actions">
+          {headerStatusMessage ? (
+            <div className={importFeedback ? "page-note page-note-success" : "page-note page-note-info"}>{headerStatusMessage}</div>
+          ) : null}
           {canMutateData ? (
             <button className="secondary-button" type="button" onClick={() => setIsCertifiedImportModalOpen(true)}>
               已认证发票导入
@@ -248,9 +260,7 @@ export default function TaxOffsetPage() {
       </header>
 
       {loadError ? <div className="state-panel error">{loadError}</div> : null}
-      {importFeedback ? <div className="state-panel success">{importFeedback}</div> : null}
-      {isLoading ? <div className="state-panel">正在加载 {currentMonth} 的税金抵扣计划与已认证结果...</div> : null}
-      {isRefreshing ? <div className="state-panel">正在同步最新已认证结果与计划状态...</div> : null}
+      {!hasVisibleMonthData && isLoading ? <div className="state-panel">正在加载 {currentMonth} 的税金抵扣计划与已认证结果...</div> : null}
       {isEmpty ? <div className="state-panel">当前月份没有可用于计划与试算的发票数据。</div> : null}
 
       {summary ? <TaxSummaryCards summary={summary} /> : null}
@@ -264,9 +274,6 @@ export default function TaxOffsetPage() {
           resultLabel={summary.resultLabel}
         />
       ) : null}
-
-      {isCalculating ? <div className="state-panel">正在根据计划勾选项重新试算税金抵扣结果...</div> : null}
-
       {!loadError && monthData ? (
         <div className="tax-offset-workspace">
           <div className="tax-left-workspace">

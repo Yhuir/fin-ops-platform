@@ -4,6 +4,12 @@ import { installMockApiFetch } from "./apiMock";
 import { renderWorkbenchPage } from "./renderHelpers";
 
 describe("Workbench candidate grouping layout", () => {
+  function getZoneGroupOrder(zone: HTMLElement) {
+    return Array.from(zone.querySelectorAll<HTMLElement>(".candidate-grid-body > [data-testid^='candidate-group-']")).map(
+      (element) => element.getAttribute("data-testid") ?? "",
+    );
+  }
+
   test("renders OA, bank, and invoice candidates on the same horizontal group row", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
@@ -39,5 +45,46 @@ describe("Workbench candidate grouping layout", () => {
 
     expect(headerScroll.scrollLeft).toBe(96);
     expect(groupScroll.scrollLeft).toBe(96);
+  });
+
+  test("toggles bank and invoice group sorting in open and paired zones", async () => {
+    installMockApiFetch();
+    renderWorkbenchPage();
+
+    const openZone = await screen.findByTestId("zone-open");
+    const pairedZone = await screen.findByTestId("zone-paired");
+    const openBankPane = within(openZone).getByTestId("pane-bank");
+    const pairedInvoicePane = within(pairedZone).getByTestId("pane-invoice");
+
+    fireEvent.click(within(openBankPane).getByRole("button", { name: "银行流水按时间降序" }));
+
+    const openDescOrder = getZoneGroupOrder(openZone);
+    expect(openDescOrder.indexOf("candidate-group-open-case:CASE-202604-101")).toBeLessThan(
+      openDescOrder.indexOf("candidate-group-open-case:CASE-202603-101"),
+    );
+    expect(openDescOrder.indexOf("candidate-group-open-row:oa-o-202603-002")).toBeGreaterThan(
+      openDescOrder.indexOf("candidate-group-open-case:CASE-202603-101"),
+    );
+
+    fireEvent.click(within(openBankPane).getByRole("button", { name: "银行流水按时间升序" }));
+
+    const openAscOrder = getZoneGroupOrder(openZone);
+    expect(openAscOrder.indexOf("candidate-group-open-case:CASE-202603-101")).toBeLessThan(
+      openAscOrder.indexOf("candidate-group-open-case:CASE-202604-101"),
+    );
+
+    fireEvent.click(within(pairedInvoicePane).getByRole("button", { name: "进销项发票按时间降序" }));
+
+    const pairedDescOrder = getZoneGroupOrder(pairedZone);
+    expect(pairedDescOrder.indexOf("candidate-group-paired-case:CASE-202604-001")).toBeLessThan(
+      pairedDescOrder.indexOf("candidate-group-paired-case:CASE-202603-001"),
+    );
+
+    fireEvent.click(within(pairedInvoicePane).getByRole("button", { name: "进销项发票按时间升序" }));
+
+    const pairedAscOrder = getZoneGroupOrder(pairedZone);
+    expect(pairedAscOrder.indexOf("candidate-group-paired-case:CASE-202603-001")).toBeLessThan(
+      pairedAscOrder.indexOf("candidate-group-paired-case:CASE-202604-001"),
+    );
   });
 });

@@ -4,10 +4,16 @@ import type { WorkbenchRecord, WorkbenchRecordType } from "../../features/workbe
 import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import type { WorkbenchInlineAction } from "./RowActions";
 import WorkbenchRecordCard from "./WorkbenchRecordCard";
+import type { WorkbenchColumn } from "../../features/workbench/tableConfig";
 
 type CandidateGroupCellProps = {
   zoneId: "paired" | "open";
   paneId: WorkbenchRecordType;
+  columns: WorkbenchColumn[];
+  columnGridStyle?: {
+    gridTemplateColumns: string;
+    minWidth: string;
+  };
   records: WorkbenchRecord[];
   scrollPaneId: WorkbenchRecordType;
   scrollTestId: string;
@@ -24,6 +30,8 @@ type CandidateGroupCellProps = {
 function CandidateGroupCell({
   zoneId,
   paneId,
+  columns,
+  columnGridStyle,
   records,
   scrollPaneId,
   scrollTestId,
@@ -58,6 +66,8 @@ function CandidateGroupCell({
         {records.map((row) => (
           <WorkbenchRecordCard
             actionMode={actionMode}
+            columnGridStyle={columnGridStyle}
+            columns={columns}
             highlighted={highlightedRowId === row.id}
             key={row.id}
             onOpenDetail={onOpenDetail}

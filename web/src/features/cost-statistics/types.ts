@@ -22,6 +22,7 @@ export type CostProjectExplorerRow = {
   totalAmount: string;
   transactionCount: number;
   expenseTypeCount: number;
+  percentageLabel?: string;
 };
 
 export type CostExpenseTypeExplorerRow = {

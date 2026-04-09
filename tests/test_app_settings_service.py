@@ -58,6 +58,7 @@ class AppSettingsServiceTests(unittest.TestCase):
                 allowed_usernames=["FULL001"],
                 readonly_export_usernames=[],
                 admin_usernames=[],
+                workbench_column_layouts={"oa": ["projectName", "applicant"]},
             )
 
             reloaded_app = build_application(data_dir=Path(temp_dir))
@@ -68,6 +69,10 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(access_control["readonly_export_usernames"], [])
         self.assertEqual(access_control["admin_usernames"], ["YNSYLP005"])
         self.assertEqual(access_control["full_access_usernames"], ["FULL001"])
+        self.assertEqual(
+            payload["workbench_column_layouts"]["oa"],
+            ["projectName", "applicant", "amount", "counterparty", "reason"],
+        )
 
     def test_update_settings_triggers_oa_role_sync_with_normalized_assignments(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -106,6 +111,10 @@ class AppSettingsServiceTests(unittest.TestCase):
                         "allowed_usernames": ["FULL001", "READONLY001"],
                         "readonly_export_usernames": ["READONLY001"],
                         "admin_usernames": [],
+                        "workbench_column_layouts": {
+                            "oa": ["projectName", "applicant"],
+                            "bank": ["amount", "counterparty"],
+                        },
                     }
                 ),
             )
@@ -126,6 +135,15 @@ class AppSettingsServiceTests(unittest.TestCase):
         )
         self.assertEqual(get_response.status_code, 200)
         self.assertEqual(get_payload["access_control"], updated_payload["access_control"])
+        self.assertEqual(
+            updated_payload["workbench_column_layouts"],
+            {
+                "oa": ["projectName", "applicant", "amount", "counterparty", "reason"],
+                "bank": ["amount", "counterparty", "loanRepaymentDate", "note"],
+                "invoice": ["sellerName", "buyerName", "issueDate", "amount", "grossAmount"],
+            },
+        )
+        self.assertEqual(get_payload["workbench_column_layouts"], updated_payload["workbench_column_layouts"])
 
 
 if __name__ == "__main__":

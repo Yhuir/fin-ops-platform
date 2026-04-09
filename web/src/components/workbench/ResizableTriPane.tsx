@@ -1,9 +1,16 @@
 import { Fragment, memo, useMemo, useRef } from "react";
 
-import type { WorkbenchCandidateGroup, WorkbenchRecord, WorkbenchRecordType } from "../../features/workbench/types";
+import type { WorkbenchZoneDisplayState } from "../../features/workbench/groupDisplayModel";
+import type {
+  WorkbenchCandidateGroup,
+  WorkbenchColumnLayouts,
+  WorkbenchRecord,
+  WorkbenchRecordType,
+} from "../../features/workbench/types";
 import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import CandidateGroupGrid from "./CandidateGroupGrid";
 import type { WorkbenchInlineAction } from "./RowActions";
+import type { WorkbenchColumnDropPosition } from "../../features/workbench/columnLayout";
 
 const COLLAPSE_EPSILON = 0.0001;
 
@@ -17,6 +24,9 @@ type ResizableTriPaneProps = {
   zoneId: "paired" | "open";
   panes: WorkbenchPane[];
   groups?: WorkbenchCandidateGroup[];
+  sourceGroups?: WorkbenchCandidateGroup[];
+  displayState: WorkbenchZoneDisplayState;
+  columnLayouts?: WorkbenchColumnLayouts;
   widths: number[];
   visibleIndices: number[];
   onStartDrag: (leftIndex: number, rightIndex: number, clientX: number, containerWidth: number) => void;
@@ -25,6 +35,21 @@ type ResizableTriPaneProps = {
   onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "open") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
+  onTogglePaneSearch: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
+  onPaneSearchQueryChange: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice", query: string) => void;
+  onColumnFilterChange: (
+    zoneId: "paired" | "open",
+    paneId: "oa" | "bank" | "invoice",
+    columnKey: string,
+    selectedValues: string[],
+  ) => void;
+  onTogglePaneSort: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
+  onReorderPaneColumns: (
+    paneId: "oa" | "bank" | "invoice",
+    activeKey: string,
+    overKey: string,
+    position: WorkbenchColumnDropPosition,
+  ) => void;
   canMutateData: boolean;
 };
 
@@ -32,6 +57,9 @@ function ResizableTriPane({
   zoneId,
   panes,
   groups,
+  sourceGroups,
+  displayState,
+  columnLayouts,
   widths,
   visibleIndices,
   onStartDrag,
@@ -40,6 +68,11 @@ function ResizableTriPane({
   onSelectRow,
   onOpenDetail,
   onRowAction,
+  onTogglePaneSearch,
+  onPaneSearchQueryChange,
+  onColumnFilterChange,
+  onTogglePaneSort,
+  onReorderPaneColumns,
   canMutateData,
 }: ResizableTriPaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -97,14 +130,22 @@ function ResizableTriPane({
         })}
       </div>
       <CandidateGroupGrid
+        columnLayouts={columnLayouts}
+        displayState={displayState}
         getRowState={getRowState}
         groups={effectiveGroups}
         highlightedRowId={highlightedRowId}
         onOpenDetail={onOpenDetail}
         onRowAction={onRowAction}
+        onColumnFilterChange={onColumnFilterChange}
+        onPaneSearchQueryChange={onPaneSearchQueryChange}
+        onReorderPaneColumns={onReorderPaneColumns}
         onSelectRow={onSelectRow}
+        onTogglePaneSearch={onTogglePaneSearch}
+        onTogglePaneSort={onTogglePaneSort}
         panes={visiblePanes}
         rowTemplateColumns={rowTemplateColumns}
+        sourceGroups={sourceGroups ?? effectiveGroups}
         canMutateData={canMutateData}
         zoneId={zoneId}
       />

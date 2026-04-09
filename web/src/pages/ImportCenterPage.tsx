@@ -200,6 +200,19 @@ export default function ImportCenterPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [templateErrorMessage, setTemplateErrorMessage] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+  const headerStatusMessage = errorMessage
+    ? null
+    : isTemplateLoading
+      ? "模板加载中..."
+      : isConfirmLoading && previewPayload
+        ? `正在确认导入 ${selectedFileIds.length} 个文件...`
+        : isPreviewLoading
+          ? `正在预览 ${selectedFiles.length} 个文件...`
+          : retryingFileId && previewPayload
+            ? `正在重新识别 ${previewPayload.files.find((file) => file.id === retryingFileId)?.fileName ?? retryingFileId}...`
+            : revertingBatchId
+              ? "正在撤销导入批次..."
+              : feedbackMessage;
 
   useEffect(() => {
     let ignore = false;
@@ -439,7 +452,12 @@ export default function ImportCenterPage() {
           <h1>{intentMeta.title}</h1>
           <p>{intentMeta.description}</p>
         </div>
-        <div className="page-note">来源用户：web_finance_user</div>
+        <div className="page-header-actions">
+          {headerStatusMessage ? (
+            <div className={feedbackMessage ? "page-note page-note-success" : "page-note page-note-info"}>{headerStatusMessage}</div>
+          ) : null}
+          <div className="page-note">来源用户：web_finance_user</div>
+        </div>
       </header>
 
       {intentMeta.unsupported ? (
@@ -516,7 +534,6 @@ export default function ImportCenterPage() {
         </div>
       </section>
 
-      {feedbackMessage ? <div className="action-feedback">{feedbackMessage}</div> : null}
       {errorMessage ? <div className="state-panel error">{errorMessage}</div> : null}
 
       {matchingRun ? (

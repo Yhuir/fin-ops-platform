@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import ActionStatusModal from "../components/workbench/ActionStatusModal";
@@ -28,6 +28,14 @@ import {
   submitOaBankException,
   unignoreWorkbenchRow,
 } from "../features/workbench/api";
+import {
+  buildWorkbenchDisplayGroups,
+  buildWorkbenchPaneRows,
+  createEmptyWorkbenchZoneDisplayState,
+  resolveWorkbenchActivePane,
+  type WorkbenchZoneDisplayState,
+} from "../features/workbench/groupDisplayModel";
+import { reorderWorkbenchColumnLayout, type WorkbenchColumnDropPosition } from "../features/workbench/columnLayout";
 import { buildOaBankExceptionOptions } from "../features/workbench/oaBankExceptionOptions";
 import type { IgnoredWorkbenchData, WorkbenchCandidateGroup, WorkbenchData, WorkbenchRecord, WorkbenchSettings } from "../features/workbench/types";
 import { createEmptySearchResponse, fetchWorkbenchSearch } from "../features/search/api";
@@ -160,6 +168,136 @@ export default function ReconciliationWorkbenchPage() {
   const [processedExceptionsModalOpen, setProcessedExceptionsModalOpen] = useState(false);
   const [oaBankExceptionDialog, setOaBankExceptionDialog] = useState<OaBankExceptionDialogState | null>(null);
   const [cancelProcessedExceptionDialog, setCancelProcessedExceptionDialog] = useState<CancelProcessedExceptionDialogState | null>(null);
+  const [pairedDisplayState, setPairedDisplayState] = useState(createEmptyWorkbenchZoneDisplayState);
+  const [openDisplayState, setOpenDisplayState] = useState(createEmptyWorkbenchZoneDisplayState);
+  const columnLayoutSaveRequestIdRef = useRef(0);
+
+  const updateZoneDisplayState = useCallback((
+    zoneId: "paired" | "open",
+    updater: (current: WorkbenchZoneDisplayState) => WorkbenchZoneDisplayState,
+  ) => {
+    if (zoneId === "paired") {
+      setPairedDisplayState((current) => updater(current));
+      return;
+    }
+    setOpenDisplayState((current) => updater(current));
+  }, []);
+
+  const handleTogglePaneSearch = useCallback((zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => {
+    updateZoneDisplayState(zoneId, (current) => ({
+      ...current,
+      openSearchPaneId: current.openSearchPaneId === paneId ? null : paneId,
+    }));
+  }, [updateZoneDisplayState]);
+
+  const handlePaneSearchQueryChange = useCallback(
+    (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice", query: string) => {
+      updateZoneDisplayState(zoneId, (current) => {
+        const nextState: WorkbenchZoneDisplayState = {
+          ...current,
+          searchQueryByPane: {
+            ...current.searchQueryByPane,
+            [paneId]: query,
+          },
+        };
+        return {
+          ...nextState,
+          activePaneId: resolveWorkbenchActivePane(nextState, paneId),
+        };
+      });
+    },
+    [updateZoneDisplayState],
+  );
+
+  const handleColumnFilterChange = useCallback(
+    (
+      zoneId: "paired" | "open",
+      paneId: "oa" | "bank" | "invoice",
+      columnKey: string,
+      selectedValues: string[],
+    ) => {
+      updateZoneDisplayState(zoneId, (current) => {
+        const nextPaneFilters = {
+          ...current.filtersByPaneAndColumn[paneId],
+          [columnKey]: selectedValues,
+        };
+        if (selectedValues.length === 0) {
+          delete nextPaneFilters[columnKey];
+        }
+        const nextState: WorkbenchZoneDisplayState = {
+          ...current,
+          filtersByPaneAndColumn: {
+            ...current.filtersByPaneAndColumn,
+            [paneId]: nextPaneFilters,
+          },
+        };
+        return {
+          ...nextState,
+          activePaneId: resolveWorkbenchActivePane(nextState, paneId),
+        };
+      });
+    },
+    [updateZoneDisplayState],
+  );
+
+  const handleTogglePaneSort = useCallback(
+    (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => {
+      updateZoneDisplayState(zoneId, (current) => {
+        const nextDirection = current.sortByPane[paneId] === "desc" ? "asc" : "desc";
+        const nextState: WorkbenchZoneDisplayState = {
+          ...current,
+          sortByPane: {
+            oa: paneId === "oa" ? nextDirection : null,
+            bank: paneId === "bank" ? nextDirection : null,
+            invoice: paneId === "invoice" ? nextDirection : null,
+          },
+        };
+        return {
+          ...nextState,
+          activePaneId: resolveWorkbenchActivePane(nextState, paneId),
+        };
+      });
+    },
+    [updateZoneDisplayState],
+  );
+
+  const handleReorderPaneColumns = useCallback((
+    paneId: "oa" | "bank" | "invoice",
+    activeKey: string,
+    overKey: string,
+    position: WorkbenchColumnDropPosition,
+  ) => {
+    setWorkbenchSettings((current) => {
+      if (!current) {
+        return current;
+      }
+      const nextLayouts = reorderWorkbenchColumnLayout(current.workbenchColumnLayouts, paneId, activeKey, overKey, position);
+      if (nextLayouts === current.workbenchColumnLayouts) {
+        return current;
+      }
+
+      const nextSettings = {
+        ...current,
+        workbenchColumnLayouts: nextLayouts,
+      };
+
+      const requestId = ++columnLayoutSaveRequestIdRef.current;
+      void saveWorkbenchSettings({
+        completedProjectIds: nextSettings.projects.completedProjectIds,
+        bankAccountMappings: nextSettings.bankAccountMappings,
+        allowedUsernames: nextSettings.accessControl.allowedUsernames,
+        readonlyExportUsernames: nextSettings.accessControl.readonlyExportUsernames,
+        adminUsernames: nextSettings.accessControl.adminUsernames,
+        workbenchColumnLayouts: nextLayouts,
+      }).then((saved) => {
+        if (columnLayoutSaveRequestIdRef.current === requestId) {
+          setWorkbenchSettings(saved);
+        }
+      }).catch(() => undefined);
+
+      return nextSettings;
+    });
+  }, []);
 
   const refreshWorkbenchDataInBackground = useCallback((month: string) => {
     void loadWorkbenchData(month, undefined, { background: true, includeAuxiliary: false });
@@ -389,6 +527,16 @@ export default function ReconciliationWorkbenchPage() {
     [workbenchData],
   );
 
+  const displayPairedGroups = useMemo(
+    () => buildWorkbenchDisplayGroups(workbenchData?.paired.groups ?? [], pairedDisplayState),
+    [pairedDisplayState, workbenchData],
+  );
+
+  const displayOpenGroups = useMemo(
+    () => buildWorkbenchDisplayGroups(visibleOpenGroups, openDisplayState),
+    [openDisplayState, visibleOpenGroups],
+  );
+
   const searchProjectOptions = useMemo(() => {
     const candidates = new Set<string>();
 
@@ -459,28 +607,25 @@ export default function ReconciliationWorkbenchPage() {
       return [] as WorkbenchRecord[];
     }
     return [
-      ...flattenGroups(workbenchData.paired.groups),
-      ...flattenGroups(visibleOpenGroups),
+      ...flattenGroups(displayPairedGroups),
+      ...flattenGroups(displayOpenGroups),
     ];
-  }, [visibleOpenGroups, workbenchData]);
+  }, [displayOpenGroups, displayPairedGroups, workbenchData]);
 
   const allGroups = useMemo(() => {
     if (!workbenchData) {
       return [] as WorkbenchCandidateGroup[];
     }
-    return [...workbenchData.paired.groups, ...visibleOpenGroups];
-  }, [visibleOpenGroups, workbenchData]);
+    return [...displayPairedGroups, ...displayOpenGroups];
+  }, [displayOpenGroups, displayPairedGroups, workbenchData]);
 
   const openRows = useMemo(() => {
-    return flattenGroups(visibleOpenGroups);
-  }, [visibleOpenGroups]);
+    return flattenGroups(displayOpenGroups);
+  }, [displayOpenGroups]);
 
   const pairedRows = useMemo(() => {
-    if (!workbenchData) {
-      return [] as WorkbenchRecord[];
-    }
-    return flattenGroups(workbenchData.paired.groups);
-  }, [workbenchData]);
+    return flattenGroups(displayPairedGroups);
+  }, [displayPairedGroups]);
 
   const selectedOpenRows = useMemo(() => {
     const rowsById = new Map(openRows.map((row) => [row.id, row]));
@@ -653,6 +798,7 @@ export default function ReconciliationWorkbenchPage() {
     allowedUsernames: string[];
     readonlyExportUsernames: string[];
     adminUsernames: string[];
+    workbenchColumnLayouts: WorkbenchSettings["workbenchColumnLayouts"];
   }) => {
     if (!canMutateData) {
       openActionResultDialog(READONLY_ACTION_MESSAGE);
@@ -1107,21 +1253,27 @@ export default function ReconciliationWorkbenchPage() {
   };
 
   const pairedPanes = useMemo<WorkbenchPane[]>(
-    () => [
-      { id: "oa", title: "OA", rows: workbenchData?.paired.groups.flatMap((group) => group.rows.oa) ?? [] },
-      { id: "bank", title: "银行流水", rows: workbenchData?.paired.groups.flatMap((group) => group.rows.bank) ?? [] },
-      { id: "invoice", title: "进销项发票", rows: workbenchData?.paired.groups.flatMap((group) => group.rows.invoice) ?? [] },
-    ],
-    [workbenchData],
+    () => {
+      const paneRows = buildWorkbenchPaneRows(displayPairedGroups);
+      return [
+        { id: "oa", title: "OA", rows: paneRows.oa },
+        { id: "bank", title: "银行流水", rows: paneRows.bank },
+        { id: "invoice", title: "进销项发票", rows: paneRows.invoice },
+      ];
+    },
+    [displayPairedGroups],
   );
 
   const openPanes = useMemo<WorkbenchPane[]>(
-    () => [
-      { id: "oa", title: "OA", rows: visibleOpenGroups.flatMap((group) => group.rows.oa) },
-      { id: "bank", title: "银行流水", rows: visibleOpenGroups.flatMap((group) => group.rows.bank) },
-      { id: "invoice", title: "进销项发票", rows: visibleOpenGroups.flatMap((group) => group.rows.invoice) },
-    ],
-    [visibleOpenGroups],
+    () => {
+      const paneRows = buildWorkbenchPaneRows(displayOpenGroups);
+      return [
+        { id: "oa", title: "OA", rows: paneRows.oa },
+        { id: "bank", title: "银行流水", rows: paneRows.bank },
+        { id: "invoice", title: "进销项发票", rows: paneRows.invoice },
+      ];
+    },
+    [displayOpenGroups],
   );
 
   const togglePairedExpand = useCallback(() => {
@@ -1166,7 +1318,15 @@ export default function ReconciliationWorkbenchPage() {
       onRowAction={handleRowAction}
       onSelectRow={handleSelectRow}
       onToggleExpand={togglePairedExpand}
-      groups={workbenchData?.paired.groups ?? []}
+      displayState={pairedDisplayState}
+      onColumnFilterChange={handleColumnFilterChange}
+      onPaneSearchQueryChange={handlePaneSearchQueryChange}
+      onTogglePaneSearch={handleTogglePaneSearch}
+      onTogglePaneSort={handleTogglePaneSort}
+      onReorderPaneColumns={handleReorderPaneColumns}
+      columnLayouts={workbenchSettings?.workbenchColumnLayouts}
+      groups={displayPairedGroups}
+      sourceGroups={workbenchData?.paired.groups ?? []}
       highlightedRowId={highlightedRowId}
       panes={pairedPanes}
       primarySelectionActionLabel="取消配对"
@@ -1194,7 +1354,15 @@ export default function ReconciliationWorkbenchPage() {
       onSecondarySelectionAction={handleOpenSelectionException}
       secondarySelectionActionDisabled={isOpenExceptionSelectionDisabled || !canMutateData}
       onToggleExpand={toggleOpenExpand}
-      groups={visibleOpenGroups}
+      displayState={openDisplayState}
+      onColumnFilterChange={handleColumnFilterChange}
+      onPaneSearchQueryChange={handlePaneSearchQueryChange}
+      onTogglePaneSearch={handleTogglePaneSearch}
+      onTogglePaneSort={handleTogglePaneSort}
+      onReorderPaneColumns={handleReorderPaneColumns}
+      columnLayouts={workbenchSettings?.workbenchColumnLayouts}
+      groups={displayOpenGroups}
+      sourceGroups={visibleOpenGroups}
       highlightedRowId={highlightedRowId}
       panes={openPanes}
       primarySelectionActionLabel="确认关联"

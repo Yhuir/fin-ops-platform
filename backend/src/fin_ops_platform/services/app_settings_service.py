@@ -7,6 +7,12 @@ from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.state_store import ApplicationStateStore
 
+DEFAULT_WORKBENCH_COLUMN_LAYOUTS = {
+    "oa": ["applicant", "projectName", "amount", "counterparty", "reason"],
+    "bank": ["counterparty", "amount", "loanRepaymentDate", "note"],
+    "invoice": ["sellerName", "buyerName", "issueDate", "amount", "grossAmount"],
+}
+
 
 class AppSettingsService:
     def __init__(
@@ -57,6 +63,10 @@ class AppSettingsService:
                 "admin_usernames": list(self._snapshot["admin_usernames"]),
                 "full_access_usernames": list(self._snapshot["full_access_usernames"]),
             },
+            "workbench_column_layouts": {
+                pane_id: list(self._snapshot["workbench_column_layouts"][pane_id])
+                for pane_id in ("oa", "bank", "invoice")
+            },
         }
 
     def update_settings(
@@ -67,6 +77,7 @@ class AppSettingsService:
         allowed_usernames: list[str],
         readonly_export_usernames: list[str] | None = None,
         admin_usernames: list[str] | None = None,
+        workbench_column_layouts: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         normalized_snapshot = self._normalize_settings(
             {
@@ -75,6 +86,7 @@ class AppSettingsService:
                 "allowed_usernames": allowed_usernames,
                 "readonly_export_usernames": readonly_export_usernames or [],
                 "admin_usernames": admin_usernames or [],
+                "workbench_column_layouts": workbench_column_layouts or {},
             }
         )
         previous_snapshot = dict(self._snapshot)
@@ -166,6 +178,23 @@ class AppSettingsService:
         full_access_usernames = sorted(
             allowed_usernames.difference(readonly_export_usernames).difference(admin_usernames)
         )
+        raw_layouts = raw_payload.get("workbench_column_layouts")
+        normalized_layouts: dict[str, list[str]] = {}
+        for pane_id, default_keys in DEFAULT_WORKBENCH_COLUMN_LAYOUTS.items():
+            raw_keys = raw_layouts.get(pane_id) if isinstance(raw_layouts, dict) else None
+            ordered_keys: list[str] = []
+            if isinstance(raw_keys, list):
+                seen_keys: set[str] = set()
+                for item in raw_keys:
+                    key = str(item).strip()
+                    if not key or key in seen_keys or key not in default_keys:
+                        continue
+                    seen_keys.add(key)
+                    ordered_keys.append(key)
+            for key in default_keys:
+                if key not in ordered_keys:
+                    ordered_keys.append(key)
+            normalized_layouts[pane_id] = ordered_keys
         return {
             "completed_project_ids": completed_ids,
             "bank_account_mappings": mappings,
@@ -173,4 +202,5 @@ class AppSettingsService:
             "readonly_export_usernames": sorted(readonly_export_usernames),
             "admin_usernames": sorted(admin_usernames),
             "full_access_usernames": full_access_usernames,
+            "workbench_column_layouts": normalized_layouts,
         }

@@ -844,12 +844,14 @@ class Application:
         allowed_usernames = payload.get("allowed_usernames", [])
         readonly_export_usernames = payload.get("readonly_export_usernames", [])
         admin_usernames = payload.get("admin_usernames", [])
+        workbench_column_layouts = payload.get("workbench_column_layouts", {})
         if (
             not isinstance(completed_project_ids, list)
             or not isinstance(bank_account_mappings, list)
             or not isinstance(allowed_usernames, list)
             or not isinstance(readonly_export_usernames, list)
             or not isinstance(admin_usernames, list)
+            or not isinstance(workbench_column_layouts, dict)
         ):
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
@@ -857,7 +859,8 @@ class Application:
                     "error": "invalid_workbench_settings_request",
                     "message": (
                         "completed_project_ids, bank_account_mappings, allowed_usernames, "
-                        "readonly_export_usernames, and admin_usernames must be arrays."
+                        "readonly_export_usernames, and admin_usernames must be arrays, "
+                        "and workbench_column_layouts must be an object."
                     ),
                 },
             )
@@ -870,6 +873,7 @@ class Application:
                     str(item).strip() for item in readonly_export_usernames if str(item).strip()
                 ],
                 admin_usernames=[str(item).strip() for item in admin_usernames if str(item).strip()],
+                workbench_column_layouts=workbench_column_layouts,
             )
         except OARoleSyncError as exc:
             return self._json_response(

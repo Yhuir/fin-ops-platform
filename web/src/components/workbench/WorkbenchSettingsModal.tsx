@@ -26,6 +26,7 @@ type WorkbenchSettingsModalProps = {
     allowedUsernames: string[];
     readonlyExportUsernames: string[];
     adminUsernames: string[];
+    workbenchColumnLayouts: WorkbenchSettings["workbenchColumnLayouts"];
   }) => void;
 };
 
@@ -170,6 +171,7 @@ export default function WorkbenchSettingsModal({
         .filter((account) => account.role === "read_export_only")
         .map((account) => account.username),
       adminUsernames,
+      workbenchColumnLayouts: settings.workbenchColumnLayouts,
     });
   }
 

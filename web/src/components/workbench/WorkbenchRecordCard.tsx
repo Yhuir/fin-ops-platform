@@ -1,6 +1,6 @@
 import { memo } from "react";
 
-import { workbenchColumns } from "../../features/workbench/tableConfig";
+import { getWorkbenchColumns } from "../../features/workbench/tableConfig";
 import type { WorkbenchRecord, WorkbenchRecordType } from "../../features/workbench/types";
 import type { WorkbenchColumn } from "../../features/workbench/tableConfig";
 import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
@@ -11,6 +11,11 @@ import RowActions, { type WorkbenchInlineAction } from "./RowActions";
 type WorkbenchRecordCardProps = {
   zoneId: "paired" | "open";
   paneId: WorkbenchRecordType;
+  columns?: WorkbenchColumn[];
+  columnGridStyle?: {
+    gridTemplateColumns: string;
+    minWidth: string;
+  };
   row: WorkbenchRecord;
   rowState: WorkbenchRowState;
   actionMode?: "default" | "cancel-exception-only";
@@ -25,6 +30,8 @@ type WorkbenchRecordCardProps = {
 function WorkbenchRecordCard({
   zoneId,
   paneId,
+  columns: columnsProp,
+  columnGridStyle,
   row,
   rowState,
   actionMode = "default",
@@ -35,7 +42,7 @@ function WorkbenchRecordCard({
   showWorkflowActions,
   canMutateData,
 }: WorkbenchRecordCardProps) {
-  const columns = workbenchColumns[paneId];
+  const columns = columnsProp ?? getWorkbenchColumns(paneId);
   const hasActionColumn = actionMode === "cancel-exception-only" || paneId === "invoice";
   const showInlineDetail = actionMode === "default" && (paneId === "oa" || paneId === "bank");
 
@@ -47,6 +54,7 @@ function WorkbenchRecordCard({
       data-row-state={rowState}
       data-search-highlighted={highlighted ? "true" : "false"}
       role="row"
+      style={columnGridStyle}
       onClick={() => onSelectRow(row, zoneId)}
     >
       {columns.map((column) => {
@@ -90,6 +98,8 @@ function WorkbenchRecordCard({
 export default memo(WorkbenchRecordCard, (previousProps, nextProps) => (
   previousProps.zoneId === nextProps.zoneId
   && previousProps.paneId === nextProps.paneId
+  && previousProps.columns === nextProps.columns
+  && previousProps.columnGridStyle === nextProps.columnGridStyle
   && previousProps.row === nextProps.row
   && previousProps.rowState === nextProps.rowState
   && previousProps.actionMode === nextProps.actionMode
@@ -133,6 +143,7 @@ function buildRowAriaLabel(row: WorkbenchRecord, paneId: WorkbenchRecordType, co
   }
 
   if (paneId === "oa") {
+    pushValue(row.tableValues.applicationTime);
     pushValue(row.tableValues.applicationType);
     pushValue(row.tableValues.reconciliationStatus);
   }
@@ -162,7 +173,7 @@ function renderCellValue(
   }
 
   if (paneId === "oa" && column.key === "applicant") {
-    return renderInlineDetailCellValue(value, showInlineDetail, onOpenDetail);
+    return renderOaApplicantValue(value, row.tableValues.applicationTime ?? "", showInlineDetail, onOpenDetail);
   }
 
   if (paneId === "oa" && column.key === "projectName") {
@@ -186,6 +197,8 @@ function renderCellValue(
       value,
       row.tableValues.transactionTime ?? "",
       row.tableValues.invoiceRelationStatus ?? "",
+      false,
+      onOpenDetail,
     );
   }
 
@@ -204,10 +217,22 @@ function renderCellValue(
   return <span className={buildTextValueClassName(column)}>{value}</span>;
 }
 
-function renderInlineDetailCellValue(value: string, showInlineDetail: boolean, onOpenDetail: () => void) {
+function renderOaApplicantValue(
+  value: string,
+  applicationTime: string,
+  showInlineDetail: boolean,
+  onOpenDetail: () => void,
+) {
+  const hasApplicationTime = applicationTime !== "--" && applicationTime !== "—" && applicationTime !== "";
+
   return (
     <span className="compound-cell-value">
       <span className="compound-cell-primary cell-text-value cell-text-value-full">{value}</span>
+      {hasApplicationTime ? (
+        <span className="compound-cell-secondary">
+          {renderInlineDateTimeTag(applicationTime)}
+        </span>
+      ) : null}
       {showInlineDetail ? (
         <span className="inline-cell-action-row">
           <button
@@ -373,7 +398,13 @@ function renderOaProjectValue(projectName: string, applicationType: string, reco
   );
 }
 
-function renderBankCounterpartyValue(counterparty: string, transactionTime: string, relationStatus: string) {
+function renderBankCounterpartyValue(
+  counterparty: string,
+  transactionTime: string,
+  relationStatus: string,
+  showInlineDetail: boolean,
+  onOpenDetail: () => void,
+) {
   const hasTransactionTime = transactionTime !== "--" && transactionTime !== "—" && transactionTime !== "";
   const hasRelationStatus = relationStatus !== "--" && relationStatus !== "—" && relationStatus !== "";
   const relationTag = hasRelationStatus ? renderBankRelationStatusTag(relationStatus) : null;
@@ -385,6 +416,20 @@ function renderBankCounterpartyValue(counterparty: string, transactionTime: stri
         <span className="compound-cell-secondary compound-cell-secondary-nowrap">
           {hasTransactionTime ? renderInlineDateTimeTag(transactionTime) : null}
           {relationTag}
+        </span>
+      ) : null}
+      {showInlineDetail ? (
+        <span className="inline-cell-action-row">
+          <button
+            className="row-action-btn row-action-btn-inline"
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenDetail();
+            }}
+          >
+            详情
+          </button>
         </span>
       ) : null}
     </span>

@@ -39,6 +39,12 @@ export type BankAccountMapping = {
   bankName: string;
 };
 
+export type WorkbenchColumnLayouts = {
+  oa: string[];
+  bank: string[];
+  invoice: string[];
+};
+
 export type WorkbenchSettings = {
   projects: {
     active: WorkbenchProjectSetting[];
@@ -52,6 +58,7 @@ export type WorkbenchSettings = {
     adminUsernames: string[];
     fullAccessUsernames: string[];
   };
+  workbenchColumnLayouts: WorkbenchColumnLayouts;
 };
 
 export type WorkbenchPaneRows = {

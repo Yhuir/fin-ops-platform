@@ -5,6 +5,7 @@ type MonthPickerProps = {
   onChange: (month: string) => void;
   ariaLabel?: string;
   caption?: string | null;
+  inline?: boolean;
 };
 
 function parseMonthValue(value: string) {
@@ -27,11 +28,13 @@ export default function MonthPicker({
   onChange,
   ariaLabel = "年月选择",
   caption = "月份",
+  inline = false,
 }: MonthPickerProps) {
   const { year: selectedYear, month: selectedMonth } = parseMonthValue(value);
   const [isOpen, setIsOpen] = useState(false);
   const [activeYear, setActiveYear] = useState(selectedYear);
   const [popoverOffsetX, setPopoverOffsetX] = useState(0);
+  const [popoverTop, setPopoverTop] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
 
@@ -40,7 +43,7 @@ export default function MonthPicker({
   }, [selectedYear]);
 
   useEffect(() => {
-    if (!isOpen) {
+    if (!isOpen || inline) {
       return;
     }
 
@@ -62,10 +65,10 @@ export default function MonthPicker({
       document.removeEventListener("mousedown", handlePointerDown);
       window.removeEventListener("keydown", handleEscape);
     };
-  }, [isOpen]);
+  }, [inline, isOpen]);
 
   useEffect(() => {
-    if (!isOpen || !containerRef.current || !popoverRef.current || typeof window === "undefined") {
+    if (!isOpen || inline || !containerRef.current || !popoverRef.current || typeof window === "undefined") {
       return undefined;
     }
 
@@ -77,14 +80,20 @@ export default function MonthPicker({
       }
       const containerRect = containerRef.current.getBoundingClientRect();
       const popoverRect = popoverRef.current.getBoundingClientRect();
-      const overflowRight = containerRect.left + popoverRect.width - (window.innerWidth - viewportPadding);
-      setPopoverOffsetX(overflowRight > 0 ? -overflowRight : 0);
+      const desiredLeft = containerRect.left;
+      const desiredTop = containerRect.bottom + 10;
+      const maxLeft = Math.max(viewportPadding, window.innerWidth - viewportPadding - popoverRect.width);
+      const maxTop = Math.max(viewportPadding, window.innerHeight - viewportPadding - popoverRect.height);
+      const finalLeft = Math.min(Math.max(desiredLeft, viewportPadding), maxLeft);
+      const finalTop = Math.min(Math.max(desiredTop, viewportPadding), maxTop);
+      setPopoverOffsetX(finalLeft - containerRect.left);
+      setPopoverTop(finalTop - containerRect.top);
     };
 
     updatePopoverOffset();
     window.addEventListener("resize", updatePopoverOffset);
     return () => window.removeEventListener("resize", updatePopoverOffset);
-  }, [isOpen]);
+  }, [inline, isOpen]);
 
   const years = useMemo(() => [selectedYear - 1, selectedYear, selectedYear + 1], [selectedYear]);
 
@@ -93,8 +102,56 @@ export default function MonthPicker({
     setIsOpen(false);
   };
 
+  const pickerContent = (
+    <>
+      <div className="month-picker-section">
+        <div className="month-picker-section-title">年份</div>
+        <div className="month-picker-chip-grid years">
+          {years.map((year) => (
+            <button
+              key={year}
+              aria-pressed={activeYear === year}
+              className={`month-picker-chip${activeYear === year ? " active" : ""}`}
+              type="button"
+              onClick={() => setActiveYear(year)}
+            >
+              {year}年
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="month-picker-section">
+        <div className="month-picker-section-title">月份</div>
+        <div className="month-picker-chip-grid months">
+          {Array.from({ length: 12 }, (_, index) => {
+            const monthNumber = index + 1;
+            const isCurrentSelection = activeYear === selectedYear && monthNumber === selectedMonth;
+            return (
+              <button
+                key={monthNumber}
+                aria-pressed={isCurrentSelection}
+                className={`month-picker-chip${isCurrentSelection ? " active" : ""}`}
+                type="button"
+                onClick={() => handlePickMonth(monthNumber)}
+              >
+                {monthNumber}月
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </>
+  );
+
   return (
     <div ref={containerRef} className="month-picker">
+      {inline ? (
+        <div aria-label={ariaLabel} className="month-picker-inline-panel" role="group">
+          {pickerContent}
+        </div>
+      ) : (
+        <>
       <button
         aria-expanded={isOpen}
         aria-haspopup="dialog"
@@ -113,47 +170,16 @@ export default function MonthPicker({
           aria-label="年月面板"
           className="month-picker-popover"
           role="dialog"
-          style={popoverOffsetX !== 0 ? { left: `${popoverOffsetX}px` } : undefined}
+          style={{
+            left: `${popoverOffsetX}px`,
+            ...(popoverTop !== null ? { top: `${popoverTop}px` } : {}),
+          }}
         >
-          <div className="month-picker-section">
-            <div className="month-picker-section-title">年份</div>
-            <div className="month-picker-chip-grid years">
-              {years.map((year) => (
-                <button
-                  key={year}
-                  aria-pressed={activeYear === year}
-                  className={`month-picker-chip${activeYear === year ? " active" : ""}`}
-                  type="button"
-                  onClick={() => setActiveYear(year)}
-                >
-                  {year}年
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="month-picker-section">
-            <div className="month-picker-section-title">月份</div>
-            <div className="month-picker-chip-grid months">
-              {Array.from({ length: 12 }, (_, index) => {
-                const monthNumber = index + 1;
-                const isCurrentSelection = activeYear === selectedYear && monthNumber === selectedMonth;
-                return (
-                  <button
-                    key={monthNumber}
-                    aria-pressed={isCurrentSelection}
-                    className={`month-picker-chip${isCurrentSelection ? " active" : ""}`}
-                    type="button"
-                    onClick={() => handlePickMonth(monthNumber)}
-                  >
-                    {monthNumber}月
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          {pickerContent}
         </div>
       ) : null}
+        </>
+      )}
     </div>
   );
 }

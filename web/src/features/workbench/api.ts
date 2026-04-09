@@ -11,6 +11,7 @@ import type {
   WorkbenchProjectSetting,
   WorkbenchSettings,
   WorkbenchSummary,
+  WorkbenchColumnLayouts,
 } from "./types";
 
 export type WorkbenchBootstrapProgress = {
@@ -117,6 +118,7 @@ type ApiWorkbenchSettings = {
     admin_usernames?: string[];
     full_access_usernames?: string[];
   };
+  workbench_column_layouts?: Partial<WorkbenchColumnLayouts>;
 };
 
 type ApiWorkbenchGroup = {
@@ -197,6 +199,7 @@ type WorkbenchSettingsUpdatePayload = {
   allowedUsernames: string[];
   readonlyExportUsernames: string[];
   adminUsernames: string[];
+  workbenchColumnLayouts: WorkbenchColumnLayouts;
 };
 
 function toDisplayValue(value: string | null | undefined, fallback = "--") {
@@ -254,8 +257,12 @@ function mapTableValues(row: ApiWorkbenchRow): Record<string, string> {
   const relationLabel = rowRelation(row)?.label ?? "待处理";
 
   if (row.type === "oa") {
+    const detailFields = row.detail_fields ?? {};
     return {
       applicant: toDisplayValue(row.applicant),
+      applicationTime: toDisplayValue(
+        detailFields["审批完成时间"] ?? detailFields["申请日期"] ?? detailFields["创建时间"],
+      ),
       projectName: toDisplayValue(row.project_name),
       applicationType: toDisplayValue(row.apply_type),
       amount: toDisplayValue(row.amount),
@@ -400,6 +407,7 @@ function mapProjectSetting(project: ApiWorkbenchSettings["projects"]["active"][n
 }
 
 function mapWorkbenchSettings(payload: ApiWorkbenchSettings): WorkbenchSettings {
+  const rawLayouts = payload.workbench_column_layouts ?? {};
   return {
     projects: {
       active: payload.projects.active.map(mapProjectSetting),
@@ -424,6 +432,11 @@ function mapWorkbenchSettings(payload: ApiWorkbenchSettings): WorkbenchSettings 
       fullAccessUsernames: (payload.access_control?.full_access_usernames ?? [])
         .map((item) => String(item).trim())
         .filter(Boolean),
+    },
+    workbenchColumnLayouts: {
+      oa: Array.isArray(rawLayouts.oa) ? rawLayouts.oa.map((item) => String(item)) : [],
+      bank: Array.isArray(rawLayouts.bank) ? rawLayouts.bank.map((item) => String(item)) : [],
+      invoice: Array.isArray(rawLayouts.invoice) ? rawLayouts.invoice.map((item) => String(item)) : [],
     },
   };
 }
@@ -690,6 +703,7 @@ export async function saveWorkbenchSettings(
       allowed_usernames: settings.allowedUsernames,
       readonly_export_usernames: settings.readonlyExportUsernames,
       admin_usernames: settings.adminUsernames,
+      workbench_column_layouts: settings.workbenchColumnLayouts,
     }),
   });
   return mapWorkbenchSettings(payload);

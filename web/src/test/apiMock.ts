@@ -28,6 +28,11 @@ type MockApiOptions = {
   workbenchPrimaryDelayMs?: number;
   workbenchIgnoredDelayMs?: number;
   workbenchSettingsDelayMs?: number;
+  workbenchColumnLayouts?: {
+    oa?: string[];
+    bank?: string[];
+    invoice?: string[];
+  };
   searchDelayMs?: number;
   searchErrorQueries?: string[];
   emptyBodyPaths?: string[];
@@ -347,6 +352,9 @@ function buildWorkbenchRowPayload(month: string) {
           counterparty_name: "华东设备供应商",
           reason: "设备首付款支付",
           oa_bank_relation: { code: "fully_linked", label: "完全关联", tone: "success" },
+          detail_fields: {
+            审批完成时间: "2026-03-25 11:05",
+          },
           available_actions: ["detail", "cancel_link"],
         },
       ],
@@ -403,6 +411,9 @@ function buildWorkbenchRowPayload(month: string) {
           counterparty_name: "智能工厂设备商",
           reason: "设备尾款待支付",
           oa_bank_relation: { code: "pending_match", label: "待找流水与发票", tone: "warn" },
+          detail_fields: {
+            审批完成时间: "2026-03-28 18:10",
+          },
           available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
         },
         {
@@ -416,6 +427,9 @@ function buildWorkbenchRowPayload(month: string) {
           counterparty_name: "独立服务商",
           reason: "月度巡检服务待付款",
           oa_bank_relation: { code: "pending_match", label: "待找流水与发票", tone: "warn" },
+          detail_fields: {
+            审批完成时间: "2026-03-26 09:20",
+          },
           available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
         },
       ],
@@ -2456,6 +2470,11 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       admin_usernames: ["YNSYLP005"],
       full_access_usernames: [],
     },
+    workbench_column_layouts: {
+      oa: options.workbenchColumnLayouts?.oa ?? ["applicant", "projectName", "amount", "counterparty", "reason"],
+      bank: options.workbenchColumnLayouts?.bank ?? ["counterparty", "amount", "loanRepaymentDate", "note"],
+      invoice: options.workbenchColumnLayouts?.invoice ?? ["sellerName", "buyerName", "issueDate", "amount", "grossAmount"],
+    },
   };
 
   const handlers: Record<string, MockFetchHandler> = {
@@ -2557,6 +2576,20 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               : workbenchSettingsState.access_control.admin_usernames,
             full_access_usernames: [],
           },
+          workbench_column_layouts:
+            jsonBody.workbench_column_layouts && typeof jsonBody.workbench_column_layouts === "object"
+              ? {
+                oa: Array.isArray((jsonBody.workbench_column_layouts as Record<string, unknown>).oa)
+                  ? ((jsonBody.workbench_column_layouts as Record<string, unknown>).oa as string[]).map((item) => String(item))
+                  : workbenchSettingsState.workbench_column_layouts.oa,
+                bank: Array.isArray((jsonBody.workbench_column_layouts as Record<string, unknown>).bank)
+                  ? ((jsonBody.workbench_column_layouts as Record<string, unknown>).bank as string[]).map((item) => String(item))
+                  : workbenchSettingsState.workbench_column_layouts.bank,
+                invoice: Array.isArray((jsonBody.workbench_column_layouts as Record<string, unknown>).invoice)
+                  ? ((jsonBody.workbench_column_layouts as Record<string, unknown>).invoice as string[]).map((item) => String(item))
+                  : workbenchSettingsState.workbench_column_layouts.invoice,
+              }
+              : workbenchSettingsState.workbench_column_layouts,
         };
         const allowedSet = new Set(workbenchSettingsState.access_control.allowed_usernames);
         const readonlySet = new Set(

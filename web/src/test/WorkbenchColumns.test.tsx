@@ -16,13 +16,19 @@ describe("Workbench columns and inline actions", () => {
 
     expect(within(oaPane).getByRole("columnheader", { name: "申请人" })).toBeInTheDocument();
     expect(within(oaPane).getByRole("columnheader", { name: "项目名称" })).toBeInTheDocument();
+    expect(within(oaPane).getByRole("columnheader", { name: "金额" })).toBeInTheDocument();
+    expect(within(oaPane).getByRole("columnheader", { name: "对方户名" })).toBeInTheDocument();
     expect(within(oaPane).getByRole("columnheader", { name: "申请事由" })).toBeInTheDocument();
     expect(within(oaPane).queryByRole("columnheader", { name: "申请类型" })).not.toBeInTheDocument();
     expect(within(oaPane).queryByRole("columnheader", { name: "OA和流水关联情况" })).not.toBeInTheDocument();
     expect(within(oaPane).queryByRole("columnheader", { name: "操作" })).not.toBeInTheDocument();
+    expect(within(oaPane).queryByRole("button", { name: "筛选 金额" })).not.toBeInTheDocument();
+    expect(within(oaPane).queryByRole("button", { name: "筛选 申请事由" })).not.toBeInTheDocument();
 
+    expect(within(bankPane).getByRole("columnheader", { name: "对方户名" })).toBeInTheDocument();
     expect(within(bankPane).getByRole("columnheader", { name: "金额" })).toBeInTheDocument();
     expect(within(bankPane).getByRole("columnheader", { name: "还借款日期" })).toBeInTheDocument();
+    expect(within(bankPane).getByRole("columnheader", { name: "备注" })).toBeInTheDocument();
     expect(within(bankPane).queryByRole("columnheader", { name: "借方发生额" })).not.toBeInTheDocument();
     expect(within(bankPane).queryByRole("columnheader", { name: "贷方发生额" })).not.toBeInTheDocument();
     expect(within(bankPane).queryByRole("columnheader", { name: "资金方向" })).not.toBeInTheDocument();
@@ -31,19 +37,20 @@ describe("Workbench columns and inline actions", () => {
     expect(within(bankPane).queryByRole("columnheader", { name: "支付/收款时间" })).not.toBeInTheDocument();
     expect(within(bankPane).queryByRole("columnheader", { name: "和发票OA关联情况" })).not.toBeInTheDocument();
     expect(within(bankPane).queryByRole("columnheader", { name: "操作" })).not.toBeInTheDocument();
+    expect(within(bankPane).queryByRole("button", { name: "筛选 备注" })).not.toBeInTheDocument();
     expect(within(bankPane).getAllByRole("columnheader")[0]).toHaveTextContent("对方户名");
 
     expect(within(invoicePane).getByRole("columnheader", { name: "销方名称/识别号" })).toBeInTheDocument();
-    expect(within(invoicePane).getByRole("columnheader", { name: "购买方名称/识别号" })).toBeInTheDocument();
+    expect(within(invoicePane).getByRole("columnheader", { name: "购方名称/识别号" })).toBeInTheDocument();
+    expect(within(invoicePane).getByRole("columnheader", { name: "开票日期" })).toBeInTheDocument();
     expect(within(invoicePane).getByRole("columnheader", { name: "金额/税率/税额" })).toBeInTheDocument();
     expect(within(invoicePane).getByRole("columnheader", { name: "价税合计" })).toBeInTheDocument();
     expect(within(invoicePane).getByRole("columnheader", { name: "操作" })).toBeInTheDocument();
     expect(within(invoicePane).queryByRole("columnheader", { name: "发票类型" })).not.toBeInTheDocument();
     expect(within(invoicePane).queryByRole("columnheader", { name: "销方识别号" })).not.toBeInTheDocument();
     expect(within(invoicePane).queryByRole("columnheader", { name: "购方识别号" })).not.toBeInTheDocument();
-    expect(within(invoicePane).queryByRole("columnheader", { name: "金额" })).not.toBeInTheDocument();
-    expect(within(invoicePane).queryByRole("columnheader", { name: "税率" })).not.toBeInTheDocument();
-    expect(within(invoicePane).queryByRole("columnheader", { name: "税额" })).not.toBeInTheDocument();
+    expect(within(invoicePane).queryByRole("button", { name: "筛选 金额/税率/税额" })).not.toBeInTheDocument();
+    expect(within(invoicePane).queryByRole("button", { name: "筛选 价税合计" })).not.toBeInTheDocument();
   });
 
   test("renders OA applicant column with compact width styling", async () => {
@@ -56,6 +63,38 @@ describe("Workbench columns and inline actions", () => {
 
     expect(applicantHeader).toHaveClass("column-applicant-compact");
     expect(applicantHeader).toHaveClass("column-content-centered");
+  });
+
+  test("renders pane column headers in saved layout order from settings", async () => {
+    installMockApiFetch({
+      workbenchColumnLayouts: {
+        oa: ["projectName", "applicant", "counterparty", "amount", "reason"],
+      },
+    });
+    renderWorkbenchPage();
+    await screen.findByText("赵华");
+
+    const oaPane = screen.getAllByTestId("pane-oa")[0];
+    const headerNames = within(oaPane)
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent?.replace(/\s+/g, "") ?? "");
+
+    expect(headerNames.slice(0, 5)).toEqual(["项目名称", "申请人", "对方户名", "金额", "申请事由"]);
+  });
+
+  test("renders OA applicant column with an approval time tag on the second line", async () => {
+    installMockApiFetch();
+    renderWorkbenchPage();
+    await screen.findByText("赵华");
+
+    const pairedGroup = screen.getByTestId("candidate-group-paired-case:CASE-202603-001");
+    const oaRow = within(pairedGroup)
+      .getAllByRole("row")
+      .find((row) => row.classList.contains("record-card-oa"));
+
+    expect(oaRow).toBeDefined();
+    expect(within(oaRow as HTMLElement).getByText("2026-03-25")).toBeInTheDocument();
+    expect(within(oaRow as HTMLElement).getByText("11:05")).toBeInTheDocument();
   });
 
   test("renders OA project metadata row with both application type and OA-bank relation status", async () => {
@@ -131,7 +170,7 @@ describe("Workbench columns and inline actions", () => {
     expect(within(bankRow as HTMLElement).getByText("14:22")).toBeInTheDocument();
   });
 
-  test("renders internal transfer bank remarks with account tag on the first line and note on the second line", () => {
+  test("renders internal transfer matched status in bank counterparty metadata while keeping inline detail available", () => {
     render(
       <WorkbenchRecordCard
         actionMode="default"
@@ -161,7 +200,6 @@ describe("Workbench columns and inline actions", () => {
             amount: "9.00",
             direction: "支出",
             paymentAccount: "民生 9486",
-            note: "本公司帐户；收款账户：民生 9486",
             repaymentDate: "--",
           },
         }}
@@ -171,8 +209,6 @@ describe("Workbench columns and inline actions", () => {
       />,
     );
 
-    expect(screen.getByText("收款账户：民生 9486")).toHaveClass("inline-meta-tag");
-    expect(screen.getByText("本公司帐户")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "详情" })).toBeInTheDocument();
     expect(screen.getByText("已匹配：")).toBeInTheDocument();
     expect(screen.getByText("内部往来款")).toBeInTheDocument();
@@ -256,21 +292,15 @@ describe("Workbench columns and inline actions", () => {
     renderWorkbenchPage();
     await screen.findByText("赵华");
 
-    const oaPane = screen.getAllByTestId("pane-oa")[0];
     const bankPane = screen.getAllByTestId("pane-bank")[0];
     const pairedGroup = screen.getByTestId("candidate-group-paired-case:CASE-202603-001");
-    const oaRow = within(pairedGroup)
-      .getAllByRole("row")
-      .find((row) => row.classList.contains("record-card-oa"));
     const bankRow = within(pairedGroup)
       .getAllByRole("row")
       .find((row) => row.classList.contains("record-card-bank"));
     const directionTag = within(pairedGroup).getAllByText("支出")[0];
     const moneyValueRow = directionTag.closest(".money-cell-value");
     const moneyMetaRow = directionTag.closest(".money-cell-meta-row");
-    const oaAmountHeader = within(oaPane).getByRole("columnheader", { name: "金额" });
     const bankAmountHeader = within(bankPane).getByRole("columnheader", { name: "金额" });
-    const oaAmountCell = within(oaRow as HTMLElement).getByText("128,000.00").closest(".record-card-cell");
     const bankAmountCell = within(bankRow as HTMLElement).getByText("128,000.00").closest(".record-card-cell");
 
     expect(directionTag).toHaveClass("direction-tag");
@@ -279,9 +309,7 @@ describe("Workbench columns and inline actions", () => {
     expect(moneyValueRow).toBeNull();
     expect(moneyMetaRow).not.toBeNull();
     expect(within(bankAmountCell as HTMLElement).getByText("128,000.00")).toBeInTheDocument();
-    expect(oaAmountHeader).toHaveClass("column-money-centered");
     expect(bankAmountHeader).toHaveClass("column-money-centered");
-    expect(oaAmountCell).toHaveClass("column-money-centered");
     expect(bankAmountCell).toHaveClass("column-money-centered");
   });
 
@@ -316,31 +344,26 @@ describe("Workbench columns and inline actions", () => {
     expect(within(pairedGroup).queryByText("发票类型")).not.toBeInTheDocument();
   });
 
-  test("renders invoice amount with tax rate and tax amount on the second line in the same column", async () => {
+  test("restores invoice amount summary columns without adding filter menus to them", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
     await screen.findByText("赵华");
 
     const invoicePane = screen.getAllByTestId("pane-invoice")[0];
     const pairedGroup = screen.getByTestId("candidate-group-paired-case:CASE-202603-001");
-    const amount = within(pairedGroup).getAllByText("128,000.00").find((element) =>
-      element.closest(".record-card-invoice"),
-    );
-    const taxMeta = within(pairedGroup).getByText("13% (16,640.00)");
-    const amountHeader = within(invoicePane).getByRole("columnheader", { name: "金额/税率/税额" });
-    const grossHeader = within(invoicePane).getByRole("columnheader", { name: "价税合计" });
-    const amountCell = amount?.closest(".record-card-cell");
-    const grossCell = within(pairedGroup)
-      .getByText("144,640.00")
-      .closest(".record-card-cell");
+    const invoiceRow = within(pairedGroup)
+      .getAllByRole("row")
+      .find((row) => row.classList.contains("record-card-invoice"));
 
-    expect(amount).toBeDefined();
-    expect(amount?.closest(".compound-cell-value")).not.toBeNull();
-    expect(taxMeta.closest(".compound-cell-secondary")).not.toBeNull();
-    expect(amountHeader).toHaveClass("column-invoice-amount-compact", "column-money-centered");
-    expect(grossHeader).toHaveClass("column-invoice-gross-compact", "column-money-centered");
-    expect(amountCell).toHaveClass("column-invoice-amount-compact", "column-money-centered");
-    expect(grossCell).toHaveClass("column-invoice-gross-compact", "column-money-centered");
+    expect(invoiceRow).toBeDefined();
+    expect(within(invoicePane).getByRole("columnheader", { name: "金额/税率/税额" })).toBeInTheDocument();
+    expect(within(invoicePane).getByRole("columnheader", { name: "价税合计" })).toBeInTheDocument();
+    expect(within(invoicePane).getByRole("columnheader", { name: "开票日期" })).toBeInTheDocument();
+    expect(within(invoicePane).queryByRole("button", { name: "筛选 金额/税率/税额" })).not.toBeInTheDocument();
+    expect(within(invoicePane).queryByRole("button", { name: "筛选 价税合计" })).not.toBeInTheDocument();
+    expect(within(invoiceRow as HTMLElement).getByText("2026-03-25")).toBeInTheDocument();
+    expect(within(invoiceRow as HTMLElement).getByText("128,000.00")).toBeInTheDocument();
+    expect(within(invoiceRow as HTMLElement).getByText("144,640.00")).toBeInTheDocument();
   });
 
   test("renders open zone batch action buttons in the zone header instead of row inline workflow buttons", async () => {
