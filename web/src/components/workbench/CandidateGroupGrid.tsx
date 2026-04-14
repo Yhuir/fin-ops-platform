@@ -2,7 +2,9 @@ import { memo, useEffect, useMemo, useState, useCallback, useRef, type PointerEv
 
 import {
   collectWorkbenchFilterOptions,
+  collectWorkbenchTimeFilterYears,
   createEmptyWorkbenchZoneDisplayState,
+  type WorkbenchPaneTimeFilter as WorkbenchPaneTimeFilterState,
   type WorkbenchZoneDisplayState,
 } from "../../features/workbench/groupDisplayModel";
 import type {
@@ -18,6 +20,7 @@ import type { WorkbenchPane } from "./ResizableTriPane";
 import CandidateGroupCell from "./CandidateGroupCell";
 import WorkbenchColumnFilterMenu from "./WorkbenchColumnFilterMenu";
 import WorkbenchPaneSearch from "./WorkbenchPaneSearch";
+import WorkbenchPaneTimeFilter from "./WorkbenchPaneTimeFilter";
 import type { WorkbenchColumnDropPosition } from "../../features/workbench/columnLayout";
 
 type CandidateGroupGridProps = {
@@ -35,6 +38,8 @@ type CandidateGroupGridProps = {
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
   onTogglePaneSearch?: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
+  onClosePaneSearch?: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
+  onClearPaneSearch?: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
   onPaneSearchQueryChange?: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice", query: string) => void;
   onColumnFilterChange?: (
     zoneId: "paired" | "open",
@@ -43,6 +48,11 @@ type CandidateGroupGridProps = {
     selectedValues: string[],
   ) => void;
   onTogglePaneSort?: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
+  onPaneTimeFilterChange?: (
+    zoneId: "paired" | "open",
+    paneId: "oa" | "bank" | "invoice",
+    filter: WorkbenchPaneTimeFilterState,
+  ) => void;
   onReorderPaneColumns?: (
     paneId: "oa" | "bank" | "invoice",
     activeKey: string,
@@ -67,9 +77,12 @@ function CandidateGroupGrid({
   onOpenDetail,
   onRowAction,
   onTogglePaneSearch = () => undefined,
+  onClosePaneSearch = () => undefined,
+  onClearPaneSearch = () => undefined,
   onPaneSearchQueryChange = () => undefined,
   onColumnFilterChange = () => undefined,
   onTogglePaneSort = () => undefined,
+  onPaneTimeFilterChange = () => undefined,
   onReorderPaneColumns = () => undefined,
   canMutateData,
 }: CandidateGroupGridProps) {
@@ -166,6 +179,20 @@ function CandidateGroupGrid({
     } satisfies Record<WorkbenchRecordType, Record<string, string[]>>;
   }, [columnsByPane, groups, sourceGroups]);
 
+  const timeFilterYearsByPane = useMemo(() => {
+    const filterSourceGroups = sourceGroups ?? groups;
+    return {
+      oa: collectWorkbenchTimeFilterYears(filterSourceGroups, "oa"),
+      bank: collectWorkbenchTimeFilterYears(filterSourceGroups, "bank"),
+      invoice: collectWorkbenchTimeFilterYears(filterSourceGroups, "invoice"),
+    } satisfies Record<WorkbenchRecordType, string[]>;
+  }, [groups, sourceGroups]);
+
+  const invoiceAttachmentDiagnostics = useMemo(
+    () => buildInvoiceAttachmentDiagnostics(groups),
+    [groups],
+  );
+
   const handleToggleFilterMenu = useCallback((paneId: WorkbenchRecordType, columnKey: string) => {
     setOpenFilterMenu((current) => (
       current?.paneId === paneId && current.columnKey === columnKey ? null : { paneId, columnKey }
@@ -252,6 +279,56 @@ function CandidateGroupGrid({
     document.addEventListener("pointerup", handlePointerUp);
   }, [canMutateData, clearDragClasses, onReorderPaneColumns]);
 
+  const gridBody = useMemo(() => (
+    <div className="candidate-grid-body">
+      {groups.length === 0 ? <div className="state-panel">当前区域暂无候选组。</div> : null}
+      {groups.map((group) => (
+        <div
+          key={group.id}
+          className="candidate-group-row"
+          data-testid={`candidate-group-${zoneId}-${group.id}`}
+          style={{ gridTemplateColumns: rowTemplateColumns }}
+        >
+          {panes.map((pane) => (
+            <div key={`${group.id}-${pane.id}`} className="candidate-group-pane-slot">
+              <CandidateGroupCell
+                actionMode={actionMode}
+                columnGridStyle={paneGridStyleByPane[pane.id as WorkbenchRecordType]}
+                columns={columnsByPane[pane.id as WorkbenchRecordType]}
+                getRowState={getRowState}
+                highlightedRowId={highlightedRowId}
+                onOpenDetail={onOpenDetail}
+                onRowAction={onRowAction}
+                onSelectRow={onSelectRow}
+                paneId={pane.id as WorkbenchRecordType}
+                records={group.rows[pane.id as WorkbenchRecordType]}
+                scrollPaneId={pane.id as WorkbenchRecordType}
+                scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${pane.id}`}
+                showWorkflowActions={zoneId !== "open"}
+                canMutateData={canMutateData}
+                zoneId={zoneId}
+              />
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  ), [
+    actionMode,
+    canMutateData,
+    columnsByPane,
+    getRowState,
+    groups,
+    highlightedRowId,
+    onOpenDetail,
+    onRowAction,
+    onSelectRow,
+    paneGridStyleByPane,
+    panes,
+    rowTemplateColumns,
+    zoneId,
+  ]);
+
   return (
     <div ref={gridRef} className="candidate-grid">
       <div className="candidate-grid-head" style={{ gridTemplateColumns: rowTemplateColumns }}>
@@ -259,10 +336,22 @@ function CandidateGroupGrid({
           <section key={pane.id} className="candidate-pane-head pane-card" data-testid={`pane-${pane.id}`}>
             <div className="pane-header">
               <div className="pane-header-main">
-                <span>{pane.title}</span>
+                {pane.id === "invoice" ? (
+                  <InvoiceAttachmentDiagnosticsTrigger title={pane.title} diagnostics={invoiceAttachmentDiagnostics} />
+                ) : (
+                  <span>{pane.title}</span>
+                )}
                 <span>{pane.rows.length} 条</span>
               </div>
               <div className="pane-header-tools">
+                {pane.id === "bank" ? (
+                  <WorkbenchPaneTimeFilter
+                    availableYears={timeFilterYearsByPane.bank}
+                    filter={displayState.timeFilterByPane.bank}
+                    paneTitle={pane.title}
+                    onChange={(filter) => onPaneTimeFilterChange(zoneId, "bank", filter)}
+                  />
+                ) : null}
                 {pane.id === "oa" || pane.id === "bank" || pane.id === "invoice" ? (
                   (() => {
                     const sortPaneId: "oa" | "bank" | "invoice" = pane.id;
@@ -280,9 +369,12 @@ function CandidateGroupGrid({
                 ) : null}
                 <WorkbenchPaneSearch
                   open={displayState.openSearchPaneId === pane.id}
+                  appliedValue={displayState.searchQueryByPane[pane.id]}
+                  draftValue={displayState.draftSearchQueryByPane[pane.id]}
                   paneTitle={pane.title}
-                  value={displayState.searchQueryByPane[pane.id]}
                   onChange={(query) => onPaneSearchQueryChange(zoneId, pane.id, query)}
+                  onClear={() => onClearPaneSearch(zoneId, pane.id)}
+                  onClose={() => onClosePaneSearch(zoneId, pane.id)}
                   onToggle={() => onTogglePaneSearch(zoneId, pane.id)}
                 />
               </div>
@@ -358,39 +450,7 @@ function CandidateGroupGrid({
         ))}
       </div>
 
-      <div className="candidate-grid-body">
-        {groups.length === 0 ? <div className="state-panel">当前区域暂无候选组。</div> : null}
-        {groups.map((group) => (
-          <div
-            key={group.id}
-            className="candidate-group-row"
-            data-testid={`candidate-group-${zoneId}-${group.id}`}
-            style={{ gridTemplateColumns: rowTemplateColumns }}
-          >
-            {panes.map((pane) => (
-              <div key={`${group.id}-${pane.id}`} className="candidate-group-pane-slot">
-                <CandidateGroupCell
-                  actionMode={actionMode}
-                  columnGridStyle={paneGridStyleByPane[pane.id as WorkbenchRecordType]}
-                  columns={columnsByPane[pane.id as WorkbenchRecordType]}
-                  getRowState={getRowState}
-                  highlightedRowId={highlightedRowId}
-                  onOpenDetail={onOpenDetail}
-                  onRowAction={onRowAction}
-                  onSelectRow={onSelectRow}
-                  paneId={pane.id as WorkbenchRecordType}
-                  records={group.rows[pane.id as WorkbenchRecordType]}
-                  scrollPaneId={pane.id as WorkbenchRecordType}
-                  scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${pane.id}`}
-                  showWorkflowActions={zoneId !== "open"}
-                  canMutateData={canMutateData}
-                  zoneId={zoneId}
-                />
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
+      {gridBody}
 
       <div className="candidate-grid-footer" style={{ gridTemplateColumns: rowTemplateColumns }}>
         {panes.map((pane) => (
@@ -428,4 +488,142 @@ function buildPaneSortActionLabel(paneId: "oa" | "bank" | "invoice", currentDire
 
 function buildPaneSortVisualLabel(currentDirection: "asc" | "desc" | null) {
   return currentDirection === "desc" ? "时间↑" : "时间↓";
+}
+
+type InvoiceAttachmentDiagnostics = {
+  oaAttachmentCount: number;
+  parsedOaInvoiceCount: number;
+  importedInvoiceCount: number;
+};
+
+function InvoiceAttachmentDiagnosticsTrigger({
+  title,
+  diagnostics,
+}: {
+  title: string;
+  diagnostics: InvoiceAttachmentDiagnostics;
+}) {
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [popoverStyle, setPopoverStyle] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+
+  const syncPopoverPosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) {
+      return;
+    }
+    const rect = trigger.getBoundingClientRect();
+    setPopoverStyle({
+      top: rect.bottom + 6,
+      left: rect.left,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    syncPopoverPosition();
+    const handleViewportChange = () => syncPopoverPosition();
+    window.addEventListener("scroll", handleViewportChange, true);
+    window.addEventListener("resize", handleViewportChange);
+    return () => {
+      window.removeEventListener("scroll", handleViewportChange, true);
+      window.removeEventListener("resize", handleViewportChange);
+    };
+  }, [open, syncPopoverPosition]);
+
+  return (
+    <div
+      className="pane-title-hover"
+      onMouseEnter={() => {
+        syncPopoverPosition();
+        setOpen(true);
+      }}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        ref={triggerRef}
+        aria-label={`${title}附件统计：OA附件 ${diagnostics.oaAttachmentCount}，已解析 ${diagnostics.parsedOaInvoiceCount}，已导入 ${diagnostics.importedInvoiceCount}`}
+        className="pane-title-hover-trigger"
+        type="button"
+        onFocus={() => {
+          syncPopoverPosition();
+          setOpen(true);
+        }}
+        onBlur={() => setOpen(false)}
+      >
+        {title}
+      </button>
+      <div
+        className={`pane-title-hover-popover${open ? " is-open" : ""}`}
+        role="tooltip"
+        style={{ top: `${popoverStyle.top}px`, left: `${popoverStyle.left}px` }}
+      >
+        <div className="pane-title-hover-row">
+          <span>OA里的发票附件数量</span>
+          <strong>{diagnostics.oaAttachmentCount}</strong>
+        </div>
+        <div className="pane-title-hover-row">
+          <span>已解析的OA发票数量</span>
+          <strong>{diagnostics.parsedOaInvoiceCount}</strong>
+        </div>
+        <div className="pane-title-hover-row">
+          <span>已导入的发票数量</span>
+          <strong>{diagnostics.importedInvoiceCount}</strong>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function buildInvoiceAttachmentDiagnostics(groups: WorkbenchCandidateGroup[]): InvoiceAttachmentDiagnostics {
+  const oaAttachmentRows = groups
+    .flatMap((group) => group.rows.oa)
+    .filter((row) => {
+      const recognition = parseAttachmentRecognitionStatus(detailFieldValue(row, "附件发票识别情况"));
+      if (recognition !== null) {
+        return recognition.total > 0;
+      }
+      const parsedCount = parseInteger(detailFieldValue(row, "附件发票数量"));
+      return parsedCount !== null && parsedCount > 0;
+    });
+  const parsedOaInvoiceCount = groups
+    .flatMap((group) => group.rows.invoice)
+    .filter((row) => row.sourceKind === "oa_attachment_invoice")
+    .length;
+  const importedInvoiceCount = groups
+    .flatMap((group) => group.rows.invoice)
+    .filter((row) => row.sourceKind !== "oa_attachment_invoice")
+    .length;
+  const oaAttachmentCount = oaAttachmentRows.length;
+
+  return {
+    oaAttachmentCount,
+    parsedOaInvoiceCount,
+    importedInvoiceCount,
+  };
+}
+
+function detailFieldValue(row: WorkbenchRecord, label: string) {
+  return row.detailFields.find((field) => field.label === label)?.value ?? "";
+}
+
+function parseAttachmentRecognitionStatus(value: string) {
+  const match = value.match(/(\d+)\s*\/\s*(\d+)/);
+  if (!match) {
+    return null;
+  }
+  return {
+    parsed: Number.parseInt(match[1], 10),
+    total: Number.parseInt(match[2], 10),
+  };
+}
+
+function parseInteger(value: string) {
+  const trimmedValue = value.trim();
+  if (!/^\d+$/.test(trimmedValue)) {
+    return null;
+  }
+  return Number.parseInt(trimmedValue, 10);
 }
