@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Callable
 from typing import Any
 
@@ -19,103 +19,12 @@ class TaxOffsetService:
         import_service: ImportNormalizationService | None = None,
         month_data: dict[str, dict[str, Any]] | None = None,
         certified_records_loader: Callable[[str], list[Any]] | None = None,
+        oa_attachment_invoice_rows_loader: Callable[[str], list[dict[str, Any]]] | None = None,
     ) -> None:
         self._import_service = import_service
-        self._month_data = month_data or {
-            "2026-03": {
-                "output_items": [
-                    {
-                        "id": "to-202603-001",
-                        "buyer_name": "华东项目甲方",
-                        "issue_date": "2026-03-25",
-                        "invoice_no": "90342011",
-                        "tax_rate": "13%",
-                        "tax_amount": "41,600.00",
-                        "total_with_tax": "361,600.00",
-                        "invoice_type": "销项专票",
-                    }
-                ],
-                "input_plan_items": [
-                    {
-                        "id": "ti-202603-001",
-                        "seller_name": "设备供应商",
-                        "issue_date": "2026-03-22",
-                        "invoice_no": "11203490",
-                        "tax_rate": "13%",
-                        "tax_amount": "12,480.00",
-                        "total_with_tax": "108,480.00",
-                        "risk_level": "低",
-                    },
-                    {
-                        "id": "ti-202603-002",
-                        "seller_name": "集成服务商",
-                        "issue_date": "2026-03-24",
-                        "invoice_no": "11203491",
-                        "tax_rate": "6%",
-                        "tax_amount": "5,760.00",
-                        "total_with_tax": "101,760.00",
-                        "risk_level": "中",
-                    },
-                ],
-            },
-            "2026-04": {
-                "output_items": [
-                    {
-                        "id": "to-202604-001",
-                        "buyer_name": "智能工厂客户",
-                        "issue_date": "2026-04-08",
-                        "invoice_no": "90352011",
-                        "tax_rate": "13%",
-                        "tax_amount": "18,200.00",
-                        "total_with_tax": "158,200.00",
-                        "invoice_type": "销项专票",
-                    },
-                    {
-                        "id": "to-202604-002",
-                        "buyer_name": "项目维保客户",
-                        "issue_date": "2026-04-18",
-                        "invoice_no": "90352012",
-                        "tax_rate": "6%",
-                        "tax_amount": "4,800.00",
-                        "total_with_tax": "84,800.00",
-                        "invoice_type": "销项普票",
-                    },
-                ],
-                "input_plan_items": [
-                    {
-                        "id": "ti-202604-001",
-                        "seller_name": "系统设备商",
-                        "issue_date": "2026-04-09",
-                        "invoice_no": "21203490",
-                        "tax_rate": "13%",
-                        "tax_amount": "10,920.00",
-                        "total_with_tax": "94,920.00",
-                        "risk_level": "低",
-                    },
-                    {
-                        "id": "ti-202604-002",
-                        "seller_name": "实施外包服务商",
-                        "issue_date": "2026-04-16",
-                        "invoice_no": "21203491",
-                        "tax_rate": "6%",
-                        "tax_amount": "9,600.00",
-                        "total_with_tax": "169,600.00",
-                        "risk_level": "中",
-                    },
-                    {
-                        "id": "ti-202604-003",
-                        "seller_name": "办公耗材商",
-                        "issue_date": "2026-04-20",
-                        "invoice_no": "21203492",
-                        "tax_rate": "13%",
-                        "tax_amount": "2,340.00",
-                        "total_with_tax": "20,340.00",
-                        "risk_level": "低",
-                    },
-                ],
-            },
-        }
+        self._month_data = month_data or {}
         self._certified_records_loader = certified_records_loader or (lambda month: [])
+        self._oa_attachment_invoice_rows_loader = oa_attachment_invoice_rows_loader or (lambda month: [])
 
     def get_month_payload(self, month: str) -> dict[str, object]:
         month_snapshot = self._build_month_snapshot(month)
@@ -123,9 +32,9 @@ class TaxOffsetService:
         default_selected_input_ids = [
             item["id"] for item in month_snapshot["input_plan_items"] if item["id"] not in month_snapshot["locked_certified_input_ids"]
         ]
-        summary = self.calculate(
+        summary = self._calculate_from_month_snapshot(
             month=month,
-            selected_output_ids=default_selected_output_ids,
+            month_snapshot=month_snapshot,
             selected_input_ids=default_selected_input_ids,
         )["summary"]
         return {
@@ -150,6 +59,19 @@ class TaxOffsetService:
         selected_input_ids: list[str],
     ) -> dict[str, object]:
         month_snapshot = self._build_month_snapshot(month)
+        return self._calculate_from_month_snapshot(
+            month=month,
+            month_snapshot=month_snapshot,
+            selected_input_ids=selected_input_ids,
+        )
+
+    def _calculate_from_month_snapshot(
+        self,
+        *,
+        month: str,
+        month_snapshot: dict[str, Any],
+        selected_input_ids: list[str],
+    ) -> dict[str, object]:
         locked_ids = set(month_snapshot["locked_certified_input_ids"])
         selected_uncertified_input = [
             item
@@ -254,29 +176,37 @@ class TaxOffsetService:
         )
 
     def _build_month_data_from_imported_invoices(self, month: str) -> dict[str, Any] | None:
-        if self._import_service is None:
-            return None
-
         output_items: list[dict[str, Any]] = []
         input_plan_items: list[dict[str, Any]] = []
         found_any = False
 
-        for invoice in self._import_service.list_invoices():
-            if not invoice.invoice_date or not invoice.invoice_date.startswith(month):
-                continue
-            if invoice.tax_amount is None:
+        if self._import_service is not None:
+            for invoice in self._import_service.list_invoices():
+                if not invoice.invoice_date or not invoice.invoice_date.startswith(month):
+                    continue
+                if invoice.tax_amount is None:
+                    continue
+                found_any = True
+                if invoice.invoice_type == InvoiceType.OUTPUT:
+                    output_items.append(self._build_output_item(invoice))
+                else:
+                    input_plan_items.append(self._build_input_plan_item(invoice))
+
+        for row in self._oa_attachment_invoice_rows_loader(month):
+            item = self._build_oa_attachment_invoice_item(row, month)
+            if item is None:
                 continue
             found_any = True
-            if invoice.invoice_type == InvoiceType.OUTPUT:
-                output_items.append(self._build_output_item(invoice))
+            if self._is_output_invoice_item(item):
+                output_items.append(item)
             else:
-                input_plan_items.append(self._build_input_plan_item(invoice))
+                input_plan_items.append(item)
 
         if not found_any:
             return None
         return {
-            "output_items": output_items,
-            "input_plan_items": input_plan_items,
+            "output_items": self._dedupe_tax_items(output_items),
+            "input_plan_items": self._dedupe_tax_items(input_plan_items),
         }
 
     def _build_output_item(self, invoice: Invoice) -> dict[str, Any]:
@@ -310,6 +240,109 @@ class TaxOffsetService:
             "invoice_type": self._resolve_invoice_display_type(invoice),
             "tax_rate": invoice.tax_rate or "—",
         }
+
+    def _build_oa_attachment_invoice_item(self, row: dict[str, Any], month: str) -> dict[str, Any] | None:
+        if row.get("source_kind") != "oa_attachment_invoice":
+            return None
+        issue_date = self._clean_optional(row.get("issue_date")) or self._clean_row_detail(row, "开票日期")
+        if not issue_date or not issue_date.startswith(month):
+            return None
+
+        tax_amount = self._format_optional_money(row.get("tax_amount"))
+        if tax_amount is None:
+            return None
+
+        total_with_tax = self._format_optional_money(row.get("total_with_tax")) or self._format_optional_money(row.get("amount"))
+        if total_with_tax is None:
+            total_with_tax = tax_amount
+
+        invoice_no = (
+            self._clean_optional(row.get("invoice_no"))
+            or self._clean_row_detail(row, "发票号码")
+            or self._clean_optional(row.get("digital_invoice_no"))
+            or self._clean_row_detail(row, "数电发票号码")
+            or str(row.get("id") or "oa-attachment-invoice")
+        )
+        invoice_code = self._clean_optional(row.get("invoice_code")) or self._clean_row_detail(row, "发票代码")
+        digital_invoice_no = self._clean_optional(row.get("digital_invoice_no")) or self._clean_row_detail(row, "数电发票号码")
+        invoice_type = self._clean_optional(row.get("invoice_type")) or "进项发票"
+
+        return {
+            "id": str(row.get("id") or f"oa-attachment-invoice:{invoice_no}"),
+            "buyer_name": self._clean_optional(row.get("buyer_name")) or "",
+            "buyer_tax_no": self._clean_optional(row.get("buyer_tax_no")),
+            "seller_name": self._clean_optional(row.get("seller_name")) or "",
+            "seller_tax_no": self._clean_optional(row.get("seller_tax_no")),
+            "issue_date": issue_date,
+            "invoice_no": invoice_no,
+            "invoice_code": invoice_code,
+            "digital_invoice_no": digital_invoice_no,
+            "tax_amount": tax_amount,
+            "total_with_tax": total_with_tax,
+            "risk_level": self._clean_row_detail(row, "发票风险等级") or "待评估",
+            "invoice_type": invoice_type,
+            "tax_rate": self._clean_optional(row.get("tax_rate")) or "—",
+            "source_kind": "oa_attachment_invoice",
+            "derived_from_oa_id": self._clean_optional(row.get("derived_from_oa_id")),
+        }
+
+    @staticmethod
+    def _is_output_invoice_item(item: dict[str, Any]) -> bool:
+        return "销" in str(item.get("invoice_type") or "")
+
+    @classmethod
+    def _dedupe_tax_items(cls, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        deduped: list[dict[str, Any]] = []
+        seen_keys: set[tuple[str, ...]] = set()
+        for item in items:
+            key = cls._tax_item_identity_key(item)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            deduped.append(item)
+        return deduped
+
+    @classmethod
+    def _tax_item_identity_key(cls, item: dict[str, Any]) -> tuple[str, ...]:
+        digital_invoice_no = cls._clean_optional(item.get("digital_invoice_no"))
+        if digital_invoice_no:
+            return ("digital", digital_invoice_no)
+        invoice_code = cls._clean_optional(item.get("invoice_code"))
+        invoice_no = cls._clean_optional(item.get("invoice_no"))
+        if invoice_code and invoice_no:
+            return ("code-number", invoice_code, invoice_no)
+        return (
+            "fallback",
+            invoice_no or cls._clean_optional(item.get("id")) or "",
+            cls._clean_optional(item.get("seller_tax_no")) or "",
+            cls._clean_optional(item.get("issue_date")) or "",
+            cls._clean_optional(item.get("tax_amount")) or "",
+        )
+
+    @classmethod
+    def _clean_row_detail(cls, row: dict[str, Any], key: str) -> str | None:
+        detail_fields = row.get("detail_fields") or row.get("_detail_fields")
+        if not isinstance(detail_fields, dict):
+            return None
+        return cls._clean_optional(detail_fields.get(key))
+
+    @staticmethod
+    def _clean_optional(value: Any) -> str | None:
+        if value is None:
+            return None
+        cleaned = str(value).strip()
+        if cleaned in {"", "—", "--", "None"}:
+            return None
+        return cleaned
+
+    def _format_optional_money(self, value: Any) -> str | None:
+        cleaned = self._clean_optional(value)
+        if cleaned is None:
+            return None
+        try:
+            return self._format_money(self._to_decimal(cleaned))
+        except (InvalidOperation, ValueError):
+            return None
 
     @staticmethod
     def _resolve_total_with_tax(invoice: Invoice) -> Decimal:

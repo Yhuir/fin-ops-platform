@@ -5,6 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from http import HTTPStatus
@@ -19,6 +20,7 @@ from uuid import uuid4
 from fin_ops_platform import __version__
 from fin_ops_platform.app.auth import (
     ForbiddenOAAccessError,
+    OARequestSession,
     UnauthorizedOASessionError,
     resolve_oa_request_session,
 )
@@ -47,6 +49,10 @@ from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError, OARo
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
 from fin_ops_platform.services.search_service import MONTH_RE as SEARCH_MONTH_RE, SUPPORTED_SCOPES as SEARCH_SUPPORTED_SCOPES, SUPPORTED_STATUSES as SEARCH_SUPPORTED_STATUSES, SearchService
+from fin_ops_platform.services.settings_data_reset_service import (
+    RESET_OA_AND_REBUILD_ACTION,
+    SettingsDataResetService,
+)
 from fin_ops_platform.services.state_store import ApplicationStateStore
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService, UploadedCertifiedImportFile
 from fin_ops_platform.services.tax_offset_service import TaxOffsetService
@@ -57,6 +63,15 @@ from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchP
 from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
 from fin_ops_platform.services.seeds import build_demo_seed
+
+
+OA_INVOICE_OFFSET_AUTO_MATCH_MODE = "oa_invoice_offset_auto_match"
+OA_INVOICE_OFFSET_TAG = "冲"
+SYSTEM_AUTO_PAIR_RELATION_MODES = {
+    "salary_personal_auto_match",
+    "internal_transfer_pair",
+    OA_INVOICE_OFFSET_AUTO_MATCH_MODE,
+}
 
 
 @dataclass(slots=True)
@@ -72,6 +87,10 @@ class Response:
             "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         }
     )
+
+
+class StatePersistenceError(RuntimeError):
+    """Raised when critical workbench state cannot be durably persisted."""
 
 
 def _build_ascii_download_name(filename: str, *, fallback_stem: str = "download", fallback_suffix: str = ".bin") -> str:
@@ -101,9 +120,17 @@ ROW_ID_MONTH_RE = re.compile(r"(20\d{2})(\d{2})")
 class Application:
     def __init__(self, *, data_dir: Path | None = None) -> None:
         self._state_store = ApplicationStateStore(data_dir) if data_dir is not None else None
-        persisted_state = self._state_store.load() if self._state_store is not None else {}
         self._seed_payload = build_demo_seed()
-        self._import_service = ImportNormalizationService.from_snapshot(persisted_state.get("imports"))
+        self._initialize_runtime_services(self._load_persisted_state())
+
+    def _load_persisted_state(self) -> dict[str, object]:
+        return self._state_store.load() if self._state_store is not None else {}
+
+    def _initialize_runtime_services(self, persisted_state: dict[str, object]) -> None:
+        self._import_service = ImportNormalizationService.from_snapshot(
+            persisted_state.get("imports"),
+            id_registry=self._state_store,
+        )
         self._file_import_service = FileImportService.from_snapshot(
             self._import_service,
             persisted_state.get("file_imports"),
@@ -123,7 +150,11 @@ class Application:
             persisted_state.get("workbench_read_models"),
         )
         mongo_oa_settings = load_mongo_oa_settings(self._state_store.data_dir if self._state_store is not None else None)
-        oa_adapter = MongoOAAdapter(settings=mongo_oa_settings) if mongo_oa_settings is not None else None
+        oa_adapter = (
+            MongoOAAdapter(settings=mongo_oa_settings, attachment_invoice_cache=self._state_store)
+            if mongo_oa_settings is not None
+            else None
+        )
         self._audit_service = AuditTrailService()
         self._reconciliation_service = ManualReconciliationService(
             self._import_service,
@@ -168,9 +199,24 @@ class Application:
             bank_account_resolver=bank_account_resolver,
         )
         self._tax_certified_import_service = TaxCertifiedImportService(state_store=self._state_store)
+        self._settings_data_reset_service = (
+            SettingsDataResetService(
+                state_store=self._state_store,
+                import_service=self._import_service,
+                file_import_service=self._file_import_service,
+                matching_service=self._matching_service,
+                workbench_override_service=self._workbench_override_service,
+                workbench_pair_relation_service=self._workbench_pair_relation_service,
+                workbench_read_model_service=self._workbench_read_model_service,
+                tax_certified_import_service=self._tax_certified_import_service,
+            )
+            if self._state_store is not None
+            else None
+        )
         self._tax_offset_service = TaxOffsetService(
             import_service=self._import_service,
             certified_records_loader=self._tax_certified_import_service.list_records_for_month,
+            oa_attachment_invoice_rows_loader=self._list_tax_offset_oa_attachment_invoice_rows,
         )
         self._cost_statistics_service = CostStatisticsService(
             self._import_service,
@@ -191,7 +237,12 @@ class Application:
             self._workbench_query_service,
             self._workbench_action_service,
         )
+        if isinstance(oa_adapter, MongoOAAdapter):
+            oa_adapter.set_attachment_invoice_cache_updated_callback(self._handle_oa_attachment_invoice_cache_updated)
         self._tax_api_routes = TaxApiRoutes(self._tax_offset_service)
+
+    def _reload_runtime_services(self) -> None:
+        self._initialize_runtime_services(self._load_persisted_state())
 
     def handle_request(
         self,
@@ -256,6 +307,8 @@ class Application:
             return self._handle_api_workbench_settings()
         if method == "POST" and route_path == "/api/workbench/settings":
             return self._handle_api_workbench_settings_update(body)
+        if method == "POST" and route_path == "/api/workbench/settings/data-reset":
+            return self._handle_api_workbench_settings_data_reset(body, headers)
         if method == "GET" and route_path.startswith("/api/workbench/rows/"):
             row_id = route_path.rsplit("/", 1)[-1]
             return self._handle_api_workbench_row_detail(row_id)
@@ -494,6 +547,7 @@ class Application:
                 "/api/session/me",
                 "/api/workbench/ignored",
                 "/api/workbench/settings",
+                "/api/workbench/settings/data-reset",
                 "/api/workbench/rows/{row_id}",
                 "/api/workbench/actions/confirm-link",
                 "/api/workbench/actions/mark-exception",
@@ -753,6 +807,98 @@ class Application:
             payload["detail"] = detail.strip()
         print(json.dumps(payload, ensure_ascii=False), flush=True)
 
+    def _emit_workbench_persistence_warning(self, *, operation: str, detail: str) -> None:
+        print(
+            json.dumps(
+                {
+                    "kind": "workbench_persistence_warning",
+                    "operation": operation,
+                    "detail": detail,
+                    "timestamp": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+
+    def _persist_workbench_read_models_best_effort(
+        self,
+        *,
+        snapshot: dict[str, object],
+        changed_scope_keys: list[str] | None = None,
+        operation: str,
+    ) -> None:
+        if self._state_store is None:
+            return
+        try:
+            self._state_store.save_workbench_read_models(
+                snapshot,
+                changed_scope_keys=changed_scope_keys,
+            )
+        except Exception as exc:
+            self._emit_workbench_persistence_warning(operation=operation, detail=str(exc))
+
+    def _persist_workbench_override_change(
+        self,
+        *,
+        changed_row_ids: list[str],
+        mutation: Callable[[], object],
+        changed_scope_keys: list[str] | None = None,
+        request_id: str | None = None,
+        action_name: str | None = None,
+    ) -> object:
+        previous_snapshot = self._workbench_override_service.snapshot()
+        result = mutation()
+        try:
+            if changed_scope_keys is None:
+                self._persist_workbench_overrides(changed_row_ids=changed_row_ids)
+            else:
+                self._save_workbench_overrides_snapshot(changed_row_ids=changed_row_ids)
+        except Exception as exc:
+            self._workbench_override_service = WorkbenchOverrideService.from_snapshot(previous_snapshot)
+            raise StatePersistenceError("工作台状态暂时无法保存，请稍后重试。") from exc
+        if changed_scope_keys is not None:
+            self._invalidate_workbench_read_model_scopes(changed_scope_keys)
+            self._schedule_workbench_read_model_persist(
+                changed_scope_keys=changed_scope_keys,
+                request_id=request_id,
+                action_name=action_name,
+            )
+        return result
+
+    def _workbench_persistence_unavailable_response(self, exc: StatePersistenceError) -> Response:
+        return self._json_response(
+            HTTPStatus.SERVICE_UNAVAILABLE,
+            {
+                "error": "workbench_state_persistence_unavailable",
+                "message": str(exc),
+            },
+        )
+
+    def _handle_oa_attachment_invoice_cache_updated(self, months: list[str]) -> None:
+        scope_keys = {
+            str(month).strip()
+            for month in list(months or [])
+            if str(month).strip()
+        }
+        if not scope_keys:
+            return
+        scope_keys.add("all")
+        normalized_scope_keys = sorted(scope_keys)
+        self._search_service.clear_cache()
+        self._invalidate_workbench_read_model_scopes(normalized_scope_keys)
+        if self._state_store is None:
+            return
+        self._persist_workbench_read_models_best_effort(
+            snapshot=self._workbench_read_model_service.snapshot(),
+            changed_scope_keys=normalized_scope_keys,
+            operation="invalidate_read_models_after_oa_attachment_invoice_cache",
+        )
+        self._schedule_workbench_read_model_persist(
+            changed_scope_keys=normalized_scope_keys,
+            action_name="oa_attachment_invoice_cache",
+        )
+
     def _enforce_route_access(
         self,
         route_path: str,
@@ -845,6 +991,8 @@ class Application:
         readonly_export_usernames = payload.get("readonly_export_usernames", [])
         admin_usernames = payload.get("admin_usernames", [])
         workbench_column_layouts = payload.get("workbench_column_layouts", {})
+        oa_retention = payload.get("oa_retention", {})
+        oa_invoice_offset = payload.get("oa_invoice_offset", {})
         if (
             not isinstance(completed_project_ids, list)
             or not isinstance(bank_account_mappings, list)
@@ -852,6 +1000,8 @@ class Application:
             or not isinstance(readonly_export_usernames, list)
             or not isinstance(admin_usernames, list)
             or not isinstance(workbench_column_layouts, dict)
+            or not isinstance(oa_retention, dict)
+            or not isinstance(oa_invoice_offset, dict)
         ):
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
@@ -860,7 +1010,7 @@ class Application:
                     "message": (
                         "completed_project_ids, bank_account_mappings, allowed_usernames, "
                         "readonly_export_usernames, and admin_usernames must be arrays, "
-                        "and workbench_column_layouts must be an object."
+                        "and workbench_column_layouts, oa_retention, and oa_invoice_offset must be objects."
                     ),
                 },
             )
@@ -874,6 +1024,8 @@ class Application:
                 ],
                 admin_usernames=[str(item).strip() for item in admin_usernames if str(item).strip()],
                 workbench_column_layouts=workbench_column_layouts,
+                oa_retention=oa_retention,
+                oa_invoice_offset=oa_invoice_offset,
             )
         except OARoleSyncError as exc:
             return self._json_response(
@@ -883,8 +1035,73 @@ class Application:
                     "message": f"OA 角色同步失败：{exc}",
                 },
             )
+        self._invalidate_workbench_read_models()
+        if self._state_store is not None:
+            self._persist_workbench_read_models_best_effort(
+                snapshot=self._workbench_read_model_service.snapshot(),
+                operation="invalidate_read_models_after_settings_update",
+            )
         self._search_service.clear_cache()
         return self._json_response(HTTPStatus.OK, updated_payload)
+
+    def _handle_api_workbench_settings_data_reset(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        if self._settings_data_reset_service is None:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "settings_data_reset_unavailable",
+                    "message": "当前运行模式未启用持久化状态存储，不能执行数据重置。",
+                },
+            )
+        admin_session, admin_error = self._resolve_admin_session(headers)
+        if admin_error is not None:
+            return admin_error
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        action = str(payload.get("action") or "").strip()
+        if not action:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "invalid_workbench_settings_reset_request",
+                    "message": "action is required.",
+                },
+            )
+        oa_password = payload.get("oa_password")
+        if not isinstance(oa_password, str) or not oa_password:
+            return self._oa_password_verification_failed_response()
+        password_error = self._verify_reset_oa_password(admin_session, oa_password)
+        if password_error is not None:
+            return password_error
+        try:
+            result = self._settings_data_reset_service.execute(action)
+        except ValueError:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "invalid_workbench_settings_reset_request",
+                    "message": "unsupported action.",
+                    "supported_actions": self._settings_data_reset_service.supported_actions(),
+                    "protected_targets": self._settings_data_reset_service.protected_targets(),
+                },
+            )
+        self._reload_runtime_services()
+        self._search_service.clear_cache()
+        if action == RESET_OA_AND_REBUILD_ACTION:
+            try:
+                self._build_api_workbench_payload("all")
+                result.rebuild_status = "completed"
+                result.message = "已按模式 B 清空 OA 相关缓存与人工状态，并完成 OA 重建。"
+            except Exception as exc:
+                result.status = "partial"
+                result.rebuild_status = "failed"
+                result.message = f"已按模式 B 清空 OA 相关缓存与人工状态，但 OA 重建失败：{exc}"
+        return self._json_response(HTTPStatus.OK, result.to_payload())
 
     def _handle_api_workbench_row_detail(self, row_id: str) -> Response:
         try:
@@ -896,11 +1113,130 @@ class Application:
             )
         return self._json_response(HTTPStatus.OK, payload)
 
+    def _enforce_admin_access(self, headers: dict[str, str] | None) -> Response | None:
+        _, error = self._resolve_admin_session(headers)
+        return error
+
+    def _resolve_admin_session(
+        self, headers: dict[str, str] | None
+    ) -> tuple[OARequestSession | None, Response | None]:
+        try:
+            session = resolve_oa_request_session(
+                headers,
+                identity_service=self._oa_identity_service,
+                access_control_service=self._access_control_service,
+            )
+            if not session.can_admin_access:
+                return None, self._json_response(
+                    HTTPStatus.FORBIDDEN,
+                    {
+                        "error": "admin_only",
+                        "message": "当前账号没有管理员权限，不能执行数据重置。",
+                    },
+                )
+        except UnauthorizedOASessionError as error:
+            return None, self._json_response(
+                HTTPStatus.UNAUTHORIZED,
+                {
+                    "error": "invalid_oa_session",
+                    "message": str(error) or "缺少 OA 登录态，请从 OA 系统进入。",
+                },
+            )
+        except OASessionExpiredError as error:
+            return None, self._json_response(
+                HTTPStatus.UNAUTHORIZED,
+                {
+                    "error": "invalid_oa_session",
+                    "message": str(error) or "OA 登录状态已过期。",
+                },
+            )
+        except ForbiddenOAAccessError as error:
+            return None, self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {
+                    "error": "forbidden",
+                    "message": str(error) or "当前 OA 账户未被授权访问财务运营平台。",
+                },
+            )
+        except OAIdentityConfigurationError as error:
+            return None, self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "oa_identity_unavailable",
+                    "message": str(error) or "OA 身份服务未配置。",
+                },
+            )
+        except OAIdentityServiceError as error:
+            return None, self._json_response(
+                HTTPStatus.BAD_GATEWAY,
+                {
+                    "error": "oa_identity_lookup_failed",
+                    "message": str(error) or "OA 身份解析失败。",
+                },
+            )
+        return session, None
+
+    def _verify_reset_oa_password(self, session: OARequestSession | None, oa_password: str) -> Response | None:
+        if session is None:
+            return self._oa_password_verification_failed_response()
+        if session.token == "local-dev-token" and os.getenv("FIN_OPS_DEV_ALLOW_LOCAL_SESSION", "").strip() == "1":
+            expected_password = os.getenv("FIN_OPS_DEV_OA_PASSWORD", "local-dev-password")
+            if oa_password == expected_password:
+                return None
+            return self._oa_password_verification_failed_response()
+        try:
+            if self._oa_identity_service.verify_current_user_password(session.token, oa_password):
+                return None
+        except OASessionExpiredError as error:
+            return self._json_response(
+                HTTPStatus.UNAUTHORIZED,
+                {
+                    "error": "invalid_oa_session",
+                    "message": "OA 登录状态已过期。",
+                },
+            )
+        except OAIdentityConfigurationError as error:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "oa_password_verification_unavailable",
+                    "message": "OA 用户密码复核服务未配置。",
+                },
+            )
+        except OAIdentityServiceError as error:
+            return self._json_response(
+                HTTPStatus.BAD_GATEWAY,
+                {
+                    "error": "oa_password_verification_unavailable",
+                    "message": "OA 用户密码复核服务暂时不可用，请稍后重试。",
+                },
+            )
+        return self._oa_password_verification_failed_response()
+
+    def _oa_password_verification_failed_response(self) -> Response:
+        return self._json_response(
+            HTTPStatus.FORBIDDEN,
+            {
+                "error": "oa_password_verification_failed",
+                "message": "当前 OA 用户密码复核失败，未执行数据重置。",
+            },
+        )
+
     def _get_api_workbench_row_detail_payload(self, row_id: str) -> dict[str, object]:
         try:
             payload = {"row": self._live_workbench_service.get_row_detail(row_id)}
         except KeyError:
-            payload = self._workbench_api_routes.get_row_detail(row_id)
+            month_hint = self._row_month_scope_from_row_id(row_id)
+            cached_rows = self._resolve_rows_from_cached_read_models(
+                [row_id],
+                month_hint=month_hint,
+            )
+            if row_id in cached_rows:
+                payload = {"row": cached_rows[row_id]}
+            elif month_hint is None and self._workbench_query_service._looks_like_oa_row_id(row_id):
+                raise KeyError(row_id)
+            else:
+                payload = self._workbench_api_routes.get_row_detail(row_id)
         payload["row"] = self._workbench_override_service.apply_to_row(payload["row"])
         return payload
 
@@ -1104,6 +1440,9 @@ class Application:
     def _handle_api_tax_offset(self, month: str | None) -> Response:
         current_month = month or datetime.now().strftime("%Y-%m")
         return self._json_response(HTTPStatus.OK, self._tax_api_routes.get_tax_offset(current_month))
+
+    def _list_tax_offset_oa_attachment_invoice_rows(self, month: str) -> list[dict[str, object]]:
+        return self._workbench_query_service.list_attachment_invoice_rows_by_issue_month(month)
 
     def _handle_api_tax_certified_import_preview(
         self,
@@ -1358,12 +1697,20 @@ class Application:
                 HTTPStatus.NOT_FOUND,
                 {"error": "workbench_row_not_found", "message": row_id},
             )
-        updated_row = self._workbench_override_service.mark_exception(
-            row=row,
-            exception_code=exception_code,
-            comment=comment,
-        )
-        self._persist_workbench_overrides(changed_row_ids=[str(updated_row["id"])])
+        try:
+            changed_scope_keys = self._scope_keys_for_rows(month=month, rows=[row])
+            updated_row = self._persist_workbench_override_change(
+                changed_row_ids=[row_id],
+                mutation=lambda: self._workbench_override_service.mark_exception(
+                    row=row,
+                    exception_code=exception_code,
+                    comment=comment,
+                ),
+                changed_scope_keys=changed_scope_keys,
+                action_name="mark_exception",
+            )
+        except StatePersistenceError as exc:
+            return self._workbench_persistence_unavailable_response(exc)
         return self._json_response(
             HTTPStatus.OK,
             {
@@ -1495,13 +1842,18 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_update_bank_exception_request", "message": "update_bank_exception only supports bank rows."},
             )
-        updated_row = self._workbench_override_service.update_bank_exception(
-            row=row,
-            relation_code=relation_code,
-            relation_label=relation_label,
-            comment=comment,
-        )
-        self._persist_workbench_overrides(changed_row_ids=[str(updated_row["id"])])
+        try:
+            updated_row = self._persist_workbench_override_change(
+                changed_row_ids=[row_id],
+                mutation=lambda: self._workbench_override_service.update_bank_exception(
+                    row=row,
+                    relation_code=relation_code,
+                    relation_label=relation_label,
+                    comment=comment,
+                ),
+            )
+        except StatePersistenceError as exc:
+            return self._workbench_persistence_unavailable_response(exc)
         return self._json_response(
             HTTPStatus.OK,
             {
@@ -1517,7 +1869,7 @@ class Application:
     def _handle_live_workbench_oa_bank_exception(self, payload: dict[str, object]) -> Response:
         try:
             month = str(payload["month"])
-            row_ids = [str(row_id) for row_id in list(payload["row_ids"])]
+            row_ids = self._normalize_row_ids(list(payload["row_ids"]))
             exception_code = str(payload["exception_code"])
             exception_label = str(payload["exception_label"])
             comment = str(payload["comment"]) if payload.get("comment") is not None else None
@@ -1527,9 +1879,8 @@ class Application:
                 {"error": "invalid_oa_bank_exception_request", "message": str(exc)},
             )
 
-        grouped_payload = self._build_api_workbench_payload(month)
         try:
-            rows = [self._resolve_live_row(grouped_payload, row_id) for row_id in row_ids]
+            rows = self._resolve_live_rows_direct(row_ids, month_hint=month)
         except KeyError as exc:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
@@ -1551,19 +1902,20 @@ class Application:
             )
 
         try:
-            updated_rows = self._workbench_override_service.apply_oa_bank_exception(
-                rows=rows,
-                exception_code=exception_code,
-                exception_label=exception_label,
-                comment=comment,
+            changed_scope_keys = self._scope_keys_for_rows(month=month, rows=rows)
+            updated_rows = self._persist_workbench_override_change(
+                changed_row_ids=[str(row["id"]) for row in rows],
+                mutation=lambda: self._workbench_override_service.apply_oa_bank_exception(
+                    rows=rows,
+                    exception_code=exception_code,
+                    exception_label=exception_label,
+                    comment=comment,
+                ),
+                changed_scope_keys=changed_scope_keys,
+                action_name="oa_bank_exception",
             )
-        except ValueError as exc:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_oa_bank_exception_request", "message": str(exc)},
-            )
-
-        self._persist_workbench_overrides(changed_row_ids=[str(row["id"]) for row in updated_rows])
+        except StatePersistenceError as exc:
+            return self._workbench_persistence_unavailable_response(exc)
         return self._json_response(
             HTTPStatus.OK,
             {
@@ -1579,7 +1931,7 @@ class Application:
     def _handle_live_workbench_cancel_exception(self, payload: dict[str, object]) -> Response:
         try:
             month = str(payload["month"])
-            row_ids = [str(row_id) for row_id in list(payload["row_ids"])]
+            row_ids = self._normalize_row_ids(list(payload["row_ids"]))
             comment = str(payload["comment"]) if payload.get("comment") is not None else None
         except (KeyError, TypeError, ValueError) as exc:
             return self._json_response(
@@ -1593,17 +1945,24 @@ class Application:
                 {"error": "invalid_cancel_exception_request", "message": "row_ids is required."},
             )
 
-        grouped_payload = self._build_api_workbench_payload(month)
         try:
-            rows = [self._resolve_live_row(grouped_payload, row_id) for row_id in row_ids]
+            rows = self._resolve_live_rows_direct(row_ids, month_hint=month)
         except KeyError as exc:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
                 {"error": "workbench_row_not_found", "message": str(exc)},
             )
 
-        updated_rows = self._workbench_override_service.cancel_exception(rows=rows, comment=comment)
-        self._persist_workbench_overrides(changed_row_ids=[str(row["id"]) for row in updated_rows])
+        try:
+            changed_scope_keys = self._scope_keys_for_rows(month=month, rows=rows)
+            updated_rows = self._persist_workbench_override_change(
+                changed_row_ids=row_ids,
+                mutation=lambda: self._workbench_override_service.cancel_exception(rows=rows, comment=comment),
+                changed_scope_keys=changed_scope_keys,
+                action_name="cancel_exception",
+            )
+        except StatePersistenceError as exc:
+            return self._workbench_persistence_unavailable_response(exc)
         return self._json_response(
             HTTPStatus.OK,
             {
@@ -1640,8 +1999,13 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_ignore_row_request", "message": "ignore_row only supports invoice rows."},
             )
-        updated_row = self._workbench_override_service.ignore_row(row=row, comment=comment)
-        self._persist_workbench_overrides(changed_row_ids=[str(updated_row["id"])])
+        try:
+            updated_row = self._persist_workbench_override_change(
+                changed_row_ids=[row_id],
+                mutation=lambda: self._workbench_override_service.ignore_row(row=row, comment=comment),
+            )
+        except StatePersistenceError as exc:
+            return self._workbench_persistence_unavailable_response(exc)
         return self._json_response(
             HTTPStatus.OK,
             {
@@ -1674,8 +2038,13 @@ class Application:
                 HTTPStatus.NOT_FOUND,
                 {"error": "workbench_row_not_found", "message": row_id},
             )
-        updated_row = self._workbench_override_service.unignore_row(row=row)
-        self._persist_workbench_overrides(changed_row_ids=[str(updated_row["id"])])
+        try:
+            updated_row = self._persist_workbench_override_change(
+                changed_row_ids=[row_id],
+                mutation=lambda: self._workbench_override_service.unignore_row(row=row),
+            )
+        except StatePersistenceError as exc:
+            return self._workbench_persistence_unavailable_response(exc)
         return self._json_response(
             HTTPStatus.OK,
             {
@@ -2256,6 +2625,20 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_import_file_preview_request", "message": "At least one file is required."},
             )
+        file_overrides, override_error = self._parse_import_file_preview_overrides(fields, len(files))
+        if override_error is not None:
+            return override_error
+        if file_overrides:
+            files = [
+                UploadedImportFile(
+                    file_name=file.file_name,
+                    content=file.content,
+                    template_code_override=override.get("template_code"),
+                    batch_type_override=override.get("batch_type"),
+                    selected_bank_name=override.get("bank_name"),
+                )
+                for file, override in zip(files, file_overrides)
+            ]
         session = self._file_import_service.preview_files(imported_by=imported_by, uploads=files)
         self._persist_state_with_workbench_invalidation()
         return self._json_response(HTTPStatus.OK, self._serialize_file_session(session))
@@ -2335,6 +2718,48 @@ class Application:
                 {"error": "import_file_session_not_found", "session_id": session_id},
             )
         return self._json_response(HTTPStatus.OK, self._serialize_file_session(session))
+
+    def _parse_import_file_preview_overrides(
+        self,
+        fields: dict[str, list[str]],
+        file_count: int,
+    ) -> tuple[list[dict[str, str]], Response | None]:
+        raw_values = fields.get("file_overrides") or []
+        if not raw_values:
+            return [{} for _ in range(file_count)], None
+        try:
+            raw_overrides = json.loads(raw_values[0])
+        except json.JSONDecodeError:
+            return [], self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "invalid_import_file_preview_request",
+                    "message": "file_overrides must be a JSON array.",
+                },
+            )
+        if not isinstance(raw_overrides, list):
+            return [], self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "invalid_import_file_preview_request",
+                    "message": "file_overrides must be a JSON array.",
+                },
+            )
+        normalized: list[dict[str, str]] = []
+        for raw_override in raw_overrides[:file_count]:
+            if not isinstance(raw_override, dict):
+                normalized.append({})
+                continue
+            normalized.append(
+                {
+                    key: value.strip()
+                    for key in ("template_code", "batch_type", "bank_name")
+                    if isinstance((value := raw_override.get(key)), str) and value.strip()
+                }
+            )
+        while len(normalized) < file_count:
+            normalized.append({})
+        return normalized, None
 
     def _handle_matching_run(self, body: str | bytes | None) -> Response:
         payload, error = self._load_json_body(body)
@@ -2536,9 +2961,10 @@ class Application:
                 )
         persist_started_at = monotonic()
         snapshot = self._workbench_read_model_service.snapshot_scope_keys(scope_keys)
-        self._state_store.save_workbench_read_models(
-            snapshot,
+        self._persist_workbench_read_models_best_effort(
+            snapshot=snapshot,
             changed_scope_keys=scope_keys,
+            operation="background_rebuild_read_models",
         )
         if request_id is not None and action_name is not None:
             self._emit_workbench_action_timing(
@@ -2556,17 +2982,21 @@ class Application:
                 detail=",".join(scope_keys),
             )
 
-    def _persist_workbench_overrides(self, *, changed_row_ids: list[str] | None = None) -> None:
+    def _save_workbench_overrides_snapshot(self, *, changed_row_ids: list[str] | None = None) -> None:
         self._search_service.clear_cache()
-        self._invalidate_workbench_read_models()
         if self._state_store is None:
             return
         self._state_store.save_workbench_overrides(
             self._workbench_override_service.snapshot(),
             changed_row_ids=changed_row_ids,
         )
-        self._state_store.save_workbench_read_models(
-            self._workbench_read_model_service.snapshot(),
+
+    def _persist_workbench_overrides(self, *, changed_row_ids: list[str] | None = None) -> None:
+        self._save_workbench_overrides_snapshot(changed_row_ids=changed_row_ids)
+        self._invalidate_workbench_read_models()
+        self._persist_workbench_read_models_best_effort(
+            snapshot=self._workbench_read_model_service.snapshot(),
+            operation="invalidate_read_models_after_override_save",
         )
 
     def _list_search_months(self) -> list[str]:
@@ -2610,31 +3040,54 @@ class Application:
 
     def _get_or_build_workbench_read_model(self, month: str) -> dict[str, object]:
         cached_read_model = self._workbench_read_model_service.get_read_model(month)
+        fallback_read_model: dict[str, object] | None = None
         if isinstance(cached_read_model, dict):
             cached_payload = cached_read_model.get("payload")
             cached_ignored_rows = cached_read_model.get("ignored_rows")
-            if isinstance(cached_payload, dict) and isinstance(cached_ignored_rows, list):
+            if (
+                isinstance(cached_payload, dict)
+                and isinstance(cached_ignored_rows, list)
+                and self._can_use_cached_workbench_payload(cached_payload)
+            ):
                 return cached_read_model
+            if (
+                isinstance(cached_payload, dict)
+                and isinstance(cached_ignored_rows, list)
+                and self._can_fallback_to_stale_workbench_payload(cached_payload)
+            ):
+                fallback_read_model = cached_read_model
 
         raw_payload = self._build_raw_workbench_payload(month)
         grouped_payload = self._group_row_payload(raw_payload)
         ignored_rows = self._extract_ignored_rows(raw_payload)
+        if not self._can_persist_workbench_payload(grouped_payload):
+            if fallback_read_model is not None:
+                return fallback_read_model
+            self._workbench_read_model_service.delete_read_model(month)
+            return {
+                "scope_key": month,
+                "scope_type": "all_time" if month == "all" else "month",
+                "generated_at": datetime.now().isoformat(),
+                "payload": grouped_payload,
+                "ignored_rows": ignored_rows,
+            }
         read_model = self._workbench_read_model_service.upsert_read_model(
             scope_key=month,
             payload=grouped_payload,
             ignored_rows=ignored_rows,
         )
         if self._state_store is not None:
-            self._state_store.save_workbench_read_models(
-                self._workbench_read_model_service.snapshot(),
+            self._persist_workbench_read_models_best_effort(
+                snapshot=self._workbench_read_model_service.snapshot_scope_keys([month]),
                 changed_scope_keys=[month],
+                operation="get_or_build_read_model",
             )
         return read_model
 
     def _build_api_workbench_payload(self, month: str) -> dict[str, object]:
         read_model = self._get_or_build_workbench_read_model(month)
         payload = read_model.get("payload")
-        return self._serialize_value(payload if isinstance(payload, dict) else {})
+        return self._apply_oa_retention_to_grouped_payload(payload if isinstance(payload, dict) else {})
 
     def _build_api_workbench_ignored_rows_payload(self, month: str) -> list[dict[str, object]]:
         read_model = self._get_or_build_workbench_read_model(month)
@@ -2646,15 +3099,156 @@ class Application:
             self._sync_live_auto_pair_relations()
             payload = self._build_live_workbench_row_payload(month)
         else:
-            payload = self._serialize_value(self._workbench_api_routes.get_workbench(month))
+            payload = self._build_oa_workbench_row_payload(month)
+        self._sync_oa_invoice_offset_auto_pair_relations(payload)
         paired_payload = self._apply_pair_relations_to_payload(payload)
         return self._workbench_override_service.apply_to_payload(paired_payload)
 
     def _build_live_workbench_row_payload(self, month: str) -> dict[str, object]:
         live_payload = self._live_workbench_service.get_workbench(month)
-        oa_payload = self._workbench_api_routes.get_workbench(month)
+        oa_payload = self._build_oa_workbench_row_payload(month)
         merged = self._merge_live_workbench_with_oa_rows(live_payload, oa_payload)
         return self._serialize_value(merged)
+
+    def _build_oa_workbench_row_payload(self, month: str) -> dict[str, object]:
+        if month == "all" and isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter):
+            return self._build_retained_all_oa_row_payload()
+        return self._serialize_value(self._workbench_api_routes.get_workbench(month))
+
+    def _build_retained_all_oa_row_payload(self) -> dict[str, object]:
+        cutoff_date = self._parse_oa_retention_date(self._app_settings_service.get_oa_retention_cutoff_date())
+        if cutoff_date is None:
+            return self._serialize_value(self._workbench_api_routes.get_workbench("all"))
+
+        scoped_months = self._retained_oa_months_for_all_scope(cutoff_date)
+        supplemental_oa_row_ids = self._supplemental_retained_oa_row_ids(cutoff_date)
+        for scoped_month in scoped_months:
+            self._workbench_query_service._sync_oa_rows(scoped_month)
+        if supplemental_oa_row_ids:
+            self._workbench_query_service.sync_oa_row_ids(supplemental_oa_row_ids)
+        return self._serialize_value(
+            self._raw_oa_payload_for_selected_scope(
+                months=set(scoped_months),
+                supplemental_oa_row_ids=set(supplemental_oa_row_ids),
+            )
+        )
+
+    def _retained_oa_months_for_all_scope(self, cutoff_date: datetime) -> list[str]:
+        cutoff_month = cutoff_date.strftime("%Y-%m")
+        list_available_months = getattr(self._workbench_query_service._oa_adapter, "list_available_months", None)
+        available_months: list[str]
+        try:
+            if callable(list_available_months):
+                available_months = [
+                    str(month).strip()
+                    for month in list_available_months()
+                    if str(month).strip()
+                ]
+            else:
+                available_months = self._workbench_query_service.list_available_months()
+        except Exception:
+            available_months = []
+        if available_months:
+            return sorted(month for month in available_months if month >= cutoff_month)
+
+        oa_status = self._workbench_query_service.oa_status_payload()
+        if isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter) and str(oa_status.get("code", "")).strip() != "ready":
+            return self._fallback_retained_oa_months_for_all_scope(cutoff_date)
+        return []
+
+    def _fallback_retained_oa_months_for_all_scope(self, cutoff_date: datetime) -> list[str]:
+        cutoff_month = cutoff_date.strftime("%Y-%m")
+        end_month = self._fallback_retained_oa_end_month()
+        if not SEARCH_MONTH_RE.match(cutoff_month) or not SEARCH_MONTH_RE.match(end_month):
+            return [cutoff_month] if SEARCH_MONTH_RE.match(cutoff_month) else []
+        months: list[str] = []
+        current = datetime.strptime(f"{cutoff_month}-01", "%Y-%m-%d")
+        end = datetime.strptime(f"{end_month}-01", "%Y-%m-%d")
+        while current <= end:
+            months.append(current.strftime("%Y-%m"))
+            if current.month == 12:
+                current = current.replace(year=current.year + 1, month=1)
+            else:
+                current = current.replace(month=current.month + 1)
+        return months
+
+    @staticmethod
+    def _fallback_retained_oa_end_month() -> str:
+        return datetime.now().strftime("%Y-%m")
+
+    def _supplemental_retained_oa_row_ids(self, cutoff_date: datetime) -> list[str]:
+        retained_row_ids: set[str] = set()
+        for relation in self._workbench_pair_relation_service.list_active_relations():
+            row_ids = [
+                str(row_id).strip()
+                for row_id in list(relation.get("row_ids") or [])
+                if str(row_id).strip()
+            ]
+            row_types = [str(row_type).strip() for row_type in list(relation.get("row_types") or [])]
+            oa_row_ids = [
+                row_id
+                for index, row_id in enumerate(row_ids)
+                if (row_types[index] if index < len(row_types) else "") == "oa"
+            ]
+            bank_row_ids = [
+                row_id
+                for index, row_id in enumerate(row_ids)
+                if (row_types[index] if index < len(row_types) else "") == "bank"
+            ]
+            if not oa_row_ids or not bank_row_ids:
+                continue
+            try:
+                bank_rows = self._resolve_live_rows_direct(bank_row_ids, month_hint="all")
+            except KeyError:
+                continue
+            if any(self._row_is_on_or_after(row, cutoff_date, row_type="bank") for row in bank_rows):
+                retained_row_ids.update(oa_row_ids)
+        return sorted(retained_row_ids)
+
+    def _raw_oa_payload_for_selected_scope(
+        self,
+        *,
+        months: set[str],
+        supplemental_oa_row_ids: set[str],
+    ) -> dict[str, object]:
+        paired: dict[str, list[dict[str, object]]] = {"oa": [], "bank": [], "invoice": []}
+        open_rows: dict[str, list[dict[str, object]]] = {"oa": [], "bank": [], "invoice": []}
+
+        for row in self._workbench_query_service._records_by_id.values():
+            row_type = str(row.get("type", "")).strip()
+            row_month = str(row.get("_month", "")).strip()
+            include_row = False
+            if row_type == "oa":
+                include_row = row_month in months or str(row.get("id", "")) in supplemental_oa_row_ids
+            elif row_type == "invoice" and str(row.get("source_kind", "")) == "oa_attachment_invoice":
+                include_row = row_month in months or str(row.get("derived_from_oa_id", "")) in supplemental_oa_row_ids
+            if not include_row:
+                continue
+            section_payload = paired if row.get("_section") == "paired" else open_rows
+            section_payload[row_type].append(self._workbench_query_service.serialize_row(row))
+
+        month_rows = [*paired["oa"], *open_rows["oa"], *paired["invoice"], *open_rows["invoice"]]
+        return {
+            "month": "all",
+            "oa_status": self._workbench_query_service.oa_status_payload(),
+            "summary": {
+                "oa_count": len(paired["oa"]) + len(open_rows["oa"]),
+                "bank_count": 0,
+                "invoice_count": len(paired["invoice"]) + len(open_rows["invoice"]),
+                "paired_count": len(paired["oa"]) + len(paired["invoice"]),
+                "open_count": len(open_rows["oa"]) + len(open_rows["invoice"]),
+                "exception_count": sum(
+                    1
+                    for row in month_rows
+                    if str(
+                        row.get("oa_bank_relation", row.get("invoice_bank_relation", {})).get("tone", "")
+                    )
+                    == "danger"
+                ),
+            },
+            "paired": paired,
+            "open": open_rows,
+        }
 
     @staticmethod
     def _merge_live_workbench_with_oa_rows(
@@ -2662,8 +3256,25 @@ class Application:
         oa_payload: dict[str, object],
     ) -> dict[str, object]:
         merged = Application._serialize_value(live_payload)
+        merged["oa_status"] = Application._serialize_value(oa_payload.get("oa_status") or {"code": "ready", "message": "OA 已同步"})
         merged["paired"]["oa"] = Application._serialize_value(oa_payload["paired"]["oa"])
         merged["open"]["oa"] = Application._serialize_value(oa_payload["open"]["oa"])
+        merged["paired"]["invoice"] = [
+            *Application._serialize_value(merged["paired"].get("invoice", [])),
+            *[
+                row
+                for row in Application._serialize_value(oa_payload["paired"].get("invoice", []))
+                if str(row.get("source_kind", "")) == "oa_attachment_invoice"
+            ],
+        ]
+        merged["open"]["invoice"] = [
+            *Application._serialize_value(merged["open"].get("invoice", [])),
+            *[
+                row
+                for row in Application._serialize_value(oa_payload["open"].get("invoice", []))
+                if str(row.get("source_kind", "")) == "oa_attachment_invoice"
+            ],
+        ]
         return merged
 
     @staticmethod
@@ -2681,12 +3292,183 @@ class Application:
         oa_rows = [row for row in [*list(paired.get("oa", [])), *list(open_rows.get("oa", []))] if not row.get("ignored")]
         bank_rows = [row for row in [*list(paired.get("bank", [])), *list(open_rows.get("bank", []))] if not row.get("ignored")]
         invoice_rows = [row for row in [*list(paired.get("invoice", [])), *list(open_rows.get("invoice", []))] if not row.get("ignored")]
-        return grouping_service.group_payload(
+        grouped = grouping_service.group_payload(
             str(payload.get("month", "")),
             oa_rows=oa_rows,
             bank_rows=bank_rows,
             invoice_rows=invoice_rows,
         )
+        oa_status = payload.get("oa_status")
+        if isinstance(oa_status, dict):
+            grouped["oa_status"] = Application._serialize_value(oa_status)
+        return grouped
+
+    def _can_use_cached_workbench_payload(self, payload: dict[str, object]) -> bool:
+        if not self._oa_status_is_ready_for_cache(payload):
+            return False
+        if self._cached_payload_needs_oa_invoice_offset_rebuild(payload):
+            return False
+        if isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter):
+            summary = payload.get("summary")
+            if isinstance(summary, dict):
+                try:
+                    return int(summary.get("oa_count", 0) or 0) > 0
+                except (TypeError, ValueError):
+                    return False
+        return True
+
+    def _can_persist_workbench_payload(self, payload: dict[str, object]) -> bool:
+        return self._oa_status_is_ready_for_cache(payload)
+
+    def _can_fallback_to_stale_workbench_payload(self, payload: dict[str, object]) -> bool:
+        return self._oa_status_is_ready_for_cache(payload)
+
+    def _oa_status_is_ready_for_cache(self, payload: dict[str, object]) -> bool:
+        oa_status = payload.get("oa_status")
+        if isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter):
+            return isinstance(oa_status, dict) and str(oa_status.get("code", "")).strip() == "ready"
+        return not isinstance(oa_status, dict) or str(oa_status.get("code", "")).strip() == "ready"
+
+    def _cached_payload_needs_oa_invoice_offset_rebuild(self, payload: dict[str, object]) -> bool:
+        applicant_names = {
+            str(name).strip()
+            for name in self._app_settings_service.get_oa_invoice_offset_applicant_names()
+            if str(name).strip()
+        }
+        if not applicant_names:
+            return False
+        for section in ("paired", "open"):
+            section_payload = payload.get(section, {})
+            if not isinstance(section_payload, dict):
+                continue
+            for group in list(section_payload.get("groups", [])):
+                if not isinstance(group, dict):
+                    continue
+                oa_rows = [row for row in list(group.get("oa_rows", [])) if isinstance(row, dict)]
+                invoice_rows = [row for row in list(group.get("invoice_rows", [])) if isinstance(row, dict)]
+                for oa_row in oa_rows:
+                    if str(oa_row.get("applicant", "")).strip() not in applicant_names:
+                        continue
+                    if not self._oa_attachment_invoice_rows_for_oa(oa_row, invoice_rows):
+                        continue
+                    if section == "open":
+                        return True
+                    for row in [*oa_rows, *invoice_rows]:
+                        tags = {str(tag).strip() for tag in list(row.get("tags") or []) if str(tag).strip()}
+                        if OA_INVOICE_OFFSET_TAG not in tags or not bool(row.get("cost_excluded")):
+                            return True
+        return False
+
+    def _apply_oa_retention_to_grouped_payload(self, payload: dict[str, object]) -> dict[str, object]:
+        cutoff_date = self._parse_oa_retention_date(self._app_settings_service.get_oa_retention_cutoff_date())
+        if cutoff_date is None:
+            return self._serialize_value(payload)
+
+        result = self._serialize_value(payload)
+        changed = False
+        for section in ("paired", "open"):
+            section_payload = result.setdefault(section, {})
+            original_groups = list(section_payload.get("groups", []))
+            filtered_groups: list[dict[str, object]] = []
+            for group in original_groups:
+                normalized_group = self._serialize_value(group)
+                oa_rows = list(normalized_group.get("oa_rows", []))
+                bank_rows = list(normalized_group.get("bank_rows", []))
+                invoice_rows = list(normalized_group.get("invoice_rows", []))
+                keep_all_group_oa = any(self._row_is_on_or_after(row, cutoff_date, row_type="oa") for row in oa_rows) or any(
+                    self._row_is_on_or_after(row, cutoff_date, row_type="bank") for row in bank_rows
+                )
+                retained_oa_rows = [
+                    row
+                    for row in oa_rows
+                    if keep_all_group_oa or not self._row_has_parseable_retention_date(row, row_type="oa")
+                ]
+                if len(retained_oa_rows) != len(oa_rows):
+                    changed = True
+                normalized_group["oa_rows"] = retained_oa_rows
+                normalized_group["bank_rows"] = bank_rows
+                normalized_group["invoice_rows"] = invoice_rows
+                if normalized_group["oa_rows"] or normalized_group["bank_rows"] or normalized_group["invoice_rows"]:
+                    filtered_groups.append(normalized_group)
+            if len(filtered_groups) != len(original_groups):
+                changed = True
+            section_payload["groups"] = filtered_groups
+        if changed:
+            result["summary"] = self._workbench_grouped_summary(result)
+        return result
+
+    @classmethod
+    def _row_is_on_or_after(cls, row: dict[str, object], cutoff_date: datetime, *, row_type: str) -> bool:
+        for value in cls._row_date_candidates(row, row_type=row_type):
+            parsed = cls._parse_oa_retention_date(value)
+            if parsed is not None and parsed >= cutoff_date:
+                return True
+        return False
+
+    @classmethod
+    def _row_has_parseable_retention_date(cls, row: dict[str, object], *, row_type: str) -> bool:
+        return any(cls._parse_oa_retention_date(value) is not None for value in cls._row_date_candidates(row, row_type=row_type))
+
+    @staticmethod
+    def _row_date_candidates(row: dict[str, object], *, row_type: str) -> list[object]:
+        candidates: list[object] = []
+        if row_type == "oa":
+            candidates.extend([row.get("application_date"), row.get("apply_date")])
+            for fields_key in ("summary_fields", "detail_fields"):
+                fields = row.get(fields_key)
+                if isinstance(fields, dict):
+                    candidates.extend(
+                        fields.get(key)
+                        for key in ("申请日期", "报销日期", "审批完成时间", "单据日期", "日期")
+                    )
+        elif row_type == "bank":
+            candidates.extend([row.get("trade_time"), row.get("pay_receive_time"), row.get("txn_date")])
+            fields = row.get("summary_fields")
+            if isinstance(fields, dict):
+                candidates.extend(fields.get(key) for key in ("交易时间", "支付/收款时间", "记账日期", "日期"))
+            detail_fields = row.get("detail_fields")
+            if isinstance(detail_fields, dict):
+                candidates.extend(detail_fields.get(key) for key in ("交易时间", "支付/收款时间", "记账日期", "日期"))
+        return candidates
+
+    @staticmethod
+    def _parse_oa_retention_date(value: object) -> datetime | None:
+        if value in (None, ""):
+            return None
+        text = str(value).strip()
+        if len(text) < 10:
+            return None
+        try:
+            return datetime.strptime(text[:10], "%Y-%m-%d")
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _workbench_grouped_summary(payload: dict[str, object]) -> dict[str, int]:
+        paired_groups = list(payload.get("paired", {}).get("groups", []))
+        open_groups = list(payload.get("open", {}).get("groups", []))
+        all_groups = [*paired_groups, *open_groups]
+        return {
+            "oa_count": sum(len(group.get("oa_rows", [])) for group in all_groups),
+            "bank_count": sum(len(group.get("bank_rows", [])) for group in all_groups),
+            "invoice_count": sum(len(group.get("invoice_rows", [])) for group in all_groups),
+            "paired_count": len(paired_groups),
+            "open_count": len(open_groups),
+            "exception_count": sum(1 for group in open_groups if Application._group_has_danger_relation(group)),
+        }
+
+    @staticmethod
+    def _group_has_danger_relation(group: dict[str, object]) -> bool:
+        for key, relation_key in (
+            ("oa_rows", "oa_bank_relation"),
+            ("bank_rows", "invoice_relation"),
+            ("invoice_rows", "invoice_bank_relation"),
+        ):
+            for row in group.get(key, []):
+                relation = row.get(relation_key) if isinstance(row, dict) else None
+                if isinstance(relation, dict) and str(relation.get("tone", "")) == "danger":
+                    return True
+        return False
 
     def _apply_pair_relations_to_payload(self, payload: dict[str, object]) -> dict[str, object]:
         result = self._serialize_value(payload)
@@ -2709,14 +3491,163 @@ class Application:
             open_section[row_type] = patched_open_rows
         return result
 
+    def _sync_oa_invoice_offset_auto_pair_relations(self, payload: dict[str, object]) -> None:
+        desired_relations = self._oa_invoice_offset_desired_relations(payload)
+        scanned_row_ids = self._raw_workbench_payload_row_ids(payload)
+        active_auto_relations = {
+            str(relation.get("case_id")): relation
+            for relation in self._workbench_pair_relation_service.list_active_relations()
+            if str(relation.get("relation_mode")) == OA_INVOICE_OFFSET_AUTO_MATCH_MODE
+        }
+        changed = False
+        changed_case_ids: list[str] = []
+        changed_scope_keys: set[str] = {"all"}
+
+        for case_id, desired_relation in desired_relations.items():
+            existing_relation = active_auto_relations.get(case_id)
+            if (
+                isinstance(existing_relation, dict)
+                and list(existing_relation.get("row_ids") or []) == desired_relation["row_ids"]
+                and str(existing_relation.get("relation_mode")) == OA_INVOICE_OFFSET_AUTO_MATCH_MODE
+                and str(existing_relation.get("month_scope")) == str(desired_relation["month_scope"])
+                and str(existing_relation.get("status")) == "active"
+            ):
+                continue
+            self._workbench_pair_relation_service.create_active_relation(
+                case_id=case_id,
+                row_ids=list(desired_relation["row_ids"]),
+                row_types=list(desired_relation["row_types"]),
+                relation_mode=OA_INVOICE_OFFSET_AUTO_MATCH_MODE,
+                created_by="system_auto_match",
+                month_scope=str(desired_relation["month_scope"]),
+            )
+            changed = True
+            changed_case_ids.append(case_id)
+            if str(desired_relation["month_scope"]) != "all":
+                changed_scope_keys.add(str(desired_relation["month_scope"]))
+
+        for case_id in sorted(set(active_auto_relations).difference(desired_relations)):
+            relation_row_ids = {str(row_id) for row_id in list(active_auto_relations[case_id].get("row_ids") or [])}
+            if not scanned_row_ids or not relation_row_ids.intersection(scanned_row_ids):
+                continue
+            self._workbench_pair_relation_service.cancel_relation(case_id)
+            changed = True
+            changed_case_ids.append(case_id)
+            month_scope = str(active_auto_relations[case_id].get("month_scope", ""))
+            if month_scope and month_scope != "all":
+                changed_scope_keys.add(month_scope)
+
+        if not changed:
+            return
+        self._search_service.clear_cache()
+        self._invalidate_workbench_read_model_scopes(list(changed_scope_keys))
+        self._persist_workbench_pair_relations(changed_case_ids=changed_case_ids)
+
+    @staticmethod
+    def _raw_workbench_payload_row_ids(payload: dict[str, object]) -> set[str]:
+        row_ids: set[str] = set()
+        for section in ("paired", "open"):
+            section_payload = payload.get(section, {})
+            if not isinstance(section_payload, dict):
+                continue
+            for pane in ("oa", "bank", "invoice"):
+                for row in list(section_payload.get(pane, [])):
+                    if isinstance(row, dict) and str(row.get("id", "")).strip():
+                        row_ids.add(str(row.get("id", "")).strip())
+        return row_ids
+
+    def _oa_invoice_offset_desired_relations(self, payload: dict[str, object]) -> dict[str, dict[str, object]]:
+        applicant_names = {
+            str(name).strip()
+            for name in self._app_settings_service.get_oa_invoice_offset_applicant_names()
+            if str(name).strip()
+        }
+        if not applicant_names:
+            return {}
+
+        oa_rows: list[dict[str, object]] = []
+        invoice_rows: list[dict[str, object]] = []
+        for section in ("paired", "open"):
+            section_payload = payload.get(section, {})
+            if not isinstance(section_payload, dict):
+                continue
+            oa_rows.extend(
+                self._serialize_value(row)
+                for row in list(section_payload.get("oa", []))
+                if isinstance(row, dict)
+            )
+            invoice_rows.extend(
+                self._serialize_value(row)
+                for row in list(section_payload.get("invoice", []))
+                if isinstance(row, dict)
+            )
+
+        desired_relations: dict[str, dict[str, object]] = {}
+        for oa_row in oa_rows:
+            if str(oa_row.get("applicant", "")).strip() not in applicant_names:
+                continue
+            attachment_invoice_rows = self._oa_attachment_invoice_rows_for_oa(oa_row, invoice_rows)
+            if not attachment_invoice_rows:
+                continue
+            row_ids = [
+                str(oa_row.get("id", "")).strip(),
+                *[
+                    str(invoice_row.get("id", "")).strip()
+                    for invoice_row in attachment_invoice_rows
+                    if str(invoice_row.get("id", "")).strip()
+                ],
+            ]
+            row_ids = [row_id for row_id in row_ids if row_id]
+            if len(row_ids) < 2 or self._auto_pair_conflicts_with_manual_relation(row_ids):
+                continue
+            case_id = str(oa_row.get("case_id") or f"CASE-OA-OFFSET-{row_ids[0]}").strip()
+            month_scope = self._month_scope_for_oa_invoice_offset_relation([oa_row, *attachment_invoice_rows])
+            desired_relations[case_id] = {
+                "case_id": case_id,
+                "row_ids": row_ids,
+                "row_types": ["oa", *(["invoice"] * (len(row_ids) - 1))],
+                "month_scope": month_scope,
+            }
+        return desired_relations
+
+    @staticmethod
+    def _oa_attachment_invoice_rows_for_oa(
+        oa_row: dict[str, object],
+        invoice_rows: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        oa_row_id = str(oa_row.get("id", "")).strip()
+        case_id = str(oa_row.get("case_id", "")).strip()
+        matches: list[dict[str, object]] = []
+        for invoice_row in invoice_rows:
+            if str(invoice_row.get("source_kind", "")) != "oa_attachment_invoice":
+                continue
+            derived_from_oa_id = str(invoice_row.get("derived_from_oa_id", "")).strip()
+            invoice_case_id = str(invoice_row.get("case_id", "")).strip()
+            if derived_from_oa_id == oa_row_id or (case_id and invoice_case_id == case_id):
+                matches.append(invoice_row)
+        return matches
+
+    def _month_scope_for_oa_invoice_offset_relation(self, rows: list[dict[str, object]]) -> str:
+        row_months = {self._row_month_scope(row) for row in rows}
+        normalized_months = {month for month in row_months if month}
+        if len(normalized_months) == 1:
+            return next(iter(normalized_months))
+        return "all"
+
     def _apply_pair_relation_to_row(self, row: dict[str, object], relation: dict[str, object]) -> dict[str, object]:
         payload = self._serialize_value(row)
         payload["case_id"] = str(relation.get("case_id", ""))
         relation_field = self._workbench_override_service.relation_field_name(str(payload["type"]))
-        linked_relation = self._pair_relation_display_payload(relation_mode=str(relation.get("relation_mode", "")))
+        relation_mode = str(relation.get("relation_mode", ""))
+        linked_relation = self._pair_relation_display_payload(
+            relation_mode=relation_mode,
+            row_type=str(payload.get("type", "")),
+        )
         payload[relation_field] = self._serialize_value(linked_relation)
         self._workbench_override_service._sync_summary_relation(payload, str(linked_relation.get("label", "")))
-        if str(relation.get("relation_mode")) == "internal_transfer_pair" and str(payload.get("type")) == "bank":
+        if relation_mode == OA_INVOICE_OFFSET_AUTO_MATCH_MODE:
+            self._apply_oa_invoice_offset_pair_metadata(payload)
+        if relation_mode == "internal_transfer_pair" and str(payload.get("type")) == "bank":
             self._apply_internal_transfer_pair_metadata(payload, relation)
         payload["available_actions"] = ["detail"]
         payload["handled_exception"] = False
@@ -2752,6 +3683,21 @@ class Application:
             if row_month:
                 scope_keys.add(row_month)
         return scope_keys
+
+    def _scope_keys_for_rows(
+        self,
+        *,
+        month: str,
+        rows: list[dict[str, object]],
+    ) -> list[str]:
+        scope_keys = {"all"}
+        if month and month != "all":
+            scope_keys.add(month)
+        for row in rows:
+            row_month = self._row_month_scope(row)
+            if row_month:
+                scope_keys.add(row_month)
+        return list(scope_keys)
 
     @staticmethod
     def _row_month_scope_from_row_id(row_id: str) -> str | None:
@@ -2831,8 +3777,8 @@ class Application:
                         return group
         return None
 
-    def _resolve_live_row_direct(self, row_id: str) -> dict[str, object]:
-        return self._resolve_live_rows_direct([row_id])[0]
+    def _resolve_live_row_direct(self, row_id: str, *, month_hint: str | None = None) -> dict[str, object]:
+        return self._resolve_live_rows_direct([row_id], month_hint=month_hint)[0]
 
     @staticmethod
     def _normalize_row_ids(row_ids: list[object]) -> list[str]:
@@ -2876,14 +3822,60 @@ class Application:
             return next(iter(row_months))
         return "all"
 
-    def _resolve_live_rows_direct(self, row_ids: list[str]) -> list[dict[str, object]]:
-        normalized_row_ids = [str(row_id) for row_id in row_ids]
+    def _resolve_rows_from_cached_read_models(
+        self,
+        row_ids: list[str],
+        *,
+        month_hint: str | None = None,
+    ) -> dict[str, dict[str, object]]:
+        normalized_month_hint = str(month_hint).strip() if month_hint not in (None, "") else None
+        scope_keys: list[str] = []
+        if normalized_month_hint:
+            scope_keys.append(normalized_month_hint)
+        if normalized_month_hint != "all":
+            scope_keys.append("all")
+        if normalized_month_hint is None:
+            scope_keys.extend(self._workbench_read_model_service.list_scope_keys())
+
         resolved_rows: dict[str, dict[str, object]] = {}
+        seen_scope_keys: set[str] = set()
+        for scope_key in scope_keys:
+            if not scope_key or scope_key in seen_scope_keys:
+                continue
+            seen_scope_keys.add(scope_key)
+            read_model = self._workbench_read_model_service.get_read_model(scope_key)
+            if not isinstance(read_model, dict):
+                continue
+            payload = read_model.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            rows_by_id = self._grouped_rows_by_id(payload)
+            for row_id in row_ids:
+                if row_id in resolved_rows:
+                    continue
+                row = rows_by_id.get(row_id)
+                if row is not None:
+                    resolved_rows[row_id] = self._serialize_value(row)
+        return resolved_rows
+
+    def _resolve_live_rows_direct(self, row_ids: list[str], *, month_hint: str | None = None) -> list[dict[str, object]]:
+        normalized_row_ids = [str(row_id) for row_id in row_ids]
+        resolved_rows = self._resolve_rows_from_cached_read_models(normalized_row_ids, month_hint=month_hint)
         unresolved_live_row_ids: list[str] = []
 
         for row_id in normalized_row_ids:
+            if row_id in resolved_rows:
+                continue
+            if (
+                not self._workbench_query_service._looks_like_oa_row_id(row_id)
+                and row_id not in self._workbench_query_service._records_by_id
+            ):
+                unresolved_live_row_ids.append(row_id)
+                continue
             try:
-                oa_row = self._workbench_query_service.serialize_row(self._workbench_query_service.get_row_record(row_id))
+                oa_row = self._workbench_query_service.serialize_row(
+                    self._workbench_query_service.get_row_record(row_id, month_hint=month_hint)
+                )
                 pair_relation = self._workbench_pair_relation_service.get_active_relation_by_row_id(row_id)
                 paired_row = self._apply_pair_relation_to_row(oa_row, pair_relation) if isinstance(pair_relation, dict) else oa_row
                 resolved_rows[row_id] = self._workbench_override_service.apply_to_row(paired_row)
@@ -3030,9 +4022,10 @@ class Application:
                     self._workbench_pair_relation_service.snapshot(),
                     changed_case_ids=changed_case_ids,
                 )
-                self._state_store.save_workbench_read_models(
-                    self._workbench_read_model_service.snapshot(),
+                self._persist_workbench_read_models_best_effort(
+                    snapshot=self._workbench_read_model_service.snapshot(),
                     changed_scope_keys=list(changed_scope_keys),
+                    operation="sync_live_auto_pair_relations",
                 )
 
     def _auto_pair_conflicts_with_manual_relation(self, row_ids: list[str]) -> bool:
@@ -3040,7 +4033,7 @@ class Application:
             active_relation = self._workbench_pair_relation_service.get_active_relation_by_row_id(row_id)
             if not isinstance(active_relation, dict):
                 continue
-            if str(active_relation.get("relation_mode")) not in {"salary_personal_auto_match", "internal_transfer_pair"}:
+            if str(active_relation.get("relation_mode")) not in SYSTEM_AUTO_PAIR_RELATION_MODES:
                 return True
         return False
 
@@ -3055,12 +4048,33 @@ class Application:
         return "all"
 
     @staticmethod
-    def _pair_relation_display_payload(*, relation_mode: str) -> dict[str, str]:
+    def _pair_relation_display_payload(*, relation_mode: str, row_type: str = "") -> dict[str, str]:
         if relation_mode == "internal_transfer_pair":
             return {"code": "internal_transfer_pair", "label": "已匹配：内部往来款", "tone": "success"}
         if relation_mode == "salary_personal_auto_match":
             return {"code": "salary_personal_auto_match", "label": "已匹配：工资", "tone": "success"}
+        if relation_mode == OA_INVOICE_OFFSET_AUTO_MATCH_MODE:
+            if row_type == "invoice":
+                return {"code": OA_INVOICE_OFFSET_AUTO_MATCH_MODE, "label": "已关联OA", "tone": "success"}
+            return {"code": OA_INVOICE_OFFSET_AUTO_MATCH_MODE, "label": "待找流水与发票", "tone": "warn"}
         return {"code": "fully_linked", "label": "完全关联", "tone": "success"}
+
+    @classmethod
+    def _apply_oa_invoice_offset_pair_metadata(cls, payload: dict[str, object]) -> None:
+        payload["cost_excluded"] = True
+        tags = [
+            str(tag).strip()
+            for tag in list(payload.get("tags") or [])
+            if str(tag).strip()
+        ]
+        if OA_INVOICE_OFFSET_TAG not in tags:
+            tags.append(OA_INVOICE_OFFSET_TAG)
+        payload["tags"] = tags
+        for fields_key in ("summary_fields", "detail_fields"):
+            fields = payload.get(fields_key)
+            if isinstance(fields, dict):
+                fields["冲账标记"] = OA_INVOICE_OFFSET_TAG
+                fields["成本统计"] = "不计入"
 
     def _apply_internal_transfer_pair_metadata(self, payload: dict[str, object], relation: dict[str, object]) -> None:
         row_id = str(payload.get("id", ""))

@@ -15,7 +15,8 @@ ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
 SINGLE_BANK_AUTO_PAIRED_CODES = {"salary_personal_auto_match"}
 MULTI_BANK_AUTO_PAIRED_CODES = {"internal_transfer_pair"}
-AUTO_PAIRED_CODES = {*SINGLE_BANK_AUTO_PAIRED_CODES, *MULTI_BANK_AUTO_PAIRED_CODES}
+OA_INVOICE_AUTO_PAIRED_CODES = {"oa_invoice_offset_auto_match"}
+AUTO_PAIRED_CODES = {*SINGLE_BANK_AUTO_PAIRED_CODES, *MULTI_BANK_AUTO_PAIRED_CODES, *OA_INVOICE_AUTO_PAIRED_CODES}
 
 
 @dataclass(slots=True)
@@ -76,8 +77,9 @@ class WorkbenchCandidateGroupingService:
         remaining_rows = self._attach_unique_rows_to_existing_groups(unattached_open_rows, target_groups_by_temp_key)
 
         standalone_temp_groups = self._build_temp_groups(remaining_rows)
+        merged_open_case_groups = self._merge_open_case_groups(list(open_case_groups.values()))
         promoted_open_case_groups, candidate_open_case_groups = self._split_promoted_and_candidate_groups(
-            list(open_case_groups.values())
+            merged_open_case_groups
         )
         promoted_groups, candidate_groups = self._split_promoted_and_candidate_groups(standalone_temp_groups)
 
@@ -137,7 +139,7 @@ class WorkbenchCandidateGroupingService:
             group.append(row)
             if group.temp_key is None:
                 group.temp_key = temp_key
-            elif temp_key is not None and group.temp_key != temp_key:
+            elif temp_key is not None and group.temp_key != temp_key and not self._is_oa_attachment_invoice_row(row):
                 group.temp_key = None
             group.group_type = self._group_type_for_existing_paired_rows(
                 [*group.oa_rows, *group.bank_rows, *group.invoice_rows],
@@ -170,7 +172,7 @@ class WorkbenchCandidateGroupingService:
             group.append(row)
             if group.temp_key is None:
                 group.temp_key = temp_key
-            elif temp_key is not None and group.temp_key != temp_key:
+            elif temp_key is not None and group.temp_key != temp_key and not self._is_oa_attachment_invoice_row(row):
                 group.temp_key = None
         return groups, unattached
 
@@ -252,6 +254,34 @@ class WorkbenchCandidateGroupingService:
             merged = next_groups
         return merged
 
+    def _merge_open_case_groups(self, groups: list[CandidateGroup]) -> list[CandidateGroup]:
+        merged = list(groups)
+        changed = True
+        while changed:
+            changed = False
+            next_groups: list[CandidateGroup] = []
+            while merged:
+                current = merged.pop(0)
+                match_indexes = [
+                    index
+                    for index, candidate in enumerate(merged)
+                    if self._should_merge_open_case_groups(current, candidate)
+                ]
+                if len(match_indexes) == 1:
+                    match_group = merged.pop(match_indexes[0])
+                    self._absorb_group(current, match_group)
+                    current.match_confidence = "medium"
+                    current.reason = "attachment_case_candidate_group"
+                    changed = True
+                next_groups.append(current)
+            merged = next_groups
+        return merged
+
+    def _should_merge_open_case_groups(self, left: CandidateGroup, right: CandidateGroup) -> bool:
+        if not (self._attachment_group_primary_row(left) or self._attachment_group_primary_row(right)):
+            return False
+        return self._should_merge_candidate_groups(left, right)
+
     def _should_merge_candidate_groups(self, left: CandidateGroup, right: CandidateGroup) -> bool:
         left_counterparty = self._group_counterparty(left)
         right_counterparty = self._group_counterparty(right)
@@ -304,6 +334,12 @@ class WorkbenchCandidateGroupingService:
         return promoted, candidates
 
     def _qualifies_for_auto_close(self, group: CandidateGroup) -> bool:
+        rows = [*group.oa_rows, *group.bank_rows, *group.invoice_rows]
+        if any(bool(row.get("handled_exception")) or bool(row.get("auto_close_suppressed")) for row in rows):
+            return False
+        if self._qualifies_for_attachment_invoice_auto_close(group):
+            return True
+
         total_count = len(group.oa_rows) + len(group.bank_rows) + len(group.invoice_rows)
         if total_count < 2:
             return False
@@ -315,8 +351,29 @@ class WorkbenchCandidateGroupingService:
             return False
         if group.invoice_rows and self._direction(group.invoice_rows[0]) != self._direction(group.bank_rows[0]):
             return False
-        amounts = {self._amount(row) for row in [*group.oa_rows, *group.bank_rows, *group.invoice_rows]}
+        amounts = {self._amount(row) for row in rows}
         return len(amounts) == 1 and None not in amounts
+
+    def _qualifies_for_attachment_invoice_auto_close(self, group: CandidateGroup) -> bool:
+        if len(group.oa_rows) != 1 or len(group.bank_rows) != 1 or not group.invoice_rows:
+            return False
+        if not all(self._is_oa_attachment_invoice_row(row) for row in group.invoice_rows):
+            return False
+        bank_direction = self._direction(group.bank_rows[0])
+        oa_direction = self._direction(group.oa_rows[0])
+        if bank_direction is None or bank_direction != oa_direction:
+            return False
+        if any(self._direction(row) != bank_direction for row in group.invoice_rows):
+            return False
+
+        oa_amount = self._amount(group.oa_rows[0])
+        bank_amount = self._amount(group.bank_rows[0])
+        invoice_amounts = [self._amount(row) for row in group.invoice_rows]
+        if oa_amount is None or bank_amount is None or oa_amount != bank_amount:
+            return False
+        if any(amount is None for amount in invoice_amounts):
+            return False
+        return sum(invoice_amounts, ZERO) == oa_amount
 
     def _group_has_danger(self, group: CandidateGroup) -> bool:
         return any(self._relation_tone(row) == "danger" for row in [*group.oa_rows, *group.bank_rows, *group.invoice_rows])
@@ -347,6 +404,8 @@ class WorkbenchCandidateGroupingService:
         row_type = str(row["type"])
         original_relation = self._relation_payload(row)
         original_code = str(original_relation.get("code", ""))
+        if original_code in OA_INVOICE_AUTO_PAIRED_CODES:
+            return deepcopy(original_relation)
         if group_kind == "oa_bank_invoice":
             return {"code": "fully_linked", "label": "完全关联", "tone": "success"}
         if group_kind == "oa_bank":
@@ -399,6 +458,11 @@ class WorkbenchCandidateGroupingService:
         return row_type_count >= 2
 
     def _group_counterparty(self, group: CandidateGroup) -> str | None:
+        attachment_primary_row = self._attachment_group_primary_row(group)
+        if attachment_primary_row is not None:
+            counterparty = self._counterparty(attachment_primary_row)
+            if counterparty is not None:
+                return counterparty
         counterparties = {
             counterparty
             for counterparty in (self._counterparty(row) for row in [*group.oa_rows, *group.bank_rows, *group.invoice_rows])
@@ -419,6 +483,11 @@ class WorkbenchCandidateGroupingService:
         return next(iter(directions))
 
     def _group_total_amount(self, group: CandidateGroup) -> Decimal | None:
+        attachment_primary_row = self._attachment_group_primary_row(group)
+        if attachment_primary_row is not None and not group.bank_rows:
+            primary_amount = self._amount(attachment_primary_row)
+            if primary_amount is not None:
+                return primary_amount
         amounts = [amount for amount in (self._amount(row) for row in [*group.oa_rows, *group.bank_rows, *group.invoice_rows]) if amount is not None]
         if not amounts:
             return None
@@ -587,3 +656,14 @@ class WorkbenchCandidateGroupingService:
 
     def _next_temp_group_id(self) -> str:
         return f"temp:{next(self._group_counter):04d}"
+
+    @staticmethod
+    def _is_oa_attachment_invoice_row(row: dict[str, Any]) -> bool:
+        return str(row.get("source_kind", "")) == "oa_attachment_invoice"
+
+    def _attachment_group_primary_row(self, group: CandidateGroup) -> dict[str, Any] | None:
+        if len(group.oa_rows) != 1 or group.bank_rows:
+            return None
+        if not group.invoice_rows or not all(self._is_oa_attachment_invoice_row(row) for row in group.invoice_rows):
+            return None
+        return group.oa_rows[0]

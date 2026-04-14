@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import ActionStatusModal from "../components/workbench/ActionStatusModal";
 import CancelProcessedExceptionModal from "../components/workbench/CancelProcessedExceptionModal";
@@ -7,6 +6,7 @@ import DetailDrawer from "../components/workbench/DetailDrawer";
 import IgnoredItemsModal from "../components/workbench/IgnoredItemsModal";
 import OaBankExceptionModal from "../components/workbench/OaBankExceptionModal";
 import ProcessedExceptionsModal from "../components/workbench/ProcessedExceptionsModal";
+import WorkbenchImportModal, { type WorkbenchImportMode } from "../components/workbench/WorkbenchImportModal";
 import WorkbenchSearchBox from "../components/workbench/WorkbenchSearchBox";
 import WorkbenchSearchModal from "../components/workbench/WorkbenchSearchModal";
 import WorkbenchSettingsModal from "../components/workbench/WorkbenchSettingsModal";
@@ -24,6 +24,7 @@ import {
   fetchWorkbenchWithProgress,
   ignoreWorkbenchRow,
   markWorkbenchException,
+  resetWorkbenchSettingsData,
   saveWorkbenchSettings,
   submitOaBankException,
   unignoreWorkbenchRow,
@@ -33,11 +34,20 @@ import {
   buildWorkbenchPaneRows,
   createEmptyWorkbenchZoneDisplayState,
   resolveWorkbenchActivePane,
+  type WorkbenchPaneTimeFilter,
   type WorkbenchZoneDisplayState,
 } from "../features/workbench/groupDisplayModel";
 import { reorderWorkbenchColumnLayout, type WorkbenchColumnDropPosition } from "../features/workbench/columnLayout";
 import { buildOaBankExceptionOptions } from "../features/workbench/oaBankExceptionOptions";
-import type { IgnoredWorkbenchData, WorkbenchCandidateGroup, WorkbenchData, WorkbenchRecord, WorkbenchSettings } from "../features/workbench/types";
+import type {
+  IgnoredWorkbenchData,
+  WorkbenchCandidateGroup,
+  WorkbenchData,
+  WorkbenchRecord,
+  WorkbenchSettings,
+  WorkbenchSettingsDataResetAction,
+  WorkbenchSettingsDataResetResult,
+} from "../features/workbench/types";
 import { createEmptySearchResponse, fetchWorkbenchSearch } from "../features/search/api";
 import type {
   WorkbenchSearchJumpTarget,
@@ -49,6 +59,7 @@ import type {
 import { useMonth } from "../contexts/MonthContext";
 import useWorkbenchSelection from "../hooks/useWorkbenchSelection";
 import type { WorkbenchInlineAction } from "../components/workbench/RowActions";
+import type { ImportSessionPayload } from "../features/imports/types";
 
 type ActionDialogState = {
   phase: "loading" | "result";
@@ -112,7 +123,6 @@ const READONLY_ACTION_MESSAGE = "当前账号仅支持查看和导出，不能�
 const WORKBENCH_VIEW_MONTH = "all";
 
 export default function ReconciliationWorkbenchPage() {
-  const navigate = useNavigate();
   const { currentMonth } = useMonth();
   const { setWorkbenchStatusText } = useAppChrome();
   const { canMutateData, canAdminAccess } = useSessionPermissions();
@@ -150,6 +160,7 @@ export default function ReconciliationWorkbenchPage() {
   const [ignoredData, setIgnoredData] = useState<IgnoredWorkbenchData>({ month: WORKBENCH_VIEW_MONTH, rows: [] });
   const [workbenchSettings, setWorkbenchSettings] = useState<WorkbenchSettings | null>(null);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const [importModalMode, setImportModalMode] = useState<WorkbenchImportMode | null>(null);
   const [isSettingsSaving, setIsSettingsSaving] = useState(false);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -171,6 +182,8 @@ export default function ReconciliationWorkbenchPage() {
   const [pairedDisplayState, setPairedDisplayState] = useState(createEmptyWorkbenchZoneDisplayState);
   const [openDisplayState, setOpenDisplayState] = useState(createEmptyWorkbenchZoneDisplayState);
   const columnLayoutSaveRequestIdRef = useRef(0);
+  const deferredPairedDisplayState = useDeferredValue(pairedDisplayState);
+  const deferredOpenDisplayState = useDeferredValue(openDisplayState);
 
   const updateZoneDisplayState = useCallback((
     zoneId: "paired" | "open",
@@ -184,10 +197,61 @@ export default function ReconciliationWorkbenchPage() {
   }, []);
 
   const handleTogglePaneSearch = useCallback((zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => {
-    updateZoneDisplayState(zoneId, (current) => ({
-      ...current,
-      openSearchPaneId: current.openSearchPaneId === paneId ? null : paneId,
-    }));
+    updateZoneDisplayState(zoneId, (current) => {
+      const isOpen = current.openSearchPaneId === paneId;
+      const nextState: WorkbenchZoneDisplayState = {
+        ...current,
+        openSearchPaneId: isOpen ? null : paneId,
+        draftSearchQueryByPane: {
+          ...current.draftSearchQueryByPane,
+          [paneId]: isOpen ? current.draftSearchQueryByPane[paneId] : current.searchQueryByPane[paneId],
+        },
+      };
+      return {
+        ...nextState,
+        activePaneId: resolveWorkbenchActivePane(nextState, paneId),
+      };
+    });
+  }, [updateZoneDisplayState]);
+
+  const handleClosePaneSearch = useCallback((zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => {
+    updateZoneDisplayState(zoneId, (current) => {
+      if (current.openSearchPaneId !== paneId) {
+        return current;
+      }
+      const nextState: WorkbenchZoneDisplayState = {
+        ...current,
+        openSearchPaneId: null,
+        draftSearchQueryByPane: {
+          ...current.draftSearchQueryByPane,
+          [paneId]: current.searchQueryByPane[paneId],
+        },
+      };
+      return {
+        ...nextState,
+        activePaneId: resolveWorkbenchActivePane(nextState, paneId),
+      };
+    });
+  }, [updateZoneDisplayState]);
+
+  const handleClearPaneSearch = useCallback((zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => {
+    updateZoneDisplayState(zoneId, (current) => {
+      const nextState: WorkbenchZoneDisplayState = {
+        ...current,
+        draftSearchQueryByPane: {
+          ...current.draftSearchQueryByPane,
+          [paneId]: "",
+        },
+        searchQueryByPane: {
+          ...current.searchQueryByPane,
+          [paneId]: "",
+        },
+      };
+      return {
+        ...nextState,
+        activePaneId: resolveWorkbenchActivePane(nextState),
+      };
+    });
   }, [updateZoneDisplayState]);
 
   const handlePaneSearchQueryChange = useCallback(
@@ -195,6 +259,10 @@ export default function ReconciliationWorkbenchPage() {
       updateZoneDisplayState(zoneId, (current) => {
         const nextState: WorkbenchZoneDisplayState = {
           ...current,
+          draftSearchQueryByPane: {
+            ...current.draftSearchQueryByPane,
+            [paneId]: query,
+          },
           searchQueryByPane: {
             ...current.searchQueryByPane,
             [paneId]: query,
@@ -261,6 +329,29 @@ export default function ReconciliationWorkbenchPage() {
     [updateZoneDisplayState],
   );
 
+  const handlePaneTimeFilterChange = useCallback(
+    (
+      zoneId: "paired" | "open",
+      paneId: "oa" | "bank" | "invoice",
+      filter: WorkbenchPaneTimeFilter,
+    ) => {
+      updateZoneDisplayState(zoneId, (current) => {
+        const nextState: WorkbenchZoneDisplayState = {
+          ...current,
+          timeFilterByPane: {
+            ...current.timeFilterByPane,
+            [paneId]: filter,
+          },
+        };
+        return {
+          ...nextState,
+          activePaneId: resolveWorkbenchActivePane(nextState, paneId),
+        };
+      });
+    },
+    [updateZoneDisplayState],
+  );
+
   const handleReorderPaneColumns = useCallback((
     paneId: "oa" | "bank" | "invoice",
     activeKey: string,
@@ -289,6 +380,8 @@ export default function ReconciliationWorkbenchPage() {
         readonlyExportUsernames: nextSettings.accessControl.readonlyExportUsernames,
         adminUsernames: nextSettings.accessControl.adminUsernames,
         workbenchColumnLayouts: nextLayouts,
+        oaRetention: nextSettings.oaRetention,
+        oaInvoiceOffset: nextSettings.oaInvoiceOffset,
       }).then((saved) => {
         if (columnLayoutSaveRequestIdRef.current === requestId) {
           setWorkbenchSettings(saved);
@@ -309,6 +402,14 @@ export default function ReconciliationWorkbenchPage() {
 
   const applyLocalCancelLink = useCallback((rowIds: string[]) => {
     setWorkbenchData((current) => (current ? updateWorkbenchAfterCancelLink(current, rowIds) : current));
+  }, []);
+
+  const applyLocalHandledException = useCallback((rowIds: string[], exceptionCode: string, label: string) => {
+    setWorkbenchData((current) => (current ? updateWorkbenchAfterHandledException(current, rowIds, exceptionCode, label) : current));
+  }, []);
+
+  const applyLocalCancelException = useCallback((rowIds: string[]) => {
+    setWorkbenchData((current) => (current ? updateWorkbenchAfterCancelException(current, rowIds) : current));
   }, []);
 
   const applyLocalIgnoreRow = useCallback((row: WorkbenchRecord) => {
@@ -353,7 +454,7 @@ export default function ReconciliationWorkbenchPage() {
       setIsLoading(true);
       setLoadError(null);
       setLoadProgress({
-        label: "正在加载关联台数据",
+        label: "读 OA 中",
         loadedBytes: 0,
         totalBytes: 0,
         percent: null,
@@ -417,8 +518,12 @@ export default function ReconciliationWorkbenchPage() {
       );
       return;
     }
+    if (workbenchData?.oaStatus?.message) {
+      setWorkbenchStatusText(workbenchData.oaStatus.message);
+      return;
+    }
     setWorkbenchStatusText(null);
-  }, [isLoading, isRefreshing, loadProgress.label, loadProgress.percent, setWorkbenchStatusText]);
+  }, [isLoading, isRefreshing, loadProgress.label, loadProgress.percent, setWorkbenchStatusText, workbenchData?.oaStatus?.message]);
 
   useEffect(() => () => setWorkbenchStatusText(null), [setWorkbenchStatusText]);
 
@@ -528,13 +633,18 @@ export default function ReconciliationWorkbenchPage() {
   );
 
   const displayPairedGroups = useMemo(
-    () => buildWorkbenchDisplayGroups(workbenchData?.paired.groups ?? [], pairedDisplayState),
-    [pairedDisplayState, workbenchData],
+    () => buildWorkbenchDisplayGroups(workbenchData?.paired.groups ?? [], deferredPairedDisplayState),
+    [deferredPairedDisplayState, workbenchData],
   );
 
   const displayOpenGroups = useMemo(
-    () => buildWorkbenchDisplayGroups(visibleOpenGroups, openDisplayState),
-    [openDisplayState, visibleOpenGroups],
+    () => buildWorkbenchDisplayGroups(visibleOpenGroups, deferredOpenDisplayState),
+    [deferredOpenDisplayState, visibleOpenGroups],
+  );
+
+  const importBankOptions = useMemo(
+    () => Array.from(new Set((workbenchSettings?.bankAccountMappings ?? []).map((item) => item.bankName.trim()).filter(Boolean))).sort(),
+    [workbenchSettings?.bankAccountMappings],
   );
 
   const searchProjectOptions = useMemo(() => {
@@ -756,6 +866,13 @@ export default function ReconciliationWorkbenchPage() {
     setSettingsModalOpen(true);
   };
 
+  const handleWorkbenchImportComplete = useCallback((payload: ImportSessionPayload) => {
+    const confirmedCount = payload.files.filter((file) => file.status === "confirmed").length;
+    setImportModalMode(null);
+    setLastActionMessage(`已导入 ${confirmedCount} 个文件，正在后台刷新关联台。`);
+    refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
+  }, [refreshWorkbenchDataInBackground]);
+
   const handleJumpToSearchResult = (jumpTarget: WorkbenchSearchJumpTarget) => {
     handleCloseDetail();
     setSearchModalOpen(false);
@@ -799,6 +916,8 @@ export default function ReconciliationWorkbenchPage() {
     readonlyExportUsernames: string[];
     adminUsernames: string[];
     workbenchColumnLayouts: WorkbenchSettings["workbenchColumnLayouts"];
+    oaRetention: WorkbenchSettings["oaRetention"];
+    oaInvoiceOffset: WorkbenchSettings["oaInvoiceOffset"];
   }) => {
     if (!canMutateData) {
       openActionResultDialog(READONLY_ACTION_MESSAGE);
@@ -816,6 +935,19 @@ export default function ReconciliationWorkbenchPage() {
     } finally {
       setIsSettingsSaving(false);
     }
+  };
+
+  const handleSettingsDataReset = async (payload: {
+    action: WorkbenchSettingsDataResetAction;
+    oaPassword: string;
+  }): Promise<WorkbenchSettingsDataResetResult> => {
+    if (!canAdminAccess) {
+      throw new Error("当前账号没有管理员权限，不能执行数据重置。");
+    }
+    const result = await resetWorkbenchSettingsData(payload);
+    await loadWorkbenchData(WORKBENCH_VIEW_MONTH);
+    setLastActionMessage(result.message);
+    return result;
   };
 
   const openActionResultDialog = useCallback((message: string, title = "操作提示") => {
@@ -930,7 +1062,11 @@ export default function ReconciliationWorkbenchPage() {
           comment,
         });
         clearOpenSelection();
-        refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
+        applyLocalHandledException(
+          rows.map((row) => row.id),
+          exceptionCode,
+          exceptionLabel,
+        );
         return result.message;
       },
     });
@@ -1056,8 +1192,10 @@ export default function ReconciliationWorkbenchPage() {
     openActionResultDialog,
     openCancelProcessedExceptionDialog,
     openOaBankExceptionDialog,
+    applyLocalCancelException,
     applyLocalCancelLink,
     applyLocalConfirmLink,
+    applyLocalHandledException,
     applyLocalIgnoreRow,
     refreshWorkbenchDataInBackground,
     runBlockingAction,
@@ -1246,7 +1384,7 @@ export default function ReconciliationWorkbenchPage() {
           rowIds: rows.map((row) => row.id),
           comment: "由已处理异常弹窗撤回异常处理",
         });
-        refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
+        applyLocalCancelException(rows.map((row) => row.id));
         return result.message;
       },
     });
@@ -1301,6 +1439,9 @@ export default function ReconciliationWorkbenchPage() {
   );
 
   const isEmpty = (workbenchData?.summary.totalCount ?? 0) === 0;
+  const oaStatus = workbenchData?.oaStatus ?? null;
+  const isOaReady = oaStatus?.code === "ready";
+  const oaStatusPanelMessage = oaStatus && !isOaReady ? `${oaStatus.message}，本次结果未包含完整 OA 数据。` : null;
   const isPairedVisible = expandedZoneId === null || expandedZoneId === "paired";
   const isOpenVisible = expandedZoneId === null || expandedZoneId === "open";
 
@@ -1316,6 +1457,8 @@ export default function ReconciliationWorkbenchPage() {
       onPrimarySelectionAction={handleCancelPairedSelection}
       primarySelectionActionDisabled={isPairedCancelSelectionDisabled || !canMutateData}
       onRowAction={handleRowAction}
+      onClearPaneSearch={handleClearPaneSearch}
+      onClosePaneSearch={handleClosePaneSearch}
       onSelectRow={handleSelectRow}
       onToggleExpand={togglePairedExpand}
       displayState={pairedDisplayState}
@@ -1323,6 +1466,7 @@ export default function ReconciliationWorkbenchPage() {
       onPaneSearchQueryChange={handlePaneSearchQueryChange}
       onTogglePaneSearch={handleTogglePaneSearch}
       onTogglePaneSort={handleTogglePaneSort}
+      onPaneTimeFilterChange={handlePaneTimeFilterChange}
       onReorderPaneColumns={handleReorderPaneColumns}
       columnLayouts={workbenchSettings?.workbenchColumnLayouts}
       groups={displayPairedGroups}
@@ -1350,6 +1494,8 @@ export default function ReconciliationWorkbenchPage() {
       onPrimarySelectionAction={handleConfirmOpenSelection}
       primarySelectionActionDisabled={isOpenConfirmSelectionDisabled || !canMutateData}
       onRowAction={handleRowAction}
+      onClearPaneSearch={handleClearPaneSearch}
+      onClosePaneSearch={handleClosePaneSearch}
       onSelectRow={handleSelectRow}
       onSecondarySelectionAction={handleOpenSelectionException}
       secondarySelectionActionDisabled={isOpenExceptionSelectionDisabled || !canMutateData}
@@ -1359,6 +1505,7 @@ export default function ReconciliationWorkbenchPage() {
       onPaneSearchQueryChange={handlePaneSearchQueryChange}
       onTogglePaneSearch={handleTogglePaneSearch}
       onTogglePaneSort={handleTogglePaneSort}
+      onPaneTimeFilterChange={handlePaneTimeFilterChange}
       onReorderPaneColumns={handleReorderPaneColumns}
       columnLayouts={workbenchSettings?.workbenchColumnLayouts}
       groups={displayOpenGroups}
@@ -1384,16 +1531,13 @@ export default function ReconciliationWorkbenchPage() {
             </button>
             {canMutateData ? (
               <>
-                <button className="secondary-button" type="button" onClick={() => navigate("/imports?intent=bank_transaction")}>
+                <button className="secondary-button" type="button" onClick={() => setImportModalMode("bank_transaction")}>
                   银行流水导入
                 </button>
-                <button className="secondary-button" type="button" onClick={() => navigate("/imports?intent=output_invoice")}>
-                  销项发票导入
+                <button className="secondary-button" type="button" onClick={() => setImportModalMode("invoice")}>
+                  发票导入
                 </button>
-                <button className="secondary-button" type="button" onClick={() => navigate("/imports?intent=input_invoice")}>
-                  进项发票导入
-                </button>
-                <button className="secondary-button" type="button" onClick={() => navigate("/imports?intent=etc_invoice")}>
+                <button className="secondary-button" type="button" onClick={() => setImportModalMode("etc_invoice")}>
                   ETC发票导入
                 </button>
               </>
@@ -1403,7 +1547,10 @@ export default function ReconciliationWorkbenchPage() {
         </div>
         {lastActionMessage ? <div className="action-feedback">{lastActionMessage}</div> : null}
         {loadError ? <div className="state-panel error">{loadError}</div> : null}
-        {!isLoading && !loadError && isEmpty ? (
+        {!loadError && oaStatusPanelMessage ? (
+          <div className={`state-panel${oaStatus?.code === "error" ? " error" : ""}`}>{oaStatusPanelMessage}</div>
+        ) : null}
+        {!isLoading && !loadError && isEmpty && isOaReady ? (
           <div className="state-panel">当前没有可展示的 OA / 银行流水 / 发票记录。</div>
         ) : null}
 
@@ -1430,7 +1577,16 @@ export default function ReconciliationWorkbenchPage() {
           isSaving={isSettingsSaving}
           settings={workbenchSettings}
           onClose={handleCloseSettingsModal}
+          onDataReset={handleSettingsDataReset}
           onSave={handleSaveSettings}
+        />
+      ) : null}
+      {importModalMode ? (
+        <WorkbenchImportModal
+          mode={importModalMode}
+          bankOptions={importBankOptions}
+          onClose={() => setImportModalMode(null)}
+          onImported={handleWorkbenchImportComplete}
         />
       ) : null}
       <DetailDrawer error={detailError} loading={isDetailLoading} row={detailRow} onClose={handleCloseDetail} />
@@ -1729,6 +1885,44 @@ function updateWorkbenchAfterCancelLink(data: WorkbenchData, rowIds: string[]) {
   });
 }
 
+function updateWorkbenchAfterHandledException(data: WorkbenchData, rowIds: string[], exceptionCode: string, label: string) {
+  const targetRowIds = new Set(rowIds);
+  const nextOpenGroups = data.open.groups.map((group) => ({
+    ...group,
+    rows: {
+      oa: group.rows.oa.map((row) => targetRowIds.has(row.id) ? updateWorkbenchRowForException(row, exceptionCode, label) : row),
+      bank: group.rows.bank.map((row) => targetRowIds.has(row.id) ? updateWorkbenchRowForException(row, exceptionCode, label) : row),
+      invoice: group.rows.invoice.map((row) => targetRowIds.has(row.id) ? updateWorkbenchRowForException(row, exceptionCode, label) : row),
+    },
+  }));
+
+  return rebuildWorkbenchSummary({
+    ...data,
+    open: {
+      groups: nextOpenGroups,
+    },
+  });
+}
+
+function updateWorkbenchAfterCancelException(data: WorkbenchData, rowIds: string[]) {
+  const targetRowIds = new Set(rowIds);
+  const nextOpenGroups = data.open.groups.map((group) => ({
+    ...group,
+    rows: {
+      oa: group.rows.oa.map((row) => targetRowIds.has(row.id) ? updateWorkbenchRowForOpen(row, pendingLabelForRow(row)) : row),
+      bank: group.rows.bank.map((row) => targetRowIds.has(row.id) ? updateWorkbenchRowForOpen(row, pendingLabelForRow(row)) : row),
+      invoice: group.rows.invoice.map((row) => targetRowIds.has(row.id) ? updateWorkbenchRowForOpen(row, pendingLabelForRow(row)) : row),
+    },
+  }));
+
+  return rebuildWorkbenchSummary({
+    ...data,
+    open: {
+      groups: nextOpenGroups,
+    },
+  });
+}
+
 function updateWorkbenchAfterIgnoreRow(data: WorkbenchData, rowId: string) {
   const nextOpenGroups = data.open.groups.flatMap((group) => {
     const nextGroup: WorkbenchCandidateGroup = {
@@ -1829,6 +2023,40 @@ function updateWorkbenchRowForLinked(row: WorkbenchRecord, caseId: string): Work
       invoiceRelationStatus: row.recordType === "bank" ? "完全关联" : row.tableValues.invoiceRelationStatus,
     },
   };
+}
+
+function updateWorkbenchRowForException(row: WorkbenchRecord, code: string, label: string): WorkbenchRecord {
+  const availableActions = row.recordType === "bank"
+    ? ["detail", "view_relation", "cancel_link", "handle_exception"]
+    : row.recordType === "invoice"
+      ? ["detail", "confirm_link", "mark_exception", "ignore"]
+      : ["detail", "confirm_link", "mark_exception"];
+
+  return {
+    ...row,
+    caseId: undefined,
+    status: label,
+    statusCode: code,
+    statusTone: "danger",
+    exceptionHandled: true,
+    availableActions,
+    actionVariant: row.recordType === "bank" ? "bank-review" : "confirm-exception",
+    tableValues: {
+      ...row.tableValues,
+      reconciliationStatus: row.recordType === "oa" ? label : row.tableValues.reconciliationStatus,
+      invoiceRelationStatus: row.recordType === "bank" ? label : row.tableValues.invoiceRelationStatus,
+    },
+  };
+}
+
+function pendingLabelForRow(row: WorkbenchRecord) {
+  if (row.recordType === "oa") {
+    return "待找流水与发票";
+  }
+  if (row.recordType === "bank") {
+    return "待关联发票";
+  }
+  return "待匹配流水";
 }
 
 function updateWorkbenchRowForOpen(row: WorkbenchRecord, label: string): WorkbenchRecord {

@@ -59,6 +59,7 @@ describe("Workbench column layout", () => {
       allowedUsernames: settings.accessControl.allowedUsernames,
       readonlyExportUsernames: settings.accessControl.readonlyExportUsernames,
       adminUsernames: settings.accessControl.adminUsernames,
+      oaRetention: settings.oaRetention,
       workbenchColumnLayouts: {
         ...settings.workbenchColumnLayouts,
         bank: ["amount", "counterparty", "loanRepaymentDate", "note"],
@@ -90,6 +91,7 @@ describe("Workbench column layout", () => {
       allowedUsernames: settings.accessControl.allowedUsernames,
       readonlyExportUsernames: settings.accessControl.readonlyExportUsernames,
       adminUsernames: settings.accessControl.adminUsernames,
+      oaRetention: settings.oaRetention,
       workbenchColumnLayouts: {
         ...settings.workbenchColumnLayouts,
         invoice: ["issueDate", "sellerName", "buyerName", "amount", "grossAmount"],

@@ -66,4 +66,19 @@ describe("Finance operations shell", () => {
     expect(document.querySelector(".app-shell.embedded-shell")).not.toBeNull();
     expect(document.querySelector(".page-body.embedded")).not.toBeNull();
   });
+
+  test("shows OA status in the shell header and warns when OA data is incomplete", async () => {
+    window.history.pushState({}, "", "/");
+    installMockApiFetch({
+      workbenchOaStatus: {
+        code: "error",
+        message: "OA 连接失败",
+      },
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("OA 连接失败")).toBeInTheDocument();
+    expect(screen.getByText("OA 连接失败，本次结果未包含完整 OA 数据。")).toBeInTheDocument();
+  });
 });

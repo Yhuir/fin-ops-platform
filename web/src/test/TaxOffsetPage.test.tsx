@@ -39,6 +39,10 @@ describe("Tax offset workbench", () => {
     expect(within(outputTable).queryByText("开票日期")).not.toBeInTheDocument();
     expect(within(outputTable).getAllByText("2026-03-25").length).toBeGreaterThan(0);
     expect(within(outputTable).getByText("(13%)")).toBeInTheDocument();
+    const outputInvoiceMetaRow = within(outputTable).getAllByText("2026-03-25")[0]?.closest(".tax-invoice-meta-row");
+    expect(outputInvoiceMetaRow).not.toBeNull();
+    expect(within(outputInvoiceMetaRow as HTMLElement).getByText("销")).toBeInTheDocument();
+    expect(within(outputInvoiceMetaRow as HTMLElement).queryByText("进")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("销项票开票情况横向滚动")).not.toBeInTheDocument();
 
     const inputTable = screen.getByRole("table", { name: "进项票认证计划" });
@@ -170,6 +174,19 @@ describe("Tax offset workbench", () => {
     );
   });
 
+  test("does not trigger duplicate calculate on first load when server summary already matches default selection", async () => {
+    window.history.pushState({}, "", "/tax-offset");
+    const fetchMock = installMockApiFetch();
+
+    render(<App />);
+
+    expect(await screen.findByText("销项税额")).toBeInTheDocument();
+
+    expect(
+      fetchMock.mock.calls.some(([input]) => input === "/api/tax-offset/calculate"),
+    ).toBe(false);
+  });
+
   test("supports select all and clear actions for the input plan table", async () => {
     window.history.pushState({}, "", "/tax-offset");
     const user = userEvent.setup();
@@ -195,6 +212,258 @@ describe("Tax offset workbench", () => {
 
     expect(firstCheckbox.checked).toBe(true);
     expect(secondCheckbox.checked).toBe(true);
+  });
+
+  test("supports inline search, time sorting, and counterparty filters in both tax invoice tables", async () => {
+    window.history.pushState({}, "", "/tax-offset");
+    const user = userEvent.setup();
+
+    const monthPayload = {
+      month: "2026-03",
+      output_items: [
+        {
+          id: "to-filter-001",
+          buyer_name: "华东项目甲方",
+          issue_date: "2026-03-25",
+          invoice_no: "90342011",
+          tax_rate: "13%",
+          tax_amount: "41,600.00",
+          total_with_tax: "361,600.00",
+          invoice_type: "销项专票",
+        },
+        {
+          id: "to-filter-002",
+          buyer_name: "西南项目客户",
+          issue_date: "2026-03-05",
+          invoice_no: "90342012",
+          tax_rate: "6%",
+          tax_amount: "2,400.00",
+          total_with_tax: "42,400.00",
+          invoice_type: "销项普票",
+        },
+      ],
+      input_plan_items: [
+        {
+          id: "ti-filter-001",
+          seller_name: "设备供应商",
+          issue_date: "2026-03-22",
+          invoice_no: "11203490",
+          tax_rate: "13%",
+          tax_amount: "12,480.00",
+          total_with_tax: "108,480.00",
+          risk_level: "低",
+          certified_status: "待认证",
+          is_locked_certified: false,
+        },
+        {
+          id: "ti-filter-002",
+          seller_name: "集成服务商",
+          issue_date: "2026-03-24",
+          invoice_no: "11203491",
+          tax_rate: "6%",
+          tax_amount: "5,760.00",
+          total_with_tax: "101,760.00",
+          risk_level: "中",
+          certified_status: "待认证",
+          is_locked_certified: false,
+        },
+      ],
+      certified_items: [],
+      certified_matched_rows: [],
+      certified_outside_plan_rows: [],
+      locked_certified_input_ids: [],
+      default_selected_output_ids: ["to-filter-001", "to-filter-002"],
+      default_selected_input_ids: ["ti-filter-001", "ti-filter-002"],
+      summary: {
+        output_tax: "44,000.00",
+        certified_input_tax: "0.00",
+        planned_input_tax: "18,240.00",
+        input_tax: "18,240.00",
+        deductible_tax: "18,240.00",
+        result_label: "本月应纳税额",
+        result_amount: "25,760.00",
+      },
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url === "/api/session/me") {
+        return new Response(
+          JSON.stringify({
+            user: {
+              user_id: "101",
+              username: "liuji",
+              nickname: "刘际涛",
+              display_name: "刘际涛",
+              dept_id: "88",
+              dept_name: "财务部",
+            },
+            roles: ["finance"],
+            permissions: ["finops:app:view"],
+            allowed: true,
+            access_tier: "full_access",
+            can_access_app: true,
+            can_mutate_data: true,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+      if (url === "/api/tax-offset?month=2026-03") {
+        return new Response(JSON.stringify(monthPayload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url === "/api/tax-offset/calculate") {
+        return new Response(JSON.stringify({ month: "2026-03", summary: monthPayload.summary }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByText("销项税额")).toBeInTheDocument();
+
+    const outputTable = screen.getByRole("table", { name: "销项票开票情况" });
+    await user.click(screen.getByRole("button", { name: "搜索 销项票开票情况" }));
+    await user.type(screen.getByRole("searchbox", { name: "搜索 销项票开票情况" }), "西南");
+    expect(within(outputTable).queryByText("90342011")).not.toBeInTheDocument();
+    expect(within(outputTable).getByText("90342012")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "清空搜索 销项票开票情况" }));
+    expect(within(outputTable).getByText("90342011")).toBeInTheDocument();
+
+    await user.click(within(outputTable.closest(".tax-panel") as HTMLElement).getByRole("button", { name: "销项票开票情况按时间降序" }));
+    const outputRowsDesc = within(outputTable).getAllByRole("row");
+    expect(outputRowsDesc[1]).toHaveTextContent("90342011");
+    await user.click(within(outputTable.closest(".tax-panel") as HTMLElement).getByRole("button", { name: "销项票开票情况按时间升序" }));
+    const outputRowsAsc = within(outputTable).getAllByRole("row");
+    expect(outputRowsAsc[1]).toHaveTextContent("90342012");
+
+    await user.click(within(outputTable).getByRole("button", { name: "筛选 对方名称" }));
+    const outputFilterDialog = screen.getByRole("dialog", { name: "筛选 对方名称" });
+    await user.click(within(outputFilterDialog).getByLabelText("华东项目甲方"));
+    expect(within(outputTable).getByText("90342011")).toBeInTheDocument();
+    expect(within(outputTable).queryByText("90342012")).not.toBeInTheDocument();
+    await user.click(within(outputFilterDialog).getByRole("button", { name: "清空" }));
+    expect(within(outputTable).getByText("90342012")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+
+    const inputTable = screen.getByRole("table", { name: "进项票认证计划" });
+    await user.click(screen.getByRole("button", { name: "搜索 进项票认证计划" }));
+    await user.type(screen.getByRole("searchbox", { name: "搜索 进项票认证计划" }), "集成");
+    expect(within(inputTable).queryByText("11203490")).not.toBeInTheDocument();
+    expect(within(inputTable).getByText("11203491")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "清空搜索 进项票认证计划" }));
+
+    await user.click(within(inputTable.closest(".tax-panel") as HTMLElement).getByRole("button", { name: "进项票认证计划按时间降序" }));
+    const inputRowsDesc = within(inputTable).getAllByRole("row");
+    expect(inputRowsDesc[1]).toHaveTextContent("11203491");
+
+    await user.click(within(inputTable).getByRole("button", { name: "筛选 对方名称" }));
+    const inputFilterDialog = screen.getByRole("dialog", { name: "筛选 对方名称" });
+    await user.click(within(inputFilterDialog).getByLabelText("设备供应商"));
+    expect(within(inputTable).getByText("11203490")).toBeInTheDocument();
+    expect(within(inputTable).queryByText("11203491")).not.toBeInTheDocument();
+    await user.click(within(inputFilterDialog).getByRole("button", { name: "清空" }));
+    expect(within(inputTable).getByText("11203491")).toBeInTheDocument();
+  });
+
+  test("renders output invoice rows with 销 tag even when invoice type text does not contain 销", async () => {
+    window.history.pushState({}, "", "/tax-offset");
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url === "/api/session/me") {
+        return new Response(
+          JSON.stringify({
+            user: {
+              user_id: "101",
+              username: "liuji",
+              nickname: "刘际涛",
+              display_name: "刘际涛",
+            },
+            roles: ["finance"],
+            permissions: ["finops:app:view"],
+            allowed: true,
+            access_tier: "full_access",
+            can_access_app: true,
+            can_mutate_data: true,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url === "/api/tax-offset?month=2026-03") {
+        return new Response(
+          JSON.stringify({
+            month: "2026-03",
+            output_items: [
+              {
+                id: "to-real-001",
+                buyer_name: "云南鸿云锅炉有限责任公司",
+                issue_date: "2026-03-16",
+                invoice_no: "26532000000395086336",
+                tax_rate: "13%",
+                tax_amount: "26,091.00",
+                total_with_tax: "226,791.00",
+                invoice_type: "数电发票（增值税专用发票）",
+              },
+            ],
+            input_plan_items: [],
+            certified_items: [],
+            certified_matched_rows: [],
+            certified_outside_plan_rows: [],
+            locked_certified_input_ids: [],
+            default_selected_output_ids: ["to-real-001"],
+            default_selected_input_ids: [],
+            summary: {
+              output_tax: "26,091.00",
+              certified_input_tax: "0.00",
+              planned_input_tax: "0.00",
+              input_tax: "0.00",
+              deductible_tax: "0.00",
+              result_label: "本月应纳税额",
+              result_amount: "26,091.00",
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url === "/api/tax-offset/calculate") {
+        return new Response(
+          JSON.stringify({
+            month: "2026-03",
+            summary: {
+              output_tax: "26,091.00",
+              certified_input_tax: "0.00",
+              planned_input_tax: "0.00",
+              input_tax: "0.00",
+              deductible_tax: "0.00",
+              result_label: "本月应纳税额",
+              result_amount: "26,091.00",
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByText("销项税额")).toBeInTheDocument();
+    const outputTable = screen.getByRole("table", { name: "销项票开票情况" });
+    const outputInvoiceMetaRow = within(outputTable).getByText("2026-03-16").closest(".tax-invoice-meta-row");
+    expect(outputInvoiceMetaRow).not.toBeNull();
+    expect(within(outputInvoiceMetaRow as HTMLElement).getByText("销")).toBeInTheDocument();
+    expect(within(outputInvoiceMetaRow as HTMLElement).queryByText("进")).not.toBeInTheDocument();
   });
 
   test("clicking a matched certified row highlights the corresponding input plan row", async () => {

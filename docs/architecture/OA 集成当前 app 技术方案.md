@@ -419,11 +419,15 @@ OA 菜单层仍然负责“看得见 / 看不见”：
 ### 9.4 建议环境变量
 
 - `FIN_OPS_OA_BASE_URL`
+- `FIN_OPS_OA_USER_INFO_PATH`
+- `FIN_OPS_OA_PASSWORD_VERIFY_PATH`
 - `FIN_OPS_OA_REQUIRED_PERMISSION`
 - `FIN_OPS_OA_SESSION_CACHE_TTL_SECONDS`
 
 默认：
 
+- `FIN_OPS_OA_USER_INFO_PATH=/system/user/getInfo`
+- `FIN_OPS_OA_PASSWORD_VERIFY_PATH=/system/user/profile/updatePwd`
 - `FIN_OPS_OA_REQUIRED_PERMISSION=finops:app:view`
 
 ## 10. 前端改造点

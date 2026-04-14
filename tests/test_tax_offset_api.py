@@ -5,6 +5,8 @@ import unittest
 
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import BatchType
+from fin_ops_platform.services.oa_adapter import InMemoryOAAdapter, OAApplicationRecord
+from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,6 +47,60 @@ def build_multipart_payload(
 
 
 class TaxOffsetApiTests(unittest.TestCase):
+    def test_tax_offset_includes_oa_attachment_invoice_rows_by_issue_month(self) -> None:
+        app = build_application()
+        target_oa_record = OAApplicationRecord(
+            id="oa-tax-202602-001",
+            month="2026-02",
+            section="open",
+            case_id=None,
+            applicant="周洁莹",
+            project_name="云南溯源科技",
+            apply_type="日常报销",
+            amount="600.00",
+            counterparty_name="云南城建物业运营集团",
+            reason="物业费",
+            relation_code="pending_match",
+            relation_label="待找流水与发票",
+            relation_tone="warn",
+            detail_fields={"OA单号": "OA-TAX-001", "申请日期": "2026-02-09"},
+            attachment_invoices=[
+                {
+                    "invoice_code": "",
+                    "invoice_no": "26532000000021026521",
+                    "seller_name": "云南城建物业运营集团",
+                    "seller_tax_no": "91530103MA6KHJWK8C",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "buyer_tax_no": "915300007194052520",
+                    "issue_date": "2026-01-06",
+                    "amount": "600.00",
+                    "tax_rate": "6%",
+                    "tax_amount": "33.96",
+                    "total_with_tax": "600.00",
+                    "invoice_type": "进项发票",
+                    "attachment_name": "物业费.pdf",
+                }
+            ],
+        )
+        app._workbench_query_service = WorkbenchQueryService(
+            oa_adapter=InMemoryOAAdapter({"2026-02": [target_oa_record]})
+        )
+
+        response = app.handle_request("GET", "/api/tax-offset?month=2026-01")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        matched_items = [
+            item
+            for item in payload["input_plan_items"]
+            if item["invoice_no"] == "26532000000021026521"
+        ]
+        self.assertEqual(len(matched_items), 1)
+        self.assertEqual(matched_items[0]["seller_name"], "云南城建物业运营集团")
+        self.assertEqual(matched_items[0]["tax_amount"], "33.96")
+        self.assertEqual(matched_items[0]["total_with_tax"], "600.00")
+        self.assertIn(matched_items[0]["id"], payload["default_selected_input_ids"])
+
     def test_tax_offset_uses_real_imported_input_invoices_as_plan_rows(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -145,17 +201,17 @@ class TaxOffsetApiTests(unittest.TestCase):
         payload = json.loads(response.body)
 
         self.assertEqual(payload["month"], "2026-03")
-        self.assertGreater(len(payload["output_items"]), 0)
-        self.assertGreater(len(payload["input_plan_items"]), 0)
+        self.assertEqual(len(payload["output_items"]), 0)
+        self.assertEqual(len(payload["input_plan_items"]), 0)
         self.assertEqual(len(payload["certified_items"]), 0)
         self.assertIn("certified_matched_rows", payload)
         self.assertIn("certified_outside_plan_rows", payload)
         self.assertEqual(len(payload["certified_outside_plan_rows"]), 0)
         self.assertEqual(payload["locked_certified_input_ids"], [])
-        self.assertEqual(payload["default_selected_output_ids"], [item["id"] for item in payload["output_items"]])
-        self.assertEqual(payload["default_selected_input_ids"], ["ti-202603-001", "ti-202603-002"])
+        self.assertEqual(payload["default_selected_output_ids"], [])
+        self.assertEqual(payload["default_selected_input_ids"], [])
         self.assertEqual(payload["summary"]["certified_input_tax"], "0.00")
-        self.assertEqual(payload["output_items"][0]["tax_rate"], "13%")
+        self.assertEqual(payload["summary"]["output_tax"], "0.00")
 
     def test_calculate_tax_offset_uses_zero_certified_input_when_no_real_import_exists(self) -> None:
         app = build_application()
@@ -174,13 +230,13 @@ class TaxOffsetApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.body)
 
-        self.assertEqual(payload["summary"]["output_tax"], "41,600.00")
+        self.assertEqual(payload["summary"]["output_tax"], "0.00")
         self.assertEqual(payload["summary"]["input_tax"], "0.00")
         self.assertEqual(payload["summary"]["planned_input_tax"], "0.00")
         self.assertEqual(payload["summary"]["certified_input_tax"], "0.00")
         self.assertEqual(payload["summary"]["deductible_tax"], "0.00")
-        self.assertEqual(payload["summary"]["result_label"], "本月应纳税额")
-        self.assertEqual(payload["summary"]["result_amount"], "41,600.00")
+        self.assertEqual(payload["summary"]["result_label"], "本月留抵税额")
+        self.assertEqual(payload["summary"]["result_amount"], "0.00")
 
 
 if __name__ == "__main__":

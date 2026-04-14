@@ -2,6 +2,7 @@ export type TaxInvoiceRecord = {
   id: string;
   invoiceNo: string;
   invoiceType: string;
+  flowType?: "input" | "output";
   counterparty: string;
   issueDate: string;
   taxRate: string;

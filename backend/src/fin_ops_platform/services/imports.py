@@ -62,12 +62,14 @@ class ImportNormalizationService:
         *,
         existing_invoices: list[Invoice] | None = None,
         existing_transactions: list[BankTransaction] | None = None,
+        id_registry: Any | None = None,
     ) -> None:
         self._batch_counter = 0
         self._row_counter = 0
         self._invoice_counter = len(existing_invoices or [])
         self._txn_counter = len(existing_transactions or [])
         self._counterparty_counter = 0
+        self._id_registry = id_registry
 
         self._batches: dict[str, ImportPreview] = {}
         self._invoices_by_id: dict[str, Invoice] = {}
@@ -85,10 +87,16 @@ class ImportNormalizationService:
             self._register_transaction(transaction)
 
     @classmethod
-    def from_snapshot(cls, snapshot: dict[str, Any] | None) -> ImportNormalizationService:
+    def from_snapshot(
+        cls,
+        snapshot: dict[str, Any] | None,
+        *,
+        id_registry: Any | None = None,
+    ) -> ImportNormalizationService:
         service = cls(
             existing_invoices=list((snapshot or {}).get("invoices", [])),
             existing_transactions=list((snapshot or {}).get("transactions", [])),
+            id_registry=id_registry,
         )
         if not snapshot:
             return service
@@ -498,12 +506,12 @@ class ImportNormalizationService:
     ) -> Invoice:
         invoice_type = InvoiceType.OUTPUT if batch_type == BatchType.OUTPUT_INVOICE else InvoiceType.INPUT
         counterparty = self._get_or_create_counterparty(normalized["counterparty_name"])
-        self._invoice_counter += 1
+        invoice_id = self._next_invoice_id()
         amount = Decimal(normalized["amount"])
         return Invoice(
-            id=f"inv_imported_{self._invoice_counter:04d}",
+            id=invoice_id,
             invoice_type=invoice_type,
-            invoice_no=normalized.get("digital_invoice_no") or normalized.get("invoice_no") or f"generated-{self._invoice_counter:04d}",
+            invoice_no=normalized.get("digital_invoice_no") or normalized.get("invoice_no") or f"generated-{invoice_id.rsplit('_', 1)[-1]}",
             invoice_code=normalized.get("invoice_code"),
             digital_invoice_no=normalized.get("digital_invoice_no"),
             counterparty=counterparty,
@@ -539,10 +547,10 @@ class ImportNormalizationService:
         )
 
     def _build_transaction_from_normalized(self, batch_id: str, normalized: dict[str, Any]) -> BankTransaction:
-        self._txn_counter += 1
+        transaction_id = self._next_transaction_id()
         counterparty = self._get_or_create_counterparty(normalized["counterparty_name_raw"])
         return BankTransaction(
-            id=f"txn_imported_{self._txn_counter:04d}",
+            id=transaction_id,
             account_no=normalized["account_no"],
             txn_direction=TransactionDirection(normalized["txn_direction"]),
             counterparty_name_raw=normalized["counterparty_name_raw"],
@@ -659,12 +667,35 @@ class ImportNormalizationService:
         return sum(1 for row in row_results if row.decision in decision_set)
 
     def _next_batch_id(self) -> str:
-        self._batch_counter += 1
-        return f"batch_import_{self._batch_counter:04d}"
+        while True:
+            self._batch_counter += 1
+            batch_id = f"batch_import_{self._batch_counter:04d}"
+            if batch_id not in self._batches and not self._registry_has("import_batch_exists", batch_id):
+                return batch_id
 
     def _next_row_id(self) -> str:
         self._row_counter += 1
         return f"batch_row_{self._row_counter:05d}"
+
+    def _next_invoice_id(self) -> str:
+        while True:
+            self._invoice_counter += 1
+            invoice_id = f"inv_imported_{self._invoice_counter:04d}"
+            if invoice_id not in self._invoices_by_id and not self._registry_has("invoice_exists", invoice_id):
+                return invoice_id
+
+    def _next_transaction_id(self) -> str:
+        while True:
+            self._txn_counter += 1
+            transaction_id = f"txn_imported_{self._txn_counter:04d}"
+            if transaction_id not in self._transactions_by_id and not self._registry_has("transaction_exists", transaction_id):
+                return transaction_id
+
+    def _registry_has(self, method_name: str, identifier: str) -> bool:
+        checker = getattr(self._id_registry, method_name, None)
+        if not callable(checker):
+            return False
+        return bool(checker(identifier))
 
     @staticmethod
     def _parse_date(value: Any) -> str | None:

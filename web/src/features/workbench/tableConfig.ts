@@ -105,10 +105,12 @@ export const workbenchColumns: Record<WorkbenchRecordType, WorkbenchColumn[]> = 
     },
     {
       key: "issueDate",
-      label: "开票日期",
-      className: "column-compact column-date-compact",
-      track: "minmax(96px, 96fr)",
-      minWidth: 96,
+      label: "发票代码/发票号码",
+      headerLines: ["发票代码 /", "发票号码"],
+      className: "column-compact column-invoice-identity-compact",
+      filterable: false,
+      track: "minmax(124px, 124fr)",
+      minWidth: 124,
     },
     {
       key: "amount",

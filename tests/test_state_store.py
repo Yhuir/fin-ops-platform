@@ -749,6 +749,26 @@ class StateStoreTests(unittest.TestCase):
             migrated_file_doc = db["file_import_files"].documents["import_file_0001"]
             self.assertTrue(migrated_file_doc["stored_file_path"].startswith("gridfs://"))
 
+    def test_oa_attachment_invoice_cache_persists_locally_across_store_instances(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            store = ApplicationStateStore(data_dir)
+            store.save_oa_attachment_invoice_cache_entry(
+                "cache-key-001",
+                {"invoices": [{"invoice_no": "40512344", "attachment_name": "invoice-a.pdf"}]},
+            )
+
+            reloaded_store = ApplicationStateStore(data_dir)
+            cached = reloaded_store.load_oa_attachment_invoice_cache_entry("cache-key-001")
+
+        self.assertEqual(
+            cached,
+            {
+                "cache_key": "cache-key-001",
+                "invoices": [{"invoice_no": "40512344", "attachment_name": "invoice-a.pdf"}],
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

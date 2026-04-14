@@ -26,7 +26,7 @@ type FileOverrideState = Record<
   }
 >;
 
-type ImportIntent = "bank_transaction" | "output_invoice" | "input_invoice" | "etc_invoice" | "certified_invoice";
+type ImportIntent = "bank_transaction" | "invoice" | "output_invoice" | "input_invoice" | "etc_invoice" | "certified_invoice";
 
 const TEMPLATE_LABELS: Record<string, string> = {
   invoice_export: "发票导出",
@@ -146,6 +146,12 @@ function resolveIntentMeta(intent: string | null) {
       return {
         title: "银行流水导入",
         description: "批量导入银行流水文件，系统会自动识别模板并进入标准预览、确认导入链路。",
+        unsupported: false,
+      };
+    case "invoice":
+      return {
+        title: "发票导入",
+        description: "导入进项或销项发票文件。系统会自动识别模板；如果方向识别不对，可在文件卡片中手动改判。",
         unsupported: false,
       };
     case "output_invoice":

@@ -1,17 +1,29 @@
 import type { WorkbenchCandidateGroup, WorkbenchPaneRows, WorkbenchRecord, WorkbenchRecordType } from "./types";
 
+export type WorkbenchPaneTimeFilter =
+  | { mode: "none" }
+  | { mode: "year"; year: string }
+  | { mode: "month"; month: string };
+
 export type WorkbenchZoneDisplayState = {
   activePaneId: WorkbenchRecordType | null;
   openSearchPaneId: WorkbenchRecordType | null;
+  draftSearchQueryByPane: Record<WorkbenchRecordType, string>;
   searchQueryByPane: Record<WorkbenchRecordType, string>;
   filtersByPaneAndColumn: Record<WorkbenchRecordType, Record<string, string[]>>;
   sortByPane: Record<WorkbenchRecordType, "asc" | "desc" | null>;
+  timeFilterByPane: Record<WorkbenchRecordType, WorkbenchPaneTimeFilter>;
 };
 
 export function createEmptyWorkbenchZoneDisplayState(): WorkbenchZoneDisplayState {
   return {
     activePaneId: null,
     openSearchPaneId: null,
+    draftSearchQueryByPane: {
+      oa: "",
+      bank: "",
+      invoice: "",
+    },
     searchQueryByPane: {
       oa: "",
       bank: "",
@@ -26,6 +38,11 @@ export function createEmptyWorkbenchZoneDisplayState(): WorkbenchZoneDisplayStat
       oa: null,
       bank: null,
       invoice: null,
+    },
+    timeFilterByPane: {
+      oa: { mode: "none" },
+      bank: { mode: "none" },
+      invoice: { mode: "none" },
     },
   };
 }
@@ -43,12 +60,14 @@ export function buildWorkbenchDisplayGroups(
   const activeFilters = state.filtersByPaneAndColumn[activePaneId] ?? {};
   const hasActiveFilters = Object.values(activeFilters).some((values) => values.length > 0);
   const sortDirection = state.sortByPane[activePaneId];
+  const activeTimeFilter = state.timeFilterByPane[activePaneId] ?? { mode: "none" };
+  const hasActiveTimeFilter = activeTimeFilter.mode !== "none";
 
-  const displayGroups = !normalizedQuery && !hasActiveFilters
+  const displayGroups = !normalizedQuery && !hasActiveFilters && !hasActiveTimeFilter
     ? groups
     : groups.flatMap((group) => {
       const matchedRows = group.rows[activePaneId].filter((row) =>
-        matchesWorkbenchRow(row, normalizedQuery, activeFilters),
+        matchesWorkbenchRow(row, activePaneId, normalizedQuery, activeFilters, activeTimeFilter),
       );
 
       if (matchedRows.length === 0) {
@@ -105,6 +124,25 @@ export function collectWorkbenchFilterOptions(
   return Array.from(values).sort((left, right) => left.localeCompare(right, "zh-CN"));
 }
 
+export function collectWorkbenchTimeFilterYears(
+  groups: WorkbenchCandidateGroup[],
+  paneId: WorkbenchRecordType,
+): string[] {
+  const years = new Set<string>();
+
+  groups.forEach((group) => {
+    group.rows[paneId].forEach((row) => {
+      const timeValue = resolveWorkbenchRowSortValue(row, paneId);
+      if (!timeValue || timeValue.length < 4) {
+        return;
+      }
+      years.add(timeValue.slice(0, 4));
+    });
+  });
+
+  return Array.from(years).sort((left, right) => right.localeCompare(left, "zh-CN"));
+}
+
 export function resolveWorkbenchActivePane(
   state: WorkbenchZoneDisplayState,
   preferredPaneId?: WorkbenchRecordType | null,
@@ -118,9 +156,15 @@ export function resolveWorkbenchActivePane(
 
 function matchesWorkbenchRow(
   row: WorkbenchRecord,
+  paneId: WorkbenchRecordType,
   normalizedQuery: string,
   activeFilters: Record<string, string[]>,
+  timeFilter: WorkbenchPaneTimeFilter,
 ) {
+  if (!matchesWorkbenchTimeFilter(row, paneId, timeFilter)) {
+    return false;
+  }
+
   if (normalizedQuery) {
     const normalizedHaystack = normalizeWorkbenchSearchText(
       [row.label, row.status, row.amount, row.counterparty, ...Object.values(row.tableValues)].join(" "),
@@ -186,6 +230,10 @@ function normalizeWorkbenchSearchText(value: string) {
 function paneHasWorkbenchCriteria(state: WorkbenchZoneDisplayState, paneId: WorkbenchRecordType) {
   const normalizedQuery = normalizeWorkbenchSearchText(state.searchQueryByPane[paneId] ?? "");
   if (normalizedQuery) {
+    return true;
+  }
+
+  if ((state.timeFilterByPane[paneId] ?? { mode: "none" }).mode !== "none") {
     return true;
   }
 
@@ -255,4 +303,25 @@ function resolveWorkbenchRowSortValue(row: WorkbenchRecord, paneId: WorkbenchRec
     return row.tableValues.issueDate ?? null;
   }
   return null;
+}
+
+function matchesWorkbenchTimeFilter(
+  row: WorkbenchRecord,
+  paneId: WorkbenchRecordType,
+  timeFilter: WorkbenchPaneTimeFilter,
+) {
+  if (timeFilter.mode === "none") {
+    return true;
+  }
+
+  const timeValue = resolveWorkbenchRowSortValue(row, paneId);
+  if (!timeValue) {
+    return false;
+  }
+
+  if (timeFilter.mode === "year") {
+    return timeValue.startsWith(`${timeFilter.year}-`);
+  }
+
+  return timeValue.startsWith(timeFilter.month);
 }

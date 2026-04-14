@@ -10,6 +10,33 @@ from fin_ops_platform.services.matching import MatchingEngineService
 
 
 class LiveWorkbenchServiceTests(unittest.TestCase):
+    def test_invoice_rows_expose_invoice_identity_fields_in_workbench_list(self) -> None:
+        import_service = ImportNormalizationService()
+        preview = import_service.preview_import(
+            batch_type=BatchType.INPUT_INVOICE,
+            source_name="input-invoice.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "invoice_code": "033001",
+                    "invoice_no": "9001",
+                    "counterparty_name": "云南供应商有限公司",
+                    "amount": "100.00",
+                    "invoice_date": "2026-03-21",
+                    "invoice_status_from_source": "valid",
+                }
+            ],
+        )
+        import_service.confirm_import(preview.id)
+
+        service = LiveWorkbenchService(import_service, MatchingEngineService(import_service))
+        payload = service.get_workbench("2026-03")
+        invoice_row = payload["open"]["invoice"][0]
+
+        self.assertEqual(invoice_row["invoice_code"], "033001")
+        self.assertEqual(invoice_row["invoice_no"], "9001")
+        self.assertEqual(invoice_row["digital_invoice_no"], "—")
+
     def test_workbench_hides_legacy_demo_bank_transactions(self) -> None:
         import_service = ImportNormalizationService()
 

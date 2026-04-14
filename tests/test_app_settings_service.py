@@ -58,6 +58,7 @@ class AppSettingsServiceTests(unittest.TestCase):
                 allowed_usernames=["FULL001"],
                 readonly_export_usernames=[],
                 admin_usernames=[],
+                oa_retention={"cutoff_date": "2026-01-01"},
                 workbench_column_layouts={"oa": ["projectName", "applicant"]},
             )
 
@@ -73,6 +74,41 @@ class AppSettingsServiceTests(unittest.TestCase):
             payload["workbench_column_layouts"]["oa"],
             ["projectName", "applicant", "amount", "counterparty", "reason"],
         )
+        self.assertEqual(payload["oa_retention"], {"cutoff_date": "2026-01-01"})
+
+    def test_invalid_oa_retention_cutoff_date_falls_back_to_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            payload = app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[],
+                allowed_usernames=[],
+                readonly_export_usernames=[],
+                admin_usernames=[],
+                oa_retention={"cutoff_date": "2026-99-99"},
+                workbench_column_layouts={},
+            )
+
+        self.assertEqual(payload["oa_retention"], {"cutoff_date": "2026-01-01"})
+
+    def test_update_settings_persists_oa_invoice_offset_applicants(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            updated_payload = app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[],
+                allowed_usernames=[],
+                readonly_export_usernames=[],
+                admin_usernames=[],
+                oa_invoice_offset={"applicant_names": [" 周洁莹 ", "周洁莹", "李四"]},
+                workbench_column_layouts={},
+            )
+            reloaded_payload = build_application(data_dir=Path(temp_dir))._app_settings_service.get_settings_payload()
+
+        self.assertEqual(updated_payload["oa_invoice_offset"], {"applicant_names": ["周洁莹", "李四"]})
+        self.assertEqual(reloaded_payload["oa_invoice_offset"], updated_payload["oa_invoice_offset"])
 
     def test_update_settings_triggers_oa_role_sync_with_normalized_assignments(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -111,6 +147,7 @@ class AppSettingsServiceTests(unittest.TestCase):
                         "allowed_usernames": ["FULL001", "READONLY001"],
                         "readonly_export_usernames": ["READONLY001"],
                         "admin_usernames": [],
+                        "oa_retention": {"cutoff_date": "2026-01-01"},
                         "workbench_column_layouts": {
                             "oa": ["projectName", "applicant"],
                             "bank": ["amount", "counterparty"],
@@ -135,6 +172,8 @@ class AppSettingsServiceTests(unittest.TestCase):
         )
         self.assertEqual(get_response.status_code, 200)
         self.assertEqual(get_payload["access_control"], updated_payload["access_control"])
+        self.assertEqual(updated_payload["oa_retention"], {"cutoff_date": "2026-01-01"})
+        self.assertEqual(get_payload["oa_retention"], updated_payload["oa_retention"])
         self.assertEqual(
             updated_payload["workbench_column_layouts"],
             {

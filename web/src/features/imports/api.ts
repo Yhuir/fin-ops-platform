@@ -1,9 +1,11 @@
 import type {
+  ImportFilePreviewOverride,
   ImportBatchType,
   ImportSessionPayload,
   ImportTemplate,
   MatchingRunSummary,
 } from "./types";
+import { readOATokenCookie } from "../session/api";
 
 type ApiImportFile = {
   id: string;
@@ -23,6 +25,7 @@ type ApiImportFile = {
   stored_file_path?: string | null;
   override_template_code?: string | null;
   override_batch_type?: "input_invoice" | "output_invoice" | "bank_transaction" | null;
+  selected_bank_name?: string | null;
   row_results?: Array<{
     id: string;
     row_no: number;
@@ -63,7 +66,17 @@ type ApiImportTemplatesPayload = {
 };
 
 async function requestJson<T>(url: string, init: RequestInit = {}) {
-  const response = await fetch(url, init);
+  const headers = new Headers(init.headers ?? undefined);
+  const token = readOATokenCookie();
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  const response = await fetch(url, {
+    ...init,
+    headers,
+    credentials: init.credentials ?? "include",
+  });
   const payload = (await response.json()) as T;
   if (!response.ok) {
     throw new Error(typeof payload === "object" && payload ? JSON.stringify(payload) : "request failed");
@@ -112,6 +125,7 @@ function mapImportPayload(payload: ApiImportSessionPayload): ImportSessionPayloa
       storedFilePath: file.stored_file_path,
       overrideTemplateCode: file.override_template_code,
       overrideBatchType: file.override_batch_type,
+      selectedBankName: file.selected_bank_name,
       rowResults: (file.row_results ?? []).map((row) => ({
         id: row.id,
         rowNo: row.row_no,
@@ -135,10 +149,27 @@ function mapImportTemplates(payload: ApiImportTemplatesPayload): ImportTemplate[
   }));
 }
 
-export async function previewImportFiles(files: File[], importedBy = "web_finance_user"): Promise<ImportSessionPayload> {
+export async function previewImportFiles(
+  files: File[],
+  importedBy = "web_finance_user",
+  fileOverrides?: ImportFilePreviewOverride[],
+): Promise<ImportSessionPayload> {
   const formData = new FormData();
   formData.append("imported_by", importedBy);
   files.forEach((file) => formData.append("files", file));
+  if (fileOverrides && fileOverrides.length > 0) {
+    formData.append(
+      "file_overrides",
+      JSON.stringify(
+        fileOverrides.map((override, index) => ({
+          file_name: override.fileName ?? files[index]?.name,
+          ...(override.templateCode ? { template_code: override.templateCode } : {}),
+          ...(override.batchType ? { batch_type: override.batchType } : {}),
+          ...(override.bankName ? { bank_name: override.bankName } : {}),
+        })),
+      ),
+    );
+  }
 
   const payload = await requestJson<ApiImportSessionPayload>("/imports/files/preview", {
     method: "POST",
@@ -150,7 +181,7 @@ export async function previewImportFiles(files: File[], importedBy = "web_financ
 export async function retryImportFiles(
   sessionId: string,
   selectedFileIds: string[],
-  overrides: Record<string, { templateCode?: string | null; batchType?: ImportBatchType | null }>,
+  overrides: Record<string, { templateCode?: string | null; batchType?: ImportBatchType | null; bankName?: string | null }>,
 ): Promise<ImportSessionPayload> {
   const payload = await requestJson<ApiImportSessionPayload>("/imports/files/retry", {
     method: "POST",
@@ -166,6 +197,7 @@ export async function retryImportFiles(
           {
             ...(override.templateCode ? { template_code: override.templateCode } : {}),
             ...(override.batchType ? { batch_type: override.batchType } : {}),
+            ...(override.bankName ? { bank_name: override.bankName } : {}),
           },
         ]),
       ),

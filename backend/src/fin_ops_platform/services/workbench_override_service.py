@@ -90,6 +90,9 @@ class WorkbenchOverrideService:
         if "handled_exception" in override:
             payload["handled_exception"] = bool(override.get("handled_exception"))
 
+        if "auto_close_suppressed" in override:
+            payload["auto_close_suppressed"] = bool(override.get("auto_close_suppressed"))
+
         detail_note = override.get("detail_note")
         if isinstance(detail_note, str) and detail_note.strip():
             self._sync_detail_note(payload, detail_note)
@@ -118,6 +121,7 @@ class WorkbenchOverrideService:
                 "relation": pending,
                 "available_actions": self.available_actions(str(row["type"]), "open"),
                 "detail_note": comment or "已取消关联",
+                "auto_close_suppressed": True,
                 "handled_exception": False,
             }
             updated_rows.append(self.apply_to_row(row))
@@ -209,6 +213,7 @@ class WorkbenchOverrideService:
             "relation": self.pending_relation(str(row["type"])),
             "available_actions": self.available_actions(str(row["type"]), "open"),
             "detail_note": "已撤回忽略",
+            "auto_close_suppressed": True,
             "ignored": False,
             "handled_exception": False,
         }
@@ -224,6 +229,7 @@ class WorkbenchOverrideService:
                 "relation": self.pending_relation(row_type),
                 "available_actions": self.available_actions(row_type, "open"),
                 "detail_note": detail_note,
+                "auto_close_suppressed": True,
                 "handled_exception": False,
                 "ignored": False,
             }

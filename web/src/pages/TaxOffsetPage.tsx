@@ -26,6 +26,13 @@ function getSelectableInputIds(data: TaxMonthData | null) {
   return data.inputPlanInvoices.filter((row) => row.isSelectable !== false && !row.isLocked).map((row) => row.id);
 }
 
+function hasSameIds(left: string[], right: string[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+  return left.every((id, index) => id === right[index]);
+}
+
 export default function TaxOffsetPage() {
   const { canMutateData } = useSessionPermissions();
   const [currentMonth, setCurrentMonth] = useState(DEFAULT_MONTH);
@@ -113,6 +120,12 @@ export default function TaxOffsetPage() {
 
   useEffect(() => {
     if (!monthData) {
+      return;
+    }
+
+    if (hasSameIds(selectedInputIds, monthData.defaultSelectedInputIds)) {
+      setSummary(monthData.summary);
+      setIsCalculating(false);
       return;
     }
 

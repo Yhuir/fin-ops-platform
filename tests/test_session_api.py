@@ -104,6 +104,8 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(payload["allowed"])
         self.assertEqual(payload["user"]["username"], "local_finops_admin")
+        self.assertEqual(payload["access_tier"], "admin")
+        self.assertTrue(payload["can_admin_access"])
 
     def test_get_session_me_allows_username_from_workbench_settings_even_without_permission_code(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

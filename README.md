@@ -252,6 +252,38 @@ python -m pip install -r backend/requirements.txt
 - [36-oa-access-role-ui-and-action-gating.md](/Users/yu/Desktop/fin-ops-platform/prompts/36-oa-access-role-ui-and-action-gating.md)
 - [37-oa-access-role-sync-and-qa.md](/Users/yu/Desktop/fin-ops-platform/prompts/37-oa-access-role-sync-and-qa.md)
 
+## 设置页数据清理与 OA 模式 B 重刷
+
+当前仓库已经落地“设置页危险数据管理工具”，用于支持财务清空 app 内旧数据后重新导入，并按 `保OA` 日期彻底重刷 OA 相关状态。实现边界是：
+
+- 只清 `fin_ops_platform_app`
+- 明确禁止触碰 `form_data_db.form_data`
+- 银行流水 / 发票 / OA 按业务域成组清理
+- 三个清理按钮执行前都必须弹出当前 OA 用户密码输入，并由后端校验通过后才执行
+- 未输入、输错密码或密码复核服务失败时，不执行清理、不失效缓存、不触发 OA 重建
+- OA 密码不得保存、写日志、写审计明文、回显到错误信息或出现在 API 响应中
+- `清 OA` 固定采用模式 B：
+  - 清 `oa_attachment_invoice_cache`
+  - 清 `workbench_read_models`
+  - 清 `workbench_pair_relations`
+  - 清 `workbench_row_overrides`
+  - 再按 `保OA` 日期重建
+
+当前自动化测试已覆盖：
+
+- 三类动作的清理范围与 `form_data_db.form_data` 保护边界
+- `清 OA` 的模式 B 重建与 `oa_retention.cutoff_date`
+- 管理员可见、普通全量账号不可见、只读导出账号不可见
+- OA 密码复核失败时无清理、无缓存失效、无 OA 重建、无密码泄露
+
+后续开发入口：
+
+- 新设计文档：[2026-04-14-settings-data-reset-tools-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-14-settings-data-reset-tools-design.md)
+- 新实施计划：[2026-04-14-settings-data-reset-tools.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-14-settings-data-reset-tools.md)
+- Prompt 50：[50-settings-data-reset-backend-foundation.md](/Users/yu/Desktop/fin-ops-platform/prompts/50-settings-data-reset-backend-foundation.md)
+- Prompt 51：[51-settings-data-reset-ui-and-oa-rebuild.md](/Users/yu/Desktop/fin-ops-platform/prompts/51-settings-data-reset-ui-and-oa-rebuild.md)
+- Prompt 52：[52-settings-data-reset-integration-and-qa.md](/Users/yu/Desktop/fin-ops-platform/prompts/52-settings-data-reset-integration-and-qa.md)
+
 ## 关联台动作性能重构后续方向
 
 当前仓库已经补了一版“pair relations 轻量写模型”方案，用于替换把配对关系混在 row overrides 里的旧口径。目标模型是：

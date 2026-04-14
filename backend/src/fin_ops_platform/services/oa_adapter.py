@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Any, Protocol
+
+from fin_ops_platform.services.imports import clean_string
 
 
 @dataclass(slots=True)
@@ -22,10 +24,20 @@ class OAApplicationRecord:
     expense_type: str | None = None
     expense_content: str | None = None
     detail_fields: dict[str, str] = field(default_factory=dict)
+    attachment_invoices: list[dict[str, str]] = field(default_factory=list)
+    attachment_file_count: int = 0
+
+
+@dataclass(slots=True)
+class OAReadStatus:
+    code: str
+    message: str
 
 
 class OAAdapter(Protocol):
     def list_application_records(self, month: str) -> list[OAApplicationRecord]: ...
+
+    def get_read_status(self) -> OAReadStatus: ...
 
 
 class InMemoryOAAdapter:
@@ -35,5 +47,60 @@ class InMemoryOAAdapter:
     def list_application_records(self, month: str) -> list[OAApplicationRecord]:
         return list(self._seed_data.get(month, []))
 
+    def list_all_application_records(self) -> list[OAApplicationRecord]:
+        records: list[OAApplicationRecord] = []
+        for month in sorted(self._seed_data.keys()):
+            records.extend(self.list_application_records(month))
+        return records
+
+    def list_application_records_by_row_ids(self, row_ids: list[str]) -> list[OAApplicationRecord]:
+        normalized_ids = [str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()]
+        if not normalized_ids:
+            return []
+        records_by_id = {
+            record.id: record
+            for record in self.list_all_application_records()
+        }
+        return [records_by_id[row_id] for row_id in normalized_ids if row_id in records_by_id]
+
     def list_available_months(self) -> list[str]:
         return sorted(self._seed_data.keys())
+
+    def get_read_status(self) -> OAReadStatus:
+        return OAReadStatus(code="ready", message="OA 已同步")
+
+
+def build_attachment_invoice_detail_fields(
+    attachment_invoices: list[dict[str, Any]] | None,
+    *,
+    attachment_file_count: int | None = None,
+) -> dict[str, str]:
+    invoices = [invoice for invoice in (attachment_invoices or []) if isinstance(invoice, dict)]
+    parsed_count = len(invoices)
+    total_count = max(parsed_count, int(attachment_file_count or 0))
+    if parsed_count == 0 and total_count == 0:
+        return {}
+
+    summary_items: list[str] = []
+    for invoice in invoices:
+        invoice_no = clean_string(
+            invoice.get("invoice_no")
+            or invoice.get("digital_invoice_no")
+            or invoice.get("invoice_code")
+            or ""
+        )
+        attachment_name = clean_string(invoice.get("attachment_name") or "")
+        if invoice_no and attachment_name:
+            summary_items.append(f"{invoice_no}（{attachment_name}）")
+        elif invoice_no:
+            summary_items.append(invoice_no)
+        elif attachment_name:
+            summary_items.append(attachment_name)
+
+    detail_fields = {
+        "附件发票数量": str(parsed_count),
+        "附件发票识别情况": f"已解析 {parsed_count} / {total_count or parsed_count}",
+    }
+    if summary_items:
+        detail_fields["附件发票摘要"] = "；".join(summary_items)
+    return detail_fields

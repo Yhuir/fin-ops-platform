@@ -42,7 +42,7 @@ describe("Workbench columns and inline actions", () => {
 
     expect(within(invoicePane).getByRole("columnheader", { name: "销方名称/识别号" })).toBeInTheDocument();
     expect(within(invoicePane).getByRole("columnheader", { name: "购方名称/识别号" })).toBeInTheDocument();
-    expect(within(invoicePane).getByRole("columnheader", { name: "开票日期" })).toBeInTheDocument();
+    expect(within(invoicePane).getByRole("columnheader", { name: "发票代码/发票号码" })).toBeInTheDocument();
     expect(within(invoicePane).getByRole("columnheader", { name: "金额/税率/税额" })).toBeInTheDocument();
     expect(within(invoicePane).getByRole("columnheader", { name: "价税合计" })).toBeInTheDocument();
     expect(within(invoicePane).getByRole("columnheader", { name: "操作" })).toBeInTheDocument();
@@ -121,6 +121,56 @@ describe("Workbench columns and inline actions", () => {
     expect(applicationType).toHaveClass("inline-meta-tag");
     expect(relationStatus.closest(".compound-cell-secondary")).not.toBeNull();
     expect(metadataRow).toBe(relationStatus.closest(".compound-cell-secondary"));
+  });
+
+  test("renders OA invoice offset tag next to application type and pending status", () => {
+    render(
+      <WorkbenchRecordCard
+        actionMode="default"
+        canMutateData
+        onOpenDetail={() => {}}
+        onRowAction={() => {}}
+        onSelectRow={() => {}}
+        paneId="oa"
+        row={{
+          id: "oa-offset-1",
+          caseId: "case:offset-1",
+          recordType: "oa",
+          label: "日常报销",
+          status: "待找流水与发票",
+          statusCode: "oa_invoice_offset_auto_match",
+          statusTone: "warn",
+          exceptionHandled: false,
+          amount: "200.00",
+          counterparty: "云南中油严家山交通服务有限公司",
+          actionVariant: "detail-only",
+          availableActions: ["detail"],
+          detailFields: [],
+          tags: ["冲"],
+          tableValues: {
+            applicant: "周洁莹",
+            applicationTime: "2026-02-09",
+            projectName: "云南溯源科技",
+            applicationType: "日常报销",
+            reconciliationStatus: "待找流水与发票",
+            amount: "200.00",
+            counterparty: "云南中油严家山交通服务有限公司",
+            reason: "汽油费",
+          },
+        }}
+        rowState="idle"
+        showWorkflowActions
+        zoneId="paired"
+      />,
+    );
+
+    const offsetTag = screen.getByText("冲");
+    const applicationType = screen.getByText("日常报销");
+    const pendingStatus = screen.getByText("待找流水与发票");
+
+    expect(offsetTag).toHaveClass("inline-meta-tag");
+    expect(offsetTag.closest(".compound-cell-secondary")).toBe(applicationType.closest(".compound-cell-secondary"));
+    expect(offsetTag.closest(".compound-cell-secondary")).toBe(pendingStatus.closest(".compound-cell-secondary"));
   });
 
   test("renders inline detail actions for OA and bank rows while keeping invoice actions in the action column", async () => {
@@ -344,6 +394,29 @@ describe("Workbench columns and inline actions", () => {
     expect(within(pairedGroup).queryByText("发票类型")).not.toBeInTheDocument();
   });
 
+  test("renders invoice code number and issue date tag without the issue date filter menu", async () => {
+    installMockApiFetch();
+    renderWorkbenchPage();
+    await screen.findByText("赵华");
+
+    const invoicePane = screen.getAllByTestId("pane-invoice")[0];
+    const pairedGroup = screen.getByTestId("candidate-group-paired-case:CASE-202603-001");
+    const invoiceRow = within(pairedGroup)
+      .getAllByRole("row")
+      .find((row) => row.classList.contains("record-card-invoice"));
+
+    expect(invoiceRow).toBeDefined();
+    expect(within(invoicePane).getByRole("columnheader", { name: "发票代码/发票号码" })).toBeInTheDocument();
+    expect(within(invoicePane).queryByRole("button", { name: "筛选 发票代码/发票号码" })).not.toBeInTheDocument();
+    expect(within(invoicePane).queryByRole("button", { name: "筛选 开票日期" })).not.toBeInTheDocument();
+
+    const identityCell = within(invoiceRow as HTMLElement).getByText("032002600111 /").closest(".invoice-identity-value");
+    expect(identityCell).not.toBeNull();
+    expect(within(identityCell as HTMLElement).getByText("00061345")).toBeInTheDocument();
+    const issueDateTag = within(identityCell as HTMLElement).getByText("2026-03-25").closest(".inline-meta-tag");
+    expect(issueDateTag).toHaveClass("invoice-issue-date-tag");
+  });
+
   test("restores invoice amount summary columns without adding filter menus to them", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
@@ -358,7 +431,7 @@ describe("Workbench columns and inline actions", () => {
     expect(invoiceRow).toBeDefined();
     expect(within(invoicePane).getByRole("columnheader", { name: "金额/税率/税额" })).toBeInTheDocument();
     expect(within(invoicePane).getByRole("columnheader", { name: "价税合计" })).toBeInTheDocument();
-    expect(within(invoicePane).getByRole("columnheader", { name: "开票日期" })).toBeInTheDocument();
+    expect(within(invoicePane).getByRole("columnheader", { name: "发票代码/发票号码" })).toBeInTheDocument();
     expect(within(invoicePane).queryByRole("button", { name: "筛选 金额/税率/税额" })).not.toBeInTheDocument();
     expect(within(invoicePane).queryByRole("button", { name: "筛选 价税合计" })).not.toBeInTheDocument();
     expect(within(invoiceRow as HTMLElement).getByText("2026-03-25")).toBeInTheDocument();

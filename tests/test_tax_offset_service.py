@@ -8,6 +8,21 @@ from fin_ops_platform.services.tax_offset_service import TaxOffsetService
 
 
 class TaxOffsetServiceTests(unittest.TestCase):
+    def test_month_payload_is_empty_without_real_imports_or_explicit_month_data(self) -> None:
+        service = TaxOffsetService(
+            import_service=ImportNormalizationService(),
+            certified_records_loader=lambda month: [],
+        )
+
+        payload = service.get_month_payload("2026-03")
+
+        self.assertEqual(payload["output_items"], [])
+        self.assertEqual(payload["input_plan_items"], [])
+        self.assertEqual(payload["default_selected_output_ids"], [])
+        self.assertEqual(payload["default_selected_input_ids"], [])
+        self.assertEqual(payload["summary"]["output_tax"], "0.00")
+        self.assertEqual(payload["summary"]["input_tax"], "0.00")
+
     def test_month_payload_builds_real_input_plan_from_imported_input_invoices(self) -> None:
         import_service = ImportNormalizationService()
         preview = import_service.preview_import(
@@ -51,6 +66,84 @@ class TaxOffsetServiceTests(unittest.TestCase):
         self.assertEqual(payload["input_plan_items"][0]["invoice_type"], "进项普票")
         self.assertEqual(payload["input_plan_items"][0]["tax_rate"], "3%")
         self.assertEqual(payload["default_selected_input_ids"], [payload["input_plan_items"][0]["id"]])
+
+    def test_month_payload_includes_oa_attachment_invoices_by_issue_month(self) -> None:
+        service = TaxOffsetService(
+            import_service=ImportNormalizationService(),
+            certified_records_loader=lambda month: [],
+            oa_attachment_invoice_rows_loader=lambda month: [
+                {
+                    "id": "oa-att-inv-oa-exp-202602-001-01",
+                    "source_kind": "oa_attachment_invoice",
+                    "derived_from_oa_id": "oa-exp-202602-001",
+                    "_month": "2026-02",
+                    "invoice_type": "进项发票",
+                    "seller_name": "云南城建物业运营集团",
+                    "seller_tax_no": "91530103MA6KHJWK8C",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "buyer_tax_no": "915300007194052520",
+                    "issue_date": "2026-01-06",
+                    "invoice_no": "26532000000021026521",
+                    "tax_rate": "6%",
+                    "tax_amount": "33.96",
+                    "amount": "600.00",
+                    "total_with_tax": "600.00",
+                    "detail_fields": {"发票来源": "OA附件解析"},
+                }
+            ],
+        )
+
+        payload = service.get_month_payload("2026-01")
+
+        self.assertEqual(len(payload["input_plan_items"]), 1)
+        input_item = payload["input_plan_items"][0]
+        self.assertEqual(input_item["id"], "oa-att-inv-oa-exp-202602-001-01")
+        self.assertEqual(input_item["invoice_no"], "26532000000021026521")
+        self.assertEqual(input_item["seller_name"], "云南城建物业运营集团")
+        self.assertEqual(input_item["seller_tax_no"], "91530103MA6KHJWK8C")
+        self.assertEqual(input_item["issue_date"], "2026-01-06")
+        self.assertEqual(input_item["tax_rate"], "6%")
+        self.assertEqual(input_item["tax_amount"], "33.96")
+        self.assertEqual(input_item["total_with_tax"], "600.00")
+        self.assertEqual(input_item["invoice_type"], "进项发票")
+        self.assertEqual(payload["default_selected_input_ids"], [input_item["id"]])
+
+    def test_month_payload_reuses_single_oa_attachment_snapshot_build(self) -> None:
+        oa_loader_call_count = 0
+
+        def load_oa_attachment_rows(month: str) -> list[dict[str, str]]:
+            nonlocal oa_loader_call_count
+            oa_loader_call_count += 1
+            return [
+                {
+                    "id": "oa-att-inv-oa-exp-202602-001-01",
+                    "source_kind": "oa_attachment_invoice",
+                    "issue_date": "2026-03-24",
+                    "invoice_no": "15312761",
+                    "tax_rate": "13%",
+                    "tax_amount": "23.01",
+                    "amount": "176.99",
+                    "total_with_tax": "200.00",
+                    "invoice_type": "进项发票",
+                    "seller_name": "云南中油严家山交通服务有限公司",
+                    "seller_tax_no": "91530000709708479E",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "buyer_tax_no": "530111199504054424",
+                    "detail_fields": {"发票来源": "OA附件解析"},
+                }
+            ]
+
+        service = TaxOffsetService(
+            import_service=ImportNormalizationService(),
+            certified_records_loader=lambda month: [],
+            oa_attachment_invoice_rows_loader=load_oa_attachment_rows,
+        )
+
+        payload = service.get_month_payload("2026-03")
+
+        self.assertEqual(len(payload["input_plan_items"]), 1)
+        self.assertEqual(payload["summary"]["planned_input_tax"], "23.01")
+        self.assertEqual(oa_loader_call_count, 1)
 
     def test_month_payload_uses_real_certified_records_to_lock_matching_plan_and_split_outside_plan(self) -> None:
         import_service = ImportNormalizationService()
@@ -141,6 +234,23 @@ class TaxOffsetServiceTests(unittest.TestCase):
 
     def test_calculate_uses_real_certified_records_even_when_not_selected(self) -> None:
         service = TaxOffsetService(
+            month_data={
+                "2026-03": {
+                    "output_items": [
+                        {
+                            "id": "to-202603-001",
+                            "buyer_name": "华东项目甲方",
+                            "issue_date": "2026-03-25",
+                            "invoice_no": "90342011",
+                            "tax_rate": "13%",
+                            "tax_amount": "41,600.00",
+                            "total_with_tax": "361,600.00",
+                            "invoice_type": "销项专票",
+                        }
+                    ],
+                    "input_plan_items": [],
+                }
+            },
             certified_records_loader=lambda month: [
                 TaxCertifiedInvoiceRecord(
                     id="cert-001",

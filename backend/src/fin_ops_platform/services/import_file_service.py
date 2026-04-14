@@ -77,6 +77,9 @@ TEMPLATE_DEFINITIONS: list[dict[str, Any]] = [
 class UploadedImportFile:
     file_name: str
     content: bytes
+    template_code_override: str | None = None
+    batch_type_override: str | None = None
+    selected_bank_name: str | None = None
 
 
 @dataclass(slots=True)
@@ -98,6 +101,7 @@ class FileImportPreviewItem:
     stored_file_path: str | None = None
     override_template_code: str | None = None
     override_batch_type: BatchType | None = None
+    selected_bank_name: str | None = None
     row_results: list[ImportedBatchRowResult] = field(default_factory=list)
     normalized_rows: list[dict[str, Any]] = field(default_factory=list)
 
@@ -170,6 +174,9 @@ class FileImportService:
                 upload=upload,
                 file_id=file_id,
                 stored_file_path=stored_file_path,
+                template_code_override=upload.template_code_override,
+                batch_type_override=upload.batch_type_override,
+                selected_bank_name=upload.selected_bank_name,
             )
             session.files.append(file_item)
 
@@ -233,6 +240,7 @@ class FileImportService:
             upload = UploadedImportFile(
                 file_name=item.file_name,
                 content=self._file_store.read_import_file(item.stored_file_path),
+                selected_bank_name=item.selected_bank_name,
             )
             override_payload = override_map.get(item.id, {})
             refreshed = self._preview_single_file(
@@ -242,6 +250,7 @@ class FileImportService:
                 stored_file_path=item.stored_file_path,
                 template_code_override=override_payload.get("template_code"),
                 batch_type_override=override_payload.get("batch_type"),
+                selected_bank_name=override_payload.get("bank_name") or item.selected_bank_name,
             )
             item.template_code = refreshed.template_code
             item.batch_type = refreshed.batch_type
@@ -258,6 +267,7 @@ class FileImportService:
             item.normalized_rows = refreshed.normalized_rows
             item.override_template_code = refreshed.override_template_code
             item.override_batch_type = refreshed.override_batch_type
+            item.selected_bank_name = refreshed.selected_bank_name
 
         session.status = "preview_ready_with_errors" if any(
             file.status == "unrecognized_template" for file in session.files
@@ -282,6 +292,7 @@ class FileImportService:
         stored_file_path: str | None,
         template_code_override: str | None = None,
         batch_type_override: str | None = None,
+        selected_bank_name: str | None = None,
     ) -> FileImportPreviewItem:
         try:
             rows = self._read_rows(upload)
@@ -303,6 +314,7 @@ class FileImportService:
                 stored_file_path=stored_file_path,
                 override_template_code=template_code_override,
                 override_batch_type=BatchType(batch_type_override) if batch_type_override else None,
+                selected_bank_name=selected_bank_name,
             )
 
         preview = self._import_service.preview_import(
@@ -328,6 +340,7 @@ class FileImportService:
             stored_file_path=stored_file_path,
             override_template_code=template_code_override,
             override_batch_type=BatchType(batch_type_override) if batch_type_override else None,
+            selected_bank_name=selected_bank_name,
             row_results=preview.row_results,
             normalized_rows=preview.normalized_rows,
         )
@@ -396,12 +409,18 @@ class FileImportService:
         raise ValueError("无法识别文件模板。")
 
     def _next_session_id(self) -> str:
-        self._session_counter += 1
-        return f"import_session_{self._session_counter:04d}"
+        while True:
+            self._session_counter += 1
+            session_id = f"import_session_{self._session_counter:04d}"
+            if session_id not in self._sessions and not self._file_store_has("import_session_exists", session_id):
+                return session_id
 
     def _next_file_id(self) -> str:
-        self._file_counter += 1
-        return f"import_file_{self._file_counter:04d}"
+        while True:
+            self._file_counter += 1
+            file_id = f"import_file_{self._file_counter:04d}"
+            if not self._file_store_has("import_file_exists", file_id):
+                return file_id
 
     def _resolve_invoice_batch_type(self, rows: list[dict[str, Any]], override: str | None) -> BatchType:
         if override:
@@ -432,6 +451,12 @@ class FileImportService:
             file_name=upload.file_name,
             content=upload.content,
         )
+
+    def _file_store_has(self, method_name: str, identifier: str) -> bool:
+        checker = getattr(self._file_store, method_name, None)
+        if not callable(checker):
+            return False
+        return bool(checker(identifier))
 
 
 class TemplateDetector:

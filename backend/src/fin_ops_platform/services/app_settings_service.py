@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from fin_ops_platform.services.access_control_service import DEFAULT_ADMIN_USERNAME
@@ -7,6 +8,8 @@ from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.state_store import ApplicationStateStore
 
+DEFAULT_OA_RETENTION_CUTOFF_DATE = "2026-01-01"
+DEFAULT_OA_INVOICE_OFFSET_APPLICANTS = ["周洁莹"]
 DEFAULT_WORKBENCH_COLUMN_LAYOUTS = {
     "oa": ["applicant", "projectName", "amount", "counterparty", "reason"],
     "bank": ["counterparty", "amount", "loanRepaymentDate", "note"],
@@ -67,6 +70,12 @@ class AppSettingsService:
                 pane_id: list(self._snapshot["workbench_column_layouts"][pane_id])
                 for pane_id in ("oa", "bank", "invoice")
             },
+            "oa_retention": {
+                "cutoff_date": self._snapshot["oa_retention"]["cutoff_date"],
+            },
+            "oa_invoice_offset": {
+                "applicant_names": list(self._snapshot["oa_invoice_offset"]["applicant_names"]),
+            },
         }
 
     def update_settings(
@@ -78,6 +87,8 @@ class AppSettingsService:
         readonly_export_usernames: list[str] | None = None,
         admin_usernames: list[str] | None = None,
         workbench_column_layouts: dict[str, Any] | None = None,
+        oa_retention: dict[str, Any] | None = None,
+        oa_invoice_offset: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         normalized_snapshot = self._normalize_settings(
             {
@@ -87,6 +98,8 @@ class AppSettingsService:
                 "readonly_export_usernames": readonly_export_usernames or [],
                 "admin_usernames": admin_usernames or [],
                 "workbench_column_layouts": workbench_column_layouts or {},
+                "oa_retention": oa_retention or {},
+                "oa_invoice_offset": oa_invoice_offset or {},
             }
         )
         previous_snapshot = dict(self._snapshot)
@@ -110,6 +123,12 @@ class AppSettingsService:
 
     def get_completed_project_ids(self) -> set[str]:
         return set(self._snapshot["completed_project_ids"])
+
+    def get_oa_retention_cutoff_date(self) -> str:
+        return str(self._snapshot["oa_retention"]["cutoff_date"])
+
+    def get_oa_invoice_offset_applicant_names(self) -> list[str]:
+        return list(self._snapshot["oa_invoice_offset"]["applicant_names"])
 
     def get_allowed_usernames(self) -> list[str]:
         return list(self._snapshot["allowed_usernames"])
@@ -195,6 +214,23 @@ class AppSettingsService:
                 if key not in ordered_keys:
                     ordered_keys.append(key)
             normalized_layouts[pane_id] = ordered_keys
+        raw_oa_retention = raw_payload.get("oa_retention")
+        oa_retention = raw_oa_retention if isinstance(raw_oa_retention, dict) else {}
+        cutoff_date = str(oa_retention.get("cutoff_date") or DEFAULT_OA_RETENTION_CUTOFF_DATE).strip()
+        if not _is_iso_date(cutoff_date):
+            cutoff_date = DEFAULT_OA_RETENTION_CUTOFF_DATE
+        raw_oa_invoice_offset = raw_payload.get("oa_invoice_offset")
+        oa_invoice_offset = raw_oa_invoice_offset if isinstance(raw_oa_invoice_offset, dict) else {}
+        raw_applicant_names = (
+            oa_invoice_offset.get("applicant_names")
+            if "applicant_names" in oa_invoice_offset
+            else DEFAULT_OA_INVOICE_OFFSET_APPLICANTS
+        )
+        if not isinstance(raw_applicant_names, list):
+            raw_applicant_names = []
+        applicant_names = AppSettingsService._normalize_username_list(
+            raw_applicant_names
+        )
         return {
             "completed_project_ids": completed_ids,
             "bank_account_mappings": mappings,
@@ -203,4 +239,14 @@ class AppSettingsService:
             "admin_usernames": sorted(admin_usernames),
             "full_access_usernames": full_access_usernames,
             "workbench_column_layouts": normalized_layouts,
+            "oa_retention": {"cutoff_date": cutoff_date},
+            "oa_invoice_offset": {"applicant_names": applicant_names},
         }
+
+
+def _is_iso_date(value: str) -> bool:
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        return False
+    return True

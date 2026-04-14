@@ -93,15 +93,25 @@ def resolve_oa_request_session(
     if token is None:
         if _should_enable_local_dev_auth():
             dev_username = os.getenv("FIN_OPS_DEV_USERNAME", "local_finops_admin").strip() or "local_finops_admin"
+            local_access_control_service = AccessControlService(
+                required_permission=access_control_service.required_permission,
+                allowed_usernames=access_control_service.allowed_usernames,
+                allowed_roles=access_control_service.allowed_roles,
+                dynamic_allowed_usernames_provider=access_control_service.dynamic_allowed_usernames_provider,
+                readonly_export_usernames=access_control_service.readonly_export_usernames,
+                admin_usernames=[*(access_control_service.admin_usernames or []), dev_username],
+                dynamic_readonly_export_usernames_provider=access_control_service.dynamic_readonly_export_usernames_provider,
+                dynamic_admin_usernames_provider=access_control_service.dynamic_admin_usernames_provider,
+            )
             synthetic_identity = OAUserIdentity(
                 user_id="local-dev-user-id",
                 username=dev_username,
                 nickname="本地开发用户",
                 display_name="本地开发用户",
-                roles=access_control_service.allowed_roles or ["finance"],
-                permissions=[access_control_service.required_permission],
+                roles=local_access_control_service.allowed_roles or ["finance"],
+                permissions=[local_access_control_service.required_permission],
             )
-            decision = access_control_service.evaluate(synthetic_identity)
+            decision = local_access_control_service.evaluate(synthetic_identity)
             return OARequestSession(
                 token="local-dev-token",
                 identity=synthetic_identity,

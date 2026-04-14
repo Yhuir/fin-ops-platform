@@ -15,6 +15,8 @@ from fin_ops_platform.services.project_detail_export_service import ProjectDetai
 
 ZERO = Decimal("0.00")
 EXCLUDED_COST_EXPENSE_TYPES = {"借款", "还款"}
+OA_INVOICE_OFFSET_AUTO_MATCH_CODE = "oa_invoice_offset_auto_match"
+OA_INVOICE_OFFSET_TAG = "冲"
 
 
 class CostStatisticsService:
@@ -969,6 +971,8 @@ class CostStatisticsService:
     def _resolve_group_cost_context(self, oa_rows: list[dict[str, Any]]) -> dict[str, str] | None:
         contexts: set[tuple[str, str, str, str]] = set()
         for row in oa_rows:
+            if self._is_cost_excluded_oa_row(row):
+                continue
             project_name = self._clean_text(row.get("project_name"))
             expense_type = self._clean_text(row.get("expense_type"))
             expense_content = self._clean_text(row.get("expense_content")) or self._clean_text(row.get("reason"))
@@ -995,6 +999,18 @@ class CostStatisticsService:
             "expense_content": expense_content,
             "oa_applicant": applicant or "—",
         }
+
+    @staticmethod
+    def _is_cost_excluded_oa_row(row: dict[str, Any]) -> bool:
+        if bool(row.get("cost_excluded")):
+            return True
+        tags = {str(tag).strip() for tag in list(row.get("tags") or []) if str(tag).strip()}
+        if OA_INVOICE_OFFSET_TAG in tags:
+            return True
+        relation = row.get("oa_bank_relation")
+        if isinstance(relation, dict) and str(relation.get("code", "")) == OA_INVOICE_OFFSET_AUTO_MATCH_CODE:
+            return True
+        return False
 
     def _extract_outflow_amount(self, bank_row: dict[str, Any]) -> Decimal | None:
         transaction_id = str(bank_row.get("id", ""))

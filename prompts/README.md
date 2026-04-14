@@ -53,6 +53,9 @@
 47. `47-workbench-column-layout-foundation.md`
 48. `48-workbench-column-layout-rendering-and-drag-ui.md`
 49. `49-workbench-column-layout-save-and-qa.md`
+50. `50-settings-data-reset-backend-foundation.md`
+51. `51-settings-data-reset-ui-and-oa-rebuild.md`
+52. `52-settings-data-reset-integration-and-qa.md`
 
 使用方式建议：
 
@@ -157,3 +160,17 @@ OA “访问账户管理 / 只读导出 / 管理员独占权限”这一组 prom
   - 每栏列顺序独立保存
   - 登录后恢复上次保存的列排列
   - 列宽变化后表头、内容和滚动轨道继续对齐
+
+设置页“数据清理 / OA 模式 B 重刷”这一组 prompt 对应的需求与文档：
+
+- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/docs/product/银企核销需求.md)
+- 设计文档：[2026-04-14-settings-data-reset-tools-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-14-settings-data-reset-tools-design.md)
+- 实施计划：[2026-04-14-settings-data-reset-tools.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-14-settings-data-reset-tools.md)
+- 当前目标：
+  - 设置页新增高风险数据重置工具
+  - 只清 `fin_ops_platform_app`
+  - 明确禁止改动 `form_data_db.form_data`
+  - 三个危险按钮执行前都必须输入当前 OA 用户密码并由后端复核，密码不得保存、写日志、写审计明文或出现在错误响应中
+  - 未输入 / 输错 OA 密码时不执行清理、不失效缓存、不触发 OA 重建
+  - `清 OA` 固定采用模式 B：彻底重刷 OA 相关状态
+  - Prompt 52 已补集成 QA：三类删表边界、`oa_retention.cutoff_date` 重建、管理员可见性与密码泄露防护

@@ -10,7 +10,10 @@ import type {
   WorkbenchRecordType,
   WorkbenchProjectSetting,
   WorkbenchSettings,
+  WorkbenchSettingsDataResetAction,
+  WorkbenchSettingsDataResetResult,
   WorkbenchSummary,
+  WorkbenchOaStatus,
   WorkbenchColumnLayouts,
 } from "./types";
 
@@ -31,6 +34,7 @@ type ApiRelation = {
 type ApiWorkbenchRow = {
   id: string;
   type: WorkbenchRecordType;
+  source_kind?: string | null;
   case_id?: string | null;
   handled_exception?: boolean | null;
   applicant?: string | null;
@@ -53,6 +57,9 @@ type ApiWorkbenchRow = {
   seller_name?: string | null;
   buyer_tax_no?: string | null;
   buyer_name?: string | null;
+  invoice_code?: string | null;
+  invoice_no?: string | null;
+  digital_invoice_no?: string | null;
   issue_date?: string | null;
   tax_rate?: string | null;
   tax_amount?: string | null;
@@ -62,10 +69,16 @@ type ApiWorkbenchRow = {
   available_actions?: string[];
   summary_fields?: Record<string, string>;
   detail_fields?: Record<string, string>;
+  tags?: string[];
+  cost_excluded?: boolean | null;
 };
 
 type ApiWorkbenchPayload = {
   month: string;
+  oa_status?: {
+    code?: string;
+    message?: string;
+  };
   summary: {
     oa_count: number;
     bank_count: number;
@@ -119,6 +132,12 @@ type ApiWorkbenchSettings = {
     full_access_usernames?: string[];
   };
   workbench_column_layouts?: Partial<WorkbenchColumnLayouts>;
+  oa_retention?: {
+    cutoff_date?: string;
+  };
+  oa_invoice_offset?: {
+    applicant_names?: string[];
+  };
 };
 
 type ApiWorkbenchGroup = {
@@ -200,10 +219,41 @@ type WorkbenchSettingsUpdatePayload = {
   readonlyExportUsernames: string[];
   adminUsernames: string[];
   workbenchColumnLayouts: WorkbenchColumnLayouts;
+  oaRetention: {
+    cutoffDate: string;
+  };
+  oaInvoiceOffset?: {
+    applicantNames: string[];
+  };
+};
+
+type ApiWorkbenchSettingsDataResetResult = {
+  action: WorkbenchSettingsDataResetAction;
+  status: string;
+  cleared_collections?: string[];
+  deleted_counts?: Record<string, number>;
+  protected_targets?: string[];
+  rebuild_status?: string;
+  message?: string;
+};
+
+type WorkbenchSettingsDataResetPayload = {
+  action: WorkbenchSettingsDataResetAction;
+  oaPassword: string;
 };
 
 function toDisplayValue(value: string | null | undefined, fallback = "--") {
   return value && value.trim().length > 0 ? value : fallback;
+}
+
+function firstNonPlaceholderDisplayValue(...values: Array<string | null | undefined>) {
+  for (const value of values) {
+    const displayValue = toDisplayValue(value, "");
+    if (displayValue && displayValue !== "--" && displayValue !== "—") {
+      return displayValue;
+    }
+  }
+  return undefined;
 }
 
 function rowRelation(row: ApiWorkbenchRow) {
@@ -289,11 +339,20 @@ function mapTableValues(row: ApiWorkbenchRow): Record<string, string> {
     };
   }
 
+  const detailFields = row.detail_fields ?? {};
   return {
     sellerTaxId: toDisplayValue(row.seller_tax_no),
     sellerName: toDisplayValue(row.seller_name),
     buyerTaxId: toDisplayValue(row.buyer_tax_no),
     buyerName: toDisplayValue(row.buyer_name),
+    invoiceCode: toDisplayValue(firstNonPlaceholderDisplayValue(detailFields["发票代码"], row.invoice_code)),
+    invoiceNo: toDisplayValue(firstNonPlaceholderDisplayValue(
+      detailFields["发票号码"],
+      row.invoice_no,
+      detailFields["数电发票号码"],
+      row.digital_invoice_no,
+    )),
+    digitalInvoiceNo: toDisplayValue(firstNonPlaceholderDisplayValue(detailFields["数电发票号码"], row.digital_invoice_no)),
     issueDate: toDisplayValue(row.issue_date),
     amount: toDisplayValue(row.amount),
     taxRate: toDisplayValue(row.tax_rate),
@@ -347,6 +406,7 @@ function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
     id: row.id,
     caseId: row.case_id ?? undefined,
     recordType: row.type,
+    sourceKind: row.source_kind ?? undefined,
     label: rowLabel(row),
     status: rowRelation(row)?.label ?? "待处理",
     statusCode: rowRelation(row)?.code ?? "pending",
@@ -358,6 +418,7 @@ function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
     detailFields: mapDetailFields(row.detail_fields),
     actionVariant: rowActionVariant(row),
     availableActions: row.available_actions ?? [],
+    tags: Array.isArray(row.tags) ? row.tags.map((tag) => String(tag).trim()).filter(Boolean) : [],
   };
 }
 
@@ -392,6 +453,15 @@ function mapSummary(summary: ApiWorkbenchPayload["summary"]): WorkbenchSummary {
     openCount: summary.open_count,
     exceptionCount: summary.exception_count,
     totalCount: summary.oa_count + summary.bank_count + summary.invoice_count,
+  };
+}
+
+function mapOaStatus(oaStatus?: ApiWorkbenchPayload["oa_status"]): WorkbenchOaStatus {
+  const code = String(oaStatus?.code ?? "ready").trim();
+  const message = String(oaStatus?.message ?? "OA 已同步").trim();
+  return {
+    code: code === "idle" || code === "loading" || code === "ready" || code === "error" ? code : "ready",
+    message: message || "OA 已同步",
   };
 }
 
@@ -437,6 +507,14 @@ function mapWorkbenchSettings(payload: ApiWorkbenchSettings): WorkbenchSettings 
       oa: Array.isArray(rawLayouts.oa) ? rawLayouts.oa.map((item) => String(item)) : [],
       bank: Array.isArray(rawLayouts.bank) ? rawLayouts.bank.map((item) => String(item)) : [],
       invoice: Array.isArray(rawLayouts.invoice) ? rawLayouts.invoice.map((item) => String(item)) : [],
+    },
+    oaRetention: {
+      cutoffDate: payload.oa_retention?.cutoff_date || "2026-01-01",
+    },
+    oaInvoiceOffset: {
+      applicantNames: (payload.oa_invoice_offset?.applicant_names ?? [])
+        .map((item) => String(item).trim())
+        .filter(Boolean),
     },
   };
 }
@@ -589,7 +667,7 @@ export async function fetchWorkbenchWithProgress(
       ? (loadedBytes, totalBytes) => {
         const resolvedPercent = totalBytes > 0 ? clampPercent((loadedBytes / totalBytes) * 100) : null;
         onProgress({
-          label: "正在加载关联台数据",
+          label: "读 OA 中",
           loadedBytes,
           totalBytes,
           percent: resolvedPercent,
@@ -611,6 +689,7 @@ export async function fetchWorkbenchWithProgress(
 
   return {
     month: payload.month,
+    oaStatus: mapOaStatus(payload.oa_status),
     summary: mapSummary(payload.summary),
     paired: {
       groups: payload.paired.groups.map(mapGroup),
@@ -704,9 +783,39 @@ export async function saveWorkbenchSettings(
       readonly_export_usernames: settings.readonlyExportUsernames,
       admin_usernames: settings.adminUsernames,
       workbench_column_layouts: settings.workbenchColumnLayouts,
+      oa_retention: {
+        cutoff_date: settings.oaRetention.cutoffDate,
+      },
+      oa_invoice_offset: {
+        applicant_names: settings.oaInvoiceOffset?.applicantNames ?? [],
+      },
     }),
   });
   return mapWorkbenchSettings(payload);
+}
+
+export async function resetWorkbenchSettingsData(
+  payload: WorkbenchSettingsDataResetPayload,
+): Promise<WorkbenchSettingsDataResetResult> {
+  const result = await requestJson<ApiWorkbenchSettingsDataResetResult>("/api/workbench/settings/data-reset", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      action: payload.action,
+      oa_password: payload.oaPassword,
+    }),
+  });
+  return {
+    action: result.action,
+    status: result.status,
+    clearedCollections: result.cleared_collections ?? [],
+    deletedCounts: result.deleted_counts ?? {},
+    protectedTargets: result.protected_targets ?? [],
+    rebuildStatus: result.rebuild_status ?? "unknown",
+    message: result.message ?? "数据重置已完成。",
+  };
 }
 
 export async function fetchWorkbenchRowDetail(rowId: string, signal?: AbortSignal): Promise<WorkbenchRecord> {

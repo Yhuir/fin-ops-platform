@@ -1,8 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import type { ReactNode } from "react";
 
 import type { TaxInvoiceRecord } from "../../features/tax/types";
+import WorkbenchColumnFilterMenu from "../workbench/WorkbenchColumnFilterMenu";
+import WorkbenchPaneSearch from "../workbench/WorkbenchPaneSearch";
 
 type TaxTableProps = {
   title: string;
@@ -32,9 +34,31 @@ export default function TaxTable({
   const scrollbarInnerRef = useRef<HTMLDivElement | null>(null);
   const isSyncingScrollRef = useRef(false);
   const activeTableWrapRef = tableWrapRef ?? internalTableWrapRef;
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [counterpartyFilterOpen, setCounterpartyFilterOpen] = useState(false);
+  const [selectedCounterparties, setSelectedCounterparties] = useState<string[]>([]);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc" | null>(null);
+  const counterpartyOptions = useMemo(() => collectCounterpartyOptions(rows), [rows]);
+  const displayRows = useMemo(
+    () => buildDisplayRows(rows, {
+      query: searchQuery,
+      selectedCounterparties,
+      sortDirection,
+    }),
+    [rows, searchQuery, selectedCounterparties, sortDirection],
+  );
+  const visibleSelectedCount = displayRows.filter((row) => selectedIds.includes(row.id)).length;
+  const hasActiveDisplayFilter = searchQuery.trim().length > 0 || selectedCounterparties.length > 0;
 
-  function getInvoiceFlowMeta(invoiceType: string) {
-    if (invoiceType.includes("销")) {
+  function getInvoiceFlowMeta(row: TaxInvoiceRecord) {
+    if (row.flowType === "output") {
+      return { label: "销", className: "invoice-flow-tag invoice-flow-tag-output" };
+    }
+    if (row.flowType === "input") {
+      return { label: "进", className: "invoice-flow-tag invoice-flow-tag-input" };
+    }
+    if (row.invoiceType.includes("销")) {
       return { label: "销", className: "invoice-flow-tag invoice-flow-tag-output" };
     }
     return { label: "进", className: "invoice-flow-tag invoice-flow-tag-input" };
@@ -112,7 +136,17 @@ export default function TaxTable({
       scrollbar.removeEventListener("scroll", syncFromScrollbar);
       window.removeEventListener("resize", syncDimensions);
     };
-  }, [activeTableWrapRef, rows, selectable, showBottomScrollbar, title]);
+  }, [activeTableWrapRef, displayRows, selectable, showBottomScrollbar, title]);
+
+  useEffect(() => {
+    setSelectedCounterparties((current) =>
+      current.filter((counterparty) => counterpartyOptions.includes(counterparty)),
+    );
+  }, [counterpartyOptions]);
+
+  const handleToggleSort = () => {
+    setSortDirection((current) => (current === "desc" ? "asc" : "desc"));
+  };
 
   return (
     <section className="tax-panel">
@@ -120,10 +154,32 @@ export default function TaxTable({
         <div className="tax-panel-header-copy">
           <span>{title}</span>
           <span>
-            {selectable ? `已选 ${selectedIds.length} / ${rows.length}` : `共 ${rows.length} 条`}
+            {selectable
+              ? `已选 ${visibleSelectedCount} / ${displayRows.length}${displayRows.length === rows.length ? "" : `（共 ${rows.length}）`}`
+              : `共 ${displayRows.length}${displayRows.length === rows.length ? "" : ` / ${rows.length}`} 条`}
           </span>
         </div>
-        {headerActions ? <div className="tax-panel-header-actions">{headerActions}</div> : null}
+        <div className="tax-panel-header-actions">
+          <button
+            aria-label={buildTaxTableSortActionLabel(title, sortDirection)}
+            className={`pane-tool-btn pane-sort-btn${sortDirection ? " active" : ""}`}
+            type="button"
+            onClick={handleToggleSort}
+          >
+            <span className="pane-sort-label">{buildTaxTableSortVisualLabel(sortDirection)}</span>
+          </button>
+          <WorkbenchPaneSearch
+            open={searchOpen}
+            appliedValue={searchQuery}
+            draftValue={searchQuery}
+            paneTitle={title}
+            onChange={setSearchQuery}
+            onClear={() => setSearchQuery("")}
+            onClose={() => setSearchOpen(false)}
+            onToggle={() => setSearchOpen((current) => !current)}
+          />
+          {headerActions}
+        </div>
       </header>
       <div ref={activeTableWrapRef} className="table-wrap tax-table-wrap">
         <table aria-label={title} className="grid-table tax-grid-table">
@@ -132,23 +188,36 @@ export default function TaxTable({
               {selectable ? <th className="tax-check-column">选择</th> : null}
               <th className="tax-column-invoice-no">发票编号</th>
               <th className="cell-money tax-column-tax-amount">税额</th>
-              <th className="tax-column-counterparty">对方名称</th>
+              <th className="tax-column-counterparty">
+                <span className="tax-column-header-with-filter">
+                  <span>对方名称</span>
+                  <WorkbenchColumnFilterMenu
+                    label="对方名称"
+                    open={counterpartyFilterOpen}
+                    options={counterpartyOptions}
+                    selectedValues={selectedCounterparties}
+                    onChange={setSelectedCounterparties}
+                    onClose={() => setCounterpartyFilterOpen(false)}
+                    onToggle={() => setCounterpartyFilterOpen((current) => !current)}
+                  />
+                </span>
+              </th>
               <th className="cell-money tax-column-amount-rate">金额（税率）</th>
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? (
+            {displayRows.length === 0 ? (
               <tr className="workbench-empty-row">
                 <td className="workbench-empty-cell" colSpan={selectable ? 5 : 4}>
-                  当前栏暂无记录
+                  {hasActiveDisplayFilter ? "当前筛选暂无记录" : "当前栏暂无记录"}
                 </td>
               </tr>
             ) : null}
-            {rows.map((row) => {
+            {displayRows.map((row) => {
               const checked = selectedIds.includes(row.id);
               const isLocked = row.isLocked ?? false;
               const isHighlighted = highlightedRowId === row.id;
-              const invoiceFlow = getInvoiceFlowMeta(row.invoiceType);
+              const invoiceFlow = getInvoiceFlowMeta(row);
               const statusMeta = getStatusMeta(row.statusLabel);
               const issueDateMeta = getIssueDateMeta(row.issueDate);
               const taxRateMeta = getTaxRateMeta(row.taxRate);
@@ -201,4 +270,66 @@ export default function TaxTable({
       ) : null}
     </section>
   );
+}
+
+function normalizeTaxSearchText(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function buildTaxRowSearchText(row: TaxInvoiceRecord) {
+  return [
+    row.invoiceNo,
+    row.invoiceType,
+    row.counterparty,
+    row.issueDate,
+    row.taxRate,
+    row.amount,
+    row.taxAmount,
+    row.statusLabel ?? "",
+  ].join(" ").toLowerCase();
+}
+
+function collectCounterpartyOptions(rows: TaxInvoiceRecord[]) {
+  return Array.from(
+    new Set(rows.map((row) => row.counterparty.trim()).filter(Boolean)),
+  ).sort((left, right) => left.localeCompare(right, "zh-CN"));
+}
+
+function buildDisplayRows(
+  rows: TaxInvoiceRecord[],
+  options: {
+    query: string;
+    selectedCounterparties: string[];
+    sortDirection: "asc" | "desc" | null;
+  },
+) {
+  const normalizedQuery = normalizeTaxSearchText(options.query);
+  const selectedCounterpartySet = new Set(options.selectedCounterparties);
+  const filteredRows = rows.filter((row) => {
+    if (normalizedQuery && !buildTaxRowSearchText(row).includes(normalizedQuery)) {
+      return false;
+    }
+    if (selectedCounterpartySet.size > 0 && !selectedCounterpartySet.has(row.counterparty)) {
+      return false;
+    }
+    return true;
+  });
+
+  if (!options.sortDirection) {
+    return filteredRows;
+  }
+
+  return [...filteredRows].sort((left, right) => {
+    const dateComparison = left.issueDate.localeCompare(right.issueDate);
+    const resolvedComparison = dateComparison === 0 ? left.invoiceNo.localeCompare(right.invoiceNo) : dateComparison;
+    return options.sortDirection === "asc" ? resolvedComparison : -resolvedComparison;
+  });
+}
+
+function buildTaxTableSortActionLabel(title: string, currentDirection: "asc" | "desc" | null) {
+  return `${title}按时间${currentDirection === "desc" ? "升序" : "降序"}`;
+}
+
+function buildTaxTableSortVisualLabel(currentDirection: "asc" | "desc" | null) {
+  return currentDirection === "desc" ? "时间↑" : "时间↓";
 }

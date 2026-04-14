@@ -25,6 +25,32 @@ describe("Workbench row selection and detail modal", () => {
     expect(row).toHaveAttribute("data-row-state", "idle");
   });
 
+  test("bank pane time filter supports month selection and clears on second click", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    renderWorkbenchPage();
+
+    const openZone = await screen.findByTestId("zone-open");
+    const openBankPane = within(openZone).getByTestId("pane-bank");
+
+    expect(within(openZone).getAllByText("杭州张三广告有限公司").length).toBeGreaterThan(0);
+    expect(within(openZone).getAllByText("智能工厂设备商").length).toBeGreaterThan(0);
+
+    await user.click(within(openBankPane).getByRole("button", { name: "银行流水时间筛选" }));
+    const dialog = await screen.findByRole("dialog", { name: "银行流水时间筛选面板" });
+
+    await user.click(within(dialog).getByRole("button", { name: "按月" }));
+    await user.click(within(dialog).getByRole("button", { name: "4月" }));
+
+    expect(within(openZone).getAllByText("杭州张三广告有限公司").length).toBeGreaterThan(0);
+    expect(within(openZone).queryByText("智能工厂设备商")).not.toBeInTheDocument();
+
+    await user.click(within(openBankPane).getByRole("button", { name: "清除银行流水时间筛选 2026年4月" }));
+
+    expect(within(openZone).getAllByText("杭州张三广告有限公司").length).toBeGreaterThan(0);
+    expect(within(openZone).getAllByText("智能工厂设备商").length).toBeGreaterThan(0);
+  });
+
   test("clicking detail opens the modal and highlights rows with the same case id", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
@@ -331,10 +357,31 @@ describe("Workbench row selection and detail modal", () => {
 
     await user.click(await screen.findByRole("button", { name: "设置" }));
 
-    expect(await screen.findByRole("dialog", { name: "关联台设置" })).toBeInTheDocument();
-    expect(screen.getByText("访问账户管理")).toBeInTheDocument();
+    const settingsDialog = await screen.findByRole("dialog", { name: "关联台设置" });
+    const settingsTree = within(settingsDialog).getByRole("tree", { name: "设置分类" });
+    expect(within(settingsDialog).getByRole("heading", { name: "设置分类" })).toBeInTheDocument();
+    expect(screen.queryByText("设置项")).not.toBeInTheDocument();
+    expect(within(settingsTree).getByRole("treeitem", { name: /项目状态/ })).toBeInTheDocument();
+    expect(within(settingsTree).getByRole("treeitem", { name: /银行账户/ })).toBeInTheDocument();
+    expect(within(settingsTree).getByRole("treeitem", { name: /保OA/ })).toBeInTheDocument();
+    expect(within(settingsTree).getByRole("treeitem", { name: /冲账规则/ })).toBeInTheDocument();
+    expect(within(settingsTree).getByRole("treeitem", { name: /访问账户/ })).toBeInTheDocument();
+    expect(within(settingsDialog).getByRole("heading", { name: "项目状态管理" })).toBeInTheDocument();
     expect(screen.getByText("登录账户：")).toBeInTheDocument();
     expect(screen.getByText("杨南山（YNSYLP005）")).toBeInTheDocument();
+
+    await user.click(within(settingsTree).getByRole("treeitem", { name: /银行账户/ }));
+    expect(within(settingsDialog).getByRole("heading", { name: "银行账户映射" })).toBeInTheDocument();
+    await user.click(within(settingsTree).getByRole("treeitem", { name: /保OA/ }));
+    expect(within(settingsDialog).getByRole("heading", { name: "保OA" })).toBeInTheDocument();
+    await user.clear(screen.getByLabelText("保OA起始日期"));
+    await user.type(screen.getByLabelText("保OA起始日期"), "2026-02-01");
+    await user.click(within(settingsTree).getByRole("treeitem", { name: /冲账规则/ }));
+    expect(within(settingsDialog).getByRole("heading", { name: "冲账规则" })).toBeInTheDocument();
+    await user.clear(screen.getByLabelText("冲账申请人"));
+    await user.type(screen.getByLabelText("冲账申请人"), "周洁莹、李四");
+    await user.click(within(settingsTree).getByRole("treeitem", { name: /访问账户/ }));
+    expect(within(settingsDialog).getByRole("heading", { name: "访问账户管理" })).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("新增访问账户"), "READONLY001");
     await user.selectOptions(screen.getByLabelText("新增账户权限"), "read_export_only");
@@ -362,7 +409,137 @@ describe("Workbench row selection and detail modal", () => {
         body: expect.stringContaining("\"admin_usernames\":[\"YNSYLP005\"]"),
       }),
     );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/settings",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining("\"oa_retention\":{\"cutoff_date\":\"2026-02-01\"}"),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/settings",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining("\"oa_invoice_offset\":{\"applicant_names\":[\"周洁莹\",\"李四\"]}"),
+      }),
+    );
     expect(await screen.findByText("已保存关联台设置。")).toBeInTheDocument();
+  });
+
+  test("YNSYKJ001 can see OA invoice offset settings without access account management", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({
+      sessionAccessTier: "full_access",
+      sessionUsername: "YNSYKJ001",
+    });
+    renderAppAt("/");
+
+    await user.click(await screen.findByRole("button", { name: "设置" }));
+
+    const settingsDialog = await screen.findByRole("dialog", { name: "关联台设置" });
+    const settingsTree = within(settingsDialog).getByRole("tree", { name: "设置分类" });
+    expect(within(settingsTree).getByRole("treeitem", { name: /冲账规则/ })).toBeInTheDocument();
+    expect(within(settingsTree).queryByRole("treeitem", { name: /访问账户/ })).not.toBeInTheDocument();
+    await user.click(within(settingsTree).getByRole("treeitem", { name: /冲账规则/ }));
+    expect(within(settingsDialog).getByRole("heading", { name: "冲账规则" })).toBeInTheDocument();
+  });
+
+  test("admin data reset requires impact confirmation and current OA password", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      sessionAccessTier: "admin",
+      sessionUsername: "YNSYLP005",
+      sessionDisplayName: "杨南山",
+    });
+    renderAppAt("/");
+
+    await user.click(await screen.findByRole("button", { name: "设置" }));
+
+    const settingsDialog = await screen.findByRole("dialog", { name: "关联台设置" });
+    const settingsTree = within(settingsDialog).getByRole("tree", { name: "设置分类" });
+    expect(within(settingsTree).getByRole("treeitem", { name: /数据重置/ })).toBeInTheDocument();
+
+    await user.click(within(settingsTree).getByRole("treeitem", { name: /数据重置/ }));
+    expect(within(settingsDialog).getByRole("button", { name: "清除所有银行流水数据" })).toBeInTheDocument();
+    expect(within(settingsDialog).getByRole("button", { name: "清除所有发票（进销）数据" })).toBeInTheDocument();
+    expect(within(settingsDialog).getByRole("button", { name: "清除所有 OA 数据并重新写入" })).toBeInTheDocument();
+    await user.click(within(settingsDialog).getByRole("button", { name: "清除所有银行流水数据" }));
+
+    const confirmDialog = await screen.findByRole("dialog", { name: "确认数据重置" });
+    expect(within(confirmDialog).getByText(/不影响 OA 源库/)).toBeInTheDocument();
+
+    await user.click(within(confirmDialog).getByRole("button", { name: "继续" }));
+    const passwordDialog = await screen.findByRole("dialog", { name: "OA 密码复核" });
+    expect(within(passwordDialog).getByText(/请输入当前 OA 用户密码/)).toBeInTheDocument();
+    expect(within(passwordDialog).queryByLabelText(/用户名/)).not.toBeInTheDocument();
+
+    await user.type(within(passwordDialog).getByLabelText("当前 OA 用户密码"), "correct-password");
+    await user.click(within(passwordDialog).getByRole("button", { name: "确认清理" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/settings/data-reset",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          action: "reset_bank_transactions",
+          oa_password: "correct-password",
+        }),
+      }),
+    );
+    expect(await screen.findAllByText("已完成数据重置。")).not.toHaveLength(0);
+  });
+
+  test("data reset password failure does not show success feedback", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({
+      sessionAccessTier: "admin",
+      sessionUsername: "YNSYLP005",
+      sessionDisplayName: "杨南山",
+      dataResetPasswordShouldFail: true,
+    });
+    renderAppAt("/");
+
+    await user.click(await screen.findByRole("button", { name: "设置" }));
+
+    const settingsDialog = await screen.findByRole("dialog", { name: "关联台设置" });
+    const settingsTree = within(settingsDialog).getByRole("tree", { name: "设置分类" });
+    await user.click(within(settingsTree).getByRole("treeitem", { name: /数据重置/ }));
+    await user.click(within(settingsDialog).getByRole("button", { name: "清除所有 OA 数据并重新写入" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "确认数据重置" })).getByRole("button", { name: "继续" }));
+    const passwordDialog = await screen.findByRole("dialog", { name: "OA 密码复核" });
+    await user.type(within(passwordDialog).getByLabelText("当前 OA 用户密码"), "wrong-password");
+    await user.click(within(passwordDialog).getByRole("button", { name: "确认清理" }));
+
+    expect(await screen.findByText("当前 OA 用户密码复核失败，未执行数据重置。")).toBeInTheDocument();
+    expect(screen.queryByText("已完成数据重置。")).not.toBeInTheDocument();
+  });
+
+  test("canceling data reset password input does not call reset API or show success", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      sessionAccessTier: "admin",
+      sessionUsername: "YNSYLP005",
+      sessionDisplayName: "杨南山",
+    });
+    renderAppAt("/");
+
+    await user.click(await screen.findByRole("button", { name: "设置" }));
+
+    const settingsDialog = await screen.findByRole("dialog", { name: "关联台设置" });
+    const settingsTree = within(settingsDialog).getByRole("tree", { name: "设置分类" });
+    await user.click(within(settingsTree).getByRole("treeitem", { name: /数据重置/ }));
+    await user.click(within(settingsDialog).getByRole("button", { name: "清除所有发票（进销）数据" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "确认数据重置" })).getByRole("button", { name: "继续" }));
+
+    const passwordDialog = await screen.findByRole("dialog", { name: "OA 密码复核" });
+    await user.type(within(passwordDialog).getByLabelText("当前 OA 用户密码"), "not-sent-password");
+    await user.click(within(passwordDialog).getByRole("button", { name: "取消" }));
+
+    expect(screen.queryByRole("dialog", { name: "OA 密码复核" })).not.toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([url]) => url === "/api/workbench/settings/data-reset"),
+    ).toBe(false);
+    expect(screen.queryByText("已完成数据重置。")).not.toBeInTheDocument();
   });
 
   test("non-admin users do not see access account management in settings", async () => {
@@ -375,8 +552,154 @@ describe("Workbench row selection and detail modal", () => {
 
     await user.click(await screen.findByRole("button", { name: "设置" }));
 
-    expect(await screen.findByRole("dialog", { name: "关联台设置" })).toBeInTheDocument();
+    const settingsDialog = await screen.findByRole("dialog", { name: "关联台设置" });
+    const settingsTree = within(settingsDialog).getByRole("tree", { name: "设置分类" });
+    expect(within(settingsTree).queryByRole("treeitem", { name: /访问账户/ })).not.toBeInTheDocument();
+    expect(within(settingsTree).queryByRole("treeitem", { name: /冲账规则/ })).not.toBeInTheDocument();
+    expect(within(settingsTree).queryByRole("treeitem", { name: /数据重置/ })).not.toBeInTheDocument();
     expect(screen.queryByText("访问账户管理")).not.toBeInTheDocument();
+  });
+
+  test("read-only export users do not see data reset tools in settings", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({
+      sessionAccessTier: "read_only_export",
+      sessionUsername: "EXPORT001",
+    });
+    renderAppAt("/");
+
+    await user.click(await screen.findByRole("button", { name: "设置" }));
+
+    const settingsDialog = await screen.findByRole("dialog", { name: "关联台设置" });
+    const settingsTree = within(settingsDialog).getByRole("tree", { name: "设置分类" });
+    expect(within(settingsTree).queryByRole("treeitem", { name: /数据重置/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "清除所有 OA 数据并重新写入" })).not.toBeInTheDocument();
+  });
+
+  test("bank import opens a dialog and sends per-file bank overrides", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderAppAt("/");
+
+    await user.click(await screen.findByRole("button", { name: "银行流水导入" }));
+    const dialog = await screen.findByRole("dialog", { name: "银行流水导入" });
+    const input = within(dialog).getByLabelText("上传银行流水文件") as HTMLInputElement;
+    const bankFile = new File(["bank-demo"], "historydetail14080.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      lastModified: 1,
+    });
+    const secondBankFile = new File(["bank-demo-2"], "2026-01-01至2026-01-31交易明细.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      lastModified: 2,
+    });
+
+    await user.upload(input, [bankFile, secondBankFile]);
+    const previewButton = within(dialog).getByRole("button", { name: "开始预览" });
+    expect(previewButton).toBeDisabled();
+
+    await user.selectOptions(within(dialog).getByLabelText("对应银行 historydetail14080.xlsx"), "建设银行");
+    await user.selectOptions(within(dialog).getByLabelText("对应银行 2026-01-01至2026-01-31交易明细.xlsx"), "建设银行");
+    expect(previewButton).toBeEnabled();
+    await user.click(previewButton);
+
+    expect(await within(dialog).findByText("已完成 2 个文件的预览识别。")).toBeInTheDocument();
+    const previewCall = fetchMock.mock.calls.find(([url]) => String(url) === "/imports/files/preview");
+    expect(previewCall).toBeTruthy();
+    const formData = (previewCall?.[1] as RequestInit).body as FormData;
+    expect(JSON.parse(String(formData.get("file_overrides")))).toEqual([
+      {
+        file_name: "historydetail14080.xlsx",
+        template_code: "ccb_transaction_detail",
+        batch_type: "bank_transaction",
+        bank_name: "建设银行",
+      },
+      {
+        file_name: "2026-01-01至2026-01-31交易明细.xlsx",
+        template_code: "ccb_transaction_detail",
+        batch_type: "bank_transaction",
+        bank_name: "建设银行",
+      },
+    ]);
+  });
+
+  test("invoice import combines input and output entry points and sends per-file directions", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderAppAt("/");
+
+    expect(await screen.findByRole("button", { name: "发票导入" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "销项发票导入" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "进项发票导入" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "发票导入" }));
+    const dialog = await screen.findByRole("dialog", { name: "发票导入" });
+    const input = within(dialog).getByLabelText("上传发票文件") as HTMLInputElement;
+    const outputFile = new File(["invoice-output"], "一月发票.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      lastModified: 1,
+    });
+    const inputFile = new File(["invoice-input"], "二月发票.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      lastModified: 2,
+    });
+
+    await user.upload(input, [outputFile, inputFile]);
+    const previewButton = within(dialog).getByRole("button", { name: "开始预览" });
+    expect(previewButton).toBeDisabled();
+
+    await user.selectOptions(within(dialog).getByLabelText("票据方向 一月发票.xlsx"), "output_invoice");
+    await user.selectOptions(within(dialog).getByLabelText("票据方向 二月发票.xlsx"), "input_invoice");
+    await user.click(previewButton);
+
+    expect(await within(dialog).findByText("已完成 2 个文件的预览识别。")).toBeInTheDocument();
+    const previewCall = fetchMock.mock.calls.find(([url]) => String(url) === "/imports/files/preview");
+    expect(previewCall).toBeTruthy();
+    const formData = (previewCall?.[1] as RequestInit).body as FormData;
+    expect(JSON.parse(String(formData.get("file_overrides")))).toEqual([
+      {
+        file_name: "一月发票.xlsx",
+        template_code: "invoice_export",
+        batch_type: "output_invoice",
+      },
+      {
+        file_name: "二月发票.xlsx",
+        template_code: "invoice_export",
+        batch_type: "input_invoice",
+      },
+    ]);
+  });
+
+  test("ETC invoice import opens a dialog and sends per-file invoice directions", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderAppAt("/");
+
+    await user.click(await screen.findByRole("button", { name: "ETC发票导入" }));
+    const dialog = await screen.findByRole("dialog", { name: "ETC发票导入" });
+    const input = within(dialog).getByLabelText("上传ETC发票文件") as HTMLInputElement;
+    const etcFile = new File(["etc-invoice"], "ETC一月发票.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      lastModified: 1,
+    });
+
+    await user.upload(input, [etcFile]);
+    const previewButton = within(dialog).getByRole("button", { name: "开始预览" });
+    expect(previewButton).toBeDisabled();
+
+    await user.selectOptions(within(dialog).getByLabelText("票据方向 ETC一月发票.xlsx"), "input_invoice");
+    await user.click(previewButton);
+
+    expect(await within(dialog).findByText("已完成 1 个文件的预览识别。")).toBeInTheDocument();
+    const previewCall = fetchMock.mock.calls.find(([url]) => String(url) === "/imports/files/preview");
+    expect(previewCall).toBeTruthy();
+    const formData = (previewCall?.[1] as RequestInit).body as FormData;
+    expect(JSON.parse(String(formData.get("file_overrides")))).toEqual([
+      {
+        file_name: "ETC一月发票.xlsx",
+        template_code: "invoice_export",
+        batch_type: "input_invoice",
+      },
+    ]);
   });
 
   test("read-only export users can search and view details but cannot see write actions", async () => {
@@ -391,6 +714,7 @@ describe("Workbench row selection and detail modal", () => {
     const pairedZone = await screen.findByTestId("zone-paired");
 
     expect(screen.queryByRole("button", { name: "银行流水导入" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "发票导入" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "销项发票导入" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "进项发票导入" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "ETC发票导入" })).not.toBeInTheDocument();
@@ -594,6 +918,7 @@ describe("Workbench row selection and detail modal", () => {
 
     await user.selectOptions(within(exceptionModal).getByLabelText("异常情况"), "oa_bank_amount_mismatch");
     await user.type(within(exceptionModal).getByLabelText("备注"), "金额核对后暂时继续异常");
+    fetchMock.mockClear();
     await user.click(within(exceptionModal).getByRole("button", { name: "继续报异常" }));
 
     expect(await screen.findByText("已对 2 条记录执行 OA/流水异常处理。")).toBeInTheDocument();
@@ -610,6 +935,11 @@ describe("Workbench row selection and detail modal", () => {
         }),
       }),
     );
+    const workbenchRefreshCalls = fetchMock.mock.calls.filter(([input]) => {
+      const rawUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      return new URL(rawUrl, "http://localhost").pathname === "/api/workbench";
+    });
+    expect(workbenchRefreshCalls).toHaveLength(0);
   });
 
   test("processed exception rows move out of the open zone and appear in the processed exception modal", async () => {
@@ -708,6 +1038,56 @@ describe("Workbench row selection and detail modal", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "确定" }));
+    expect(
+      within(openZone).getByRole("row", {
+        name: /陈涛.*智能工厂设备商/,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(openZone).getByRole("row", {
+        name: /2026-03-28.*智能工厂设备商/,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  test("canceling processed exception restores rows locally without starting an all-scope refresh", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({ actionDelayMs: 80 });
+    renderWorkbenchPage();
+
+    const openZone = await screen.findByTestId("zone-open");
+    const openOaRow = await screen.findByRole("row", {
+      name: /陈涛.*智能工厂设备商/,
+    });
+    const openBankRow = await screen.findByRole("row", {
+      name: /2026-03-28.*智能工厂设备商/,
+    });
+
+    await user.click(openOaRow);
+    await user.click(openBankRow);
+    await user.click(within(openZone).getByRole("button", { name: "异常处理" }));
+
+    const exceptionModal = await screen.findByRole("dialog", { name: "OA流水异常处理弹窗" });
+    await user.selectOptions(within(exceptionModal).getByLabelText("异常情况"), "oa_bank_amount_mismatch");
+    await user.click(within(exceptionModal).getByRole("button", { name: "继续报异常" }));
+    await user.click(await screen.findByRole("button", { name: "确定" }));
+    fetchMock.mockClear();
+
+    await user.click(within(openZone).getByRole("button", { name: /已处理异常\d+项/ }));
+    const processedModal = await screen.findByRole("dialog", { name: "已处理异常弹窗" });
+    await user.click(within(processedModal).getAllByRole("button", { name: "取消异常处理" })[0]);
+
+    const confirmModal = await screen.findByRole("dialog", { name: "取消异常处理确认弹窗" });
+    await user.click(within(confirmModal).getByRole("button", { name: "确认取消异常处理" }));
+
+    expect(await screen.findByText("已取消 2 条记录的异常处理。")).toBeInTheDocument();
+    const workbenchRefreshCalls = fetchMock.mock.calls.filter(([input]) => {
+      const rawUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      return new URL(rawUrl, "http://localhost").pathname === "/api/workbench";
+    });
+    expect(workbenchRefreshCalls).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: "确定" }));
+
     expect(
       within(openZone).getByRole("row", {
         name: /陈涛.*智能工厂设备商/,

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import UTC, datetime
+from threading import RLock
 from typing import Any
 
 
 class WorkbenchReadModelService:
     def __init__(self, *, read_models: dict[str, dict[str, Any]] | None = None) -> None:
+        self._lock = RLock()
         self._read_models = self._normalize_read_models(read_models or {})
 
     @classmethod
@@ -17,7 +19,8 @@ class WorkbenchReadModelService:
         return cls(read_models=read_models if isinstance(read_models, dict) else {})
 
     def snapshot(self) -> dict[str, Any]:
-        return {"read_models": deepcopy(self._read_models)}
+        with self._lock:
+            return {"read_models": deepcopy(self._read_models)}
 
     def snapshot_scope_keys(self, scope_keys: list[str]) -> dict[str, Any]:
         normalized_scope_keys = {
@@ -25,22 +28,28 @@ class WorkbenchReadModelService:
             for scope_key in list(scope_keys or [])
             if str(scope_key).strip()
         }
-        return {
-            "read_models": {
-                scope_key: deepcopy(read_model)
-                for scope_key, read_model in self._read_models.items()
-                if scope_key in normalized_scope_keys
+        with self._lock:
+            return {
+                "read_models": {
+                    scope_key: deepcopy(read_model)
+                    for scope_key, read_model in self._read_models.items()
+                    if scope_key in normalized_scope_keys
+                }
             }
-        }
 
     def get_read_model(self, scope_key: str) -> dict[str, Any] | None:
         resolved_scope_key = str(scope_key).strip()
         if not resolved_scope_key:
             return None
-        read_model = self._read_models.get(resolved_scope_key)
-        if not isinstance(read_model, dict):
-            return None
-        return deepcopy(read_model)
+        with self._lock:
+            read_model = self._read_models.get(resolved_scope_key)
+            if not isinstance(read_model, dict):
+                return None
+            return deepcopy(read_model)
+
+    def list_scope_keys(self) -> list[str]:
+        with self._lock:
+            return list(self._read_models.keys())
 
     def upsert_read_model(
         self,
@@ -64,14 +73,16 @@ class WorkbenchReadModelService:
             },
             fallback_scope_key=resolved_scope_key,
         )
-        self._read_models[resolved_scope_key] = normalized
-        return deepcopy(normalized)
+        with self._lock:
+            self._read_models[resolved_scope_key] = normalized
+            return deepcopy(normalized)
 
     def delete_read_model(self, scope_key: str) -> bool:
         resolved_scope_key = str(scope_key).strip()
         if not resolved_scope_key:
             return False
-        return self._read_models.pop(resolved_scope_key, None) is not None
+        with self._lock:
+            return self._read_models.pop(resolved_scope_key, None) is not None
 
     @classmethod
     def _normalize_read_models(cls, read_models: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:

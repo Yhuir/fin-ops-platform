@@ -212,7 +212,7 @@ describe("Workbench pane display model", () => {
     ]);
   });
 
-  test("opens a pane-local search box and filters the current pane while keeping related rows in sibling panes", async () => {
+  test("searches while typing and only clears pane-local search from the inner clear action", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
     await screen.findByText("陈涛");
@@ -225,15 +225,42 @@ describe("Workbench pane display model", () => {
     fireEvent.click(within(openOaPane).getByRole("button", { name: "搜索 OA" }));
 
     const oaSearchInput = within(openOaPane).getByRole("searchbox", { name: "搜索 OA" });
+    expect(oaSearchInput.closest(".pane-search-popover")).not.toBeNull();
+    expect(within(openOaPane).getByRole("button", { name: "收起搜索 OA" })).toHaveClass("pane-search-toggle-btn", "fixed");
     fireEvent.change(oaSearchInput, { target: { value: "陈涛" } });
 
-    expect(within(openZone).getByText("陈涛")).toBeInTheDocument();
     expect(within(openZone).queryByTestId("candidate-group-open-row:oa-o-202603-002")).not.toBeInTheDocument();
     expect(within(openZone).getAllByText((content) => content.includes("智能工厂设备商")).length).toBeGreaterThan(1);
+    expect(oaSearchInput).toHaveClass("pane-search-input", "active");
+    expect(within(openOaPane).getByRole("button", { name: "收起搜索 OA" })).toHaveClass("pane-search-toggle-btn", "fixed");
+    expect(within(openOaPane).getByRole("button", { name: "清空搜索 OA" })).toBeInTheDocument();
+
+    fireEvent.click(within(openOaPane).getByRole("button", { name: "收起搜索 OA" }));
+    expect(within(openOaPane).queryByRole("searchbox", { name: "搜索 OA" })).not.toBeInTheDocument();
+    expect(within(openOaPane).getByRole("button", { name: "搜索 OA，当前关键词 陈涛" })).toHaveTextContent("陈涛");
+
+    fireEvent.click(within(openOaPane).getByRole("button", { name: "搜索 OA，当前关键词 陈涛" }));
+    const reopenedOaSearchInput = within(openOaPane).getByRole("searchbox", { name: "搜索 OA" });
+    expect(reopenedOaSearchInput).toBeInTheDocument();
+    expect(within(openOaPane).getByRole("button", { name: "收起搜索 OA" })).toBeInTheDocument();
+
+    fireEvent.mouseDown(document.body);
+    expect(within(openOaPane).queryByRole("searchbox", { name: "搜索 OA" })).not.toBeInTheDocument();
+    expect(within(openOaPane).getByRole("button", { name: "搜索 OA，当前关键词 陈涛" })).toHaveTextContent("陈涛");
 
     fireEvent.click(within(openBankPane).getByRole("button", { name: "搜索 银行流水" }));
-    expect(within(openOaPane).queryByRole("searchbox", { name: "搜索 OA" })).not.toBeInTheDocument();
     expect(within(openBankPane).getByRole("searchbox", { name: "搜索 银行流水" })).toBeInTheDocument();
+    expect(within(openOaPane).getByRole("button", { name: "搜索 OA，当前关键词 陈涛" })).toHaveTextContent("陈涛");
+
+    fireEvent.click(within(openOaPane).getByRole("button", { name: "搜索 OA，当前关键词 陈涛" }));
+    expect(within(openOaPane).getByRole("searchbox", { name: "搜索 OA" })).toBeInTheDocument();
+    fireEvent.click(within(openOaPane).getByRole("button", { name: "清空搜索 OA" }));
+    expect(within(openZone).getByTestId("candidate-group-open-row:oa-o-202603-002")).toBeInTheDocument();
+    expect(within(openOaPane).getByRole("searchbox", { name: "搜索 OA" })).toHaveValue("");
+    expect(within(openOaPane).getByRole("button", { name: "收起搜索 OA" })).toBeInTheDocument();
+
+    fireEvent.mouseDown(document.body);
+    expect(within(openOaPane).getByRole("button", { name: "搜索 OA" })).toBeInTheDocument();
   });
 
   test("supports multi-select column filtering with select-all and clear actions", async () => {

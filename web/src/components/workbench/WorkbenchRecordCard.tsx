@@ -129,6 +129,8 @@ function buildRowAriaLabel(row: WorkbenchRecord, paneId: WorkbenchRecordType, co
     pushValue(row.tableValues.sellerName);
     pushValue(row.tableValues.buyerTaxId);
     pushValue(row.tableValues.buyerName);
+    pushValue(row.tableValues.invoiceCode);
+    pushValue(row.tableValues.invoiceNo);
     pushValue(row.tableValues.issueDate);
     pushValue(row.tableValues.amount);
     pushValue(row.tableValues.taxRate);
@@ -181,6 +183,7 @@ function renderCellValue(
       value,
       row.tableValues.applicationType ?? "",
       row.tableValues.reconciliationStatus ?? "",
+      row.tags ?? [],
     );
   }
 
@@ -208,6 +211,10 @@ function renderCellValue(
 
   if (paneId === "invoice" && column.key === "buyerName") {
     return renderInvoicePartyValue(value, row.tableValues.buyerTaxId ?? "", "");
+  }
+
+  if (paneId === "invoice" && column.key === "issueDate") {
+    return renderInvoiceIdentityValue(row.tableValues.invoiceCode ?? "", row.tableValues.invoiceNo ?? "", value);
   }
 
   if (paneId === "invoice" && column.key === "amount") {
@@ -380,18 +387,29 @@ function resolveDirectionForMoneyCell(columnKey: string, direction: string, hasV
   return null;
 }
 
-function renderOaProjectValue(projectName: string, applicationType: string, reconciliationStatus: string) {
+function renderOaProjectValue(
+  projectName: string,
+  applicationType: string,
+  reconciliationStatus: string,
+  tags: string[] = [],
+) {
   const hasApplicationType = applicationType !== "--" && applicationType !== "—" && applicationType !== "";
   const hasReconciliationStatus =
     reconciliationStatus !== "--" && reconciliationStatus !== "—" && reconciliationStatus !== "";
+  const visibleTags = tags.map((tag) => tag.trim()).filter(Boolean);
 
   return (
     <span className="compound-cell-value">
       <span className="compound-cell-primary cell-text-value cell-text-value-full">{projectName}</span>
-      {hasApplicationType || hasReconciliationStatus ? (
+      {hasApplicationType || hasReconciliationStatus || visibleTags.length > 0 ? (
         <span className="compound-cell-secondary compound-cell-secondary-nowrap">
           {hasApplicationType ? <span className="inline-meta-tag">{applicationType}</span> : null}
           {hasReconciliationStatus ? <span className="status-tag">{reconciliationStatus}</span> : null}
+          {visibleTags.map((tag) => (
+            <span key={tag} className="inline-meta-tag">
+              {tag}
+            </span>
+          ))}
         </span>
       ) : null}
     </span>
@@ -513,6 +531,48 @@ function renderInvoiceAmountValue(amount: string, taxRate: string, taxAmount: st
           </span>
         </span>
       ) : null}
+    </span>
+  );
+}
+
+function renderInvoiceIdentityValue(invoiceCode: string, invoiceNo: string, issueDate: string) {
+  const normalizedCode = normalizeDisplayText(invoiceCode);
+  const normalizedNo = normalizeDisplayText(invoiceNo);
+  const hasIssueDate = issueDate !== "--" && issueDate !== "—" && issueDate !== "";
+
+  return (
+    <span className="compound-cell-value invoice-identity-value">
+      <span className="compound-cell-primary cell-text-value cell-text-value-full invoice-identity-code">
+        {`${normalizedCode} /`}
+      </span>
+      <span className="compound-cell-secondary">
+        <span className="cell-text-value cell-text-value-full invoice-identity-no">{normalizedNo}</span>
+      </span>
+      {hasIssueDate ? (
+        <span className="compound-cell-tertiary">
+          {renderInlineInvoiceDateTag(issueDate)}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function normalizeDisplayText(value: string) {
+  return value && value !== "—" ? value : "--";
+}
+
+function renderInlineInvoiceDateTag(value: string) {
+  const [datePart, ...rest] = value.trim().split(/\s+/);
+  const timePart = rest.join(" ").trim();
+
+  if (!timePart) {
+    return <span className="inline-meta-tag inline-meta-tag-muted invoice-issue-date-tag">{datePart}</span>;
+  }
+
+  return (
+    <span className="inline-meta-tag inline-meta-tag-muted inline-meta-tag-datetime invoice-issue-date-tag">
+      <span className="inline-meta-tag-datetime-date">{datePart}</span>
+      <span className="inline-meta-tag-datetime-time">{timePart}</span>
     </span>
   );
 }

@@ -3,24 +3,31 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
+from threading import Lock, Thread
 from time import monotonic
-from typing import Any
+from typing import Any, Callable, Protocol
 from urllib.parse import quote_plus
 
+from bson import ObjectId
 from pymongo import MongoClient
+from pymongo.errors import PyMongoError
 
 from fin_ops_platform.services.imports import clean_string
-from fin_ops_platform.services.oa_adapter import OAAdapter, OAApplicationRecord
+from fin_ops_platform.services.oa_adapter import OAAdapter, OAApplicationRecord, OAReadStatus, build_attachment_invoice_detail_fields
+from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
 
 
 APPROVED_STATUS_VALUES = {"approved", "APPROVED", "Approved"}
 APPROVED_PROCESS_VALUES = {"1", "2", 1, 2}
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 KEY_NORMALIZE_RE = re.compile(r"[\s_\-:/\\()（）【】\[\]·,.，。]+")
+PAYMENT_ROW_ID_RE = re.compile(r"^oa-pay-(.+)$")
+EXPENSE_ROW_ID_RE = re.compile(r"^oa-exp-(.+)-([^-]+)$")
 
 EXPENSE_TYPE_CANDIDATE_KEYS = (
     "feeType",
@@ -125,6 +132,12 @@ class MongoOASettings:
         )
 
 
+class OAAttachmentInvoiceCache(Protocol):
+    def load_oa_attachment_invoice_cache_entry(self, cache_key: str) -> dict[str, object] | None: ...
+
+    def save_oa_attachment_invoice_cache_entry(self, cache_key: str, payload: dict[str, object]) -> None: ...
+
+
 def load_mongo_oa_settings(data_dir: Path | None = None) -> MongoOASettings | None:
     file_payload: dict[str, Any] = {}
     if data_dir is not None:
@@ -166,15 +179,35 @@ def load_mongo_oa_settings(data_dir: Path | None = None) -> MongoOASettings | No
 class MongoOAAdapter(OAAdapter):
     name = "mongo_oa"
 
-    def __init__(self, *, settings: MongoOASettings) -> None:
+    def __init__(
+        self,
+        *,
+        settings: MongoOASettings,
+        attachment_invoice_cache: OAAttachmentInvoiceCache | None = None,
+    ) -> None:
         self._settings = settings
+        self._attachment_invoice_cache = attachment_invoice_cache
+        self._attachment_invoice_cache_updated_callback: Callable[[list[str]], None] | None = None
+        self._attachment_invoice_parse_lock = Lock()
+        self._attachment_invoice_parse_inflight: set[str] = set()
         self._client: MongoClient | None = None
         self._project_name_cache: dict[str, str] | None = None
         self._records_cache: dict[str, tuple[float, list[OAApplicationRecord]]] = {}
         self._available_months_cache: tuple[float, list[str]] | None = None
+        self._mongo_unavailable_until = 0.0
+        self._last_read_status = OAReadStatus(code="idle", message="OA 待读取")
+        self._attachment_invoice_service = OAAttachmentInvoiceService(
+            timeout_seconds=max(self._settings.request_timeout_ms / 1000, 1),
+        )
+
+    def set_attachment_invoice_cache_updated_callback(self, callback: Callable[[list[str]], None] | None) -> None:
+        self._attachment_invoice_cache_updated_callback = callback
 
     def list_application_records(self, month: str) -> list[OAApplicationRecord]:
         if not MONTH_RE.match(month):
+            return []
+        if self._mongo_temporarily_unavailable():
+            self._set_read_status("error", "OA 连接失败")
             return []
 
         cached_records = self._records_cache.get(month)
@@ -182,31 +215,148 @@ class MongoOAAdapter(OAAdapter):
         if cached_records is not None and self._settings.cache_ttl_seconds > 0:
             cached_at, records = cached_records
             if now - cached_at < self._settings.cache_ttl_seconds:
+                self._set_read_status("ready", "OA 已同步")
                 return deepcopy(records)
 
         project_names = self._project_name_index()
+        if self._mongo_temporarily_unavailable():
+            self._set_read_status("error", "OA 连接失败")
+            return []
         records: list[OAApplicationRecord] = []
-        for document in self._load_form_documents(self._settings.payment_request_form_id, month):
+        payment_documents = self._load_form_documents(self._settings.payment_request_form_id, month)
+        if self._mongo_temporarily_unavailable():
+            self._set_read_status("error", "OA 连接失败")
+            return []
+        for document in payment_documents:
             record = self._build_payment_request_record(document, project_names)
             if record is not None:
                 records.append(record)
-        for document in self._load_form_documents(self._settings.expense_claim_form_id, month):
+        expense_documents = self._load_form_documents(self._settings.expense_claim_form_id, month)
+        if self._mongo_temporarily_unavailable():
+            self._set_read_status("error", "OA 连接失败")
+            return sorted(records, key=lambda item: (item.month, item.id))
+        for document in expense_documents:
             records.extend(self._build_expense_claim_records(document, project_names))
         sorted_records = sorted(records, key=lambda item: (item.month, item.id))
         if self._settings.cache_ttl_seconds > 0:
             self._records_cache[month] = (now, deepcopy(sorted_records))
+        self._set_read_status("ready", "OA 已同步")
         return sorted_records
+
+    def list_all_application_records(self) -> list[OAApplicationRecord]:
+        cache_key = "__all__"
+        if self._mongo_temporarily_unavailable():
+            self._set_read_status("error", "OA 连接失败")
+            return []
+
+        cached_records = self._records_cache.get(cache_key)
+        now = self._now()
+        if cached_records is not None and self._settings.cache_ttl_seconds > 0:
+            cached_at, records = cached_records
+            if now - cached_at < self._settings.cache_ttl_seconds:
+                self._set_read_status("ready", "OA 已同步")
+                return deepcopy(records)
+
+        project_names = self._project_name_index()
+        if self._mongo_temporarily_unavailable():
+            self._set_read_status("error", "OA 连接失败")
+            return []
+
+        records: list[OAApplicationRecord] = []
+        payment_documents = self._load_form_documents(self._settings.payment_request_form_id)
+        if self._mongo_temporarily_unavailable():
+            self._set_read_status("error", "OA 连接失败")
+            return []
+        for document in payment_documents:
+            record = self._build_payment_request_record(document, project_names)
+            if record is not None:
+                records.append(record)
+
+        expense_documents = self._load_form_documents(self._settings.expense_claim_form_id)
+        if self._mongo_temporarily_unavailable():
+            self._set_read_status("error", "OA 连接失败")
+            return sorted(records, key=lambda item: (item.month, item.id))
+        for document in expense_documents:
+            records.extend(self._build_expense_claim_records(document, project_names))
+
+        sorted_records = sorted(records, key=lambda item: (item.month, item.id))
+        if self._settings.cache_ttl_seconds > 0:
+            self._records_cache[cache_key] = (now, deepcopy(sorted_records))
+        self._set_read_status("ready", "OA 已同步")
+        return sorted_records
+
+    def list_application_records_by_row_ids(self, row_ids: list[str]) -> list[OAApplicationRecord]:
+        normalized_row_ids = [str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()]
+        if not normalized_row_ids:
+            return []
+        if self._mongo_temporarily_unavailable():
+            self._set_read_status("error", "OA 连接失败")
+            return []
+
+        project_names = self._project_name_index()
+        if self._mongo_temporarily_unavailable():
+            self._set_read_status("error", "OA 连接失败")
+            return []
+
+        payment_external_ids: set[str] = set()
+        expense_external_ids: set[str] = set()
+        for row_id in normalized_row_ids:
+            parsed = self._parse_oa_row_id(row_id)
+            if parsed is None:
+                continue
+            record_kind, external_id, _row_index = parsed
+            if record_kind == "payment":
+                payment_external_ids.add(external_id)
+            else:
+                expense_external_ids.add(external_id)
+
+        records_by_id: dict[str, OAApplicationRecord] = {}
+        if payment_external_ids:
+            payment_documents = self._load_form_documents_by_external_ids(
+                self._settings.payment_request_form_id,
+                payment_external_ids,
+            )
+            if self._mongo_temporarily_unavailable():
+                self._set_read_status("error", "OA 连接失败")
+                return [records_by_id[row_id] for row_id in normalized_row_ids if row_id in records_by_id]
+            for document in payment_documents:
+                record = self._build_payment_request_record(document, project_names)
+                if record is not None:
+                    records_by_id[record.id] = record
+
+        if expense_external_ids:
+            expense_documents = self._load_form_documents_by_external_ids(
+                self._settings.expense_claim_form_id,
+                expense_external_ids,
+            )
+            if self._mongo_temporarily_unavailable():
+                self._set_read_status("error", "OA 连接失败")
+                return [records_by_id[row_id] for row_id in normalized_row_ids if row_id in records_by_id]
+            for document in expense_documents:
+                for record in self._build_expense_claim_records(document, project_names):
+                    records_by_id[record.id] = record
+
+        self._set_read_status("ready", "OA 已同步")
+        return [records_by_id[row_id] for row_id in normalized_row_ids if row_id in records_by_id]
 
     def list_available_months(self) -> list[str]:
         now = self._now()
+        if self._mongo_temporarily_unavailable():
+            self._set_read_status("error", "OA 连接失败")
+            return []
         if self._available_months_cache is not None and self._settings.cache_ttl_seconds > 0:
             cached_at, months = self._available_months_cache
             if now - cached_at < self._settings.cache_ttl_seconds:
+                self._set_read_status("ready", "OA 已同步")
                 return list(months)
 
         months: set[str] = set()
         for form_id in (self._settings.payment_request_form_id, self._settings.expense_claim_form_id):
-            for document in self._load_form_documents(form_id):
+            documents = self._load_form_month_documents(form_id)
+            if self._mongo_temporarily_unavailable():
+                self._set_read_status("error", "OA 连接失败")
+                return sorted(months)
+            for document in documents:
                 data = self._document_data(document)
                 derived_month = self._derive_month(data, document)
                 if MONTH_RE.match(derived_month):
@@ -214,7 +364,11 @@ class MongoOAAdapter(OAAdapter):
         ordered_months = sorted(months)
         if self._settings.cache_ttl_seconds > 0:
             self._available_months_cache = (now, list(ordered_months))
+        self._set_read_status("ready", "OA 已同步")
         return ordered_months
+
+    def get_read_status(self) -> OAReadStatus:
+        return OAReadStatus(code=self._last_read_status.code, message=self._last_read_status.message)
 
     def fetch_counterparties(self) -> list[dict[str, Any]]:
         names: dict[str, dict[str, Any]] = {}
@@ -369,10 +523,31 @@ class MongoOAAdapter(OAAdapter):
             project_id = self._first_text(item, "detailProjectName") or self._first_text(data, "projectName")
             project_name = project_names.get(project_id, project_id or "--")
             row_index = clean_string(item.get("row_index", index))
+            attachment_files = self._attachment_files(item)
+            record_month = self._derive_month(data, document)
+            attachment_invoices = self._parse_attachment_invoices(attachment_files, month=record_month)
+            detail_fields = {
+                "OA单号": self._expense_form_no(data, document),
+                "表单ID": self._settings.expense_claim_form_id,
+                "明细行号": row_index,
+                "申请日期": self._first_text(data, "ApplicationDate", "applicationDate"),
+                "报销日期": self._first_text(item, "detailReimbursementDate", "reimbursementDate"),
+                "付款方式": self._first_text(item, "detailPaymentMethod", "paymentMethod"),
+                "票据类型": self._first_text(item, "detailTypeOfInvoice", "paymentProof"),
+                "费用类型": expense_type or "—",
+                "费用内容": expense_content or "—",
+                "流程状态": self._form_status(data),
+            }
+            detail_fields.update(
+                build_attachment_invoice_detail_fields(
+                    attachment_invoices,
+                    attachment_file_count=len(attachment_files),
+                )
+            )
             records.append(
                 OAApplicationRecord(
                     id=f"oa-exp-{external_id}-{row_index}",
-                    month=self._derive_month(data, document),
+                    month=record_month,
                     section="open",
                     case_id=None,
                     applicant=applicant,
@@ -386,21 +561,175 @@ class MongoOAAdapter(OAAdapter):
                     relation_tone="warn",
                     expense_type=expense_type,
                     expense_content=expense_content,
-                    detail_fields={
-                        "OA单号": self._expense_form_no(data, document),
-                        "表单ID": self._settings.expense_claim_form_id,
-                        "明细行号": row_index,
-                        "申请日期": self._first_text(data, "ApplicationDate", "applicationDate"),
-                        "报销日期": self._first_text(item, "detailReimbursementDate", "reimbursementDate"),
-                        "付款方式": self._first_text(item, "detailPaymentMethod", "paymentMethod"),
-                        "票据类型": self._first_text(item, "detailTypeOfInvoice", "paymentProof"),
-                        "费用类型": expense_type or "—",
-                        "费用内容": expense_content or "—",
-                        "流程状态": self._form_status(data),
-                    },
+                    detail_fields=detail_fields,
+                    attachment_invoices=attachment_invoices,
+                    attachment_file_count=len(attachment_files),
                 )
             )
         return records
+
+    @staticmethod
+    def _attachment_files(item: dict[str, Any]) -> list[dict[str, object]]:
+        attachment = item.get("detailReimbursementAttachment")
+        if not isinstance(attachment, dict):
+            return []
+        files = attachment.get("files")
+        if isinstance(files, list):
+            return [file_entry for file_entry in files if isinstance(file_entry, dict)]
+
+        file_list = attachment.get("list")
+        if not isinstance(file_list, list):
+            return []
+        normalized_entries: list[dict[str, object]] = []
+        for file_entry in file_list:
+            normalized = MongoOAAdapter._normalize_attachment_list_entry(file_entry)
+            if normalized is not None:
+                normalized_entries.append(normalized)
+        return normalized_entries
+
+    @staticmethod
+    def _normalize_attachment_list_entry(file_entry: object) -> dict[str, object] | None:
+        if not isinstance(file_entry, dict):
+            return None
+        response = file_entry.get("response")
+        extra = response.get("extra") if isinstance(response, dict) else None
+        if isinstance(extra, dict):
+            file_name = clean_string(extra.get("fileName") or file_entry.get("name") or "")
+            file_path = clean_string(
+                extra.get("filePath")
+                or extra.get("url")
+                or (response.get("data") if isinstance(response, dict) else "")
+                or ""
+            )
+            suffix = clean_string(extra.get("suffix") or Path(file_name or file_path).suffix.lstrip(".")).lower()
+            if file_name or file_path:
+                return {
+                    "fileName": file_name,
+                    "filePath": file_path,
+                    "suffix": suffix,
+                }
+        file_name = clean_string(file_entry.get("name") or file_entry.get("fileName") or "")
+        file_path = clean_string(file_entry.get("filePath") or file_entry.get("url") or "")
+        suffix = clean_string(file_entry.get("suffix") or Path(file_name or file_path).suffix.lstrip(".")).lower()
+        if not file_name and not file_path:
+            return None
+        return {
+            "fileName": file_name,
+            "filePath": file_path,
+            "suffix": suffix,
+        }
+
+    def _parse_attachment_invoices(self, files: list[dict[str, object]], *, month: str | None = None) -> list[dict[str, str]]:
+        if not files:
+            return []
+        cache = self._attachment_invoice_cache
+        if cache is None:
+            return []
+
+        cached_invoices: list[dict[str, str]] = []
+        missing_files: list[tuple[str, dict[str, object]]] = []
+        for file_entry in files:
+            cache_key = self._attachment_invoice_cache_key(file_entry)
+            cached_entry = cache.load_oa_attachment_invoice_cache_entry(cache_key)
+            if self._is_current_attachment_invoice_cache_entry(cached_entry):
+                cached_invoices.extend(
+                    dict(invoice)
+                    for invoice in cached_entry["invoices"]
+                    if isinstance(invoice, dict)
+                )
+                continue
+            missing_files.append((cache_key, file_entry))
+        if missing_files:
+            self._schedule_attachment_invoice_parse(missing_files, month=month)
+        return cached_invoices
+
+    @staticmethod
+    def _attachment_invoice_cache_parser_version() -> str:
+        return OAAttachmentInvoiceService.PARSER_VERSION
+
+    def _is_current_attachment_invoice_cache_entry(self, entry: object) -> bool:
+        return (
+            isinstance(entry, dict)
+            and entry.get("parser_version") == self._attachment_invoice_cache_parser_version()
+            and isinstance(entry.get("invoices"), list)
+        )
+
+    @staticmethod
+    def _attachment_invoice_cache_key(file_entry: dict[str, object]) -> str:
+        fingerprint = {
+            "file_name": clean_string(file_entry.get("fileName") or file_entry.get("name") or ""),
+            "file_path": clean_string(file_entry.get("filePath") or file_entry.get("url") or ""),
+            "suffix": clean_string(file_entry.get("suffix") or ""),
+            "size": clean_string(file_entry.get("size") or file_entry.get("fileSize") or ""),
+            "modified_time": clean_string(
+                file_entry.get("modifiedTime")
+                or file_entry.get("lastModified")
+                or file_entry.get("updatedAt")
+                or ""
+            ),
+        }
+        raw_fingerprint = json.dumps(fingerprint, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(raw_fingerprint.encode("utf-8")).hexdigest()
+
+    def _schedule_attachment_invoice_parse(
+        self,
+        files: list[tuple[str, dict[str, object]]],
+        *,
+        month: str | None = None,
+    ) -> None:
+        if self._attachment_invoice_cache is None:
+            return
+        scheduled_files: list[tuple[str, dict[str, object]]] = []
+        with self._attachment_invoice_parse_lock:
+            for cache_key, file_entry in files:
+                if cache_key in self._attachment_invoice_parse_inflight:
+                    continue
+                self._attachment_invoice_parse_inflight.add(cache_key)
+                scheduled_files.append((cache_key, file_entry))
+        if not scheduled_files:
+            return
+        Thread(
+            target=self._parse_attachment_invoice_files_in_background,
+            kwargs={"files": scheduled_files, "month": month},
+            daemon=True,
+        ).start()
+
+    def _parse_attachment_invoice_files_in_background(
+        self,
+        files: list[tuple[str, dict[str, object]]],
+        *,
+        month: str | None = None,
+    ) -> None:
+        cache = self._attachment_invoice_cache
+        if cache is None:
+            return
+        updated = False
+        try:
+            for cache_key, file_entry in files:
+                invoices = self._attachment_invoice_service.parse_files([file_entry])
+                cache.save_oa_attachment_invoice_cache_entry(
+                    cache_key,
+                    {
+                        "cache_key": cache_key,
+                        "parser_version": self._attachment_invoice_cache_parser_version(),
+                        "invoices": [dict(invoice) for invoice in invoices],
+                        "parsed_at": datetime.now().isoformat(),
+                    },
+                )
+                updated = True
+        finally:
+            with self._attachment_invoice_parse_lock:
+                for cache_key, _file_entry in files:
+                    self._attachment_invoice_parse_inflight.discard(cache_key)
+        if not updated:
+            return
+        if month and month in self._records_cache:
+            self._records_cache.pop(month, None)
+            self._records_cache.pop("__all__", None)
+        else:
+            self._records_cache.clear()
+        if self._attachment_invoice_cache_updated_callback is not None and month:
+            self._attachment_invoice_cache_updated_callback([month])
 
     def _project_name_index(self) -> dict[str, str]:
         if self._project_name_cache is not None:
@@ -414,25 +743,111 @@ class MongoOAAdapter(OAAdapter):
         return project_names
 
     def _load_form_documents(self, form_id: str, month: str | None = None) -> list[dict]:
-        documents = list(self._collection().find(self._build_form_query(form_id, month)))
+        if self._mongo_temporarily_unavailable():
+            return []
+        documents = self._find_documents(self._build_form_query(form_id, month))
         if month is None:
             return documents
 
         return [document for document in documents if self._matches_month(document, month)]
 
+    def _load_form_month_documents(self, form_id: str) -> list[dict]:
+        if self._mongo_temporarily_unavailable():
+            return []
+        return self._find_documents(
+            self._build_form_query(form_id),
+            projection=self._month_scan_projection(),
+        )
+
+    def _load_form_documents_by_external_ids(
+        self,
+        form_id: str,
+        external_ids: set[str],
+    ) -> list[dict]:
+        normalized_external_ids = {
+            clean_string(external_id)
+            for external_id in external_ids
+            if clean_string(external_id)
+        }
+        if not normalized_external_ids or self._mongo_temporarily_unavailable():
+            return []
+        query = self._build_external_id_query(form_id, normalized_external_ids)
+        documents = self._find_documents(query)
+        return [
+            document
+            for document in documents
+            if self._document_external_id(form_id, document) in normalized_external_ids
+        ]
+
     def _load_project_documents(self) -> list[dict]:
-        return list(self._collection().find({"form_id": str(self._settings.project_form_id)}))
+        if self._mongo_temporarily_unavailable():
+            return []
+        return self._find_documents({"form_id": self._form_id_query_value(self._settings.project_form_id)})
+
+    def _find_documents(
+        self,
+        query: dict[str, Any],
+        *,
+        projection: dict[str, int] | None = None,
+    ) -> list[dict]:
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                return list(self._collection().find(query, projection))
+            except (OSError, PyMongoError, TimeoutError, ValueError) as exc:
+                last_error = exc
+                self._reset_client()
+                if attempt == 0:
+                    continue
+        if last_error is not None:
+            self._mark_mongo_unavailable()
+        return []
 
     def _collection(self):
         if self._client is None:
             self._client = MongoClient(
                 self._settings.mongo_uri,
                 serverSelectionTimeoutMS=self._settings.request_timeout_ms,
+                connectTimeoutMS=self._settings.request_timeout_ms,
+                socketTimeoutMS=self._settings.request_timeout_ms,
+                waitQueueTimeoutMS=self._settings.request_timeout_ms,
             )
         return self._client[self._settings.database][self._settings.collection]
 
+    def _reset_client(self) -> None:
+        client = self._client
+        self._client = None
+        if client is None:
+            return
+        try:
+            client.close()
+        except Exception:
+            return
+
+    def _mark_mongo_unavailable(self) -> None:
+        self._reset_client()
+        self._mongo_unavailable_until = self._now() + self._mongo_unavailable_backoff_seconds()
+        self._set_read_status("error", "OA 连接失败")
+
+    def _mongo_temporarily_unavailable(self) -> bool:
+        return self._now() < self._mongo_unavailable_until
+
+    def _mongo_unavailable_backoff_seconds(self) -> float:
+        return float(max(1, min(self._settings.cache_ttl_seconds, 30)))
+
+    def _set_read_status(self, code: str, message: str) -> None:
+        self._last_read_status = OAReadStatus(code=code, message=message)
+
+    @staticmethod
+    def _month_scan_projection() -> dict[str, int]:
+        return {
+            "data.applicationDate": 1,
+            "data.ApplicationDate": 1,
+            "modifiedTime": 1,
+        }
+
     def _build_form_query(self, form_id: str, month: str | None = None) -> dict[str, Any]:
-        query: dict[str, Any] = {"form_id": str(form_id)}
+        query: dict[str, Any] = {"form_id": self._form_id_query_value(form_id)}
         if month is None:
             return query
 
@@ -460,6 +875,80 @@ class MongoOAAdapter(OAAdapter):
             missing_application_date,
         ]
         return query
+
+    def _build_external_id_query(self, form_id: str, external_ids: set[str]) -> dict[str, Any]:
+        query: dict[str, Any] = {
+            "form_id": self._form_id_query_value(form_id),
+            "$or": [],
+        }
+        scalar_candidates = self._external_id_query_values(external_ids)
+        if scalar_candidates:
+            query["$or"].append({"data.flowRequestId": {"$in": scalar_candidates}})
+            query["$or"].append({"data.processId": {"$in": scalar_candidates}})
+        object_id_candidates = self._object_id_query_values(external_ids)
+        if object_id_candidates:
+            query["$or"].append({"_id": {"$in": object_id_candidates}})
+        if not query["$or"]:
+            query["$or"].append({"_id": {"$in": list(external_ids)}})
+        return query
+
+    def _document_external_id(self, form_id: str, document: dict[str, Any]) -> str:
+        data = self._document_data(document)
+        normalized_form_id = clean_string(form_id)
+        if normalized_form_id == clean_string(self._settings.payment_request_form_id):
+            return self._payment_external_id(data, document)
+        if normalized_form_id == clean_string(self._settings.expense_claim_form_id):
+            return self._expense_external_id(data, document)
+        return self._document_id(document)
+
+    @staticmethod
+    def _form_id_query_value(form_id: object) -> object:
+        normalized_form_id = clean_string(form_id)
+        if normalized_form_id.isdigit():
+            return {"$in": [normalized_form_id, int(normalized_form_id)]}
+        return normalized_form_id
+
+    @staticmethod
+    def _external_id_query_values(external_ids: set[str]) -> list[object]:
+        values: list[object] = []
+        seen: set[tuple[type, str]] = set()
+        for external_id in external_ids:
+            normalized = clean_string(external_id)
+            if not normalized:
+                continue
+            key = (str, normalized)
+            if key not in seen:
+                seen.add(key)
+                values.append(normalized)
+            if normalized.isdigit():
+                int_key = (int, normalized)
+                if int_key not in seen:
+                    seen.add(int_key)
+                    values.append(int(normalized))
+        return values
+
+    @staticmethod
+    def _object_id_query_values(external_ids: set[str]) -> list[ObjectId]:
+        values: list[ObjectId] = []
+        seen: set[str] = set()
+        for external_id in external_ids:
+            normalized = clean_string(external_id)
+            if normalized in seen or not ObjectId.is_valid(normalized):
+                continue
+            seen.add(normalized)
+            values.append(ObjectId(normalized))
+        return values
+
+    @staticmethod
+    def _parse_oa_row_id(row_id: str) -> tuple[str, str, str | None] | None:
+        normalized_row_id = clean_string(row_id)
+        payment_match = PAYMENT_ROW_ID_RE.match(normalized_row_id)
+        if payment_match is not None:
+            return ("payment", payment_match.group(1), None)
+        expense_match = EXPENSE_ROW_ID_RE.match(normalized_row_id)
+        if expense_match is not None:
+            return ("expense", expense_match.group(1), expense_match.group(2))
+        return None
 
     def _matches_month(self, document: dict[str, Any], month: str) -> bool:
         data = self._document_data(document)

@@ -11,6 +11,7 @@ export type WorkbenchRecord = {
   id: string;
   caseId?: string;
   recordType: WorkbenchRecordType;
+  sourceKind?: string;
   label: string;
   status: string;
   statusCode: string;
@@ -22,6 +23,7 @@ export type WorkbenchRecord = {
   detailFields: WorkbenchDetailField[];
   actionVariant: WorkbenchActionVariant;
   availableActions: string[];
+  tags?: string[];
 };
 
 export type WorkbenchProjectSetting = {
@@ -59,6 +61,12 @@ export type WorkbenchSettings = {
     fullAccessUsernames: string[];
   };
   workbenchColumnLayouts: WorkbenchColumnLayouts;
+  oaRetention: {
+    cutoffDate: string;
+  };
+  oaInvoiceOffset: {
+    applicantNames: string[];
+  };
 };
 
 export type WorkbenchPaneRows = {
@@ -89,8 +97,14 @@ export type WorkbenchSummary = {
   totalCount: number;
 };
 
+export type WorkbenchOaStatus = {
+  code: "idle" | "loading" | "ready" | "error";
+  message: string;
+};
+
 export type WorkbenchData = {
   month: string;
+  oaStatus: WorkbenchOaStatus;
   summary: WorkbenchSummary;
   paired: {
     groups: WorkbenchCandidateGroup[];
@@ -106,3 +120,18 @@ export type IgnoredWorkbenchData = {
 };
 
 export type WorkbenchAccessRole = "full_access" | "read_export_only";
+
+export type WorkbenchSettingsDataResetAction =
+  | "reset_bank_transactions"
+  | "reset_invoices"
+  | "reset_oa_and_rebuild";
+
+export type WorkbenchSettingsDataResetResult = {
+  action: WorkbenchSettingsDataResetAction;
+  status: string;
+  clearedCollections: string[];
+  deletedCounts: Record<string, number>;
+  protectedTargets: string[];
+  rebuildStatus: string;
+  message: string;
+};

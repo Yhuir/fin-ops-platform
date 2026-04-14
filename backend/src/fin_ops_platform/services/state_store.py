@@ -44,6 +44,7 @@ WORKBENCH_PAIR_RELATIONS_META_COLLECTION = "workbench_pair_relations_meta"
 WORKBENCH_PAIR_RELATIONS_COLLECTION = "workbench_pair_relations"
 WORKBENCH_READ_MODELS_META_COLLECTION = "workbench_read_models_meta"
 WORKBENCH_READ_MODELS_COLLECTION = "workbench_read_models"
+OA_ATTACHMENT_INVOICE_CACHE_COLLECTION = "oa_attachment_invoice_cache"
 APP_SETTINGS_COLLECTION = "app_settings"
 TAX_CERTIFIED_IMPORTS_META_COLLECTION = "tax_certified_imports_meta"
 TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION = "tax_certified_import_sessions"
@@ -145,6 +146,7 @@ class ApplicationStateStore:
         self._legacy_state_path = root / "state.pkl"
         self._import_file_root = root / "import_files"
         self._app_settings_path = root / "app_settings.json"
+        self._oa_attachment_invoice_cache_path = root / "oa_attachment_invoice_cache.json"
         self._tax_certified_imports_path = root / "tax_certified_imports.pkl"
         self._data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -195,6 +197,7 @@ class ApplicationStateStore:
                 "workbench_pair_relations": self._mongo_database[WORKBENCH_PAIR_RELATIONS_COLLECTION],
                 "workbench_read_models_meta": self._mongo_database[WORKBENCH_READ_MODELS_META_COLLECTION],
                 "workbench_read_models": self._mongo_database[WORKBENCH_READ_MODELS_COLLECTION],
+                "oa_attachment_invoice_cache": self._mongo_database[OA_ATTACHMENT_INVOICE_CACHE_COLLECTION],
                 "app_settings": self._mongo_database[APP_SETTINGS_COLLECTION],
                 "tax_certified_imports_meta": self._mongo_database[TAX_CERTIFIED_IMPORTS_META_COLLECTION],
                 "tax_certified_import_sessions": self._mongo_database[TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION],
@@ -230,6 +233,8 @@ class ApplicationStateStore:
             "readonly_export_usernames": [],
             "admin_usernames": [],
             "workbench_column_layouts": {},
+            "oa_retention": {},
+            "oa_invoice_offset": {},
         }
         if self._mongo_database is not None:
             document = self._mongo_detailed_collections["app_settings"].find_one({"_id": APP_SETTINGS_DOCUMENT_ID})
@@ -242,6 +247,8 @@ class ApplicationStateStore:
                     "readonly_export_usernames": list(payload.get("readonly_export_usernames") or []),
                     "admin_usernames": list(payload.get("admin_usernames") or []),
                     "workbench_column_layouts": dict(payload.get("workbench_column_layouts") or {}),
+                    "oa_retention": dict(payload.get("oa_retention") or {}),
+                    "oa_invoice_offset": dict(payload.get("oa_invoice_offset") or {}),
                 }
             return default_payload
 
@@ -260,6 +267,8 @@ class ApplicationStateStore:
             "readonly_export_usernames": list(loaded.get("readonly_export_usernames") or []),
             "admin_usernames": list(loaded.get("admin_usernames") or []),
             "workbench_column_layouts": dict(loaded.get("workbench_column_layouts") or {}),
+            "oa_retention": dict(loaded.get("oa_retention") or {}),
+            "oa_invoice_offset": dict(loaded.get("oa_invoice_offset") or {}),
         }
 
     def save_app_settings(self, payload: dict[str, Any]) -> None:
@@ -270,6 +279,8 @@ class ApplicationStateStore:
             "readonly_export_usernames": list(payload.get("readonly_export_usernames") or []),
             "admin_usernames": list(payload.get("admin_usernames") or []),
             "workbench_column_layouts": dict(payload.get("workbench_column_layouts") or {}),
+            "oa_retention": dict(payload.get("oa_retention") or {}),
+            "oa_invoice_offset": dict(payload.get("oa_invoice_offset") or {}),
         }
         if self._mongo_database is not None:
             self._mongo_detailed_collections["app_settings"].update_one(
@@ -282,6 +293,8 @@ class ApplicationStateStore:
                         "readonly_export_usernames": normalized_payload["readonly_export_usernames"],
                         "admin_usernames": normalized_payload["admin_usernames"],
                         "workbench_column_layouts": normalized_payload["workbench_column_layouts"],
+                        "oa_retention": normalized_payload["oa_retention"],
+                        "oa_invoice_offset": normalized_payload["oa_invoice_offset"],
                         "payload": Binary(pickle.dumps(normalized_payload)),
                         "updated_at": datetime.now(UTC),
                     }
@@ -294,6 +307,56 @@ class ApplicationStateStore:
             raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         self._app_settings_path.write_text(
             json.dumps(normalized_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def load_oa_attachment_invoice_cache_entry(self, cache_key: str) -> dict[str, object] | None:
+        normalized_cache_key = str(cache_key).strip()
+        if not normalized_cache_key:
+            return None
+        if self._mongo_database is not None:
+            document = self._mongo_detailed_collections["oa_attachment_invoice_cache"].find_one({"_id": normalized_cache_key})
+            payload = self._load_binary_payload(document)
+            return dict(payload) if isinstance(payload, dict) else None
+
+        if not self._oa_attachment_invoice_cache_path.exists():
+            return None
+        try:
+            loaded = json.loads(self._oa_attachment_invoice_cache_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return None
+        entry = loaded.get(normalized_cache_key) if isinstance(loaded, dict) else None
+        return dict(entry) if isinstance(entry, dict) else None
+
+    def save_oa_attachment_invoice_cache_entry(self, cache_key: str, payload: dict[str, object]) -> None:
+        normalized_cache_key = str(cache_key).strip()
+        if not normalized_cache_key:
+            return
+        normalized_payload = dict(payload if isinstance(payload, dict) else {})
+        normalized_payload["cache_key"] = normalized_cache_key
+        if self._mongo_database is not None:
+            self._mongo_detailed_collections["oa_attachment_invoice_cache"].update_one(
+                {"_id": normalized_cache_key},
+                {
+                    "$set": {
+                        "payload": Binary(pickle.dumps(normalized_payload)),
+                        "updated_at": datetime.now(UTC),
+                    }
+                },
+                upsert=True,
+            )
+            return
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        try:
+            loaded = json.loads(self._oa_attachment_invoice_cache_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            loaded = {}
+        cache_payload = loaded if isinstance(loaded, dict) else {}
+        cache_payload[normalized_cache_key] = self._serialize_value(normalized_payload)
+        self._oa_attachment_invoice_cache_path.write_text(
+            json.dumps(cache_payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
 
@@ -503,6 +566,100 @@ class ApplicationStateStore:
             raise RuntimeError("Local import file access is disabled in FIN_OPS_STORAGE_MODE=mongo_only.")
         return Path(stored_file_path).read_bytes()
 
+    def delete_import_files(self, stored_file_paths: list[str]) -> int:
+        deleted_count = 0
+        seen_paths: set[str] = set()
+        for stored_file_path in stored_file_paths:
+            normalized_path = str(stored_file_path or "").strip()
+            if not normalized_path or normalized_path in seen_paths:
+                continue
+            seen_paths.add(normalized_path)
+            if self._is_gridfs_ref(normalized_path):
+                if self._mongo_file_bucket is None:
+                    continue
+                try:
+                    self._mongo_file_bucket.delete(self._parse_gridfs_ref(normalized_path))
+                    deleted_count += 1
+                except Exception:
+                    continue
+                continue
+            if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+                continue
+            target_path = Path(normalized_path)
+            if target_path.exists():
+                target_path.unlink(missing_ok=True)
+                deleted_count += 1
+        return deleted_count
+
+    def clear_oa_attachment_invoice_cache(self) -> int:
+        if self._mongo_database is not None:
+            result = self._mongo_detailed_collections["oa_attachment_invoice_cache"].delete_many({})
+            return int(result.deleted_count)
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        if not self._oa_attachment_invoice_cache_path.exists():
+            return 0
+        try:
+            loaded = json.loads(self._oa_attachment_invoice_cache_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            loaded = {}
+        entry_count = len(loaded) if isinstance(loaded, dict) else 0
+        self._oa_attachment_invoice_cache_path.write_text("{}", encoding="utf-8")
+        return entry_count
+
+    def import_session_exists(self, session_id: str) -> bool:
+        if self._mongo_database is not None:
+            return self._mongo_detailed_collections["file_import_sessions"].find_one({"_id": session_id}) is not None
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            return False
+        file_imports = self._load_local_pickle().get("file_imports", {})
+        sessions = file_imports.get("sessions", {}) if isinstance(file_imports, dict) else {}
+        return session_id in sessions
+
+    def import_file_exists(self, file_id: str) -> bool:
+        if self._mongo_database is not None:
+            if self._mongo_detailed_collections["file_import_files"].find_one({"_id": file_id}) is not None:
+                return True
+            files_collection = self._mongo_database[f"{GRIDFS_BUCKET_NAME}.files"]
+            return files_collection.find_one({"_id": file_id}) is not None
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            return False
+        file_imports = self._load_local_pickle().get("file_imports", {})
+        sessions = file_imports.get("sessions", {}) if isinstance(file_imports, dict) else {}
+        for session in sessions.values():
+            files = session.get("files", []) if isinstance(session, dict) else []
+            if any(isinstance(file, dict) and file.get("id") == file_id for file in files):
+                return True
+        return False
+
+    def import_batch_exists(self, batch_id: str) -> bool:
+        if self._mongo_database is not None:
+            return self._mongo_detailed_collections["import_batches"].find_one({"_id": batch_id}) is not None
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            return False
+        imports = self._load_local_pickle().get("imports", {})
+        batches = imports.get("batches", {}) if isinstance(imports, dict) else {}
+        return batch_id in batches
+
+    def invoice_exists(self, invoice_id: str) -> bool:
+        if self._mongo_database is not None:
+            return self._mongo_detailed_collections["invoices"].find_one({"_id": invoice_id}) is not None
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            return False
+        imports = self._load_local_pickle().get("imports", {})
+        invoices = imports.get("invoices", []) if isinstance(imports, dict) else []
+        return any(isinstance(invoice, dict) and invoice.get("id") == invoice_id for invoice in invoices)
+
+    def transaction_exists(self, transaction_id: str) -> bool:
+        if self._mongo_database is not None:
+            return self._mongo_detailed_collections["bank_transactions"].find_one({"_id": transaction_id}) is not None
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            return False
+        imports = self._load_local_pickle().get("imports", {})
+        transactions = imports.get("transactions", []) if isinstance(imports, dict) else []
+        return any(isinstance(transaction, dict) and transaction.get("id") == transaction_id for transaction in transactions)
+
     def _ensure_mongo_metadata(self) -> None:
         if self._mongo_meta_collection is None:
             return
@@ -530,6 +687,7 @@ class ApplicationStateStore:
                         "workbench_pair_relations": WORKBENCH_PAIR_RELATIONS_COLLECTION,
                         "workbench_read_models_meta": WORKBENCH_READ_MODELS_META_COLLECTION,
                         "workbench_read_models": WORKBENCH_READ_MODELS_COLLECTION,
+                        "oa_attachment_invoice_cache": OA_ATTACHMENT_INVOICE_CACHE_COLLECTION,
                         "tax_certified_imports_meta": TAX_CERTIFIED_IMPORTS_META_COLLECTION,
                         "tax_certified_import_sessions": TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION,
                         "tax_certified_import_batches": TAX_CERTIFIED_IMPORT_BATCHES_COLLECTION,

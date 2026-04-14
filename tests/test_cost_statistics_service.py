@@ -342,6 +342,62 @@ class CostStatisticsServiceTests(unittest.TestCase):
         self.assertEqual(payload["time_rows"][0]["expense_type"], "交通费")
         self.assertEqual(payload["time_rows"][0]["expense_content"], "项目现场往返交通")
 
+    def test_cost_entries_skip_oa_invoice_offset_groups(self) -> None:
+        from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
+
+        payloads = {
+            "2026-03": {
+                "month": "2026-03",
+                "summary": {},
+                "paired": {
+                    "groups": [
+                        {
+                            "group_id": "case:offset-001",
+                            "group_type": "auto_closed",
+                            "match_confidence": "high",
+                            "reason": "oa_invoice_offset_auto_match",
+                            "oa_rows": [
+                                {
+                                    "id": "oa-offset-001",
+                                    "type": "oa",
+                                    "project_name": "云南溯源科技",
+                                    "expense_type": "交通费",
+                                    "expense_content": "汽油费冲账",
+                                    "amount": "200.00",
+                                    "cost_excluded": True,
+                                    "tags": ["冲"],
+                                }
+                            ],
+                            "bank_rows": [
+                                {
+                                    "id": "txn-cost-001",
+                                    "type": "bank",
+                                    "trade_time": "2026-03-10 21:27:55",
+                                    "debit_amount": "1,000.00",
+                                    "credit_amount": "",
+                                    "counterparty_name": "昆明设备供应商",
+                                    "payment_account_label": "工商银行 账户 0001",
+                                    "remark": "设备采购款",
+                                }
+                            ],
+                            "invoice_rows": [],
+                        }
+                    ]
+                },
+                "open": {"groups": []},
+            }
+        }
+        service = CostStatisticsService(
+            self.import_service,
+            grouped_workbench_loader=lambda month: payloads[month],
+            row_detail_loader=lambda row_id: self.row_details[row_id],
+        )
+
+        payload = service.get_explorer("2026-03")
+
+        self.assertEqual(payload["summary"]["transaction_count"], 0)
+        self.assertEqual(payload["summary"]["total_amount"], "0.00")
+
 
 if __name__ == "__main__":
     unittest.main()

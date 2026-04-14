@@ -36,6 +36,11 @@ type MockApiOptions = {
   searchDelayMs?: number;
   searchErrorQueries?: string[];
   emptyBodyPaths?: string[];
+  workbenchOaStatus?: {
+    code: "idle" | "loading" | "ready" | "error";
+    message: string;
+  };
+  dataResetPasswordShouldFail?: boolean;
 };
 
 const templateRegistry = [
@@ -93,7 +98,7 @@ function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function buildImportPreviewPayload(fileNames: string[]) {
+function buildImportPreviewPayload(fileNames: string[], overrides: Array<Record<string, string>> = []) {
   return {
     session: {
       id: "import_session_0001",
@@ -125,11 +130,14 @@ function buildImportPreviewPayload(fileNames: string[]) {
 
       const isInvoice = fileName.includes("发票");
       const isIcbc = fileName.includes("historydetail");
+      const override = overrides[index] ?? {};
+      const templateCode = override.template_code ?? (isInvoice ? "invoice_export" : isIcbc ? "icbc_historydetail" : "pingan_transaction_detail");
+      const batchType = override.batch_type ?? (isInvoice ? "input_invoice" : "bank_transaction");
       return {
         id: `import_file_${String(index + 1).padStart(4, "0")}`,
         file_name: fileName,
-        template_code: isInvoice ? "invoice_export" : isIcbc ? "icbc_historydetail" : "pingan_transaction_detail",
-        batch_type: isInvoice ? "input_invoice" : "bank_transaction",
+        template_code: templateCode,
+        batch_type: batchType,
         status: "preview_ready",
         message: "模板识别成功。",
         row_count: isInvoice ? 14 : 9,
@@ -141,13 +149,14 @@ function buildImportPreviewPayload(fileNames: string[]) {
         preview_batch_id: `batch_import_${String(4444 + index)}`,
         batch_id: null,
         stored_file_path: `/tmp/import_session_0001/import_file_${String(index + 1).padStart(4, "0")}_${fileName}`,
-        override_template_code: null,
-        override_batch_type: null,
+        override_template_code: override.template_code ?? null,
+        override_batch_type: override.batch_type ?? null,
+        selected_bank_name: override.bank_name ?? null,
         row_results: [
           {
             id: `batch_row_${String(index + 1).padStart(5, "0")}`,
             row_no: 1,
-            source_record_type: isInvoice ? "invoice" : "bank_transaction",
+            source_record_type: templateCode === "invoice_export" ? "invoice" : "bank_transaction",
             decision: "created",
             decision_reason: "Ready to create new record.",
           },
@@ -157,8 +166,8 @@ function buildImportPreviewPayload(fileNames: string[]) {
   };
 }
 
-function buildWorkbenchPayload(month: string) {
-  return toGroupedWorkbenchPayload(buildWorkbenchRowPayload(month));
+function buildWorkbenchPayload(month: string, oaStatus?: MockApiOptions["workbenchOaStatus"]) {
+  return toGroupedWorkbenchPayload(buildWorkbenchRowPayload(month), oaStatus);
 }
 
 type RawWorkbenchPayload = ReturnType<typeof buildWorkbenchRowPayload>;
@@ -393,6 +402,7 @@ function buildWorkbenchRowPayload(month: string) {
           invoice_bank_relation: { code: "fully_linked", label: "完全关联", tone: "success" },
           available_actions: ["detail", "cancel_link"],
           detail_fields: {
+            发票代码: "032002600111",
             发票号码: "00061345",
           },
         },
@@ -429,6 +439,8 @@ function buildWorkbenchRowPayload(month: string) {
           oa_bank_relation: { code: "pending_match", label: "待找流水与发票", tone: "warn" },
           detail_fields: {
             审批完成时间: "2026-03-26 09:20",
+            附件发票数量: "0",
+            附件发票识别情况: "已解析 0 / 6",
           },
           available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
         },
@@ -503,12 +515,13 @@ function toGroupedWorkbenchPayload(payload: {
   };
   paired: Record<"oa" | "bank" | "invoice", Array<Record<string, unknown>>>;
   open: Record<"oa" | "bank" | "invoice", Array<Record<string, unknown>>>;
-}) {
+}, oaStatus?: MockApiOptions["workbenchOaStatus"]) {
   const pairedGroups = buildGroups(payload.paired, "paired");
   const openGroups = buildGroups(payload.open, "open");
 
   return {
     month: payload.month,
+    oa_status: oaStatus ?? { code: "ready", message: "OA 已同步" },
     summary: {
       oa_count: payload.summary.oa_count,
       bank_count: payload.summary.bank_count,
@@ -1111,6 +1124,7 @@ function buildWorkbenchDetail(rowId: string) {
         },
         detail_fields: {
           序号: "1",
+          发票代码: "032002600111",
           发票号码: "00061345",
           备注: "已与银行付款和 OA 闭环",
         },
@@ -2475,6 +2489,12 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       bank: options.workbenchColumnLayouts?.bank ?? ["counterparty", "amount", "loanRepaymentDate", "note"],
       invoice: options.workbenchColumnLayouts?.invoice ?? ["sellerName", "buyerName", "issueDate", "amount", "grossAmount"],
     },
+    oa_retention: {
+      cutoff_date: "2026-01-01",
+    },
+    oa_invoice_offset: {
+      applicant_names: ["周洁莹"],
+    },
   };
 
   const handlers: Record<string, MockFetchHandler> = {
@@ -2535,7 +2555,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       if (options.workbenchErrorMonths?.includes(month)) {
         return { status: 500, body: { message: "workbench failed" } };
       }
-      return { body: toGroupedWorkbenchPayload(cloneJson(workbenchStateStore.get(month))) };
+      return { body: toGroupedWorkbenchPayload(cloneJson(workbenchStateStore.get(month)), options.workbenchOaStatus) };
     },
     "/api/workbench/ignored": ({ url }) => {
       const month = url.searchParams.get("month") ?? "";
@@ -2590,6 +2610,22 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
                   : workbenchSettingsState.workbench_column_layouts.invoice,
               }
               : workbenchSettingsState.workbench_column_layouts,
+          oa_retention:
+            jsonBody.oa_retention && typeof jsonBody.oa_retention === "object"
+              ? {
+                cutoff_date: String((jsonBody.oa_retention as Record<string, unknown>).cutoff_date || "2026-01-01"),
+              }
+              : workbenchSettingsState.oa_retention,
+          oa_invoice_offset:
+            jsonBody.oa_invoice_offset && typeof jsonBody.oa_invoice_offset === "object"
+              ? {
+                applicant_names: Array.isArray((jsonBody.oa_invoice_offset as Record<string, unknown>).applicant_names)
+                  ? ((jsonBody.oa_invoice_offset as Record<string, unknown>).applicant_names as unknown[])
+                    .map((item) => String(item).trim())
+                    .filter(Boolean)
+                  : workbenchSettingsState.oa_invoice_offset.applicant_names,
+              }
+              : workbenchSettingsState.oa_invoice_offset,
         };
         const allowedSet = new Set(workbenchSettingsState.access_control.allowed_usernames);
         const readonlySet = new Set(
@@ -2601,6 +2637,30 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         );
       }
       return { body: cloneJson(workbenchSettingsState) };
+    },
+    "/api/workbench/settings/data-reset": ({ jsonBody }) => {
+      if (options.dataResetPasswordShouldFail || !jsonBody?.oa_password) {
+        return {
+          status: 403,
+          body: {
+            error: "oa_password_verification_failed",
+            message: "当前 OA 用户密码复核失败，未执行数据重置。",
+          },
+        };
+      }
+      return {
+        body: {
+          action: String(jsonBody.action ?? ""),
+          status: "completed",
+          cleared_collections: ["workbench_read_models"],
+          deleted_counts: {
+            workbench_read_models: 1,
+          },
+          protected_targets: ["form_data_db.form_data"],
+          rebuild_status: jsonBody.action === "reset_oa_and_rebuild" ? "completed" : "not_applicable",
+          message: "已完成数据重置。",
+        },
+      };
     },
     "/api/search": ({ url }) => {
       const query = url.searchParams.get("q") ?? "";
@@ -2981,7 +3041,12 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     },
     "/imports/files/preview": ({ formData }) => {
       const fileNames = (formData?.getAll("files") as File[] | undefined)?.map((file) => file.name) ?? [];
-      latestImportSession = buildImportPreviewPayload(fileNames);
+      const rawOverrides = formData?.get("file_overrides");
+      const overrides =
+        typeof rawOverrides === "string"
+          ? (JSON.parse(rawOverrides) as Array<Record<string, string>>)
+          : [];
+      latestImportSession = buildImportPreviewPayload(fileNames, overrides);
       return { body: latestImportSession };
     },
     "/imports/files/confirm": ({ jsonBody }) => {

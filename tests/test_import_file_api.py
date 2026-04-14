@@ -21,6 +21,7 @@ def build_multipart_payload(
     *,
     imported_by: str,
     file_paths: list[Path],
+    file_overrides: list[dict[str, str]] | None = None,
 ) -> tuple[bytes, dict[str, str]]:
     boundary = "----finops-import-boundary"
     chunks: list[bytes] = []
@@ -50,6 +51,8 @@ def build_multipart_payload(
     add_text("imported_by", imported_by)
     for file_path in file_paths:
         add_file("files", file_path)
+    if file_overrides is not None:
+        add_text("file_overrides", json.dumps(file_overrides, ensure_ascii=False))
     chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
 
     return b"".join(chunks), {"Content-Type": f"multipart/form-data; boundary={boundary}"}
@@ -106,6 +109,38 @@ class ImportFileApiTests(unittest.TestCase):
 
         self.assertEqual(file_map[CMBC_JAN.name]["template_code"], "cmbc_transaction_detail")
         self.assertGreater(file_map[CMBC_JAN.name]["row_count"], 0)
+
+    def test_preview_files_accepts_per_file_overrides(self) -> None:
+        app = build_application()
+        body, headers = build_multipart_payload(
+            imported_by="user_finance_01",
+            file_paths=[INVOICE_JAN, PINGAN_JAN],
+            file_overrides=[
+                {
+                    "file_name": INVOICE_JAN.name,
+                    "template_code": "invoice_export",
+                    "batch_type": "output_invoice",
+                },
+                {
+                    "file_name": PINGAN_JAN.name,
+                    "template_code": "pingan_transaction_detail",
+                    "batch_type": "bank_transaction",
+                    "bank_name": "平安银行",
+                },
+            ],
+        )
+
+        response = app.handle_request("POST", "/imports/files/preview", body=body, headers=headers)
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        file_map = {item["file_name"]: item for item in payload["files"]}
+
+        self.assertEqual(file_map[INVOICE_JAN.name]["batch_type"], "output_invoice")
+        self.assertEqual(file_map[INVOICE_JAN.name]["override_batch_type"], "output_invoice")
+        self.assertEqual(file_map[PINGAN_JAN.name]["template_code"], "pingan_transaction_detail")
+        self.assertEqual(file_map[PINGAN_JAN.name]["override_template_code"], "pingan_transaction_detail")
+        self.assertEqual(file_map[PINGAN_JAN.name]["selected_bank_name"], "平安银行")
 
     def test_confirm_files_imports_only_selected_files_from_session(self) -> None:
         app = build_application()

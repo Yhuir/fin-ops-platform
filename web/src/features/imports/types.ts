@@ -49,7 +49,15 @@ export type ImportFilePreview = {
   storedFilePath?: string | null;
   overrideTemplateCode?: string | null;
   overrideBatchType?: ImportBatchType | null;
+  selectedBankName?: string | null;
   rowResults: ImportRowResult[];
+};
+
+export type ImportFilePreviewOverride = {
+  fileName?: string;
+  templateCode?: string | null;
+  batchType?: ImportBatchType | null;
+  bankName?: string | null;
 };
 
 export type ImportTemplate = {

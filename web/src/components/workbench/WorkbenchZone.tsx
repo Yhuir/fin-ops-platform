@@ -2,7 +2,7 @@ import { memo } from "react";
 
 import ResizableTriPane, { type WorkbenchPane } from "./ResizableTriPane";
 import { useResizablePanes } from "../../hooks/useResizablePanes";
-import type { WorkbenchZoneDisplayState } from "../../features/workbench/groupDisplayModel";
+import type { WorkbenchPaneTimeFilter, WorkbenchZoneDisplayState } from "../../features/workbench/groupDisplayModel";
 import type { WorkbenchCandidateGroup, WorkbenchColumnLayouts, WorkbenchRecord } from "../../features/workbench/types";
 import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import type { WorkbenchInlineAction } from "./RowActions";
@@ -46,6 +46,8 @@ type WorkbenchZoneProps = {
     tone?: "warning" | "danger";
   }>;
   onTogglePaneSearch: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
+  onClosePaneSearch: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
+  onClearPaneSearch: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
   onPaneSearchQueryChange: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice", query: string) => void;
   onColumnFilterChange: (
     zoneId: "paired" | "open",
@@ -54,6 +56,11 @@ type WorkbenchZoneProps = {
     selectedValues: string[],
   ) => void;
   onTogglePaneSort: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
+  onPaneTimeFilterChange?: (
+    zoneId: "paired" | "open",
+    paneId: "oa" | "bank" | "invoice",
+    filter: WorkbenchPaneTimeFilter,
+  ) => void;
   onReorderPaneColumns: (
     paneId: "oa" | "bank" | "invoice",
     activeKey: string,
@@ -91,9 +98,12 @@ function WorkbenchZone({
   secondarySelectionActionDisabled,
   auxiliaryHeaderActions,
   onTogglePaneSearch,
+  onClosePaneSearch,
+  onClearPaneSearch,
   onPaneSearchQueryChange,
   onColumnFilterChange,
   onTogglePaneSort,
+  onPaneTimeFilterChange = () => undefined,
   onReorderPaneColumns,
 }: WorkbenchZoneProps) {
   const { widths, visibleIndices, visibleCount, togglePane, startDrag } = useResizablePanes();
@@ -235,10 +245,13 @@ function WorkbenchZone({
         getRowState={getRowState}
         groups={groups}
         highlightedRowId={highlightedRowId}
+        onClearPaneSearch={onClearPaneSearch}
+        onClosePaneSearch={onClosePaneSearch}
         onOpenDetail={onOpenDetail}
         onRowAction={onRowAction}
         onColumnFilterChange={onColumnFilterChange}
         onPaneSearchQueryChange={onPaneSearchQueryChange}
+        onPaneTimeFilterChange={onPaneTimeFilterChange}
         onReorderPaneColumns={onReorderPaneColumns}
         onSelectRow={onSelectRow}
         onTogglePaneSearch={onTogglePaneSearch}

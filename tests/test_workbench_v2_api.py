@@ -4,9 +4,92 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
+from pymongo.errors import ServerSelectionTimeoutError
+
 from fin_ops_platform.app.server import Application, build_application
+from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes
 from fin_ops_platform.domain.enums import BatchType
+from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, MongoOASettings
+from fin_ops_platform.services.oa_adapter import InMemoryOAAdapter, OAApplicationRecord
+from fin_ops_platform.services.workbench_action_service import WorkbenchActionService
 from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
+
+
+class FailingMongoWorkbenchOAAdapter(MongoOAAdapter):
+    def __init__(self) -> None:
+        super().__init__(settings=MongoOASettings(host="127.0.0.1", database="form_data_db"))
+
+    def _collection(self):
+        raise ServerSelectionTimeoutError("mock mongo unavailable")
+
+
+class StaticMongoWorkbenchOAAdapter(MongoOAAdapter):
+    def __init__(self, *, form_documents: dict[str, list[dict]], project_documents: list[dict] | None = None) -> None:
+        super().__init__(settings=MongoOASettings(host="127.0.0.1", database="form_data_db"))
+        self._form_documents = form_documents
+        self._project_documents = project_documents or []
+
+    def _load_form_documents(self, form_id: str, month: str | None = None) -> list[dict]:
+        documents = list(self._form_documents.get(str(form_id), []))
+        if month is None:
+            return documents
+        filtered: list[dict] = []
+        for document in documents:
+            data = document.get("data", {})
+            application_date = str(data.get("applicationDate") or data.get("ApplicationDate") or "")
+            if application_date.startswith(month):
+                filtered.append(document)
+        return filtered
+
+    def _load_project_documents(self) -> list[dict]:
+        return list(self._project_documents)
+
+
+class RetentionScopedMongoWorkbenchOAAdapter(StaticMongoWorkbenchOAAdapter):
+    def __init__(
+        self,
+        *,
+        form_documents: dict[str, list[dict]],
+        project_documents: list[dict] | None = None,
+        row_id_records: dict[str, list[OAApplicationRecord]] | None = None,
+    ) -> None:
+        super().__init__(form_documents=form_documents, project_documents=project_documents)
+        self.month_calls: list[str] = []
+        self.bulk_call_count = 0
+        self.row_id_calls: list[list[str]] = []
+        self._row_id_records = row_id_records or {}
+
+    def list_available_months(self) -> list[str]:
+        months: set[str] = set()
+        for documents in self._form_documents.values():
+            for document in documents:
+                data = document.get("data", {})
+                application_date = str(data.get("applicationDate") or data.get("ApplicationDate") or "")
+                if len(application_date) >= 7:
+                    months.add(application_date[:7])
+        return sorted(months)
+
+    def list_application_records(self, month: str) -> list[OAApplicationRecord]:
+        self.month_calls.append(month)
+        return super().list_application_records(month)
+
+    def list_all_application_records(self) -> list[OAApplicationRecord]:
+        self.bulk_call_count += 1
+        raise AssertionError("should not bulk scan all OA records")
+
+    def list_application_records_by_row_ids(self, row_ids: list[str]) -> list[OAApplicationRecord]:
+        normalized = [str(row_id) for row_id in row_ids]
+        self.row_id_calls.append(normalized)
+        records: list[OAApplicationRecord] = []
+        for row_id in normalized:
+            records.extend(self._row_id_records.get(row_id, []))
+        return records
+
+
+class ErrorMonthListRetentionMongoWorkbenchOAAdapter(RetentionScopedMongoWorkbenchOAAdapter):
+    def list_available_months(self) -> list[str]:
+        self._set_read_status("error", "OA 连接失败")
+        return []
 
 
 class WorkbenchV2ApiTests(unittest.TestCase):
@@ -14,6 +97,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         app = build_application()
         cached_payload = {
             "month": "2026-03",
+            "oa_status": {"code": "ready", "message": "OA 已同步"},
             "summary": {
                 "oa_count": 99,
                 "bank_count": 88,
@@ -47,6 +131,483 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual(payload["summary"]["oa_count"], 99)
         self.assertEqual(payload["paired"]["groups"][0]["oa_rows"][0]["id"], "oa-cached-001")
+
+    def test_get_api_workbench_rebuilds_when_cached_read_model_oa_status_is_not_ready(self) -> None:
+        app = build_application()
+        app._workbench_read_model_service.upsert_read_model(
+            scope_key="all",
+            payload={
+                "month": "all",
+                "oa_status": {"code": "error", "message": "OA 连接失败"},
+                "summary": {
+                    "oa_count": 0,
+                    "bank_count": 0,
+                    "invoice_count": 0,
+                    "paired_count": 0,
+                    "open_count": 0,
+                    "exception_count": 0,
+                },
+                "paired": {"groups": []},
+                "open": {"groups": []},
+            },
+            ignored_rows=[],
+            generated_at="2026-04-08T11:00:00+00:00",
+        )
+
+        with patch.object(
+            app,
+            "_build_raw_workbench_payload",
+            return_value={
+                "month": "all",
+                "oa_status": {"code": "ready", "message": "OA 已同步"},
+                "summary": {
+                    "oa_count": 1,
+                    "bank_count": 0,
+                    "invoice_count": 0,
+                    "paired_count": 0,
+                    "open_count": 1,
+                    "exception_count": 0,
+                },
+                "paired": {"oa": [], "bank": [], "invoice": []},
+                "open": {
+                    "oa": [{"id": "oa-rebuilt-001", "type": "oa"}],
+                    "bank": [],
+                    "invoice": [],
+                },
+            },
+        ) as build_raw_payload:
+            response = app.handle_request("GET", "/api/workbench?month=all")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(build_raw_payload.call_count, 1)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["oa_status"]["code"], "ready")
+        self.assertEqual(payload["summary"]["oa_count"], 1)
+
+    def test_get_api_workbench_does_not_persist_read_model_when_oa_status_is_not_ready(self) -> None:
+        app = build_application()
+
+        with patch.object(
+            app,
+            "_build_raw_workbench_payload",
+            return_value={
+                "month": "all",
+                "oa_status": {"code": "error", "message": "OA 连接失败"},
+                "summary": {
+                    "oa_count": 0,
+                    "bank_count": 0,
+                    "invoice_count": 0,
+                    "paired_count": 0,
+                    "open_count": 0,
+                    "exception_count": 0,
+                },
+                "paired": {"oa": [], "bank": [], "invoice": []},
+                "open": {"oa": [], "bank": [], "invoice": []},
+            },
+        ):
+            response = app.handle_request("GET", "/api/workbench?month=all")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["oa_status"]["code"], "error")
+        self.assertIsNone(app._workbench_read_model_service.get_read_model("all"))
+
+    def test_get_api_workbench_falls_back_to_stale_ready_cache_when_rebuild_oa_fails(self) -> None:
+        app = build_application()
+        app._workbench_read_model_service.upsert_read_model(
+            scope_key="all",
+            payload={
+                "month": "all",
+                "oa_status": {"code": "ready", "message": "OA 已同步"},
+                "summary": {
+                    "oa_count": 1,
+                    "bank_count": 0,
+                    "invoice_count": 1,
+                    "paired_count": 0,
+                    "open_count": 2,
+                    "exception_count": 0,
+                },
+                "paired": {"groups": []},
+                "open": {
+                    "groups": [
+                        {
+                            "group_id": "case:CASE-OA-ATT-stale",
+                            "group_type": "candidate",
+                            "oa_rows": [
+                                {
+                                    "id": "oa-stale-001",
+                                    "type": "oa",
+                                    "case_id": "CASE-OA-ATT-stale",
+                                    "applicant": "周洁莹",
+                                    "oa_bank_relation": {
+                                        "code": "pending_match",
+                                        "label": "待找流水与发票",
+                                        "tone": "warn",
+                                    },
+                                }
+                            ],
+                            "bank_rows": [],
+                            "invoice_rows": [
+                                {
+                                    "id": "oa-att-inv-stale-001",
+                                    "type": "invoice",
+                                    "case_id": "CASE-OA-ATT-stale",
+                                    "source_kind": "oa_attachment_invoice",
+                                    "derived_from_oa_id": "oa-stale-001",
+                                    "invoice_bank_relation": {
+                                        "code": "pending_match",
+                                        "label": "待匹配",
+                                        "tone": "warn",
+                                    },
+                                }
+                            ],
+                        }
+                    ]
+                },
+            },
+            ignored_rows=[],
+            generated_at="2026-04-08T11:00:00+00:00",
+        )
+
+        with patch.object(
+            app,
+            "_build_raw_workbench_payload",
+            return_value={
+                "month": "all",
+                "oa_status": {"code": "error", "message": "OA 连接失败"},
+                "summary": {
+                    "oa_count": 0,
+                    "bank_count": 0,
+                    "invoice_count": 0,
+                    "paired_count": 0,
+                    "open_count": 0,
+                    "exception_count": 0,
+                },
+                "paired": {"oa": [], "bank": [], "invoice": []},
+                "open": {"oa": [], "bank": [], "invoice": []},
+            },
+        ) as build_raw_payload:
+            response = app.handle_request("GET", "/api/workbench?month=all")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(build_raw_payload.call_count, 1)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["oa_status"]["code"], "ready")
+        self.assertEqual(payload["summary"]["oa_count"], 1)
+        self.assertEqual(payload["open"]["groups"][0]["oa_rows"][0]["id"], "oa-stale-001")
+
+    def test_get_api_workbench_reports_oa_error_when_mongo_adapter_is_unavailable(self) -> None:
+        app = build_application()
+        app._workbench_query_service._oa_adapter = FailingMongoWorkbenchOAAdapter()
+
+        response = app.handle_request("GET", "/api/workbench?month=all")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["oa_status"]["code"], "error")
+        self.assertEqual(payload["oa_status"]["message"], "OA 连接失败")
+
+    def test_get_api_workbench_rebuilds_stale_zero_oa_cache_for_mongo_adapter(self) -> None:
+        app = build_application()
+        app._workbench_read_model_service.upsert_read_model(
+            scope_key="2026-03",
+            payload={
+                "month": "2026-03",
+                "oa_status": {"code": "ready", "message": "OA 已同步"},
+                "summary": {
+                    "oa_count": 0,
+                    "bank_count": 0,
+                    "invoice_count": 0,
+                    "paired_count": 0,
+                    "open_count": 0,
+                    "exception_count": 0,
+                },
+                "paired": {"groups": []},
+                "open": {"groups": []},
+            },
+            ignored_rows=[],
+            generated_at="2026-04-08T11:00:00+00:00",
+        )
+        app._workbench_query_service._oa_adapter = StaticMongoWorkbenchOAAdapter(
+            form_documents={
+                "2": [
+                    {
+                        "_id": "payment-doc-1",
+                        "form_id": "2",
+                        "modifiedTime": "2026-03-27T09:00:00",
+                        "data": {
+                            "applicationDate": "2026-03-16",
+                            "userName": "刘际涛",
+                            "fromTitle": "支付申请",
+                            "amount": "199",
+                            "beneficiary": "中国电信股份有限公司昆明分公司",
+                            "cause": "托收电话费及宽带",
+                            "projectName": "6486ca70cd6cae5d4e2b0b48",
+                            "flowRequestId": "2047",
+                        },
+                    }
+                ],
+                "32": [],
+            },
+            project_documents=[
+                {"_id": "6486ca70cd6cae5d4e2b0b48", "data": {"name": "云南溯源科技", "code": "YNSY"}},
+            ],
+        )
+
+        response = app.handle_request("GET", "/api/workbench?month=2026-03")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["oa_status"]["code"], "ready")
+        self.assertEqual(payload["summary"]["oa_count"], 1)
+
+    def test_get_api_workbench_all_scopes_mongo_oa_reads_to_retention_months(self) -> None:
+        app = build_application()
+        app._app_settings_service.update_settings(
+            completed_project_ids=[],
+            bank_account_mappings=[],
+            allowed_usernames=[],
+            readonly_export_usernames=[],
+            admin_usernames=[],
+            oa_retention={"cutoff_date": "2026-01-01"},
+        )
+        adapter = RetentionScopedMongoWorkbenchOAAdapter(
+            form_documents={
+                "2": [
+                    {
+                        "_id": "payment-doc-old",
+                        "form_id": "2",
+                        "modifiedTime": "2025-12-20T09:00:00",
+                        "data": {
+                            "applicationDate": "2025-12-20",
+                            "userName": "旧单据",
+                            "fromTitle": "支付申请",
+                            "amount": "100",
+                            "beneficiary": "旧供应商",
+                            "cause": "旧付款",
+                            "projectName": "oa-project-001",
+                            "flowRequestId": "2046",
+                        },
+                    },
+                    {
+                        "_id": "payment-doc-202601",
+                        "form_id": "2",
+                        "modifiedTime": "2026-01-05T09:00:00",
+                        "data": {
+                            "applicationDate": "2026-01-05",
+                            "userName": "近期单据一",
+                            "fromTitle": "支付申请",
+                            "amount": "200",
+                            "beneficiary": "供应商A",
+                            "cause": "近期付款A",
+                            "projectName": "oa-project-001",
+                            "flowRequestId": "2047",
+                        },
+                    },
+                    {
+                        "_id": "payment-doc-202602",
+                        "form_id": "2",
+                        "modifiedTime": "2026-02-08T09:00:00",
+                        "data": {
+                            "applicationDate": "2026-02-08",
+                            "userName": "近期单据二",
+                            "fromTitle": "支付申请",
+                            "amount": "300",
+                            "beneficiary": "供应商B",
+                            "cause": "近期付款B",
+                            "projectName": "oa-project-001",
+                            "flowRequestId": "2048",
+                        },
+                    },
+                ],
+                "32": [],
+            },
+            project_documents=[
+                {"_id": "oa-project-001", "data": {"name": "云南溯源科技", "code": "YNSY"}},
+            ],
+        )
+        app._workbench_query_service._oa_adapter = adapter
+
+        with patch.object(app._live_workbench_service, "has_rows_for_month", return_value=False):
+            response = app.handle_request("GET", "/api/workbench?month=all")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        oa_ids = [row["id"] for row in flatten_groups(all_groups(payload), "oa")]
+        self.assertEqual(set(oa_ids), {"oa-pay-2047", "oa-pay-2048"})
+        self.assertEqual(adapter.bulk_call_count, 0)
+        self.assertEqual(adapter.month_calls, ["2026-01", "2026-02"])
+
+    def test_get_api_workbench_all_reincludes_old_oa_related_to_recent_bank_after_cutoff(self) -> None:
+        app = build_application()
+        app._app_settings_service.update_settings(
+            completed_project_ids=[],
+            bank_account_mappings=[],
+            allowed_usernames=[],
+            readonly_export_usernames=[],
+            admin_usernames=[],
+            oa_retention={"cutoff_date": "2026-01-01"},
+        )
+        adapter = RetentionScopedMongoWorkbenchOAAdapter(
+            form_documents={
+                "2": [
+                    {
+                        "_id": "payment-doc-202601",
+                        "form_id": "2",
+                        "modifiedTime": "2026-01-05T09:00:00",
+                        "data": {
+                            "applicationDate": "2026-01-05",
+                            "userName": "近期单据",
+                            "fromTitle": "支付申请",
+                            "amount": "200",
+                            "beneficiary": "供应商A",
+                            "cause": "近期付款A",
+                            "projectName": "oa-project-001",
+                            "flowRequestId": "2047",
+                        },
+                    }
+                ],
+                "32": [],
+            },
+            project_documents=[
+                {"_id": "oa-project-001", "data": {"name": "云南溯源科技", "code": "YNSY"}},
+            ],
+            row_id_records={
+                "oa-pay-2046": [
+                    OAApplicationRecord(
+                        id="oa-pay-2046",
+                        month="2025-12",
+                        section="open",
+                        case_id=None,
+                        applicant="旧关联OA",
+                        project_name="云南溯源科技",
+                        apply_type="支付申请",
+                        amount="100",
+                        counterparty_name="旧供应商",
+                        reason="旧付款",
+                        relation_code="pending_match",
+                        relation_label="待找流水与发票",
+                        relation_tone="warn",
+                    )
+                ]
+            },
+        )
+        app._workbench_query_service._oa_adapter = adapter
+        app._workbench_pair_relation_service.create_active_relation(
+            case_id="CASE-RETENTION-001",
+            row_ids=["oa-pay-2046", "bank-recent-001"],
+            row_types=["oa", "bank"],
+            relation_mode="manual_confirmed",
+            created_by="test",
+            month_scope="all",
+        )
+        recent_bank_row = {
+            "id": "bank-recent-001",
+            "type": "bank",
+            "trade_time": "2026-01-06 10:00:00",
+            "pay_receive_time": "2026-01-06 10:00:00",
+            "invoice_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+            "case_id": "CASE-RETENTION-001",
+        }
+        live_payload = {
+            "month": "all",
+            "summary": {
+                "oa_count": 0,
+                "bank_count": 1,
+                "invoice_count": 0,
+                "paired_count": 1,
+                "open_count": 0,
+                "exception_count": 0,
+            },
+            "paired": {"oa": [], "bank": [recent_bank_row], "invoice": []},
+            "open": {"oa": [], "bank": [], "invoice": []},
+        }
+
+        with (
+            patch.object(app._live_workbench_service, "has_rows_for_month", return_value=True),
+            patch.object(app._live_workbench_service, "get_workbench", return_value=live_payload),
+            patch.object(app, "_sync_live_auto_pair_relations", return_value=None),
+            patch.object(
+                app,
+                "_resolve_live_rows_direct",
+                side_effect=lambda row_ids, month_hint=None: [recent_bank_row],
+            ),
+        ):
+            response = app.handle_request("GET", "/api/workbench?month=all")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        oa_ids = [row["id"] for row in flatten_groups(all_groups(payload), "oa")]
+        self.assertIn("oa-pay-2046", oa_ids)
+        self.assertIn("oa-pay-2047", oa_ids)
+        self.assertEqual(adapter.bulk_call_count, 0)
+        self.assertEqual(adapter.month_calls, ["2026-01"])
+        self.assertEqual(adapter.row_id_calls, [["oa-pay-2046"]])
+
+    def test_get_api_workbench_all_falls_back_to_cutoff_month_range_when_month_listing_errors(self) -> None:
+        app = build_application()
+        app._app_settings_service.update_settings(
+            completed_project_ids=[],
+            bank_account_mappings=[],
+            allowed_usernames=[],
+            readonly_export_usernames=[],
+            admin_usernames=[],
+            oa_retention={"cutoff_date": "2026-01-01"},
+        )
+        adapter = ErrorMonthListRetentionMongoWorkbenchOAAdapter(
+            form_documents={
+                "2": [
+                    {
+                        "_id": "payment-doc-202601",
+                        "form_id": "2",
+                        "modifiedTime": "2026-01-05T09:00:00",
+                        "data": {
+                            "applicationDate": "2026-01-05",
+                            "userName": "近期单据一",
+                            "fromTitle": "支付申请",
+                            "amount": "200",
+                            "beneficiary": "供应商A",
+                            "cause": "近期付款A",
+                            "projectName": "oa-project-001",
+                            "flowRequestId": "2047",
+                        },
+                    },
+                    {
+                        "_id": "payment-doc-202602",
+                        "form_id": "2",
+                        "modifiedTime": "2026-02-08T09:00:00",
+                        "data": {
+                            "applicationDate": "2026-02-08",
+                            "userName": "近期单据二",
+                            "fromTitle": "支付申请",
+                            "amount": "300",
+                            "beneficiary": "供应商B",
+                            "cause": "近期付款B",
+                            "projectName": "oa-project-001",
+                            "flowRequestId": "2048",
+                        },
+                    },
+                ],
+                "32": [],
+            },
+            project_documents=[
+                {"_id": "oa-project-001", "data": {"name": "云南溯源科技", "code": "YNSY"}},
+            ],
+        )
+        app._workbench_query_service._oa_adapter = adapter
+
+        with (
+            patch.object(app._live_workbench_service, "has_rows_for_month", return_value=False),
+            patch.object(Application, "_fallback_retained_oa_end_month", return_value="2026-02", create=True),
+        ):
+            response = app.handle_request("GET", "/api/workbench?month=all")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["oa_status"]["code"], "ready")
+        oa_ids = [row["id"] for row in flatten_groups(all_groups(payload), "oa")]
+        self.assertEqual(set(oa_ids), {"oa-pay-2047", "oa-pay-2048"})
+        self.assertEqual(adapter.month_calls, ["2026-01", "2026-02"])
 
     def test_get_api_workbench_persists_salary_auto_match_into_pair_relations(self) -> None:
         app = build_application()
@@ -83,6 +644,34 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         assert relation is not None
         self.assertEqual(relation["relation_mode"], "salary_personal_auto_match")
         self.assertEqual(relation["row_ids"], [salary_row_id])
+
+    def test_get_api_workbench_exposes_invoice_identity_fields_for_live_invoice_rows(self) -> None:
+        app = build_application()
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.INPUT_INVOICE,
+            source_name="input-invoice.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "invoice_code": "033001",
+                    "invoice_no": "9001",
+                    "counterparty_name": "云南供应商有限公司",
+                    "amount": "100.00",
+                    "invoice_date": "2026-03-21",
+                    "invoice_status_from_source": "valid",
+                }
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+
+        response = app.handle_request("GET", "/api/workbench?month=2026-03")
+        payload = json.loads(response.body)
+        invoice_row = flatten_groups(payload["open"]["groups"], "invoice")[0]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(invoice_row["invoice_code"], "033001")
+        self.assertEqual(invoice_row["invoice_no"], "9001")
+        self.assertEqual(invoice_row["digital_invoice_no"], "—")
 
     def test_get_api_workbench_persists_internal_transfer_auto_match_into_pair_relations(self) -> None:
         app = build_application()
@@ -212,6 +801,249 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertTrue(any(group["oa_rows"] for group in merged["open"]["groups"]))
         self.assertEqual(merged["summary"]["bank_count"], 1)
         self.assertEqual(merged["summary"]["invoice_count"], 1)
+
+    def test_get_api_workbench_merges_oa_attachment_invoice_rows_into_live_grouping(self) -> None:
+        app = build_application()
+        query_service = WorkbenchQueryService(oa_adapter=AttachmentAwareOAAdapter())
+        action_service = WorkbenchActionService(query_service)
+        app._workbench_query_service = query_service
+        app._workbench_action_service = action_service
+        app._workbench_api_routes = WorkbenchApiRoutes(query_service, action_service)
+        app._live_workbench_service = _StubLiveWorkbenchService()
+
+        response = app.handle_request("GET", "/api/workbench?month=2026-03")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        matching_groups = [
+            group
+            for group in payload["paired"]["groups"]
+            if any(row["id"] == "oa-attach-202603-001" for row in group["oa_rows"])
+        ]
+        self.assertEqual(len(matching_groups), 1)
+        group = matching_groups[0]
+        self.assertEqual(group["group_type"], "auto_closed")
+        self.assertIn("txn-live-202603-001", [row["id"] for row in group["bank_rows"]])
+        self.assertEqual(len(group["invoice_rows"]), 1)
+        self.assertEqual(group["invoice_rows"][0]["detail_fields"]["来源OA单号"], "OA-ATT-001")
+
+        invoice_row_id = group["invoice_rows"][0]["id"]
+        invoice_detail_response = app.handle_request("GET", f"/api/workbench/rows/{invoice_row_id}")
+        oa_detail_response = app.handle_request("GET", "/api/workbench/rows/oa-attach-202603-001")
+        self.assertEqual(invoice_detail_response.status_code, 200)
+        self.assertEqual(oa_detail_response.status_code, 200)
+        invoice_detail = json.loads(invoice_detail_response.body)["row"]
+        oa_detail = json.loads(oa_detail_response.body)["row"]
+        self.assertEqual(invoice_detail["detail_fields"]["附件文件名"], "设备发票.pdf")
+        self.assertEqual(oa_detail["detail_fields"]["附件发票数量"], "1")
+
+    def test_get_api_workbench_auto_pairs_offset_applicant_oa_with_attachment_invoice(self) -> None:
+        app = build_application()
+        target_oa_record = OAApplicationRecord(
+            id="oa-offset-202602-001",
+            month="2026-02",
+            section="open",
+            case_id=None,
+            applicant="周洁莹",
+            project_name="云南溯源科技",
+            apply_type="日常报销",
+            amount="200.00",
+            counterparty_name="云南中油严家山交通服务有限公司",
+            reason="汽油费",
+            relation_code="pending_match",
+            relation_label="待找流水与发票",
+            relation_tone="warn",
+            expense_type="交通费",
+            expense_content="汽油费",
+            detail_fields={"OA单号": "OA-OFFSET-001", "申请日期": "2026-02-09"},
+            attachment_invoices=[
+                {
+                    "invoice_code": "053002200111",
+                    "invoice_no": "15312761",
+                    "seller_name": "云南中油严家山交通服务有限公司",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "issue_date": "2025-04-24",
+                    "amount": "200.00",
+                    "tax_rate": "13%",
+                    "tax_amount": "23.01",
+                    "invoice_type": "进项发票",
+                    "attachment_name": "20240424-汽油费-200.jpg",
+                }
+            ],
+        )
+        query_service = WorkbenchQueryService(
+            oa_adapter=InMemoryOAAdapter({"2026-02": [target_oa_record]})
+        )
+        action_service = WorkbenchActionService(query_service)
+        app._workbench_query_service = query_service
+        app._workbench_action_service = action_service
+        app._workbench_api_routes = WorkbenchApiRoutes(query_service, action_service)
+
+        with patch.object(app._live_workbench_service, "has_rows_for_month", return_value=False):
+            response = app.handle_request("GET", "/api/workbench?month=2026-02")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        paired_groups = payload["paired"]["groups"]
+        self.assertEqual(len(paired_groups), 1)
+        group = paired_groups[0]
+        self.assertEqual(group["group_type"], "auto_closed")
+        self.assertEqual(len(group["oa_rows"]), 1)
+        self.assertEqual(len(group["invoice_rows"]), 1)
+        self.assertEqual(group["bank_rows"], [])
+        self.assertEqual(group["oa_rows"][0]["oa_bank_relation"]["label"], "待找流水与发票")
+        self.assertIn("冲", group["oa_rows"][0]["tags"])
+        self.assertTrue(group["oa_rows"][0]["cost_excluded"])
+        self.assertIn("冲", group["invoice_rows"][0]["tags"])
+        self.assertTrue(group["invoice_rows"][0]["cost_excluded"])
+        self.assertEqual(payload["open"]["groups"], [])
+        relation = app._workbench_pair_relation_service.get_active_relation_by_row_id("oa-offset-202602-001")
+        self.assertIsNotNone(relation)
+        assert relation is not None
+        self.assertEqual(relation["relation_mode"], "oa_invoice_offset_auto_match")
+        self.assertCountEqual(
+            relation["row_ids"],
+            ["oa-offset-202602-001", "oa-att-inv-oa-offset-202602-001-01"],
+        )
+
+    def test_oa_invoice_offset_sync_does_not_cancel_relations_outside_current_payload(self) -> None:
+        app = build_application()
+        app._workbench_pair_relation_service.create_active_relation(
+            case_id="CASE-OA-OFFSET-OTHER",
+            row_ids=["oa-offset-other", "oa-att-inv-other-01"],
+            row_types=["oa", "invoice"],
+            relation_mode="oa_invoice_offset_auto_match",
+            created_by="system_auto_match",
+            month_scope="2026-01",
+        )
+        payload = {
+            "month": "2026-02",
+            "paired": {"oa": [], "bank": [], "invoice": []},
+            "open": {
+                "oa": [
+                    {
+                        "id": "oa-current-without-invoice",
+                        "type": "oa",
+                        "applicant": "周洁莹",
+                        "case_id": "CASE-CURRENT",
+                    }
+                ],
+                "bank": [],
+                "invoice": [],
+            },
+        }
+
+        app._sync_oa_invoice_offset_auto_pair_relations(payload)
+
+        relation = app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-OA-OFFSET-OTHER")
+        self.assertIsNotNone(relation)
+        assert relation is not None
+        self.assertEqual(relation["relation_mode"], "oa_invoice_offset_auto_match")
+
+    def test_row_detail_prefers_cached_read_model_before_query_service_sync(self) -> None:
+        app = build_application()
+        payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
+        oa_row = flatten_groups(payload["open"]["groups"], "oa")[0]
+
+        with (
+            patch.object(app._live_workbench_service, "get_row_detail", side_effect=KeyError(oa_row["id"])),
+            patch.object(
+                app._workbench_query_service,
+                "get_row_record",
+                side_effect=AssertionError("row detail should resolve from cached read model"),
+            ),
+        ):
+            detail_payload = app._get_api_workbench_row_detail_payload(oa_row["id"])
+
+        self.assertEqual(detail_payload["row"]["id"], oa_row["id"])
+
+    def test_opaque_oa_row_detail_prefers_month_read_model_without_full_oa_sync(self) -> None:
+        app = build_application()
+        row_id = "oa-exp-69898450db8c0a3633bd748c-0"
+        app._workbench_read_model_service.upsert_read_model(
+            scope_key="2026-02",
+            payload={
+                "month": "2026-02",
+                "summary": {
+                    "oa_count": 1,
+                    "bank_count": 0,
+                    "invoice_count": 1,
+                    "paired_count": 0,
+                    "open_count": 2,
+                    "exception_count": 0,
+                },
+                "paired": {"groups": []},
+                "open": {
+                    "groups": [
+                        {
+                            "group_id": "case:CASE-OA-ATT-opaque-001",
+                            "group_type": "candidate",
+                            "oa_rows": [
+                                {
+                                    "id": row_id,
+                                    "type": "oa",
+                                    "case_id": "CASE-OA-ATT-opaque-001",
+                                    "applicant": "周洁莹",
+                                    "project_name": "云南溯源科技",
+                                    "apply_type": "日常报销",
+                                    "amount": "200",
+                                    "counterparty_name": "",
+                                    "reason": "汽油费",
+                                    "oa_bank_relation": {
+                                        "code": "pending_match",
+                                        "label": "待找流水与发票",
+                                        "tone": "warn",
+                                    },
+                                    "available_actions": ["detail", "confirm_link", "mark_exception"],
+                                    "summary_fields": {"申请人": "周洁莹"},
+                                    "detail_fields": {
+                                        "OA单号": "69898450db8c0a3633bd748c",
+                                        "附件发票数量": "1",
+                                    },
+                                }
+                            ],
+                            "bank_rows": [],
+                            "invoice_rows": [],
+                        }
+                    ]
+                },
+                "exceptions": {"groups": []},
+            },
+            ignored_rows=[],
+        )
+
+        with (
+            patch.object(app._live_workbench_service, "get_row_detail", side_effect=KeyError(row_id)),
+            patch.object(
+                app._workbench_query_service,
+                "get_row_record",
+                side_effect=AssertionError("opaque OA row detail should resolve from month read model"),
+            ),
+            patch.object(
+                app._workbench_query_service,
+                "_sync_all_oa_rows",
+                side_effect=AssertionError("opaque OA row detail should not trigger all-scope OA sync"),
+            ),
+        ):
+            response = app.handle_request("GET", f"/api/workbench/rows/{row_id}")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["row"]["id"], row_id)
+        self.assertEqual(payload["row"]["detail_fields"]["附件发票数量"], "1")
+
+    def test_opaque_oa_row_detail_without_cache_returns_404_without_full_oa_sync(self) -> None:
+        app = build_application()
+        row_id = "oa-exp-opaque-without-month-0"
+
+        with patch.object(
+            app._workbench_query_service,
+            "_sync_all_oa_rows",
+            side_effect=AssertionError("opaque OA row detail should not trigger all-scope OA sync"),
+        ):
+            response = app.handle_request("GET", f"/api/workbench/rows/{row_id}")
+
+        self.assertEqual(response.status_code, 404)
 
     def test_get_api_workbench_supports_two_seed_months(self) -> None:
         app = build_application()
@@ -654,6 +1486,129 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertIsNone(schedule_read_model_persist.call_args.kwargs["request_id"])
         self.assertEqual(schedule_read_model_persist.call_args.kwargs["action_name"], "cancel_link")
 
+    def test_mark_exception_invalidates_only_changed_scopes_and_rebuilds_in_background(self) -> None:
+        app = build_application()
+        app._live_workbench_service = _StubLiveWorkbenchService()
+        payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
+        oa_row = flatten_groups(payload["open"]["groups"], "oa")[0]
+
+        with (
+            patch.object(app, "_invalidate_workbench_read_models") as invalidate_all_read_models,
+            patch.object(app, "_invalidate_workbench_read_model_scopes") as invalidate_read_model_scopes,
+            patch.object(app, "_schedule_workbench_read_model_persist") as schedule_read_model_persist,
+        ):
+            response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/mark-exception",
+                json.dumps(
+                    {
+                        "month": "2026-03",
+                        "row_id": oa_row["id"],
+                        "exception_code": "pending_collection",
+                        "comment": "客户尚未付款",
+                    }
+                ),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        invalidate_all_read_models.assert_not_called()
+        invalidate_read_model_scopes.assert_called_once()
+        self.assertCountEqual(invalidate_read_model_scopes.call_args.args[0], ["2026-03", "all"])
+        schedule_read_model_persist.assert_called_once()
+        self.assertCountEqual(
+            schedule_read_model_persist.call_args.kwargs["changed_scope_keys"],
+            ["2026-03", "all"],
+        )
+        self.assertIsNone(schedule_read_model_persist.call_args.kwargs["request_id"])
+        self.assertEqual(schedule_read_model_persist.call_args.kwargs["action_name"], "mark_exception")
+
+    def test_oa_bank_exception_invalidates_only_changed_scopes_and_rebuilds_in_background(self) -> None:
+        app = build_application()
+        payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
+        oa_row = flatten_groups(payload["open"]["groups"], "oa")[0]
+        bank_row = flatten_groups(payload["open"]["groups"], "bank")[0]
+
+        with (
+            patch.object(app, "_invalidate_workbench_read_models") as invalidate_all_read_models,
+            patch.object(app, "_invalidate_workbench_read_model_scopes") as invalidate_read_model_scopes,
+            patch.object(app, "_schedule_workbench_read_model_persist") as schedule_read_model_persist,
+        ):
+            response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/oa-bank-exception",
+                json.dumps(
+                    {
+                        "month": "2026-03",
+                        "row_ids": [oa_row["id"], bank_row["id"]],
+                        "exception_code": "oa_bank_amount_mismatch",
+                        "exception_label": "金额不一致，继续异常",
+                        "comment": "付款金额与OA金额不一致，继续核查",
+                    }
+                ),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        invalidate_all_read_models.assert_not_called()
+        invalidate_read_model_scopes.assert_called_once()
+        self.assertCountEqual(invalidate_read_model_scopes.call_args.args[0], ["2026-03", "all"])
+        schedule_read_model_persist.assert_called_once()
+        self.assertCountEqual(
+            schedule_read_model_persist.call_args.kwargs["changed_scope_keys"],
+            ["2026-03", "all"],
+        )
+        self.assertIsNone(schedule_read_model_persist.call_args.kwargs["request_id"])
+        self.assertEqual(schedule_read_model_persist.call_args.kwargs["action_name"], "oa_bank_exception")
+
+    def test_cancel_exception_invalidates_only_changed_scopes_and_rebuilds_in_background(self) -> None:
+        app = build_application()
+        payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
+        oa_row = flatten_groups(payload["open"]["groups"], "oa")[0]
+        bank_row = flatten_groups(payload["open"]["groups"], "bank")[0]
+
+        exception_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/oa-bank-exception",
+            json.dumps(
+                {
+                    "month": "2026-03",
+                    "row_ids": [oa_row["id"], bank_row["id"]],
+                    "exception_code": "oa_bank_amount_mismatch",
+                    "exception_label": "金额不一致，继续异常",
+                    "comment": "测试异常处理",
+                }
+            ),
+        )
+        self.assertEqual(exception_response.status_code, 200)
+
+        with (
+            patch.object(app, "_invalidate_workbench_read_models") as invalidate_all_read_models,
+            patch.object(app, "_invalidate_workbench_read_model_scopes") as invalidate_read_model_scopes,
+            patch.object(app, "_schedule_workbench_read_model_persist") as schedule_read_model_persist,
+        ):
+            cancel_response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/cancel-exception",
+                json.dumps(
+                    {
+                        "month": "2026-03",
+                        "row_ids": [oa_row["id"], bank_row["id"]],
+                        "comment": "撤回异常处理",
+                    }
+                ),
+            )
+
+        self.assertEqual(cancel_response.status_code, 200)
+        invalidate_all_read_models.assert_not_called()
+        invalidate_read_model_scopes.assert_called_once()
+        self.assertCountEqual(invalidate_read_model_scopes.call_args.args[0], ["2026-03", "all"])
+        schedule_read_model_persist.assert_called_once()
+        self.assertCountEqual(
+            schedule_read_model_persist.call_args.kwargs["changed_scope_keys"],
+            ["2026-03", "all"],
+        )
+        self.assertIsNone(schedule_read_model_persist.call_args.kwargs["request_id"])
+        self.assertEqual(schedule_read_model_persist.call_args.kwargs["action_name"], "cancel_exception")
+
     def test_confirm_link_emits_phased_timing_logs(self) -> None:
         app = build_application()
         payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
@@ -784,6 +1739,196 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         )
         self.assertNotIn("updated_rows", cancel_payload)
 
+    def test_cancel_exception_resolves_selected_rows_without_rebuilding_grouped_workbench(self) -> None:
+        app = build_application()
+        initial_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
+        oa_row = flatten_groups(initial_payload["open"]["groups"], "oa")[0]
+        bank_row = flatten_groups(initial_payload["open"]["groups"], "bank")[0]
+
+        exception_response = app._handle_live_workbench_oa_bank_exception(
+            {
+                "month": "2026-03",
+                "row_ids": [oa_row["id"], bank_row["id"]],
+                "exception_code": "oa_bank_amount_mismatch",
+                "exception_label": "金额不一致，继续异常",
+                "comment": "测试异常处理",
+            }
+        )
+        self.assertEqual(exception_response.status_code, 200)
+
+        with patch.object(app, "_build_api_workbench_payload", side_effect=AssertionError("should not rebuild workbench")):
+            cancel_response = app._handle_live_workbench_cancel_exception(
+                {
+                    "month": "2026-03",
+                    "row_ids": [oa_row["id"], bank_row["id"]],
+                    "comment": "撤回异常处理",
+                }
+            )
+
+        self.assertEqual(cancel_response.status_code, 200)
+        cancel_payload = json.loads(cancel_response.body)
+        self.assertTrue(cancel_payload["success"])
+        self.assertCountEqual(cancel_payload["affected_row_ids"], [oa_row["id"], bank_row["id"]])
+        self.assertEqual(cancel_payload["action"], "cancel_exception")
+
+    def test_oa_bank_exception_resolves_selected_rows_without_rebuilding_grouped_workbench(self) -> None:
+        app = build_application()
+        initial_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
+        oa_row = flatten_groups(initial_payload["open"]["groups"], "oa")[0]
+        bank_row = flatten_groups(initial_payload["open"]["groups"], "bank")[0]
+
+        with patch.object(app, "_build_api_workbench_payload", side_effect=AssertionError("should not rebuild workbench")):
+            exception_response = app._handle_live_workbench_oa_bank_exception(
+                {
+                    "month": "2026-03",
+                    "row_ids": [oa_row["id"], bank_row["id"]],
+                    "exception_code": "oa_bank_amount_mismatch",
+                    "exception_label": "金额不一致，继续异常",
+                    "comment": "测试异常处理",
+                }
+            )
+
+        self.assertEqual(exception_response.status_code, 200)
+        exception_payload = json.loads(exception_response.body)
+        self.assertTrue(exception_payload["success"])
+        self.assertCountEqual(exception_payload["affected_row_ids"], [oa_row["id"], bank_row["id"]])
+        self.assertEqual(exception_payload["action"], "oa_bank_exception")
+
+    def test_oa_bank_exception_prefers_cached_read_model_rows_before_query_service(self) -> None:
+        app = build_application()
+        initial_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
+        oa_row = flatten_groups(initial_payload["open"]["groups"], "oa")[0]
+        bank_row = flatten_groups(initial_payload["open"]["groups"], "bank")[0]
+
+        app._workbench_query_service._records_by_id.pop(oa_row["id"], None)
+        app._workbench_query_service._records_by_id.pop(bank_row["id"], None)
+
+        with (
+            patch.object(
+                app._workbench_query_service,
+                "get_row_record",
+                side_effect=AssertionError("should not hit query service when cached read model has selected rows"),
+            ),
+            patch.object(
+                app._live_workbench_service,
+                "get_rows_detail",
+                side_effect=AssertionError("should not hit live row detail when cached read model has selected rows"),
+            ),
+        ):
+            response = app._handle_live_workbench_oa_bank_exception(
+                {
+                    "month": "2026-03",
+                    "row_ids": [oa_row["id"], bank_row["id"]],
+                    "exception_code": "oa_bank_amount_mismatch",
+                    "exception_label": "金额不一致，继续异常",
+                    "comment": "测试异常处理",
+                }
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["action"], "oa_bank_exception")
+        self.assertCountEqual(payload["affected_row_ids"], [oa_row["id"], bank_row["id"]])
+
+    def test_cancel_exception_does_not_full_sync_all_oa_rows_after_read_model_invalidation(self) -> None:
+        app = build_application()
+        initial_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
+        oa_row = flatten_groups(initial_payload["open"]["groups"], "oa")[0]
+        bank_row = flatten_groups(initial_payload["open"]["groups"], "bank")[0]
+
+        app._workbench_query_service._records_by_id.pop(oa_row["id"], None)
+
+        exception_response = app._handle_live_workbench_oa_bank_exception(
+            {
+                "month": "2026-03",
+                "row_ids": [oa_row["id"], bank_row["id"]],
+                "exception_code": "oa_bank_amount_mismatch",
+                "exception_label": "金额不一致，继续异常",
+                "comment": "测试异常处理",
+            }
+        )
+        self.assertEqual(exception_response.status_code, 200)
+
+        app._workbench_query_service._records_by_id.pop(oa_row["id"], None)
+
+        with patch.object(
+            app._workbench_query_service,
+            "_sync_all_oa_rows",
+            side_effect=AssertionError("cancel_exception should not fall back to full OA sync"),
+        ):
+            cancel_response = app._handle_live_workbench_cancel_exception(
+                {
+                    "month": "2026-03",
+                    "row_ids": [oa_row["id"], bank_row["id"]],
+                    "comment": "撤回异常处理",
+                }
+            )
+
+        self.assertEqual(cancel_response.status_code, 200)
+        cancel_payload = json.loads(cancel_response.body)
+        self.assertTrue(cancel_payload["success"])
+        self.assertEqual(cancel_payload["action"], "cancel_exception")
+        self.assertCountEqual(cancel_payload["affected_row_ids"], [oa_row["id"], bank_row["id"]])
+
+    def test_cancel_exception_resolves_all_scope_bank_rows_without_oa_query_service(self) -> None:
+        app = build_application()
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="cancel-exception-bank-fast-path.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220031",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-03-10",
+                    "trade_time": "2026-03-10 09:00:00",
+                    "pay_receive_time": "2026-03-10 09:00:00",
+                    "counterparty_name": "测试取消异常流水",
+                    "debit_amount": "100.00",
+                    "credit_amount": "",
+                    "summary": "测试取消异常流水",
+                },
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+        bank_row_id = next(
+            transaction.id
+            for transaction in app._import_service.list_transactions()
+            if transaction.source_batch_id == preview.id
+        )
+        app.handle_request("GET", "/api/workbench?month=all")
+
+        exception_response = app._handle_live_workbench_oa_bank_exception(
+            {
+                "month": "all",
+                "row_ids": [bank_row_id],
+                "exception_code": "oa_bank_amount_mismatch",
+                "exception_label": "金额不一致，继续异常",
+                "comment": "测试异常处理",
+            }
+        )
+        self.assertEqual(exception_response.status_code, 200)
+
+        with patch.object(
+            app._workbench_query_service,
+            "get_row_record",
+            side_effect=AssertionError("bank rows should resolve from live detail without OA query service"),
+        ):
+            cancel_response = app._handle_live_workbench_cancel_exception(
+                {
+                    "month": "all",
+                    "row_ids": [bank_row_id],
+                    "comment": "撤回异常处理",
+                }
+            )
+
+        self.assertEqual(cancel_response.status_code, 200)
+        cancel_payload = json.loads(cancel_response.body)
+        self.assertTrue(cancel_payload["success"])
+        self.assertEqual(cancel_payload["action"], "cancel_exception")
+        self.assertEqual(cancel_payload["affected_row_ids"], [bank_row_id])
+
     def test_confirm_link_rebuilds_live_cache_once_for_multiple_live_rows(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(
@@ -872,6 +2017,94 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         updated_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
         updated_oa = next(row for row in flatten_groups(updated_payload["open"]["groups"], "oa") if row["id"] == oa_row["id"])
         updated_bank = next(row for row in flatten_groups(updated_payload["open"]["groups"], "bank") if row["id"] == bank_row["id"])
+
+        self.assertFalse(updated_oa.get("handled_exception", False))
+        self.assertFalse(updated_bank.get("handled_exception", False))
+        self.assertEqual(updated_oa["oa_bank_relation"]["tone"], "warn")
+        self.assertEqual(updated_bank["invoice_relation"]["tone"], "warn")
+
+    def test_live_oa_bank_exception_keeps_rows_in_open_processed_exception_state(self) -> None:
+        app = build_application()
+        app._live_workbench_service = _StubLiveWorkbenchService()
+
+        initial_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
+        oa_row = flatten_groups(initial_payload["open"]["groups"], "oa")[0]
+        bank_row = next(
+            row for row in flatten_groups(initial_payload["open"]["groups"], "bank") if row["id"] == "txn-live-202603-001"
+        )
+
+        response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/oa-bank-exception",
+            json.dumps(
+                {
+                    "month": "2026-03",
+                    "row_ids": [oa_row["id"], bank_row["id"]],
+                    "exception_code": "oa_bank_amount_mismatch",
+                    "exception_label": "金额不一致，继续异常",
+                    "comment": "付款金额与OA金额不一致，继续核查",
+                }
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        updated_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
+        self.assertEqual(updated_payload["summary"]["paired_count"], 0)
+        updated_oa = next(row for row in flatten_groups(updated_payload["open"]["groups"], "oa") if row["id"] == oa_row["id"])
+        updated_bank = next(
+            row for row in flatten_groups(updated_payload["open"]["groups"], "bank") if row["id"] == bank_row["id"]
+        )
+
+        self.assertTrue(updated_oa.get("handled_exception", False))
+        self.assertTrue(updated_bank.get("handled_exception", False))
+        self.assertEqual(updated_oa["oa_bank_relation"]["tone"], "danger")
+        self.assertEqual(updated_bank["invoice_relation"]["tone"], "danger")
+
+    def test_cancel_exception_keeps_live_rows_in_open_state_after_revert(self) -> None:
+        app = build_application()
+        app._live_workbench_service = _StubLiveWorkbenchService()
+
+        initial_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
+        oa_row = flatten_groups(initial_payload["open"]["groups"], "oa")[0]
+        bank_row = next(
+            row for row in flatten_groups(initial_payload["open"]["groups"], "bank") if row["id"] == "txn-live-202603-001"
+        )
+
+        exception_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/oa-bank-exception",
+            json.dumps(
+                {
+                    "month": "2026-03",
+                    "row_ids": [oa_row["id"], bank_row["id"]],
+                    "exception_code": "oa_bank_amount_mismatch",
+                    "exception_label": "金额不一致，继续异常",
+                    "comment": "付款金额与OA金额不一致，继续核查",
+                }
+            ),
+        )
+        self.assertEqual(exception_response.status_code, 200)
+
+        cancel_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/cancel-exception",
+            json.dumps(
+                {
+                    "month": "2026-03",
+                    "row_ids": [oa_row["id"], bank_row["id"]],
+                    "comment": "撤回异常处理",
+                }
+            ),
+        )
+        self.assertEqual(cancel_response.status_code, 200)
+
+        updated_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
+        self.assertEqual(updated_payload["summary"]["paired_count"], 0)
+        updated_oa = next(row for row in flatten_groups(updated_payload["open"]["groups"], "oa") if row["id"] == oa_row["id"])
+        updated_bank = next(
+            row for row in flatten_groups(updated_payload["open"]["groups"], "bank") if row["id"] == bank_row["id"]
+        )
 
         self.assertFalse(updated_oa.get("handled_exception", False))
         self.assertFalse(updated_bank.get("handled_exception", False))
@@ -1077,6 +2310,124 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(confirm_payload["month"], "all")
         self.assertEqual(confirm_payload["affected_row_ids"], ["oa-o-202603-001", "bk-o-202604-001"])
 
+    def test_mark_exception_returns_503_and_keeps_workbench_loadable_when_override_persist_fails(self) -> None:
+        app = build_application()
+        app._live_workbench_service = _StubLiveWorkbenchService()
+        app._state_store = _FailingOverrideStateStore()
+
+        initial_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
+        oa_row = flatten_groups(initial_payload["open"]["groups"], "oa")[0]
+
+        response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/mark-exception",
+            json.dumps(
+                {
+                    "month": "2026-03",
+                    "row_id": oa_row["id"],
+                    "exception_code": "pending_match",
+                    "comment": "测试持久化失败",
+                }
+            ),
+        )
+
+        self.assertEqual(response.status_code, 503)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["error"], "workbench_state_persistence_unavailable")
+
+        reloaded_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
+        reloaded_oa = next(row for row in flatten_groups(reloaded_payload["open"]["groups"], "oa") if row["id"] == oa_row["id"])
+        self.assertFalse(reloaded_oa.get("handled_exception", False))
+        self.assertEqual(reloaded_oa["oa_bank_relation"]["tone"], "warn")
+
+    def test_get_api_workbench_uses_in_memory_read_model_when_read_model_persist_fails(self) -> None:
+        app = build_application()
+        app._state_store = _FailingReadModelStateStore()
+
+        response = app.handle_request("GET", "/api/workbench?month=2026-03")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["month"], "2026-03")
+        self.assertGreater(payload["summary"]["open_count"], 0)
+        self.assertIsNotNone(app._workbench_read_model_service.get_read_model("2026-03"))
+
+    def test_oa_retention_filters_only_unrelated_old_oa_and_can_reinclude_after_new_bank_relation(self) -> None:
+        app = build_application()
+        app._app_settings_service.update_settings(
+            completed_project_ids=[],
+            bank_account_mappings=[],
+            allowed_usernames=[],
+            readonly_export_usernames=[],
+            admin_usernames=[],
+            oa_retention={"cutoff_date": "2026-01-01"},
+        )
+        old_oa = build_oa_retention_oa_row("oa-old-001", "CASE-OLD-001", "2025-12-20")
+        recent_oa = build_oa_retention_oa_row("oa-recent-001", "CASE-RECENT-001", "2026-01-03")
+        old_bank = build_oa_retention_bank_row("bank-old-001", "CASE-OLD-001", "2025-12-22 09:00:00")
+        recent_oa_invoice = build_oa_retention_invoice_row("invoice-recent-001", "CASE-RECENT-001", "2026-01-04")
+        initial_grouped_payload = app._group_row_payload(
+            build_oa_retention_raw_payload(
+                oa_rows=[old_oa, recent_oa],
+                bank_rows=[old_bank],
+                invoice_rows=[recent_oa_invoice],
+            )
+        )
+
+        initial_payload = app._apply_oa_retention_to_grouped_payload(
+            initial_grouped_payload
+        )
+        initial_oa_ids = [row["id"] for row in flatten_groups(initial_payload["open"]["groups"], "oa")]
+        initial_bank_ids = [row["id"] for row in flatten_groups(all_groups(initial_payload), "bank")]
+        initial_invoice_ids = [row["id"] for row in flatten_groups(all_groups(initial_payload), "invoice")]
+
+        self.assertNotIn("oa-old-001", initial_oa_ids)
+        self.assertIn("oa-recent-001", initial_oa_ids)
+        self.assertIn("bank-old-001", initial_bank_ids)
+        self.assertIn("invoice-recent-001", initial_invoice_ids)
+        self.assertEqual(initial_payload["summary"]["oa_count"], 1)
+
+        app._workbench_read_model_service.upsert_read_model(scope_key="all", payload=initial_grouped_payload)
+        filtered_cached_payload = app._build_api_workbench_payload("all")
+        cached_read_model = app._workbench_read_model_service.get_read_model("all")
+        self.assertNotIn("oa-old-001", [row["id"] for row in flatten_groups(filtered_cached_payload["open"]["groups"], "oa")])
+        self.assertIn(
+            "oa-old-001",
+            [row["id"] for row in flatten_groups(all_groups(cached_read_model["payload"]), "oa")],
+        )
+
+        related_recent_bank = build_oa_retention_bank_row("bank-recent-001", "CASE-OLD-001", "2026-01-05 10:00:00")
+        refreshed_payload = app._apply_oa_retention_to_grouped_payload(
+            app._group_row_payload(
+                build_oa_retention_raw_payload(
+                    oa_rows=[old_oa, recent_oa],
+                    bank_rows=[old_bank, related_recent_bank],
+                    invoice_rows=[recent_oa_invoice],
+                )
+            )
+        )
+        refreshed_oa_ids = [row["id"] for row in flatten_groups(refreshed_payload["open"]["groups"], "oa")]
+        refreshed_bank_ids = [row["id"] for row in flatten_groups(all_groups(refreshed_payload), "bank")]
+
+        self.assertIn("oa-old-001", refreshed_oa_ids)
+        self.assertIn("oa-recent-001", refreshed_oa_ids)
+        self.assertIn("bank-recent-001", refreshed_bank_ids)
+        self.assertEqual(refreshed_payload["summary"]["oa_count"], 2)
+
+    def test_oa_attachment_invoice_cache_update_invalidates_related_read_models(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._workbench_read_model_service.upsert_read_model(scope_key="all", payload={"month": "all"})
+            app._workbench_read_model_service.upsert_read_model(scope_key="2026-03", payload={"month": "2026-03"})
+
+            with patch.object(app, "_schedule_workbench_read_model_persist") as schedule_read_model_persist:
+                app._handle_oa_attachment_invoice_cache_updated(["2026-03"])
+
+        self.assertIsNone(app._workbench_read_model_service.get_read_model("all"))
+        self.assertIsNone(app._workbench_read_model_service.get_read_model("2026-03"))
+        schedule_read_model_persist.assert_called_once()
+        self.assertCountEqual(schedule_read_model_persist.call_args.kwargs["changed_scope_keys"], ["2026-03", "all"])
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -1092,6 +2443,73 @@ def flatten_groups(groups: list[dict[str, object]], record_type: str) -> list[di
 
 def all_groups(payload: dict[str, object]) -> list[dict[str, object]]:
     return [*payload["paired"]["groups"], *payload["open"]["groups"]]
+
+
+def build_oa_retention_raw_payload(
+    *,
+    oa_rows: list[dict[str, object]],
+    bank_rows: list[dict[str, object]],
+    invoice_rows: list[dict[str, object]],
+) -> dict[str, object]:
+    return {
+        "month": "all",
+        "summary": {
+            "oa_count": len(oa_rows),
+            "bank_count": len(bank_rows),
+            "invoice_count": len(invoice_rows),
+            "paired_count": 0,
+            "open_count": len(oa_rows) + len(bank_rows) + len(invoice_rows),
+            "exception_count": 0,
+        },
+        "paired": {"oa": [], "bank": [], "invoice": []},
+        "open": {"oa": oa_rows, "bank": bank_rows, "invoice": invoice_rows},
+    }
+
+
+def build_oa_retention_oa_row(row_id: str, case_id: str, application_date: str) -> dict[str, object]:
+    return {
+        "id": row_id,
+        "type": "oa",
+        "case_id": case_id,
+        "applicant": "测试申请人",
+        "project_name": "测试项目",
+        "apply_type": "支付申请",
+        "amount": "100.00",
+        "counterparty_name": "测试供应商",
+        "reason": "测试保OA",
+        "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"},
+        "available_actions": ["detail"],
+        "summary_fields": {"申请人": "测试申请人"},
+        "detail_fields": {"申请日期": application_date},
+    }
+
+
+def build_oa_retention_bank_row(row_id: str, case_id: str, trade_time: str) -> dict[str, object]:
+    return {
+        "id": row_id,
+        "type": "bank",
+        "case_id": case_id,
+        "trade_time": trade_time,
+        "debit_amount": "100.00",
+        "credit_amount": "",
+        "counterparty_name": "测试供应商",
+        "invoice_relation": {"code": "pending_match", "label": "待匹配", "tone": "warn"},
+        "available_actions": ["detail"],
+    }
+
+
+def build_oa_retention_invoice_row(row_id: str, case_id: str, issue_date: str) -> dict[str, object]:
+    return {
+        "id": row_id,
+        "type": "invoice",
+        "case_id": case_id,
+        "seller_name": "测试供应商",
+        "buyer_name": "云南溯源科技有限公司",
+        "issue_date": issue_date,
+        "amount": "100.00",
+        "invoice_bank_relation": {"code": "pending_collection", "label": "待匹配流水", "tone": "warn"},
+        "available_actions": ["detail"],
+    }
 
 
 class _StubLiveWorkbenchService:
@@ -1153,3 +2571,75 @@ class _StubLiveWorkbenchService:
             "summary_fields": {"和发票关联情况": "待人工确认", "备注": "设备尾款待支付"},
             "detail_fields": {"备注": "设备尾款待支付"},
         }
+
+
+class _AttachmentRecord:
+    def __init__(self) -> None:
+        self.id = "oa-attach-202603-001"
+        self.month = "2026-03"
+        self.section = "open"
+        self.case_id = None
+        self.applicant = "刘际涛"
+        self.project_name = "玉烟维护项目"
+        self.apply_type = "日常报销"
+        self.amount = "58,000.00"
+        self.counterparty_name = "智能工厂设备商"
+        self.reason = "设备尾款报销"
+        self.relation_code = "pending_match"
+        self.relation_label = "待找流水与发票"
+        self.relation_tone = "warn"
+        self.expense_type = "设备货款及材料费"
+        self.expense_content = "设备尾款报销"
+        self.detail_fields = {
+            "OA单号": "OA-ATT-001",
+            "申请日期": "2026-03-28",
+            "明细行号": "0",
+        }
+        self.attachment_invoices = [
+            {
+                "invoice_code": "053002200111",
+                "invoice_no": "40512344",
+                "seller_tax_no": "91530100678728169X",
+                "seller_name": "智能工厂设备商",
+                "buyer_tax_no": "915300007194052520",
+                "buyer_name": "云南溯源科技有限公司",
+                "issue_date": "2026-03-28",
+                "amount": "58,000.00",
+                "tax_rate": "13%",
+                "tax_amount": "6,673.45",
+                "total_with_tax": "64,673.45",
+                "invoice_type": "进项发票",
+                "attachment_name": "设备发票.pdf",
+                "invoice_kind": "增值税电子专用发票",
+            }
+        ]
+
+
+class AttachmentAwareOAAdapter:
+    def list_application_records(self, month: str) -> list[object]:
+        if month != "2026-03":
+            return []
+        return [_AttachmentRecord()]
+
+
+class _FailingOverrideStateStore:
+    def save_workbench_overrides(self, snapshot: dict[str, object], *, changed_row_ids: list[str] | None = None) -> None:
+        raise TimeoutError("mock override persistence timeout")
+
+    def save_workbench_read_models(
+        self,
+        snapshot: dict[str, object],
+        *,
+        changed_scope_keys: list[str] | None = None,
+    ) -> None:
+        return None
+
+
+class _FailingReadModelStateStore:
+    def save_workbench_read_models(
+        self,
+        snapshot: dict[str, object],
+        *,
+        changed_scope_keys: list[str] | None = None,
+    ) -> None:
+        raise TimeoutError("mock read model persistence timeout")

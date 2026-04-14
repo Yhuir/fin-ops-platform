@@ -1,6 +1,6 @@
 import { Fragment, memo, useMemo, useRef } from "react";
 
-import type { WorkbenchZoneDisplayState } from "../../features/workbench/groupDisplayModel";
+import type { WorkbenchPaneTimeFilter, WorkbenchZoneDisplayState } from "../../features/workbench/groupDisplayModel";
 import type {
   WorkbenchCandidateGroup,
   WorkbenchColumnLayouts,
@@ -36,6 +36,8 @@ type ResizableTriPaneProps = {
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
   onTogglePaneSearch: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
+  onClosePaneSearch: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
+  onClearPaneSearch: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
   onPaneSearchQueryChange: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice", query: string) => void;
   onColumnFilterChange: (
     zoneId: "paired" | "open",
@@ -44,6 +46,11 @@ type ResizableTriPaneProps = {
     selectedValues: string[],
   ) => void;
   onTogglePaneSort: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
+  onPaneTimeFilterChange?: (
+    zoneId: "paired" | "open",
+    paneId: "oa" | "bank" | "invoice",
+    filter: WorkbenchPaneTimeFilter,
+  ) => void;
   onReorderPaneColumns: (
     paneId: "oa" | "bank" | "invoice",
     activeKey: string,
@@ -69,9 +76,12 @@ function ResizableTriPane({
   onOpenDetail,
   onRowAction,
   onTogglePaneSearch,
+  onClosePaneSearch,
+  onClearPaneSearch,
   onPaneSearchQueryChange,
   onColumnFilterChange,
   onTogglePaneSort,
+  onPaneTimeFilterChange = () => undefined,
   onReorderPaneColumns,
   canMutateData,
 }: ResizableTriPaneProps) {
@@ -137,8 +147,11 @@ function ResizableTriPane({
         highlightedRowId={highlightedRowId}
         onOpenDetail={onOpenDetail}
         onRowAction={onRowAction}
+        onClearPaneSearch={onClearPaneSearch}
+        onClosePaneSearch={onClosePaneSearch}
         onColumnFilterChange={onColumnFilterChange}
         onPaneSearchQueryChange={onPaneSearchQueryChange}
+        onPaneTimeFilterChange={onPaneTimeFilterChange}
         onReorderPaneColumns={onReorderPaneColumns}
         onSelectRow={onSelectRow}
         onTogglePaneSearch={onTogglePaneSearch}

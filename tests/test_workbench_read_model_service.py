@@ -81,5 +81,30 @@ class WorkbenchReadModelServiceTests(unittest.TestCase):
         )
 
 
+    def test_list_scope_keys_returns_current_scopes(self) -> None:
+        service = WorkbenchReadModelService.from_snapshot(
+            {
+                "read_models": {
+                    "all": {
+                        "scope_key": "all",
+                        "scope_type": "all_time",
+                        "generated_at": "2026-04-08T12:00:00+00:00",
+                        "payload": {"summary": {"paired_count": 5}},
+                        "ignored_rows": [],
+                    },
+                    "2026-03": {
+                        "scope_key": "2026-03",
+                        "scope_type": "month",
+                        "generated_at": "2026-04-08T12:00:00+00:00",
+                        "payload": {"summary": {"paired_count": 2}},
+                        "ignored_rows": [],
+                    },
+                }
+            }
+        )
+
+        self.assertCountEqual(service.list_scope_keys(), ["all", "2026-03"])
+
+
 if __name__ == "__main__":
     unittest.main()
