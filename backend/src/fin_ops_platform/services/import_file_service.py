@@ -79,7 +79,9 @@ class UploadedImportFile:
     content: bytes
     template_code_override: str | None = None
     batch_type_override: str | None = None
+    selected_bank_mapping_id: str | None = None
     selected_bank_name: str | None = None
+    selected_bank_last4: str | None = None
 
 
 @dataclass(slots=True)
@@ -101,7 +103,13 @@ class FileImportPreviewItem:
     stored_file_path: str | None = None
     override_template_code: str | None = None
     override_batch_type: BatchType | None = None
+    selected_bank_mapping_id: str | None = None
     selected_bank_name: str | None = None
+    selected_bank_last4: str | None = None
+    detected_bank_name: str | None = None
+    detected_last4: str | None = None
+    bank_selection_conflict: bool = False
+    conflict_message: str | None = None
     row_results: list[ImportedBatchRowResult] = field(default_factory=list)
     normalized_rows: list[dict[str, Any]] = field(default_factory=list)
 
@@ -176,7 +184,9 @@ class FileImportService:
                 stored_file_path=stored_file_path,
                 template_code_override=upload.template_code_override,
                 batch_type_override=upload.batch_type_override,
+                selected_bank_mapping_id=upload.selected_bank_mapping_id,
                 selected_bank_name=upload.selected_bank_name,
+                selected_bank_last4=upload.selected_bank_last4,
             )
             session.files.append(file_item)
 
@@ -240,7 +250,9 @@ class FileImportService:
             upload = UploadedImportFile(
                 file_name=item.file_name,
                 content=self._file_store.read_import_file(item.stored_file_path),
+                selected_bank_mapping_id=item.selected_bank_mapping_id,
                 selected_bank_name=item.selected_bank_name,
+                selected_bank_last4=item.selected_bank_last4,
             )
             override_payload = override_map.get(item.id, {})
             refreshed = self._preview_single_file(
@@ -250,7 +262,9 @@ class FileImportService:
                 stored_file_path=item.stored_file_path,
                 template_code_override=override_payload.get("template_code"),
                 batch_type_override=override_payload.get("batch_type"),
+                selected_bank_mapping_id=override_payload.get("bank_mapping_id") or item.selected_bank_mapping_id,
                 selected_bank_name=override_payload.get("bank_name") or item.selected_bank_name,
+                selected_bank_last4=override_payload.get("last4") or item.selected_bank_last4,
             )
             item.template_code = refreshed.template_code
             item.batch_type = refreshed.batch_type
@@ -267,7 +281,13 @@ class FileImportService:
             item.normalized_rows = refreshed.normalized_rows
             item.override_template_code = refreshed.override_template_code
             item.override_batch_type = refreshed.override_batch_type
+            item.selected_bank_mapping_id = refreshed.selected_bank_mapping_id
             item.selected_bank_name = refreshed.selected_bank_name
+            item.selected_bank_last4 = refreshed.selected_bank_last4
+            item.detected_bank_name = refreshed.detected_bank_name
+            item.detected_last4 = refreshed.detected_last4
+            item.bank_selection_conflict = refreshed.bank_selection_conflict
+            item.conflict_message = refreshed.conflict_message
 
         session.status = "preview_ready_with_errors" if any(
             file.status == "unrecognized_template" for file in session.files
@@ -292,7 +312,9 @@ class FileImportService:
         stored_file_path: str | None,
         template_code_override: str | None = None,
         batch_type_override: str | None = None,
+        selected_bank_mapping_id: str | None = None,
         selected_bank_name: str | None = None,
+        selected_bank_last4: str | None = None,
     ) -> FileImportPreviewItem:
         try:
             rows = self._read_rows(upload)
@@ -303,26 +325,65 @@ class FileImportService:
                 batch_type_override=batch_type_override,
             )
         except ValueError as exc:
-            return FileImportPreviewItem(
-                id=file_id,
-                file_name=upload.file_name,
-                template_code=None,
-                batch_type=None,
-                status="unrecognized_template",
-                message=str(exc),
-                row_count=0,
+            return self._build_preview_error_item(
+                file_id=file_id,
+                upload=upload,
                 stored_file_path=stored_file_path,
-                override_template_code=template_code_override,
-                override_batch_type=BatchType(batch_type_override) if batch_type_override else None,
+                message=str(exc),
+                template_code_override=template_code_override,
+                batch_type_override=batch_type_override,
+                selected_bank_mapping_id=selected_bank_mapping_id,
                 selected_bank_name=selected_bank_name,
+                selected_bank_last4=selected_bank_last4,
+            )
+        except Exception:
+            return self._build_preview_error_item(
+                file_id=file_id,
+                upload=upload,
+                stored_file_path=stored_file_path,
+                message="文件读取失败，请确认文件未损坏且为受支持的 Excel 模板。",
+                template_code_override=template_code_override,
+                batch_type_override=batch_type_override,
+                selected_bank_mapping_id=selected_bank_mapping_id,
+                selected_bank_name=selected_bank_name,
+                selected_bank_last4=selected_bank_last4,
             )
 
-        preview = self._import_service.preview_import(
-            batch_type=parsed.batch_type,
-            source_name=upload.file_name,
-            imported_by=imported_by,
-            rows=parsed.rows,
+        detected_bank_name, detected_last4 = self._detect_bank_selection(parsed)
+        conflict_message = self._build_bank_selection_conflict_message(
+            selected_bank_name=selected_bank_name,
+            selected_bank_last4=selected_bank_last4,
+            detected_bank_name=detected_bank_name,
+            detected_last4=detected_last4,
         )
+        bank_selection_conflict = bool(conflict_message)
+        if parsed.batch_type == BatchType.BANK_TRANSACTION:
+            for row in parsed.rows:
+                row["selected_bank_mapping_id"] = selected_bank_mapping_id
+                row["selected_bank_name"] = selected_bank_name
+                row["selected_bank_last4"] = selected_bank_last4
+                row["detected_bank_name"] = detected_bank_name
+                row["detected_last4"] = detected_last4
+
+        try:
+            preview = self._import_service.preview_import(
+                batch_type=parsed.batch_type,
+                source_name=upload.file_name,
+                imported_by=imported_by,
+                rows=parsed.rows,
+            )
+        except Exception:
+            return self._build_preview_error_item(
+                file_id=file_id,
+                upload=upload,
+                stored_file_path=stored_file_path,
+                message="文件预览失败，请检查字段格式后重试。",
+                template_code_override=template_code_override,
+                batch_type_override=batch_type_override,
+                selected_bank_mapping_id=selected_bank_mapping_id,
+                selected_bank_name=selected_bank_name,
+                selected_bank_last4=selected_bank_last4,
+            )
         return FileImportPreviewItem(
             id=file_id,
             file_name=upload.file_name,
@@ -340,9 +401,44 @@ class FileImportService:
             stored_file_path=stored_file_path,
             override_template_code=template_code_override,
             override_batch_type=BatchType(batch_type_override) if batch_type_override else None,
+            selected_bank_mapping_id=selected_bank_mapping_id,
             selected_bank_name=selected_bank_name,
+            selected_bank_last4=selected_bank_last4,
+            detected_bank_name=detected_bank_name,
+            detected_last4=detected_last4,
+            bank_selection_conflict=bank_selection_conflict,
+            conflict_message=conflict_message,
             row_results=preview.row_results,
             normalized_rows=preview.normalized_rows,
+        )
+
+    @staticmethod
+    def _build_preview_error_item(
+        *,
+        file_id: str,
+        upload: UploadedImportFile,
+        stored_file_path: str | None,
+        message: str,
+        template_code_override: str | None,
+        batch_type_override: str | None,
+        selected_bank_mapping_id: str | None,
+        selected_bank_name: str | None,
+        selected_bank_last4: str | None,
+    ) -> FileImportPreviewItem:
+        return FileImportPreviewItem(
+            id=file_id,
+            file_name=upload.file_name,
+            template_code=None,
+            batch_type=None,
+            status="unrecognized_template",
+            message=message,
+            row_count=0,
+            stored_file_path=stored_file_path,
+            override_template_code=template_code_override,
+            override_batch_type=BatchType(batch_type_override) if batch_type_override else None,
+            selected_bank_mapping_id=selected_bank_mapping_id,
+            selected_bank_name=selected_bank_name,
+            selected_bank_last4=selected_bank_last4,
         )
 
     def _parse_rows(
@@ -457,6 +553,52 @@ class FileImportService:
         if not callable(checker):
             return False
         return bool(checker(identifier))
+
+    @staticmethod
+    def _detect_bank_selection(parsed: ParsedImportFile) -> tuple[str | None, str | None]:
+        if parsed.batch_type != BatchType.BANK_TRANSACTION:
+            return None, None
+        detected_bank_name = {
+            "icbc_historydetail": "工商银行",
+            "pingan_transaction_detail": "平安银行",
+            "cmbc_transaction_detail": "民生银行",
+            "ccb_transaction_detail": "建设银行",
+            "ceb_transaction_detail": "光大银行",
+        }.get(parsed.template_code)
+        detected_last4 = None
+        for row in parsed.rows:
+            account_no = clean(row.get("account_no"))
+            if len(account_no) >= 4:
+                detected_last4 = account_no[-4:]
+                break
+        return detected_bank_name, detected_last4
+
+    @staticmethod
+    def _build_bank_selection_conflict_message(
+        *,
+        selected_bank_name: str | None,
+        selected_bank_last4: str | None,
+        detected_bank_name: str | None,
+        detected_last4: str | None,
+    ) -> str | None:
+        mismatches: list[str] = []
+        if (
+            selected_bank_name
+            and detected_bank_name
+            and FileImportService._normalize_bank_name_for_conflict(selected_bank_name)
+            != FileImportService._normalize_bank_name_for_conflict(detected_bank_name)
+        ):
+            mismatches.append(f"银行选择为{selected_bank_name}，系统识别为{detected_bank_name}")
+        if selected_bank_last4 and detected_last4 and selected_bank_last4 != detected_last4:
+            mismatches.append(f"后四位选择为{selected_bank_last4}，系统识别为{detected_last4}")
+        if not mismatches:
+            return None
+        return "；".join(mismatches)
+
+    @staticmethod
+    def _normalize_bank_name_for_conflict(bank_name: str) -> str:
+        normalized = re.sub(r"\s+", "", str(bank_name or "").strip())
+        return normalized.removesuffix("银行")
 
 
 class TemplateDetector:

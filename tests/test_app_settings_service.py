@@ -184,6 +184,97 @@ class AppSettingsServiceTests(unittest.TestCase):
         )
         self.assertEqual(get_payload["workbench_column_layouts"], updated_payload["workbench_column_layouts"])
 
+    def test_sync_oa_projects_returns_source_and_status_in_settings_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            payload = app._app_settings_service.sync_oa_projects(actor_id="settings_test")
+            active_projects = payload["projects"]["active"]
+
+        self.assertGreaterEqual(len(active_projects), 2)
+        project = next(item for item in active_projects if item["project_code"] == "PJT-001")
+        self.assertEqual(project["project_name"], "华东改造项目")
+        self.assertEqual(project["project_status"], "active")
+        self.assertEqual(project["source"], "oa")
+        self.assertEqual(project["department_name"], "交付中心")
+        self.assertEqual(project["owner_name"], "张三")
+
+    def test_synced_oa_projects_persist_across_reload(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            synced_payload = app._app_settings_service.sync_oa_projects(actor_id="settings_test")
+            reloaded_payload = build_application(data_dir=Path(temp_dir))._app_settings_service.get_settings_payload()
+
+        self.assertEqual(
+            [project["project_code"] for project in reloaded_payload["projects"]["active"]],
+            [project["project_code"] for project in synced_payload["projects"]["active"]],
+        )
+        self.assertEqual(
+            [project["project_name"] for project in reloaded_payload["projects"]["active"]],
+            [project["project_name"] for project in synced_payload["projects"]["active"]],
+        )
+
+    def test_create_manual_project_persists_and_defaults_to_active(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            created_payload = app._app_settings_service.create_manual_project(
+                actor_id="settings_test",
+                project_code="LOCAL-001",
+                project_name="本地测试项目",
+                department_name="财务部",
+                owner_name="王五",
+            )
+            reloaded_payload = build_application(data_dir=Path(temp_dir))._app_settings_service.get_settings_payload()
+
+        created_project = created_payload["projects"]["active"][0]
+        self.assertEqual(created_project["project_code"], "LOCAL-001")
+        self.assertEqual(created_project["project_name"], "本地测试项目")
+        self.assertEqual(created_project["project_status"], "active")
+        self.assertEqual(created_project["source"], "manual")
+        self.assertEqual(created_project["department_name"], "财务部")
+        self.assertEqual(created_project["owner_name"], "王五")
+        self.assertEqual(reloaded_payload["projects"]["active"][0], created_project)
+
+    def test_delete_manual_project_removes_only_local_project(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            created_payload = app._app_settings_service.create_manual_project(
+                actor_id="settings_test",
+                project_code="LOCAL-001",
+                project_name="本地测试项目",
+            )
+            project_id = created_payload["projects"]["active"][0]["id"]
+
+            deleted_payload = app._app_settings_service.delete_project(project_id)
+            reloaded_payload = build_application(data_dir=Path(temp_dir))._app_settings_service.get_settings_payload()
+
+        self.assertEqual(deleted_payload["projects"]["active"], [])
+        self.assertEqual(reloaded_payload["projects"]["active"], [])
+        self.assertEqual(reloaded_payload["projects"]["completed_project_ids"], [])
+
+    def test_delete_oa_project_local_override_does_not_remove_oa_project(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            synced_payload = app._app_settings_service.sync_oa_projects(actor_id="settings_test")
+            project_id = synced_payload["projects"]["active"][0]["id"]
+            app._app_settings_service.update_settings(
+                completed_project_ids=[project_id],
+                bank_account_mappings=[],
+                allowed_usernames=[],
+                readonly_export_usernames=[],
+                admin_usernames=[],
+            )
+
+            deleted_payload = app._app_settings_service.delete_project(project_id)
+
+        self.assertIn(
+            project_id,
+            [project["id"] for project in deleted_payload["projects"]["active"]],
+        )
+        self.assertNotIn(project_id, deleted_payload["projects"]["completed_project_ids"])
+
 
 if __name__ == "__main__":
     unittest.main()

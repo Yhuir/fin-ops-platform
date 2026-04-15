@@ -22,12 +22,13 @@ from fin_ops_platform.services.oa_adapter import OAAdapter, OAApplicationRecord,
 from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
 
 
-APPROVED_STATUS_VALUES = {"approved", "APPROVED", "Approved"}
-APPROVED_PROCESS_VALUES = {"1", "2", 1, 2}
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 KEY_NORMALIZE_RE = re.compile(r"[\s_\-:/\\()（）【】\[\]·,.，。]+")
 PAYMENT_ROW_ID_RE = re.compile(r"^oa-pay-(.+)$")
 EXPENSE_ROW_ID_RE = re.compile(r"^oa-exp-(.+)-([^-]+)$")
+COMPLETED_PROCESS_VALUES = {"已完成", "2", 2}
+IN_PROGRESS_PROCESS_VALUES = {"进行中", "1", 1}
+COMPLETED_STATUS_VALUES = {"approved", "APPROVED", "Approved"}
 
 EXPENSE_TYPE_CANDIDATE_KEYS = (
     "feeType",
@@ -358,6 +359,8 @@ class MongoOAAdapter(OAAdapter):
                 return sorted(months)
             for document in documents:
                 data = self._document_data(document)
+                if not self._is_completed_form(data):
+                    continue
                 derived_month = self._derive_month(data, document)
                 if MONTH_RE.match(derived_month):
                     months.add(derived_month)
@@ -374,6 +377,8 @@ class MongoOAAdapter(OAAdapter):
         names: dict[str, dict[str, Any]] = {}
         for document in self._load_form_documents(self._settings.payment_request_form_id):
             data = self._document_data(document)
+            if not self._is_completed_form(data):
+                continue
             name = self._first_text(data, "beneficiary")
             if not name:
                 continue
@@ -412,6 +417,8 @@ class MongoOAAdapter(OAAdapter):
             documents = []
             for document in self._load_form_documents(self._settings.payment_request_form_id):
                 data = self._document_data(document)
+                if not self._is_completed_form(data):
+                    continue
                 documents.append(
                     {
                         "external_id": self._payment_external_id(data, document),
@@ -432,6 +439,8 @@ class MongoOAAdapter(OAAdapter):
             documents = []
             for document in self._load_form_documents(self._settings.expense_claim_form_id):
                 data = self._document_data(document)
+                if not self._is_completed_form(data):
+                    continue
                 documents.append(
                     {
                         "external_id": self._expense_external_id(data, document),
@@ -456,6 +465,8 @@ class MongoOAAdapter(OAAdapter):
         project_names: dict[str, str],
     ) -> OAApplicationRecord | None:
         data = self._document_data(document)
+        if not self._is_completed_form(data):
+            return None
         amount = self._first_text(data, "amount")
         applicant = self._first_text(data, "userName", "applicant")
         reason = self._first_text(data, "cause")
@@ -503,6 +514,8 @@ class MongoOAAdapter(OAAdapter):
         project_names: dict[str, str],
     ) -> list[OAApplicationRecord]:
         data = self._document_data(document)
+        if not self._is_completed_form(data):
+            return []
         applicant = self._first_text(data, "Reimbursement Personnel", "applicant", "userName")
         if not applicant:
             return []
@@ -632,6 +645,10 @@ class MongoOAAdapter(OAAdapter):
             cache_key = self._attachment_invoice_cache_key(file_entry)
             cached_entry = cache.load_oa_attachment_invoice_cache_entry(cache_key)
             if self._is_current_attachment_invoice_cache_entry(cached_entry):
+                normalized_entry, changed = self._normalize_attachment_invoice_cache_entry(cached_entry)
+                if changed:
+                    cache.save_oa_attachment_invoice_cache_entry(cache_key, normalized_entry)
+                    cached_entry = normalized_entry
                 cached_invoices.extend(
                     dict(invoice)
                     for invoice in cached_entry["invoices"]
@@ -653,6 +670,29 @@ class MongoOAAdapter(OAAdapter):
             and entry.get("parser_version") == self._attachment_invoice_cache_parser_version()
             and isinstance(entry.get("invoices"), list)
         )
+
+    @staticmethod
+    def _normalize_attachment_invoice_cache_entry(entry: dict[str, object]) -> tuple[dict[str, object], bool]:
+        normalized_entry = dict(entry if isinstance(entry, dict) else {})
+        invoices = normalized_entry.get("invoices")
+        if not isinstance(invoices, list):
+            return normalized_entry, False
+
+        normalized_invoices: list[dict[str, object]] = []
+        changed = False
+        for invoice in invoices:
+            if not isinstance(invoice, dict):
+                continue
+            normalized_invoice = dict(invoice)
+            net_amount = clean_string(normalized_invoice.get("net_amount") or "")
+            amount = clean_string(normalized_invoice.get("amount") or "")
+            total_with_tax = clean_string(normalized_invoice.get("total_with_tax") or "")
+            if net_amount and amount != net_amount and (not amount or amount == total_with_tax):
+                normalized_invoice["amount"] = net_amount
+                changed = True
+            normalized_invoices.append(normalized_invoice)
+        normalized_entry["invoices"] = normalized_invoices
+        return normalized_entry, changed
 
     @staticmethod
     def _attachment_invoice_cache_key(file_entry: dict[str, object]) -> str:
@@ -843,6 +883,7 @@ class MongoOAAdapter(OAAdapter):
         return {
             "data.applicationDate": 1,
             "data.ApplicationDate": 1,
+            "data.status": 1,
             "modifiedTime": 1,
         }
 
@@ -1044,11 +1085,23 @@ class MongoOAAdapter(OAAdapter):
 
     @staticmethod
     def _form_status(data: dict[str, Any]) -> str:
+        process_status = data.get("processStatus")
+        normalized_process_status = clean_string(process_status) if process_status not in (None, "") else ""
+        if normalized_process_status in COMPLETED_PROCESS_VALUES:
+            return "已完成"
+        if normalized_process_status in IN_PROGRESS_PROCESS_VALUES:
+            return "进行中"
+
         status = MongoOAAdapter._first_text(data, "status")
+        if status in COMPLETED_STATUS_VALUES:
+            return "已完成"
         if status:
             return status
-        process_status = data.get("processStatus")
-        return clean_string(process_status) if process_status not in (None, "") else ""
+        return normalized_process_status
+
+    @staticmethod
+    def _is_completed_form(data: dict[str, Any]) -> bool:
+        return MongoOAAdapter._form_status(data) == "已完成"
 
     def _derive_month(self, data: dict[str, Any], document: dict[str, Any]) -> str:
         candidate = self._first_text(data, "applicationDate", "ApplicationDate")

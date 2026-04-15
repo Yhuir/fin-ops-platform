@@ -427,7 +427,13 @@ class WorkbenchQueryService:
                     or source_detail_fields.get("申请日期")
                     or "—"
                 ),
-                amount=str(attachment_invoice.get("amount") or attachment_invoice.get("total_with_tax") or oa_row.get("amount") or "—"),
+                amount=str(
+                    attachment_invoice.get("net_amount")
+                    or attachment_invoice.get("amount")
+                    or attachment_invoice.get("total_with_tax")
+                    or oa_row.get("amount")
+                    or "—"
+                ),
                 tax_rate=str(attachment_invoice.get("tax_rate") or "—"),
                 tax_amount=str(attachment_invoice.get("tax_amount") or "—"),
                 total_with_tax=str(attachment_invoice.get("total_with_tax") or attachment_invoice.get("amount") or "—"),

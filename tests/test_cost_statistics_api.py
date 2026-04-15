@@ -82,6 +82,7 @@ class CostStatisticsApiTests(unittest.TestCase):
             self.app._import_service,
             grouped_workbench_loader=self.app._build_api_workbench_payload,
             row_detail_loader=self.app._get_api_workbench_row_detail_payload,
+            project_active_checker=self.app._app_settings_service.is_project_active,
         )
 
     def test_get_cost_statistics_routes_return_expected_shapes(self) -> None:
@@ -134,6 +135,73 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(explorer_payload["time_rows"][0]["project_name"], "云南溯源科技")
         self.assertEqual(explorer_payload["project_rows"][0]["project_name"], "云南溯源科技")
         self.assertEqual(explorer_payload["expense_type_rows"][0]["expense_type"], "设备货款及材料费")
+
+    def test_project_scope_defaults_active_allows_all_and_rejects_invalid_scope(self) -> None:
+        from fin_ops_platform.domain.enums import BatchType
+        from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
+
+        preview = self.app._import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="cost-statistics-project-scope.json",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62228888",
+                    "txn_date": "2026-03-10",
+                    "trade_time": "2026-03-10 21:27:55",
+                    "counterparty_name": "昆明设备供应商",
+                    "debit_amount": "1250.00",
+                    "credit_amount": "",
+                    "bank_serial_no": "COST-SCOPE-001",
+                    "summary": "PLC 模块采购",
+                    "remark": "设备采购款",
+                }
+            ],
+        )
+        self.app._import_service.confirm_import(preview.id)
+        settings_payload = self.app._app_settings_service.create_manual_project(
+            actor_id="settings_test",
+            project_code="LOCAL-COST-001",
+            project_name="云南溯源科技",
+        )
+        completed_project_id = settings_payload["projects"]["active"][0]["id"]
+        self.app._app_settings_service.update_settings(
+            completed_project_ids=[completed_project_id],
+            bank_account_mappings=[],
+            allowed_usernames=[],
+            readonly_export_usernames=[],
+            admin_usernames=[],
+        )
+        self.app._cost_statistics_service = CostStatisticsService(
+            self.app._import_service,
+            grouped_workbench_loader=self.app._build_api_workbench_payload,
+            row_detail_loader=self.app._get_api_workbench_row_detail_payload,
+            project_active_checker=self.app._app_settings_service.is_project_active,
+        )
+
+        default_payload = json.loads(
+            self.app.handle_request("GET", "/api/cost-statistics/explorer?month=2026-03").body
+        )
+        all_payload = json.loads(
+            self.app.handle_request("GET", "/api/cost-statistics/explorer?month=2026-03&project_scope=all").body
+        )
+        preview_payload = json.loads(
+            self.app.handle_request(
+                "GET",
+                "/api/cost-statistics/export-preview?month=2026-03&view=time&project_scope=all",
+            ).body
+        )
+        invalid_response = self.app.handle_request(
+            "GET",
+            "/api/cost-statistics/explorer?month=2026-03&project_scope=finished",
+        )
+        invalid_payload = json.loads(invalid_response.body)
+
+        self.assertEqual(default_payload["summary"]["transaction_count"], 0)
+        self.assertEqual(all_payload["summary"]["transaction_count"], 1)
+        self.assertEqual(preview_payload["summary"]["transaction_count"], 1)
+        self.assertEqual(invalid_response.status_code, 400)
+        self.assertEqual(invalid_payload["error"], "invalid_cost_statistics_project_scope")
 
     def test_cost_statistics_export_returns_xlsx_for_each_view(self) -> None:
         from fin_ops_platform.domain.enums import BatchType
@@ -477,6 +545,7 @@ class CostStatisticsApiTests(unittest.TestCase):
             app._import_service,
             grouped_workbench_loader=app._build_api_workbench_payload,
             row_detail_loader=app._get_api_workbench_row_detail_payload,
+            project_active_checker=app._app_settings_service.is_project_active,
         )
 
         preview = app._import_service.preview_import(

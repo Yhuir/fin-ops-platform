@@ -228,6 +228,8 @@ class ApplicationStateStore:
     def load_app_settings(self) -> dict[str, Any]:
         default_payload = {
             "completed_project_ids": [],
+            "manual_projects": [],
+            "synced_projects": [],
             "bank_account_mappings": [],
             "allowed_usernames": [],
             "readonly_export_usernames": [],
@@ -242,6 +244,8 @@ class ApplicationStateStore:
             if isinstance(payload, dict):
                 return {
                     "completed_project_ids": list(payload.get("completed_project_ids") or []),
+                    "manual_projects": list(payload.get("manual_projects") or []),
+                    "synced_projects": list(payload.get("synced_projects") or []),
                     "bank_account_mappings": list(payload.get("bank_account_mappings") or []),
                     "allowed_usernames": list(payload.get("allowed_usernames") or []),
                     "readonly_export_usernames": list(payload.get("readonly_export_usernames") or []),
@@ -262,6 +266,8 @@ class ApplicationStateStore:
             return default_payload
         return {
             "completed_project_ids": list(loaded.get("completed_project_ids") or []),
+            "manual_projects": list(loaded.get("manual_projects") or []),
+            "synced_projects": list(loaded.get("synced_projects") or []),
             "bank_account_mappings": list(loaded.get("bank_account_mappings") or []),
             "allowed_usernames": list(loaded.get("allowed_usernames") or []),
             "readonly_export_usernames": list(loaded.get("readonly_export_usernames") or []),
@@ -274,6 +280,8 @@ class ApplicationStateStore:
     def save_app_settings(self, payload: dict[str, Any]) -> None:
         normalized_payload = {
             "completed_project_ids": list(payload.get("completed_project_ids") or []),
+            "manual_projects": list(payload.get("manual_projects") or []),
+            "synced_projects": list(payload.get("synced_projects") or []),
             "bank_account_mappings": list(payload.get("bank_account_mappings") or []),
             "allowed_usernames": list(payload.get("allowed_usernames") or []),
             "readonly_export_usernames": list(payload.get("readonly_export_usernames") or []),
@@ -288,6 +296,8 @@ class ApplicationStateStore:
                 {
                     "$set": {
                         "completed_project_ids": normalized_payload["completed_project_ids"],
+                        "manual_projects": normalized_payload["manual_projects"],
+                        "synced_projects": normalized_payload["synced_projects"],
                         "bank_account_mappings": normalized_payload["bank_account_mappings"],
                         "allowed_usernames": normalized_payload["allowed_usernames"],
                         "readonly_export_usernames": normalized_payload["readonly_export_usernames"],

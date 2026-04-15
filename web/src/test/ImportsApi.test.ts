@@ -4,6 +4,7 @@ import {
   confirmImportFiles,
   fetchImportSession,
   previewImportFiles,
+  resolveImportApiErrorMessage,
   retryImportFiles,
 } from "../features/imports/api";
 
@@ -16,6 +17,20 @@ afterEach(() => {
 });
 
 describe("imports api", () => {
+  test("extracts backend message from json-shaped request errors", () => {
+    expect(
+      resolveImportApiErrorMessage(
+        new Error(JSON.stringify({ error: "invalid_multipart_body", message: "文件读取失败，请确认文件未损坏且为受支持的 Excel 模板。" })),
+        "文件预览失败，请稍后重试。",
+      ),
+    ).toBe("文件读取失败，请确认文件未损坏且为受支持的 Excel 模板。");
+  });
+
+  test("falls back when the error is not a json payload", () => {
+    expect(resolveImportApiErrorMessage(new Error("network down"), "文件预览失败，请稍后重试。")).toBe("network down");
+    expect(resolveImportApiErrorMessage(null, "文件预览失败，请稍后重试。")).toBe("文件预览失败，请稍后重试。");
+  });
+
   test("sends Authorization header and credentials for preview uploads", async () => {
     document.cookie = "Admin-Token=mock-cookie-token";
     const fetchMock = vi.fn().mockResolvedValue(

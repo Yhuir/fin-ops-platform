@@ -49,7 +49,13 @@ export type ImportFilePreview = {
   storedFilePath?: string | null;
   overrideTemplateCode?: string | null;
   overrideBatchType?: ImportBatchType | null;
+  selectedBankMappingId?: string | null;
   selectedBankName?: string | null;
+  selectedBankLast4?: string | null;
+  detectedBankName?: string | null;
+  detectedLast4?: string | null;
+  bankSelectionConflict?: boolean;
+  conflictMessage?: string | null;
   rowResults: ImportRowResult[];
 };
 
@@ -57,7 +63,9 @@ export type ImportFilePreviewOverride = {
   fileName?: string;
   templateCode?: string | null;
   batchType?: ImportBatchType | null;
+  bankMappingId?: string | null;
   bankName?: string | null;
+  last4?: string | null;
 };
 
 export type ImportTemplate = {

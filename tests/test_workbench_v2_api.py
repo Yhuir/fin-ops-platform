@@ -30,7 +30,7 @@ class StaticMongoWorkbenchOAAdapter(MongoOAAdapter):
         self._project_documents = project_documents or []
 
     def _load_form_documents(self, form_id: str, month: str | None = None) -> list[dict]:
-        documents = list(self._form_documents.get(str(form_id), []))
+        documents = [self._with_default_completed_status(document) for document in self._form_documents.get(str(form_id), [])]
         if month is None:
             return documents
         filtered: list[dict] = []
@@ -43,6 +43,27 @@ class StaticMongoWorkbenchOAAdapter(MongoOAAdapter):
 
     def _load_project_documents(self) -> list[dict]:
         return list(self._project_documents)
+
+    def _load_form_month_documents(self, form_id: str) -> list[dict]:
+        return [self._with_default_completed_status(document) for document in self._form_documents.get(str(form_id), [])]
+
+    def _load_form_documents_by_external_ids(self, form_id: str, external_ids: set[str]) -> list[dict]:
+        documents = [self._with_default_completed_status(document) for document in self._form_documents.get(str(form_id), [])]
+        normalized_external_ids = {str(external_id).strip() for external_id in external_ids if str(external_id).strip()}
+        return [
+            document
+            for document in documents
+            if self._document_external_id(form_id, document) in normalized_external_ids
+        ]
+
+    @staticmethod
+    def _with_default_completed_status(document: dict) -> dict:
+        normalized = dict(document)
+        data = dict(normalized.get("data", {}))
+        if "status" not in data or data.get("status") in (None, ""):
+            data["status"] = "已完成"
+        normalized["data"] = data
+        return normalized
 
 
 class RetentionScopedMongoWorkbenchOAAdapter(StaticMongoWorkbenchOAAdapter):
@@ -63,7 +84,7 @@ class RetentionScopedMongoWorkbenchOAAdapter(StaticMongoWorkbenchOAAdapter):
         months: set[str] = set()
         for documents in self._form_documents.values():
             for document in documents:
-                data = document.get("data", {})
+                data = self._with_default_completed_status(document).get("data", {})
                 application_date = str(data.get("applicationDate") or data.get("ApplicationDate") or "")
                 if len(application_date) >= 7:
                     months.add(application_date[:7])
@@ -2142,16 +2163,21 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         updated_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
         paired_oa_ids = [row["id"] for row in flatten_groups(updated_payload["paired"]["groups"], "oa")]
         paired_bank_ids = [row["id"] for row in flatten_groups(updated_payload["paired"]["groups"], "bank")]
-        self.assertIn("oa-o-202603-001", paired_oa_ids)
-        self.assertIn("txn-live-202603-001", paired_bank_ids)
-        paired_group = next(
+        self.assertNotIn("oa-o-202603-001", paired_oa_ids)
+        self.assertNotIn("txn-live-202603-001", paired_bank_ids)
+        open_group = next(
             group
-            for group in updated_payload["paired"]["groups"]
+            for group in updated_payload["open"]["groups"]
             if any(row["id"] == "txn-live-202603-001" for row in group["bank_rows"])
         )
-        self.assertEqual([row["id"] for row in paired_group["oa_rows"]], ["oa-o-202603-001"])
-        self.assertEqual([row["id"] for row in paired_group["bank_rows"]], ["txn-live-202603-001"])
-        self.assertEqual(paired_group["invoice_rows"], [])
+        self.assertEqual(open_group["group_type"], "candidate")
+        self.assertEqual([row["id"] for row in open_group["oa_rows"]], ["oa-o-202603-001"])
+        self.assertEqual([row["id"] for row in open_group["bank_rows"]], ["txn-live-202603-001"])
+        self.assertEqual(open_group["invoice_rows"], [])
+        relation = app._workbench_pair_relation_service.get_active_relation_by_row_id("txn-live-202603-001")
+        self.assertIsNotNone(relation)
+        assert relation is not None
+        self.assertEqual(relation["relation_mode"], "manual_confirmed")
 
     def test_confirm_link_falls_back_to_underlying_live_row_services_when_group_payload_is_missing_selected_rows(self) -> None:
         app = build_application()

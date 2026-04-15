@@ -398,6 +398,171 @@ class CostStatisticsServiceTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["transaction_count"], 0)
         self.assertEqual(payload["summary"]["total_amount"], "0.00")
 
+    def test_project_scope_filters_completed_projects_by_name_and_keeps_unknown_projects_active(self) -> None:
+        from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
+
+        payloads = {
+            "2026-03": {
+                "month": "2026-03",
+                "summary": {},
+                "paired": {
+                    "groups": [
+                        self._project_scope_group(
+                            group_id="group-active-project",
+                            bank_id="txn-scope-active",
+                            project_name="进行中项目",
+                            amount="100.00",
+                        ),
+                        self._project_scope_group(
+                            group_id="group-completed-project",
+                            bank_id="txn-scope-completed",
+                            project_name="已完成项目",
+                            amount="200.00",
+                        ),
+                        self._project_scope_group(
+                            group_id="group-unknown-project",
+                            bank_id="txn-scope-unknown",
+                            project_name="未登记项目",
+                            amount="300.00",
+                        ),
+                    ]
+                },
+                "open": {"groups": []},
+            }
+        }
+        service = CostStatisticsService(
+            self.import_service,
+            grouped_workbench_loader=lambda month: payloads[month],
+            row_detail_loader=lambda row_id: self.row_details[row_id],
+            project_active_checker=lambda project_id, project_name: project_name != "已完成项目",
+        )
+
+        active_payload = service.get_explorer("2026-03")
+        all_payload = service.get_explorer("2026-03", project_scope="all")
+        preview_payload = service.get_export_preview(month="2026-03", view="time")
+
+        self.assertEqual(active_payload["summary"]["transaction_count"], 2)
+        self.assertEqual(active_payload["summary"]["total_amount"], "400.00")
+        self.assertEqual(
+            {row["project_name"] for row in active_payload["time_rows"]},
+            {"进行中项目", "未登记项目"},
+        )
+        self.assertEqual(all_payload["summary"]["transaction_count"], 3)
+        self.assertEqual(all_payload["summary"]["total_amount"], "600.00")
+        self.assertEqual(preview_payload["summary"]["transaction_count"], 2)
+
+    def test_open_attached_unique_candidate_groups_are_included_in_cost_statistics(self) -> None:
+        from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
+
+        payloads = {
+            "2026-03": {
+                "month": "2026-03",
+                "summary": {},
+                "paired": {"groups": []},
+                "open": {
+                    "groups": [
+                        {
+                            "group_id": "group-open-linked-cost",
+                            "group_type": "candidate",
+                            "match_confidence": "medium",
+                            "reason": "attached_unique_candidate",
+                            "oa_rows": [
+                                {
+                                    "id": "oa-open-cost-001",
+                                    "type": "oa",
+                                    "project_name": "云南溯源科技",
+                                    "expense_type": "交通费",
+                                    "expense_content": "项目现场交通",
+                                    "oa_bank_relation": {
+                                        "code": "pending_match",
+                                        "label": "待找流水与发票",
+                                        "tone": "warn",
+                                    },
+                                }
+                            ],
+                            "bank_rows": [
+                                {
+                                    "id": "txn-cost-001",
+                                    "type": "bank",
+                                    "trade_time": "2026-03-10 21:27:55",
+                                    "debit_amount": "1,000.00",
+                                    "credit_amount": "",
+                                    "counterparty_name": "昆明设备供应商",
+                                    "payment_account_label": "工商银行 账户 0001",
+                                    "remark": "设备采购款",
+                                    "available_actions": ["detail", "view_relation", "cancel_link", "handle_exception"],
+                                }
+                            ],
+                            "invoice_rows": [],
+                        }
+                    ]
+                },
+            }
+        }
+
+        service = CostStatisticsService(
+            self.import_service,
+            grouped_workbench_loader=lambda month: payloads[month],
+            row_detail_loader=lambda row_id: self.row_details[row_id],
+        )
+
+        payload = service.get_explorer("2026-03", project_scope="all")
+
+        self.assertEqual(payload["summary"]["transaction_count"], 1)
+        self.assertEqual(payload["summary"]["total_amount"], "1,000.00")
+        self.assertEqual(payload["time_rows"][0]["project_name"], "云南溯源科技")
+        self.assertEqual(payload["time_rows"][0]["expense_type"], "交通费")
+
+    def test_invalid_project_scope_is_rejected(self) -> None:
+        from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
+
+        service = CostStatisticsService(
+            self.import_service,
+            grouped_workbench_loader=lambda month: self.grouped_payloads[month],
+            row_detail_loader=lambda row_id: self.row_details[row_id],
+        )
+
+        with self.assertRaisesRegex(ValueError, "project_scope must be active or all"):
+            service.get_explorer("2026-03", project_scope="finished")
+
+    @staticmethod
+    def _project_scope_group(
+        *,
+        group_id: str,
+        bank_id: str,
+        project_name: str,
+        amount: str,
+    ) -> dict[str, object]:
+        return {
+            "group_id": group_id,
+            "group_type": "manual_confirmed",
+            "match_confidence": "high",
+            "reason": "confirmed",
+            "oa_rows": [
+                {
+                    "id": f"oa-{bank_id}",
+                    "type": "oa",
+                    "project_name": project_name,
+                    "expense_type": "交通费",
+                    "expense_content": "项目现场交通",
+                    "amount": amount,
+                }
+            ],
+            "bank_rows": [
+                {
+                    "id": bank_id,
+                    "type": "bank",
+                    "trade_time": "2026-03-10 21:27:55",
+                    "debit_amount": amount,
+                    "credit_amount": "",
+                    "counterparty_name": "昆明设备供应商",
+                    "payment_account_label": "工商银行 账户 0001",
+                    "remark": "项目费用",
+                }
+            ],
+            "invoice_rows": [],
+        }
+
 
 if __name__ == "__main__":
     unittest.main()

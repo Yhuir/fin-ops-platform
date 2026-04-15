@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from "react";
+import { type DragEvent, useId, useMemo, useState } from "react";
 
 import { useSession } from "../../contexts/SessionContext";
 import {
@@ -16,6 +16,11 @@ type CertifiedInvoiceImportModalProps = {
   onImported: (result: TaxCertifiedImportConfirmResult) => Promise<void> | void;
 };
 
+function isExcelFile(file: File) {
+  const normalizedName = file.name.toLowerCase();
+  return normalizedName.endsWith(".xls") || normalizedName.endsWith(".xlsx");
+}
+
 export default function CertifiedInvoiceImportModal({
   currentMonth,
   onClose,
@@ -27,6 +32,7 @@ export default function CertifiedInvoiceImportModal({
     session.status === "authenticated" ? session.session.canMutateData : false;
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [previewResult, setPreviewResult] = useState<TaxCertifiedImportPreviewResult | null>(null);
+  const [isDragActive, setIsDragActive] = useState(false);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -44,6 +50,55 @@ export default function CertifiedInvoiceImportModal({
     }
     return `已选择 ${selectedFiles.length} 个文件，当前页面月份为 ${currentMonth}。确认导入后会刷新当前税金抵扣页。`;
   }, [currentMonth, selectedFiles.length]);
+
+  function updateSelectedFiles(files: File[]) {
+    setSelectedFiles(files);
+    setPreviewResult(null);
+    setErrorMessage(null);
+  }
+
+  function applyDroppedFiles(files: File[]) {
+    const validFiles = files.filter(isExcelFile);
+    const invalidFiles = files.filter((file) => !isExcelFile(file));
+    if (validFiles.length > 0) {
+      updateSelectedFiles(validFiles);
+    }
+    if (invalidFiles.length > 0) {
+      if (validFiles.length === 0) {
+        setPreviewResult(null);
+      }
+      setErrorMessage("仅支持 .xls/.xlsx");
+    }
+  }
+
+  function handleDropzoneDragOver(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    if (!canMutateData || isPreviewing || isConfirming) {
+      return;
+    }
+    setIsDragActive(true);
+  }
+
+  function handleDropzoneDragLeave(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      return;
+    }
+    setIsDragActive(false);
+  }
+
+  function handleDropzoneDrop(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    setIsDragActive(false);
+    if (!canMutateData || isPreviewing || isConfirming) {
+      return;
+    }
+    const files = Array.from(event.dataTransfer.files ?? []);
+    if (files.length === 0) {
+      return;
+    }
+    applyDroppedFiles(files);
+  }
 
   async function handlePreview() {
     if (selectedFiles.length === 0) {
@@ -106,7 +161,15 @@ export default function CertifiedInvoiceImportModal({
         </header>
 
         <div className="export-center-modal-body certified-import-body">
-          <label className="certified-import-dropzone" htmlFor={inputId} aria-label="选择已认证发票文件">
+          <label
+            className={`certified-import-dropzone${isDragActive ? " drag-active" : ""}`}
+            htmlFor={inputId}
+            aria-label="选择已认证发票文件"
+            onDragEnter={handleDropzoneDragOver}
+            onDragOver={handleDropzoneDragOver}
+            onDragLeave={handleDropzoneDragLeave}
+            onDrop={handleDropzoneDrop}
+          >
             <strong>选择已认证发票文件</strong>
             <span>{fileHint}</span>
             <input
@@ -116,9 +179,8 @@ export default function CertifiedInvoiceImportModal({
               accept=".xlsx,.xls"
               disabled={!canMutateData}
               onChange={(event) => {
-                setSelectedFiles(Array.from(event.currentTarget.files ?? []));
-                setPreviewResult(null);
-                setErrorMessage(null);
+                setIsDragActive(false);
+                updateSelectedFiles(Array.from(event.currentTarget.files ?? []));
               }}
             />
           </label>

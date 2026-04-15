@@ -196,6 +196,142 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         created = next(invoice for invoice in self.service.list_invoices() if invoice.invoice_no == "9010")
         self.assertEqual(created.counterparty.normalized_name, "created corp")
 
+    def test_confirm_import_preserves_selected_bank_mapping_fields_on_created_transactions(self) -> None:
+        preview = self.service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="bank-demo.json",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220001",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-03-25",
+                    "trade_time": "2026-03-25 09:00:00",
+                    "pay_receive_time": "2026-03-25 09:00:00",
+                    "counterparty_name": "Vendor A",
+                    "debit_amount": "50.00",
+                    "credit_amount": "",
+                    "bank_serial_no": "SERIAL-SELECTED-001",
+                    "selected_bank_name": "建设银行",
+                    "selected_bank_last4": "8826",
+                }
+            ],
+        )
+
+        self.service.confirm_import(preview.id)
+
+        created = next(transaction for transaction in self.service.list_transactions() if transaction.bank_serial_no == "SERIAL-SELECTED-001")
+        self.assertEqual(created.account_no, "62220001")
+        self.assertEqual(created.imported_bank_name, "建设银行")
+        self.assertEqual(created.imported_bank_last4, "8826")
+
+    def test_confirm_import_skips_duplicate_invoice_rows_within_same_batch(self) -> None:
+        preview = self.service.preview_import(
+            batch_type=BatchType.INPUT_INVOICE,
+            source_name="duplicate-in-batch.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "invoice_code": "",
+                    "invoice_no": "",
+                    "digital_invoice_no": "26537912210200143464",
+                    "seller_tax_no": "915300007873997205",
+                    "seller_name": "云南省交通投资建设集团有限公司",
+                    "buyer_tax_no": "915300007194052520",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "counterparty_name": "云南省交通投资建设集团有限公司",
+                    "invoice_date": "2026-02-05",
+                    "amount": "40.53",
+                    "tax_rate": "3%",
+                    "tax_amount": "1.22",
+                    "total_with_tax": "41.75",
+                    "invoice_status_from_source": "正常",
+                },
+                {
+                    "invoice_code": "",
+                    "invoice_no": "",
+                    "digital_invoice_no": "26537912210200143464",
+                    "seller_tax_no": "915300007873997205",
+                    "seller_name": "云南省交通投资建设集团有限公司",
+                    "buyer_tax_no": "915300007194052520",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "counterparty_name": "云南省交通投资建设集团有限公司",
+                    "invoice_date": "2026-02-05",
+                    "amount": "40.53",
+                    "tax_rate": "3%",
+                    "tax_amount": "1.22",
+                    "total_with_tax": "41.75",
+                    "invoice_status_from_source": "正常",
+                },
+            ],
+        )
+
+        confirmed = self.service.confirm_import(preview.id)
+
+        matching = [invoice for invoice in self.service.list_invoices() if invoice.digital_invoice_no == "26537912210200143464"]
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(confirmed.duplicate_count, 1)
+        self.assertEqual(confirmed.success_count, 1)
+        self.assertEqual(preview.row_results[1].decision, ImportDecision.DUPLICATE_SKIPPED)
+
+    def test_confirm_import_skips_duplicate_invoice_from_later_preview_batch(self) -> None:
+        feb_preview = self.service.preview_import(
+            batch_type=BatchType.INPUT_INVOICE,
+            source_name="全量发票查询导出结果-2026年2月.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "invoice_code": "",
+                    "invoice_no": "",
+                    "digital_invoice_no": "26537912210200143464",
+                    "seller_tax_no": "915300007873997205",
+                    "seller_name": "云南省交通投资建设集团有限公司",
+                    "buyer_tax_no": "915300007194052520",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "counterparty_name": "云南省交通投资建设集团有限公司",
+                    "invoice_date": "2026-02-05",
+                    "amount": "40.53",
+                    "tax_rate": "3%",
+                    "tax_amount": "1.22",
+                    "total_with_tax": "41.75",
+                    "invoice_status_from_source": "正常",
+                }
+            ],
+        )
+        mar_preview = self.service.preview_import(
+            batch_type=BatchType.INPUT_INVOICE,
+            source_name="全量发票查询导出结果-2026年3月.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "invoice_code": "",
+                    "invoice_no": "",
+                    "digital_invoice_no": "26537912210200143464",
+                    "seller_tax_no": "915300007873997205",
+                    "seller_name": "云南省交通投资建设集团有限公司",
+                    "buyer_tax_no": "915300007194052520",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "counterparty_name": "云南省交通投资建设集团有限公司",
+                    "invoice_date": "2026-02-05",
+                    "amount": "40.53",
+                    "tax_rate": "3%",
+                    "tax_amount": "1.22",
+                    "total_with_tax": "41.75",
+                    "invoice_status_from_source": "正常",
+                }
+            ],
+        )
+
+        first_confirmed = self.service.confirm_import(feb_preview.id)
+        second_confirmed = self.service.confirm_import(mar_preview.id)
+
+        matching = [invoice for invoice in self.service.list_invoices() if invoice.digital_invoice_no == "26537912210200143464"]
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(first_confirmed.duplicate_count, 0)
+        self.assertEqual(second_confirmed.duplicate_count, 1)
+        self.assertEqual(second_confirmed.success_count, 0)
+        self.assertEqual(mar_preview.row_results[0].decision, ImportDecision.DUPLICATE_SKIPPED)
+
 
 if __name__ == "__main__":
     unittest.main()

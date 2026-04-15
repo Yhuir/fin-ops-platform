@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import CertifiedInvoiceImportModal from "../components/tax/CertifiedInvoiceImportModal";
 import CertifiedResultsDrawer from "../components/tax/CertifiedResultsDrawer";
@@ -6,6 +7,7 @@ import MonthPicker from "../components/MonthPicker";
 import TaxResultPanel from "../components/tax/TaxResultPanel";
 import TaxSummaryCards from "../components/tax/TaxSummaryCards";
 import TaxTable from "../components/tax/TaxTable";
+import { type WorkbenchHeaderIntent, useAppChrome } from "../contexts/AppChromeContext";
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import { calculateTaxOffset, fetchTaxOffsetMonth } from "../features/tax/api";
@@ -34,6 +36,8 @@ function hasSameIds(left: string[], right: string[]) {
 }
 
 export default function TaxOffsetPage() {
+  const navigate = useNavigate();
+  const { setWorkbenchHeaderActions } = useAppChrome();
   const { canMutateData } = useSessionPermissions();
   const [currentMonth, setCurrentMonth] = useState(DEFAULT_MONTH);
   const [monthData, setMonthData] = useState<TaxMonthData | null>(null);
@@ -52,6 +56,26 @@ export default function TaxOffsetPage() {
   const taxLayoutScrollbarRef = useRef<HTMLDivElement | null>(null);
   const taxLayoutScrollbarInnerRef = useRef<HTMLDivElement | null>(null);
   const isSyncingTaxLayoutScrollRef = useRef(false);
+
+  const handleRouteToWorkbenchIntent = useCallback((intent: WorkbenchHeaderIntent) => {
+    navigate("/", {
+      state: {
+        workbenchHeaderIntent: intent,
+      },
+    });
+  }, [navigate]);
+
+  useLayoutEffect(() => {
+    setWorkbenchHeaderActions({
+      canMutateData,
+      onOpenImport: (mode) => handleRouteToWorkbenchIntent({ type: "open_import", mode }),
+      onOpenSearch: () => handleRouteToWorkbenchIntent({ type: "open_search" }),
+      onOpenSettings: () => navigate("/settings"),
+    });
+    return () => {
+      setWorkbenchHeaderActions(null);
+    };
+  }, [canMutateData, handleRouteToWorkbenchIntent, navigate, setWorkbenchHeaderActions]);
 
   const loadMonthData = useCallback(
     async (mode: "reset" | "refresh", signal?: AbortSignal) => {

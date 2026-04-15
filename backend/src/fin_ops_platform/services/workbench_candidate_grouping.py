@@ -343,6 +343,8 @@ class WorkbenchCandidateGroupingService:
         total_count = len(group.oa_rows) + len(group.bank_rows) + len(group.invoice_rows)
         if total_count < 2:
             return False
+        if not (group.oa_rows and group.bank_rows and group.invoice_rows):
+            return False
         if len(group.oa_rows) > 1 or len(group.bank_rows) > 1 or len(group.invoice_rows) > 1:
             return False
         if not group.bank_rows:
@@ -443,8 +445,7 @@ class WorkbenchCandidateGroupingService:
             return "oa_invoice"
         return "single"
 
-    @staticmethod
-    def _paired_group_has_enough_row_types(group: CandidateGroup) -> bool:
+    def _paired_group_has_enough_row_types(self, group: CandidateGroup) -> bool:
         row_type_count = sum(1 for rows in (group.oa_rows, group.bank_rows, group.invoice_rows) if rows)
         if row_type_count == 1 and group.bank_rows and not group.oa_rows and not group.invoice_rows:
             relation_codes = {
@@ -455,7 +456,14 @@ class WorkbenchCandidateGroupingService:
                 return True
             if relation_codes and relation_codes.issubset(MULTI_BANK_AUTO_PAIRED_CODES) and len(group.bank_rows) >= 2:
                 return True
-        return row_type_count >= 2
+        if row_type_count == 2 and group.oa_rows and group.invoice_rows and not group.bank_rows:
+            relation_codes = {
+                self._relation_code(row)
+                for row in [*group.oa_rows, *group.invoice_rows]
+            }
+            if relation_codes and relation_codes.issubset(OA_INVOICE_AUTO_PAIRED_CODES):
+                return True
+        return row_type_count >= 3
 
     def _group_counterparty(self, group: CandidateGroup) -> str | None:
         attachment_primary_row = self._attachment_group_primary_row(group)
@@ -624,6 +632,10 @@ class WorkbenchCandidateGroupingService:
             if debit_amount is not None and debit_amount > ZERO:
                 return debit_amount
             return self._amount_from_value(row.get("credit_amount"))
+        if self._is_oa_attachment_invoice_row(row):
+            total_with_tax = self._amount_from_value(row.get("total_with_tax"))
+            if total_with_tax is not None:
+                return total_with_tax
         return self._amount_from_value(row.get("amount"))
 
     def _amount_bucket(self, amount: Decimal | None) -> Decimal | None:

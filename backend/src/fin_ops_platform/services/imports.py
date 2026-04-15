@@ -172,15 +172,63 @@ class ImportNormalizationService:
         if preview.batch.status != BatchStatus.PENDING:
             return preview.batch
         for row_result, normalized in zip(preview.row_results, preview.normalized_rows, strict=True):
+            self._refresh_row_decision_before_confirm(preview.batch.batch_type, row_result, normalized)
             if row_result.decision == ImportDecision.CREATED:
                 self._persist_created_row(preview.batch.batch_type, row_result, normalized)
             elif row_result.decision == ImportDecision.STATUS_UPDATED:
                 self._persist_updated_row(preview.batch.batch_type, row_result, normalized)
 
+        preview.batch.success_count = self._count_decisions(preview.row_results, ImportDecision.CREATED, ImportDecision.STATUS_UPDATED)
+        preview.batch.duplicate_count = self._count_decisions(preview.row_results, ImportDecision.DUPLICATE_SKIPPED)
+        preview.batch.suspected_duplicate_count = self._count_decisions(preview.row_results, ImportDecision.SUSPECTED_DUPLICATE)
+        preview.batch.updated_count = self._count_decisions(preview.row_results, ImportDecision.STATUS_UPDATED)
+        preview.batch.error_count = self._count_decisions(preview.row_results, ImportDecision.ERROR)
         has_issues = preview.error_count > 0 or preview.suspected_duplicate_count > 0
         preview.batch.status = BatchStatus.COMPLETED_WITH_ERRORS if has_issues else BatchStatus.COMPLETED
         self._batches[batch_id] = preview
         return preview.batch
+
+    def _refresh_row_decision_before_confirm(
+        self,
+        batch_type: BatchType,
+        row_result: ImportedBatchRowResult,
+        normalized: dict[str, Any],
+    ) -> None:
+        if row_result.decision != ImportDecision.CREATED:
+            return
+        if batch_type in (BatchType.OUTPUT_INVOICE, BatchType.INPUT_INVOICE):
+            self._refresh_invoice_row_decision_before_confirm(row_result, normalized)
+
+    def _refresh_invoice_row_decision_before_confirm(
+        self,
+        row_result: ImportedBatchRowResult,
+        normalized: dict[str, Any],
+    ) -> None:
+        source_unique_key = normalized.get("source_unique_key")
+        data_fingerprint = normalized.get("data_fingerprint")
+
+        if source_unique_key and source_unique_key in self._invoice_unique_index:
+            linked_invoice_id = self._invoice_unique_index[source_unique_key]
+            existing = self._invoices_by_id[linked_invoice_id]
+            normalized["previous_invoice_status_from_source"] = existing.invoice_status_from_source
+            normalized["previous_source_batch_id"] = existing.source_batch_id
+            incoming_status = normalized.get("invoice_status_from_source")
+            row_result.linked_object_type = "invoice"
+            row_result.linked_object_id = linked_invoice_id
+            if incoming_status and incoming_status != existing.invoice_status_from_source:
+                row_result.decision = ImportDecision.STATUS_UPDATED
+                row_result.decision_reason = "Unique business key matched an existing invoice during confirm with a changed source status."
+            else:
+                row_result.decision = ImportDecision.DUPLICATE_SKIPPED
+                row_result.decision_reason = "Unique business key matched an existing invoice during confirm."
+            return
+
+        if data_fingerprint and data_fingerprint in self._invoice_fingerprint_index:
+            linked_invoice_id = self._invoice_fingerprint_index[data_fingerprint]
+            row_result.linked_object_type = "invoice"
+            row_result.linked_object_id = linked_invoice_id
+            row_result.decision = ImportDecision.SUSPECTED_DUPLICATE
+            row_result.decision_reason = "Fingerprint matched an existing invoice during confirm without a stable official unique key."
 
     def get_batch(self, batch_id: str) -> ImportPreview:
         return self._batches[batch_id]
@@ -378,6 +426,8 @@ class ImportNormalizationService:
             "account_detail_no": self._string_or_none(raw_row.get("account_detail_no")),
             "voucher_kind": self._string_or_none(raw_row.get("voucher_kind")),
             "project_id": self._string_or_none(raw_row.get("project_id")),
+            "imported_bank_name": self._string_or_none(raw_row.get("selected_bank_name")),
+            "imported_bank_last4": self._string_or_none(raw_row.get("selected_bank_last4")),
         }
         errors: list[str] = []
 
@@ -577,6 +627,8 @@ class ImportNormalizationService:
             voucher_no=normalized.get("voucher_no"),
             project_id=normalized.get("project_id"),
             source_batch_id=batch_id,
+            imported_bank_name=normalized.get("imported_bank_name"),
+            imported_bank_last4=normalized.get("imported_bank_last4"),
         )
 
     def _register_invoice(self, invoice: Invoice) -> None:

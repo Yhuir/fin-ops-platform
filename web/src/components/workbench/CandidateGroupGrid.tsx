@@ -282,15 +282,15 @@ function CandidateGroupGrid({
   const gridBody = useMemo(() => (
     <div className="candidate-grid-body">
       {groups.length === 0 ? <div className="state-panel">当前区域暂无候选组。</div> : null}
-      {groups.map((group) => (
+      {groups.map((group, index) => (
         <div
           key={group.id}
-          className="candidate-group-row"
+          className={`candidate-group-row candidate-group-row-sheet candidate-group-row-tone-${index % 4}`}
           data-testid={`candidate-group-${zoneId}-${group.id}`}
           style={{ gridTemplateColumns: rowTemplateColumns }}
         >
           {panes.map((pane) => (
-            <div key={`${group.id}-${pane.id}`} className="candidate-group-pane-slot">
+            <div key={`${group.id}-${pane.id}`} className="candidate-group-pane-slot candidate-group-pane-slot-sheet">
               <CandidateGroupCell
                 actionMode={actionMode}
                 columnGridStyle={paneGridStyleByPane[pane.id as WorkbenchRecordType]}

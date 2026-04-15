@@ -301,6 +301,38 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
         self.assertEqual(auto_results[0].rule_code, "salary_personal_auto_match")
         self.assertEqual(auto_results[0].transaction_ids, [payload["open"]["bank"][0]["id"]])
 
+    def test_selected_bank_mapping_controls_payment_account_label(self) -> None:
+        import_service = ImportNormalizationService()
+        preview = import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="selected-bank.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220004",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-03-20",
+                    "trade_time": "2026-03-20 11:15:46",
+                    "pay_receive_time": "2026-03-20 11:15:46",
+                    "counterparty_name": "云南服务商有限公司",
+                    "debit_amount": "13000.00",
+                    "credit_amount": "",
+                    "summary": "服务费支出",
+                    "selected_bank_name": "建设银行",
+                    "selected_bank_last4": "8826",
+                },
+            ],
+        )
+        import_service.confirm_import(preview.id)
+
+        service = LiveWorkbenchService(import_service, MatchingEngineService(import_service))
+        payload = service.get_workbench("2026-03")
+        bank_row = payload["open"]["bank"][0]
+
+        self.assertEqual(bank_row["payment_account_label"], "建设银行 基本户 8826")
+        detail_row = service.get_row_detail(bank_row["id"])
+        self.assertEqual(detail_row["summary_fields"]["支付账户"], "建设银行 基本户 8826")
+
 
 if __name__ == "__main__":
     unittest.main()

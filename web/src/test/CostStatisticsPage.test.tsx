@@ -57,18 +57,23 @@ describe("Cost statistics page", () => {
     expect(await screen.findByRole("heading", { name: "成本统计" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "按时间" })).toHaveClass("active");
     const timeTable = await screen.findByRole("table", { name: "按时间统计表" });
-    expect(within(timeTable).getByRole("button", { name: "查看流水 cost-txn-004" })).toBeInTheDocument();
+    expect(within(timeTable).getByRole("button", { name: "查看流水 cost-txn-003" })).toBeInTheDocument();
+    expect(within(timeTable).queryByRole("button", { name: "查看流水 cost-txn-004" })).not.toBeInTheDocument();
     expect(within(timeTable).queryByRole("columnheader", { name: "资金方向" })).not.toBeInTheDocument();
     expect(within(timeTable).getAllByText("支出")[0]).toHaveClass("direction-tag");
-    expect(within(getStatCard("时间流水")).getByText("4")).toBeInTheDocument();
-    expect(within(getStatCard("支出流水")).getByText("4")).toBeInTheDocument();
-    expect(within(getStatCard("支出总额")).getByText("18,560.00")).toBeInTheDocument();
+    expect(within(getStatCard("时间流水")).getByText("3")).toBeInTheDocument();
+    expect(within(getStatCard("支出流水")).getByText("3")).toBeInTheDocument();
+    expect(within(getStatCard("支出总额")).getByText("13,360.00")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/cost-statistics/explorer?month=2026-03&project_scope=active",
+      expect.any(Object),
+    );
 
     await user.click(screen.getByRole("button", { name: "4月" }));
 
     const nextTimeTable = await screen.findByRole("table", { name: "按时间统计表" });
     expect(within(nextTimeTable).getByRole("button", { name: "查看流水 cost-txn-102" })).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith("/api/cost-statistics/explorer?month=2026-04", expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith("/api/cost-statistics/explorer?month=2026-04&project_scope=active", expect.any(Object));
   });
 
   test("project view drills down from project to expense type to transaction from left to right", async () => {
@@ -81,9 +86,14 @@ describe("Cost statistics page", () => {
     expect(await screen.findByRole("heading", { name: "成本统计" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "按项目" }));
     expect(await screen.findAllByText("全部时间")).not.toHaveLength(0);
-    expect(fetchMock).toHaveBeenCalledWith("/api/cost-statistics/explorer?month=all", expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith("/api/cost-statistics/explorer?month=all&project_scope=active", expect.any(Object));
     expect(screen.getByText("昆明卷烟厂动力设备控制系统升级改造项目")).toBeInTheDocument();
-    expect(screen.getByText("昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目")).toBeInTheDocument();
+    expect(screen.queryByText("昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "项目范围：进行中" }));
+    expect(await screen.findByRole("button", { name: "项目范围：所有项目" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/cost-statistics/explorer?month=all&project_scope=all", expect.any(Object));
+    expect(await screen.findByText("昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目")).toBeInTheDocument();
 
     const projectLane = screen.getByRole("heading", { name: "项目名" }).closest(".cost-explorer-lane");
     expect(projectLane).not.toBeNull();
@@ -108,6 +118,10 @@ describe("Cost statistics page", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "流水详情" });
     expect(dialog).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/cost-statistics/transactions/cost-txn-001?project_scope=all",
+      expect.any(Object),
+    );
     expect(screen.getAllByText("PLC 模块采购").length).toBeGreaterThan(0);
     const detailBankName = within(dialog).getByText("工商银行");
     expect(detailBankName).toBeInTheDocument();
@@ -136,6 +150,7 @@ describe("Cost statistics page", () => {
     expect(projectLane).not.toBeNull();
     expect(within(projectLane as HTMLElement).getByText("云南溯源科技")).toBeInTheDocument();
     expect(within(projectLane as HTMLElement).getByText("昆明卷烟厂动力设备控制系统升级改造项目")).toBeInTheDocument();
+    expect(within(projectLane as HTMLElement).queryByText("昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "按年统计" }));
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
@@ -156,7 +171,7 @@ describe("Cost statistics page", () => {
     expect(screen.getByRole("button", { name: "自定义时间段 2026-03-18至2026-03-20" })).toHaveClass("active");
 
     expect(await within(projectLane as HTMLElement).findByText("云南溯源科技")).toBeInTheDocument();
-    expect(within(projectLane as HTMLElement).getByText("昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目")).toBeInTheDocument();
+    expect(within(projectLane as HTMLElement).queryByText("昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目")).not.toBeInTheDocument();
     expect(within(projectLane as HTMLElement).queryByText("昆明卷烟厂动力设备控制系统升级改造项目")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "全部时间" }));
@@ -225,7 +240,7 @@ describe("Cost statistics page", () => {
     expect(bankLane).not.toBeNull();
     expect(within(bankLane as HTMLElement).getByText("工商银行 账户 0001")).toBeInTheDocument();
     expect(within(bankLane as HTMLElement).getByText("平安银行 账户 8821")).toBeInTheDocument();
-    expect(within(bankLane as HTMLElement).getByText("44.4%")).toBeInTheDocument();
+    expect(within(bankLane as HTMLElement).getByText("54.4%")).toBeInTheDocument();
 
     await user.click(within(bankLane as HTMLElement).getByRole("button", { name: /工商银行 账户 0001/ }));
 
@@ -378,15 +393,15 @@ describe("Cost statistics page", () => {
 
     expect(await within(dialog).findByText("预览结果")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/export-preview?month=all&view=time&start_date=2026-03-10&end_date=2026-04-16",
+      "/api/cost-statistics/export-preview?month=all&view=time&project_scope=active&start_date=2026-03-10&end_date=2026-04-16",
       expect.any(Object),
     );
-    expect(within(dialog).getByText("预计导出 6 条流水")).toBeInTheDocument();
+    expect(within(dialog).getByText("预计导出 5 条流水")).toBeInTheDocument();
 
     await user.click(within(dialog).getByRole("button", { name: "导出" }));
     expect(await within(dialog).findByText("已导出 成本统计_2026-03-10至2026-04-16_按时间统计.xlsx")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/export?month=all&view=time&start_date=2026-03-10&end_date=2026-04-16",
+      "/api/cost-statistics/export?month=all&view=time&project_scope=active&start_date=2026-03-10&end_date=2026-04-16",
       expect.any(Object),
     );
     expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
@@ -401,6 +416,8 @@ describe("Cost statistics page", () => {
 
     expect(await screen.findByRole("heading", { name: "成本统计" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "按项目" }));
+    await user.click(screen.getByRole("button", { name: "项目范围：进行中" }));
+    expect(await screen.findByRole("button", { name: "项目范围：所有项目" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "导出中心" }));
     const dialog = await screen.findByRole("dialog", { name: "导出中心" });
@@ -411,7 +428,7 @@ describe("Cost statistics page", () => {
 
     expect(await within(dialog).findByText("预览结果")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      `/api/cost-statistics/export-preview?month=all&view=project&project_name=${encodeURIComponent("云南溯源科技")}&aggregate_by=month&expense_type=${encodeURIComponent("设备货款及材料费")}`,
+      `/api/cost-statistics/export-preview?month=all&view=project&project_scope=all&project_name=${encodeURIComponent("云南溯源科技")}&aggregate_by=month&expense_type=${encodeURIComponent("设备货款及材料费")}`,
       expect.any(Object),
     );
     expect(within(dialog).getByText("预计导出 2 条流水")).toBeInTheDocument();
@@ -419,7 +436,7 @@ describe("Cost statistics page", () => {
     await user.click(within(dialog).getByRole("button", { name: "导出" }));
     expect(await within(dialog).findByText("已导出 成本统计_全部期间_按项目统计_按月_云南溯源科技.xlsx")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      `/api/cost-statistics/export?month=all&view=project&project_name=${encodeURIComponent("云南溯源科技")}&aggregate_by=month&expense_type=${encodeURIComponent("设备货款及材料费")}&include_oa_details=true&include_invoice_details=true&include_exception_rows=true&include_ignored_rows=true&include_expense_content_summary=true&sort_by=time`,
+      `/api/cost-statistics/export?month=all&view=project&project_scope=all&project_name=${encodeURIComponent("云南溯源科技")}&aggregate_by=month&expense_type=${encodeURIComponent("设备货款及材料费")}&include_oa_details=true&include_invoice_details=true&include_exception_rows=true&include_ignored_rows=true&include_expense_content_summary=true&sort_by=time`,
       expect.any(Object),
     );
   });
@@ -451,14 +468,14 @@ describe("Cost statistics page", () => {
 
     expect(await within(dialog).findByText("预览结果")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      `/api/cost-statistics/export-preview?month=all&view=expense_type&start_date=2026-03-18&end_date=2026-04-16&expense_type=${encodeURIComponent("交通费")}`,
+      `/api/cost-statistics/export-preview?month=all&view=expense_type&project_scope=active&start_date=2026-03-18&end_date=2026-04-16&expense_type=${encodeURIComponent("交通费")}`,
       expect.any(Object),
     );
 
     await user.click(within(dialog).getByRole("button", { name: "导出" }));
     expect(await within(dialog).findByText("已导出 成本统计_2026-03-18至2026-04-16_按费用类型统计_交通费.xlsx")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      `/api/cost-statistics/export?month=all&view=expense_type&start_date=2026-03-18&end_date=2026-04-16&expense_type=${encodeURIComponent("交通费")}`,
+      `/api/cost-statistics/export?month=all&view=expense_type&project_scope=active&start_date=2026-03-18&end_date=2026-04-16&expense_type=${encodeURIComponent("交通费")}`,
       expect.any(Object),
     );
   });

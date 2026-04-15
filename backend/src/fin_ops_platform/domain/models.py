@@ -117,6 +117,8 @@ class BankTransaction:
     enterprise_serial_no: str | None = None
     voucher_kind: str | None = None
     voucher_no: str | None = None
+    imported_bank_name: str | None = None
+    imported_bank_last4: str | None = None
     status: TransactionStatus = TransactionStatus.PENDING
 
     @property

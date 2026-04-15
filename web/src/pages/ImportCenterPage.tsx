@@ -6,6 +6,7 @@ import {
   fetchImportSession,
   fetchImportTemplates,
   previewImportFiles,
+  resolveImportApiErrorMessage,
   retryImportFiles,
   revertImportBatch,
 } from "../features/imports/api";
@@ -350,8 +351,8 @@ export default function ImportCenterPage() {
       setSelectedFileIds(payload.files.filter(canSelectFile).map((file) => file.id));
       applyPreviewPayload(payload, `已完成 ${payload.files.length} 个文件的预览识别。`);
       setMatchingRun(null);
-    } catch {
-      setErrorMessage("文件预览失败，请稍后重试。");
+    } catch (error) {
+      setErrorMessage(resolveImportApiErrorMessage(error, "文件预览失败，请稍后重试。"));
     } finally {
       setIsPreviewLoading(false);
     }
@@ -370,8 +371,8 @@ export default function ImportCenterPage() {
         `已确认导入 ${summarizeSelection(payload.files, selectedFileIds)} 个文件，并自动触发匹配闭环。`,
       );
       setSelectedFileIds([]);
-    } catch {
-      setErrorMessage("确认导入失败，请稍后重试。");
+    } catch (error) {
+      setErrorMessage(resolveImportApiErrorMessage(error, "确认导入失败，请稍后重试。"));
     } finally {
       setIsConfirmLoading(false);
     }
@@ -398,8 +399,8 @@ export default function ImportCenterPage() {
         },
       });
       applyPreviewPayload(payload, `已重新识别 ${file.fileName}。`);
-    } catch {
-      setErrorMessage("重新识别失败，请稍后重试。");
+    } catch (error) {
+      setErrorMessage(resolveImportApiErrorMessage(error, "重新识别失败，请稍后重试。"));
     } finally {
       setRetryingFileId(null);
     }
@@ -418,8 +419,8 @@ export default function ImportCenterPage() {
       if (!payload.files.some((item) => item.status === "confirmed")) {
         setMatchingRun(null);
       }
-    } catch {
-      setErrorMessage("撤销导入失败，请稍后重试。");
+    } catch (error) {
+      setErrorMessage(resolveImportApiErrorMessage(error, "撤销导入失败，请稍后重试。"));
     } finally {
       setRevertingBatchId(null);
     }

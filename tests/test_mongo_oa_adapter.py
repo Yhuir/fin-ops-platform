@@ -35,7 +35,7 @@ class StubMongoOAAdapter(MongoOAAdapter):
         self._project_documents = project_documents
 
     def _load_form_documents(self, form_id: str, month: str | None = None) -> list[dict]:
-        documents = list(self._form_documents.get(str(form_id), []))
+        documents = [self._with_default_completed_status(document) for document in self._form_documents.get(str(form_id), [])]
         if month is None:
             return documents
         filtered: list[dict] = []
@@ -49,13 +49,25 @@ class StubMongoOAAdapter(MongoOAAdapter):
     def _load_project_documents(self) -> list[dict]:
         return list(self._project_documents)
 
+    def _load_form_month_documents(self, form_id: str) -> list[dict]:
+        return [self._with_default_completed_status(document) for document in self._form_documents.get(str(form_id), [])]
+
     def _load_form_documents_by_external_ids(self, form_id: str, external_ids: set[str]) -> list[dict]:
-        documents = list(self._form_documents.get(str(form_id), []))
+        documents = [self._with_default_completed_status(document) for document in self._form_documents.get(str(form_id), [])]
         return [
             document
             for document in documents
             if self._document_external_id(form_id, document) in set(external_ids)
         ]
+
+    @staticmethod
+    def _with_default_completed_status(document: dict) -> dict:
+        normalized = dict(document)
+        data = dict(normalized.get("data", {}))
+        if "status" not in data or data.get("status") in (None, ""):
+            data["status"] = "已完成"
+        normalized["data"] = data
+        return normalized
 
 
 class CountingStubMongoOAAdapter(StubMongoOAAdapter):
@@ -112,8 +124,8 @@ class FlakyMonthCollection:
         if self.call_count == 1:
             raise ServerSelectionTimeoutError("transient mongo timeout")
         return [
-            {"data": {"applicationDate": "2026-03-16"}},
-            {"data": {"ApplicationDate": "2026-04-01"}, "modifiedTime": "2026-04-01T09:00:00"},
+            {"data": {"applicationDate": "2026-03-16", "status": "已完成"}},
+            {"data": {"ApplicationDate": "2026-04-01", "status": "已完成"}, "modifiedTime": "2026-04-01T09:00:00"},
         ]
 
 
@@ -202,8 +214,7 @@ class MongoOAAdapterTests(unittest.TestCase):
                             "payeeAccount": "2502013009022108588",
                             "paymentMethod": "Bank_transfer",
                             "paymentProof": "VAT_ordinary_invoice",
-                            "status": "APPROVED",
-                            "processStatus": 2,
+                            "status": "已完成",
                         },
                     }
                 ],
@@ -656,6 +667,67 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].attachment_invoices[0]["invoice_no"], "40512344")
 
+    def test_expense_claim_normalizes_current_cache_entry_amount_to_net_amount(self) -> None:
+        cache = MemoryAttachmentInvoiceCache()
+        file_entry = {"fileName": "invoice-a.pdf", "filePath": "/invoice-a.pdf", "suffix": "pdf"}
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-cache-normalize",
+                        "form_id": "32",
+                        "modifiedTime": "2026-03-28T11:00:00",
+                        "data": {
+                            "ApplicationDate": "2026-03-28",
+                            "Reimbursement Personnel": "刘际涛",
+                            "titleName": "日常报销",
+                            "processId": "exp-attach-cache-normalize-001",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailProjectName": "oa-project-001",
+                                    "detailReimbursementAmount": "215.00",
+                                    "feeContent": "设备费用",
+                                    "detailReimbursementAttachment": {"files": [file_entry]},
+                                }
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[
+                {"_id": "oa-project-001", "data": {"name": "玉烟维护项目", "code": "YYWH"}},
+            ],
+            attachment_invoice_cache=cache,
+        )
+        cache_key = adapter._attachment_invoice_cache_key(file_entry)
+        cache.save_oa_attachment_invoice_cache_entry(
+            cache_key,
+            {
+                "parser_version": adapter._attachment_invoice_cache_parser_version(),
+                "invoices": [
+                    {
+                        "invoice_no": "25532000000191043884",
+                        "seller_name": "玉溪市卓达自动化科技有限公司",
+                        "buyer_name": "云南溯源科技有限公司",
+                        "issue_date": "2025-12-26",
+                        "amount": "215.00",
+                        "net_amount": "212.86",
+                        "tax_amount": "2.14",
+                        "total_with_tax": "215.00",
+                        "attachment_name": "invoice-a.pdf",
+                    }
+                ],
+            },
+        )
+
+        with patch.object(adapter._attachment_invoice_service, "parse_files", side_effect=AssertionError("should not parse synchronously")):
+            records = adapter.list_application_records("2026-03")
+
+        self.assertEqual(records[0].attachment_invoices[0]["amount"], "212.86")
+        self.assertEqual(cache.entries[cache_key]["invoices"][0]["amount"], "212.86")
+
     def test_expense_claim_reparses_stale_attachment_invoice_cache_entry(self) -> None:
         cache = MemoryAttachmentInvoiceCache()
         file_entry = {"fileName": "invoice-a.pdf", "filePath": "/invoice-a.pdf", "suffix": "pdf"}
@@ -784,7 +856,7 @@ class MongoOAAdapterTests(unittest.TestCase):
                             "beneficiary": "中国电信股份有限公司昆明分公司",
                             "projectName": "6486ca70cd6cae5d4e2b0b48",
                             "amount": "199",
-                            "status": "APPROVED",
+                            "status": "已完成",
                         },
                     }
                 ],
@@ -802,6 +874,109 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual(projects[0]["project_name"], "云南溯源科技")
         self.assertEqual(counterparties[0]["name"], "中国电信股份有限公司昆明分公司")
         self.assertEqual(documents[0]["project_name"], "云南溯源科技")
+
+    def test_only_completed_oa_rows_are_returned(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [
+                    {
+                        "_id": "payment-doc-completed",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2026-03-16",
+                            "userName": "刘际涛",
+                            "fromTitle": "支付申请",
+                            "amount": "199",
+                            "beneficiary": "中国电信股份有限公司昆明分公司",
+                            "cause": "托收电话费及宽带",
+                            "projectName": "6486ca70cd6cae5d4e2b0b48",
+                            "flowRequestId": "2047",
+                            "status": "已完成",
+                        },
+                    },
+                    {
+                        "_id": "payment-doc-in-progress",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2026-04-18",
+                            "userName": "樊祖芳",
+                            "fromTitle": "支付申请",
+                            "amount": "88050",
+                            "beneficiary": "云南辰飞机电工程有限公司",
+                            "cause": "空气源热泵预付款",
+                            "projectName": "6486ca70cd6cae5d4e2b0b48",
+                            "flowRequestId": "2048",
+                            "status": "进行中",
+                        },
+                    },
+                ],
+                "32": [],
+            },
+            project_documents=[
+                {"_id": "6486ca70cd6cae5d4e2b0b48", "data": {"name": "云南溯源科技", "code": "YNSY"}},
+            ],
+        )
+
+        records = adapter.list_application_records("2026-03")
+        documents = adapter.fetch_documents("payment_requests")
+        months = adapter.list_available_months()
+
+        self.assertEqual([record.id for record in records], ["oa-pay-2047"])
+        self.assertEqual([document["external_id"] for document in documents], ["2047"])
+        self.assertEqual(months, ["2026-03"])
+
+    def test_list_application_records_by_row_ids_skips_non_completed_rows(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [
+                    {
+                        "_id": "payment-doc-completed",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2026-03-16",
+                            "userName": "刘际涛",
+                            "fromTitle": "支付申请",
+                            "amount": "199",
+                            "beneficiary": "中国电信股份有限公司昆明分公司",
+                            "cause": "托收电话费及宽带",
+                            "projectName": "6486ca70cd6cae5d4e2b0b48",
+                            "flowRequestId": "2047",
+                            "status": "已完成",
+                        },
+                    },
+                    {
+                        "_id": "payment-doc-in-progress",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2026-03-18",
+                            "userName": "樊祖芳",
+                            "fromTitle": "支付申请",
+                            "amount": "88050",
+                            "beneficiary": "云南辰飞机电工程有限公司",
+                            "cause": "空气源热泵预付款",
+                            "projectName": "6486ca70cd6cae5d4e2b0b48",
+                            "flowRequestId": "2048",
+                            "status": "进行中",
+                        },
+                    },
+                ],
+                "32": [],
+            },
+            project_documents=[
+                {"_id": "6486ca70cd6cae5d4e2b0b48", "data": {"name": "云南溯源科技", "code": "YNSY"}},
+            ],
+        )
+
+        records = adapter.list_application_records_by_row_ids(["oa-pay-2047", "oa-pay-2048"])
+
+        self.assertEqual([record.id for record in records], ["oa-pay-2047"])
+
+    def test_form_status_normalizes_real_mongo_completed_and_in_progress_values(self) -> None:
+        self.assertEqual(MongoOAAdapter._form_status({"status": "APPROVED", "processStatus": "已完成"}), "已完成")
+        self.assertEqual(MongoOAAdapter._form_status({"status": "APPROVED", "processStatus": 2}), "已完成")
+        self.assertEqual(MongoOAAdapter._form_status({"processStatus": "2"}), "已完成")
+        self.assertEqual(MongoOAAdapter._form_status({"processStatus": "进行中"}), "进行中")
+        self.assertEqual(MongoOAAdapter._form_status({"processStatus": 1}), "进行中")
 
     def test_list_application_records_uses_month_cache(self) -> None:
         adapter = CountingStubMongoOAAdapter(
@@ -875,6 +1050,7 @@ class MongoOAAdapterTests(unittest.TestCase):
                 {
                     "data.applicationDate": 1,
                     "data.ApplicationDate": 1,
+                    "data.status": 1,
                     "modifiedTime": 1,
                 },
             )

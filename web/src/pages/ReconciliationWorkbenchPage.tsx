@@ -1,4 +1,5 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import ActionStatusModal from "../components/workbench/ActionStatusModal";
 import CancelProcessedExceptionModal from "../components/workbench/CancelProcessedExceptionModal";
@@ -6,13 +7,12 @@ import DetailDrawer from "../components/workbench/DetailDrawer";
 import IgnoredItemsModal from "../components/workbench/IgnoredItemsModal";
 import OaBankExceptionModal from "../components/workbench/OaBankExceptionModal";
 import ProcessedExceptionsModal from "../components/workbench/ProcessedExceptionsModal";
+import WorkbenchHeaderControls from "../components/workbench/WorkbenchHeaderControls";
 import WorkbenchImportModal, { type WorkbenchImportMode } from "../components/workbench/WorkbenchImportModal";
-import WorkbenchSearchBox from "../components/workbench/WorkbenchSearchBox";
 import WorkbenchSearchModal from "../components/workbench/WorkbenchSearchModal";
-import WorkbenchSettingsModal from "../components/workbench/WorkbenchSettingsModal";
 import WorkbenchZone from "../components/workbench/WorkbenchZone";
 import type { WorkbenchPane } from "../components/workbench/ResizableTriPane";
-import { useAppChrome } from "../contexts/AppChromeContext";
+import { type WorkbenchRouteState, useAppChrome } from "../contexts/AppChromeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import {
   cancelWorkbenchLink,
@@ -24,7 +24,6 @@ import {
   fetchWorkbenchWithProgress,
   ignoreWorkbenchRow,
   markWorkbenchException,
-  resetWorkbenchSettingsData,
   saveWorkbenchSettings,
   submitOaBankException,
   unignoreWorkbenchRow,
@@ -45,8 +44,6 @@ import type {
   WorkbenchData,
   WorkbenchRecord,
   WorkbenchSettings,
-  WorkbenchSettingsDataResetAction,
-  WorkbenchSettingsDataResetResult,
 } from "../features/workbench/types";
 import { createEmptySearchResponse, fetchWorkbenchSearch } from "../features/search/api";
 import type {
@@ -123,9 +120,11 @@ const READONLY_ACTION_MESSAGE = "当前账号仅支持查看和导出，不能�
 const WORKBENCH_VIEW_MONTH = "all";
 
 export default function ReconciliationWorkbenchPage() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const { currentMonth } = useMonth();
-  const { setWorkbenchStatusText } = useAppChrome();
-  const { canMutateData, canAdminAccess } = useSessionPermissions();
+  const { setWorkbenchHeaderActions, setWorkbenchStatusText, shellHeaderMounted } = useAppChrome();
+  const { canMutateData } = useSessionPermissions();
   const {
     detailRow,
     getRowState,
@@ -159,9 +158,7 @@ export default function ReconciliationWorkbenchPage() {
   const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(null);
   const [ignoredData, setIgnoredData] = useState<IgnoredWorkbenchData>({ month: WORKBENCH_VIEW_MONTH, rows: [] });
   const [workbenchSettings, setWorkbenchSettings] = useState<WorkbenchSettings | null>(null);
-  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [importModalMode, setImportModalMode] = useState<WorkbenchImportMode | null>(null);
-  const [isSettingsSaving, setIsSettingsSaving] = useState(false);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchScope, setSearchScope] = useState<WorkbenchSearchScope>("all");
@@ -184,6 +181,7 @@ export default function ReconciliationWorkbenchPage() {
   const columnLayoutSaveRequestIdRef = useRef(0);
   const deferredPairedDisplayState = useDeferredValue(pairedDisplayState);
   const deferredOpenDisplayState = useDeferredValue(openDisplayState);
+  const routeState = location.state as WorkbenchRouteState;
 
   const updateZoneDisplayState = useCallback((
     zoneId: "paired" | "open",
@@ -474,6 +472,7 @@ export default function ReconciliationWorkbenchPage() {
         setIsLoading(false);
       } else {
         setIsRefreshing(false);
+        setLastActionMessage(null);
       }
       if (includeAuxiliary) {
         void loadWorkbenchAuxiliaryData(month, signal);
@@ -489,6 +488,7 @@ export default function ReconciliationWorkbenchPage() {
         setIsLoading(false);
       } else {
         setIsRefreshing(false);
+        setLastActionMessage(null);
       }
     }
   }
@@ -510,6 +510,10 @@ export default function ReconciliationWorkbenchPage() {
   }, [expandedZoneId]);
 
   useEffect(() => {
+    if (lastActionMessage) {
+      setWorkbenchStatusText(lastActionMessage);
+      return;
+    }
     if (isLoading || isRefreshing) {
       setWorkbenchStatusText(
         loadProgress.percent === null
@@ -523,7 +527,7 @@ export default function ReconciliationWorkbenchPage() {
       return;
     }
     setWorkbenchStatusText(null);
-  }, [isLoading, isRefreshing, loadProgress.label, loadProgress.percent, setWorkbenchStatusText, workbenchData?.oaStatus?.message]);
+  }, [isLoading, isRefreshing, lastActionMessage, loadProgress.label, loadProgress.percent, setWorkbenchStatusText, workbenchData?.oaStatus?.message]);
 
   useEffect(() => () => setWorkbenchStatusText(null), [setWorkbenchStatusText]);
 
@@ -643,7 +647,11 @@ export default function ReconciliationWorkbenchPage() {
   );
 
   const importBankOptions = useMemo(
-    () => Array.from(new Set((workbenchSettings?.bankAccountMappings ?? []).map((item) => item.bankName.trim()).filter(Boolean))).sort(),
+    () => [...(workbenchSettings?.bankAccountMappings ?? [])].sort((left, right) => {
+      const leftLabel = `${left.bankName} ${left.last4}`.trim();
+      const rightLabel = `${right.bankName} ${right.last4}`.trim();
+      return leftLabel.localeCompare(rightLabel, "zh-Hans-CN");
+    }),
     [workbenchSettings?.bankAccountMappings],
   );
 
@@ -817,14 +825,14 @@ export default function ReconciliationWorkbenchPage() {
     setActionDialog((current) => (current?.phase === "result" ? null : current));
   };
 
-  const handleOpenSearchModal = () => {
+  const handleOpenSearchModal = useCallback(() => {
     setSearchMonthValue(currentMonth);
     setSearchModalOpen(true);
-  };
+  }, [currentMonth]);
 
-  const handleCloseSearchModal = () => {
+  const handleCloseSearchModal = useCallback(() => {
     setSearchModalOpen(false);
-  };
+  }, []);
 
   const handleSubmitSearch = () => {
     if (!currentSearchState.query) {
@@ -862,14 +870,29 @@ export default function ReconciliationWorkbenchPage() {
     setProcessedExceptionsModalOpen(false);
   };
 
-  const handleOpenSettingsModal = () => {
-    setSettingsModalOpen(true);
-  };
+  const handleOpenSettingsPage = useCallback(() => {
+    navigate("/settings");
+  }, [navigate]);
+
+  useEffect(() => {
+    const intent = routeState?.workbenchHeaderIntent;
+    if (!intent) {
+      return;
+    }
+    if (intent.type === "open_search") {
+      setSearchMonthValue(currentMonth);
+      setSearchModalOpen(true);
+    }
+    if (intent.type === "open_import") {
+      setImportModalMode(intent.mode);
+    }
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+  }, [currentMonth, location.pathname, location.search, navigate, routeState]);
 
   const handleWorkbenchImportComplete = useCallback((payload: ImportSessionPayload) => {
     const confirmedCount = payload.files.filter((file) => file.status === "confirmed").length;
     setImportModalMode(null);
-    setLastActionMessage(`已导入 ${confirmedCount} 个文件，正在后台刷新关联台。`);
+    setLastActionMessage(`已导入 ${confirmedCount} 个文件，正在刷新关联台。`);
     refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
   }, [refreshWorkbenchDataInBackground]);
 
@@ -902,53 +925,15 @@ export default function ReconciliationWorkbenchPage() {
     }
   };
 
-  const handleCloseSettingsModal = () => {
-    if (isSettingsSaving) {
-      return;
-    }
-    setSettingsModalOpen(false);
-  };
-
-  const handleSaveSettings = async (payload: {
-    completedProjectIds: string[];
-    bankAccountMappings: WorkbenchSettings["bankAccountMappings"];
-    allowedUsernames: string[];
-    readonlyExportUsernames: string[];
-    adminUsernames: string[];
-    workbenchColumnLayouts: WorkbenchSettings["workbenchColumnLayouts"];
-    oaRetention: WorkbenchSettings["oaRetention"];
-    oaInvoiceOffset: WorkbenchSettings["oaInvoiceOffset"];
-  }) => {
-    if (!canMutateData) {
-      openActionResultDialog(READONLY_ACTION_MESSAGE);
-      return;
-    }
-    setIsSettingsSaving(true);
-    try {
-      const saved = await saveWorkbenchSettings(payload);
-      setWorkbenchSettings(saved);
-      setSettingsModalOpen(false);
-      await loadWorkbenchData(WORKBENCH_VIEW_MONTH);
-      setLastActionMessage("已保存关联台设置。");
-    } catch {
-      openActionResultDialog("保存设置失败，请稍后重试。");
-    } finally {
-      setIsSettingsSaving(false);
-    }
-  };
-
-  const handleSettingsDataReset = async (payload: {
-    action: WorkbenchSettingsDataResetAction;
-    oaPassword: string;
-  }): Promise<WorkbenchSettingsDataResetResult> => {
-    if (!canAdminAccess) {
-      throw new Error("当前账号没有管理员权限，不能执行数据重置。");
-    }
-    const result = await resetWorkbenchSettingsData(payload);
-    await loadWorkbenchData(WORKBENCH_VIEW_MONTH);
-    setLastActionMessage(result.message);
-    return result;
-  };
+  useLayoutEffect(() => {
+    setWorkbenchHeaderActions({
+      canMutateData,
+      onOpenImport: setImportModalMode,
+      onOpenSearch: handleOpenSearchModal,
+      onOpenSettings: handleOpenSettingsPage,
+    });
+    return () => setWorkbenchHeaderActions(null);
+  }, [canMutateData, handleOpenSearchModal, handleOpenSettingsPage, setWorkbenchHeaderActions]);
 
   const openActionResultDialog = useCallback((message: string, title = "操作提示") => {
     setActionDialog({
@@ -1524,28 +1509,14 @@ export default function ReconciliationWorkbenchPage() {
   return (
     <div className="workbench-shell">
       <div className={`page-stack${expandedZoneId ? " zone-expanded-layout" : ""}`}>
-        <div className="workbench-page-toolbar">
-          <div className="workbench-page-toolbar-actions">
-            <button className="secondary-button" type="button" onClick={handleOpenSettingsModal}>
-              设置
-            </button>
-            {canMutateData ? (
-              <>
-                <button className="secondary-button" type="button" onClick={() => setImportModalMode("bank_transaction")}>
-                  银行流水导入
-                </button>
-                <button className="secondary-button" type="button" onClick={() => setImportModalMode("invoice")}>
-                  发票导入
-                </button>
-                <button className="secondary-button" type="button" onClick={() => setImportModalMode("etc_invoice")}>
-                  ETC发票导入
-                </button>
-              </>
-            ) : null}
-          </div>
-          <WorkbenchSearchBox onOpen={handleOpenSearchModal} />
-        </div>
-        {lastActionMessage ? <div className="action-feedback">{lastActionMessage}</div> : null}
+        {!shellHeaderMounted ? (
+          <WorkbenchHeaderControls
+            canMutateData={canMutateData}
+            onOpenImport={setImportModalMode}
+            onOpenSearch={handleOpenSearchModal}
+            onOpenSettings={handleOpenSettingsPage}
+          />
+        ) : null}
         {loadError ? <div className="state-panel error">{loadError}</div> : null}
         {!loadError && oaStatusPanelMessage ? (
           <div className={`state-panel${oaStatus?.code === "error" ? " error" : ""}`}>{oaStatusPanelMessage}</div>
@@ -1570,17 +1541,6 @@ export default function ReconciliationWorkbenchPage() {
         ) : null}
       </div>
 
-      {settingsModalOpen && workbenchSettings ? (
-        <WorkbenchSettingsModal
-          canManageAccessControl={canAdminAccess}
-          canSave={canMutateData}
-          isSaving={isSettingsSaving}
-          settings={workbenchSettings}
-          onClose={handleCloseSettingsModal}
-          onDataReset={handleSettingsDataReset}
-          onSave={handleSaveSettings}
-        />
-      ) : null}
       {importModalMode ? (
         <WorkbenchImportModal
           mode={importModalMode}

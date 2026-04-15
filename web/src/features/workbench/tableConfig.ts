@@ -114,7 +114,8 @@ export const workbenchColumns: Record<WorkbenchRecordType, WorkbenchColumn[]> = 
     },
     {
       key: "amount",
-      label: "金额/税率/税额",
+      label: "不含税价格/税率（税额）",
+      headerLines: ["不含税价格", "税率（税额）"],
       kind: "money",
       className: "column-compact column-invoice-amount-compact column-money-centered",
       filterable: false,

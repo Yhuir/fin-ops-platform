@@ -15,20 +15,28 @@ class BankAccountResolver:
     def __init__(self, mapping_provider: Callable[[], dict[str, str]] | None = None) -> None:
         self._mapping_provider = mapping_provider
 
-    def resolve_label(self, account_no: str | None, account_name: str | None = None) -> str:
-        if not account_no:
+    def resolve_label(
+        self,
+        account_no: str | None,
+        account_name: str | None = None,
+        *,
+        preferred_bank_name: str | None = None,
+        preferred_last4: str | None = None,
+    ) -> str:
+        if not account_no and not preferred_last4:
             return "未识别账户"
 
-        bank_name = "未识别银行"
-        last4 = account_no[-4:]
-        if self._mapping_provider is not None:
+        bank_name = preferred_bank_name or "未识别银行"
+        last4 = preferred_last4 or (account_no[-4:] if account_no else "")
+        if bank_name == "未识别银行" and last4 and self._mapping_provider is not None:
             mapped_name = self._mapping_provider().get(last4)
             if mapped_name:
                 bank_name = mapped_name
-        for prefix, candidate in self._BANK_PREFIXES.items():
-            if bank_name == "未识别银行" and account_no.startswith(prefix):
-                bank_name = candidate
-                break
+        if bank_name == "未识别银行" and account_no:
+            for prefix, candidate in self._BANK_PREFIXES.items():
+                if account_no.startswith(prefix):
+                    bank_name = candidate
+                    break
 
         account_type = "账户"
         if account_name:

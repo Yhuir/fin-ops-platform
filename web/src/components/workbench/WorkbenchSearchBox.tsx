@@ -10,7 +10,7 @@ export default function WorkbenchSearchBox({ onOpen }: WorkbenchSearchBoxProps) 
       type="button"
       onClick={onOpen}
     >
-      <strong>搜索</strong>
+      <span className="workbench-search-entry-placeholder">搜索</span>
     </button>
   );
 }

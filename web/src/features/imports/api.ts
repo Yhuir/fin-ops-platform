@@ -25,7 +25,13 @@ type ApiImportFile = {
   stored_file_path?: string | null;
   override_template_code?: string | null;
   override_batch_type?: "input_invoice" | "output_invoice" | "bank_transaction" | null;
+  selected_bank_mapping_id?: string | null;
   selected_bank_name?: string | null;
+  selected_bank_last4?: string | null;
+  detected_bank_name?: string | null;
+  detected_last4?: string | null;
+  bank_selection_conflict?: boolean;
+  conflict_message?: string | null;
   row_results?: Array<{
     id: string;
     row_no: number;
@@ -84,6 +90,25 @@ async function requestJson<T>(url: string, init: RequestInit = {}) {
   return payload;
 }
 
+export function resolveImportApiErrorMessage(error: unknown, fallback: string): string {
+  if (!(error instanceof Error)) {
+    return fallback;
+  }
+  const raw = error.message?.trim();
+  if (!raw) {
+    return fallback;
+  }
+  try {
+    const payload = JSON.parse(raw) as { message?: unknown };
+    if (typeof payload?.message === "string" && payload.message.trim()) {
+      return payload.message.trim();
+    }
+  } catch {
+    // Fall back to the raw Error message when the payload is not JSON.
+  }
+  return raw;
+}
+
 function mapMatchingRun(payload?: ApiImportSessionPayload["matching_run"]): MatchingRunSummary | undefined {
   if (!payload) {
     return undefined;
@@ -125,7 +150,13 @@ function mapImportPayload(payload: ApiImportSessionPayload): ImportSessionPayloa
       storedFilePath: file.stored_file_path,
       overrideTemplateCode: file.override_template_code,
       overrideBatchType: file.override_batch_type,
+      selectedBankMappingId: file.selected_bank_mapping_id,
       selectedBankName: file.selected_bank_name,
+      selectedBankLast4: file.selected_bank_last4,
+      detectedBankName: file.detected_bank_name,
+      detectedLast4: file.detected_last4,
+      bankSelectionConflict: file.bank_selection_conflict ?? false,
+      conflictMessage: file.conflict_message,
       rowResults: (file.row_results ?? []).map((row) => ({
         id: row.id,
         rowNo: row.row_no,
@@ -165,7 +196,9 @@ export async function previewImportFiles(
           file_name: override.fileName ?? files[index]?.name,
           ...(override.templateCode ? { template_code: override.templateCode } : {}),
           ...(override.batchType ? { batch_type: override.batchType } : {}),
+          ...(override.bankMappingId ? { bank_mapping_id: override.bankMappingId } : {}),
           ...(override.bankName ? { bank_name: override.bankName } : {}),
+          ...(override.last4 ? { last4: override.last4 } : {}),
         })),
       ),
     );
@@ -181,7 +214,13 @@ export async function previewImportFiles(
 export async function retryImportFiles(
   sessionId: string,
   selectedFileIds: string[],
-  overrides: Record<string, { templateCode?: string | null; batchType?: ImportBatchType | null; bankName?: string | null }>,
+  overrides: Record<string, {
+    templateCode?: string | null;
+    batchType?: ImportBatchType | null;
+    bankMappingId?: string | null;
+    bankName?: string | null;
+    last4?: string | null;
+  }>,
 ): Promise<ImportSessionPayload> {
   const payload = await requestJson<ApiImportSessionPayload>("/imports/files/retry", {
     method: "POST",
@@ -197,7 +236,9 @@ export async function retryImportFiles(
           {
             ...(override.templateCode ? { template_code: override.templateCode } : {}),
             ...(override.batchType ? { batch_type: override.batchType } : {}),
+            ...(override.bankMappingId ? { bank_mapping_id: override.bankMappingId } : {}),
             ...(override.bankName ? { bank_name: override.bankName } : {}),
+            ...(override.last4 ? { last4: override.last4 } : {}),
           },
         ]),
       ),

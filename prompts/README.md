@@ -56,6 +56,14 @@
 50. `50-settings-data-reset-backend-foundation.md`
 51. `51-settings-data-reset-ui-and-oa-rebuild.md`
 52. `52-settings-data-reset-integration-and-qa.md`
+53. `53-workbench-sheet-layout-foundation.md`
+54. `54-workbench-sheet-layout-states-and-qa.md`
+55. `55-project-status-settings-foundation.md`
+56. `56-cost-statistics-project-scope-backend.md`
+57. `57-cost-statistics-project-scope-ui-and-qa.md`
+58. `58-settings-page-route-and-state-foundation.md`
+59. `59-settings-page-sections-and-tree-ui.md`
+60. `60-settings-page-integration-and-cleanup.md`
 
 使用方式建议：
 
@@ -174,3 +182,35 @@ OA “访问账户管理 / 只读导出 / 管理员独占权限”这一组 prom
   - 未输入 / 输错 OA 密码时不执行清理、不失效缓存、不触发 OA 重建
   - `清 OA` 固定采用模式 B：彻底重刷 OA 相关状态
   - Prompt 52 已补集成 QA：三类删表边界、`oa_retention.cutoff_date` 重建、管理员可见性与密码泄露防护
+
+关联台“三栏 Excel / sheet 化样式重设计”这一组 prompt 对应的需求与文档：
+
+- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/docs/product/银企核销需求.md)
+- 设计文档：[2026-04-14-workbench-sheet-layout-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-14-workbench-sheet-layout-design.md)
+- 实施计划：[2026-04-14-workbench-sheet-layout.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-14-workbench-sheet-layout.md)
+- 当前目标：
+  - 三栏候选项从 `block / card stack` 改成更接近 Excel / sheet 的分割线风格
+  - `1 条 OA 对多条发票` 时，单条项视觉上像合并单元格
+  - 现有列、tag、动作、数据语义全部保持不变
+
+设置页“项目状态管理 / 成本统计项目范围”这一组 prompt 对应的需求与文档：
+
+- 需求源：[银企核销需求.md](/Users/yu/Desktop/fin-ops-platform/docs/product/银企核销需求.md)
+- 设计文档：[2026-04-14-project-status-cost-scope-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-14-project-status-cost-scope-design.md)
+- 实施计划：[2026-04-14-project-status-cost-scope.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-14-project-status-cost-scope.md)
+- 当前目标：
+  - 设置页 `项目状态管理` 支持 OA 项目拉取、手动新增、删除和 `进行中 / 已完成` 切换
+  - 成本统计页面在视图切换右侧新增 `进行中 / 所有项目` 范围 trigger
+  - 成本统计默认只统计 `进行中`，但可切换到 `所有项目`
+  - 所有实现明确禁止改动 `form_data_db`
+
+设置页“页面化 / 树状两栏模块化”这一组 prompt 对应的需求与文档：
+
+- 设计文档：[2026-04-14-settings-page-route-and-tree-design.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/specs/2026-04-14-settings-page-route-and-tree-design.md)
+- 实施计划：[2026-04-14-settings-page-route-and-tree.md](/Users/yu/Desktop/fin-ops-platform/docs/superpowers/plans/2026-04-14-settings-page-route-and-tree.md)
+- 当前目标：
+  - 把“关联台设置”从弹窗改成独立页面 `/settings`
+  - 设置页固定为树状两栏结构
+  - 设置相关加载、保存、项目同步、数据重置迁移到页面容器
+  - 后续按 section 拆成独立组件
+  - 所有实现明确禁止改动 `form_data_db`

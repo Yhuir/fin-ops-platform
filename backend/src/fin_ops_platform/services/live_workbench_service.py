@@ -154,7 +154,12 @@ class LiveWorkbenchService:
     def _build_bank_row(self, transaction: BankTransaction, result: MatchingResult | None) -> dict[str, Any]:
         relation = relation_from_result(result)
         section = "paired" if result and result.result_type == MatchingResultType.AUTOMATIC_MATCH else "open"
-        payment_account_label = self._bank_account_resolver.resolve_label(transaction.account_no, transaction.account_name)
+        payment_account_label = self._bank_account_resolver.resolve_label(
+            transaction.account_no,
+            transaction.account_name,
+            preferred_bank_name=transaction.imported_bank_name,
+            preferred_last4=transaction.imported_bank_last4,
+        )
         direction_label = "支出" if transaction.txn_direction.value == "outflow" else "收入"
         account_field_label = "支付账户" if transaction.txn_direction.value == "outflow" else "收款账户"
         remark_value = self._build_bank_remark(transaction, result)
@@ -400,7 +405,12 @@ class LiveWorkbenchService:
         if counterpart is None:
             return base_remark
 
-        counterpart_account_label = self._compact_bank_account_label(counterpart.account_no, counterpart.account_name)
+        counterpart_account_label = self._compact_bank_account_label(
+            counterpart.account_no,
+            counterpart.account_name,
+            preferred_bank_name=counterpart.imported_bank_name,
+            preferred_last4=counterpart.imported_bank_last4,
+        )
         if not counterpart_account_label:
             return base_remark
 
@@ -423,8 +433,20 @@ class LiveWorkbenchService:
         transactions_by_id = {transaction.id: transaction for transaction in self._import_service.list_transactions()}
         return transactions_by_id.get(counterpart_ids[0])
 
-    def _compact_bank_account_label(self, account_no: str | None, account_name: str | None) -> str:
-        full_label = self._bank_account_resolver.resolve_label(account_no, account_name).strip()
+    def _compact_bank_account_label(
+        self,
+        account_no: str | None,
+        account_name: str | None,
+        *,
+        preferred_bank_name: str | None = None,
+        preferred_last4: str | None = None,
+    ) -> str:
+        full_label = self._bank_account_resolver.resolve_label(
+            account_no,
+            account_name,
+            preferred_bank_name=preferred_bank_name,
+            preferred_last4=preferred_last4,
+        ).strip()
         compact_label = full_label
         for marker in (" 基本户 ", " 一般户 ", " 专户 ", " 账户 "):
             compact_label = compact_label.replace(marker, " ")

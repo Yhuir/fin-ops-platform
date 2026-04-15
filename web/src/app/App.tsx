@@ -1,6 +1,7 @@
 import { BrowserRouter, NavLink } from "react-router-dom";
 
 import SessionGate from "../components/auth/SessionGate";
+import WorkbenchHeaderControls from "../components/workbench/WorkbenchHeaderControls";
 import { AppChromeProvider, useAppChrome } from "../contexts/AppChromeContext";
 import { ImportProgressProvider, useImportProgress } from "../contexts/ImportProgressContext";
 import { MonthProvider } from "../contexts/MonthContext";
@@ -10,7 +11,7 @@ import { APP_BASE_PATH, isOaEmbeddedMode } from "./runtime";
 import "./styles.css";
 
 function AppShell() {
-  const { workbenchStatusText } = useAppChrome();
+  const { workbenchHeaderActions, workbenchStatusText } = useAppChrome();
   const { progress } = useImportProgress();
   const embedded = isOaEmbeddedMode();
 
@@ -25,11 +26,14 @@ function AppShell() {
           {workbenchStatusText ? <div className="global-status-text">{workbenchStatusText}</div> : null}
         </div>
         <div className="header-actions">
-          {progress ? (
-            <div className={`global-progress-chip ${progress.tone}`} aria-live="polite">
-              <span className="global-progress-label">进度</span>
-              <strong>{progress.label}</strong>
-            </div>
+          {workbenchHeaderActions ? (
+            <WorkbenchHeaderControls
+              canMutateData={workbenchHeaderActions.canMutateData}
+              className="shell"
+              onOpenImport={workbenchHeaderActions.onOpenImport}
+              onOpenSearch={workbenchHeaderActions.onOpenSearch}
+              onOpenSettings={workbenchHeaderActions.onOpenSettings}
+            />
           ) : null}
           <nav className="nav-links" aria-label="主导航">
             <NavLink
@@ -52,6 +56,12 @@ function AppShell() {
               成本统计
             </NavLink>
           </nav>
+          {progress ? (
+            <div className={`global-progress-chip ${progress.tone}`} aria-live="polite">
+              <span className="global-progress-label">进度</span>
+              <strong>{progress.label}</strong>
+            </div>
+          ) : null}
         </div>
       </header>
       <main className={`page-body${embedded ? " embedded" : ""}`}>
@@ -70,7 +80,7 @@ export default function App() {
       <MonthProvider>
         <ImportProgressProvider>
           <SessionProvider>
-            <AppChromeProvider>
+            <AppChromeProvider initialShellHeaderMounted>
               <SessionGate>
                 <AppShell />
               </SessionGate>

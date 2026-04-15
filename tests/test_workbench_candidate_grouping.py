@@ -4,6 +4,44 @@ from fin_ops_platform.services.workbench_candidate_grouping import WorkbenchCand
 
 
 class WorkbenchCandidateGroupingTests(unittest.TestCase):
+    def test_oa_attachment_invoice_uses_total_with_tax_for_amount_matching(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-03",
+            oa_rows=[
+                {
+                    "id": "oa-001",
+                    "type": "oa",
+                    "case_id": None,
+                    "amount": "200.00",
+                    "counterparty_name": "云南中油严家山交通服务有限公司",
+                    "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"},
+                }
+            ],
+            bank_rows=[],
+            invoice_rows=[
+                {
+                    "id": "iv-oa-att-001",
+                    "type": "invoice",
+                    "case_id": None,
+                    "source_kind": "oa_attachment_invoice",
+                    "amount": "176.99",
+                    "total_with_tax": "200.00",
+                    "issue_date": "2026-03-24",
+                    "seller_name": "云南中油严家山交通服务有限公司",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "invoice_type": "进项发票",
+                    "invoice_bank_relation": {"code": "pending_match", "label": "待匹配", "tone": "warn"},
+                }
+            ],
+        )
+
+        self.assertEqual(payload["summary"]["open_count"], 1)
+        self.assertEqual(len(payload["open"]["groups"]), 1)
+        group = payload["open"]["groups"][0]
+        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-001"])
+        self.assertEqual([row["id"] for row in group["invoice_rows"]], ["iv-oa-att-001"])
+
     def test_promotes_unique_three_way_chain_to_paired_group(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(
@@ -149,7 +187,7 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in group["bank_rows"]], ["bk-001"])
         self.assertEqual([row["id"] for row in group["invoice_rows"]], ["iv-001"])
 
-    def test_promotes_exact_open_case_oa_bank_group_into_paired(self) -> None:
+    def test_keeps_exact_open_case_oa_bank_group_in_open_until_invoice_exists(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(
             "2026-03",
@@ -180,17 +218,15 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
             invoice_rows=[],
         )
 
-        self.assertEqual(payload["summary"]["paired_count"], 1)
-        self.assertEqual(payload["summary"]["open_count"], 0)
-        group = payload["paired"]["groups"][0]
-        self.assertEqual(group["group_type"], "auto_closed")
-        self.assertEqual(group["match_confidence"], "high")
-        self.assertEqual(group["oa_rows"][0]["oa_bank_relation"]["label"], "已关联流水")
-        self.assertEqual(group["oa_rows"][0]["available_actions"], ["detail"])
-        self.assertEqual(group["bank_rows"][0]["invoice_relation"]["label"], "已关联OA")
-        self.assertEqual(group["bank_rows"][0]["available_actions"], ["detail"])
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(payload["summary"]["open_count"], 1)
+        group = payload["open"]["groups"][0]
+        self.assertEqual(group["group_type"], "candidate")
+        self.assertEqual(group["match_confidence"], "medium")
+        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-001"])
+        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bk-001"])
 
-    def test_promotes_exact_open_case_bank_invoice_group_into_paired(self) -> None:
+    def test_keeps_exact_open_case_bank_invoice_group_in_open_until_oa_exists(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(
             "2026-03",
@@ -223,15 +259,13 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
             ],
         )
 
-        self.assertEqual(payload["summary"]["paired_count"], 1)
-        self.assertEqual(payload["summary"]["open_count"], 0)
-        group = payload["paired"]["groups"][0]
-        self.assertEqual(group["group_type"], "auto_closed")
-        self.assertEqual(group["match_confidence"], "high")
-        self.assertEqual(group["bank_rows"][0]["invoice_relation"]["label"], "已关联发票")
-        self.assertEqual(group["bank_rows"][0]["available_actions"], ["detail"])
-        self.assertEqual(group["invoice_rows"][0]["invoice_bank_relation"]["label"], "已关联流水")
-        self.assertEqual(group["invoice_rows"][0]["available_actions"], ["detail"])
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(payload["summary"]["open_count"], 1)
+        group = payload["open"]["groups"][0]
+        self.assertEqual(group["group_type"], "candidate")
+        self.assertEqual(group["match_confidence"], "medium")
+        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bk-001"])
+        self.assertEqual([row["id"] for row in group["invoice_rows"]], ["iv-001"])
 
     def test_keeps_single_bank_salary_auto_match_in_paired_section(self) -> None:
         service = WorkbenchCandidateGroupingService()
@@ -356,7 +390,7 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual(len(payload["open"]["groups"]), 2)
         self.assertCountEqual(group_ids(payload["open"]["groups"], "oa_rows"), [["oa-001"], ["oa-002"]])
 
-    def test_groups_existing_case_id_rows_together_in_paired_section(self) -> None:
+    def test_demotes_existing_two_type_case_id_rows_back_to_open_section(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(
             "2026-03",
@@ -384,11 +418,12 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
             invoice_rows=[],
         )
 
-        self.assertEqual(payload["summary"]["paired_count"], 1)
-        group = payload["paired"]["groups"][0]
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(payload["summary"]["open_count"], 1)
+        group = payload["open"]["groups"][0]
         self.assertEqual(group["group_id"], "case:CASE-001")
-        self.assertEqual(group["group_type"], "manual_confirmed")
-        self.assertEqual(group["match_confidence"], "high")
+        self.assertEqual(group["group_type"], "candidate")
+        self.assertEqual(group["match_confidence"], "medium")
 
     def test_demotes_single_type_paired_invoice_group_back_to_open(self) -> None:
         service = WorkbenchCandidateGroupingService()

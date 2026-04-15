@@ -1,4 +1,5 @@
-import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import MonthPicker, { formatMonthLabel } from "../components/MonthPicker";
 import CostExplorerList from "../components/cost-statistics/CostExplorerList";
@@ -9,7 +10,9 @@ import ExportCenterModal, {
 import CostStatisticsSummaryCards from "../components/cost-statistics/CostStatisticsSummaryCards";
 import CostStatisticsTable from "../components/cost-statistics/CostStatisticsTable";
 import CostTransactionDetailModal from "../components/cost-statistics/CostTransactionDetailModal";
+import { type WorkbenchHeaderIntent, useAppChrome } from "../contexts/AppChromeContext";
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
+import { useSessionPermissions } from "../contexts/SessionContext";
 import {
   exportCostStatisticsView,
   fetchCostStatisticsExplorer,
@@ -20,6 +23,7 @@ import {
 } from "../features/cost-statistics/api";
 import type {
   CostExpenseTypeExplorerRow,
+  CostProjectScope,
   CostProjectExplorerRow,
   CostStatisticsExplorer,
   CostStatisticsExportPreview,
@@ -282,7 +286,11 @@ function ScopeYearPicker({ ariaLabel, years, value, onChange }: ScopeYearPickerP
 }
 
 export default function CostStatisticsPage() {
+  const navigate = useNavigate();
+  const { setWorkbenchHeaderActions } = useAppChrome();
+  const { canMutateData } = useSessionPermissions();
   const [viewMode, setViewMode] = useState<CostViewMode>("time");
+  const [costProjectScope, setCostProjectScope] = useState<CostProjectScope>("active");
   const [timeScopeMode, setTimeScopeMode] = useState<ExplorerScopeMode>("month");
   const [timeScopePanel, setTimeScopePanel] = useState<ScopePickerPanel | null>("month");
   const [timeScopeYear, setTimeScopeYear] = useState(DEFAULT_MONTH.slice(0, 4));
@@ -350,6 +358,26 @@ export default function CostStatisticsPage() {
   const [selectedExpenseTransactionId, setSelectedExpenseTransactionId] = useState<string | null>(null);
   const scopeControlsRef = useRef<HTMLDivElement | null>(null);
 
+  const handleRouteToWorkbenchIntent = useCallback((intent: WorkbenchHeaderIntent) => {
+    navigate("/", {
+      state: {
+        workbenchHeaderIntent: intent,
+      },
+    });
+  }, [navigate]);
+
+  useLayoutEffect(() => {
+    setWorkbenchHeaderActions({
+      canMutateData,
+      onOpenImport: (mode) => handleRouteToWorkbenchIntent({ type: "open_import", mode }),
+      onOpenSearch: () => handleRouteToWorkbenchIntent({ type: "open_search" }),
+      onOpenSettings: () => navigate("/settings"),
+    });
+    return () => {
+      setWorkbenchHeaderActions(null);
+    };
+  }, [canMutateData, handleRouteToWorkbenchIntent, navigate, setWorkbenchHeaderActions]);
+
   const explorerMonth =
     viewMode === "project" || viewMode === "bank"
       ? "all"
@@ -360,6 +388,7 @@ export default function CostStatisticsPage() {
         : expenseTypeScopeMode === "month"
           ? expenseTypeScopeMonth
           : "all";
+  const explorerCacheKey = `${costProjectScope}:${explorerMonth}`;
 
   function resetDetailSelection() {
     setTransactionDetail(null);
@@ -373,7 +402,7 @@ export default function CostStatisticsPage() {
     const controller = new AbortController();
 
     async function loadExplorer() {
-      const cachedPayload = explorerCacheRef.current.get(explorerMonth) ?? null;
+      const cachedPayload = explorerCacheRef.current.get(explorerCacheKey) ?? null;
       const hasVisibleData = Boolean(explorerData || cachedPayload);
 
       setLoadError(null);
@@ -396,9 +425,9 @@ export default function CostStatisticsPage() {
       }
 
       try {
-        const payload = await fetchCostStatisticsExplorer(explorerMonth, controller.signal);
+        const payload = await fetchCostStatisticsExplorer(explorerMonth, controller.signal, costProjectScope);
         if (!controller.signal.aborted) {
-          explorerCacheRef.current.set(explorerMonth, payload);
+          explorerCacheRef.current.set(explorerCacheKey, payload);
           setExplorerData(payload);
           if (explorerMonth === "all") {
             setExportReferenceData(payload);
@@ -418,16 +447,16 @@ export default function CostStatisticsPage() {
 
     void loadExplorer();
     return () => controller.abort();
-  }, [explorerMonth]);
+  }, [costProjectScope, explorerCacheKey, explorerMonth]);
 
   useEffect(() => {
     const controller = new AbortController();
 
     async function loadExportReferenceData() {
       try {
-        const payload = await fetchCostStatisticsExplorer("all", controller.signal);
+        const payload = await fetchCostStatisticsExplorer("all", controller.signal, costProjectScope);
         if (!controller.signal.aborted) {
-          explorerCacheRef.current.set("all", payload);
+          explorerCacheRef.current.set(`${costProjectScope}:all`, payload);
           setExportReferenceData(payload);
         }
       } catch {
@@ -439,7 +468,7 @@ export default function CostStatisticsPage() {
 
     void loadExportReferenceData();
     return () => controller.abort();
-  }, []);
+  }, [costProjectScope]);
 
   useEffect(() => {
     if (viewMode !== "time") {
@@ -725,7 +754,7 @@ export default function CostStatisticsPage() {
       setSelectedExpenseTransactionId(row.transactionId);
     }
     try {
-      const payload = await fetchCostTransactionDetail(row.transactionId);
+      const payload = await fetchCostTransactionDetail(row.transactionId, undefined, costProjectScope);
       setTransactionDetail(payload);
     } catch {
       setLoadError("流水详情加载失败，请稍后重试。");
@@ -952,11 +981,13 @@ export default function CostStatisticsPage() {
         return {
           month: timeMonth,
           view: "time",
+          projectScope: costProjectScope,
         };
       }
       return {
         month: "all",
         view: "time",
+        projectScope: costProjectScope,
         startDate: timeStartDate <= timeEndDate ? timeStartDate : timeEndDate,
         endDate: timeStartDate <= timeEndDate ? timeEndDate : timeStartDate,
       };
@@ -969,6 +1000,7 @@ export default function CostStatisticsPage() {
       return {
         month: "all",
         view: "project",
+        projectScope: costProjectScope,
         projectNames: projectExportNames,
         aggregateBy: projectAggregateBy,
         expenseTypes: projectExpenseTypes,
@@ -988,12 +1020,14 @@ export default function CostStatisticsPage() {
       return {
         month: expenseTypeMonth,
         view: "expense_type",
+        projectScope: costProjectScope,
         expenseTypes: expenseTypeSelections,
       };
     }
     return {
       month: "all",
       view: "expense_type",
+      projectScope: costProjectScope,
       expenseTypes: expenseTypeSelections,
       startDate: expenseTypeStartDate <= expenseTypeEndDate ? expenseTypeStartDate : expenseTypeEndDate,
       endDate: expenseTypeStartDate <= expenseTypeEndDate ? expenseTypeEndDate : expenseTypeStartDate,
@@ -1181,6 +1215,14 @@ export default function CostStatisticsPage() {
               onClick={() => handleViewModeChange("expenseType")}
             >
               按费用类型
+            </button>
+            <button
+              aria-label={`项目范围：${costProjectScope === "active" ? "进行中" : "所有项目"}`}
+              className={costProjectScope === "active" ? "cost-project-scope-trigger active" : "cost-project-scope-trigger"}
+              type="button"
+              onClick={() => setCostProjectScope((current) => (current === "active" ? "all" : "active"))}
+            >
+              {costProjectScope === "active" ? "进行中" : "所有项目"}
             </button>
           </div>
           <div className="cost-toolbar-meta">

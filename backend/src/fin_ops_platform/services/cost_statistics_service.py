@@ -17,6 +17,10 @@ ZERO = Decimal("0.00")
 EXCLUDED_COST_EXPENSE_TYPES = {"借款", "还款"}
 OA_INVOICE_OFFSET_AUTO_MATCH_CODE = "oa_invoice_offset_auto_match"
 OA_INVOICE_OFFSET_TAG = "冲"
+PROJECT_SCOPE_ACTIVE = "active"
+PROJECT_SCOPE_ALL = "all"
+COST_LINKED_RELATION_CODES = {"fully_linked", "automatic_match"}
+OPEN_COST_GROUP_REASONS = {"attached_unique_candidate"}
 
 
 class CostStatisticsService:
@@ -27,18 +31,20 @@ class CostStatisticsService:
         grouped_workbench_loader: Callable[[str], dict[str, Any]],
         row_detail_loader: Callable[[str], dict[str, Any]],
         raw_workbench_loader: Callable[[str], dict[str, Any]] | None = None,
+        project_active_checker: Callable[[str | None, str], bool] | None = None,
     ) -> None:
         self._import_service = import_service
         self._grouped_workbench_loader = grouped_workbench_loader
         self._row_detail_loader = row_detail_loader
+        self._project_active_checker = project_active_checker or (lambda project_id, project_name: True)
         self._project_detail_export_service = ProjectDetailExportService(
             import_service,
             grouped_workbench_loader=grouped_workbench_loader,
             raw_workbench_loader=raw_workbench_loader,
         )
 
-    def get_month_statistics(self, month: str) -> dict[str, Any]:
-        entries = self._build_cost_entries(month)
+    def get_month_statistics(self, month: str, *, project_scope: str = PROJECT_SCOPE_ACTIVE) -> dict[str, Any]:
+        entries = self._build_cost_entries(month, project_scope=project_scope)
         grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
         for entry in entries:
             key = (entry["project_name"], entry["expense_type"], entry["expense_content"])
@@ -82,8 +88,8 @@ class CostStatisticsService:
             "rows": rows,
         }
 
-    def get_explorer(self, month: str) -> dict[str, Any]:
-        entries = self._build_cost_entries(month)
+    def get_explorer(self, month: str, *, project_scope: str = PROJECT_SCOPE_ACTIVE) -> dict[str, Any]:
+        entries = self._build_cost_entries(month, project_scope=project_scope)
         sorted_entries = sorted(entries, key=lambda item: (item["trade_time"], item["transaction_id"]), reverse=True)
 
         project_groups: dict[str, dict[str, Any]] = {}
@@ -146,8 +152,18 @@ class CostStatisticsService:
             ],
         }
 
-    def get_project_statistics(self, month: str, project_name: str) -> dict[str, Any]:
-        entries = [entry for entry in self._build_cost_entries(month) if entry["project_name"] == project_name]
+    def get_project_statistics(
+        self,
+        month: str,
+        project_name: str,
+        *,
+        project_scope: str = PROJECT_SCOPE_ACTIVE,
+    ) -> dict[str, Any]:
+        entries = [
+            entry
+            for entry in self._build_cost_entries(month, project_scope=project_scope)
+            if entry["project_name"] == project_name
+        ]
         rows = [
             {
                 "transaction_id": entry["transaction_id"],
@@ -172,8 +188,18 @@ class CostStatisticsService:
             "rows": rows,
         }
 
-    def get_expense_type_statistics(self, month: str, expense_type: str) -> dict[str, Any]:
-        entries = [entry for entry in self._build_cost_entries(month) if entry["expense_type"] == expense_type]
+    def get_expense_type_statistics(
+        self,
+        month: str,
+        expense_type: str,
+        *,
+        project_scope: str = PROJECT_SCOPE_ACTIVE,
+    ) -> dict[str, Any]:
+        entries = [
+            entry
+            for entry in self._build_cost_entries(month, project_scope=project_scope)
+            if entry["expense_type"] == expense_type
+        ]
         rows = [
             {
                 "transaction_id": entry["transaction_id"],
@@ -208,7 +234,9 @@ class CostStatisticsService:
         start_date: str | None = None,
         end_date: str | None = None,
         aggregate_by: str | None = None,
+        project_scope: str = PROJECT_SCOPE_ACTIVE,
     ) -> dict[str, Any]:
+        normalized_project_scope = self._normalize_project_scope(project_scope)
         normalized_expense_types = self._normalize_expense_types(expense_types)
         normalized_project_names = self._normalize_project_names(project_names or ([project_name] if project_name else []))
         ordered_project_names = sorted(normalized_project_names)
@@ -220,6 +248,7 @@ class CostStatisticsService:
                 end_month=end_month,
                 start_date=start_date,
                 end_date=end_date,
+                project_scope=normalized_project_scope,
             )
             scope_label = self._build_scope_label(
                 month=month,
@@ -261,6 +290,7 @@ class CostStatisticsService:
                     end_date=end_date,
                     project_names=normalized_project_names,
                     expense_types=normalized_expense_types,
+                    project_scope=normalized_project_scope,
                 )
                 rows = self._build_project_aggregate_rows(entries, aggregate_by=resolved_aggregate_by or "month")
                 scope_label = self._build_scope_label(
@@ -294,21 +324,37 @@ class CostStatisticsService:
                     ],
                     total_amount=format_decimal(sum((row["amount_decimal"] for row in rows), start=ZERO)),
                 )
-            payload = self._project_detail_export_service.build_export_payload_with_options(
-                month=month,
-                project_name=ordered_project_names[0],
-                expense_types=sorted(normalized_expense_types),
-                start_month=start_month,
-                end_month=end_month,
-                start_date=start_date,
-                end_date=end_date,
-                include_oa_details=True,
-                include_invoice_details=True,
-                include_exception_rows=True,
-                include_ignored_rows=True,
-                include_expense_content_summary=True,
-                sort_by="time",
-            )
+            if self._should_include_project(None, ordered_project_names[0], normalized_project_scope):
+                payload = self._project_detail_export_service.build_export_payload_with_options(
+                    month=month,
+                    project_name=ordered_project_names[0],
+                    expense_types=sorted(normalized_expense_types),
+                    start_month=start_month,
+                    end_month=end_month,
+                    start_date=start_date,
+                    end_date=end_date,
+                    include_oa_details=True,
+                    include_invoice_details=True,
+                    include_exception_rows=True,
+                    include_ignored_rows=True,
+                    include_expense_content_summary=True,
+                    sort_by="time",
+                )
+            else:
+                payload = self._empty_project_detail_payload(
+                    month=month,
+                    project_name=ordered_project_names[0],
+                    start_month=start_month,
+                    end_month=end_month,
+                    start_date=start_date,
+                    end_date=end_date,
+                    include_oa_details=True,
+                    include_invoice_details=True,
+                    include_exception_rows=True,
+                    include_ignored_rows=True,
+                    include_expense_content_summary=True,
+                    sort_by="time",
+                )
             return self._build_preview_payload(
                 view=view,
                 file_name=self._build_filename(
@@ -343,6 +389,7 @@ class CostStatisticsService:
                 start_date=start_date,
                 end_date=end_date,
                 expense_types=normalized_expense_types,
+                project_scope=normalized_project_scope,
             )
             scope_label = self._build_scope_label(
                 month=month,
@@ -374,13 +421,22 @@ class CostStatisticsService:
             )
         raise ValueError("view must be time, project, or expense_type.")
 
-    def get_transaction_detail(self, transaction_id: str) -> dict[str, Any]:
+    def get_transaction_detail(
+        self,
+        transaction_id: str,
+        *,
+        project_scope: str = PROJECT_SCOPE_ACTIVE,
+    ) -> dict[str, Any]:
         transaction = self._import_service.get_transaction(transaction_id)
         month = (transaction.txn_date or "")[:7]
         if not month:
             raise KeyError(transaction_id)
         entry = next(
-            (candidate for candidate in self._build_cost_entries(month) if candidate["transaction_id"] == transaction_id),
+            (
+                candidate
+                for candidate in self._build_cost_entries(month, project_scope=project_scope)
+                if candidate["transaction_id"] == transaction_id
+            ),
             None,
         )
         if entry is None:
@@ -426,7 +482,9 @@ class CostStatisticsService:
         include_ignored_rows: bool = True,
         include_expense_content_summary: bool = True,
         sort_by: str = "time",
+        project_scope: str = PROJECT_SCOPE_ACTIVE,
     ) -> tuple[str, bytes]:
+        normalized_project_scope = self._normalize_project_scope(project_scope)
         normalized_expense_types = self._normalize_expense_types(expense_types)
         normalized_project_names = self._normalize_project_names(project_names or ([project_name] if project_name else []))
         ordered_project_names = sorted(normalized_project_names)
@@ -438,6 +496,7 @@ class CostStatisticsService:
                 end_month=end_month,
                 start_date=start_date,
                 end_date=end_date,
+                project_scope=normalized_project_scope,
             )
             scope_label = self._build_scope_label(
                 month=month,
@@ -453,7 +512,7 @@ class CostStatisticsService:
             filename = self._build_filename(month=scope_label, view=view)
             return filename, self._serialize_workbook(workbook)
         if view == "month":
-            payload = self.get_month_statistics(month)
+            payload = self.get_month_statistics(month, project_scope=normalized_project_scope)
             workbook = self._build_month_workbook(payload)
             filename = self._build_filename(month=month, view=view)
             return filename, self._serialize_workbook(workbook)
@@ -469,6 +528,7 @@ class CostStatisticsService:
                     end_date=end_date,
                     project_names=normalized_project_names,
                     expense_types=normalized_expense_types,
+                    project_scope=normalized_project_scope,
                 )
                 rows = self._build_project_aggregate_rows(entries, aggregate_by=resolved_aggregate_by or "month")
                 workbook = self._build_project_aggregate_workbook(rows)
@@ -486,21 +546,37 @@ class CostStatisticsService:
                     aggregate_by=resolved_aggregate_by or "month",
                 )
                 return filename, self._serialize_workbook(workbook)
-            payload = self._project_detail_export_service.build_export_payload_with_options(
-                month=month,
-                project_name=ordered_project_names[0],
-                expense_types=sorted(normalized_expense_types),
-                start_month=start_month,
-                end_month=end_month,
-                start_date=start_date,
-                end_date=end_date,
-                include_oa_details=include_oa_details,
-                include_invoice_details=include_invoice_details,
-                include_exception_rows=include_exception_rows,
-                include_ignored_rows=include_ignored_rows,
-                include_expense_content_summary=include_expense_content_summary,
-                sort_by=sort_by,
-            )
+            if self._should_include_project(None, ordered_project_names[0], normalized_project_scope):
+                payload = self._project_detail_export_service.build_export_payload_with_options(
+                    month=month,
+                    project_name=ordered_project_names[0],
+                    expense_types=sorted(normalized_expense_types),
+                    start_month=start_month,
+                    end_month=end_month,
+                    start_date=start_date,
+                    end_date=end_date,
+                    include_oa_details=include_oa_details,
+                    include_invoice_details=include_invoice_details,
+                    include_exception_rows=include_exception_rows,
+                    include_ignored_rows=include_ignored_rows,
+                    include_expense_content_summary=include_expense_content_summary,
+                    sort_by=sort_by,
+                )
+            else:
+                payload = self._empty_project_detail_payload(
+                    month=month,
+                    project_name=ordered_project_names[0],
+                    start_month=start_month,
+                    end_month=end_month,
+                    start_date=start_date,
+                    end_date=end_date,
+                    include_oa_details=include_oa_details,
+                    include_invoice_details=include_invoice_details,
+                    include_exception_rows=include_exception_rows,
+                    include_ignored_rows=include_ignored_rows,
+                    include_expense_content_summary=include_expense_content_summary,
+                    sort_by=sort_by,
+                )
             workbook = self._project_detail_export_service.build_workbook(payload)
             filename = self._build_filename(
                 month=payload["summary"]["scope_label"],
@@ -518,6 +594,7 @@ class CostStatisticsService:
                 start_date=start_date,
                 end_date=end_date,
                 expense_types=normalized_expense_types,
+                project_scope=normalized_project_scope,
             )
             scope_label = self._build_scope_label(
                 month=month,
@@ -547,7 +624,7 @@ class CostStatisticsService:
         if view == "transaction":
             if not transaction_id:
                 raise ValueError("transaction_id is required for transaction export")
-            payload = self.get_transaction_detail(transaction_id)
+            payload = self.get_transaction_detail(transaction_id, project_scope=normalized_project_scope)
             workbook = self._build_transaction_workbook(payload)
             filename = self._build_filename(
                 month=payload["month"],
@@ -558,11 +635,19 @@ class CostStatisticsService:
             return filename, self._serialize_workbook(workbook)
         raise ValueError(f"unsupported export view: {view}")
 
-    def _build_cost_entries(self, month: str) -> list[dict[str, Any]]:
+    def _build_cost_entries(self, month: str, *, project_scope: str = PROJECT_SCOPE_ACTIVE) -> list[dict[str, Any]]:
+        normalized_project_scope = self._normalize_project_scope(project_scope)
         entries: list[dict[str, Any]] = []
         for scoped_month in self._resolve_target_months(month):
             payload = self._grouped_workbench_loader(scoped_month)
-            groups = list(((payload.get("paired") or {}).get("groups") or []))
+            groups = [
+                *list(((payload.get("paired") or {}).get("groups") or [])),
+                *[
+                    group
+                    for group in list(((payload.get("open") or {}).get("groups") or []))
+                    if self._is_cost_eligible_open_group(group)
+                ],
+            ]
             for group in groups:
                 oa_rows = list(group.get("oa_rows") or [])
                 bank_rows = list(group.get("bank_rows") or [])
@@ -585,13 +670,38 @@ class CostStatisticsService:
                             "direction": str(bank_row.get("direction") or "支出"),
                             "remark": str(bank_row.get("remark") or ""),
                             "project_name": context["project_name"],
+                            "project_id": context["project_id"],
                             "expense_type": context["expense_type"],
                             "expense_content": context["expense_content"],
                             "oa_applicant": context["oa_applicant"],
                             "amount_decimal": amount,
                         }
                     )
-        return entries
+        return self._filter_entries_by_project_scope(entries, normalized_project_scope)
+
+    @staticmethod
+    def _is_linked_cost_open_group(group: dict[str, Any]) -> bool:
+        for row in list(group.get("oa_rows") or []):
+            relation = row.get("oa_bank_relation")
+            if isinstance(relation, dict) and str(relation.get("code", "")).strip() in COST_LINKED_RELATION_CODES:
+                return True
+        return False
+
+    @classmethod
+    def _is_cost_eligible_open_group(cls, group: dict[str, Any]) -> bool:
+        if cls._is_linked_cost_open_group(group):
+            return True
+        if str(group.get("reason") or "").strip() in OPEN_COST_GROUP_REASONS:
+            return True
+        for row in list(group.get("bank_rows") or []):
+            actions = {
+                str(action).strip()
+                for action in list(row.get("available_actions") or [])
+                if str(action).strip()
+            }
+            if "cancel_link" in actions:
+                return True
+        return False
 
     def _build_filtered_entries(
         self,
@@ -604,7 +714,9 @@ class CostStatisticsService:
         project_name: str | None = None,
         project_names: set[str] | list[str] | None = None,
         expense_types: set[str] | None = None,
+        project_scope: str = PROJECT_SCOPE_ACTIVE,
     ) -> list[dict[str, Any]]:
+        normalized_project_scope = self._normalize_project_scope(project_scope)
         normalized_project_name = self._clean_text(project_name)
         normalized_project_names = self._normalize_project_names(project_names)
         normalized_expense_types = self._normalize_expense_types(expense_types)
@@ -615,7 +727,8 @@ class CostStatisticsService:
                 end_month=end_month,
                 start_date=start_date,
                 end_date=end_date,
-            )
+            ),
+            project_scope=normalized_project_scope,
         )
         entries = self._filter_entries_by_date_range(entries, start_date=start_date, end_date=end_date)
         if normalized_project_name:
@@ -626,11 +739,53 @@ class CostStatisticsService:
             entries = [entry for entry in entries if entry["expense_type"] in normalized_expense_types]
         return sorted(entries, key=lambda item: (item["trade_time"], item["transaction_id"]), reverse=True)
 
-    def _build_cost_entries_for_months(self, months: list[str]) -> list[dict[str, Any]]:
+    def _build_cost_entries_for_months(
+        self,
+        months: list[str],
+        *,
+        project_scope: str = PROJECT_SCOPE_ACTIVE,
+    ) -> list[dict[str, Any]]:
         entries: list[dict[str, Any]] = []
         for scoped_month in months:
-            entries.extend(self._build_cost_entries(scoped_month))
+            entries.extend(self._build_cost_entries(scoped_month, project_scope=project_scope))
         return entries
+
+    def _filter_entries_by_project_scope(
+        self,
+        entries: list[dict[str, Any]],
+        project_scope: str,
+    ) -> list[dict[str, Any]]:
+        normalized_scope = self._normalize_project_scope(project_scope)
+        if normalized_scope == PROJECT_SCOPE_ALL:
+            return entries
+        return [
+            entry
+            for entry in entries
+            if self._should_include_project(
+                entry.get("project_id"),
+                str(entry.get("project_name") or ""),
+                normalized_scope,
+            )
+        ]
+
+    def _should_include_project(
+        self,
+        project_id: object,
+        project_name: str,
+        project_scope: str,
+    ) -> bool:
+        normalized_scope = self._normalize_project_scope(project_scope)
+        if normalized_scope == PROJECT_SCOPE_ALL:
+            return True
+        normalized_project_id = str(project_id or "").strip() or None
+        return bool(self._project_active_checker(normalized_project_id, self._clean_text(project_name)))
+
+    @staticmethod
+    def _normalize_project_scope(project_scope: str | None) -> str:
+        normalized_scope = str(project_scope or PROJECT_SCOPE_ACTIVE).strip().lower()
+        if normalized_scope not in {PROJECT_SCOPE_ACTIVE, PROJECT_SCOPE_ALL}:
+            raise ValueError("project_scope must be active or all")
+        return normalized_scope
 
     def _resolve_target_months(
         self,
@@ -942,6 +1097,70 @@ class CostStatisticsService:
             sheet_names.append("异常与未闭环")
         return sheet_names
 
+    def _empty_project_detail_payload(
+        self,
+        *,
+        month: str,
+        project_name: str,
+        start_month: str | None = None,
+        end_month: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        include_oa_details: bool,
+        include_invoice_details: bool,
+        include_exception_rows: bool,
+        include_ignored_rows: bool,
+        include_expense_content_summary: bool,
+        sort_by: str,
+    ) -> dict[str, Any]:
+        target_months = self._resolve_target_months(
+            month,
+            start_month=start_month,
+            end_month=end_month,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        scope_label = self._build_scope_label(
+            month=month,
+            start_month=start_month,
+            end_month=end_month,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        return {
+            "month": month,
+            "project_name": project_name,
+            "months": target_months,
+            "options": {
+                "include_oa_details": include_oa_details,
+                "include_invoice_details": include_invoice_details,
+                "include_exception_rows": include_exception_rows,
+                "include_ignored_rows": include_ignored_rows,
+                "include_expense_content_summary": include_expense_content_summary,
+                "sort_by": sort_by,
+                "scope_label": scope_label,
+                "expense_types": [],
+            },
+            "summary": {
+                "project_name": project_name,
+                "scope_label": scope_label,
+                "total_amount": format_decimal(ZERO),
+                "transaction_count": 0,
+                "expense_type_count": 0,
+                "oa_count": 0,
+                "invoice_count": 0,
+                "exception_count": 0,
+                "ignored_count": 0,
+            },
+            "expense_type_rows": [],
+            "expense_content_rows": [],
+            "transaction_rows": [],
+            "oa_rows": [],
+            "invoice_rows": [],
+            "exception_rows": [],
+            "ignored_rows": [],
+        }
+
     @staticmethod
     def _build_preview_payload(
         *,
@@ -969,11 +1188,12 @@ class CostStatisticsService:
         }
 
     def _resolve_group_cost_context(self, oa_rows: list[dict[str, Any]]) -> dict[str, str] | None:
-        contexts: set[tuple[str, str, str, str]] = set()
+        contexts: set[tuple[str, str, str, str, str]] = set()
         for row in oa_rows:
             if self._is_cost_excluded_oa_row(row):
                 continue
             project_name = self._clean_text(row.get("project_name"))
+            project_id = self._clean_text(row.get("project_id"))
             expense_type = self._clean_text(row.get("expense_type"))
             expense_content = self._clean_text(row.get("expense_content")) or self._clean_text(row.get("reason"))
             applicant = self._clean_text(row.get("applicant"))
@@ -989,12 +1209,13 @@ class CostStatisticsService:
                 continue
             if not (project_name and expense_type and expense_content):
                 continue
-            contexts.add((project_name, expense_type, expense_content, applicant))
+            contexts.add((project_name, project_id, expense_type, expense_content, applicant))
         if len(contexts) != 1:
             return None
-        project_name, expense_type, expense_content, applicant = next(iter(contexts))
+        project_name, project_id, expense_type, expense_content, applicant = next(iter(contexts))
         return {
             "project_name": project_name,
+            "project_id": project_id,
             "expense_type": expense_type,
             "expense_content": expense_content,
             "oa_applicant": applicant or "—",

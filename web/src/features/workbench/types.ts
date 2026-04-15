@@ -31,6 +31,7 @@ export type WorkbenchProjectSetting = {
   projectCode: string;
   projectName: string;
   projectStatus: "active" | "completed";
+  source?: "oa" | "manual";
   departmentName?: string | null;
   ownerName?: string | null;
 };

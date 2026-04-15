@@ -223,6 +223,7 @@ class Application:
             grouped_workbench_loader=self._build_api_workbench_payload,
             row_detail_loader=self._get_api_workbench_row_detail_payload,
             raw_workbench_loader=self._build_raw_workbench_payload,
+            project_active_checker=self._app_settings_service.is_project_active,
         )
         self._search_service = SearchService(
             known_months_loader=self._list_search_months,
@@ -307,6 +308,13 @@ class Application:
             return self._handle_api_workbench_settings()
         if method == "POST" and route_path == "/api/workbench/settings":
             return self._handle_api_workbench_settings_update(body)
+        if method == "POST" and route_path == "/api/workbench/settings/projects/sync":
+            return self._handle_api_workbench_settings_projects_sync(body)
+        if method == "POST" and route_path == "/api/workbench/settings/projects":
+            return self._handle_api_workbench_settings_project_create(body)
+        if method == "DELETE" and route_path.startswith("/api/workbench/settings/projects/"):
+            project_id = unquote(route_path.rsplit("/", 1)[-1])
+            return self._handle_api_workbench_settings_project_delete(project_id)
         if method == "POST" and route_path == "/api/workbench/settings/data-reset":
             return self._handle_api_workbench_settings_data_reset(body, headers)
         if method == "GET" and route_path.startswith("/api/workbench/rows/"):
@@ -358,10 +366,12 @@ class Application:
             return self._handle_api_tax_offset_calculate(body)
         if method == "GET" and route_path == "/api/cost-statistics":
             month = query.get("month", [None])[0]
-            return self._handle_api_cost_statistics(month)
+            project_scope = query.get("project_scope", [None])[0]
+            return self._handle_api_cost_statistics(month, project_scope)
         if method == "GET" and route_path == "/api/cost-statistics/explorer":
             month = query.get("month", [None])[0]
-            return self._handle_api_cost_statistics_explorer(month)
+            project_scope = query.get("project_scope", [None])[0]
+            return self._handle_api_cost_statistics_explorer(month, project_scope)
         if method == "GET" and route_path == "/api/cost-statistics/export-preview":
             month = query.get("month", [None])[0]
             view = query.get("view", [None])[0]
@@ -372,6 +382,7 @@ class Application:
             start_date = query.get("start_date", [None])[0]
             end_date = query.get("end_date", [None])[0]
             aggregate_by = query.get("aggregate_by", [None])[0]
+            project_scope = query.get("project_scope", [None])[0]
             return self._handle_api_cost_statistics_export_preview(
                 month=month,
                 view=view,
@@ -382,6 +393,7 @@ class Application:
                 start_date=start_date,
                 end_date=end_date,
                 aggregate_by=aggregate_by,
+                project_scope=project_scope,
             )
         if method == "GET" and route_path == "/api/cost-statistics/export":
             month = query.get("month", [None])[0]
@@ -394,6 +406,7 @@ class Application:
             start_date = query.get("start_date", [None])[0]
             end_date = query.get("end_date", [None])[0]
             aggregate_by = query.get("aggregate_by", [None])[0]
+            project_scope = query.get("project_scope", [None])[0]
             include_oa_details = self._parse_optional_bool(query.get("include_oa_details", [None])[0], default=True)
             include_invoice_details = self._parse_optional_bool(query.get("include_invoice_details", [None])[0], default=True)
             include_exception_rows = self._parse_optional_bool(query.get("include_exception_rows", [None])[0], default=True)
@@ -420,14 +433,17 @@ class Application:
                 include_ignored_rows=include_ignored_rows,
                 include_expense_content_summary=include_expense_content_summary,
                 sort_by=sort_by,
+                project_scope=project_scope,
             )
         if method == "GET" and route_path.startswith("/api/cost-statistics/projects/"):
             month = query.get("month", [None])[0]
+            project_scope = query.get("project_scope", [None])[0]
             project_name = unquote(route_path.rsplit("/", 1)[-1])
-            return self._handle_api_cost_statistics_project(month, project_name)
+            return self._handle_api_cost_statistics_project(month, project_name, project_scope)
         if method == "GET" and route_path.startswith("/api/cost-statistics/transactions/"):
             transaction_id = route_path.rsplit("/", 1)[-1]
-            return self._handle_api_cost_statistics_transaction(transaction_id)
+            project_scope = query.get("project_scope", [None])[0]
+            return self._handle_api_cost_statistics_transaction(transaction_id, project_scope)
         if method == "GET" and route_path == "/workbench/prototype":
             return self._handle_workbench_prototype()
         if method == "GET" and route_path == "/workbench":
@@ -1044,6 +1060,69 @@ class Application:
         self._search_service.clear_cache()
         return self._json_response(HTTPStatus.OK, updated_payload)
 
+    def _handle_api_workbench_settings_projects_sync(self, body: str | bytes | None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        actor_id = str(payload.get("actor_id", "")).strip()
+        if not actor_id:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_project_sync_request", "message": "actor_id is required."},
+            )
+        try:
+            run = self._project_costing_service.sync_projects_from_oa(actor_id=actor_id)
+        except Exception as exc:
+            return self._json_response(
+                HTTPStatus.BAD_GATEWAY,
+                {
+                    "error": "oa_project_sync_failed",
+                    "message": f"OA 项目同步失败：{exc}",
+                },
+            )
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "sync": self._serialize_sync_run(run),
+                "settings": self._app_settings_service.get_settings_payload(),
+            },
+        )
+
+    def _handle_api_workbench_settings_project_create(self, body: str | bytes | None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        actor_id = str(payload.get("actor_id", "")).strip()
+        if not actor_id:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_project_create_request", "message": "actor_id is required."},
+            )
+        try:
+            settings_payload = self._app_settings_service.create_manual_project(
+                actor_id=actor_id,
+                project_code=str(payload.get("project_code", "")),
+                project_name=str(payload.get("project_name", "")),
+                department_name=payload.get("department_name"),
+                owner_name=payload.get("owner_name"),
+            )
+        except ValueError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_project_create_request", "message": str(exc)},
+            )
+        return self._json_response(HTTPStatus.OK, {"settings": settings_payload})
+
+    def _handle_api_workbench_settings_project_delete(self, project_id: str) -> Response:
+        normalized_project_id = str(project_id).strip()
+        if not normalized_project_id:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_project_delete_request", "message": "project_id is required."},
+            )
+        settings_payload = self._app_settings_service.delete_project(normalized_project_id)
+        return self._json_response(HTTPStatus.OK, {"settings": settings_payload})
+
     def _handle_api_workbench_settings_data_reset(
         self,
         body: str | bytes | None,
@@ -1240,19 +1319,43 @@ class Application:
         payload["row"] = self._workbench_override_service.apply_to_row(payload["row"])
         return payload
 
-    def _handle_api_cost_statistics(self, month: str | None) -> Response:
+    def _handle_api_cost_statistics(self, month: str | None, project_scope: str | None) -> Response:
         current_month = month or datetime.now().strftime("%Y-%m")
-        payload = self._cost_statistics_service.get_month_statistics(current_month)
+        try:
+            payload = self._cost_statistics_service.get_month_statistics(
+                current_month,
+                project_scope=project_scope or "active",
+            )
+        except ValueError as error:
+            return self._cost_statistics_project_scope_error_response(error)
         return self._json_response(HTTPStatus.OK, payload)
 
-    def _handle_api_cost_statistics_explorer(self, month: str | None) -> Response:
+    def _handle_api_cost_statistics_explorer(self, month: str | None, project_scope: str | None) -> Response:
         current_month = month or datetime.now().strftime("%Y-%m")
-        payload = self._cost_statistics_service.get_explorer(current_month)
+        try:
+            payload = self._cost_statistics_service.get_explorer(
+                current_month,
+                project_scope=project_scope or "active",
+            )
+        except ValueError as error:
+            return self._cost_statistics_project_scope_error_response(error)
         return self._json_response(HTTPStatus.OK, payload)
 
-    def _handle_api_cost_statistics_project(self, month: str | None, project_name: str) -> Response:
+    def _handle_api_cost_statistics_project(
+        self,
+        month: str | None,
+        project_name: str,
+        project_scope: str | None,
+    ) -> Response:
         current_month = month or datetime.now().strftime("%Y-%m")
-        payload = self._cost_statistics_service.get_project_statistics(current_month, project_name)
+        try:
+            payload = self._cost_statistics_service.get_project_statistics(
+                current_month,
+                project_name,
+                project_scope=project_scope or "active",
+            )
+        except ValueError as error:
+            return self._cost_statistics_project_scope_error_response(error)
         return self._json_response(HTTPStatus.OK, payload)
 
     def _handle_api_cost_statistics_export(
@@ -1274,6 +1377,7 @@ class Application:
         include_ignored_rows: bool = True,
         include_expense_content_summary: bool = True,
         sort_by: str | None = None,
+        project_scope: str | None = None,
     ) -> Response:
         current_month = month or datetime.now().strftime("%Y-%m")
         if view not in {"month", "time", "project", "expense_type", "transaction"}:
@@ -1299,6 +1403,7 @@ class Application:
                 include_ignored_rows=include_ignored_rows,
                 include_expense_content_summary=include_expense_content_summary,
                 sort_by=sort_by or "time",
+                project_scope=project_scope or "active",
             )
         except KeyError:
             return self._json_response(
@@ -1306,6 +1411,8 @@ class Application:
                 {"error": "cost_statistics_transaction_not_found", "transaction_id": transaction_id},
             )
         except ValueError as error:
+            if str(error) == "project_scope must be active or all":
+                return self._cost_statistics_project_scope_error_response(error)
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_cost_statistics_export_request", "message": str(error)},
@@ -1334,6 +1441,7 @@ class Application:
         start_date: str | None = None,
         end_date: str | None = None,
         aggregate_by: str | None = None,
+        project_scope: str | None = None,
     ) -> Response:
         current_month = month or datetime.now().strftime("%Y-%m")
         if view not in {"time", "project", "expense_type"}:
@@ -1355,23 +1463,44 @@ class Application:
                 start_date=start_date,
                 end_date=end_date,
                 aggregate_by=aggregate_by,
+                project_scope=project_scope or "active",
             )
         except ValueError as error:
+            if str(error) == "project_scope must be active or all":
+                return self._cost_statistics_project_scope_error_response(error)
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_cost_statistics_export_preview_request", "message": str(error)},
             )
         return self._json_response(HTTPStatus.OK, payload)
 
-    def _handle_api_cost_statistics_transaction(self, transaction_id: str) -> Response:
+    def _handle_api_cost_statistics_transaction(
+        self,
+        transaction_id: str,
+        project_scope: str | None,
+    ) -> Response:
         try:
-            payload = self._cost_statistics_service.get_transaction_detail(transaction_id)
+            payload = self._cost_statistics_service.get_transaction_detail(
+                transaction_id,
+                project_scope=project_scope or "active",
+            )
+        except ValueError as error:
+            return self._cost_statistics_project_scope_error_response(error)
         except KeyError:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
                 {"error": "cost_statistics_transaction_not_found", "transaction_id": transaction_id},
             )
         return self._json_response(HTTPStatus.OK, payload)
+
+    def _cost_statistics_project_scope_error_response(self, error: ValueError) -> Response:
+        return self._json_response(
+            HTTPStatus.BAD_REQUEST,
+            {
+                "error": "invalid_cost_statistics_project_scope",
+                "message": str(error),
+            },
+        )
 
     def _handle_api_workbench_confirm_link(self, body: str | None, *, request_id: str | None = None) -> Response:
         payload, error = self._load_json_body(body)
@@ -2635,7 +2764,9 @@ class Application:
                     content=file.content,
                     template_code_override=override.get("template_code"),
                     batch_type_override=override.get("batch_type"),
+                    selected_bank_mapping_id=override.get("bank_mapping_id"),
                     selected_bank_name=override.get("bank_name"),
+                    selected_bank_last4=override.get("last4"),
                 )
                 for file, override in zip(files, file_overrides)
             ]
@@ -2753,7 +2884,7 @@ class Application:
             normalized.append(
                 {
                     key: value.strip()
-                    for key in ("template_code", "batch_type", "bank_name")
+                    for key in ("template_code", "batch_type", "bank_mapping_id", "bank_name", "last4")
                     if isinstance((value := raw_override.get(key)), str) and value.strip()
                 }
             )

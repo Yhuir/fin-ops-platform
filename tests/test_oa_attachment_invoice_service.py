@@ -119,6 +119,25 @@ DIGITAL_INVOICE_TEXT_WITH_DETACHED_NUMBER_AND_DATE = """
 开票人：卢朦
 """
 
+HOTEL_PDF_TEXT = """
+电子发票（普通发票）
+发票号码：26532000000423491746
+开票日期：2026年03月20日
+购 名称：云南溯源科技有限公司 销 名称：弥勒市豪荟酒店（个体工商户）
+买 售
+方 方
+信 统一社会信用代码/纳税人识别号：915300007194052520 信 统一社会信用代码/纳税人识别号：92532526MA6NTMA00H
+息 息
+项目名称 规格型号 单 位 数 量 单 价 金 额 税率/征收率 税 额
+*住宿服务*住宿费 天 4 72.2772277227723 289.11 1% 2.89
+合 计 ¥289.11 ¥2.89
+价税合计（大写） 贰佰玖拾贰圆整 （小写）¥292.00
+备
+注
+开票人：顾龙姣
+顾龙姣
+"""
+
 
 class OAAttachmentInvoiceServiceTests(unittest.TestCase):
     def test_build_download_url_percent_encodes_absolute_unicode_url(self) -> None:
@@ -218,7 +237,7 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         self.assertEqual(invoice["tax_amount"], "23.01")
         self.assertEqual(invoice["total_with_tax"], "200.00")
         self.assertEqual(invoice["tax_rate"], "13%")
-        self.assertEqual(invoice["amount"], "200.00")
+        self.assertEqual(invoice["amount"], "176.99")
 
     def test_parse_invoice_text_accepts_digital_invoice_when_number_and_date_are_detached(self) -> None:
         service = OAAttachmentInvoiceService()
@@ -237,6 +256,22 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         self.assertEqual(invoice["tax_amount"], "3.96")
         self.assertEqual(invoice["total_with_tax"], "70.00")
         self.assertEqual(invoice["tax_rate"], "6%")
+
+    def test_parse_invoice_text_keeps_net_amount_separate_from_total_with_tax(self) -> None:
+        service = OAAttachmentInvoiceService()
+
+        invoice = service._parse_invoice_text(HOTEL_PDF_TEXT)
+
+        self.assertIsNotNone(invoice)
+        assert invoice is not None
+        self.assertEqual(invoice["invoice_no"], "26532000000423491746")
+        self.assertEqual(invoice["buyer_name"], "云南溯源科技有限公司")
+        self.assertEqual(invoice["seller_name"], "弥勒市豪荟酒店")
+        self.assertEqual(invoice["amount"], "289.11")
+        self.assertEqual(invoice["net_amount"], "289.11")
+        self.assertEqual(invoice["tax_amount"], "2.89")
+        self.assertEqual(invoice["total_with_tax"], "292.00")
+        self.assertEqual(invoice["tax_rate"], "1%")
 
 
 if __name__ == "__main__":

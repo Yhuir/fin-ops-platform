@@ -1,5 +1,6 @@
 import type {
   CostExpenseTypeExplorerRow,
+  CostProjectScope,
   CostProjectExplorerRow,
   CostStatisticsExportPreview,
   CostStatisticsExplorer,
@@ -131,11 +132,25 @@ async function requestJson<T>(url: string, init: RequestInit = {}) {
   return payload;
 }
 
+function buildScopedUrl(path: string, params: Record<string, string | undefined>) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value) {
+      query.set(key, value);
+    }
+  }
+  return `${path}?${query.toString()}`;
+}
+
 export async function fetchCostStatisticsMonth(
   month: string,
   signal?: AbortSignal,
+  projectScope: CostProjectScope = "active",
 ): Promise<CostMonthStatistics> {
-  const payload = await requestJson<ApiCostMonthStatistics>(`/api/cost-statistics?month=${month}`, {
+  const payload = await requestJson<ApiCostMonthStatistics>(buildScopedUrl("/api/cost-statistics", {
+    month,
+    project_scope: projectScope,
+  }), {
     method: "GET",
     signal,
   });
@@ -157,11 +172,18 @@ export async function fetchCostStatisticsMonth(
 export async function fetchCostStatisticsExplorer(
   month: string,
   signal?: AbortSignal,
+  projectScope: CostProjectScope = "active",
 ): Promise<CostStatisticsExplorer> {
-  const payload = await requestJson<ApiCostStatisticsExplorer>(`/api/cost-statistics/explorer?month=${month}`, {
-    method: "GET",
-    signal,
-  });
+  const payload = await requestJson<ApiCostStatisticsExplorer>(
+    buildScopedUrl("/api/cost-statistics/explorer", {
+      month,
+      project_scope: projectScope,
+    }),
+    {
+      method: "GET",
+      signal,
+    },
+  );
 
   return {
     month: payload.month,
@@ -197,9 +219,13 @@ export async function fetchProjectCostStatistics(
   month: string,
   projectName: string,
   signal?: AbortSignal,
+  projectScope: CostProjectScope = "active",
 ): Promise<CostProjectStatistics> {
   const payload = await requestJson<ApiCostProjectStatistics>(
-    `/api/cost-statistics/projects/${encodeURIComponent(projectName)}?month=${month}`,
+    buildScopedUrl(`/api/cost-statistics/projects/${encodeURIComponent(projectName)}`, {
+      month,
+      project_scope: projectScope,
+    }),
     {
       method: "GET",
       signal,
@@ -227,9 +253,12 @@ export async function fetchProjectCostStatistics(
 export async function fetchCostTransactionDetail(
   transactionId: string,
   signal?: AbortSignal,
+  projectScope: CostProjectScope = "active",
 ): Promise<CostTransactionDetail> {
   const payload = await requestJson<ApiCostTransactionDetail>(
-    `/api/cost-statistics/transactions/${encodeURIComponent(transactionId)}`,
+    buildScopedUrl(`/api/cost-statistics/transactions/${encodeURIComponent(transactionId)}`, {
+      project_scope: projectScope,
+    }),
     {
       method: "GET",
       signal,
@@ -259,6 +288,7 @@ export async function fetchCostTransactionDetail(
 export type ProjectCostExportParams = {
   month: string;
   view: "project";
+  projectScope?: CostProjectScope;
   projectNames: string[];
   expenseTypes?: string[];
   aggregateBy: "month" | "year";
@@ -274,6 +304,7 @@ export type CostExportParams =
   | {
       month: string;
       view: "time";
+      projectScope?: CostProjectScope;
       startMonth?: string;
       endMonth?: string;
       startDate?: string;
@@ -282,11 +313,13 @@ export type CostExportParams =
   | {
       month: string;
       view: "month";
+      projectScope?: CostProjectScope;
     }
   | ProjectCostExportParams
   | {
       month: string;
       view: "expense_type";
+      projectScope?: CostProjectScope;
       expenseTypes: string[];
       startMonth?: string;
       endMonth?: string;
@@ -296,6 +329,7 @@ export type CostExportParams =
   | {
       month: string;
       view: "transaction";
+      projectScope?: CostProjectScope;
       transactionId: string;
       projectName?: string;
     };
@@ -362,6 +396,7 @@ function buildCostStatisticsQuery(
     month: params.month,
     view: params.view,
   });
+  query.set("project_scope", params.projectScope ?? "active");
 
   if ("startMonth" in params && params.startMonth) {
     query.set("start_month", params.startMonth);
@@ -452,6 +487,7 @@ export type PreviewCostExportParams =
   | {
       month: string;
       view: "time";
+      projectScope?: CostProjectScope;
       startMonth?: string;
       endMonth?: string;
       startDate?: string;
@@ -460,6 +496,7 @@ export type PreviewCostExportParams =
   | {
       month: string;
       view: "project";
+      projectScope?: CostProjectScope;
       projectNames: string[];
       aggregateBy: "month" | "year";
       expenseTypes?: string[];
@@ -467,6 +504,7 @@ export type PreviewCostExportParams =
   | {
       month: string;
       view: "expense_type";
+      projectScope?: CostProjectScope;
       expenseTypes: string[];
       startMonth?: string;
       endMonth?: string;

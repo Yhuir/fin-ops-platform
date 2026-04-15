@@ -107,6 +107,7 @@ type ApiWorkbenchSettings = {
       project_code: string;
       project_name: string;
       project_status: "active" | "completed";
+      source?: "oa" | "manual" | null;
       department_name?: string | null;
       owner_name?: string | null;
     }>;
@@ -115,6 +116,7 @@ type ApiWorkbenchSettings = {
       project_code: string;
       project_name: string;
       project_status: "active" | "completed";
+      source?: "oa" | "manual" | null;
       department_name?: string | null;
       owner_name?: string | null;
     }>;
@@ -240,6 +242,20 @@ type ApiWorkbenchSettingsDataResetResult = {
 type WorkbenchSettingsDataResetPayload = {
   action: WorkbenchSettingsDataResetAction;
   oaPassword: string;
+};
+
+type ApiWorkbenchSettingsProjectMutationResult = {
+  settings: ApiWorkbenchSettings;
+};
+
+type ApiWorkbenchSettingsProjectSyncResult = {
+  settings: ApiWorkbenchSettings;
+};
+
+type WorkbenchSettingsProjectCreatePayload = {
+  actorId: string;
+  projectCode: string;
+  projectName: string;
 };
 
 function toDisplayValue(value: string | null | undefined, fallback = "--") {
@@ -471,6 +487,7 @@ function mapProjectSetting(project: ApiWorkbenchSettings["projects"]["active"][n
     projectCode: project.project_code,
     projectName: project.project_name,
     projectStatus: project.project_status,
+    source: project.source === "manual" ? "manual" : "oa",
     departmentName: project.department_name,
     ownerName: project.owner_name,
   };
@@ -816,6 +833,46 @@ export async function resetWorkbenchSettingsData(
     rebuildStatus: result.rebuild_status ?? "unknown",
     message: result.message ?? "数据重置已完成。",
   };
+}
+
+export async function syncWorkbenchSettingsProjects(actorId: string): Promise<WorkbenchSettings> {
+  const payload = await requestJson<ApiWorkbenchSettingsProjectSyncResult>("/api/workbench/settings/projects/sync", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      actor_id: actorId,
+    }),
+  });
+  return mapWorkbenchSettings(payload.settings);
+}
+
+export async function createWorkbenchSettingsProject(
+  payload: WorkbenchSettingsProjectCreatePayload,
+): Promise<WorkbenchSettings> {
+  const result = await requestJson<ApiWorkbenchSettingsProjectMutationResult>("/api/workbench/settings/projects", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      actor_id: payload.actorId,
+      project_code: payload.projectCode,
+      project_name: payload.projectName,
+    }),
+  });
+  return mapWorkbenchSettings(result.settings);
+}
+
+export async function deleteWorkbenchSettingsProject(projectId: string): Promise<WorkbenchSettings> {
+  const payload = await requestJson<ApiWorkbenchSettingsProjectMutationResult>(
+    `/api/workbench/settings/projects/${encodeURIComponent(projectId)}`,
+    {
+      method: "DELETE",
+    },
+  );
+  return mapWorkbenchSettings(payload.settings);
 }
 
 export async function fetchWorkbenchRowDetail(rowId: string, signal?: AbortSignal): Promise<WorkbenchRecord> {

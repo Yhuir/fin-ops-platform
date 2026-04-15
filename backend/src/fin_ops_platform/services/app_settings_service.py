@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from fin_ops_platform.domain.models import ProjectMaster
 from fin_ops_platform.services.access_control_service import DEFAULT_ADMIN_USERNAME
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
 from fin_ops_platform.services.project_costing import ProjectCostingService
@@ -30,17 +31,23 @@ class AppSettingsService:
         self._snapshot = self._normalize_settings(
             state_store.load_app_settings() if state_store is not None else {}
         )
+        self._restore_manual_projects()
 
     def get_settings_payload(self) -> dict[str, Any]:
         completed_ids = set(self._snapshot["completed_project_ids"])
+        manual_project_ids = {
+            str(project["id"])
+            for project in self._snapshot["manual_projects"]
+        }
         active_projects: list[dict[str, Any]] = []
         completed_projects: list[dict[str, Any]] = []
-        for project in self._project_costing_service.list_projects():
+        for project in self._list_known_projects():
             payload = {
                 "id": project.id,
                 "project_code": project.project_code,
                 "project_name": project.project_name,
                 "project_status": "completed" if project.id in completed_ids else "active",
+                "source": "manual" if project.id in manual_project_ids else "oa",
                 "department_name": project.department_name,
                 "owner_name": project.owner_name,
             }
@@ -89,6 +96,7 @@ class AppSettingsService:
         workbench_column_layouts: dict[str, Any] | None = None,
         oa_retention: dict[str, Any] | None = None,
         oa_invoice_offset: dict[str, Any] | None = None,
+        manual_projects: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         normalized_snapshot = self._normalize_settings(
             {
@@ -100,6 +108,12 @@ class AppSettingsService:
                 "workbench_column_layouts": workbench_column_layouts or {},
                 "oa_retention": oa_retention or {},
                 "oa_invoice_offset": oa_invoice_offset or {},
+                "manual_projects": (
+                    manual_projects
+                    if manual_projects is not None
+                    else self._snapshot.get("manual_projects", [])
+                ),
+                "synced_projects": self._snapshot.get("synced_projects", []),
             }
         )
         previous_snapshot = dict(self._snapshot)
@@ -113,7 +127,124 @@ class AppSettingsService:
                 self._oa_role_sync_service.sync_access_control(previous_snapshot)
             raise
         self._snapshot = normalized_snapshot
+        self._restore_manual_projects()
         return self.get_settings_payload()
+
+    def sync_oa_projects(self, *, actor_id: str) -> dict[str, Any]:
+        self._project_costing_service.sync_projects_from_oa(actor_id=actor_id)
+        next_snapshot = dict(self._snapshot)
+        next_snapshot["synced_projects"] = self._serialize_synced_projects()
+        self._save_snapshot(next_snapshot)
+        return self.get_settings_payload()
+
+    def create_manual_project(
+        self,
+        *,
+        actor_id: str,
+        project_code: str,
+        project_name: str,
+        department_name: str | None = None,
+        owner_name: str | None = None,
+    ) -> dict[str, Any]:
+        project = self._project_costing_service.create_project(
+            actor_id=actor_id,
+            project_code=project_code,
+            project_name=project_name,
+            project_status="active",
+            department_name=department_name,
+            owner_name=owner_name,
+        )
+        next_snapshot = dict(self._snapshot)
+        next_snapshot["manual_projects"] = [
+            *self._snapshot["manual_projects"],
+            self._serialize_project(project),
+        ]
+        try:
+            self._save_snapshot(next_snapshot)
+        except Exception:
+            self._project_costing_service.delete_manual_project(project.id)
+            raise
+        return self.get_settings_payload()
+
+    def delete_project(self, project_id: str) -> dict[str, Any]:
+        normalized_project_id = str(project_id).strip()
+        next_snapshot = dict(self._snapshot)
+        next_snapshot["completed_project_ids"] = [
+            item
+            for item in self._snapshot["completed_project_ids"]
+            if item != normalized_project_id
+        ]
+        next_snapshot["manual_projects"] = [
+            project
+            for project in self._snapshot["manual_projects"]
+            if project["id"] != normalized_project_id
+        ]
+        self._save_snapshot(next_snapshot)
+        return self.get_settings_payload()
+
+    def _save_snapshot(self, snapshot: dict[str, Any]) -> None:
+        normalized_snapshot = self._normalize_settings(snapshot)
+        if self._state_store is not None:
+            self._state_store.save_app_settings(normalized_snapshot)
+        self._snapshot = normalized_snapshot
+        self._restore_manual_projects()
+
+    def _restore_manual_projects(self) -> None:
+        projects = [
+            ProjectMaster(
+                id=str(project["id"]),
+                project_code=str(project["project_code"]),
+                project_name=str(project["project_name"]),
+                project_status=str(project.get("project_status") or "active"),
+                department_name=project.get("department_name"),
+                owner_name=project.get("owner_name"),
+            )
+            for project in self._snapshot["manual_projects"]
+        ]
+        self._project_costing_service.restore_manual_projects(projects)
+
+    def _list_known_projects(self) -> list[ProjectMaster]:
+        live_projects = self._project_costing_service.list_projects()
+        known_ids = {project.id for project in live_projects}
+        snapshot_projects = [
+            self._deserialize_project(project)
+            for project in self._snapshot.get("synced_projects", [])
+            if str(project.get("id", "")).strip() and str(project.get("id", "")).strip() not in known_ids
+        ]
+        return [*live_projects, *snapshot_projects]
+
+    def _serialize_synced_projects(self) -> list[dict[str, Any]]:
+        manual_project_ids = {
+            str(project["id"])
+            for project in self._snapshot["manual_projects"]
+        }
+        return [
+            self._serialize_project(project)
+            for project in self._project_costing_service.list_projects()
+            if project.id not in manual_project_ids
+        ]
+
+    @staticmethod
+    def _deserialize_project(project: dict[str, Any]) -> ProjectMaster:
+        return ProjectMaster(
+            id=str(project["id"]),
+            project_code=str(project["project_code"]),
+            project_name=str(project["project_name"]),
+            project_status=str(project.get("project_status") or "active"),
+            department_name=project.get("department_name"),
+            owner_name=project.get("owner_name"),
+        )
+
+    @staticmethod
+    def _serialize_project(project: ProjectMaster) -> dict[str, Any]:
+        return {
+            "id": project.id,
+            "project_code": project.project_code,
+            "project_name": project.project_name,
+            "project_status": project.project_status,
+            "department_name": project.department_name,
+            "owner_name": project.owner_name,
+        }
 
     def get_bank_account_mapping_dict(self) -> dict[str, str]:
         return {
@@ -123,6 +254,23 @@ class AppSettingsService:
 
     def get_completed_project_ids(self) -> set[str]:
         return set(self._snapshot["completed_project_ids"])
+
+    def is_project_active(self, project_id: str | None, project_name: str) -> bool:
+        normalized_project_id = str(project_id or "").strip()
+        if normalized_project_id and normalized_project_id in self.get_completed_project_ids():
+            return False
+        normalized_project_name = str(project_name or "").strip()
+        if not normalized_project_name:
+            return True
+        payload = self.get_settings_payload()["projects"]
+        completed_names = {
+            str(project.get("project_name", "")).strip()
+            for project in list(payload.get("completed") or [])
+            if str(project.get("project_name", "")).strip()
+        }
+        if normalized_project_name in completed_names:
+            return False
+        return True
 
     def get_oa_retention_cutoff_date(self) -> str:
         return str(self._snapshot["oa_retention"]["cutoff_date"])
@@ -231,8 +379,68 @@ class AppSettingsService:
         applicant_names = AppSettingsService._normalize_username_list(
             raw_applicant_names
         )
+        manual_projects: list[dict[str, Any]] = []
+        seen_manual_project_ids: set[str] = set()
+        for item in list(raw_payload.get("manual_projects") or []):
+            if not isinstance(item, dict):
+                continue
+            project_id = str(item.get("id", "")).strip()
+            project_code = str(item.get("project_code", "")).strip()
+            project_name = str(item.get("project_name", "")).strip()
+            if not project_id or not project_code or not project_name or project_id in seen_manual_project_ids:
+                continue
+            seen_manual_project_ids.add(project_id)
+            manual_projects.append(
+                {
+                    "id": project_id,
+                    "project_code": project_code,
+                    "project_name": project_name,
+                    "project_status": str(item.get("project_status") or "active").strip() or "active",
+                    "department_name": (
+                        str(item.get("department_name")).strip()
+                        if item.get("department_name") is not None
+                        else None
+                    ),
+                    "owner_name": (
+                        str(item.get("owner_name")).strip()
+                        if item.get("owner_name") is not None
+                        else None
+                    ),
+                }
+            )
+        synced_projects: list[dict[str, Any]] = []
+        seen_synced_project_ids: set[str] = set()
+        for item in list(raw_payload.get("synced_projects") or []):
+            if not isinstance(item, dict):
+                continue
+            project_id = str(item.get("id", "")).strip()
+            project_code = str(item.get("project_code", "")).strip()
+            project_name = str(item.get("project_name", "")).strip()
+            if not project_id or not project_code or not project_name or project_id in seen_synced_project_ids:
+                continue
+            seen_synced_project_ids.add(project_id)
+            synced_projects.append(
+                {
+                    "id": project_id,
+                    "project_code": project_code,
+                    "project_name": project_name,
+                    "project_status": str(item.get("project_status") or "active").strip() or "active",
+                    "department_name": (
+                        str(item.get("department_name")).strip()
+                        if item.get("department_name") is not None
+                        else None
+                    ),
+                    "owner_name": (
+                        str(item.get("owner_name")).strip()
+                        if item.get("owner_name") is not None
+                        else None
+                    ),
+                }
+            )
         return {
             "completed_project_ids": completed_ids,
+            "manual_projects": manual_projects,
+            "synced_projects": synced_projects,
             "bank_account_mappings": mappings,
             "allowed_usernames": sorted(allowed_usernames),
             "readonly_export_usernames": sorted(readonly_export_usernames),

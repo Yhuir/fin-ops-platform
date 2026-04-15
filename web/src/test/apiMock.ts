@@ -98,7 +98,50 @@ function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function buildImportPreviewPayload(fileNames: string[], overrides: Array<Record<string, string>> = []) {
+function detectMockBankSelection(fileName: string) {
+  if (fileName.includes("historydetail")) {
+    return {
+      templateCode: "icbc_historydetail",
+      bankName: "工商银行",
+      last4: "4080",
+    };
+  }
+  if (fileName.includes("交易明细")) {
+    return {
+      templateCode: "pingan_transaction_detail",
+      bankName: "平安银行",
+      last4: "0093",
+    };
+  }
+  if (fileName.includes("民生")) {
+    return {
+      templateCode: "cmbc_transaction_detail",
+      bankName: "民生银行",
+      last4: "9486",
+    };
+  }
+  if (fileName.includes("光大")) {
+    return {
+      templateCode: "ceb_transaction_detail",
+      bankName: "光大银行",
+      last4: "8826",
+    };
+  }
+  return {
+    templateCode: "pingan_transaction_detail",
+    bankName: "平安银行",
+    last4: "0093",
+  };
+}
+
+function normalizeMockBankNameForConflict(bankName: string | null) {
+  return String(bankName ?? "").replace(/\s+/g, "").replace(/银行$/, "");
+}
+
+function buildImportPreviewPayload(
+  fileNames: string[],
+  overrides: Array<Record<string, string | null | undefined>> = [],
+) {
   return {
     session: {
       id: "import_session_0001",
@@ -129,10 +172,27 @@ function buildImportPreviewPayload(fileNames: string[], overrides: Array<Record<
       }
 
       const isInvoice = fileName.includes("发票");
-      const isIcbc = fileName.includes("historydetail");
       const override = overrides[index] ?? {};
-      const templateCode = override.template_code ?? (isInvoice ? "invoice_export" : isIcbc ? "icbc_historydetail" : "pingan_transaction_detail");
+      const detectedBank = detectMockBankSelection(fileName);
+      const templateCode = override.template_code ?? (isInvoice ? "invoice_export" : detectedBank.templateCode);
       const batchType = override.batch_type ?? (isInvoice ? "input_invoice" : "bank_transaction");
+      const selectedBankName = override.bank_name ?? null;
+      const selectedBankLast4 = override.last4 ?? null;
+      const selectedBankMappingId = override.bank_mapping_id ?? null;
+      const bankSelectionConflict = !isInvoice && (
+        (selectedBankName !== null && normalizeMockBankNameForConflict(selectedBankName) !== normalizeMockBankNameForConflict(detectedBank.bankName))
+        || (selectedBankLast4 !== null && selectedBankLast4 !== detectedBank.last4)
+      );
+      const conflictMessage = bankSelectionConflict
+        ? [
+          selectedBankName && selectedBankName !== detectedBank.bankName
+            ? `银行选择为${selectedBankName}，系统识别为${detectedBank.bankName}`
+            : null,
+          selectedBankLast4 && selectedBankLast4 !== detectedBank.last4
+            ? `后四位选择为${selectedBankLast4}，系统识别为${detectedBank.last4}`
+            : null,
+        ].filter(Boolean).join("；")
+        : null;
       return {
         id: `import_file_${String(index + 1).padStart(4, "0")}`,
         file_name: fileName,
@@ -151,7 +211,13 @@ function buildImportPreviewPayload(fileNames: string[], overrides: Array<Record<
         stored_file_path: `/tmp/import_session_0001/import_file_${String(index + 1).padStart(4, "0")}_${fileName}`,
         override_template_code: override.template_code ?? null,
         override_batch_type: override.batch_type ?? null,
-        selected_bank_name: override.bank_name ?? null,
+        selected_bank_mapping_id: selectedBankMappingId,
+        selected_bank_name: selectedBankName,
+        selected_bank_last4: selectedBankLast4,
+        detected_bank_name: isInvoice ? null : detectedBank.bankName,
+        detected_last4: isInvoice ? null : detectedBank.last4,
+        bank_selection_conflict: bankSelectionConflict,
+        conflict_message: conflictMessage,
         row_results: [
           {
             id: `batch_row_${String(index + 1).padStart(5, "0")}`,
@@ -1726,6 +1792,14 @@ const costStatisticsMonthRows: Record<string, CostSummaryRow[]> = {
   ],
 };
 
+const completedCostProjectNames = new Set([
+  "昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目",
+]);
+
+function isCostProjectVisibleForScope(projectName: string, projectScope: string | null | undefined) {
+  return projectScope === "all" || !completedCostProjectNames.has(projectName);
+}
+
 const costStatisticsProjectRows: Record<string, Record<string, CostProjectRow[]>> = {
   "2026-03": {
     云南溯源科技: [
@@ -1969,8 +2043,10 @@ function sumCostAmounts(rows: Array<{ amount: string }>) {
   });
 }
 
-function buildCostStatisticsMonthPayload(month: string) {
-  const rows = costStatisticsMonthRows[month] ?? [];
+function buildCostStatisticsMonthPayload(month: string, projectScope = "active") {
+  const rows = (costStatisticsMonthRows[month] ?? []).filter((row) =>
+    isCostProjectVisibleForScope(row.project_name, projectScope),
+  );
   return {
     month,
     summary: {
@@ -1991,8 +2067,13 @@ function buildAllCostProjectRows() {
   }, {});
 }
 
-function buildCostStatisticsExplorerPayload(month: string) {
-  const projectRowMap = month === "all" ? buildAllCostProjectRows() : (costStatisticsProjectRows[month] ?? {});
+function buildCostStatisticsExplorerPayload(month: string, projectScope = "active") {
+  const sourceProjectRowMap = month === "all" ? buildAllCostProjectRows() : (costStatisticsProjectRows[month] ?? {});
+  const projectRowMap = Object.fromEntries(
+    Object.entries(sourceProjectRowMap).filter(([projectName]) =>
+      isCostProjectVisibleForScope(projectName, projectScope),
+    ),
+  );
   const timeRows = Object.entries(projectRowMap)
     .flatMap(([projectName, rows]) =>
       rows.map((row) => ({
@@ -2056,11 +2137,12 @@ function buildCostStatisticsExplorerPayload(month: string) {
   };
 }
 
-function buildCostStatisticsProjectPayload(month: string, projectName: string) {
-  const rows =
-    month === "all"
+function buildCostStatisticsProjectPayload(month: string, projectName: string, projectScope = "active") {
+  const rows = isCostProjectVisibleForScope(projectName, projectScope)
+    ? month === "all"
       ? buildAllCostProjectRows()[projectName] ?? []
-      : (costStatisticsProjectRows[month]?.[projectName] ?? []);
+      : (costStatisticsProjectRows[month]?.[projectName] ?? [])
+    : [];
   return {
     month,
     project_name: projectName,
@@ -2163,6 +2245,7 @@ function buildFilteredCostTimeRows({
   endDate,
   projectNames,
   expenseTypes,
+  projectScope,
 }: {
   month: string;
   startMonth?: string | null;
@@ -2171,6 +2254,7 @@ function buildFilteredCostTimeRows({
   endDate?: string | null;
   projectNames?: string[];
   expenseTypes?: string[];
+  projectScope?: string | null;
 }) {
   const projectNameSet = new Set((projectNames ?? []).filter(Boolean));
   const expenseTypeSet = new Set((expenseTypes ?? []).filter(Boolean));
@@ -2191,6 +2275,7 @@ function buildFilteredCostTimeRows({
         })),
       ),
     )
+    .filter((row) => isCostProjectVisibleForScope(row.project_name, projectScope ?? "active"))
     .filter((row) => (projectNameSet.size > 0 ? projectNameSet.has(row.project_name) : true))
     .filter((row) => (expenseTypeSet.size > 0 ? expenseTypeSet.has(row.expense_type) : true))
     .filter((row) => {
@@ -2265,6 +2350,7 @@ function buildCostStatisticsExportPreviewPayload({
   projectNames,
   aggregateBy,
   expenseTypes,
+  projectScope,
   startMonth,
   endMonth,
   startDate,
@@ -2275,6 +2361,7 @@ function buildCostStatisticsExportPreviewPayload({
   projectNames?: string[];
   aggregateBy?: string | null;
   expenseTypes?: string[];
+  projectScope?: string | null;
   startMonth?: string | null;
   endMonth?: string | null;
   startDate?: string | null;
@@ -2288,6 +2375,7 @@ function buildCostStatisticsExportPreviewPayload({
     endDate,
     projectNames,
     expenseTypes,
+    projectScope,
   });
   const scopeLabel =
     startDate && endDate
@@ -2447,6 +2535,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           project_code: "YN-001",
           project_name: "云南溯源科技",
           project_status: "active" as const,
+          source: "oa" as const,
           department_name: "财务部",
           owner_name: "赵华",
         },
@@ -2455,6 +2544,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           project_code: "KM-002",
           project_name: "昆明卷烟厂动力设备控制系统升级改造项目",
           project_status: "active" as const,
+          source: "oa" as const,
           department_name: "项目部",
           owner_name: "王青",
         },
@@ -2465,6 +2555,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           project_code: "ZT-003",
           project_name: "昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目",
           project_status: "completed" as const,
+          source: "oa" as const,
           department_name: "项目部",
           owner_name: "刘宁",
         },
@@ -2638,6 +2729,65 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       }
       return { body: cloneJson(workbenchSettingsState) };
     },
+    "/api/workbench/settings/projects/sync": () => {
+      if (!workbenchSettingsState.projects.active.some((project) => project.id === "proj-oa-sync-001")) {
+        workbenchSettingsState = {
+          ...workbenchSettingsState,
+          projects: {
+            ...workbenchSettingsState.projects,
+            active: [
+              ...workbenchSettingsState.projects.active,
+              {
+                id: "proj-oa-sync-001",
+                project_code: "OA-SYNC-001",
+                project_name: "OA 同步新增项目",
+                project_status: "active" as const,
+                source: "oa" as const,
+                department_name: "项目部",
+                owner_name: "OA项目经理",
+              },
+            ],
+          },
+        };
+      }
+      return {
+        body: {
+          sync: {
+            id: "mock-project-sync",
+            status: "completed",
+          },
+          settings: cloneJson(workbenchSettingsState),
+        },
+      };
+    },
+    "/api/workbench/settings/projects": ({ jsonBody }) => {
+      const projectCode = String(jsonBody?.project_code ?? "").trim();
+      const projectName = String(jsonBody?.project_name ?? "").trim();
+      const projectId = projectCode === "LOCAL-001" ? "proj_manual_local_001" : `proj_manual_${projectCode || "new"}`;
+      workbenchSettingsState = {
+        ...workbenchSettingsState,
+        projects: {
+          ...workbenchSettingsState.projects,
+          active: [
+            ...workbenchSettingsState.projects.active.filter((project) => project.id !== projectId),
+            {
+              id: projectId,
+              project_code: projectCode,
+              project_name: projectName,
+              project_status: "active" as const,
+              source: "manual" as const,
+              department_name: null,
+              owner_name: null,
+            },
+          ],
+        },
+      };
+      return {
+        body: {
+          settings: cloneJson(workbenchSettingsState),
+        },
+      };
+    },
     "/api/workbench/settings/data-reset": ({ jsonBody }) => {
       if (options.dataResetPasswordShouldFail || !jsonBody?.oa_password) {
         return {
@@ -2760,21 +2910,24 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     },
     "/api/cost-statistics": ({ url }) => {
       const month = url.searchParams.get("month") ?? "";
+      const projectScope = url.searchParams.get("project_scope") ?? "active";
       if (options.costErrorMonths?.includes(month)) {
         return { status: 500, body: { message: "cost statistics failed" } };
       }
-      return { body: buildCostStatisticsMonthPayload(month) };
+      return { body: buildCostStatisticsMonthPayload(month, projectScope) };
     },
     "/api/cost-statistics/explorer": ({ url }) => {
       const month = url.searchParams.get("month") ?? "";
+      const projectScope = url.searchParams.get("project_scope") ?? "active";
       if (options.costErrorMonths?.includes(month)) {
         return { status: 500, body: { message: "cost statistics failed" } };
       }
-      return { body: buildCostStatisticsExplorerPayload(month) };
+      return { body: buildCostStatisticsExplorerPayload(month, projectScope) };
     },
     "/api/cost-statistics/export-preview": ({ url }) => {
       const month = url.searchParams.get("month") ?? "";
       const view = url.searchParams.get("view") ?? "time";
+      const projectScope = url.searchParams.get("project_scope") ?? "active";
       const projectNames = url.searchParams.getAll("project_name");
       const aggregateBy = url.searchParams.get("aggregate_by");
       const expenseTypes = url.searchParams.getAll("expense_type");
@@ -2789,6 +2942,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           projectNames,
           aggregateBy,
           expenseTypes,
+          projectScope,
           startMonth,
           endMonth,
           startDate,
@@ -3134,13 +3288,30 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         : null;
     const formData = init?.body instanceof FormData ? init.body : null;
 
+    if ((init?.method ?? "GET").toUpperCase() === "DELETE" && url.pathname.startsWith("/api/workbench/settings/projects/")) {
+      const projectId = decodeURIComponent(url.pathname.split("/").pop() ?? "");
+      workbenchSettingsState = {
+        ...workbenchSettingsState,
+        projects: {
+          active: workbenchSettingsState.projects.active.filter((project) => project.id !== projectId),
+          completed: workbenchSettingsState.projects.completed.filter((project) => project.id !== projectId),
+          completed_project_ids: workbenchSettingsState.projects.completed_project_ids.filter((id) => id !== projectId),
+        },
+      };
+      return jsonResponse({
+        body: {
+          settings: cloneJson(workbenchSettingsState),
+        },
+      });
+    }
     if (url.pathname.startsWith("/api/workbench/rows/")) {
       return jsonResponse({ body: buildWorkbenchDetail(url.pathname.split("/").pop() ?? "") });
     }
     if (url.pathname.startsWith("/api/cost-statistics/projects/")) {
       const projectName = decodeURIComponent(url.pathname.split("/").pop() ?? "");
       const month = url.searchParams.get("month") ?? "";
-      return jsonResponse({ body: buildCostStatisticsProjectPayload(month, projectName) });
+      const projectScope = url.searchParams.get("project_scope") ?? "active";
+      return jsonResponse({ body: buildCostStatisticsProjectPayload(month, projectName, projectScope) });
     }
     if (url.pathname.startsWith("/api/cost-statistics/transactions/")) {
       const transactionId = url.pathname.split("/").pop() ?? "";

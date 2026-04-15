@@ -270,8 +270,7 @@ class OAAttachmentInvoiceService:
             "buyer_tax_no": buyer_tax_no,
             "buyer_name": buyer_name,
             "issue_date": issue_date,
-            # Use payable total as row amount so candidate grouping can align with OA / bank payment amount.
-            "amount": total_with_tax,
+            "amount": net_amount,
             "net_amount": net_amount,
             "tax_rate": self._extract_tax_rate(extracted_text, compact_text),
             "tax_amount": tax_amount,

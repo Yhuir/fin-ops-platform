@@ -59,6 +59,57 @@ def build_multipart_payload(
 
 
 class ImportFileApiTests(unittest.TestCase):
+    def test_preview_files_keeps_corrupt_excel_as_file_level_error_without_aborting_batch(self) -> None:
+        app = build_application()
+        boundary = "----finops-import-boundary"
+        chunks: list[bytes] = []
+
+        def add_text(name: str, value: str) -> None:
+            chunks.append(f"--{boundary}\r\n".encode("utf-8"))
+            chunks.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
+            chunks.append(value.encode("utf-8"))
+            chunks.append(b"\r\n")
+
+        def add_file(name: str, filename: str, content: bytes, content_type: str) -> None:
+            chunks.append(f"--{boundary}\r\n".encode("utf-8"))
+            chunks.append(
+                (
+                    f'Content-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'
+                    f"Content-Type: {content_type}\r\n\r\n"
+                ).encode("utf-8")
+            )
+            chunks.append(content)
+            chunks.append(b"\r\n")
+
+        add_text("imported_by", "user_finance_01")
+        add_file(
+            "files",
+            "损坏流水.xlsx",
+            b"not-a-real-xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        add_file(
+            "files",
+            INVOICE_JAN.name,
+            INVOICE_JAN.read_bytes(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
+
+        response = app.handle_request(
+            "POST",
+            "/imports/files/preview",
+            body=b"".join(chunks),
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        file_map = {item["file_name"]: item for item in payload["files"]}
+        self.assertEqual(file_map["损坏流水.xlsx"]["status"], "unrecognized_template")
+        self.assertIn("文件读取失败", file_map["损坏流水.xlsx"]["message"])
+        self.assertEqual(file_map[INVOICE_JAN.name]["status"], "preview_ready")
+
     def test_preview_files_detects_supported_templates_and_keeps_unrecognized_file_level_error(self) -> None:
         app = build_application()
         body, headers = build_multipart_payload(
@@ -125,7 +176,9 @@ class ImportFileApiTests(unittest.TestCase):
                     "file_name": PINGAN_JAN.name,
                     "template_code": "pingan_transaction_detail",
                     "batch_type": "bank_transaction",
+                    "bank_mapping_id": "bank_mapping_pingan_override",
                     "bank_name": "平安银行",
+                    "last4": "0093",
                 },
             ],
         )
@@ -140,7 +193,38 @@ class ImportFileApiTests(unittest.TestCase):
         self.assertEqual(file_map[INVOICE_JAN.name]["override_batch_type"], "output_invoice")
         self.assertEqual(file_map[PINGAN_JAN.name]["template_code"], "pingan_transaction_detail")
         self.assertEqual(file_map[PINGAN_JAN.name]["override_template_code"], "pingan_transaction_detail")
+        self.assertEqual(file_map[PINGAN_JAN.name]["selected_bank_mapping_id"], "bank_mapping_pingan_override")
         self.assertEqual(file_map[PINGAN_JAN.name]["selected_bank_name"], "平安银行")
+        self.assertEqual(file_map[PINGAN_JAN.name]["selected_bank_last4"], "0093")
+
+    def test_preview_files_returns_bank_selection_conflict_fields(self) -> None:
+        app = build_application()
+        body, headers = build_multipart_payload(
+            imported_by="user_finance_01",
+            file_paths=[PINGAN_JAN],
+            file_overrides=[
+                {
+                    "file_name": PINGAN_JAN.name,
+                    "template_code": "pingan_transaction_detail",
+                    "batch_type": "bank_transaction",
+                    "bank_mapping_id": "bank_mapping_manual_8826",
+                    "bank_name": "建设银行",
+                    "last4": "8826",
+                },
+            ],
+        )
+
+        response = app.handle_request("POST", "/imports/files/preview", body=body, headers=headers)
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        preview_file = payload["files"][0]
+        self.assertTrue(preview_file["bank_selection_conflict"])
+        self.assertEqual(preview_file["selected_bank_mapping_id"], "bank_mapping_manual_8826")
+        self.assertEqual(preview_file["selected_bank_last4"], "8826")
+        self.assertEqual(preview_file["detected_last4"], "0093")
+        self.assertEqual(preview_file["detected_bank_name"], "平安银行")
+        self.assertIn("建设银行", preview_file["conflict_message"])
 
     def test_confirm_files_imports_only_selected_files_from_session(self) -> None:
         app = build_application()

@@ -48,6 +48,24 @@ class ProjectCostingService:
         self._assignments_by_id: dict[str, ProjectAssignmentRecord] = {}
         self._assignment_index: dict[tuple[str, str], str] = {}
 
+    def restore_manual_projects(self, projects: list[ProjectMaster]) -> None:
+        self._manual_projects = {project.id: project for project in projects}
+        next_sequence = 1
+        for project in projects:
+            if not project.id.startswith("proj_manual_"):
+                continue
+            try:
+                next_sequence = max(next_sequence, int(project.id.rsplit("_", 1)[-1]) + 1)
+            except ValueError:
+                continue
+        self._manual_project_sequence = count(next_sequence)
+
+    def delete_manual_project(self, project_id: str) -> bool:
+        return self._manual_projects.pop(project_id, None) is not None
+
+    def sync_projects_from_oa(self, *, actor_id: str):
+        return self._integration_service.sync(scope="projects", triggered_by=actor_id)
+
     def create_project(
         self,
         *,

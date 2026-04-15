@@ -1,3 +1,5 @@
+export type CostProjectScope = "active" | "all";
+
 export type CostSummary = {
   rowCount: number;
   transactionCount: number;

@@ -258,6 +258,8 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
 
         self.assertEqual(len(first_rows), 1)
         self.assertEqual(first_rows[0]["detail_fields"]["发票号码"], "15312761")
+        self.assertEqual(first_rows[0]["amount"], "176.99")
+        self.assertEqual(first_rows[0]["total_with_tax"], "200.00")
         self.assertEqual(len(second_rows), 1)
         self.assertEqual(adapter.bulk_call_count, 1)
         self.assertEqual(adapter.month_call_count, 0)

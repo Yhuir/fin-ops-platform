@@ -51,6 +51,9 @@
 - `docs/superpowers/specs/2026-04-08-workbench-materialized-read-model-design.md`：关联台 `pair relations + 物化读模型` 的性能重构设计文档
 - `docs/superpowers/specs/2026-04-08-workbench-pane-search-filter-sort-design.md`：关联台三栏局部搜索、多选筛选与按组时间排序设计文档
 - `docs/superpowers/specs/2026-04-08-workbench-column-layout-drag-design.md`：关联台三栏列拖拽排序、宽度联动与登录后持久化设计文档
+- `docs/superpowers/specs/2026-04-14-workbench-sheet-layout-design.md`：关联台三栏候选项从 card 风格改成 Excel / sheet 风格的样式设计文档
+- `docs/superpowers/specs/2026-04-14-bank-import-account-selection-design.md`：银行流水导入按“银行账户映射项”主导、预览冲突确认设计文档
+- `docs/superpowers/specs/2026-04-14-project-status-cost-scope-design.md`：设置页项目状态管理与成本统计 `进行中 / 所有项目` 范围切换设计文档
 - `docs/superpowers/plans/2026-04-01-cost-statistics-workbench.md`：成本统计页面实施计划
 - `docs/superpowers/plans/2026-04-02-workbench-global-search.md`：关联台强搜索实施计划
 - `docs/superpowers/plans/2026-04-03-tax-offset-certified-plan.md`：税金抵扣“计划 vs 已认证结果”实施计划
@@ -61,6 +64,9 @@
 - `docs/superpowers/plans/2026-04-08-workbench-materialized-read-model.md`：关联台 `pair relations + read model` 的读写分离实施计划
 - `docs/superpowers/plans/2026-04-08-workbench-pane-search-filter-sort.md`：关联台三栏局部搜索、多选筛选与按组时间排序实施计划
 - `docs/superpowers/plans/2026-04-08-workbench-column-layout-drag.md`：关联台三栏列拖拽排序、持久化与渲染接线实施计划
+- `docs/superpowers/plans/2026-04-14-workbench-sheet-layout.md`：关联台三栏 Excel / sheet 化样式改造实施计划
+- `docs/superpowers/plans/2026-04-14-bank-import-account-selection.md`：银行流水导入按账户映射项主导的实施计划
+- `docs/superpowers/plans/2026-04-14-project-status-cost-scope.md`：项目状态管理与成本统计项目范围过滤实施计划
 - `docs/architecture/OA 集成当前 app 技术方案.md`：基于真实 OA 源码分析的总接入方案
 - `docs/superpowers/specs/2026-03-26-import-formalization-design.md`：导入正式化 A 的设计文档
 - `docs/superpowers/plans/2026-03-26-import-formalization.md`：导入正式化 A 的实施计划

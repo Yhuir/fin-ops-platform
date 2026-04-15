@@ -1,5 +1,20 @@
 import { useMemo, useState } from "react";
 
+import SettingsAccessAccountsSection from "../settings/SettingsAccessAccountsSection";
+import SettingsBankAccountsSection from "../settings/SettingsBankAccountsSection";
+import SettingsDataResetSection from "../settings/SettingsDataResetSection";
+import SettingsOaInvoiceOffsetSection from "../settings/SettingsOaInvoiceOffsetSection";
+import SettingsOaRetentionSection from "../settings/SettingsOaRetentionSection";
+import SettingsProjectsSection from "../settings/SettingsProjectsSection";
+import SettingsTreeNav from "../settings/SettingsTreeNav";
+import type {
+  DataResetActionConfig,
+  DataResetStatus,
+  ManagedAccessAccount,
+  ProjectActionStatus,
+  SettingsNavigationItem,
+  SettingsSectionId,
+} from "../settings/types";
 import { useSession } from "../../contexts/SessionContext";
 import type {
   BankAccountMapping,
@@ -10,18 +25,11 @@ import type {
   WorkbenchSettingsDataResetResult,
 } from "../../features/workbench/types";
 
-type ManagedAccessAccount = {
-  id: string;
-  username: string;
-  role: WorkbenchAccessRole;
-};
-
 type WorkbenchSettingsModalProps = {
   settings: WorkbenchSettings;
   isSaving: boolean;
   canSave: boolean;
   canManageAccessControl: boolean;
-  onClose: () => void;
   onSave: (payload: {
     completedProjectIds: string[];
     bankAccountMappings: BankAccountMapping[];
@@ -36,33 +44,18 @@ type WorkbenchSettingsModalProps = {
     action: WorkbenchSettingsDataResetAction;
     oaPassword: string;
   }) => Promise<WorkbenchSettingsDataResetResult>;
+  onSyncProjects: () => Promise<WorkbenchSettings>;
+  onCreateProject: (payload: {
+    projectCode: string;
+    projectName: string;
+  }) => Promise<WorkbenchSettings>;
+  onDeleteProject: (projectId: string) => Promise<WorkbenchSettings>;
 };
-
-type SettingsSectionId =
-  | "projects"
-  | "bank_accounts"
-  | "oa_retention"
-  | "oa_invoice_offset"
-  | "access_accounts"
-  | "data_reset";
 
 type DataResetDialogState =
   | { step: "confirm"; action: WorkbenchSettingsDataResetAction }
   | { step: "password"; action: WorkbenchSettingsDataResetAction }
   | null;
-
-type DataResetStatus = {
-  tone: "success" | "error";
-  message: string;
-};
-
-type DataResetActionConfig = {
-  action: WorkbenchSettingsDataResetAction;
-  label: string;
-  title: string;
-  description: string;
-  impact: string[];
-};
 
 const OA_INVOICE_OFFSET_SETTINGS_VISIBLE_USERNAMES = new Set(["YNSYLP005", "YNSYKJ001"]);
 
@@ -167,9 +160,11 @@ export default function WorkbenchSettingsModal({
   isSaving,
   canSave,
   canManageAccessControl,
-  onClose,
+  onCreateProject,
   onDataReset,
+  onDeleteProject,
   onSave,
+  onSyncProjects,
 }: WorkbenchSettingsModalProps) {
   const session = useSession();
   const [completedProjectIds, setCompletedProjectIds] = useState<string[]>(settings.projects.completedProjectIds);
@@ -183,6 +178,10 @@ export default function WorkbenchSettingsModal({
   );
   const [bankNameDraft, setBankNameDraft] = useState("");
   const [last4Draft, setLast4Draft] = useState("");
+  const [projectCodeDraft, setProjectCodeDraft] = useState("");
+  const [projectNameDraft, setProjectNameDraft] = useState("");
+  const [projectActionStatus, setProjectActionStatus] = useState<ProjectActionStatus | null>(null);
+  const [isProjectActionBusy, setIsProjectActionBusy] = useState(false);
   const [accessUsernameDraft, setAccessUsernameDraft] = useState("");
   const [accessRoleDraft, setAccessRoleDraft] = useState<WorkbenchAccessRole>("full_access");
   const [activeSectionId, setActiveSectionId] = useState<SettingsSectionId>("projects");
@@ -191,7 +190,7 @@ export default function WorkbenchSettingsModal({
   const [dataResetStatus, setDataResetStatus] = useState<DataResetStatus | null>(null);
   const [isDataResetting, setIsDataResetting] = useState(false);
 
-  const controlsDisabled = !canSave || isSaving || isDataResetting;
+  const controlsDisabled = !canSave || isSaving || isDataResetting || isProjectActionBusy;
   const adminUsernames = settings.accessControl.adminUsernames;
 
   const activeProjects = useMemo(
@@ -209,16 +208,14 @@ export default function WorkbenchSettingsModal({
 
   const canAddMapping =
     last4Draft.trim().length === 4 && /^\d{4}$/.test(last4Draft.trim()) && bankNameDraft.trim().length > 0;
+  const canAddProject = projectCodeDraft.trim().length > 0 && projectNameDraft.trim().length > 0;
   const canAddAccessAccount = accessUsernameDraft.trim().length > 0;
   const currentSessionUser =
     session.status === "authenticated" || session.status === "forbidden" ? session.session.user : null;
-  const currentAccountLabel = currentSessionUser
-    ? `${currentSessionUser.displayName}（${currentSessionUser.username}）`
-    : "--";
   const canManageOaInvoiceOffset =
     currentSessionUser !== null && OA_INVOICE_OFFSET_SETTINGS_VISIBLE_USERNAMES.has(currentSessionUser.username);
-  const settingsNavigationItems = useMemo(
-    () => [
+  const settingsNavigationItems = useMemo<SettingsNavigationItem[]>(() => {
+    const items = [
       {
         id: "projects" as const,
         label: "项目状态",
@@ -261,18 +258,18 @@ export default function WorkbenchSettingsModal({
         count: DATA_RESET_ACTIONS.length,
         visible: canManageAccessControl,
       },
-    ].filter((item) => item.visible),
-    [
-      activeProjects.length,
-      adminUsernames.length,
-      canManageAccessControl,
-      canManageOaInvoiceOffset,
-      completedProjects.length,
-      managedAccessAccounts.length,
-      mappings.length,
-      oaInvoiceOffsetApplicantsText,
-    ],
-  );
+    ];
+    return items.filter((item) => item.visible).map(({ visible: _visible, ...item }) => item);
+  }, [
+    activeProjects.length,
+    completedProjects.length,
+    mappings.length,
+    oaInvoiceOffsetApplicantsText,
+    canManageOaInvoiceOffset,
+    managedAccessAccounts.length,
+    adminUsernames.length,
+    canManageAccessControl,
+  ]);
 
   function handleAddMapping() {
     if (!canAddMapping || controlsDisabled) {
@@ -295,6 +292,82 @@ export default function WorkbenchSettingsModal({
     }
     setLast4Draft("");
     setBankNameDraft("");
+  }
+
+  function applyProjectSettings(nextSettings: WorkbenchSettings, message: string) {
+    setCompletedProjectIds(nextSettings.projects.completedProjectIds);
+    setProjectActionStatus({ tone: "success", message });
+  }
+
+  function projectActionErrorMessage(error: unknown) {
+    if (error instanceof Error && error.message.trim()) {
+      try {
+        const payload = JSON.parse(error.message) as { message?: string };
+        return payload.message || error.message;
+      } catch {
+        return error.message;
+      }
+    }
+    return "项目状态更新失败，请稍后重试。";
+  }
+
+  async function handleSyncProjects() {
+    if (controlsDisabled) {
+      return;
+    }
+    setProjectActionStatus(null);
+    setIsProjectActionBusy(true);
+    try {
+      const nextSettings = await onSyncProjects();
+      applyProjectSettings(nextSettings, "已从 OA 拉取项目。");
+    } catch (error) {
+      setProjectActionStatus({ tone: "error", message: projectActionErrorMessage(error) });
+    } finally {
+      setIsProjectActionBusy(false);
+    }
+  }
+
+  async function handleAddProject() {
+    if (!canAddProject || controlsDisabled) {
+      return;
+    }
+    setProjectActionStatus(null);
+    setIsProjectActionBusy(true);
+    try {
+      const nextSettings = await onCreateProject({
+        projectCode: projectCodeDraft.trim(),
+        projectName: projectNameDraft.trim(),
+      });
+      setProjectCodeDraft("");
+      setProjectNameDraft("");
+      applyProjectSettings(nextSettings, "已新增本地项目。");
+    } catch (error) {
+      setProjectActionStatus({ tone: "error", message: projectActionErrorMessage(error) });
+    } finally {
+      setIsProjectActionBusy(false);
+    }
+  }
+
+  async function handleDeleteProject(project: WorkbenchProjectSetting) {
+    if (controlsDisabled) {
+      return;
+    }
+    const confirmed = window.confirm(
+      "删除只会移除 app 本地项目或本地状态覆盖，不会删除 OA 源项目和历史数据。是否继续？",
+    );
+    if (!confirmed) {
+      return;
+    }
+    setProjectActionStatus(null);
+    setIsProjectActionBusy(true);
+    try {
+      const nextSettings = await onDeleteProject(project.id);
+      applyProjectSettings(nextSettings, "已删除本地项目或状态覆盖。");
+    } catch (error) {
+      setProjectActionStatus({ tone: "error", message: projectActionErrorMessage(error) });
+    } finally {
+      setIsProjectActionBusy(false);
+    }
   }
 
   function handleAddAccessAccount() {
@@ -364,12 +437,10 @@ export default function WorkbenchSettingsModal({
     }
     setIsDataResetting(true);
     setDataResetStatus(null);
-    const action = dataResetDialog.action;
-    const passwordForRequest = dataResetPassword;
     try {
       const result = await onDataReset({
-        action,
-        oaPassword: passwordForRequest,
+        action: dataResetDialog.action,
+        oaPassword: dataResetPassword,
       });
       setDataResetPassword("");
       setDataResetDialog(null);
@@ -397,401 +468,105 @@ export default function WorkbenchSettingsModal({
   }
 
   return (
-    <div className="export-center-modal-layer" role="presentation">
-      <button
-        aria-label="关闭设置"
-        className="export-center-modal-backdrop"
-        type="button"
-        disabled={isDataResetting}
-        onClick={onClose}
-      />
-      <section
-        aria-labelledby="workbench-settings-modal-title"
-        aria-modal="true"
-        className="export-center-modal workbench-settings-modal"
-        role="dialog"
-      >
-        <header className="export-center-modal-header">
-          <div>
-            <h2 id="workbench-settings-modal-title">关联台设置</h2>
-            <p>管理项目完工状态、银行账户映射，以及受控账号的访问权限。</p>
-            <div className="settings-session-account">
-              <span className="settings-session-account-label">登录账户：</span>
-              <strong>{currentAccountLabel}</strong>
-            </div>
-          </div>
-          <button className="secondary-button" type="button" onClick={onClose} disabled={isSaving || isDataResetting}>
-            关闭
-          </button>
-        </header>
-
-        <div className="export-center-modal-body workbench-settings-body">
+    <>
+      <section aria-label="设置内容" className="settings-page-panel">
+        <div className="settings-page-body workbench-settings-body">
           {!canSave ? <div className="state-panel settings-state-banner">当前账号仅支持查看和导出，不能保存设置。</div> : null}
 
           <div className="settings-two-column-layout">
-            <aside className="cost-explorer-lane settings-tree-panel" aria-label="设置导航">
-              <header className="cost-explorer-lane-header settings-nav-header">
-                <h3>设置分类</h3>
-                <span>{settingsNavigationItems.length}</span>
-              </header>
-              <div className="cost-explorer-list settings-tree" role="tree" aria-label="设置分类">
-                {settingsNavigationItems.map((item) => (
-                  <button
-                    key={item.id}
-                    role="treeitem"
-                    aria-selected={activeSectionId === item.id}
-                    className={`cost-explorer-item settings-tree-item${activeSectionId === item.id ? " active" : ""}`}
-                    type="button"
-                    onClick={() => setActiveSectionId(item.id)}
-                  >
-                    <span className="settings-tree-copy">
-                      <strong>{item.label}</strong>
-                      <small>{item.description}</small>
-                    </span>
-                    <span className="settings-tree-count">{item.count}</span>
-                  </button>
-                ))}
-              </div>
-            </aside>
+            <SettingsTreeNav
+              items={settingsNavigationItems}
+              activeSectionId={activeSectionId}
+              onSelect={setActiveSectionId}
+            />
 
             <div className="settings-content-panel">
               {activeSectionId === "projects" ? (
-                <section className="cost-explorer-lane settings-section-panel">
-                  <div className="cost-explorer-lane-header settings-section-header">
-                    <h3>项目状态管理</h3>
-                  </div>
-                  <div className="settings-section-body">
-                    <div className="settings-project-columns">
-                    <div className="settings-project-column">
-                      <div className="settings-project-column-head">
-                        <strong>进行中项目</strong>
-                        <span>{activeProjects.length} 个</span>
-                      </div>
-                      <div className="settings-project-list">
-                        {activeProjects.map((project) => (
-                          <button
-                            key={project.id}
-                            className="settings-project-row"
-                            type="button"
-                            disabled={controlsDisabled}
-                            onClick={() => setCompletedProjectIds((current) => toggleCompleted(project.id, current))}
-                          >
-                            <span>{project.projectName}</span>
-                            <span>标记完成</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="settings-project-column">
-                      <div className="settings-project-column-head">
-                        <strong>已完成项目</strong>
-                        <span>{completedProjects.length} 个</span>
-                      </div>
-                      <div className="settings-project-list">
-                        {completedProjects.map((project) => (
-                          <button
-                            key={project.id}
-                            className="settings-project-row done"
-                            type="button"
-                            disabled={controlsDisabled}
-                            onClick={() => setCompletedProjectIds((current) => toggleCompleted(project.id, current))}
-                          >
-                            <span>{project.projectName}</span>
-                            <span>移回进行中</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                  </div>
-                </section>
+                <SettingsProjectsSection
+                  activeProjects={activeProjects}
+                  completedProjects={completedProjects}
+                  controlsDisabled={controlsDisabled}
+                  projectActionStatus={projectActionStatus}
+                  projectCodeDraft={projectCodeDraft}
+                  projectNameDraft={projectNameDraft}
+                  onChangeProjectCodeDraft={setProjectCodeDraft}
+                  onChangeProjectNameDraft={setProjectNameDraft}
+                  onSyncProjects={handleSyncProjects}
+                  onAddProject={handleAddProject}
+                  onToggleCompleted={(projectId) => setCompletedProjectIds((current) => toggleCompleted(projectId, current))}
+                  onDeleteProject={handleDeleteProject}
+                  isProjectActionBusy={isProjectActionBusy}
+                  canAddProject={canAddProject}
+                />
               ) : null}
 
               {activeSectionId === "bank_accounts" ? (
-                <section className="cost-explorer-lane settings-section-panel">
-                  <div className="cost-explorer-lane-header settings-section-header">
-                    <h3>银行账户映射</h3>
-                  </div>
-                  <div className="settings-section-body">
-                  <div className="settings-bank-mapping-form">
-                    <label className="project-export-select-field">
-                      <span>银行名称</span>
-                      <input
-                        value={bankNameDraft}
-                        disabled={controlsDisabled}
-                        onChange={(event) => setBankNameDraft(event.currentTarget.value)}
-                      />
-                    </label>
-                    <label className="project-export-select-field">
-                      <span>银行卡后四位</span>
-                      <input
-                        maxLength={4}
-                        value={last4Draft}
-                        disabled={controlsDisabled}
-                        onChange={(event) => setLast4Draft(event.currentTarget.value.replace(/\D/g, ""))}
-                      />
-                    </label>
-                    <button
-                      className="primary-button"
-                      type="button"
-                      disabled={!canAddMapping || controlsDisabled}
-                      onClick={handleAddMapping}
-                    >
-                      新增映射
-                    </button>
-                  </div>
-
-                  <div className="settings-bank-mapping-list">
-                    {mappings.length === 0 ? <div className="cost-explorer-empty">当前没有银行映射。</div> : null}
-                    {mappings.map((mapping) => (
-                      <div key={mapping.id} className="settings-bank-mapping-row">
-                        <label className="project-export-select-field">
-                          <span>银行名称</span>
-                          <input
-                            value={mapping.bankName}
-                            disabled={controlsDisabled}
-                            onChange={(event) =>
-                              setMappings((current) =>
-                                current.map((item) => (item.id === mapping.id ? { ...item, bankName: event.currentTarget.value } : item)),
-                              )
-                            }
-                          />
-                        </label>
-                        <label className="project-export-select-field">
-                          <span>后四位</span>
-                          <input
-                            maxLength={4}
-                            value={mapping.last4}
-                            disabled={controlsDisabled}
-                            onChange={(event) =>
-                              setMappings((current) =>
-                                current.map((item) =>
-                                  item.id === mapping.id
-                                    ? { ...item, last4: event.currentTarget.value.replace(/\D/g, "").slice(0, 4) }
-                                    : item,
-                                ),
-                              )
-                            }
-                          />
-                        </label>
-                        <button
-                          className="secondary-button danger-button"
-                          type="button"
-                          disabled={controlsDisabled}
-                          onClick={() => setMappings((current) => current.filter((item) => item.id !== mapping.id))}
-                        >
-                          删除
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                  </div>
-                </section>
+                <SettingsBankAccountsSection
+                  controlsDisabled={controlsDisabled}
+                  mappings={mappings}
+                  bankNameDraft={bankNameDraft}
+                  last4Draft={last4Draft}
+                  canAddMapping={canAddMapping}
+                  onChangeBankNameDraft={setBankNameDraft}
+                  onChangeLast4Draft={setLast4Draft}
+                  onAddMapping={handleAddMapping}
+                  onUpdateMapping={(mappingId, updater) =>
+                    setMappings((current) => current.map((item) => (item.id === mappingId ? updater(item) : item)))
+                  }
+                  onDeleteMapping={(mappingId) =>
+                    setMappings((current) => current.filter((item) => item.id !== mappingId))
+                  }
+                />
               ) : null}
 
               {activeSectionId === "oa_retention" ? (
-                <section className="cost-explorer-lane settings-section-panel">
-                  <div className="cost-explorer-lane-header settings-section-header">
-                    <h3>保OA</h3>
-                  </div>
-                  <div className="settings-section-body">
-                    <div className="settings-bank-mapping-form">
-                      <label className="project-export-select-field">
-                        <span>保留起始日期</span>
-                        <input
-                          aria-label="保OA起始日期"
-                          type="date"
-                          value={oaRetentionCutoffDate}
-                          disabled={controlsDisabled}
-                          onChange={(event) => setOaRetentionCutoffDate(event.currentTarget.value)}
-                        />
-                      </label>
-                      <div className="settings-access-admin-note">
-                        <strong>保留规则</strong>
-                        <p>
-                          保留该日期及之后的 OA；保留与这些 OA 同组的流水和发票；如果旧 OA 与该日期及之后的流水同组，也会重新保留。
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </section>
+                <SettingsOaRetentionSection
+                  controlsDisabled={controlsDisabled}
+                  cutoffDate={oaRetentionCutoffDate}
+                  onChangeCutoffDate={setOaRetentionCutoffDate}
+                />
               ) : null}
 
               {activeSectionId === "oa_invoice_offset" && canManageOaInvoiceOffset ? (
-                <section className="cost-explorer-lane settings-section-panel">
-                  <div className="cost-explorer-lane-header settings-section-header">
-                    <h3>冲账规则</h3>
-                  </div>
-                  <div className="settings-section-body">
-                    <div className="settings-bank-mapping-form">
-                      <label className="project-export-select-field">
-                        <span>冲账申请人</span>
-                        <input
-                          aria-label="冲账申请人"
-                          value={oaInvoiceOffsetApplicantsText}
-                          disabled={controlsDisabled}
-                          onChange={(event) => setOaInvoiceOffsetApplicantsText(event.currentTarget.value)}
-                        />
-                      </label>
-                      <div className="settings-access-admin-note">
-                        <strong>自动配对规则</strong>
-                        <p>
-                          OA 申请人在名单内时，自动配对该 OA 和 OA 附件解析出的发票，并打“冲”标签；该组不计入成本统计。
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </section>
+                <SettingsOaInvoiceOffsetSection
+                  controlsDisabled={controlsDisabled}
+                  applicantsText={oaInvoiceOffsetApplicantsText}
+                  onChangeApplicantsText={setOaInvoiceOffsetApplicantsText}
+                />
               ) : null}
 
               {activeSectionId === "access_accounts" && canManageAccessControl ? (
-                <section className="cost-explorer-lane settings-section-panel">
-                  <div className="cost-explorer-lane-header settings-section-header">
-                    <h3>访问账户管理</h3>
-                  </div>
-                  <div className="settings-section-body">
-                  <div className="settings-access-admin-note">
-                    <strong>权限管理员</strong>
-                    <div className="settings-access-admin-list">
-                      {adminUsernames.map((username) => (
-                        <span key={username} className="zone-selection-pill">
-                          {username}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="settings-bank-mapping-form settings-access-form">
-                    <label className="project-export-select-field">
-                      <span>新增访问账户</span>
-                      <input
-                        value={accessUsernameDraft}
-                        disabled={controlsDisabled}
-                        onChange={(event) => setAccessUsernameDraft(event.currentTarget.value)}
-                      />
-                    </label>
-                    <label className="project-export-select-field">
-                      <span>新增账户权限</span>
-                      <select
-                        aria-label="新增账户权限"
-                        value={accessRoleDraft}
-                        disabled={controlsDisabled}
-                        onChange={(event) => setAccessRoleDraft(event.currentTarget.value as WorkbenchAccessRole)}
-                      >
-                        <option value="full_access">所有操作均可</option>
-                        <option value="read_export_only">只可看和只可导出</option>
-                      </select>
-                    </label>
-                    <button
-                      className="primary-button"
-                      type="button"
-                      disabled={!canAddAccessAccount || controlsDisabled}
-                      onClick={handleAddAccessAccount}
-                    >
-                      新增账户
-                    </button>
-                  </div>
-
-                  <div className="settings-bank-mapping-list">
-                    {managedAccessAccounts.length === 0 ? (
-                      <div className="cost-explorer-empty">当前没有单独配置的可访问 OA 账户。</div>
-                    ) : null}
-                    {managedAccessAccounts.map((account) => (
-                      <div key={account.id} className="settings-bank-mapping-row">
-                        <label className="project-export-select-field">
-                          <span>账户</span>
-                          <input
-                            value={account.username}
-                            disabled={controlsDisabled}
-                            onChange={(event) =>
-                              setManagedAccessAccounts((current) =>
-                                current.map((item) =>
-                                  item.id === account.id ? { ...item, username: event.currentTarget.value } : item,
-                                ),
-                              )
-                            }
-                          />
-                        </label>
-                        <label className="project-export-select-field">
-                          <span>权限级别</span>
-                          <select
-                            aria-label={`权限级别-${account.username}`}
-                            value={account.role}
-                            disabled={controlsDisabled}
-                            onChange={(event) =>
-                              setManagedAccessAccounts((current) =>
-                                current.map((item) =>
-                                  item.id === account.id
-                                    ? { ...item, role: event.currentTarget.value as WorkbenchAccessRole }
-                                    : item,
-                                ),
-                              )
-                            }
-                          >
-                            <option value="full_access">所有操作均可</option>
-                            <option value="read_export_only">只可看和只可导出</option>
-                          </select>
-                        </label>
-                        <button
-                          className="secondary-button danger-button"
-                          type="button"
-                          disabled={controlsDisabled}
-                          onClick={() =>
-                            setManagedAccessAccounts((current) => current.filter((item) => item.id !== account.id))
-                          }
-                        >
-                          删除
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                  </div>
-                </section>
+                <SettingsAccessAccountsSection
+                  controlsDisabled={controlsDisabled}
+                  adminUsernames={adminUsernames}
+                  managedAccessAccounts={managedAccessAccounts}
+                  accessUsernameDraft={accessUsernameDraft}
+                  accessRoleDraft={accessRoleDraft}
+                  canAddAccessAccount={canAddAccessAccount}
+                  onChangeAccessUsernameDraft={setAccessUsernameDraft}
+                  onChangeAccessRoleDraft={setAccessRoleDraft}
+                  onAddAccessAccount={handleAddAccessAccount}
+                  onUpdateManagedAccessAccount={(accountId, updater) =>
+                    setManagedAccessAccounts((current) => current.map((item) => (item.id === accountId ? updater(item) : item)))
+                  }
+                  onDeleteManagedAccessAccount={(accountId) =>
+                    setManagedAccessAccounts((current) => current.filter((item) => item.id !== accountId))
+                  }
+                />
               ) : null}
 
               {activeSectionId === "data_reset" && canManageAccessControl ? (
-                <section className="cost-explorer-lane settings-section-panel">
-                  <div className="cost-explorer-lane-header settings-section-header">
-                    <h3>数据重置</h3>
-                  </div>
-                  <div className="settings-section-body">
-                    <div className="settings-access-admin-note data-reset-warning">
-                      <strong>高风险操作</strong>
-                      <p>
-                        这些按钮只清理 app 内部数据，不允许触碰 `form_data_db.form_data`。每次执行前都需要二次确认和当前 OA 用户密码复核。
-                      </p>
-                    </div>
-                    {dataResetStatus ? (
-                      <div className={`state-panel data-reset-status data-reset-status-${dataResetStatus.tone}`}>
-                        {dataResetStatus.message}
-                      </div>
-                    ) : null}
-                    <div className="data-reset-actions">
-                      {DATA_RESET_ACTIONS.map((item) => (
-                        <article key={item.action} className="data-reset-card">
-                          <div>
-                            <strong>{item.title}</strong>
-                            <p>{item.description}</p>
-                          </div>
-                          <button
-                            className="secondary-button danger-button"
-                            type="button"
-                            disabled={controlsDisabled}
-                            onClick={() => handleOpenDataResetConfirm(item.action)}
-                          >
-                            {item.label}
-                          </button>
-                        </article>
-                      ))}
-                    </div>
-                  </div>
-                </section>
+                <SettingsDataResetSection
+                  controlsDisabled={controlsDisabled}
+                  dataResetStatus={dataResetStatus}
+                  actions={DATA_RESET_ACTIONS}
+                  onOpenDataResetConfirm={handleOpenDataResetConfirm}
+                />
               ) : null}
             </div>
           </div>
         </div>
-
-        <footer className="export-center-modal-footer">
+        <footer className="settings-page-footer">
           <button className="primary-button" type="button" disabled={controlsDisabled} onClick={handleSave}>
             {isSaving ? "保存中..." : "保存设置"}
           </button>
@@ -809,7 +584,7 @@ export default function WorkbenchSettingsModal({
           onSubmit={handleConfirmDataReset}
         />
       ) : null}
-    </div>
+    </>
   );
 }
 

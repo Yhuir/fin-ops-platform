@@ -21,15 +21,33 @@ describe("Finance operations shell", () => {
       }),
     ).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "年月选择" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "搜索" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "设置" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导入中心" })).toBeInTheDocument();
     expect(await screen.findByText("王青")).toBeInTheDocument();
     await user.click(screen.getByRole("link", { name: "税金抵扣" }));
 
     expect(
       screen.getByRole("heading", { name: "税金抵扣计划与试算" }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "搜索" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "设置" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导入中心" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "年月选择" })).toHaveTextContent("2026年3月");
     expect(fetchMock).toHaveBeenCalledWith("/api/workbench?month=all", expect.any(Object));
     expect(fetchMock).toHaveBeenCalledWith("/api/tax-offset?month=2026-03", expect.any(Object));
+  });
+
+  test("keeps the shell header controls stable on cost statistics", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    installMockApiFetch();
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "成本统计" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "搜索" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "设置" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导入中心" })).toBeInTheDocument();
   });
 
   test("hides the global workbench title block while a zone is expanded", async () => {
@@ -80,5 +98,36 @@ describe("Finance operations shell", () => {
 
     expect(await screen.findByText("OA 连接失败")).toBeInTheDocument();
     expect(screen.getByText("OA 连接失败，本次结果未包含完整 OA 数据。")).toBeInTheDocument();
+  });
+
+  test("navigates to the standalone settings page from the shell header", async () => {
+    window.history.pushState({}, "", "/");
+    const user = userEvent.setup();
+    installMockApiFetch();
+
+    render(<App />);
+
+    expect(await screen.findByText("赵华")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "设置" }));
+
+    expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "关联台设置" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "设置" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "设置" })).not.toBeInTheDocument();
+  });
+
+  test("renders the standalone settings route directly", async () => {
+    window.history.pushState({}, "", "/settings");
+    installMockApiFetch();
+
+    render(<App />);
+
+    expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "关联台设置" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "设置" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "搜索" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导入中心" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "设置" })).not.toBeInTheDocument();
   });
 });

@@ -43,13 +43,13 @@ describe("Workbench columns and inline actions", () => {
     expect(within(invoicePane).getByRole("columnheader", { name: "销方名称/识别号" })).toBeInTheDocument();
     expect(within(invoicePane).getByRole("columnheader", { name: "购方名称/识别号" })).toBeInTheDocument();
     expect(within(invoicePane).getByRole("columnheader", { name: "发票代码/发票号码" })).toBeInTheDocument();
-    expect(within(invoicePane).getByRole("columnheader", { name: "金额/税率/税额" })).toBeInTheDocument();
+    expect(within(invoicePane).getByRole("columnheader", { name: "不含税价格/税率（税额）" })).toBeInTheDocument();
     expect(within(invoicePane).getByRole("columnheader", { name: "价税合计" })).toBeInTheDocument();
     expect(within(invoicePane).getByRole("columnheader", { name: "操作" })).toBeInTheDocument();
     expect(within(invoicePane).queryByRole("columnheader", { name: "发票类型" })).not.toBeInTheDocument();
     expect(within(invoicePane).queryByRole("columnheader", { name: "销方识别号" })).not.toBeInTheDocument();
     expect(within(invoicePane).queryByRole("columnheader", { name: "购方识别号" })).not.toBeInTheDocument();
-    expect(within(invoicePane).queryByRole("button", { name: "筛选 金额/税率/税额" })).not.toBeInTheDocument();
+    expect(within(invoicePane).queryByRole("button", { name: "筛选 不含税价格/税率（税额）" })).not.toBeInTheDocument();
     expect(within(invoicePane).queryByRole("button", { name: "筛选 价税合计" })).not.toBeInTheDocument();
   });
 
@@ -429,14 +429,66 @@ describe("Workbench columns and inline actions", () => {
       .find((row) => row.classList.contains("record-card-invoice"));
 
     expect(invoiceRow).toBeDefined();
-    expect(within(invoicePane).getByRole("columnheader", { name: "金额/税率/税额" })).toBeInTheDocument();
+    expect(within(invoicePane).getByRole("columnheader", { name: "不含税价格/税率（税额）" })).toBeInTheDocument();
     expect(within(invoicePane).getByRole("columnheader", { name: "价税合计" })).toBeInTheDocument();
     expect(within(invoicePane).getByRole("columnheader", { name: "发票代码/发票号码" })).toBeInTheDocument();
-    expect(within(invoicePane).queryByRole("button", { name: "筛选 金额/税率/税额" })).not.toBeInTheDocument();
+    expect(within(invoicePane).queryByRole("button", { name: "筛选 不含税价格/税率（税额）" })).not.toBeInTheDocument();
     expect(within(invoicePane).queryByRole("button", { name: "筛选 价税合计" })).not.toBeInTheDocument();
     expect(within(invoiceRow as HTMLElement).getByText("2026-03-25")).toBeInTheDocument();
     expect(within(invoiceRow as HTMLElement).getByText("128,000.00")).toBeInTheDocument();
     expect(within(invoiceRow as HTMLElement).getByText("144,640.00")).toBeInTheDocument();
+  });
+
+  test("renders invoice amount column as net amount with tax meta on the second line", () => {
+    render(
+      <WorkbenchRecordCard
+        actionMode="default"
+        canMutateData
+        columns={[
+          { key: "amount", label: "不含税价格/税率（税额）" },
+          { key: "grossAmount", label: "价税合计" },
+        ]}
+        onOpenDetail={() => {}}
+        onRowAction={() => {}}
+        onSelectRow={() => {}}
+        paneId="invoice"
+        row={{
+          id: "inv-net-amount-001",
+          caseId: "case:inv-net-amount-001",
+          recordType: "invoice",
+          label: "进项发票",
+          status: "待人工核查",
+          statusCode: "manual_review",
+          statusTone: "danger",
+          exceptionHandled: false,
+          amount: "49.50",
+          counterparty: "弥勒市豪荟酒店",
+          actionVariant: "detail-only",
+          availableActions: ["detail"],
+          detailFields: [],
+          tableValues: {
+            sellerName: "弥勒市豪荟酒店",
+            sellerTaxId: "92532526MA6NTMA00H",
+            buyerName: "云南溯源科技有限公司",
+            buyerTaxId: "915300007194052520",
+            invoiceCode: "—",
+            invoiceNo: "26532000000065242711",
+            issueDate: "2026-01-14",
+            amount: "49.50",
+            taxRate: "1%",
+            taxAmount: "0.50",
+            grossAmount: "50.00",
+          },
+        }}
+        rowState="idle"
+        showWorkflowActions
+        zoneId="open"
+      />,
+    );
+
+    expect(screen.getByText("49.50")).toBeInTheDocument();
+    expect(screen.getByText("1% (0.50)")).toBeInTheDocument();
+    expect(screen.getByText("50.00")).toBeInTheDocument();
   });
 
   test("renders open zone batch action buttons in the zone header instead of row inline workflow buttons", async () => {

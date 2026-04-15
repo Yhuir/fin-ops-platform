@@ -44,25 +44,29 @@ function CandidateGroupCell({
   showWorkflowActions,
   canMutateData,
 }: CandidateGroupCellProps) {
+  const isSingleRecord = records.length === 1;
+
   if (records.length === 0) {
     return (
       <div
-        className={`candidate-group-cell candidate-group-cell-${paneId} candidate-group-cell-empty`}
+        className={`candidate-group-cell candidate-group-cell-${paneId} candidate-group-cell-sheet candidate-group-cell-empty candidate-group-cell-empty-sheet`}
         data-scroll-pane={scrollPaneId}
         data-testid={scrollTestId}
       >
-        <div className="candidate-group-empty-copy">当前栏暂无候选</div>
+        <div className="candidate-group-empty-copy">-</div>
       </div>
     );
   }
 
   return (
     <div
-      className={`candidate-group-cell candidate-group-cell-${paneId}`}
+      className={`candidate-group-cell candidate-group-cell-${paneId} candidate-group-cell-sheet ${isSingleRecord ? "candidate-group-cell-sheet-single" : "candidate-group-cell-sheet-multi"}`}
       data-scroll-pane={scrollPaneId}
       data-testid={scrollTestId}
     >
-      <div className="candidate-group-stack">
+      <div
+        className={`candidate-group-stack candidate-group-stack-sheet ${isSingleRecord ? "candidate-group-stack-sheet-single" : "candidate-group-stack-sheet-multi"}`}
+      >
         {records.map((row) => (
           <WorkbenchRecordCard
             actionMode={actionMode}
@@ -76,6 +80,7 @@ function CandidateGroupCell({
             paneId={paneId}
             row={row}
             rowState={getRowState(row, zoneId)}
+            sheetRowMode={isSingleRecord ? "stretched" : "split"}
             showWorkflowActions={showWorkflowActions}
             canMutateData={canMutateData}
             zoneId={zoneId}

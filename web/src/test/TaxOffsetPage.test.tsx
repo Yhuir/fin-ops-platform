@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 
@@ -139,6 +139,63 @@ describe("Tax offset workbench", () => {
     const drawer = screen.getByRole("complementary", { name: "已认证结果" });
     expect(within(drawer).getByText("11203490")).toBeInTheDocument();
     expect(within(drawer).getByText("11203999")).toBeInTheDocument();
+  });
+
+  test("certified invoice import accepts dragged files in the upload area", async () => {
+    window.history.pushState({}, "", "/tax-offset");
+    const user = userEvent.setup();
+    installMockApiFetch();
+    render(<App />);
+
+    expect(await screen.findByText("销项税额")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "已认证发票导入" }));
+
+    const modal = screen.getByRole("dialog", { name: "已认证发票导入" });
+    const dropzone = within(modal).getByLabelText("选择已认证发票文件");
+    const certifiedFile = new File(["mock-xlsx"], "拖拽认证结果.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+
+    fireEvent.dragEnter(dropzone, {
+      dataTransfer: { files: [certifiedFile] },
+    });
+    fireEvent.dragOver(dropzone, {
+      dataTransfer: { files: [certifiedFile] },
+    });
+    fireEvent.drop(dropzone, {
+      dataTransfer: { files: [certifiedFile] },
+    });
+
+    expect(await within(modal).findByText("拖拽认证结果.xlsx")).toBeInTheDocument();
+  });
+
+  test("certified invoice import dropzone rejects non-excel files with an immediate message", async () => {
+    window.history.pushState({}, "", "/tax-offset");
+    const user = userEvent.setup();
+    installMockApiFetch();
+    render(<App />);
+
+    expect(await screen.findByText("销项税额")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "已认证发票导入" }));
+
+    const modal = screen.getByRole("dialog", { name: "已认证发票导入" });
+    const dropzone = within(modal).getByLabelText("选择已认证发票文件");
+    const invalidFile = new File(["text"], "说明.txt", {
+      type: "text/plain",
+    });
+
+    fireEvent.dragEnter(dropzone, {
+      dataTransfer: { files: [invalidFile] },
+    });
+    fireEvent.dragOver(dropzone, {
+      dataTransfer: { files: [invalidFile] },
+    });
+    fireEvent.drop(dropzone, {
+      dataTransfer: { files: [invalidFile] },
+    });
+
+    expect(await within(modal).findByText("仅支持 .xls/.xlsx")).toBeInTheDocument();
+    expect(within(modal).queryByText("说明.txt")).not.toBeInTheDocument();
   });
 
   test("recalculates using certified invoices plus selected uncertified plan rows", async () => {

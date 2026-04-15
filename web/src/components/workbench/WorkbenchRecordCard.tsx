@@ -20,6 +20,7 @@ type WorkbenchRecordCardProps = {
   rowState: WorkbenchRowState;
   actionMode?: "default" | "cancel-exception-only";
   highlighted?: boolean;
+  sheetRowMode?: "stretched" | "split";
   onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "open") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
@@ -36,6 +37,7 @@ function WorkbenchRecordCard({
   rowState,
   actionMode = "default",
   highlighted = false,
+  sheetRowMode = "split",
   onSelectRow,
   onOpenDetail,
   onRowAction,
@@ -45,11 +47,18 @@ function WorkbenchRecordCard({
   const columns = columnsProp ?? getWorkbenchColumns(paneId);
   const hasActionColumn = actionMode === "cancel-exception-only" || paneId === "invoice";
   const showInlineDetail = actionMode === "default" && (paneId === "oa" || paneId === "bank");
+  const sheetStateClass =
+    rowState === "selected"
+      ? " record-card-sheet-selected"
+      : rowState === "related"
+        ? " record-card-sheet-related"
+        : "";
+  const sheetHighlightClass = highlighted ? " record-card-sheet-highlighted" : "";
 
   return (
     <div
       aria-label={buildRowAriaLabel(row, paneId, columns)}
-      className={`record-card workbench-row row-state-${rowState} record-card-${paneId} ${hasActionColumn ? "record-card-has-action" : "record-card-no-action"}${highlighted ? " search-target-highlighted" : ""}`}
+      className={`record-card record-card-sheet-row record-card-sheet-row-${sheetRowMode}${sheetStateClass}${sheetHighlightClass} workbench-row row-state-${rowState} record-card-${paneId} ${hasActionColumn ? "record-card-has-action" : "record-card-no-action"}${highlighted ? " search-target-highlighted" : ""}`}
       data-row-id={row.id}
       data-row-state={rowState}
       data-search-highlighted={highlighted ? "true" : "false"}
@@ -72,7 +81,7 @@ function WorkbenchRecordCard({
         );
       })}
       {hasActionColumn ? (
-        <div className="record-card-cell record-card-action-cell" role="cell">
+        <div className="record-card-cell record-card-action-cell record-card-action-cell-sheet" role="cell">
           <RowActions
             availableActions={row.availableActions}
             canMutateData={canMutateData}
@@ -104,6 +113,7 @@ export default memo(WorkbenchRecordCard, (previousProps, nextProps) => (
   && previousProps.rowState === nextProps.rowState
   && previousProps.actionMode === nextProps.actionMode
   && previousProps.highlighted === nextProps.highlighted
+  && previousProps.sheetRowMode === nextProps.sheetRowMode
   && previousProps.showWorkflowActions === nextProps.showWorkflowActions
   && previousProps.canMutateData === nextProps.canMutateData
   && previousProps.onSelectRow === nextProps.onSelectRow

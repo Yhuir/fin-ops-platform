@@ -1,9 +1,21 @@
 import { screen, within } from "@testing-library/react";
 import { waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { vi } from "vitest";
 
 import { installMockApiFetch } from "./apiMock";
 import { renderAppAt, renderWorkbenchPage } from "./renderHelpers";
+
+async function openWorkbenchImportMenu(user: ReturnType<typeof userEvent.setup>) {
+  const trigger = await screen.findByRole("button", { name: "导入中心" });
+  await user.hover(trigger);
+  return trigger;
+}
+
+async function openWorkbenchSettingsPage(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole("button", { name: "设置" }));
+  return await screen.findByTestId("settings-page");
+}
 
 describe("Workbench row selection and detail modal", () => {
   test("clicking an open row toggles multi-selection without opening the detail modal", async () => {
@@ -355,33 +367,29 @@ describe("Workbench row selection and detail modal", () => {
     });
     renderAppAt("/");
 
-    await user.click(await screen.findByRole("button", { name: "设置" }));
-
-    const settingsDialog = await screen.findByRole("dialog", { name: "关联台设置" });
-    const settingsTree = within(settingsDialog).getByRole("tree", { name: "设置分类" });
-    expect(within(settingsDialog).getByRole("heading", { name: "设置分类" })).toBeInTheDocument();
+    const settingsPage = await openWorkbenchSettingsPage(user);
+    const settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
+    expect(within(settingsPage).getByRole("heading", { name: "设置分类" })).toBeInTheDocument();
     expect(screen.queryByText("设置项")).not.toBeInTheDocument();
     expect(within(settingsTree).getByRole("treeitem", { name: /项目状态/ })).toBeInTheDocument();
     expect(within(settingsTree).getByRole("treeitem", { name: /银行账户/ })).toBeInTheDocument();
     expect(within(settingsTree).getByRole("treeitem", { name: /保OA/ })).toBeInTheDocument();
     expect(within(settingsTree).getByRole("treeitem", { name: /冲账规则/ })).toBeInTheDocument();
     expect(within(settingsTree).getByRole("treeitem", { name: /访问账户/ })).toBeInTheDocument();
-    expect(within(settingsDialog).getByRole("heading", { name: "项目状态管理" })).toBeInTheDocument();
-    expect(screen.getByText("登录账户：")).toBeInTheDocument();
-    expect(screen.getByText("杨南山（YNSYLP005）")).toBeInTheDocument();
+    expect(within(settingsPage).getByRole("heading", { name: "项目状态管理" })).toBeInTheDocument();
 
     await user.click(within(settingsTree).getByRole("treeitem", { name: /银行账户/ }));
-    expect(within(settingsDialog).getByRole("heading", { name: "银行账户映射" })).toBeInTheDocument();
+    expect(within(settingsPage).getByRole("heading", { name: "银行账户映射" })).toBeInTheDocument();
     await user.click(within(settingsTree).getByRole("treeitem", { name: /保OA/ }));
-    expect(within(settingsDialog).getByRole("heading", { name: "保OA" })).toBeInTheDocument();
+    expect(within(settingsPage).getByRole("heading", { name: "保OA" })).toBeInTheDocument();
     await user.clear(screen.getByLabelText("保OA起始日期"));
     await user.type(screen.getByLabelText("保OA起始日期"), "2026-02-01");
     await user.click(within(settingsTree).getByRole("treeitem", { name: /冲账规则/ }));
-    expect(within(settingsDialog).getByRole("heading", { name: "冲账规则" })).toBeInTheDocument();
+    expect(within(settingsPage).getByRole("heading", { name: "冲账规则" })).toBeInTheDocument();
     await user.clear(screen.getByLabelText("冲账申请人"));
     await user.type(screen.getByLabelText("冲账申请人"), "周洁莹、李四");
     await user.click(within(settingsTree).getByRole("treeitem", { name: /访问账户/ }));
-    expect(within(settingsDialog).getByRole("heading", { name: "访问账户管理" })).toBeInTheDocument();
+    expect(within(settingsPage).getByRole("heading", { name: "访问账户管理" })).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("新增访问账户"), "READONLY001");
     await user.selectOptions(screen.getByLabelText("新增账户权限"), "read_export_only");
@@ -434,14 +442,71 @@ describe("Workbench row selection and detail modal", () => {
     });
     renderAppAt("/");
 
-    await user.click(await screen.findByRole("button", { name: "设置" }));
-
-    const settingsDialog = await screen.findByRole("dialog", { name: "关联台设置" });
-    const settingsTree = within(settingsDialog).getByRole("tree", { name: "设置分类" });
+    const settingsPage = await openWorkbenchSettingsPage(user);
+    const settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
     expect(within(settingsTree).getByRole("treeitem", { name: /冲账规则/ })).toBeInTheDocument();
     expect(within(settingsTree).queryByRole("treeitem", { name: /访问账户/ })).not.toBeInTheDocument();
     await user.click(within(settingsTree).getByRole("treeitem", { name: /冲账规则/ }));
-    expect(within(settingsDialog).getByRole("heading", { name: "冲账规则" })).toBeInTheDocument();
+    expect(within(settingsPage).getByRole("heading", { name: "冲账规则" })).toBeInTheDocument();
+  });
+
+  test("project status settings can sync, add, move, and delete local projects", async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const fetchMock = installMockApiFetch({
+      sessionAccessTier: "admin",
+      sessionUsername: "YNSYLP005",
+      sessionDisplayName: "杨南山",
+    });
+    renderAppAt("/");
+
+    const settingsPage = await openWorkbenchSettingsPage(user);
+    const settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
+    await user.click(within(settingsTree).getByRole("treeitem", { name: /项目状态/ }));
+
+    expect(within(settingsPage).getByRole("heading", { name: "项目状态管理" })).toBeInTheDocument();
+    expect(within(settingsPage).getByText("进行中项目")).toBeInTheDocument();
+    expect(within(settingsPage).getByText("已完成项目")).toBeInTheDocument();
+    expect(within(settingsPage).getByText("昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目")).toBeInTheDocument();
+
+    await user.click(within(settingsPage).getByRole("button", { name: "从 OA 拉取项目" }));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/settings/projects/sync",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ actor_id: "YNSYLP005" }),
+      }),
+    );
+    expect(await within(settingsPage).findByText("OA 同步新增项目")).toBeInTheDocument();
+
+    await user.type(within(settingsPage).getByLabelText("项目编码"), "LOCAL-001");
+    await user.type(within(settingsPage).getByLabelText("项目名称"), "本地测试项目");
+    await user.click(within(settingsPage).getByRole("button", { name: "新增本地项目" }));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/settings/projects",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          actor_id: "YNSYLP005",
+          project_code: "LOCAL-001",
+          project_name: "本地测试项目",
+        }),
+      }),
+    );
+    expect(await within(settingsPage).findByText("本地测试项目")).toBeInTheDocument();
+
+    await user.click(within(settingsPage).getByRole("button", { name: /本地测试项目.*标记完成/ }));
+    const completedColumn = within(settingsPage).getByText("已完成项目").closest(".settings-project-column");
+    expect(completedColumn).not.toBeNull();
+    expect(within(completedColumn as HTMLElement).getByText("本地测试项目")).toBeInTheDocument();
+
+    await user.click(within(completedColumn as HTMLElement).getByRole("button", { name: /本地测试项目.*删除/ }));
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining("不会删除 OA 源项目和历史数据"));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/settings/projects/proj_manual_local_001",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    expect(within(settingsPage).queryByText("本地测试项目")).not.toBeInTheDocument();
   });
 
   test("admin data reset requires impact confirmation and current OA password", async () => {
@@ -453,17 +518,15 @@ describe("Workbench row selection and detail modal", () => {
     });
     renderAppAt("/");
 
-    await user.click(await screen.findByRole("button", { name: "设置" }));
-
-    const settingsDialog = await screen.findByRole("dialog", { name: "关联台设置" });
-    const settingsTree = within(settingsDialog).getByRole("tree", { name: "设置分类" });
+    const settingsPage = await openWorkbenchSettingsPage(user);
+    const settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
     expect(within(settingsTree).getByRole("treeitem", { name: /数据重置/ })).toBeInTheDocument();
 
     await user.click(within(settingsTree).getByRole("treeitem", { name: /数据重置/ }));
-    expect(within(settingsDialog).getByRole("button", { name: "清除所有银行流水数据" })).toBeInTheDocument();
-    expect(within(settingsDialog).getByRole("button", { name: "清除所有发票（进销）数据" })).toBeInTheDocument();
-    expect(within(settingsDialog).getByRole("button", { name: "清除所有 OA 数据并重新写入" })).toBeInTheDocument();
-    await user.click(within(settingsDialog).getByRole("button", { name: "清除所有银行流水数据" }));
+    expect(within(settingsPage).getByRole("button", { name: "清除所有银行流水数据" })).toBeInTheDocument();
+    expect(within(settingsPage).getByRole("button", { name: "清除所有发票（进销）数据" })).toBeInTheDocument();
+    expect(within(settingsPage).getByRole("button", { name: "清除所有 OA 数据并重新写入" })).toBeInTheDocument();
+    await user.click(within(settingsPage).getByRole("button", { name: "清除所有银行流水数据" }));
 
     const confirmDialog = await screen.findByRole("dialog", { name: "确认数据重置" });
     expect(within(confirmDialog).getByText(/不影响 OA 源库/)).toBeInTheDocument();
@@ -499,12 +562,10 @@ describe("Workbench row selection and detail modal", () => {
     });
     renderAppAt("/");
 
-    await user.click(await screen.findByRole("button", { name: "设置" }));
-
-    const settingsDialog = await screen.findByRole("dialog", { name: "关联台设置" });
-    const settingsTree = within(settingsDialog).getByRole("tree", { name: "设置分类" });
+    const settingsPage = await openWorkbenchSettingsPage(user);
+    const settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
     await user.click(within(settingsTree).getByRole("treeitem", { name: /数据重置/ }));
-    await user.click(within(settingsDialog).getByRole("button", { name: "清除所有 OA 数据并重新写入" }));
+    await user.click(within(settingsPage).getByRole("button", { name: "清除所有 OA 数据并重新写入" }));
     await user.click(within(await screen.findByRole("dialog", { name: "确认数据重置" })).getByRole("button", { name: "继续" }));
     const passwordDialog = await screen.findByRole("dialog", { name: "OA 密码复核" });
     await user.type(within(passwordDialog).getByLabelText("当前 OA 用户密码"), "wrong-password");
@@ -523,12 +584,10 @@ describe("Workbench row selection and detail modal", () => {
     });
     renderAppAt("/");
 
-    await user.click(await screen.findByRole("button", { name: "设置" }));
-
-    const settingsDialog = await screen.findByRole("dialog", { name: "关联台设置" });
-    const settingsTree = within(settingsDialog).getByRole("tree", { name: "设置分类" });
+    const settingsPage = await openWorkbenchSettingsPage(user);
+    const settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
     await user.click(within(settingsTree).getByRole("treeitem", { name: /数据重置/ }));
-    await user.click(within(settingsDialog).getByRole("button", { name: "清除所有发票（进销）数据" }));
+    await user.click(within(settingsPage).getByRole("button", { name: "清除所有发票（进销）数据" }));
     await user.click(within(await screen.findByRole("dialog", { name: "确认数据重置" })).getByRole("button", { name: "继续" }));
 
     const passwordDialog = await screen.findByRole("dialog", { name: "OA 密码复核" });
@@ -550,10 +609,8 @@ describe("Workbench row selection and detail modal", () => {
     });
     renderAppAt("/");
 
-    await user.click(await screen.findByRole("button", { name: "设置" }));
-
-    const settingsDialog = await screen.findByRole("dialog", { name: "关联台设置" });
-    const settingsTree = within(settingsDialog).getByRole("tree", { name: "设置分类" });
+    const settingsPage = await openWorkbenchSettingsPage(user);
+    const settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
     expect(within(settingsTree).queryByRole("treeitem", { name: /访问账户/ })).not.toBeInTheDocument();
     expect(within(settingsTree).queryByRole("treeitem", { name: /冲账规则/ })).not.toBeInTheDocument();
     expect(within(settingsTree).queryByRole("treeitem", { name: /数据重置/ })).not.toBeInTheDocument();
@@ -568,19 +625,18 @@ describe("Workbench row selection and detail modal", () => {
     });
     renderAppAt("/");
 
-    await user.click(await screen.findByRole("button", { name: "设置" }));
-
-    const settingsDialog = await screen.findByRole("dialog", { name: "关联台设置" });
-    const settingsTree = within(settingsDialog).getByRole("tree", { name: "设置分类" });
+    const settingsPage = await openWorkbenchSettingsPage(user);
+    const settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
     expect(within(settingsTree).queryByRole("treeitem", { name: /数据重置/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "清除所有 OA 数据并重新写入" })).not.toBeInTheDocument();
   });
 
-  test("bank import opens a dialog and sends per-file bank overrides", async () => {
+  test("bank import opens a dialog and sends per-file bank mapping overrides", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderAppAt("/");
 
+    await openWorkbenchImportMenu(user);
     await user.click(await screen.findByRole("button", { name: "银行流水导入" }));
     const dialog = await screen.findByRole("dialog", { name: "银行流水导入" });
     const input = within(dialog).getByLabelText("上传银行流水文件") as HTMLInputElement;
@@ -597,8 +653,8 @@ describe("Workbench row selection and detail modal", () => {
     const previewButton = within(dialog).getByRole("button", { name: "开始预览" });
     expect(previewButton).toBeDisabled();
 
-    await user.selectOptions(within(dialog).getByLabelText("对应银行 historydetail14080.xlsx"), "建设银行");
-    await user.selectOptions(within(dialog).getByLabelText("对应银行 2026-01-01至2026-01-31交易明细.xlsx"), "建设银行");
+    await user.selectOptions(within(dialog).getByLabelText("对应账户 historydetail14080.xlsx"), "bank_mapping_8826");
+    await user.selectOptions(within(dialog).getByLabelText("对应账户 2026-01-01至2026-01-31交易明细.xlsx"), "bank_mapping_8826");
     expect(previewButton).toBeEnabled();
     await user.click(previewButton);
 
@@ -609,15 +665,17 @@ describe("Workbench row selection and detail modal", () => {
     expect(JSON.parse(String(formData.get("file_overrides")))).toEqual([
       {
         file_name: "historydetail14080.xlsx",
-        template_code: "ccb_transaction_detail",
         batch_type: "bank_transaction",
+        bank_mapping_id: "bank_mapping_8826",
         bank_name: "建设银行",
+        last4: "8826",
       },
       {
         file_name: "2026-01-01至2026-01-31交易明细.xlsx",
-        template_code: "ccb_transaction_detail",
         batch_type: "bank_transaction",
+        bank_mapping_id: "bank_mapping_8826",
         bank_name: "建设银行",
+        last4: "8826",
       },
     ]);
   });
@@ -627,6 +685,7 @@ describe("Workbench row selection and detail modal", () => {
     const fetchMock = installMockApiFetch();
     renderAppAt("/");
 
+    await openWorkbenchImportMenu(user);
     expect(await screen.findByRole("button", { name: "发票导入" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "销项发票导入" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "进项发票导入" })).not.toBeInTheDocument();
@@ -674,6 +733,7 @@ describe("Workbench row selection and detail modal", () => {
     const fetchMock = installMockApiFetch();
     renderAppAt("/");
 
+    await openWorkbenchImportMenu(user);
     await user.click(await screen.findByRole("button", { name: "ETC发票导入" }));
     const dialog = await screen.findByRole("dialog", { name: "ETC发票导入" });
     const input = within(dialog).getByLabelText("上传ETC发票文件") as HTMLInputElement;
@@ -700,6 +760,38 @@ describe("Workbench row selection and detail modal", () => {
         batch_type: "input_invoice",
       },
     ]);
+  });
+
+  test("import completion writes status only into the global OA status text and clears after background refresh", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({ workbenchLoadDelayMs: 160 });
+    renderAppAt("/");
+
+    await openWorkbenchImportMenu(user);
+    await user.click(await screen.findByRole("button", { name: "发票导入" }));
+    const dialog = await screen.findByRole("dialog", { name: "发票导入" });
+    const input = within(dialog).getByLabelText("上传发票文件") as HTMLInputElement;
+    const inputFile = new File(["invoice-input"], "二月发票.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      lastModified: 2,
+    });
+
+    await user.upload(input, [inputFile]);
+    await user.selectOptions(within(dialog).getByLabelText("票据方向 二月发票.xlsx"), "input_invoice");
+    await user.click(within(dialog).getByRole("button", { name: "开始预览" }));
+    expect(await within(dialog).findByText("已完成 1 个文件的预览识别。")).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "确认导入" }));
+
+    await waitFor(() => {
+      expect(document.querySelector(".global-status-text")?.textContent).toContain("已导入 1 个文件，正在刷新关联台。");
+    });
+    expect(screen.queryByText("已导入 1 个文件，正在后台刷新关联台。")).not.toBeInTheDocument();
+    expect(document.querySelector(".action-feedback")).toBeNull();
+
+    await waitFor(() => {
+      expect(document.querySelector(".global-status-text")?.textContent).toContain("OA 已同步");
+    });
   });
 
   test("read-only export users can search and view details but cannot see write actions", async () => {
@@ -735,9 +827,8 @@ describe("Workbench row selection and detail modal", () => {
 
     await user.click(screen.getByRole("button", { name: "关闭搜索" }));
 
-    await user.click(screen.getByRole("button", { name: "设置" }));
-    const settingsDialog = await screen.findByRole("dialog", { name: "关联台设置" });
-    expect(within(settingsDialog).getByRole("button", { name: "保存设置" })).toBeDisabled();
+    const settingsPage = await openWorkbenchSettingsPage(user);
+    expect(within(settingsPage).getByRole("button", { name: "保存设置" })).toBeDisabled();
   });
 
   test("paired zone cancel action stays disabled until at least two rows are selected", async () => {
