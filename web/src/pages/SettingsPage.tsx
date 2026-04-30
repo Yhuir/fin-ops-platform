@@ -46,7 +46,7 @@ export default function SettingsPage() {
   const navigate = useNavigate();
   const session = useSession();
   const { canMutateData, canAdminAccess } = useSessionPermissions();
-  const { setWorkbenchHeaderActions, setWorkbenchStatusText } = useAppChrome();
+  const { setWorkbenchHeaderActions, setWorkbenchStatus } = useAppChrome();
   const [settings, setSettings] = useState<WorkbenchSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -92,18 +92,21 @@ export default function SettingsPage() {
   }, [loadSettings]);
 
   useEffect(() => {
-    if (isLoading) {
-      setWorkbenchStatusText(
-        loadProgress.percent === null
-          ? `${loadProgress.label}...`
-          : `${loadProgress.label} ${loadProgress.percent}%`,
-      );
+    if (loadError) {
+      setWorkbenchStatus({ level: "error", reason: loadError });
       return;
     }
-    setWorkbenchStatusText(null);
-  }, [isLoading, loadProgress.label, loadProgress.percent, setWorkbenchStatusText]);
+    if (isLoading) {
+      const reason = loadProgress.percent === null
+        ? `${loadProgress.label}...`
+        : `${loadProgress.label} ${loadProgress.percent}%`;
+      setWorkbenchStatus({ level: "pending", reason });
+      return;
+    }
+    setWorkbenchStatus(null);
+  }, [isLoading, loadError, loadProgress.label, loadProgress.percent, setWorkbenchStatus]);
 
-  useEffect(() => () => setWorkbenchStatusText(null), [setWorkbenchStatusText]);
+  useEffect(() => () => setWorkbenchStatus(null), [setWorkbenchStatus]);
 
   const handleSaveSettings = async (payload: {
     completedProjectIds: string[];
@@ -113,6 +116,7 @@ export default function SettingsPage() {
     adminUsernames: string[];
     workbenchColumnLayouts: WorkbenchSettings["workbenchColumnLayouts"];
     oaRetention: WorkbenchSettings["oaRetention"];
+    oaImport: WorkbenchSettings["oaImport"];
     oaInvoiceOffset: WorkbenchSettings["oaInvoiceOffset"];
   }) => {
     if (!canMutateData) {

@@ -17,13 +17,18 @@ export type WorkbenchHeaderActions = {
   onOpenSettings: () => void;
 };
 
+export type WorkbenchShellStatus = {
+  level: "ok" | "pending" | "error";
+  reason: string;
+};
+
 type AppChromeContextValue = {
   shellHeaderMounted: boolean;
   setShellHeaderMounted: (nextValue: boolean) => void;
   setWorkbenchHeaderActions: (nextValue: WorkbenchHeaderActions | null) => void;
-  workbenchStatusText: string | null;
+  workbenchStatus: WorkbenchShellStatus | null;
   workbenchHeaderActions: WorkbenchHeaderActions | null;
-  setWorkbenchStatusText: (nextValue: string | null) => void;
+  setWorkbenchStatus: (nextValue: WorkbenchShellStatus | null) => void;
 };
 
 const AppChromeContext = createContext<AppChromeContextValue | null>(null);
@@ -32,7 +37,7 @@ export function AppChromeProvider(
   { children, initialShellHeaderMounted = false }: { children: ReactNode; initialShellHeaderMounted?: boolean },
 ) {
   const [shellHeaderMounted, setShellHeaderMounted] = useState(initialShellHeaderMounted);
-  const [workbenchStatusText, setWorkbenchStatusText] = useState<string | null>(null);
+  const [workbenchStatus, setWorkbenchStatus] = useState<WorkbenchShellStatus | null>(null);
   const [workbenchHeaderActions, setWorkbenchHeaderActions] = useState<WorkbenchHeaderActions | null>(null);
 
   const value = useMemo(
@@ -40,11 +45,11 @@ export function AppChromeProvider(
       shellHeaderMounted,
       setShellHeaderMounted,
       setWorkbenchHeaderActions,
-      workbenchStatusText,
+      workbenchStatus,
       workbenchHeaderActions,
-      setWorkbenchStatusText,
+      setWorkbenchStatus,
     }),
-    [shellHeaderMounted, workbenchHeaderActions, workbenchStatusText],
+    [shellHeaderMounted, workbenchHeaderActions, workbenchStatus],
   );
 
   return <AppChromeContext.Provider value={value}>{children}</AppChromeContext.Provider>;

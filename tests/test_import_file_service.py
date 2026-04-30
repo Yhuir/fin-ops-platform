@@ -7,7 +7,7 @@ from openpyxl import Workbook
 
 from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile, is_company_identity
 from fin_ops_platform.services.imports import ImportNormalizationService
-from tests.mock_import_files import CEB_JAN, INVOICE_JAN, PINGAN_JAN
+from tests.mock_import_files import BOCOM_JAN, CEB_JAN, INVOICE_JAN, PINGAN_JAN, icbc_history_file
 
 
 class FakeImportIdStore:
@@ -179,6 +179,86 @@ class ImportFileServiceTests(unittest.TestCase):
         self.assertFalse(preview_file.bank_selection_conflict)
         self.assertIsNone(preview_file.conflict_message)
 
+    def test_preview_does_not_detect_icbc_last4_from_filename(self) -> None:
+        import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
+        service = FileImportService(import_service)
+        upload = icbc_history_file(name="historydetail1410.xlsx")
+
+        session = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[
+                UploadedImportFile(
+                    file_name=upload.name,
+                    content=upload.content,
+                    selected_bank_mapping_id="bank_mapping_icbc_6386",
+                    selected_bank_name="工商银行",
+                    selected_bank_short_name="工行",
+                    selected_bank_last4="6386",
+                )
+            ],
+        )
+
+        preview_file = session.files[0]
+        self.assertEqual(preview_file.status, "preview_ready")
+        self.assertEqual(preview_file.template_code, "icbc_historydetail")
+        self.assertEqual(preview_file.detected_bank_name, "工商银行")
+        self.assertIsNone(preview_file.detected_last4)
+        self.assertFalse(preview_file.bank_selection_conflict)
+        self.assertIsNone(preview_file.conflict_message)
+
+    def test_preview_uses_selected_bank_account_when_icbc_file_has_no_account(self) -> None:
+        import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
+        service = FileImportService(import_service)
+        upload = icbc_history_file(name="historydetail1410.xlsx")
+
+        session = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[
+                UploadedImportFile(
+                    file_name=upload.name,
+                    content=upload.content,
+                    selected_bank_mapping_id="bank_mapping_icbc_6386",
+                    selected_bank_name="工商银行",
+                    selected_bank_short_name="工行",
+                    selected_bank_last4="6386",
+                )
+            ],
+        )
+
+        preview_file = session.files[0]
+        self.assertEqual(preview_file.success_count, 1)
+        self.assertEqual(preview_file.error_count, 0)
+        self.assertIsNone(preview_file.detected_last4)
+        self.assertEqual(preview_file.normalized_rows[0]["account_no"], "bank_mapping_icbc_6386")
+        self.assertEqual(preview_file.normalized_rows[0]["imported_bank_last4"], "6386")
+
+    def test_preview_detects_icbc_last4_from_explicit_file_account(self) -> None:
+        import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
+        service = FileImportService(import_service)
+        upload = icbc_history_file(name="historydetail1410.xlsx", account_no="6222020200006386")
+
+        session = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[
+                UploadedImportFile(
+                    file_name=upload.name,
+                    content=upload.content,
+                    selected_bank_mapping_id="bank_mapping_icbc_6386",
+                    selected_bank_name="工商银行",
+                    selected_bank_short_name="工行",
+                    selected_bank_last4="6386",
+                )
+            ],
+        )
+
+        preview_file = session.files[0]
+        self.assertEqual(preview_file.status, "preview_ready")
+        self.assertEqual(preview_file.template_code, "icbc_historydetail")
+        self.assertEqual(preview_file.detected_bank_name, "工商银行")
+        self.assertEqual(preview_file.detected_last4, "6386")
+        self.assertFalse(preview_file.bank_selection_conflict)
+        self.assertIsNone(preview_file.conflict_message)
+
     def test_preview_accepts_ceb_xlsx_statement_with_yuan_amount_headers(self) -> None:
         workbook = Workbook()
         sheet = workbook.active
@@ -217,6 +297,37 @@ class ImportFileServiceTests(unittest.TestCase):
         self.assertEqual(preview_file.row_count, 1)
         self.assertEqual(preview_file.success_count, 1)
         self.assertFalse(preview_file.bank_selection_conflict)
+
+    def test_preview_accepts_bocom_transaction_detail_statement(self) -> None:
+        import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
+        service = FileImportService(import_service)
+
+        session = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[
+                UploadedImportFile(
+                    file_name=BOCOM_JAN.name,
+                    content=BOCOM_JAN.content,
+                    selected_bank_mapping_id="bank_mapping_bocom_3847",
+                    selected_bank_name="交通银行",
+                    selected_bank_short_name="交行",
+                    selected_bank_last4="3847",
+                )
+            ],
+        )
+
+        preview_file = session.files[0]
+        self.assertEqual(preview_file.status, "preview_ready")
+        self.assertEqual(preview_file.template_code, "bocom_transaction_detail")
+        self.assertEqual(preview_file.batch_type.value, "bank_transaction")
+        self.assertEqual(preview_file.detected_bank_name, "交通银行")
+        self.assertEqual(preview_file.detected_last4, "3847")
+        self.assertEqual(preview_file.row_count, 2)
+        self.assertEqual(preview_file.success_count, 2)
+        self.assertEqual(preview_file.error_count, 0)
+        self.assertFalse(preview_file.bank_selection_conflict)
+        self.assertEqual(preview_file.normalized_rows[0]["account_no"], "531899991015003383847")
+        self.assertEqual(preview_file.normalized_rows[0]["account_name"], "云南溯源科技有限公司")
 
 
 if __name__ == "__main__":

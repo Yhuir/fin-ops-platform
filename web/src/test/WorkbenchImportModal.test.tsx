@@ -13,6 +13,25 @@ async function openWorkbenchImportMenu(user: ReturnType<typeof userEvent.setup>)
 }
 
 describe("Workbench import modal", () => {
+  test("keeps the import modal open when clicking the backdrop and closes from the close button", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    renderAppAt("/");
+
+    await openWorkbenchImportMenu(user);
+    await user.click(await screen.findByRole("button", { name: "银行流水导入" }));
+    const dialog = await screen.findByRole("dialog", { name: "银行流水导入" });
+
+    const backdrop = document.querySelector(".export-center-modal-backdrop");
+    expect(backdrop).toBeInTheDocument();
+
+    fireEvent.click(backdrop as Element);
+    expect(screen.getByRole("dialog", { name: "银行流水导入" })).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "关闭" }));
+    expect(screen.queryByRole("dialog", { name: "银行流水导入" })).not.toBeInTheDocument();
+  });
+
   test("bank import uses concrete bank account mapping options and sends mapping fields in preview payload", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();

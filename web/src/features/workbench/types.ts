@@ -49,6 +49,18 @@ export type WorkbenchColumnLayouts = {
   invoice: string[];
 };
 
+export type WorkbenchOaImportOption = {
+  value: string;
+  label: string;
+};
+
+export type WorkbenchOaImportSettings = {
+  formTypes: string[];
+  statuses: string[];
+  availableFormTypes: WorkbenchOaImportOption[];
+  availableStatuses: WorkbenchOaImportOption[];
+};
+
 export type WorkbenchSettings = {
   projects: {
     active: WorkbenchProjectSetting[];
@@ -66,6 +78,7 @@ export type WorkbenchSettings = {
   oaRetention: {
     cutoffDate: string;
   };
+  oaImport: WorkbenchOaImportSettings;
   oaInvoiceOffset: {
     applicantNames: string[];
   };

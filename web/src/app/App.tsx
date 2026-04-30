@@ -10,8 +10,23 @@ import AppRouter from "./router";
 import { APP_BASE_PATH, isOaEmbeddedMode } from "./runtime";
 import "./styles.css";
 
+function HeaderStatusIndicator({ level, reason }: { level: "ok" | "pending" | "error"; reason: string }) {
+  return (
+    <div
+      aria-label={reason}
+      aria-live="polite"
+      className={`global-status-indicator ${level}`}
+      data-status-reason={reason}
+      role="status"
+      title={reason}
+    >
+      <span className="global-status-dot" aria-hidden="true" />
+    </div>
+  );
+}
+
 function AppShell() {
-  const { workbenchHeaderActions, workbenchStatusText } = useAppChrome();
+  const { workbenchHeaderActions, workbenchStatus } = useAppChrome();
   const { progress } = useImportProgress();
   const embedded = isOaEmbeddedMode();
 
@@ -23,7 +38,7 @@ function AppShell() {
             <div className="eyebrow">溯源办公系统</div>
             <div className="global-title">财务运营平台</div>
           </div>
-          {workbenchStatusText ? <div className="global-status-text">{workbenchStatusText}</div> : null}
+          {workbenchStatus ? <HeaderStatusIndicator level={workbenchStatus.level} reason={workbenchStatus.reason} /> : null}
         </div>
         <div className="header-actions">
           {workbenchHeaderActions ? (

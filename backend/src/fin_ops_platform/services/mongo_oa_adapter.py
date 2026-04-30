@@ -30,6 +30,22 @@ EXPENSE_ROW_ID_RE = re.compile(r"^oa-exp-(.+)-([^-]+)$")
 COMPLETED_PROCESS_VALUES = {"已完成", "2", 2}
 IN_PROGRESS_PROCESS_VALUES = {"进行中", "1", 1}
 COMPLETED_STATUS_VALUES = {"approved", "APPROVED", "Approved"}
+OA_IMPORT_FORM_TYPE_PAYMENT = "payment_request"
+OA_IMPORT_FORM_TYPE_EXPENSE = "expense_claim"
+OA_IMPORT_STATUS_COMPLETED = "completed"
+OA_IMPORT_STATUS_IN_PROGRESS = "in_progress"
+OA_IMPORT_FORM_TYPE_OPTIONS = [
+    {"id": OA_IMPORT_FORM_TYPE_PAYMENT, "label": "支付申请"},
+    {"id": OA_IMPORT_FORM_TYPE_EXPENSE, "label": "日常报销"},
+]
+OA_IMPORT_STATUS_OPTIONS = [
+    {"id": OA_IMPORT_STATUS_COMPLETED, "label": "已完成"},
+    {"id": OA_IMPORT_STATUS_IN_PROGRESS, "label": "进行中"},
+]
+DEFAULT_OA_IMPORT_SETTINGS = {
+    "form_types": [OA_IMPORT_FORM_TYPE_PAYMENT, OA_IMPORT_FORM_TYPE_EXPENSE],
+    "statuses": [OA_IMPORT_STATUS_COMPLETED],
+}
 
 EXPENSE_TYPE_CANDIDATE_KEYS = (
     "feeType",
@@ -193,15 +209,27 @@ class MongoOAAdapter(OAAdapter):
         self._attachment_invoice_parse_lock = Lock()
         self._attachment_invoice_parse_inflight: set[str] = set()
         self._attachment_invoice_parse_suppression_depth = 0
+        self._attachment_invoice_sync_parse_depth = 0
         self._client: MongoClient | None = None
         self._project_name_cache: dict[str, str] | None = None
         self._records_cache: dict[str, tuple[float, list[OAApplicationRecord]]] = {}
         self._available_months_cache: tuple[float, list[str]] | None = None
         self._mongo_unavailable_until = 0.0
         self._last_read_status = OAReadStatus(code="idle", message="OA 待读取")
+        self._import_settings_provider: Callable[[], dict[str, list[str]]] | None = None
+        self._import_settings_signature: str | None = None
         self._attachment_invoice_service = OAAttachmentInvoiceService(
             timeout_seconds=max(self._settings.request_timeout_ms / 1000, 1),
         )
+
+    def set_import_settings_provider(self, provider: Callable[[], dict[str, list[str]]] | None) -> None:
+        self._import_settings_provider = provider
+        self._import_settings_signature = None
+        self._records_cache.clear()
+        self._available_months_cache = None
+
+    def set_import_filter_provider(self, provider: Callable[[], dict[str, list[str]]] | None) -> None:
+        self.set_import_settings_provider(provider)
 
     def set_attachment_invoice_cache_updated_callback(self, callback: Callable[[list[str]], None] | None) -> None:
         self._attachment_invoice_cache_updated_callback = callback
@@ -217,9 +245,33 @@ class MongoOAAdapter(OAAdapter):
                 self._attachment_invoice_parse_suppression_depth - 1,
             )
 
+    @contextmanager
+    def force_attachment_invoice_sync_parse(self):
+        self._attachment_invoice_sync_parse_depth += 1
+        try:
+            yield
+        finally:
+            self._attachment_invoice_sync_parse_depth = max(
+                0,
+                self._attachment_invoice_sync_parse_depth - 1,
+            )
+
+    def parse_attachment_invoices_for_months(self, months: list[str]) -> None:
+        normalized_months = [
+            str(month).strip()
+            for month in list(months or [])
+            if MONTH_RE.match(str(month).strip())
+        ]
+        if not normalized_months:
+            return
+        with self.force_attachment_invoice_sync_parse():
+            for month in normalized_months:
+                self.list_application_records(month)
+
     def list_application_records(self, month: str) -> list[OAApplicationRecord]:
         if not MONTH_RE.match(month):
             return []
+        self._sync_import_settings_cache()
         if self._mongo_temporarily_unavailable():
             self._set_read_status("error", "OA 连接失败")
             return []
@@ -237,20 +289,22 @@ class MongoOAAdapter(OAAdapter):
             self._set_read_status("error", "OA 连接失败")
             return []
         records: list[OAApplicationRecord] = []
-        payment_documents = self._load_form_documents(self._settings.payment_request_form_id, month)
-        if self._mongo_temporarily_unavailable():
-            self._set_read_status("error", "OA 连接失败")
-            return []
-        for document in payment_documents:
-            record = self._build_payment_request_record(document, project_names)
-            if record is not None:
-                records.append(record)
-        expense_documents = self._load_form_documents(self._settings.expense_claim_form_id, month)
-        if self._mongo_temporarily_unavailable():
-            self._set_read_status("error", "OA 连接失败")
-            return sorted(records, key=lambda item: (item.month, item.id))
-        for document in expense_documents:
-            records.extend(self._build_expense_claim_records(document, project_names))
+        if self._should_include_form_type(OA_IMPORT_FORM_TYPE_PAYMENT):
+            payment_documents = self._load_form_documents(self._settings.payment_request_form_id, month)
+            if self._mongo_temporarily_unavailable():
+                self._set_read_status("error", "OA 连接失败")
+                return []
+            for document in payment_documents:
+                record = self._build_payment_request_record(document, project_names)
+                if record is not None:
+                    records.append(record)
+        if self._should_include_form_type(OA_IMPORT_FORM_TYPE_EXPENSE):
+            expense_documents = self._load_form_documents(self._settings.expense_claim_form_id, month)
+            if self._mongo_temporarily_unavailable():
+                self._set_read_status("error", "OA 连接失败")
+                return sorted(records, key=lambda item: (item.month, item.id))
+            for document in expense_documents:
+                records.extend(self._build_expense_claim_records(document, project_names))
         sorted_records = sorted(records, key=lambda item: (item.month, item.id))
         if self._settings.cache_ttl_seconds > 0:
             self._records_cache[month] = (now, deepcopy(sorted_records))
@@ -259,6 +313,7 @@ class MongoOAAdapter(OAAdapter):
 
     def list_all_application_records(self) -> list[OAApplicationRecord]:
         cache_key = "__all__"
+        self._sync_import_settings_cache()
         if self._mongo_temporarily_unavailable():
             self._set_read_status("error", "OA 连接失败")
             return []
@@ -277,21 +332,23 @@ class MongoOAAdapter(OAAdapter):
             return []
 
         records: list[OAApplicationRecord] = []
-        payment_documents = self._load_form_documents(self._settings.payment_request_form_id)
-        if self._mongo_temporarily_unavailable():
-            self._set_read_status("error", "OA 连接失败")
-            return []
-        for document in payment_documents:
-            record = self._build_payment_request_record(document, project_names)
-            if record is not None:
-                records.append(record)
+        if self._should_include_form_type(OA_IMPORT_FORM_TYPE_PAYMENT):
+            payment_documents = self._load_form_documents(self._settings.payment_request_form_id)
+            if self._mongo_temporarily_unavailable():
+                self._set_read_status("error", "OA 连接失败")
+                return []
+            for document in payment_documents:
+                record = self._build_payment_request_record(document, project_names)
+                if record is not None:
+                    records.append(record)
 
-        expense_documents = self._load_form_documents(self._settings.expense_claim_form_id)
-        if self._mongo_temporarily_unavailable():
-            self._set_read_status("error", "OA 连接失败")
-            return sorted(records, key=lambda item: (item.month, item.id))
-        for document in expense_documents:
-            records.extend(self._build_expense_claim_records(document, project_names))
+        if self._should_include_form_type(OA_IMPORT_FORM_TYPE_EXPENSE):
+            expense_documents = self._load_form_documents(self._settings.expense_claim_form_id)
+            if self._mongo_temporarily_unavailable():
+                self._set_read_status("error", "OA 连接失败")
+                return sorted(records, key=lambda item: (item.month, item.id))
+            for document in expense_documents:
+                records.extend(self._build_expense_claim_records(document, project_names))
 
         sorted_records = sorted(records, key=lambda item: (item.month, item.id))
         if self._settings.cache_ttl_seconds > 0:
@@ -303,6 +360,7 @@ class MongoOAAdapter(OAAdapter):
         normalized_row_ids = [str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()]
         if not normalized_row_ids:
             return []
+        self._sync_import_settings_cache()
         if self._mongo_temporarily_unavailable():
             self._set_read_status("error", "OA 连接失败")
             return []
@@ -319,9 +377,9 @@ class MongoOAAdapter(OAAdapter):
             if parsed is None:
                 continue
             record_kind, external_id, _row_index = parsed
-            if record_kind == "payment":
+            if record_kind == "payment" and self._should_include_form_type(OA_IMPORT_FORM_TYPE_PAYMENT):
                 payment_external_ids.add(external_id)
-            else:
+            elif record_kind == "expense" and self._should_include_form_type(OA_IMPORT_FORM_TYPE_EXPENSE):
                 expense_external_ids.add(external_id)
 
         records_by_id: dict[str, OAApplicationRecord] = {}
@@ -355,6 +413,7 @@ class MongoOAAdapter(OAAdapter):
 
     def list_available_months(self) -> list[str]:
         now = self._now()
+        self._sync_import_settings_cache()
         if self._mongo_temporarily_unavailable():
             self._set_read_status("error", "OA 连接失败")
             return []
@@ -365,14 +424,20 @@ class MongoOAAdapter(OAAdapter):
                 return list(months)
 
         months: set[str] = set()
-        for form_id in (self._settings.payment_request_form_id, self._settings.expense_claim_form_id):
+        enabled_forms = (
+            (self._settings.payment_request_form_id, OA_IMPORT_FORM_TYPE_PAYMENT),
+            (self._settings.expense_claim_form_id, OA_IMPORT_FORM_TYPE_EXPENSE),
+        )
+        for form_id, form_type in enabled_forms:
+            if not self._should_include_form_type(form_type):
+                continue
             documents = self._load_form_month_documents(form_id)
             if self._mongo_temporarily_unavailable():
                 self._set_read_status("error", "OA 连接失败")
                 return sorted(months)
             for document in documents:
                 data = self._document_data(document)
-                if not self._is_completed_form(data):
+                if not self._should_include_document(form_type, data):
                     continue
                 derived_month = self._derive_month(data, document)
                 if MONTH_RE.match(derived_month):
@@ -386,11 +451,41 @@ class MongoOAAdapter(OAAdapter):
     def get_read_status(self) -> OAReadStatus:
         return OAReadStatus(code=self._last_read_status.code, message=self._last_read_status.message)
 
+    def list_oa_import_filter_options(self) -> dict[str, list[dict[str, str]]]:
+        seen_form_types: set[str] = set()
+        seen_statuses: set[str] = set()
+        for form_id, form_type in (
+            (self._settings.payment_request_form_id, OA_IMPORT_FORM_TYPE_PAYMENT),
+            (self._settings.expense_claim_form_id, OA_IMPORT_FORM_TYPE_EXPENSE),
+        ):
+            documents = self._load_form_month_documents(form_id)
+            if self._mongo_temporarily_unavailable():
+                break
+            if documents:
+                seen_form_types.add(form_type)
+            for document in documents:
+                status_key = self._canonical_status_key(self._document_data(document))
+                if status_key:
+                    seen_statuses.add(status_key)
+
+        return {
+            "available_form_types": self._ordered_options(
+                OA_IMPORT_FORM_TYPE_OPTIONS,
+                seen_form_types or {item["id"] for item in OA_IMPORT_FORM_TYPE_OPTIONS},
+            ),
+            "available_statuses": self._ordered_options(
+                OA_IMPORT_STATUS_OPTIONS,
+                seen_statuses or {item["id"] for item in OA_IMPORT_STATUS_OPTIONS},
+            ),
+        }
+
     def fetch_counterparties(self) -> list[dict[str, Any]]:
         names: dict[str, dict[str, Any]] = {}
+        if not self._should_include_form_type(OA_IMPORT_FORM_TYPE_PAYMENT):
+            return []
         for document in self._load_form_documents(self._settings.payment_request_form_id):
             data = self._document_data(document)
-            if not self._is_completed_form(data):
+            if not self._should_include_document(OA_IMPORT_FORM_TYPE_PAYMENT, data):
                 continue
             name = self._first_text(data, "beneficiary")
             if not name:
@@ -427,16 +522,18 @@ class MongoOAAdapter(OAAdapter):
     def fetch_documents(self, scope: str) -> list[dict[str, Any]]:
         project_names = self._project_name_index()
         if scope == "payment_requests":
+            if not self._should_include_form_type(OA_IMPORT_FORM_TYPE_PAYMENT):
+                return []
             documents = []
             for document in self._load_form_documents(self._settings.payment_request_form_id):
                 data = self._document_data(document)
-                if not self._is_completed_form(data):
+                if not self._should_include_document(OA_IMPORT_FORM_TYPE_PAYMENT, data):
                     continue
                 documents.append(
                     {
                         "external_id": self._payment_external_id(data, document),
                         "form_no": self._payment_form_no(data, document),
-                        "title": self._first_text(data, "fromTitle", "formTitle") or "支付申请",
+                        "title": self._canonical_apply_type(OA_IMPORT_FORM_TYPE_PAYMENT),
                         "applicant_name": self._first_text(data, "userName", "applicant"),
                         "amount": self._first_text(data, "amount"),
                         "counterparty_name": self._first_text(data, "beneficiary"),
@@ -449,16 +546,18 @@ class MongoOAAdapter(OAAdapter):
                 )
             return documents
         if scope == "expense_claims":
+            if not self._should_include_form_type(OA_IMPORT_FORM_TYPE_EXPENSE):
+                return []
             documents = []
             for document in self._load_form_documents(self._settings.expense_claim_form_id):
                 data = self._document_data(document)
-                if not self._is_completed_form(data):
+                if not self._should_include_document(OA_IMPORT_FORM_TYPE_EXPENSE, data):
                     continue
                 documents.append(
                     {
                         "external_id": self._expense_external_id(data, document),
                         "form_no": self._expense_form_no(data, document),
-                        "title": self._first_text(data, "titleName", "formTitle") or "日常报销",
+                        "title": self._canonical_apply_type(OA_IMPORT_FORM_TYPE_EXPENSE),
                         "applicant_name": self._first_text(data, "Reimbursement Personnel", "applicant", "userName"),
                         "amount": self._first_text(data, "amount"),
                         "counterparty_name": "",
@@ -478,7 +577,7 @@ class MongoOAAdapter(OAAdapter):
         project_names: dict[str, str],
     ) -> OAApplicationRecord | None:
         data = self._document_data(document)
-        if not self._is_completed_form(data):
+        if not self._should_include_document(OA_IMPORT_FORM_TYPE_PAYMENT, data):
             return None
         amount = self._first_text(data, "amount")
         applicant = self._first_text(data, "userName", "applicant")
@@ -498,7 +597,7 @@ class MongoOAAdapter(OAAdapter):
             case_id=None,
             applicant=applicant,
             project_name=project_name,
-            apply_type=self._first_text(data, "fromTitle", "formTitle") or "支付申请",
+            apply_type=self._canonical_apply_type(OA_IMPORT_FORM_TYPE_PAYMENT),
             amount=amount,
             counterparty_name=counterparty,
             reason=reason,
@@ -527,7 +626,7 @@ class MongoOAAdapter(OAAdapter):
         project_names: dict[str, str],
     ) -> list[OAApplicationRecord]:
         data = self._document_data(document)
-        if not self._is_completed_form(data):
+        if not self._should_include_document(OA_IMPORT_FORM_TYPE_EXPENSE, data):
             return []
         applicant = self._first_text(data, "Reimbursement Personnel", "applicant", "userName")
         if not applicant:
@@ -578,7 +677,7 @@ class MongoOAAdapter(OAAdapter):
                     case_id=None,
                     applicant=applicant,
                     project_name=project_name,
-                    apply_type=self._first_text(data, "titleName", "formTitle") or "日常报销",
+                    apply_type=self._canonical_apply_type(OA_IMPORT_FORM_TYPE_EXPENSE),
                     amount=amount,
                     counterparty_name="",
                     reason=reason,
@@ -669,7 +768,9 @@ class MongoOAAdapter(OAAdapter):
                 )
                 continue
             missing_files.append((cache_key, file_entry))
-        if missing_files and self._attachment_invoice_parse_suppression_depth <= 0:
+        if missing_files and self._attachment_invoice_sync_parse_depth > 0:
+            cached_invoices.extend(self._parse_attachment_invoice_files_now(missing_files, month=month))
+        elif missing_files and self._attachment_invoice_parse_suppression_depth <= 0:
             self._schedule_attachment_invoice_parse(missing_files, month=month)
         return cached_invoices
 
@@ -746,6 +847,42 @@ class MongoOAAdapter(OAAdapter):
             kwargs={"files": scheduled_files, "month": month},
             daemon=True,
         ).start()
+
+    def _parse_attachment_invoice_files_now(
+        self,
+        files: list[tuple[str, dict[str, object]]],
+        *,
+        month: str | None = None,
+    ) -> list[dict[str, str]]:
+        cache = self._attachment_invoice_cache
+        if cache is None:
+            return []
+        parsed_invoices: list[dict[str, str]] = []
+        updated = False
+        for cache_key, file_entry in files:
+            invoices = [
+                dict(invoice)
+                for invoice in self._attachment_invoice_service.parse_files([file_entry])
+                if isinstance(invoice, dict)
+            ]
+            cache.save_oa_attachment_invoice_cache_entry(
+                cache_key,
+                {
+                    "cache_key": cache_key,
+                    "parser_version": self._attachment_invoice_cache_parser_version(),
+                    "invoices": invoices,
+                    "parsed_at": datetime.now().isoformat(),
+                },
+            )
+            parsed_invoices.extend(invoices)
+            updated = True
+        if updated:
+            if month and month in self._records_cache:
+                self._records_cache.pop(month, None)
+                self._records_cache.pop("__all__", None)
+            else:
+                self._records_cache.clear()
+        return parsed_invoices
 
     def _parse_attachment_invoice_files_in_background(
         self,
@@ -897,6 +1034,7 @@ class MongoOAAdapter(OAAdapter):
             "data.applicationDate": 1,
             "data.ApplicationDate": 1,
             "data.status": 1,
+            "data.processStatus": 1,
             "modifiedTime": 1,
         }
 
@@ -1095,6 +1233,98 @@ class MongoOAAdapter(OAAdapter):
     @staticmethod
     def _normalize_key(value: Any) -> str:
         return KEY_NORMALIZE_RE.sub("", clean_string(value)).lower()
+
+    def _sync_import_settings_cache(self) -> None:
+        settings = self._current_import_settings()
+        signature = json.dumps(settings, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        if self._import_settings_signature == signature:
+            return
+        self._import_settings_signature = signature
+        self._records_cache.clear()
+        self._available_months_cache = None
+
+    def _current_import_settings(self) -> dict[str, list[str]]:
+        provider = self._import_settings_provider
+        if provider is None:
+            return {
+                "form_types": list(DEFAULT_OA_IMPORT_SETTINGS["form_types"]),
+                "statuses": list(DEFAULT_OA_IMPORT_SETTINGS["statuses"]),
+            }
+        try:
+            payload = provider()
+        except Exception:
+            payload = {}
+        return self._normalize_import_settings(payload)
+
+    @staticmethod
+    def _normalize_import_settings(payload: object) -> dict[str, list[str]]:
+        raw_payload = payload if isinstance(payload, dict) else {}
+        form_type_ids = [item["id"] for item in OA_IMPORT_FORM_TYPE_OPTIONS]
+        status_ids = [item["id"] for item in OA_IMPORT_STATUS_OPTIONS]
+        return {
+            "form_types": MongoOAAdapter._normalize_import_option_list(
+                raw_payload.get("form_types"),
+                allowed_values=form_type_ids,
+                default_values=DEFAULT_OA_IMPORT_SETTINGS["form_types"],
+            ),
+            "statuses": MongoOAAdapter._normalize_import_option_list(
+                raw_payload.get("statuses"),
+                allowed_values=status_ids,
+                default_values=DEFAULT_OA_IMPORT_SETTINGS["statuses"],
+            ),
+        }
+
+    @staticmethod
+    def _normalize_import_option_list(
+        values: object,
+        *,
+        allowed_values: list[str],
+        default_values: list[str],
+    ) -> list[str]:
+        if not isinstance(values, list):
+            return list(default_values)
+        seen: set[str] = set()
+        for value in values:
+            normalized = clean_string(value)
+            if normalized in allowed_values:
+                seen.add(normalized)
+        return [value for value in allowed_values if value in seen]
+
+    def _should_include_form_type(self, form_type: str) -> bool:
+        return clean_string(form_type) in set(self._current_import_settings()["form_types"])
+
+    def _should_include_document(self, form_type: str, data: dict[str, Any]) -> bool:
+        settings = self._current_import_settings()
+        return (
+            clean_string(form_type) in set(settings["form_types"])
+            and self._canonical_status_key(data) in set(settings["statuses"])
+        )
+
+    @staticmethod
+    def _canonical_status_key(data: dict[str, Any]) -> str:
+        status = MongoOAAdapter._form_status(data)
+        if status == "已完成":
+            return OA_IMPORT_STATUS_COMPLETED
+        if status == "进行中":
+            return OA_IMPORT_STATUS_IN_PROGRESS
+        return ""
+
+    @staticmethod
+    def _canonical_apply_type(form_type: str) -> str:
+        if form_type == OA_IMPORT_FORM_TYPE_EXPENSE:
+            return "日常报销"
+        return "支付申请"
+
+    @staticmethod
+    def _ordered_options(
+        options: list[dict[str, str]],
+        enabled_ids: set[str],
+    ) -> list[dict[str, str]]:
+        return [
+            {"id": item["id"], "label": item["label"]}
+            for item in options
+            if item["id"] in enabled_ids
+        ]
 
     @staticmethod
     def _form_status(data: dict[str, Any]) -> str:

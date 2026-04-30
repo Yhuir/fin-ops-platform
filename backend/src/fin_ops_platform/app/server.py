@@ -181,11 +181,19 @@ class Application:
             self._audit_service,
         )
         self._oa_role_sync_service = OARoleSyncService.from_environment()
+        oa_import_options_provider = (
+            oa_adapter.list_oa_import_filter_options
+            if isinstance(oa_adapter, MongoOAAdapter)
+            else None
+        )
         self._app_settings_service = AppSettingsService(
             self._state_store,
             self._project_costing_service,
             oa_role_sync_service=self._oa_role_sync_service,
+            oa_import_options_provider=oa_import_options_provider,
         )
+        if oa_adapter is not None:
+            oa_adapter.set_import_settings_provider(self._app_settings_service.get_oa_import_settings)
         self._oa_identity_service = OAIdentityService()
         self._access_control_service = AccessControlService.from_environment(
             dynamic_allowed_usernames_provider=self._app_settings_service.get_allowed_usernames,
@@ -1012,6 +1020,7 @@ class Application:
         workbench_column_layouts = payload.get("workbench_column_layouts", {})
         oa_retention = payload.get("oa_retention", {})
         oa_invoice_offset = payload.get("oa_invoice_offset", {})
+        oa_import = payload.get("oa_import", {})
         if (
             not isinstance(completed_project_ids, list)
             or not isinstance(bank_account_mappings, list)
@@ -1020,6 +1029,7 @@ class Application:
             or not isinstance(admin_usernames, list)
             or not isinstance(workbench_column_layouts, dict)
             or not isinstance(oa_retention, dict)
+            or not isinstance(oa_import, dict)
             or not isinstance(oa_invoice_offset, dict)
         ):
             return self._json_response(
@@ -1029,7 +1039,7 @@ class Application:
                     "message": (
                         "completed_project_ids, bank_account_mappings, allowed_usernames, "
                         "readonly_export_usernames, and admin_usernames must be arrays, "
-                        "and workbench_column_layouts, oa_retention, and oa_invoice_offset must be objects."
+                        "and workbench_column_layouts, oa_retention, oa_import, and oa_invoice_offset must be objects."
                     ),
                 },
             )
@@ -1044,6 +1054,7 @@ class Application:
                 admin_usernames=[str(item).strip() for item in admin_usernames if str(item).strip()],
                 workbench_column_layouts=workbench_column_layouts,
                 oa_retention=oa_retention,
+                oa_import=oa_import,
                 oa_invoice_offset=oa_invoice_offset,
             )
         except OARoleSyncError as exc:
@@ -1184,6 +1195,7 @@ class Application:
         self._search_service.clear_cache()
         if action == RESET_OA_AND_REBUILD_ACTION:
             try:
+                self._parse_oa_attachment_invoices_for_reset_rebuild()
                 self._build_api_workbench_payload("all")
                 result.rebuild_status = "completed"
                 result.message = "已按模式 B 清空 OA 相关缓存与人工状态，并完成 OA 重建。"
@@ -1192,6 +1204,18 @@ class Application:
                 result.rebuild_status = "failed"
                 result.message = f"已按模式 B 清空 OA 相关缓存与人工状态，但 OA 重建失败：{exc}"
         return self._json_response(HTTPStatus.OK, result.to_payload())
+
+    def _parse_oa_attachment_invoices_for_reset_rebuild(self) -> None:
+        adapter = self._workbench_query_service._oa_adapter
+        parse_attachment_invoices_for_months = getattr(adapter, "parse_attachment_invoices_for_months", None)
+        if not callable(parse_attachment_invoices_for_months):
+            return
+        cutoff_date = self._parse_oa_retention_date(self._app_settings_service.get_oa_retention_cutoff_date())
+        if cutoff_date is None:
+            months = self._workbench_query_service.list_available_months()
+        else:
+            months = self._retained_oa_months_for_all_scope(cutoff_date)
+        parse_attachment_invoices_for_months(months)
 
     def _handle_api_workbench_row_detail(self, row_id: str) -> Response:
         try:

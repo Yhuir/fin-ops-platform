@@ -370,7 +370,7 @@ describe("Workbench columns and inline actions", () => {
 
     const pairedGroup = screen.getByTestId("candidate-group-paired-case:CASE-202603-001");
 
-    const bankName = within(pairedGroup).getByText("招商银行");
+    const bankName = within(pairedGroup).getByText("招行");
     expect(bankName).toBeInTheDocument();
     expect(bankName.closest(".bank-account-tag")).not.toBeNull();
     expect(within(pairedGroup).getByText("9123")).toBeInTheDocument();
@@ -378,7 +378,56 @@ describe("Workbench columns and inline actions", () => {
     const moneyMetaRow = bankName.closest(".money-cell-meta-row");
     expect(moneyMetaRow).not.toBeNull();
     expect(directionTag.closest(".money-cell-meta-row")).toBe(moneyMetaRow);
-    expect(within(moneyMetaRow as HTMLElement).getByText("招商银行")).toBeInTheDocument();
+    expect(within(moneyMetaRow as HTMLElement).getByText("招行")).toBeInTheDocument();
+  });
+
+  test("renders short bank names in bank row amount account tags", () => {
+    render(
+      <WorkbenchRecordCard
+        actionMode="default"
+        canMutateData
+        columns={[
+          { key: "amount", label: "金额", kind: "money", track: "minmax(144px, 144fr)", minWidth: 144 },
+        ]}
+        onOpenDetail={() => {}}
+        onRowAction={() => {}}
+        onSelectRow={() => {}}
+        paneId="bank"
+        row={{
+          id: "bank-short-account-1",
+          caseId: "case:bank-short-account-1",
+          recordType: "bank",
+          label: "银行流水",
+          status: "待人工核查",
+          statusCode: "manual_review",
+          statusTone: "danger",
+          exceptionHandled: false,
+          amount: "9,370.53",
+          counterparty: "待报解预算收入",
+          actionVariant: "detail-only",
+          availableActions: ["detail"],
+          detailFields: [],
+          tableValues: {
+            counterparty: "待报解预算收入",
+            transactionTime: "2026-04-16 11:27:30",
+            invoiceRelationStatus: "待人工核查",
+            amount: "9,370.53",
+            direction: "支出",
+            paymentAccount: "工商银行 6386",
+            note: "18985283",
+            repaymentDate: "--",
+          },
+        }}
+        rowState="idle"
+        showWorkflowActions
+        zoneId="open"
+      />,
+    );
+
+    const accountTag = screen.getByText("6386").closest(".bank-account-tag");
+    expect(accountTag).not.toBeNull();
+    expect(within(accountTag as HTMLElement).getByText("工行")).toBeInTheDocument();
+    expect(within(accountTag as HTMLElement).queryByText("工商银行")).not.toBeInTheDocument();
   });
 
   test("renders invoice input or output label before seller tax id instead of a dedicated invoice type column", async () => {

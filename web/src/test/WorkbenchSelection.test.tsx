@@ -373,17 +373,26 @@ describe("Workbench row selection and detail modal", () => {
     expect(screen.queryByText("设置项")).not.toBeInTheDocument();
     expect(within(settingsTree).getByRole("treeitem", { name: /项目状态/ })).toBeInTheDocument();
     expect(within(settingsTree).getByRole("treeitem", { name: /银行账户/ })).toBeInTheDocument();
-    expect(within(settingsTree).getByRole("treeitem", { name: /保OA/ })).toBeInTheDocument();
+    expect(within(settingsTree).getByRole("treeitem", { name: /OA导入设置/ })).toBeInTheDocument();
     expect(within(settingsTree).getByRole("treeitem", { name: /冲账规则/ })).toBeInTheDocument();
     expect(within(settingsTree).getByRole("treeitem", { name: /访问账户/ })).toBeInTheDocument();
     expect(within(settingsPage).getByRole("heading", { name: "项目状态管理" })).toBeInTheDocument();
 
     await user.click(within(settingsTree).getByRole("treeitem", { name: /银行账户/ }));
     expect(within(settingsPage).getByRole("heading", { name: "银行账户映射" })).toBeInTheDocument();
-    await user.click(within(settingsTree).getByRole("treeitem", { name: /保OA/ }));
-    expect(within(settingsPage).getByRole("heading", { name: "保OA" })).toBeInTheDocument();
-    await user.clear(screen.getByLabelText("保OA起始日期"));
-    await user.type(screen.getByLabelText("保OA起始日期"), "2026-02-01");
+    await user.click(within(settingsTree).getByRole("treeitem", { name: /OA导入设置/ }));
+    expect(within(settingsPage).getByRole("heading", { name: "OA导入设置" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "支付申请" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "日常报销" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "已完成" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "进行中" })).not.toBeChecked();
+    expect(within(settingsPage).queryByText("票据类型")).not.toBeInTheDocument();
+    expect(within(settingsPage).queryByText(/^0$/)).not.toBeInTheDocument();
+    expect(within(settingsPage).queryByText(/^4$/)).not.toBeInTheDocument();
+    expect(within(settingsPage).queryByText("REJECTED")).not.toBeInTheDocument();
+    await user.clear(screen.getByLabelText("OA导入起始日期"));
+    await user.type(screen.getByLabelText("OA导入起始日期"), "2026-02-01");
+    await user.click(screen.getByRole("checkbox", { name: "进行中" }));
     await user.click(within(settingsTree).getByRole("treeitem", { name: /冲账规则/ }));
     expect(within(settingsPage).getByRole("heading", { name: "冲账规则" })).toBeInTheDocument();
     await user.clear(screen.getByLabelText("冲账申请人"));
@@ -422,6 +431,13 @@ describe("Workbench row selection and detail modal", () => {
       expect.objectContaining({
         method: "POST",
         body: expect.stringContaining("\"oa_retention\":{\"cutoff_date\":\"2026-02-01\"}"),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/settings",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining("\"oa_import\":{\"form_types\":[\"payment_request\",\"expense_claim\"],\"statuses\":[\"completed\",\"in_progress\"]}"),
       }),
     );
     expect(fetchMock).toHaveBeenCalledWith(
@@ -794,7 +810,7 @@ describe("Workbench row selection and detail modal", () => {
     ]);
   });
 
-  test("import completion writes status only into the global OA status text and clears after background refresh", async () => {
+  test("import completion marks the global status icon pending and returns to synced", async () => {
     const user = userEvent.setup();
     installMockApiFetch({ workbenchLoadDelayMs: 160 });
     renderAppAt("/");
@@ -816,14 +832,32 @@ describe("Workbench row selection and detail modal", () => {
     await user.click(within(dialog).getByRole("button", { name: "确认导入" }));
 
     await waitFor(() => {
-      expect(document.querySelector(".global-status-text")?.textContent).toContain("已导入 1 个文件，正在刷新关联台。");
+      const statusIndicator = screen.getByRole("status", { name: "已导入 1 个文件，正在刷新关联台。" });
+      expect(statusIndicator).toHaveClass("pending");
+      expect(statusIndicator.textContent).toBe("");
     });
+    expect(document.querySelector(".global-status-text")).toBeNull();
     expect(screen.queryByText("已导入 1 个文件，正在后台刷新关联台。")).not.toBeInTheDocument();
     expect(document.querySelector(".action-feedback")).toBeNull();
 
     await waitFor(() => {
-      expect(document.querySelector(".global-status-text")?.textContent).toContain("OA 已同步");
+      const statusIndicator = screen.getByRole("status", { name: "OA 已同步" });
+      expect(statusIndicator).toHaveClass("ok");
+      expect(statusIndicator.textContent).toBe("");
     });
+  });
+
+  test("OA connection errors mark the global status icon red with the failure reason", async () => {
+    installMockApiFetch({
+      workbenchOaStatus: { code: "error", message: "OA连接失败，请检查会话或网络" },
+    });
+    renderAppAt("/");
+
+    const statusIndicator = await screen.findByRole("status", { name: "OA连接失败，请检查会话或网络" });
+
+    expect(statusIndicator).toHaveClass("error");
+    expect(statusIndicator.textContent).toBe("");
+    expect(document.querySelector(".global-status-text")).toBeNull();
   });
 
   test("read-only export users can search and view details but cannot see write actions", async () => {

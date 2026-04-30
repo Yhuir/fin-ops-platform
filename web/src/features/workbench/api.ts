@@ -15,6 +15,7 @@ import type {
   WorkbenchSummary,
   WorkbenchOaStatus,
   WorkbenchColumnLayouts,
+  WorkbenchOaImportOption,
 } from "./types";
 
 export type WorkbenchBootstrapProgress = {
@@ -138,10 +139,30 @@ type ApiWorkbenchSettings = {
   oa_retention?: {
     cutoff_date?: string;
   };
+  oa_import?: {
+    form_types?: string[];
+    selected_form_types?: string[];
+    statuses?: string[];
+    selected_statuses?: string[];
+    available_form_types?: ApiWorkbenchSettingsOption[];
+    available_statuses?: ApiWorkbenchSettingsOption[];
+  };
   oa_invoice_offset?: {
     applicant_names?: string[];
   };
 };
+
+type ApiWorkbenchSettingsOption =
+  | string
+  | number
+  | {
+    value?: string | number | null;
+    code?: string | number | null;
+    id?: string | number | null;
+    label?: string | null;
+    name?: string | null;
+    text?: string | null;
+  };
 
 type ApiWorkbenchGroup = {
   group_id: string;
@@ -224,6 +245,10 @@ type WorkbenchSettingsUpdatePayload = {
   workbenchColumnLayouts: WorkbenchColumnLayouts;
   oaRetention: {
     cutoffDate: string;
+  };
+  oaImport: {
+    formTypes: string[];
+    statuses: string[];
   };
   oaInvoiceOffset?: {
     applicantNames: string[];
@@ -494,8 +519,52 @@ function mapProjectSetting(project: ApiWorkbenchSettings["projects"]["active"][n
   };
 }
 
+function cleanStringList(values: unknown[] | undefined, fallback: string[]) {
+  const cleaned = (values ?? [])
+    .map((item) => String(item).trim())
+    .filter(Boolean);
+  return cleaned.length > 0 ? cleaned : fallback;
+}
+
+function mapSettingsOption(option: ApiWorkbenchSettingsOption): WorkbenchOaImportOption | null {
+  if (typeof option === "string" || typeof option === "number") {
+    const value = String(option).trim();
+    return value ? { value, label: value } : null;
+  }
+  if (!option || typeof option !== "object") {
+    return null;
+  }
+  const value = String(option.value ?? option.code ?? option.id ?? "").trim();
+  const label = String(option.label ?? option.name ?? option.text ?? value).trim();
+  if (!value || !label) {
+    return null;
+  }
+  return { value, label };
+}
+
+function normalizeSettingsOptions(
+  options: ApiWorkbenchSettingsOption[] | undefined,
+  fallback: WorkbenchOaImportOption[],
+) {
+  const mapped = (options ?? [])
+    .map(mapSettingsOption)
+    .filter((option): option is WorkbenchOaImportOption => option !== null);
+  return mapped.length > 0 ? mapped : fallback;
+}
+
 function mapWorkbenchSettings(payload: ApiWorkbenchSettings): WorkbenchSettings {
   const rawLayouts = payload.workbench_column_layouts ?? {};
+  const defaultFormTypes = ["payment_request", "expense_claim"];
+  const defaultStatuses = ["completed"];
+  const defaultAvailableFormTypes = [
+    { value: "payment_request", label: "支付申请" },
+    { value: "expense_claim", label: "日常报销" },
+  ];
+  const defaultAvailableStatuses = [
+    { value: "completed", label: "已完成" },
+    { value: "in_progress", label: "进行中" },
+  ];
+  const oaImport = payload.oa_import ?? {};
   return {
     projects: {
       active: payload.projects.active.map(mapProjectSetting),
@@ -529,6 +598,12 @@ function mapWorkbenchSettings(payload: ApiWorkbenchSettings): WorkbenchSettings 
     },
     oaRetention: {
       cutoffDate: payload.oa_retention?.cutoff_date || "2026-01-01",
+    },
+    oaImport: {
+      formTypes: cleanStringList(oaImport.form_types ?? oaImport.selected_form_types, defaultFormTypes),
+      statuses: cleanStringList(oaImport.statuses ?? oaImport.selected_statuses, defaultStatuses),
+      availableFormTypes: normalizeSettingsOptions(oaImport.available_form_types, defaultAvailableFormTypes),
+      availableStatuses: normalizeSettingsOptions(oaImport.available_statuses, defaultAvailableStatuses),
     },
     oaInvoiceOffset: {
       applicantNames: (payload.oa_invoice_offset?.applicant_names ?? [])
@@ -805,6 +880,10 @@ export async function saveWorkbenchSettings(
       workbench_column_layouts: settings.workbenchColumnLayouts,
       oa_retention: {
         cutoff_date: settings.oaRetention.cutoffDate,
+      },
+      oa_import: {
+        form_types: settings.oaImport.formTypes,
+        statuses: settings.oaImport.statuses,
       },
       oa_invoice_offset: {
         applicant_names: settings.oaInvoiceOffset?.applicantNames ?? [],

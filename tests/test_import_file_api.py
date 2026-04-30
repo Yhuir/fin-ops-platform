@@ -6,6 +6,7 @@ import unittest
 from fin_ops_platform.app.server import build_application
 
 from tests.mock_import_files import (
+    BOCOM_JAN,
     CCB_JAN,
     CEB_JAN,
     CMBC_JAN,
@@ -134,11 +135,11 @@ class ImportFileApiTests(unittest.TestCase):
         self.assertEqual(file_map[UNSUPPORTED.name]["status"], "unrecognized_template")
         self.assertIn("无法识别", file_map[UNSUPPORTED.name]["message"])
 
-    def test_preview_files_recognizes_ceb_ccb_and_cmbc_templates(self) -> None:
+    def test_preview_files_recognizes_bank_statement_templates(self) -> None:
         app = build_application()
         body, headers = build_multipart_payload(
             imported_by="user_finance_01",
-            files=[CEB_JAN, CCB_JAN, CMBC_JAN],
+            files=[CEB_JAN, CCB_JAN, CMBC_JAN, BOCOM_JAN],
         )
 
         response = app.handle_request("POST", "/imports/files/preview", body=body, headers=headers)
@@ -155,6 +156,11 @@ class ImportFileApiTests(unittest.TestCase):
 
         self.assertEqual(file_map[CMBC_JAN.name]["template_code"], "cmbc_transaction_detail")
         self.assertGreater(file_map[CMBC_JAN.name]["row_count"], 0)
+
+        self.assertEqual(file_map[BOCOM_JAN.name]["template_code"], "bocom_transaction_detail")
+        self.assertEqual(file_map[BOCOM_JAN.name]["detected_bank_name"], "交通银行")
+        self.assertEqual(file_map[BOCOM_JAN.name]["detected_last4"], "3847")
+        self.assertEqual(file_map[BOCOM_JAN.name]["row_count"], 2)
 
     def test_preview_files_accepts_per_file_overrides(self) -> None:
         app = build_application()

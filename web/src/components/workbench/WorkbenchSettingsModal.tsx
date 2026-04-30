@@ -38,6 +38,7 @@ type WorkbenchSettingsModalProps = {
     adminUsernames: string[];
     workbenchColumnLayouts: WorkbenchSettings["workbenchColumnLayouts"];
     oaRetention: WorkbenchSettings["oaRetention"];
+    oaImport: WorkbenchSettings["oaImport"];
     oaInvoiceOffset: WorkbenchSettings["oaInvoiceOffset"];
   }) => void;
   onDataReset: (payload: {
@@ -78,8 +79,8 @@ const DATA_RESET_ACTIONS: DataResetActionConfig[] = [
     action: "reset_oa_and_rebuild",
     label: "清除所有 OA 数据并重新写入",
     title: "清除所有 OA 数据并重新写入",
-    description: "按模式 B 清空 OA 相关 app 侧缓存和人工状态，再按保OA日期重新构建。",
-    impact: ["OA 附件发票缓存会被清空", "OA 相关配对 / 异常 / 忽略状态会被清空", "不会删除 OA 原始数据"],
+    description: "按模式 B 清空 OA 相关 app 侧缓存和人工状态，再按 OA导入设置重新构建。",
+    impact: ["OA 附件发票解析缓存会保留", "OA 相关配对 / 异常 / 忽略状态会被清空", "不会删除 OA 原始数据"],
   },
 ];
 
@@ -91,6 +92,10 @@ function toggleCompleted(projectId: string, completedProjectIds: string[]) {
   return completedProjectIds.includes(projectId)
     ? completedProjectIds.filter((id) => id !== projectId)
     : [...completedProjectIds, projectId];
+}
+
+function toggleValue(value: string, values: string[]) {
+  return values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
 }
 
 function sortProjects(projects: WorkbenchProjectSetting[]) {
@@ -173,6 +178,8 @@ export default function WorkbenchSettingsModal({
     buildManagedAccessAccounts(settings),
   );
   const [oaRetentionCutoffDate, setOaRetentionCutoffDate] = useState(settings.oaRetention.cutoffDate);
+  const [oaImportFormTypes, setOaImportFormTypes] = useState(settings.oaImport.formTypes);
+  const [oaImportStatuses, setOaImportStatuses] = useState(settings.oaImport.statuses);
   const [oaInvoiceOffsetApplicantsText, setOaInvoiceOffsetApplicantsText] = useState(
     settings.oaInvoiceOffset.applicantNames.join("、"),
   );
@@ -233,9 +240,9 @@ export default function WorkbenchSettingsModal({
       },
       {
         id: "oa_retention" as const,
-        label: "保OA",
-        description: "按日期保留关联 OA",
-        count: 1,
+        label: "OA导入设置",
+        description: "表单类型与流程状态",
+        count: oaImportFormTypes.length + oaImportStatuses.length,
         visible: true,
       },
       {
@@ -265,6 +272,8 @@ export default function WorkbenchSettingsModal({
     activeProjects.length,
     completedProjects.length,
     mappings.length,
+    oaImportFormTypes.length,
+    oaImportStatuses.length,
     oaInvoiceOffsetApplicantsText,
     canManageOaInvoiceOffset,
     managedAccessAccounts.length,
@@ -416,6 +425,11 @@ export default function WorkbenchSettingsModal({
       oaRetention: {
         cutoffDate: oaRetentionCutoffDate || "2026-01-01",
       },
+      oaImport: {
+        ...settings.oaImport,
+        formTypes: oaImportFormTypes,
+        statuses: oaImportStatuses,
+      },
       oaInvoiceOffset: {
         applicantNames: parseApplicantNames(oaInvoiceOffsetApplicantsText),
       },
@@ -532,7 +546,14 @@ export default function WorkbenchSettingsModal({
                 <SettingsOaRetentionSection
                   controlsDisabled={controlsDisabled}
                   cutoffDate={oaRetentionCutoffDate}
+                  oaImport={{
+                    ...settings.oaImport,
+                    formTypes: oaImportFormTypes,
+                    statuses: oaImportStatuses,
+                  }}
                   onChangeCutoffDate={setOaRetentionCutoffDate}
+                  onToggleFormType={(value) => setOaImportFormTypes((current) => toggleValue(value, current))}
+                  onToggleStatus={(value) => setOaImportStatuses((current) => toggleValue(value, current))}
                 />
               ) : null}
 

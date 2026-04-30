@@ -8,6 +8,23 @@ import BankAccountValue from "../BankAccountValue";
 import DirectionTag from "../DirectionTag";
 import RowActions, { type WorkbenchInlineAction } from "./RowActions";
 
+const COMPACT_BANK_NAME_BY_PREFIX: Record<string, string> = {
+  中国工商银行: "工行",
+  工商银行: "工行",
+  中国建设银行: "建行",
+  建设银行: "建行",
+  中国农业银行: "农行",
+  农业银行: "农行",
+  中国银行: "中行",
+  招商银行: "招行",
+  交通银行: "交行",
+  中国光大银行: "光大",
+  光大银行: "光大",
+  中国民生银行: "民生",
+  民生银行: "民生",
+  平安银行: "平安",
+};
+
 type WorkbenchRecordCardProps = {
   zoneId: "paired" | "open";
   paneId: WorkbenchRecordType;
@@ -372,13 +389,26 @@ function renderBankMoneyValue(columnKey: string, value: string, direction: strin
           {shouldShowDirectionTag ? <DirectionTag direction={normalizedDirection} /> : null}
           {shouldShowAccount ? (
             <span className="money-cell-account">
-              <BankAccountValue value={paymentAccount} variant="tag" />
+              <BankAccountValue value={compactBankAccountLabel(paymentAccount)} variant="tag" />
             </span>
           ) : null}
         </span>
       ) : null}
     </span>
   );
+}
+
+function compactBankAccountLabel(value: string) {
+  const normalizedValue = value.replace(/\s+/g, " ").trim();
+  for (const [bankName, shortName] of Object.entries(COMPACT_BANK_NAME_BY_PREFIX)) {
+    if (normalizedValue === bankName) {
+      return shortName;
+    }
+    if (normalizedValue.startsWith(`${bankName} `)) {
+      return `${shortName}${normalizedValue.slice(bankName.length)}`;
+    }
+  }
+  return value;
 }
 
 function resolveDirectionForMoneyCell(columnKey: string, direction: string, hasValue: boolean) {

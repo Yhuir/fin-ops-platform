@@ -98,7 +98,9 @@ describe("Finance operations shell", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("OA 连接失败", {}, { timeout: WORKBENCH_RENDER_TIMEOUT })).toBeInTheDocument();
+    const statusIndicator = await screen.findByRole("status", { name: "OA 连接失败" }, { timeout: WORKBENCH_RENDER_TIMEOUT });
+    expect(statusIndicator).toHaveClass("error");
+    expect(statusIndicator.textContent).toBe("");
     expect(screen.getByText("OA 连接失败，本次结果未包含完整 OA 数据。")).toBeInTheDocument();
   });
 

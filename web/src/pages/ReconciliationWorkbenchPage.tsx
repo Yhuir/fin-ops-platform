@@ -123,7 +123,7 @@ export default function ReconciliationWorkbenchPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { currentMonth } = useMonth();
-  const { setWorkbenchHeaderActions, setWorkbenchStatusText, shellHeaderMounted } = useAppChrome();
+  const { setWorkbenchHeaderActions, setWorkbenchStatus, shellHeaderMounted } = useAppChrome();
   const { canMutateData } = useSessionPermissions();
   const {
     detailRow,
@@ -379,6 +379,7 @@ export default function ReconciliationWorkbenchPage() {
         adminUsernames: nextSettings.accessControl.adminUsernames,
         workbenchColumnLayouts: nextLayouts,
         oaRetention: nextSettings.oaRetention,
+        oaImport: nextSettings.oaImport,
         oaInvoiceOffset: nextSettings.oaInvoiceOffset,
       }).then((saved) => {
         if (columnLayoutSaveRequestIdRef.current === requestId) {
@@ -510,26 +511,42 @@ export default function ReconciliationWorkbenchPage() {
   }, [expandedZoneId]);
 
   useEffect(() => {
+    if (loadError) {
+      setWorkbenchStatus({ level: "error", reason: loadError });
+      return;
+    }
     if (lastActionMessage) {
-      setWorkbenchStatusText(lastActionMessage);
+      setWorkbenchStatus({ level: "pending", reason: lastActionMessage });
       return;
     }
     if (isLoading || isRefreshing) {
-      setWorkbenchStatusText(
-        loadProgress.percent === null
-          ? `${loadProgress.label}...`
-          : `${loadProgress.label} ${loadProgress.percent}%`,
-      );
+      const reason = loadProgress.percent === null
+        ? `${loadProgress.label}...`
+        : `${loadProgress.label} ${loadProgress.percent}%`;
+      setWorkbenchStatus({ level: "pending", reason });
       return;
     }
     if (workbenchData?.oaStatus?.message) {
-      setWorkbenchStatusText(workbenchData.oaStatus.message);
+      setWorkbenchStatus({
+        level: workbenchData.oaStatus.code === "error" ? "error" : workbenchData.oaStatus.code === "ready" ? "ok" : "pending",
+        reason: workbenchData.oaStatus.message,
+      });
       return;
     }
-    setWorkbenchStatusText(null);
-  }, [isLoading, isRefreshing, lastActionMessage, loadProgress.label, loadProgress.percent, setWorkbenchStatusText, workbenchData?.oaStatus?.message]);
+    setWorkbenchStatus(null);
+  }, [
+    isLoading,
+    isRefreshing,
+    lastActionMessage,
+    loadError,
+    loadProgress.label,
+    loadProgress.percent,
+    setWorkbenchStatus,
+    workbenchData?.oaStatus?.code,
+    workbenchData?.oaStatus?.message,
+  ]);
 
-  useEffect(() => () => setWorkbenchStatusText(null), [setWorkbenchStatusText]);
+  useEffect(() => () => setWorkbenchStatus(null), [setWorkbenchStatus]);
 
   const searchNarrowingHint = useMemo(() => {
     if (!searchModalOpen) {

@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import BatchType
+from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter
 from fin_ops_platform.services.oa_identity_service import OAIdentityServiceError, OAUserIdentity
 from fin_ops_platform.services.settings_data_reset_service import (
     RESET_BANK_TRANSACTIONS_ACTION,
@@ -341,6 +342,298 @@ class SettingsDataResetServiceTests(unittest.TestCase):
         self.assertNotIn("oa-before-cutoff", rebuilt_oa_ids)
         self.assertIn("oa-after-cutoff", rebuilt_oa_ids)
 
+    def test_reset_oa_and_rebuild_imports_only_configured_oa_form_types_and_statuses(self) -> None:
+        with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "oa_mongo_config.json").write_text(
+                json.dumps(
+                    {
+                        "host": "127.0.0.1",
+                        "database": "form_data_db",
+                        "cache_ttl_seconds": 0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            app = build_application(data_dir=data_dir)
+            app._app_settings_service._oa_import_options_provider = None
+            app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[],
+                allowed_usernames=[],
+                readonly_export_usernames=[],
+                admin_usernames=["YNSYLP005"],
+                oa_retention={"cutoff_date": "2026-01-01"},
+                oa_import={
+                    "form_types": ["payment_request"],
+                    "statuses": ["completed"],
+                },
+            )
+            app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
+                user_id="1",
+                username="YNSYLP005",
+                nickname="管理员",
+                display_name="管理员",
+                dept_id="01",
+                dept_name="财务部",
+                roles=["finance_admin"],
+                permissions=[],
+            )
+            app._oa_identity_service.verify_current_user_password = lambda token, password: (
+                token == "admin-token" and password == "correct-password"
+            )
+            form_documents = {
+                "2": [
+                    {
+                        "_id": "payment-completed",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2026-03-16",
+                            "userName": "刘际涛",
+                            "fromTitle": "支付申请单",
+                            "amount": "199",
+                            "beneficiary": "中国电信股份有限公司昆明分公司",
+                            "cause": "托收电话费及宽带",
+                            "projectName": "project-001",
+                            "flowRequestId": "2047",
+                            "processStatus": "2",
+                        },
+                    },
+                    {
+                        "_id": "payment-in-progress",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2026-03-17",
+                            "userName": "樊祖芳",
+                            "fromTitle": "支付申请",
+                            "amount": "88050",
+                            "beneficiary": "云南辰飞机电工程有限公司",
+                            "cause": "空气源热泵预付款",
+                            "projectName": "project-001",
+                            "flowRequestId": "2048",
+                            "processStatus": "1",
+                        },
+                    },
+                ],
+                "32": [
+                    {
+                        "_id": "expense-completed",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2026-03-18",
+                            "Reimbursement Personnel": "刘际涛",
+                            "titleName": "日常报销",
+                            "processId": "exp-001",
+                            "processStatus": "2",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailProjectName": "project-001",
+                                    "detailReimbursementAmount": "127",
+                                    "feeContent": "角磨机",
+                                }
+                            ],
+                        },
+                    }
+                ],
+            }
+            load_calls: list[tuple[str, str | None]] = []
+
+            def load_form_documents(adapter: MongoOAAdapter, form_id: str, month: str | None = None) -> list[dict]:
+                load_calls.append((str(form_id), month))
+                documents = list(form_documents.get(str(form_id), []))
+                if month is None:
+                    return documents
+                return [
+                    document
+                    for document in documents
+                    if str(
+                        document.get("data", {}).get("applicationDate")
+                        or document.get("data", {}).get("ApplicationDate")
+                        or ""
+                    ).startswith(month)
+                ]
+
+            def load_form_month_documents(adapter: MongoOAAdapter, form_id: str) -> list[dict]:
+                load_calls.append((str(form_id), None))
+                return list(form_documents.get(str(form_id), []))
+
+            with patch.object(MongoOAAdapter, "_load_project_documents", autospec=True, return_value=[]), patch.object(
+                MongoOAAdapter,
+                "_load_form_documents",
+                autospec=True,
+                side_effect=load_form_documents,
+            ), patch.object(
+                MongoOAAdapter,
+                "_load_form_month_documents",
+                autospec=True,
+                side_effect=load_form_month_documents,
+            ):
+                response = app.handle_request(
+                    "POST",
+                    "/api/workbench/settings/data-reset",
+                    body=json.dumps(
+                        {
+                            "action": RESET_OA_AND_REBUILD_ACTION,
+                            "oa_password": "correct-password",
+                        }
+                    ),
+                    headers={"Authorization": "Bearer admin-token"},
+                )
+                rebuilt_payload = app._build_api_workbench_payload("all")
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["rebuild_status"], "completed")
+        rebuilt_oa_ids = _flatten_group_rows(rebuilt_payload, "oa")
+        self.assertEqual(rebuilt_oa_ids, ["oa-pay-2047"])
+        self.assertNotIn("oa-pay-2048", rebuilt_oa_ids)
+        self.assertFalse(any(form_id == "32" for form_id, _month in load_calls))
+
+    def test_reset_oa_and_rebuild_reparses_attachment_invoices_before_writing_read_model(self) -> None:
+        with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "oa_mongo_config.json").write_text(
+                json.dumps(
+                    {
+                        "host": "127.0.0.1",
+                        "database": "form_data_db",
+                        "cache_ttl_seconds": 0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            app = build_application(data_dir=data_dir)
+            app._app_settings_service._oa_import_options_provider = None
+            app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[],
+                allowed_usernames=[],
+                readonly_export_usernames=[],
+                admin_usernames=["YNSYLP005"],
+                oa_retention={"cutoff_date": "2026-01-01"},
+                oa_import={
+                    "form_types": ["expense_claim"],
+                    "statuses": ["completed"],
+                },
+            )
+            app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
+                user_id="1",
+                username="YNSYLP005",
+                nickname="管理员",
+                display_name="管理员",
+                dept_id="01",
+                dept_name="财务部",
+                roles=["finance_admin"],
+                permissions=[],
+            )
+            app._oa_identity_service.verify_current_user_password = lambda token, password: (
+                token == "admin-token" and password == "correct-password"
+            )
+            form_documents = {
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-with-attachment",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2026-03-18",
+                            "Reimbursement Personnel": "刘际涛",
+                            "titleName": "日常报销",
+                            "processId": "exp-attach-001",
+                            "processStatus": "2",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailProjectName": "project-001",
+                                    "detailReimbursementAmount": "127",
+                                    "feeContent": "角磨机",
+                                    "detailReimbursementAttachment": {
+                                        "list": [
+                                            {
+                                                "status": "success",
+                                                "name": "invoice-a.pdf",
+                                                "response": {
+                                                    "extra": {
+                                                        "filePath": "/oa/invoice-a.pdf",
+                                                        "fileName": "invoice-a.pdf",
+                                                        "suffix": "pdf",
+                                                    }
+                                                },
+                                            }
+                                        ]
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+            }
+
+            def load_form_documents(adapter: MongoOAAdapter, form_id: str, month: str | None = None) -> list[dict]:
+                documents = list(form_documents.get(str(form_id), []))
+                if month is None:
+                    return documents
+                return [
+                    document
+                    for document in documents
+                    if str(
+                        document.get("data", {}).get("applicationDate")
+                        or document.get("data", {}).get("ApplicationDate")
+                        or ""
+                    ).startswith(month)
+                ]
+
+            def load_form_month_documents(adapter: MongoOAAdapter, form_id: str) -> list[dict]:
+                return list(form_documents.get(str(form_id), []))
+
+            parsed_invoice = {
+                "invoice_no": "40512344",
+                "seller_name": "云南顺丰速运有限公司",
+                "buyer_name": "云南溯源科技有限公司",
+                "issue_date": "2026-03-18",
+                "amount": "119.81",
+                "tax_amount": "7.19",
+                "total_with_tax": "127.00",
+                "attachment_name": "invoice-a.pdf",
+            }
+            with patch.object(MongoOAAdapter, "_load_project_documents", autospec=True, return_value=[]), patch.object(
+                MongoOAAdapter,
+                "_load_form_documents",
+                autospec=True,
+                side_effect=load_form_documents,
+            ), patch.object(
+                MongoOAAdapter,
+                "_load_form_month_documents",
+                autospec=True,
+                side_effect=load_form_month_documents,
+            ), patch(
+                "fin_ops_platform.services.mongo_oa_adapter.OAAttachmentInvoiceService.parse_files",
+                return_value=[parsed_invoice],
+            ) as parse_files:
+                response = app.handle_request(
+                    "POST",
+                    "/api/workbench/settings/data-reset",
+                    body=json.dumps(
+                        {
+                            "action": RESET_OA_AND_REBUILD_ACTION,
+                            "oa_password": "correct-password",
+                        }
+                    ),
+                    headers={"Authorization": "Bearer admin-token"},
+                )
+                rebuilt_payload = app._build_api_workbench_payload("all")
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["rebuild_status"], "completed")
+        parse_files.assert_called()
+        rebuilt_invoice_ids = _flatten_group_rows(rebuilt_payload, "invoice")
+        self.assertEqual(rebuilt_invoice_ids, ["oa-att-inv-oa-exp-exp-attach-001-0-01"])
+        invoice_rows = _flatten_group_payload_rows(rebuilt_payload, "invoice")
+        self.assertEqual(invoice_rows[0]["source_kind"], "oa_attachment_invoice")
+        self.assertEqual(invoice_rows[0]["detail_fields"]["发票号码"], "40512344")
+
     def test_reset_api_rejects_missing_oa_password_without_clearing_data(self) -> None:
         with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -574,9 +867,13 @@ def _build_retention_oa_row(row_id: str, case_id: str, application_date: str) ->
 
 
 def _flatten_group_rows(payload: dict[str, object], row_type: str) -> list[str]:
+    return [str(row["id"]) for row in _flatten_group_payload_rows(payload, row_type)]
+
+
+def _flatten_group_payload_rows(payload: dict[str, object], row_type: str) -> list[dict[str, object]]:
     row_key = f"{row_type}_rows"
     groups = [*list(payload["paired"]["groups"]), *list(payload["open"]["groups"])]
-    return [str(row["id"]) for group in groups for row in list(group.get(row_key, []))]
+    return [row for group in groups for row in list(group.get(row_key, []))]
 
 
 if __name__ == "__main__":

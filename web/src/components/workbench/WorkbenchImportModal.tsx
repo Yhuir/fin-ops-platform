@@ -308,12 +308,9 @@ export default function WorkbenchImportModal({
 
   return (
     <div className="export-center-modal-layer" role="presentation">
-      <button
-        aria-label={`关闭${title}`}
+      <div
+        aria-hidden="true"
         className="export-center-modal-backdrop"
-        type="button"
-        onClick={onClose}
-        disabled={isConfirming}
       />
       <section
         aria-labelledby="workbench-import-modal-title"

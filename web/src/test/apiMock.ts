@@ -2595,6 +2595,18 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     oa_retention: {
       cutoff_date: "2026-01-01",
     },
+    oa_import: {
+      form_types: ["payment_request", "expense_claim"],
+      statuses: ["completed"],
+      available_form_types: [
+        { value: "payment_request", label: "支付申请" },
+        { value: "expense_claim", label: "日常报销" },
+      ],
+      available_statuses: [
+        { value: "completed", label: "已完成" },
+        { value: "in_progress", label: "进行中" },
+      ],
+    },
     oa_invoice_offset: {
       applicant_names: ["周洁莹"],
     },
@@ -2720,6 +2732,22 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
                 cutoff_date: String((jsonBody.oa_retention as Record<string, unknown>).cutoff_date || "2026-01-01"),
               }
               : workbenchSettingsState.oa_retention,
+          oa_import:
+            jsonBody.oa_import && typeof jsonBody.oa_import === "object"
+              ? {
+                ...workbenchSettingsState.oa_import,
+                form_types: Array.isArray((jsonBody.oa_import as Record<string, unknown>).form_types)
+                  ? ((jsonBody.oa_import as Record<string, unknown>).form_types as unknown[])
+                    .map((item) => String(item).trim())
+                    .filter(Boolean)
+                  : workbenchSettingsState.oa_import.form_types,
+                statuses: Array.isArray((jsonBody.oa_import as Record<string, unknown>).statuses)
+                  ? ((jsonBody.oa_import as Record<string, unknown>).statuses as unknown[])
+                    .map((item) => String(item).trim())
+                    .filter(Boolean)
+                  : workbenchSettingsState.oa_import.statuses,
+              }
+              : workbenchSettingsState.oa_import,
           oa_invoice_offset:
             jsonBody.oa_invoice_offset && typeof jsonBody.oa_invoice_offset === "object"
               ? {

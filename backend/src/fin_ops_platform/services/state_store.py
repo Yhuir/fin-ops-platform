@@ -236,6 +236,7 @@ class ApplicationStateStore:
             "admin_usernames": [],
             "workbench_column_layouts": {},
             "oa_retention": {},
+            "oa_import": {},
             "oa_invoice_offset": {},
         }
         if self._mongo_database is not None:
@@ -252,6 +253,7 @@ class ApplicationStateStore:
                     "admin_usernames": list(payload.get("admin_usernames") or []),
                     "workbench_column_layouts": dict(payload.get("workbench_column_layouts") or {}),
                     "oa_retention": dict(payload.get("oa_retention") or {}),
+                    "oa_import": dict(payload.get("oa_import") or {}),
                     "oa_invoice_offset": dict(payload.get("oa_invoice_offset") or {}),
                 }
             return default_payload
@@ -274,6 +276,7 @@ class ApplicationStateStore:
             "admin_usernames": list(loaded.get("admin_usernames") or []),
             "workbench_column_layouts": dict(loaded.get("workbench_column_layouts") or {}),
             "oa_retention": dict(loaded.get("oa_retention") or {}),
+            "oa_import": dict(loaded.get("oa_import") or {}),
             "oa_invoice_offset": dict(loaded.get("oa_invoice_offset") or {}),
         }
 
@@ -288,6 +291,7 @@ class ApplicationStateStore:
             "admin_usernames": list(payload.get("admin_usernames") or []),
             "workbench_column_layouts": dict(payload.get("workbench_column_layouts") or {}),
             "oa_retention": dict(payload.get("oa_retention") or {}),
+            "oa_import": dict(payload.get("oa_import") or {}),
             "oa_invoice_offset": dict(payload.get("oa_invoice_offset") or {}),
         }
         if self._mongo_database is not None:
@@ -304,6 +308,7 @@ class ApplicationStateStore:
                         "admin_usernames": normalized_payload["admin_usernames"],
                         "workbench_column_layouts": normalized_payload["workbench_column_layouts"],
                         "oa_retention": normalized_payload["oa_retention"],
+                        "oa_import": normalized_payload["oa_import"],
                         "oa_invoice_offset": normalized_payload["oa_invoice_offset"],
                         "payload": Binary(pickle.dumps(normalized_payload)),
                         "updated_at": datetime.now(UTC),

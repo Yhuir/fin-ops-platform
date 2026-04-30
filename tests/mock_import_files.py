@@ -105,37 +105,41 @@ def invoice_export_file(name: str = "全量发票查询导出结果-2026年1月.
     )
 
 
-def icbc_history_file(name: str = "historydetail14080.xlsx") -> MockImportFile:
+def icbc_history_file(name: str = "historydetail14080.xlsx", *, account_no: str | None = None) -> MockImportFile:
+    rows = []
+    if account_no:
+        rows.append([f"账号：{account_no}"])
+    rows.extend(
+        [
+            [
+                "[HISTORYDETAIL]",
+                "凭证号",
+                "交易时间",
+                "对方单位",
+                "对方账号",
+                "转入金额",
+                "转出金额",
+                "余额",
+                "摘要",
+                "附言",
+            ],
+            [
+                "",
+                "ICBC-001",
+                "2026-01-03 09:12:00",
+                "重庆高新技术产业开发区国家税务局",
+                "500000000000001",
+                "",
+                "6180.00",
+                "12000.00",
+                "服务费",
+                "ICBC-001",
+            ],
+        ]
+    )
     return MockImportFile(
         name=name,
-        content=xlsx_bytes(
-            [
-                [
-                    "[HISTORYDETAIL]",
-                    "凭证号",
-                    "交易时间",
-                    "对方单位",
-                    "对方账号",
-                    "转入金额",
-                    "转出金额",
-                    "余额",
-                    "摘要",
-                    "附言",
-                ],
-                [
-                    "",
-                    "ICBC-001",
-                    "2026-01-03 09:12:00",
-                    "重庆高新技术产业开发区国家税务局",
-                    "500000000000001",
-                    "",
-                    "6180.00",
-                    "12000.00",
-                    "服务费",
-                    "ICBC-001",
-                ],
-            ]
-        ),
+        content=xlsx_bytes(rows),
     )
 
 
@@ -250,6 +254,21 @@ def cmbc_transaction_file(name: str = "活期账户交易明细查询20260424114
     )
 
 
+def bocom_transaction_file(name: str = "20260424115013_531899991015003383847.xlsx") -> MockImportFile:
+    return MockImportFile(
+        name=name,
+        content=xlsx_bytes(
+            [
+                ["查询账号:", "531899991015003383847", "户  名:", "云南溯源科技有限公司"],
+                ["交易时间", "借方发生额（支出）", "贷方发生额（收入）", "账户余额", "对方账号", "对方户名", "摘要"],
+                ["2026-04-23 15:08:57", "0.00", "300000.00", "300000.00", "531899999905003240769", "云南溯源科技有限公司", "普贷放款"],
+                ["2026-04-23 15:28:54", "30900.00", "0.00", "269100.00", "53050110285500001629", "昆明云成电线电缆有限公司", "货款"],
+                ["借方交易笔数", "1", "借方交易金额", "30900.00", "贷方交易笔数", "1", "贷方交易金额", "300000.00"],
+            ]
+        ),
+    )
+
+
 def unsupported_text_file(name: str = "README.md") -> MockImportFile:
     return MockImportFile(name=name, content=b"# unsupported fixture\n")
 
@@ -340,6 +359,7 @@ PINGAN_JAN = pingan_transaction_file()
 CEB_JAN = ceb_transaction_file()
 CCB_JAN = ccb_transaction_file()
 CMBC_JAN = cmbc_transaction_file()
+BOCOM_JAN = bocom_transaction_file()
 UNSUPPORTED = unsupported_text_file()
 CERTIFIED_JAN = certified_invoice_file(
     "2026年1月 进项认证结果  用途确认信息.xlsx",

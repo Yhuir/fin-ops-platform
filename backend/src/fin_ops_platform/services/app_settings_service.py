@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 
 from fin_ops_platform.domain.models import ProjectMaster
 from fin_ops_platform.services.access_control_service import DEFAULT_ADMIN_USERNAME
@@ -11,6 +11,16 @@ from fin_ops_platform.services.state_store import ApplicationStateStore
 
 DEFAULT_OA_RETENTION_CUTOFF_DATE = "2026-01-01"
 DEFAULT_OA_INVOICE_OFFSET_APPLICANTS = ["周洁莹"]
+DEFAULT_OA_IMPORT_FORM_TYPES = ["payment_request", "expense_claim"]
+DEFAULT_OA_IMPORT_STATUSES = ["completed"]
+OA_IMPORT_FORM_TYPE_OPTIONS = [
+    {"id": "payment_request", "label": "支付申请"},
+    {"id": "expense_claim", "label": "日常报销"},
+]
+OA_IMPORT_STATUS_OPTIONS = [
+    {"id": "completed", "label": "已完成"},
+    {"id": "in_progress", "label": "进行中"},
+]
 DEFAULT_WORKBENCH_COLUMN_LAYOUTS = {
     "oa": ["applicant", "projectName", "amount", "counterparty", "reason"],
     "bank": ["counterparty", "amount", "loanRepaymentDate", "note"],
@@ -24,10 +34,12 @@ class AppSettingsService:
         state_store: ApplicationStateStore | None,
         project_costing_service: ProjectCostingService,
         oa_role_sync_service: OARoleSyncService | None = None,
+        oa_import_options_provider: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self._state_store = state_store
         self._project_costing_service = project_costing_service
         self._oa_role_sync_service = oa_role_sync_service
+        self._oa_import_options_provider = oa_import_options_provider
         self._snapshot = self._normalize_settings(
             state_store.load_app_settings() if state_store is not None else {}
         )
@@ -60,6 +72,7 @@ class AppSettingsService:
             self._snapshot["bank_account_mappings"],
             key=lambda item: (item["bank_name"], item["last4"]),
         )
+        oa_import_options = self._oa_import_available_options()
         return {
             "projects": {
                 "active": active_projects,
@@ -80,6 +93,12 @@ class AppSettingsService:
             "oa_retention": {
                 "cutoff_date": self._snapshot["oa_retention"]["cutoff_date"],
             },
+            "oa_import": {
+                "form_types": list(self._snapshot["oa_import"]["form_types"]),
+                "statuses": list(self._snapshot["oa_import"]["statuses"]),
+                "available_form_types": oa_import_options["available_form_types"],
+                "available_statuses": oa_import_options["available_statuses"],
+            },
             "oa_invoice_offset": {
                 "applicant_names": list(self._snapshot["oa_invoice_offset"]["applicant_names"]),
             },
@@ -95,6 +114,7 @@ class AppSettingsService:
         admin_usernames: list[str] | None = None,
         workbench_column_layouts: dict[str, Any] | None = None,
         oa_retention: dict[str, Any] | None = None,
+        oa_import: dict[str, Any] | None = None,
         oa_invoice_offset: dict[str, Any] | None = None,
         manual_projects: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
@@ -107,6 +127,11 @@ class AppSettingsService:
                 "admin_usernames": admin_usernames or [],
                 "workbench_column_layouts": workbench_column_layouts or {},
                 "oa_retention": oa_retention or {},
+                "oa_import": (
+                    oa_import
+                    if oa_import is not None
+                    else self._snapshot.get("oa_import", {})
+                ),
                 "oa_invoice_offset": oa_invoice_offset or {},
                 "manual_projects": (
                     manual_projects
@@ -275,6 +300,37 @@ class AppSettingsService:
     def get_oa_retention_cutoff_date(self) -> str:
         return str(self._snapshot["oa_retention"]["cutoff_date"])
 
+    def get_oa_import_settings(self) -> dict[str, list[str]]:
+        return {
+            "form_types": list(self._snapshot["oa_import"]["form_types"]),
+            "statuses": list(self._snapshot["oa_import"]["statuses"]),
+        }
+
+    def _oa_import_available_options(self) -> dict[str, list[dict[str, str]]]:
+        default_options = {
+            "available_form_types": [dict(item) for item in OA_IMPORT_FORM_TYPE_OPTIONS],
+            "available_statuses": [dict(item) for item in OA_IMPORT_STATUS_OPTIONS],
+        }
+        provider = self._oa_import_options_provider
+        if provider is None:
+            return default_options
+        try:
+            raw_options = provider()
+        except Exception:
+            return default_options
+        if not isinstance(raw_options, dict):
+            return default_options
+        return {
+            "available_form_types": self._normalize_available_options(
+                raw_options.get("available_form_types"),
+                defaults=OA_IMPORT_FORM_TYPE_OPTIONS,
+            ),
+            "available_statuses": self._normalize_available_options(
+                raw_options.get("available_statuses"),
+                defaults=OA_IMPORT_STATUS_OPTIONS,
+            ),
+        }
+
     def get_oa_invoice_offset_applicant_names(self) -> list[str]:
         return list(self._snapshot["oa_invoice_offset"]["applicant_names"])
 
@@ -369,6 +425,22 @@ class AppSettingsService:
         cutoff_date = str(oa_retention.get("cutoff_date") or DEFAULT_OA_RETENTION_CUTOFF_DATE).strip()
         if not _is_iso_date(cutoff_date):
             cutoff_date = DEFAULT_OA_RETENTION_CUTOFF_DATE
+        raw_oa_import = raw_payload.get("oa_import")
+        oa_import = raw_oa_import if isinstance(raw_oa_import, dict) else {}
+        form_type_ids = [item["id"] for item in OA_IMPORT_FORM_TYPE_OPTIONS]
+        status_ids = [item["id"] for item in OA_IMPORT_STATUS_OPTIONS]
+        form_types = AppSettingsService._normalize_option_list(
+            oa_import.get("form_types"),
+            allowed_values=form_type_ids,
+            default_values=DEFAULT_OA_IMPORT_FORM_TYPES,
+            preserve_empty="form_types" in oa_import,
+        )
+        statuses = AppSettingsService._normalize_option_list(
+            oa_import.get("statuses"),
+            allowed_values=status_ids,
+            default_values=DEFAULT_OA_IMPORT_STATUSES,
+            preserve_empty="statuses" in oa_import,
+        )
         raw_oa_invoice_offset = raw_payload.get("oa_invoice_offset")
         oa_invoice_offset = raw_oa_invoice_offset if isinstance(raw_oa_invoice_offset, dict) else {}
         raw_applicant_names = (
@@ -450,8 +522,57 @@ class AppSettingsService:
             "full_access_usernames": full_access_usernames,
             "workbench_column_layouts": normalized_layouts,
             "oa_retention": {"cutoff_date": cutoff_date},
+            "oa_import": {
+                "form_types": form_types,
+                "statuses": statuses,
+            },
             "oa_invoice_offset": {"applicant_names": applicant_names},
         }
+
+    @staticmethod
+    def _normalize_option_list(
+        values: Any,
+        *,
+        allowed_values: list[str],
+        default_values: list[str],
+        preserve_empty: bool,
+    ) -> list[str]:
+        if not isinstance(values, list):
+            return list(default_values)
+        allowed_set = set(allowed_values)
+        normalized = []
+        seen = set()
+        for item in values:
+            value = str(item).strip()
+            if value not in allowed_set or value in seen:
+                continue
+            seen.add(value)
+            normalized.append(value)
+        if normalized or preserve_empty:
+            return [value for value in allowed_values if value in seen]
+        return list(default_values)
+
+    @staticmethod
+    def _normalize_available_options(
+        values: Any,
+        *,
+        defaults: list[dict[str, str]],
+    ) -> list[dict[str, str]]:
+        allowed_labels = {str(item["id"]): str(item["label"]) for item in defaults}
+        seen: set[str] = set()
+        normalized: list[dict[str, str]] = []
+        if isinstance(values, list):
+            for item in values:
+                if not isinstance(item, dict):
+                    continue
+                option_id = str(item.get("id", "")).strip()
+                if option_id not in allowed_labels or option_id in seen:
+                    continue
+                seen.add(option_id)
+                normalized.append({"id": option_id, "label": allowed_labels[option_id]})
+        if normalized:
+            return normalized
+        return [dict(item) for item in defaults]
 
 
 def _is_iso_date(value: str) -> bool:

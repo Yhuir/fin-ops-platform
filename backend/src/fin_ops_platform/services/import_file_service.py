@@ -21,6 +21,7 @@ COMPACT_DATE_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})$")
 COMPACT_DATE_TIME_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})[ T]?(\d{2})(\d{2})(\d{2})$")
 COMPANY_TAX_NOS = {"91330106589876543T", "915300007194052520"}
 COMPANY_NAME_KEYWORDS = ("云南溯源科技有限公司", "溯源科技有限公司")
+ACCOUNT_METADATA_KEYWORDS = ("账号", "账户", "卡号")
 TEMPLATE_DEFINITIONS: list[dict[str, Any]] = [
     {
         "template_code": "invoice_export",
@@ -69,6 +70,14 @@ TEMPLATE_DEFINITIONS: list[dict[str, Any]] = [
         "record_type": "bank_transaction",
         "allowed_batch_types": [BatchType.BANK_TRANSACTION.value],
         "required_headers": ["交易时间", "账号", "收入", "支出", "对方户名", "交易流水号", "核心唯一流水号"],
+    },
+    {
+        "template_code": "bocom_transaction_detail",
+        "label": "交通银行流水",
+        "file_extensions": [".xls", ".xlsx"],
+        "record_type": "bank_transaction",
+        "allowed_batch_types": [BatchType.BANK_TRANSACTION.value],
+        "required_headers": ["交易时间", "借方发生额（支出）", "贷方发生额（收入）", "账户余额", "对方账号", "对方户名", "摘要"],
     },
 ]
 
@@ -326,7 +335,6 @@ class FileImportService:
         try:
             rows = self._read_rows(upload)
             parsed = self._parse_rows(
-                file_name=upload.file_name,
                 rows=rows,
                 template_code_override=template_code_override,
                 batch_type_override=batch_type_override,
@@ -369,6 +377,8 @@ class FileImportService:
         bank_selection_conflict = bool(conflict_message)
         if parsed.batch_type == BatchType.BANK_TRANSACTION:
             for row in parsed.rows:
+                if not clean(row.get("account_no")) and (selected_bank_mapping_id or selected_bank_last4):
+                    row["account_no"] = selected_bank_mapping_id or selected_bank_last4
                 row["selected_bank_mapping_id"] = selected_bank_mapping_id
                 row["selected_bank_name"] = selected_bank_name
                 row["selected_bank_short_name"] = selected_bank_short_name
@@ -459,7 +469,6 @@ class FileImportService:
     def _parse_rows(
         self,
         *,
-        file_name: str,
         rows: list[list[str]],
         template_code_override: str | None = None,
         batch_type_override: str | None = None,
@@ -482,7 +491,7 @@ class FileImportService:
             return ParsedImportFile(
                 template_code=template_code,
                 batch_type=BatchType.BANK_TRANSACTION,
-                rows=parse_icbc_rows(rows, file_name=file_name),
+                rows=parse_icbc_rows(rows),
             )
         if template_code == "pingan_transaction_detail":
             return ParsedImportFile(
@@ -507,6 +516,12 @@ class FileImportService:
                 template_code=template_code,
                 batch_type=BatchType.BANK_TRANSACTION,
                 rows=parse_ceb_rows(rows),
+            )
+        if template_code == "bocom_transaction_detail":
+            return ParsedImportFile(
+                template_code=template_code,
+                batch_type=BatchType.BANK_TRANSACTION,
+                rows=parse_bocom_rows(rows),
             )
         raise ValueError("无法识别文件模板。")
 
@@ -579,6 +594,7 @@ class FileImportService:
             "cmbc_transaction_detail": "民生银行",
             "ccb_transaction_detail": "建设银行",
             "ceb_transaction_detail": "光大银行",
+            "bocom_transaction_detail": "交通银行",
         }.get(parsed.template_code)
         detected_last4 = None
         for row in parsed.rows:
@@ -661,6 +677,8 @@ class TemplateDetector:
                 return "ccb_transaction_detail"
             if is_ceb_header_row(row_set):
                 return "ceb_transaction_detail"
+            if is_bocom_header_row(row_set):
+                return "bocom_transaction_detail"
         raise ValueError("无法识别文件模板。")
 
 
@@ -729,16 +747,17 @@ def parse_invoice_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
     return data_rows
 
 
-def parse_icbc_rows(rows: list[list[str]], *, file_name: str) -> list[dict[str, Any]]:
+def parse_icbc_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
     header_index = find_header_index(rows, {"凭证号", "交易时间", "对方单位", "对方账号", "转入金额", "转出金额", "摘要"})
     header = rows[header_index]
-    account_no = derive_account_no_from_filename(file_name)
+    metadata_account_no = extract_account_no_from_metadata(rows[:header_index])
     data_rows = []
     for row in rows[header_index + 1 :]:
         mapped = row_to_dict(header, row)
         if not any(mapped.values()):
             continue
         trade_time = normalize_datetime_string(mapped.get("交易时间"))
+        account_no = metadata_account_no or extract_account_no_from_mapping(mapped)
         data_rows.append(
             {
                 "account_no": account_no,
@@ -901,6 +920,41 @@ def parse_ceb_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
     return data_rows
 
 
+def parse_bocom_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
+    header_index = find_bocom_header_index(rows)
+    header = rows[header_index]
+    meta = extract_key_value_metadata(rows[:header_index])
+    account_no = meta.get("查询账号") or extract_account_no_from_metadata(rows[:header_index])
+    account_name = meta.get("户名") or meta.get("户  名")
+    data_rows = []
+    for row in rows[header_index + 1 :]:
+        mapped = row_to_dict(header, row)
+        if not any(mapped.values()):
+            continue
+        if to_date_string(mapped.get("交易时间")) is None:
+            continue
+        trade_time = normalize_datetime_string(mapped.get("交易时间"))
+        data_rows.append(
+            {
+                "account_no": account_no,
+                "account_name": account_name,
+                "trade_time": trade_time,
+                "pay_receive_time": trade_time,
+                "txn_date": to_date_string(mapped.get("交易时间")),
+                "counterparty_name": mapped.get("对方户名") or "未知对手方",
+                "counterparty_account_no": mapped.get("对方账号"),
+                "credit_amount": mapped.get("贷方发生额（收入）"),
+                "debit_amount": mapped.get("借方发生额（支出）"),
+                "balance": mapped.get("账户余额"),
+                "summary": mapped.get("摘要"),
+                "remark": mapped.get("摘要"),
+                "bank_serial_no": first_mapped_value(mapped, "流水号", "交易流水号", "凭证号"),
+                "currency": "CNY",
+            }
+        )
+    return data_rows
+
+
 def is_ceb_header_row(row_set: set[str]) -> bool:
     return (
         {"交易日期", "交易时间", "对方名称", "对方账号"}.issubset(row_set)
@@ -908,6 +962,25 @@ def is_ceb_header_row(row_set: set[str]) -> bool:
         and bool({"贷方发生额", "贷方发生额（元）"} & row_set)
         and bool({"账户余额", "账户余额（元）"} & row_set)
     )
+
+
+def is_bocom_header_row(row_set: set[str]) -> bool:
+    return {
+        "交易时间",
+        "借方发生额（支出）",
+        "贷方发生额（收入）",
+        "账户余额",
+        "对方账号",
+        "对方户名",
+        "摘要",
+    }.issubset(row_set)
+
+
+def find_bocom_header_index(rows: list[list[str]]) -> int:
+    for index, row in enumerate(rows):
+        if is_bocom_header_row(set(normalize_row(row))):
+            return index
+    raise ValueError("无法识别文件模板。")
 
 
 def normalize_row(row: list[str]) -> list[str]:
@@ -982,13 +1055,43 @@ def extract_key_value_metadata(rows: list[list[str]]) -> dict[str, str]:
             normalized_value = clean(value)
             if normalized_key and normalized_value:
                 metadata[normalized_key] = normalized_value
-        if len(row) < 2:
-            continue
-        key = clean(row[0]).rstrip(":：")
-        value = clean(row[1])
-        if key:
-            metadata[key] = value
+        for index in range(0, len(row) - 1, 2):
+            key = clean(row[index]).rstrip(":：")
+            value = clean(row[index + 1])
+            if key and value:
+                metadata[key] = value
     return metadata
+
+
+def extract_account_no_from_metadata(rows: list[list[str]]) -> str | None:
+    metadata = extract_key_value_metadata(rows)
+    for key, value in metadata.items():
+        if is_account_no_key(key):
+            account_no = normalize_account_no(value)
+            if account_no:
+                return account_no
+    return None
+
+
+def extract_account_no_from_mapping(mapped: dict[str, str]) -> str | None:
+    for key, value in mapped.items():
+        if is_account_no_key(key):
+            account_no = normalize_account_no(value)
+            if account_no:
+                return account_no
+    return None
+
+
+def is_account_no_key(key: str) -> bool:
+    normalized_key = normalize_header(key)
+    if not any(keyword in normalized_key for keyword in ACCOUNT_METADATA_KEYWORDS):
+        return False
+    return not any(excluded in normalized_key for excluded in ("对方", "户名", "名称", "开户", "余额"))
+
+
+def normalize_account_no(value: Any) -> str | None:
+    digits = re.sub(r"\D+", "", clean(value))
+    return digits if len(digits) >= 4 else None
 
 
 def to_date_string(value: str | None) -> str | None:
@@ -1024,13 +1127,6 @@ def normalize_datetime_string(value: str | None) -> str | None:
     except ValueError:
         return text
     return parsed.strftime("%Y-%m-%d %H:%M:%S")
-
-
-def derive_account_no_from_filename(file_name: str) -> str:
-    digit_groups = re.findall(r"\d+", file_name)
-    if not digit_groups:
-        return file_name
-    return digit_groups[-1]
 
 
 def is_company_identity(tax_no: str | None, company_name: str | None) -> bool:

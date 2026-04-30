@@ -1,6 +1,7 @@
 import type {
   BankAccountMapping,
   WorkbenchAccessRole,
+  WorkbenchOaImportSettings,
   WorkbenchProjectSetting,
   WorkbenchSettingsDataResetAction,
 } from "../../features/workbench/types";
@@ -79,7 +80,10 @@ export type SettingsBankAccountsSectionProps = {
 export type SettingsOaRetentionSectionProps = {
   controlsDisabled: boolean;
   cutoffDate: string;
+  oaImport: WorkbenchOaImportSettings;
   onChangeCutoffDate: (value: string) => void;
+  onToggleFormType: (value: string) => void;
+  onToggleStatus: (value: string) => void;
 };
 
 export type SettingsOaInvoiceOffsetSectionProps = {

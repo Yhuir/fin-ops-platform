@@ -89,12 +89,70 @@ body.workbench-focus-mode .global-header {
   font-weight: 800;
 }
 
-.global-status-text {
-  color: #5d6d7e;
+.global-status-indicator {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+}
+
+.global-status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #16a34a;
+}
+
+.global-status-indicator.pending .global-status-dot {
+  background: #f59e0b;
+  animation: status-pulse 1.4s ease-in-out infinite;
+}
+
+.global-status-indicator.error .global-status-dot {
+  background: #dc2626;
+}
+
+.global-status-indicator::after {
+  content: attr(data-status-reason);
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  width: max-content;
+  max-width: min(340px, calc(100vw - 32px));
+  padding: 8px 10px;
+  border: 1px solid #d8e1eb;
+  border-radius: 8px;
+  background: #fff;
+  color: #243b53;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
   font-size: 12px;
   font-weight: 700;
-  white-space: nowrap;
-  padding-bottom: 3px;
+  line-height: 1.4;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: opacity 140ms ease, transform 140ms ease;
+  white-space: normal;
+}
+
+.global-status-indicator:hover::after,
+.global-status-indicator:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@keyframes status-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.35);
+  }
+
+  50% {
+    box-shadow: 0 0 0 5px rgba(245, 158, 11, 0);
+  }
 }
 
 .header-actions {
@@ -4346,6 +4404,55 @@ body.column-layout-dragging {
   align-items: end;
 }
 
+.settings-oa-import-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.75fr) minmax(180px, 1fr) minmax(180px, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.settings-checkbox-group {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.settings-checkbox-group legend {
+  margin: 0 0 8px;
+  padding: 0;
+  color: #486581;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.settings-checkbox-list {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #d8e1eb;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.settings-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  color: #102a43;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.settings-checkbox-row input {
+  width: 14px;
+  height: 14px;
+  accent-color: #0f4c81;
+}
+
 .settings-access-admin-note {
   display: grid;
   gap: 10px;
@@ -5681,6 +5788,7 @@ body.column-layout-dragging {
   .settings-two-column-layout,
   .settings-bank-mapping-form,
   .settings-bank-mapping-row,
+  .settings-oa-import-layout,
   .data-reset-card {
     grid-template-columns: minmax(0, 1fr);
   }

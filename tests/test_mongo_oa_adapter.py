@@ -326,6 +326,127 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual([record.id for record in records], ["oa-pay-2047", "oa-pay-2048"])
         self.assertEqual(adapter.get_read_status().code, "ready")
 
+    def test_list_application_records_applies_oa_import_form_type_and_status_filters(self) -> None:
+        adapter = CountingStubMongoOAAdapter(
+            form_documents={
+                "2": [
+                    {
+                        "_id": "payment-completed",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2026-03-16",
+                            "userName": "刘际涛",
+                            "fromTitle": "支付申请单",
+                            "amount": "199",
+                            "beneficiary": "中国电信股份有限公司昆明分公司",
+                            "cause": "托收电话费及宽带",
+                            "projectName": "6486ca70cd6cae5d4e2b0b48",
+                            "flowRequestId": "2047",
+                            "processStatus": "2",
+                        },
+                    },
+                    {
+                        "_id": "payment-in-progress",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2026-03-17",
+                            "userName": "樊祖芳",
+                            "fromTitle": "支付申请",
+                            "amount": "88050",
+                            "beneficiary": "云南辰飞机电工程有限公司",
+                            "cause": "空气源热泵预付款",
+                            "projectName": "6486ca70cd6cae5d4e2b0b48",
+                            "flowRequestId": "2048",
+                            "processStatus": "1",
+                        },
+                    },
+                ],
+                "32": [
+                    {
+                        "_id": "expense-doc-1",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2026-03-18",
+                            "Reimbursement Personnel": "刘际涛",
+                            "titleName": "日常报销",
+                            "processId": "exp-001",
+                            "processStatus": "2",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailProjectName": "6486ca70cd6cae5d4e2b0b48",
+                                    "detailReimbursementAmount": "127",
+                                    "feeContent": "角磨机",
+                                }
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[
+                {"_id": "6486ca70cd6cae5d4e2b0b48", "data": {"name": "云南溯源科技", "code": "YNSY"}},
+            ],
+        )
+        adapter.set_import_filter_provider(
+            lambda: {
+                "form_types": ["payment_request"],
+                "statuses": ["completed"],
+            }
+        )
+
+        records = adapter.list_application_records("2026-03")
+
+        self.assertEqual([record.id for record in records], ["oa-pay-2047"])
+        self.assertEqual(records[0].apply_type, "支付申请")
+        self.assertEqual(adapter.form_load_calls, [("2", "2026-03")])
+
+    def test_list_oa_import_filter_options_normalizes_oa_names_and_excludes_unsupported_statuses(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [
+                    {
+                        "_id": "payment-doc-1",
+                        "form_id": "2",
+                        "data": {"fromTitle": "支付申请单", "processStatus": "2"},
+                    },
+                    {
+                        "_id": "payment-doc-2",
+                        "form_id": "2",
+                        "data": {"fromTitle": "", "status": "REJECTED"},
+                    },
+                ],
+                "32": [
+                    {
+                        "_id": "expense-doc-1",
+                        "form_id": "32",
+                        "data": {"titleName": "", "processStatus": "1"},
+                    },
+                    {
+                        "_id": "expense-doc-2",
+                        "form_id": "32",
+                        "data": {"titleName": "日常报销", "processStatus": "4"},
+                    },
+                ],
+            },
+            project_documents=[],
+        )
+
+        options = adapter.list_oa_import_filter_options()
+
+        self.assertEqual(
+            options,
+            {
+                "available_form_types": [
+                    {"id": "payment_request", "label": "支付申请"},
+                    {"id": "expense_claim", "label": "日常报销"},
+                ],
+                "available_statuses": [
+                    {"id": "completed", "label": "已完成"},
+                    {"id": "in_progress", "label": "进行中"},
+                ],
+            },
+        )
+
     def test_list_application_records_by_row_ids_returns_only_requested_rows(self) -> None:
         adapter = StubMongoOAAdapter(
             form_documents={
@@ -925,6 +1046,81 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual([document["external_id"] for document in documents], ["2047"])
         self.assertEqual(months, ["2026-03"])
 
+    def test_import_settings_filter_form_types_and_statuses(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [
+                    {
+                        "_id": "payment-doc-completed",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2026-03-16",
+                            "userName": "刘际涛",
+                            "fromTitle": "支付申请",
+                            "amount": "199",
+                            "beneficiary": "中国电信股份有限公司昆明分公司",
+                            "cause": "托收电话费及宽带",
+                            "projectName": "6486ca70cd6cae5d4e2b0b48",
+                            "flowRequestId": "2047",
+                            "status": "已完成",
+                        },
+                    }
+                ],
+                "32": [
+                    {
+                        "_id": "expense-doc-completed",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2026-03-18",
+                            "Reimbursement Personnel": "王五",
+                            "titleName": "日常报销",
+                            "flowRequestId": "3001",
+                            "status": "已完成",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailReimbursementAmount": "88",
+                                    "feeContent": "停车费",
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "_id": "expense-doc-in-progress",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2026-03-19",
+                            "Reimbursement Personnel": "赵六",
+                            "titleName": "日常报销",
+                            "flowRequestId": "3002",
+                            "status": "进行中",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailReimbursementAmount": "99",
+                                    "feeContent": "车费",
+                                }
+                            ],
+                        },
+                    },
+                ],
+            },
+            project_documents=[],
+        )
+        adapter.set_import_settings_provider(
+            lambda: {"form_types": ["expense_claim"], "statuses": ["completed", "in_progress"]}
+        )
+
+        records = adapter.list_application_records("2026-03")
+        payment_documents = adapter.fetch_documents("payment_requests")
+        expense_documents = adapter.fetch_documents("expense_claims")
+        months = adapter.list_available_months()
+
+        self.assertEqual([record.id for record in records], ["oa-exp-3001-0", "oa-exp-3002-0"])
+        self.assertEqual(payment_documents, [])
+        self.assertEqual([document["external_id"] for document in expense_documents], ["3001", "3002"])
+        self.assertEqual(months, ["2026-03"])
+
     def test_list_application_records_by_row_ids_skips_non_completed_rows(self) -> None:
         adapter = StubMongoOAAdapter(
             form_documents={
@@ -1051,6 +1247,7 @@ class MongoOAAdapterTests(unittest.TestCase):
                     "data.applicationDate": 1,
                     "data.ApplicationDate": 1,
                     "data.status": 1,
+                    "data.processStatus": 1,
                     "modifiedTime": 1,
                 },
             )

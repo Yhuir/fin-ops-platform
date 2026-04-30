@@ -124,6 +124,53 @@ class AppSettingsServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["oa_retention"], {"cutoff_date": "2026-01-01"})
 
+    def test_oa_import_defaults_and_normalizes_to_supported_form_type_and_status_filters(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            default_payload = app._app_settings_service.get_settings_payload()
+            updated_payload = app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[],
+                allowed_usernames=[],
+                readonly_export_usernames=[],
+                admin_usernames=[],
+                oa_import={
+                    "form_types": ["expense_claim", "ticket_type", "payment_request", "payment_request"],
+                    "statuses": ["in_progress", "REJECTED", "completed", "0", "completed"],
+                },
+                workbench_column_layouts={},
+            )
+            reloaded_payload = build_application(data_dir=Path(temp_dir))._app_settings_service.get_settings_payload()
+
+        expected_available_form_types = [
+            {"id": "payment_request", "label": "支付申请"},
+            {"id": "expense_claim", "label": "日常报销"},
+        ]
+        expected_available_statuses = [
+            {"id": "completed", "label": "已完成"},
+            {"id": "in_progress", "label": "进行中"},
+        ]
+        self.assertEqual(
+            default_payload["oa_import"],
+            {
+                "form_types": ["payment_request", "expense_claim"],
+                "statuses": ["completed"],
+                "available_form_types": expected_available_form_types,
+                "available_statuses": expected_available_statuses,
+            },
+        )
+        self.assertEqual(
+            updated_payload["oa_import"],
+            {
+                "form_types": ["payment_request", "expense_claim"],
+                "statuses": ["completed", "in_progress"],
+                "available_form_types": expected_available_form_types,
+                "available_statuses": expected_available_statuses,
+            },
+        )
+        self.assertEqual(reloaded_payload["oa_import"], updated_payload["oa_import"])
+
     def test_update_settings_persists_oa_invoice_offset_applicants(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -180,6 +227,10 @@ class AppSettingsServiceTests(unittest.TestCase):
                         "readonly_export_usernames": ["READONLY001"],
                         "admin_usernames": [],
                         "oa_retention": {"cutoff_date": "2026-01-01"},
+                        "oa_import": {
+                            "form_types": ["payment_request"],
+                            "statuses": ["completed"],
+                        },
                         "workbench_column_layouts": {
                             "oa": ["projectName", "applicant"],
                             "bank": ["amount", "counterparty"],
@@ -206,6 +257,22 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(get_payload["access_control"], updated_payload["access_control"])
         self.assertEqual(updated_payload["oa_retention"], {"cutoff_date": "2026-01-01"})
         self.assertEqual(get_payload["oa_retention"], updated_payload["oa_retention"])
+        self.assertEqual(
+            updated_payload["oa_import"],
+            {
+                "form_types": ["payment_request"],
+                "statuses": ["completed"],
+                "available_form_types": [
+                    {"id": "payment_request", "label": "支付申请"},
+                    {"id": "expense_claim", "label": "日常报销"},
+                ],
+                "available_statuses": [
+                    {"id": "completed", "label": "已完成"},
+                    {"id": "in_progress", "label": "进行中"},
+                ],
+            },
+        )
+        self.assertEqual(get_payload["oa_import"], updated_payload["oa_import"])
         self.assertEqual(
             updated_payload["workbench_column_layouts"],
             {
