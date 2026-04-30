@@ -1,19 +1,13 @@
 from __future__ import annotations
 
 from io import BytesIO
-from pathlib import Path
 import unittest
 
 from openpyxl import Workbook
 
 from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile, is_company_identity
 from fin_ops_platform.services.imports import ImportNormalizationService
-
-
-ROOT = Path(__file__).resolve().parents[1]
-INVOICE_JAN = ROOT / "fixtures" / "进发票信息导出1-3月" / "全量发票查询导出结果-2026年1月.xlsx"
-PINGAN_JAN = ROOT / "fixtures" / "测试用银行流水下载" / "平安1-3月" / "2026-01-01至2026-01-31交易明细.xlsx"
-CEB_JAN = ROOT / "fixtures" / "测试用银行流水下载" / "光大1-3月" / "billmx20260320-202601.xls"
+from tests.mock_import_files import CEB_JAN, INVOICE_JAN, PINGAN_JAN
 
 
 class FakeImportIdStore:
@@ -79,7 +73,7 @@ class ImportFileServiceTests(unittest.TestCase):
 
         session = service.preview_files(
             imported_by="user_finance_01",
-            uploads=[UploadedImportFile(file_name=INVOICE_JAN.name, content=INVOICE_JAN.read_bytes())],
+            uploads=[UploadedImportFile(file_name=INVOICE_JAN.name, content=INVOICE_JAN.content)],
         )
 
         self.assertEqual(session.id, "import_session_0003")
@@ -97,7 +91,7 @@ class ImportFileServiceTests(unittest.TestCase):
             uploads=[
                 UploadedImportFile(
                     file_name=PINGAN_JAN.name,
-                    content=PINGAN_JAN.read_bytes(),
+                    content=PINGAN_JAN.content,
                     selected_bank_mapping_id="bank_mapping_pingan_override",
                     selected_bank_name="建设银行",
                     selected_bank_last4="8826",
@@ -123,7 +117,7 @@ class ImportFileServiceTests(unittest.TestCase):
             uploads=[
                 UploadedImportFile(
                     file_name=CEB_JAN.name,
-                    content=CEB_JAN.read_bytes(),
+                    content=CEB_JAN.content,
                     selected_bank_mapping_id="bank_mapping_ceb_8826",
                     selected_bank_name="光大",
                     selected_bank_last4="8826",
@@ -146,7 +140,7 @@ class ImportFileServiceTests(unittest.TestCase):
             uploads=[
                 UploadedImportFile(
                     file_name=CEB_JAN.name,
-                    content=CEB_JAN.read_bytes(),
+                    content=CEB_JAN.content,
                     selected_bank_mapping_id="bank_mapping_ceb_8826",
                     selected_bank_name="中国光大银行股份有限公司",
                     selected_bank_short_name="光大",
@@ -171,7 +165,7 @@ class ImportFileServiceTests(unittest.TestCase):
             uploads=[
                 UploadedImportFile(
                     file_name=CEB_JAN.name,
-                    content=CEB_JAN.read_bytes(),
+                    content=CEB_JAN.content,
                     selected_bank_mapping_id="bank_mapping_ceb_8826",
                     selected_bank_name="中国光大银行股份有限公司",
                     selected_bank_last4="8826",

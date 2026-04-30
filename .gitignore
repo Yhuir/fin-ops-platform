@@ -12,3 +12,13 @@ build/
 *.tsbuildinfo
 /package-lock.json
 node_modules/
+fixtures/**/*.xls
+fixtures/**/*.xlsx
+fixtures/**/*.zip
+fixtures/**/*.pdf
+fixtures/**/*.ofd
+fixtures/**/*.xml
+fixtures/银行流水*/
+fixtures/测试用银行流水下载/
+fixtures/进发票信息导出*/
+fixtures/发票信息导出*/

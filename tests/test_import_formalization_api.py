@@ -8,17 +8,13 @@ import unittest
 from openpyxl import Workbook
 
 from fin_ops_platform.app.server import build_application
-
-
-ROOT = Path(__file__).resolve().parents[1]
-INVOICE_JAN = ROOT / "fixtures" / "进发票信息导出1-3月" / "全量发票查询导出结果-2026年1月.xlsx"
-PINGAN_JAN = ROOT / "fixtures" / "测试用银行流水下载" / "平安1-3月" / "2026-01-01至2026-01-31交易明细.xlsx"
+from tests.mock_import_files import INVOICE_JAN, PINGAN_JAN, MockImportFile
 
 
 def build_multipart_payload(
     *,
     imported_by: str,
-    file_paths: list[Path],
+    files: list[Path | MockImportFile],
 ) -> tuple[bytes, dict[str, str]]:
     boundary = "----finops-import-boundary"
     chunks: list[bytes] = []
@@ -29,25 +25,28 @@ def build_multipart_payload(
         chunks.append(value.encode("utf-8"))
         chunks.append(b"\r\n")
 
-    def add_file(name: str, path: Path) -> None:
+    def add_file(name: str, file: Path | MockImportFile) -> None:
+        file_name = file.name
+        content = file.read_bytes() if isinstance(file, Path) else file.content
+        suffix = file.suffix.lower() if isinstance(file, Path) else f".{file.suffix}"
         content_type = (
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            if path.suffix.lower() == ".xlsx"
+            if suffix == ".xlsx"
             else "application/vnd.ms-excel"
         )
         chunks.append(f"--{boundary}\r\n".encode("utf-8"))
         chunks.append(
             (
-                f'Content-Disposition: form-data; name="{name}"; filename="{path.name}"\r\n'
+                f'Content-Disposition: form-data; name="{name}"; filename="{file_name}"\r\n'
                 f"Content-Type: {content_type}\r\n\r\n"
             ).encode("utf-8")
         )
-        chunks.append(path.read_bytes())
+        chunks.append(content)
         chunks.append(b"\r\n")
 
     add_text("imported_by", imported_by)
-    for file_path in file_paths:
-        add_file("files", file_path)
+    for file in files:
+        add_file("files", file)
     chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
 
     return b"".join(chunks), {"Content-Type": f"multipart/form-data; boundary={boundary}"}
@@ -59,7 +58,7 @@ class ImportFormalizationApiTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
             preview_body, preview_headers = build_multipart_payload(
                 imported_by="user_finance_01",
-                file_paths=[INVOICE_JAN, PINGAN_JAN],
+                files=[INVOICE_JAN, PINGAN_JAN],
             )
             preview_response = app.handle_request(
                 "POST",
@@ -76,7 +75,9 @@ class ImportFormalizationApiTests(unittest.TestCase):
                 json.dumps(
                     {
                         "session_id": preview_payload["session"]["id"],
-                        "selected_file_ids": [file["id"] for file in preview_payload["files"] if file["status"] == "preview_ready"],
+                        "selected_file_ids": [
+                            file["id"] for file in preview_payload["files"] if file["status"] == "preview_ready"
+                        ],
                     }
                 ),
             )
@@ -179,7 +180,7 @@ class ImportFormalizationApiTests(unittest.TestCase):
 
             preview_body, preview_headers = build_multipart_payload(
                 imported_by="user_finance_01",
-                file_paths=[invoice_file],
+                files=[invoice_file],
             )
             preview_response = app.handle_request(
                 "POST",
@@ -220,7 +221,7 @@ class ImportFormalizationApiTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
             preview_body, preview_headers = build_multipart_payload(
                 imported_by="user_finance_01",
-                file_paths=[INVOICE_JAN],
+                files=[INVOICE_JAN],
             )
             preview_response = app.handle_request(
                 "POST",

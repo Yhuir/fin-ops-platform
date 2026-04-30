@@ -7,16 +7,13 @@ from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.oa_adapter import InMemoryOAAdapter, OAApplicationRecord
 from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
-
-
-ROOT = Path(__file__).resolve().parents[1]
-CERTIFIED_JAN = ROOT / "fixtures" / "测试数据" / "2026年1月 进项认证结果  用途确认信息.xlsx"
+from tests.mock_import_files import CERTIFIED_JAN, MockImportFile
 
 
 def build_multipart_payload(
     *,
     imported_by: str,
-    file_paths: list[Path],
+    files: list[MockImportFile],
 ) -> tuple[bytes, dict[str, str]]:
     boundary = "----finops-tax-certified-boundary"
     chunks: list[bytes] = []
@@ -27,20 +24,20 @@ def build_multipart_payload(
         chunks.append(value.encode("utf-8"))
         chunks.append(b"\r\n")
 
-    def add_file(name: str, path: Path) -> None:
+    def add_file(name: str, file: MockImportFile) -> None:
         chunks.append(f"--{boundary}\r\n".encode("utf-8"))
         chunks.append(
             (
-                f'Content-Disposition: form-data; name="{name}"; filename="{path.name}"\r\n'
+                f'Content-Disposition: form-data; name="{name}"; filename="{file.name}"\r\n'
                 "Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n\r\n"
             ).encode("utf-8")
         )
-        chunks.append(path.read_bytes())
+        chunks.append(file.content)
         chunks.append(b"\r\n")
 
     add_text("imported_by", imported_by)
-    for file_path in file_paths:
-        add_file("files", file_path)
+    for file in files:
+        add_file("files", file)
     chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
 
     return b"".join(chunks), {"Content-Type": f"multipart/form-data; boundary={boundary}"}
@@ -147,7 +144,7 @@ class TaxOffsetApiTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
             preview_body, preview_headers = build_multipart_payload(
                 imported_by="user_finance_01",
-                file_paths=[CERTIFIED_JAN],
+                files=[CERTIFIED_JAN],
             )
 
             preview_response = app.handle_request(
@@ -160,12 +157,12 @@ class TaxOffsetApiTests(unittest.TestCase):
             preview_payload = json.loads(preview_response.body)
             self.assertEqual(preview_payload["session"]["file_count"], 1)
             self.assertEqual(preview_payload["files"][0]["month"], "2026-01")
-            self.assertEqual(preview_payload["files"][0]["recognized_count"], 60)
+            self.assertEqual(preview_payload["files"][0]["recognized_count"], 2)
             self.assertEqual(preview_payload["files"][0]["matched_plan_count"], 0)
-            self.assertEqual(preview_payload["files"][0]["outside_plan_count"], 60)
-            self.assertEqual(preview_payload["summary"]["recognized_count"], 60)
+            self.assertEqual(preview_payload["files"][0]["outside_plan_count"], 2)
+            self.assertEqual(preview_payload["summary"]["recognized_count"], 2)
             self.assertEqual(preview_payload["summary"]["matched_plan_count"], 0)
-            self.assertEqual(preview_payload["summary"]["outside_plan_count"], 60)
+            self.assertEqual(preview_payload["summary"]["outside_plan_count"], 2)
 
             confirm_response = app.handle_request(
                 "POST",
@@ -175,23 +172,23 @@ class TaxOffsetApiTests(unittest.TestCase):
             self.assertEqual(confirm_response.status_code, 200)
             confirm_payload = json.loads(confirm_response.body)
             self.assertEqual(confirm_payload["batch"]["months"], ["2026-01"])
-            self.assertEqual(confirm_payload["batch"]["persisted_record_count"], 60)
+            self.assertEqual(confirm_payload["batch"]["persisted_record_count"], 2)
 
             list_response = app.handle_request("GET", "/api/tax-offset/certified-imports?month=2026-01")
             self.assertEqual(list_response.status_code, 200)
             list_payload = json.loads(list_response.body)
             self.assertEqual(list_payload["month"], "2026-01")
-            self.assertEqual(len(list_payload["records"]), 60)
+            self.assertEqual(len(list_payload["records"]), 2)
             self.assertEqual(list_payload["records"][0]["selection_status"], "已勾选")
 
             month_payload_response = app.handle_request("GET", "/api/tax-offset?month=2026-01")
             self.assertEqual(month_payload_response.status_code, 200)
             month_payload = json.loads(month_payload_response.body)
-            self.assertEqual(len(month_payload["certified_items"]), 60)
+            self.assertEqual(len(month_payload["certified_items"]), 2)
             self.assertEqual(len(month_payload["certified_matched_rows"]), 0)
-            self.assertEqual(len(month_payload["certified_outside_plan_rows"]), 60)
+            self.assertEqual(len(month_payload["certified_outside_plan_rows"]), 2)
             self.assertEqual(month_payload["locked_certified_input_ids"], [])
-            self.assertEqual(month_payload["summary"]["certified_input_tax"], "4,855.00")
+            self.assertEqual(month_payload["summary"]["certified_input_tax"], "250.75")
 
     def test_get_tax_offset_returns_month_rows_without_hardcoded_certified_items_by_default(self) -> None:
         app = build_application()

@@ -5,12 +5,11 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from fin_ops_platform.services.state_store import ApplicationStateStore
-from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService, UploadedCertifiedImportFile
-
-
-ROOT = Path(__file__).resolve().parents[1]
-CERTIFIED_JAN = ROOT / "fixtures" / "测试数据" / "2026年1月 进项认证结果  用途确认信息.xlsx"
-CERTIFIED_FEB = ROOT / "fixtures" / "测试数据" / "2026年2月 进项认证结果  用途确认信息.xlsx"
+from fin_ops_platform.services.tax_certified_import_service import (
+    TaxCertifiedImportService,
+    UploadedCertifiedImportFile,
+)
+from tests.mock_import_files import CERTIFIED_FEB, CERTIFIED_JAN
 
 
 class TaxCertifiedImportServiceTests(unittest.TestCase):
@@ -24,14 +23,14 @@ class TaxCertifiedImportServiceTests(unittest.TestCase):
                 uploads=[
                     UploadedCertifiedImportFile(
                         file_name=CERTIFIED_JAN.name,
-                        content=CERTIFIED_JAN.read_bytes(),
+                        content=CERTIFIED_JAN.content,
                     )
                 ],
             )
 
         self.assertEqual(session.file_count, 1)
         self.assertEqual(session.files[0].month, "2026-01")
-        self.assertEqual(session.files[0].recognized_count, 60)
+        self.assertEqual(session.files[0].recognized_count, 2)
         self.assertEqual(session.files[0].invalid_count, 1)
         self.assertEqual(session.files[0].rows[0].invoice_no, "45098656")
         self.assertEqual(session.files[0].rows[0].digital_invoice_no, "25502000000145098656")
@@ -47,8 +46,8 @@ class TaxCertifiedImportServiceTests(unittest.TestCase):
             first_session = service.preview_files(
                 imported_by="user_finance_01",
                 uploads=[
-                    UploadedCertifiedImportFile(file_name=CERTIFIED_JAN.name, content=CERTIFIED_JAN.read_bytes()),
-                    UploadedCertifiedImportFile(file_name=CERTIFIED_FEB.name, content=CERTIFIED_FEB.read_bytes()),
+                    UploadedCertifiedImportFile(file_name=CERTIFIED_JAN.name, content=CERTIFIED_JAN.content),
+                    UploadedCertifiedImportFile(file_name=CERTIFIED_FEB.name, content=CERTIFIED_FEB.content),
                 ],
             )
             first_batch = service.confirm_session(first_session.id)
@@ -56,7 +55,7 @@ class TaxCertifiedImportServiceTests(unittest.TestCase):
             reimport_session = service.preview_files(
                 imported_by="user_finance_01",
                 uploads=[
-                    UploadedCertifiedImportFile(file_name=CERTIFIED_JAN.name, content=CERTIFIED_JAN.read_bytes()),
+                    UploadedCertifiedImportFile(file_name=CERTIFIED_JAN.name, content=CERTIFIED_JAN.content),
                 ],
             )
             second_batch = service.confirm_session(reimport_session.id)
@@ -68,12 +67,12 @@ class TaxCertifiedImportServiceTests(unittest.TestCase):
             january_records_reloaded = reloaded_service.list_records_for_month("2026-01")
 
         self.assertEqual(first_batch.months, ["2026-01", "2026-02"])
-        self.assertEqual(first_batch.persisted_record_count, 99)
+        self.assertEqual(first_batch.persisted_record_count, 3)
         self.assertEqual(second_batch.months, ["2026-01"])
-        self.assertEqual(second_batch.persisted_record_count, 60)
-        self.assertEqual(len(january_records), 60)
-        self.assertEqual(len(february_records), 39)
-        self.assertEqual(len(january_records_reloaded), 60)
+        self.assertEqual(second_batch.persisted_record_count, 2)
+        self.assertEqual(len(january_records), 2)
+        self.assertEqual(len(february_records), 1)
+        self.assertEqual(len(january_records_reloaded), 2)
         self.assertEqual(january_records[0].month, "2026-01")
         self.assertTrue(all(record.unique_key for record in january_records))
 

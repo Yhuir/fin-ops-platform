@@ -1,26 +1,26 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import unittest
 
 from fin_ops_platform.app.server import build_application
 
-
-ROOT = Path(__file__).resolve().parents[1]
-INVOICE_JAN = ROOT / "fixtures" / "进发票信息导出1-3月" / "全量发票查询导出结果-2026年1月.xlsx"
-ICBC_JAN = ROOT / "fixtures" / "测试用银行流水下载" / "工行税户1-3月" / "historydetail14080.xlsx"
-PINGAN_JAN = ROOT / "fixtures" / "测试用银行流水下载" / "平安1-3月" / "2026-01-01至2026-01-31交易明细.xlsx"
-CEB_JAN = ROOT / "fixtures" / "测试用银行流水下载" / "光大1-3月" / "billmx20260320-202601.xls"
-CCB_JAN = ROOT / "fixtures" / "测试用银行流水下载" / "建行1-3月" / "A058171TB_ND94389000000501277800011_CN000_20260320150836_2091193_resp.xls"
-CMBC_JAN = ROOT / "fixtures" / "测试用银行流水下载" / "民生1-3月" / "活期账户交易明细查询20260320165947097.xlsx"
-UNSUPPORTED = ROOT / "README.md"
+from tests.mock_import_files import (
+    CCB_JAN,
+    CEB_JAN,
+    CMBC_JAN,
+    ICBC_JAN,
+    INVOICE_JAN,
+    PINGAN_JAN,
+    UNSUPPORTED,
+    MockImportFile,
+)
 
 
 def build_multipart_payload(
     *,
     imported_by: str,
-    file_paths: list[Path],
+    files: list[MockImportFile],
     file_overrides: list[dict[str, str]] | None = None,
 ) -> tuple[bytes, dict[str, str]]:
     boundary = "----finops-import-boundary"
@@ -32,25 +32,20 @@ def build_multipart_payload(
         chunks.append(value.encode("utf-8"))
         chunks.append(b"\r\n")
 
-    def add_file(name: str, path: Path) -> None:
-        content_type = (
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            if path.suffix.lower() == ".xlsx"
-            else "application/vnd.ms-excel"
-        )
+    def add_file(name: str, file: MockImportFile) -> None:
         chunks.append(f"--{boundary}\r\n".encode("utf-8"))
         chunks.append(
             (
-                f'Content-Disposition: form-data; name="{name}"; filename="{path.name}"\r\n'
-                f"Content-Type: {content_type}\r\n\r\n"
+                f'Content-Disposition: form-data; name="{name}"; filename="{file.name}"\r\n'
+                f"Content-Type: {file.content_type}\r\n\r\n"
             ).encode("utf-8")
         )
-        chunks.append(path.read_bytes())
+        chunks.append(file.content)
         chunks.append(b"\r\n")
 
     add_text("imported_by", imported_by)
-    for file_path in file_paths:
-        add_file("files", file_path)
+    for file in files:
+        add_file("files", file)
     if file_overrides is not None:
         add_text("file_overrides", json.dumps(file_overrides, ensure_ascii=False))
     chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
@@ -91,7 +86,7 @@ class ImportFileApiTests(unittest.TestCase):
         add_file(
             "files",
             INVOICE_JAN.name,
-            INVOICE_JAN.read_bytes(),
+            INVOICE_JAN.content,
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
         chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
@@ -114,7 +109,7 @@ class ImportFileApiTests(unittest.TestCase):
         app = build_application()
         body, headers = build_multipart_payload(
             imported_by="user_finance_01",
-            file_paths=[INVOICE_JAN, ICBC_JAN, PINGAN_JAN, UNSUPPORTED],
+            files=[INVOICE_JAN, ICBC_JAN, PINGAN_JAN, UNSUPPORTED],
         )
 
         response = app.handle_request("POST", "/imports/files/preview", body=body, headers=headers)
@@ -143,7 +138,7 @@ class ImportFileApiTests(unittest.TestCase):
         app = build_application()
         body, headers = build_multipart_payload(
             imported_by="user_finance_01",
-            file_paths=[CEB_JAN, CCB_JAN, CMBC_JAN],
+            files=[CEB_JAN, CCB_JAN, CMBC_JAN],
         )
 
         response = app.handle_request("POST", "/imports/files/preview", body=body, headers=headers)
@@ -165,7 +160,7 @@ class ImportFileApiTests(unittest.TestCase):
         app = build_application()
         body, headers = build_multipart_payload(
             imported_by="user_finance_01",
-            file_paths=[INVOICE_JAN, PINGAN_JAN],
+            files=[INVOICE_JAN, PINGAN_JAN],
             file_overrides=[
                 {
                     "file_name": INVOICE_JAN.name,
@@ -203,7 +198,7 @@ class ImportFileApiTests(unittest.TestCase):
         app = build_application()
         body, headers = build_multipart_payload(
             imported_by="user_finance_01",
-            file_paths=[PINGAN_JAN],
+            files=[PINGAN_JAN],
             file_overrides=[
                 {
                     "file_name": PINGAN_JAN.name,
@@ -232,7 +227,7 @@ class ImportFileApiTests(unittest.TestCase):
         app = build_application()
         preview_body, preview_headers = build_multipart_payload(
             imported_by="user_finance_01",
-            file_paths=[INVOICE_JAN, PINGAN_JAN],
+            files=[INVOICE_JAN, PINGAN_JAN],
         )
         preview_response = app.handle_request(
             "POST",

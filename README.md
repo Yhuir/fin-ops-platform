@@ -10,7 +10,7 @@
 - [`docs/`](/Users/yu/Desktop/fin-ops-platform/docs/README.md)：业务需求、架构方案、路线图、任务拆解
 - [`docs/product/`](/Users/yu/Desktop/fin-ops-platform/docs/product/银企核销需求.md)：产品需求源文档
 - [`docs/architecture/`](/Users/yu/Desktop/fin-ops-platform/docs/architecture/OA%20集成当前%20app%20技术方案.md)：跨系统集成与总体方案
-- [`fixtures/`](/Users/yu/Desktop/fin-ops-platform/fixtures/README.md)：导入样例、测试数据、手工验收 Excel
+- `fixtures/`：本地手工验收 Excel 目录；自动化测试不依赖真实导入文件，目录内容不入库
 - `backend/`：Python 后端与导入解析服务
 - `web/`：正式 React 前端工程
 - `tests/`：基础单元测试
