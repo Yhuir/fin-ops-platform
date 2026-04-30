@@ -8,7 +8,7 @@ from fin_ops_platform.app.server import build_application
 
 
 ROOT = Path(__file__).resolve().parents[1]
-INVOICE_JAN = ROOT / "fixtures" / "发票信息导出1-3月" / "全量发票查询导出结果-2026年1月.xlsx"
+INVOICE_JAN = ROOT / "fixtures" / "进发票信息导出1-3月" / "全量发票查询导出结果-2026年1月.xlsx"
 ICBC_JAN = ROOT / "fixtures" / "测试用银行流水下载" / "工行税户1-3月" / "historydetail14080.xlsx"
 PINGAN_JAN = ROOT / "fixtures" / "测试用银行流水下载" / "平安1-3月" / "2026-01-01至2026-01-31交易明细.xlsx"
 CEB_JAN = ROOT / "fixtures" / "测试用银行流水下载" / "光大1-3月" / "billmx20260320-202601.xls"
@@ -178,6 +178,7 @@ class ImportFileApiTests(unittest.TestCase):
                     "batch_type": "bank_transaction",
                     "bank_mapping_id": "bank_mapping_pingan_override",
                     "bank_name": "平安银行",
+                    "bank_short_name": "平安",
                     "last4": "0093",
                 },
             ],
@@ -195,6 +196,7 @@ class ImportFileApiTests(unittest.TestCase):
         self.assertEqual(file_map[PINGAN_JAN.name]["override_template_code"], "pingan_transaction_detail")
         self.assertEqual(file_map[PINGAN_JAN.name]["selected_bank_mapping_id"], "bank_mapping_pingan_override")
         self.assertEqual(file_map[PINGAN_JAN.name]["selected_bank_name"], "平安银行")
+        self.assertEqual(file_map[PINGAN_JAN.name]["selected_bank_short_name"], "平安")
         self.assertEqual(file_map[PINGAN_JAN.name]["selected_bank_last4"], "0093")
 
     def test_preview_files_returns_bank_selection_conflict_fields(self) -> None:

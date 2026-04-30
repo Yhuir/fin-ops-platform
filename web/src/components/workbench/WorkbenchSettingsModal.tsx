@@ -177,6 +177,7 @@ export default function WorkbenchSettingsModal({
     settings.oaInvoiceOffset.applicantNames.join("、"),
   );
   const [bankNameDraft, setBankNameDraft] = useState("");
+  const [bankShortNameDraft, setBankShortNameDraft] = useState("");
   const [last4Draft, setLast4Draft] = useState("");
   const [projectCodeDraft, setProjectCodeDraft] = useState("");
   const [projectNameDraft, setProjectNameDraft] = useState("");
@@ -278,7 +279,11 @@ export default function WorkbenchSettingsModal({
     const nextLast4 = last4Draft.trim();
     if (mappings.some((item) => item.last4 === nextLast4)) {
       setMappings((current) =>
-        current.map((item) => (item.last4 === nextLast4 ? { ...item, bankName: bankNameDraft.trim() } : item)),
+        current.map((item) =>
+          item.last4 === nextLast4
+            ? { ...item, bankName: bankNameDraft.trim(), shortName: bankShortNameDraft.trim() }
+            : item,
+        ),
       );
     } else {
       setMappings((current) => [
@@ -287,11 +292,13 @@ export default function WorkbenchSettingsModal({
           id: `bank_mapping_${nextLast4}`,
           last4: nextLast4,
           bankName: bankNameDraft.trim(),
+          shortName: bankShortNameDraft.trim(),
         },
       ]);
     }
     setLast4Draft("");
     setBankNameDraft("");
+    setBankShortNameDraft("");
   }
 
   function applyProjectSettings(nextSettings: WorkbenchSettings, message: string) {
@@ -505,9 +512,11 @@ export default function WorkbenchSettingsModal({
                   controlsDisabled={controlsDisabled}
                   mappings={mappings}
                   bankNameDraft={bankNameDraft}
+                  bankShortNameDraft={bankShortNameDraft}
                   last4Draft={last4Draft}
                   canAddMapping={canAddMapping}
                   onChangeBankNameDraft={setBankNameDraft}
+                  onChangeBankShortNameDraft={setBankShortNameDraft}
                   onChangeLast4Draft={setLast4Draft}
                   onAddMapping={handleAddMapping}
                   onUpdateMapping={(mappingId, updater) =>

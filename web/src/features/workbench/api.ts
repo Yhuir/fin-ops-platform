@@ -126,6 +126,7 @@ type ApiWorkbenchSettings = {
     id: string;
     last4: string;
     bank_name: string;
+    short_name?: string | null;
   }>;
   access_control?: {
     allowed_usernames?: string[];
@@ -505,6 +506,7 @@ function mapWorkbenchSettings(payload: ApiWorkbenchSettings): WorkbenchSettings 
       id: mapping.id,
       last4: mapping.last4,
       bankName: mapping.bank_name,
+      shortName: mapping.short_name ?? "",
     })),
     accessControl: {
       allowedUsernames: (payload.access_control?.allowed_usernames ?? [])
@@ -795,6 +797,7 @@ export async function saveWorkbenchSettings(
         id: mapping.id,
         last4: mapping.last4,
         bank_name: mapping.bankName,
+        short_name: mapping.shortName,
       })),
       allowed_usernames: settings.allowedUsernames,
       readonly_export_usernames: settings.readonlyExportUsernames,

@@ -40,6 +40,7 @@ export type BankAccountMapping = {
   id: string;
   last4: string;
   bankName: string;
+  shortName: string;
 };
 
 export type WorkbenchColumnLayouts = {

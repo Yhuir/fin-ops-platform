@@ -799,6 +799,7 @@ class ApplicationStateStore:
             loaded = self._load_binary_payload(document)
             if loaded is None:
                 continue
+            self._backfill_file_import_preview_item(loaded)
             session_id = str(document.get("session_id", ""))
             raw_files.append((session_id, loaded))
         found_any = bool(meta_payload or raw_sessions or raw_files)
@@ -1632,7 +1633,7 @@ class ApplicationStateStore:
     def _serialize_value(self, value: Any) -> Any:
         if hasattr(value, "__dataclass_fields__"):
             return {
-                key: self._serialize_value(getattr(value, key))
+                key: self._serialize_value(getattr(value, key, None))
                 for key in value.__dataclass_fields__  # type: ignore[attr-defined]
             }
         if isinstance(value, dict):
@@ -1650,3 +1651,12 @@ class ApplicationStateStore:
         if isinstance(value, Enum):
             return value.value
         return value
+
+    @staticmethod
+    def _backfill_file_import_preview_item(value: Any) -> None:
+        if not hasattr(value, "__dataclass_fields__"):
+            return
+        fields = getattr(value, "__dataclass_fields__", {})
+        if "selected_bank_short_name" not in fields or hasattr(value, "selected_bank_short_name"):
+            return
+        setattr(value, "selected_bank_short_name", None)

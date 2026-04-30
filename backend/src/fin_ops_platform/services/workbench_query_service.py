@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from threading import RLock
 from typing import Any
 
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
@@ -22,6 +23,7 @@ class WorkbenchQueryService:
         self._bank_account_resolver = bank_account_resolver or BankAccountResolver()
         self._oa_adapter = oa_adapter or InMemoryOAAdapter(self._seed_oa_records())
         self._records_by_id: dict[str, dict[str, Any]] = {}
+        self._records_lock = RLock()
         self._attachment_invoice_rows_by_issue_month_cache: dict[str, list[dict[str, Any]]] = {}
         self._has_full_oa_snapshot = False
         self._seed_all_rows()
@@ -29,10 +31,10 @@ class WorkbenchQueryService:
     def get_workbench(self, month: str) -> dict[str, Any]:
         if month == "all":
             self._sync_all_oa_rows()
-            month_rows = list(self._records_by_id.values())
+            month_rows = self.list_record_snapshots()
         else:
             self._sync_oa_rows(month)
-            month_rows = [row for row in self._records_by_id.values() if row["_month"] == month]
+            month_rows = [row for row in self.list_record_snapshots() if row["_month"] == month]
         paired_rows = [row for row in month_rows if row["_section"] == "paired"]
         open_rows = [row for row in month_rows if row["_section"] == "open"]
 
@@ -89,7 +91,7 @@ class WorkbenchQueryService:
     def list_available_months(self) -> list[str]:
         months = {
             str(row.get("_month", "")).strip()
-            for row in self._records_by_id.values()
+            for row in self.list_record_snapshots()
             if str(row.get("_month", "")).strip()
         }
         adapter = self._oa_adapter
@@ -115,7 +117,7 @@ class WorkbenchQueryService:
             self._sync_all_oa_rows()
         rows = [
             self.serialize_row(row)
-            for row in self._records_by_id.values()
+            for row in self.list_record_snapshots()
             if row.get("type") == "invoice"
             and row.get("source_kind") == "oa_attachment_invoice"
             and str(row.get("issue_date", "")).strip().startswith(normalized_month)
@@ -191,7 +193,12 @@ class WorkbenchQueryService:
         return ["detail", "cancel_link"]
 
     def replace_row(self, row_id: str, row: dict[str, Any]) -> None:
-        self._records_by_id[row_id] = row
+        with self._records_lock:
+            self._records_by_id[row_id] = row
+
+    def list_record_snapshots(self) -> list[dict[str, Any]]:
+        with self._records_lock:
+            return list(self._records_by_id.copy().values())
 
     def _relation_payload(self, row: dict[str, Any]) -> dict[str, str]:
         return row[self.relation_field_name(row["type"])]
@@ -210,7 +217,8 @@ class WorkbenchQueryService:
                 self._add_row(invoice_row)
 
     def _add_row(self, row: dict[str, Any]) -> None:
-        self._records_by_id[row["id"]] = row
+        with self._records_lock:
+            self._records_by_id[row["id"]] = row
 
     def _sync_oa_rows(self, month: str) -> None:
         self._sync_oa_record_collection(
@@ -225,57 +233,58 @@ class WorkbenchQueryService:
         target_months: set[str] | None = None,
         prune_missing: bool = True,
     ) -> None:
-        self._attachment_invoice_rows_by_issue_month_cache.clear()
-        seen_ids: set[str] = set()
-        seen_attachment_invoice_ids: set[str] = set()
-        normalized_target_months = {
-            str(month).strip()
-            for month in list(target_months or [])
-            if str(month).strip()
-        }
-        for record in records:
-            record_month = str(getattr(record, "month", "")).strip()
-            if record_month:
-                normalized_target_months.add(record_month)
-            new_row = self._build_oa_row(record)
-            existing = self._records_by_id.get(new_row["id"])
-            if existing is not None:
-                new_row = self._merge_existing_oa_row(existing, new_row)
-            self._records_by_id[new_row["id"]] = new_row
-            seen_ids.add(new_row["id"])
-            for attachment_invoice_row in self._build_attachment_invoice_rows(record, oa_row=new_row):
-                existing_attachment_row = self._records_by_id.get(attachment_invoice_row["id"])
-                if existing_attachment_row is not None:
-                    attachment_invoice_row = self._merge_existing_attachment_invoice_row(
-                        existing_attachment_row,
-                        attachment_invoice_row,
-                    )
-                self._records_by_id[attachment_invoice_row["id"]] = attachment_invoice_row
-                seen_attachment_invoice_ids.add(attachment_invoice_row["id"])
+        with self._records_lock:
+            self._attachment_invoice_rows_by_issue_month_cache.clear()
+            seen_ids: set[str] = set()
+            seen_attachment_invoice_ids: set[str] = set()
+            normalized_target_months = {
+                str(month).strip()
+                for month in list(target_months or [])
+                if str(month).strip()
+            }
+            for record in records:
+                record_month = str(getattr(record, "month", "")).strip()
+                if record_month:
+                    normalized_target_months.add(record_month)
+                new_row = self._build_oa_row(record)
+                existing = self._records_by_id.get(new_row["id"])
+                if existing is not None:
+                    new_row = self._merge_existing_oa_row(existing, new_row)
+                self._records_by_id[new_row["id"]] = new_row
+                seen_ids.add(new_row["id"])
+                for attachment_invoice_row in self._build_attachment_invoice_rows(record, oa_row=new_row):
+                    existing_attachment_row = self._records_by_id.get(attachment_invoice_row["id"])
+                    if existing_attachment_row is not None:
+                        attachment_invoice_row = self._merge_existing_attachment_invoice_row(
+                            existing_attachment_row,
+                            attachment_invoice_row,
+                        )
+                    self._records_by_id[attachment_invoice_row["id"]] = attachment_invoice_row
+                    seen_attachment_invoice_ids.add(attachment_invoice_row["id"])
 
-        if not prune_missing:
-            return
+            if not prune_missing:
+                return
 
-        for row_id, row in list(self._records_by_id.items()):
-            if normalized_target_months and row["_month"] not in normalized_target_months:
-                continue
-            if row["type"] == "oa" and row_id not in seen_ids:
-                relation = row["oa_bank_relation"]
-                if row["_section"] == "open" and relation["code"] in {"pending_match", "oa_pending_approval"}:
-                    del self._records_by_id[row_id]
-                continue
-            if (
-                row["type"] == "invoice"
-                and row.get("source_kind") == "oa_attachment_invoice"
-                and row_id not in seen_attachment_invoice_ids
-            ):
-                relation = row["invoice_bank_relation"]
-                if row["_section"] == "open" and relation["code"] in {"pending_collection"}:
-                    del self._records_by_id[row_id]
+            for row_id, row in list(self._records_by_id.items()):
+                if normalized_target_months and row["_month"] not in normalized_target_months:
+                    continue
+                if row["type"] == "oa" and row_id not in seen_ids:
+                    relation = row["oa_bank_relation"]
+                    if row["_section"] == "open" and relation["code"] in {"pending_match", "oa_pending_approval"}:
+                        del self._records_by_id[row_id]
+                    continue
+                if (
+                    row["type"] == "invoice"
+                    and row.get("source_kind") == "oa_attachment_invoice"
+                    and row_id not in seen_attachment_invoice_ids
+                ):
+                    relation = row["invoice_bank_relation"]
+                    if row["_section"] == "open" and relation["code"] in {"pending_collection"}:
+                        del self._records_by_id[row_id]
 
     def _tracked_oa_months(self) -> set[str]:
         tracked_months: set[str] = set()
-        for row in self._records_by_id.values():
+        for row in self.list_record_snapshots():
             row_type = str(row.get("type"))
             if row_type == "oa" or (
                 row_type == "invoice"

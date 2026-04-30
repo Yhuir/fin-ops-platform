@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -191,6 +192,7 @@ class MongoOAAdapter(OAAdapter):
         self._attachment_invoice_cache_updated_callback: Callable[[list[str]], None] | None = None
         self._attachment_invoice_parse_lock = Lock()
         self._attachment_invoice_parse_inflight: set[str] = set()
+        self._attachment_invoice_parse_suppression_depth = 0
         self._client: MongoClient | None = None
         self._project_name_cache: dict[str, str] | None = None
         self._records_cache: dict[str, tuple[float, list[OAApplicationRecord]]] = {}
@@ -203,6 +205,17 @@ class MongoOAAdapter(OAAdapter):
 
     def set_attachment_invoice_cache_updated_callback(self, callback: Callable[[list[str]], None] | None) -> None:
         self._attachment_invoice_cache_updated_callback = callback
+
+    @contextmanager
+    def suppress_attachment_invoice_background_parse(self):
+        self._attachment_invoice_parse_suppression_depth += 1
+        try:
+            yield
+        finally:
+            self._attachment_invoice_parse_suppression_depth = max(
+                0,
+                self._attachment_invoice_parse_suppression_depth - 1,
+            )
 
     def list_application_records(self, month: str) -> list[OAApplicationRecord]:
         if not MONTH_RE.match(month):
@@ -656,7 +669,7 @@ class MongoOAAdapter(OAAdapter):
                 )
                 continue
             missing_files.append((cache_key, file_entry))
-        if missing_files:
+        if missing_files and self._attachment_invoice_parse_suppression_depth <= 0:
             self._schedule_attachment_invoice_parse(missing_files, month=month)
         return cached_invoices
 

@@ -20,7 +20,7 @@ DATE_TIME_RE = re.compile(r"^(\d{4})[-/](\d{2})[-/](\d{2})[ T](\d{2}):(\d{2}):(\
 COMPACT_DATE_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})$")
 COMPACT_DATE_TIME_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})[ T]?(\d{2})(\d{2})(\d{2})$")
 COMPANY_TAX_NOS = {"91330106589876543T", "915300007194052520"}
-COMPANY_NAME_KEYWORDS = ("杭州溯源科技有限公司", "云南溯源科技有限公司", "溯源科技有限公司")
+COMPANY_NAME_KEYWORDS = ("云南溯源科技有限公司", "溯源科技有限公司")
 TEMPLATE_DEFINITIONS: list[dict[str, Any]] = [
     {
         "template_code": "invoice_export",
@@ -81,6 +81,7 @@ class UploadedImportFile:
     batch_type_override: str | None = None
     selected_bank_mapping_id: str | None = None
     selected_bank_name: str | None = None
+    selected_bank_short_name: str | None = None
     selected_bank_last4: str | None = None
 
 
@@ -105,6 +106,7 @@ class FileImportPreviewItem:
     override_batch_type: BatchType | None = None
     selected_bank_mapping_id: str | None = None
     selected_bank_name: str | None = None
+    selected_bank_short_name: str | None = None
     selected_bank_last4: str | None = None
     detected_bank_name: str | None = None
     detected_last4: str | None = None
@@ -186,6 +188,7 @@ class FileImportService:
                 batch_type_override=upload.batch_type_override,
                 selected_bank_mapping_id=upload.selected_bank_mapping_id,
                 selected_bank_name=upload.selected_bank_name,
+                selected_bank_short_name=upload.selected_bank_short_name,
                 selected_bank_last4=upload.selected_bank_last4,
             )
             session.files.append(file_item)
@@ -252,6 +255,7 @@ class FileImportService:
                 content=self._file_store.read_import_file(item.stored_file_path),
                 selected_bank_mapping_id=item.selected_bank_mapping_id,
                 selected_bank_name=item.selected_bank_name,
+                selected_bank_short_name=item.selected_bank_short_name,
                 selected_bank_last4=item.selected_bank_last4,
             )
             override_payload = override_map.get(item.id, {})
@@ -264,6 +268,7 @@ class FileImportService:
                 batch_type_override=override_payload.get("batch_type"),
                 selected_bank_mapping_id=override_payload.get("bank_mapping_id") or item.selected_bank_mapping_id,
                 selected_bank_name=override_payload.get("bank_name") or item.selected_bank_name,
+                selected_bank_short_name=override_payload.get("bank_short_name") or item.selected_bank_short_name,
                 selected_bank_last4=override_payload.get("last4") or item.selected_bank_last4,
             )
             item.template_code = refreshed.template_code
@@ -283,6 +288,7 @@ class FileImportService:
             item.override_batch_type = refreshed.override_batch_type
             item.selected_bank_mapping_id = refreshed.selected_bank_mapping_id
             item.selected_bank_name = refreshed.selected_bank_name
+            item.selected_bank_short_name = refreshed.selected_bank_short_name
             item.selected_bank_last4 = refreshed.selected_bank_last4
             item.detected_bank_name = refreshed.detected_bank_name
             item.detected_last4 = refreshed.detected_last4
@@ -314,6 +320,7 @@ class FileImportService:
         batch_type_override: str | None = None,
         selected_bank_mapping_id: str | None = None,
         selected_bank_name: str | None = None,
+        selected_bank_short_name: str | None = None,
         selected_bank_last4: str | None = None,
     ) -> FileImportPreviewItem:
         try:
@@ -334,6 +341,7 @@ class FileImportService:
                 batch_type_override=batch_type_override,
                 selected_bank_mapping_id=selected_bank_mapping_id,
                 selected_bank_name=selected_bank_name,
+                selected_bank_short_name=selected_bank_short_name,
                 selected_bank_last4=selected_bank_last4,
             )
         except Exception:
@@ -346,12 +354,14 @@ class FileImportService:
                 batch_type_override=batch_type_override,
                 selected_bank_mapping_id=selected_bank_mapping_id,
                 selected_bank_name=selected_bank_name,
+                selected_bank_short_name=selected_bank_short_name,
                 selected_bank_last4=selected_bank_last4,
             )
 
         detected_bank_name, detected_last4 = self._detect_bank_selection(parsed)
         conflict_message = self._build_bank_selection_conflict_message(
             selected_bank_name=selected_bank_name,
+            selected_bank_short_name=selected_bank_short_name,
             selected_bank_last4=selected_bank_last4,
             detected_bank_name=detected_bank_name,
             detected_last4=detected_last4,
@@ -361,6 +371,7 @@ class FileImportService:
             for row in parsed.rows:
                 row["selected_bank_mapping_id"] = selected_bank_mapping_id
                 row["selected_bank_name"] = selected_bank_name
+                row["selected_bank_short_name"] = selected_bank_short_name
                 row["selected_bank_last4"] = selected_bank_last4
                 row["detected_bank_name"] = detected_bank_name
                 row["detected_last4"] = detected_last4
@@ -382,6 +393,7 @@ class FileImportService:
                 batch_type_override=batch_type_override,
                 selected_bank_mapping_id=selected_bank_mapping_id,
                 selected_bank_name=selected_bank_name,
+                selected_bank_short_name=selected_bank_short_name,
                 selected_bank_last4=selected_bank_last4,
             )
         return FileImportPreviewItem(
@@ -403,6 +415,7 @@ class FileImportService:
             override_batch_type=BatchType(batch_type_override) if batch_type_override else None,
             selected_bank_mapping_id=selected_bank_mapping_id,
             selected_bank_name=selected_bank_name,
+            selected_bank_short_name=selected_bank_short_name,
             selected_bank_last4=selected_bank_last4,
             detected_bank_name=detected_bank_name,
             detected_last4=detected_last4,
@@ -423,6 +436,7 @@ class FileImportService:
         batch_type_override: str | None,
         selected_bank_mapping_id: str | None,
         selected_bank_name: str | None,
+        selected_bank_short_name: str | None,
         selected_bank_last4: str | None,
     ) -> FileImportPreviewItem:
         return FileImportPreviewItem(
@@ -438,6 +452,7 @@ class FileImportService:
             override_batch_type=BatchType(batch_type_override) if batch_type_override else None,
             selected_bank_mapping_id=selected_bank_mapping_id,
             selected_bank_name=selected_bank_name,
+            selected_bank_short_name=selected_bank_short_name,
             selected_bank_last4=selected_bank_last4,
         )
 
@@ -577,16 +592,25 @@ class FileImportService:
     def _build_bank_selection_conflict_message(
         *,
         selected_bank_name: str | None,
+        selected_bank_short_name: str | None,
         selected_bank_last4: str | None,
         detected_bank_name: str | None,
         detected_last4: str | None,
     ) -> str | None:
         mismatches: list[str] = []
+        selected_bank_aliases = {
+            normalized
+            for raw_name in (selected_bank_name, selected_bank_short_name)
+            if (normalized := FileImportService._normalize_bank_name_for_conflict(raw_name or ""))
+        }
+        detected_bank_alias = FileImportService._normalize_bank_name_for_conflict(detected_bank_name or "")
         if (
-            selected_bank_name
-            and detected_bank_name
-            and FileImportService._normalize_bank_name_for_conflict(selected_bank_name)
-            != FileImportService._normalize_bank_name_for_conflict(detected_bank_name)
+            selected_bank_aliases
+            and detected_bank_alias
+            and not any(
+                FileImportService._bank_name_alias_matches(selected_alias, detected_bank_alias)
+                for selected_alias in selected_bank_aliases
+            )
         ):
             mismatches.append(f"银行选择为{selected_bank_name}，系统识别为{detected_bank_name}")
         if selected_bank_last4 and detected_last4 and selected_bank_last4 != detected_last4:
@@ -599,6 +623,10 @@ class FileImportService:
     def _normalize_bank_name_for_conflict(bank_name: str) -> str:
         normalized = re.sub(r"\s+", "", str(bank_name or "").strip())
         return normalized.removesuffix("银行")
+
+    @staticmethod
+    def _bank_name_alias_matches(selected_alias: str, detected_alias: str) -> bool:
+        return selected_alias == detected_alias or selected_alias in detected_alias or detected_alias in selected_alias
 
 
 class TemplateDetector:
@@ -631,9 +659,7 @@ class TemplateDetector:
                 "账户明细编号-交易流水号",
             }.issubset(row_set):
                 return "ccb_transaction_detail"
-            if {"交易日期", "交易时间", "借方发生额", "贷方发生额", "账户余额", "对方名称", "对方账号", "凭证号"}.issubset(
-                row_set
-            ):
+            if is_ceb_header_row(row_set):
                 return "ceb_transaction_detail"
         raise ValueError("无法识别文件模板。")
 
@@ -842,7 +868,7 @@ def parse_ccb_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
 
 
 def parse_ceb_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
-    header_index = find_header_index(rows, {"交易日期", "交易时间", "借方发生额", "贷方发生额", "账户余额", "对方名称", "对方账号", "凭证号"})
+    header_index = find_ceb_header_index(rows)
     header = rows[header_index]
     meta = extract_key_value_metadata(rows[:header_index])
     account_no = meta.get("账号")
@@ -863,9 +889,9 @@ def parse_ceb_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
                 "counterparty_name": mapped.get("对方名称") or "未知对手方",
                 "counterparty_account_no": mapped.get("对方账号"),
                 "counterparty_bank_name": mapped.get("对方银行"),
-                "credit_amount": mapped.get("贷方发生额"),
-                "debit_amount": mapped.get("借方发生额"),
-                "balance": mapped.get("账户余额"),
+                "credit_amount": first_mapped_value(mapped, "贷方发生额", "贷方发生额（元）"),
+                "debit_amount": first_mapped_value(mapped, "借方发生额", "借方发生额（元）"),
+                "balance": first_mapped_value(mapped, "账户余额", "账户余额（元）"),
                 "summary": mapped.get("摘要"),
                 "voucher_no": mapped.get("凭证号"),
                 "bank_serial_no": mapped.get("流水号") or mapped.get("凭证号"),
@@ -873,6 +899,15 @@ def parse_ceb_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
             }
         )
     return data_rows
+
+
+def is_ceb_header_row(row_set: set[str]) -> bool:
+    return (
+        {"交易日期", "交易时间", "对方名称", "对方账号"}.issubset(row_set)
+        and bool({"借方发生额", "借方发生额（元）"} & row_set)
+        and bool({"贷方发生额", "贷方发生额（元）"} & row_set)
+        and bool({"账户余额", "账户余额（元）"} & row_set)
+    )
 
 
 def normalize_row(row: list[str]) -> list[str]:
@@ -906,6 +941,13 @@ def find_header_index(rows: list[list[str]], required_headers: set[str]) -> int:
     raise ValueError("无法识别文件模板。")
 
 
+def find_ceb_header_index(rows: list[list[str]]) -> int:
+    for index, row in enumerate(rows):
+        if is_ceb_header_row(set(normalize_row(row))):
+            return index
+    raise ValueError("无法识别文件模板。")
+
+
 def row_to_dict(header: list[str], row: list[str]) -> dict[str, str]:
     payload: dict[str, str] = {}
     width = max(len(header), len(row))
@@ -917,9 +959,29 @@ def row_to_dict(header: list[str], row: list[str]) -> dict[str, str]:
     return payload
 
 
+def first_mapped_value(mapped: dict[str, str], *keys: str) -> str | None:
+    for key in keys:
+        value = clean(mapped.get(key))
+        if value:
+            return value
+    return None
+
+
 def extract_key_value_metadata(rows: list[list[str]]) -> dict[str, str]:
     metadata: dict[str, str] = {}
     for row in rows:
+        for cell in row:
+            text = clean(cell)
+            if "：" in text:
+                key, value = text.split("：", 1)
+            elif ":" in text:
+                key, value = text.split(":", 1)
+            else:
+                continue
+            normalized_key = clean(key)
+            normalized_value = clean(value)
+            if normalized_key and normalized_value:
+                metadata[normalized_key] = normalized_value
         if len(row) < 2:
             continue
         key = clean(row[0]).rstrip(":：")

@@ -23,9 +23,29 @@ class FailingMongoWorkbenchOAAdapter(MongoOAAdapter):
         raise ServerSelectionTimeoutError("mock mongo unavailable")
 
 
+class MemoryAttachmentInvoiceCache:
+    def __init__(self) -> None:
+        self.entries: dict[str, dict[str, object]] = {}
+
+    def load_oa_attachment_invoice_cache_entry(self, cache_key: str) -> dict[str, object] | None:
+        return self.entries.get(cache_key)
+
+    def save_oa_attachment_invoice_cache_entry(self, cache_key: str, payload: dict[str, object]) -> None:
+        self.entries[cache_key] = dict(payload)
+
+
 class StaticMongoWorkbenchOAAdapter(MongoOAAdapter):
-    def __init__(self, *, form_documents: dict[str, list[dict]], project_documents: list[dict] | None = None) -> None:
-        super().__init__(settings=MongoOASettings(host="127.0.0.1", database="form_data_db"))
+    def __init__(
+        self,
+        *,
+        form_documents: dict[str, list[dict]],
+        project_documents: list[dict] | None = None,
+        attachment_invoice_cache: MemoryAttachmentInvoiceCache | None = None,
+    ) -> None:
+        super().__init__(
+            settings=MongoOASettings(host="127.0.0.1", database="form_data_db"),
+            attachment_invoice_cache=attachment_invoice_cache,
+        )
         self._form_documents = form_documents
         self._project_documents = project_documents or []
 
@@ -72,9 +92,14 @@ class RetentionScopedMongoWorkbenchOAAdapter(StaticMongoWorkbenchOAAdapter):
         *,
         form_documents: dict[str, list[dict]],
         project_documents: list[dict] | None = None,
+        attachment_invoice_cache: MemoryAttachmentInvoiceCache | None = None,
         row_id_records: dict[str, list[OAApplicationRecord]] | None = None,
     ) -> None:
-        super().__init__(form_documents=form_documents, project_documents=project_documents)
+        super().__init__(
+            form_documents=form_documents,
+            project_documents=project_documents,
+            attachment_invoice_cache=attachment_invoice_cache,
+        )
         self.month_calls: list[str] = []
         self.bulk_call_count = 0
         self.row_id_calls: list[list[str]] = []
@@ -111,6 +136,23 @@ class ErrorMonthListRetentionMongoWorkbenchOAAdapter(RetentionScopedMongoWorkben
     def list_available_months(self) -> list[str]:
         self._set_read_status("error", "OA 连接失败")
         return []
+
+
+class MutatingRecordDict(dict):
+    def values(self):
+        values_iterator = super().values()
+        did_mutate = False
+        for row in values_iterator:
+            if not did_mutate:
+                self["oa-mutated-during-iteration"] = {
+                    "id": "oa-mutated-during-iteration",
+                    "type": "oa",
+                    "_month": "2026-01",
+                    "_section": "open",
+                    "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"},
+                }
+                did_mutate = True
+            yield row
 
 
 class WorkbenchV2ApiTests(unittest.TestCase):
@@ -629,6 +671,95 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         oa_ids = [row["id"] for row in flatten_groups(all_groups(payload), "oa")]
         self.assertEqual(set(oa_ids), {"oa-pay-2047", "oa-pay-2048"})
         self.assertEqual(adapter.month_calls, ["2026-01", "2026-02"])
+
+    def test_get_api_workbench_all_does_not_schedule_attachment_invoice_ocr(self) -> None:
+        app = build_application()
+        app._app_settings_service.update_settings(
+            completed_project_ids=[],
+            bank_account_mappings=[],
+            allowed_usernames=[],
+            readonly_export_usernames=[],
+            admin_usernames=[],
+            oa_retention={"cutoff_date": "2026-03-01"},
+        )
+        adapter = RetentionScopedMongoWorkbenchOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-attach-001",
+                        "form_id": "32",
+                        "modifiedTime": "2026-03-28T11:00:00",
+                        "data": {
+                            "ApplicationDate": "2026-03-28",
+                            "Reimbursement Personnel": "刘际涛",
+                            "titleName": "日常报销",
+                            "processId": "exp-attach-cache-miss-001",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailProjectName": "oa-project-001",
+                                    "detailReimbursementAmount": "120.00",
+                                    "feeContent": "顺丰邮寄发票",
+                                    "detailReimbursementAttachment": {
+                                        "files": [
+                                            {
+                                                "fileName": "invoice-a.png",
+                                                "filePath": "/invoice-a.png",
+                                                "suffix": "png",
+                                            }
+                                        ]
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[
+                {"_id": "oa-project-001", "data": {"name": "玉烟维护项目", "code": "YYWH"}},
+            ],
+            attachment_invoice_cache=MemoryAttachmentInvoiceCache(),
+        )
+        app._workbench_query_service._oa_adapter = adapter
+
+        with (
+            patch.object(app._live_workbench_service, "has_rows_for_month", return_value=False),
+            patch.object(adapter, "_schedule_attachment_invoice_parse", side_effect=AssertionError("should not schedule OCR for all-scope bootstrap")),
+        ):
+            response = app.handle_request("GET", "/api/workbench?month=all")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        oa_ids = [row["id"] for row in flatten_groups(all_groups(payload), "oa")]
+        self.assertEqual(oa_ids, ["oa-exp-exp-attach-cache-miss-001-0"])
+
+    def test_raw_oa_payload_uses_record_snapshot_when_records_change_during_build(self) -> None:
+        app = build_application()
+        app._workbench_query_service._records_by_id = MutatingRecordDict(
+            {
+                "oa-existing-001": {
+                    "id": "oa-existing-001",
+                    "type": "oa",
+                    "_month": "2026-01",
+                    "_section": "open",
+                    "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"},
+                },
+                "oa-existing-002": {
+                    "id": "oa-existing-002",
+                    "type": "oa",
+                    "_month": "2026-01",
+                    "_section": "open",
+                    "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"},
+                },
+            }
+        )
+
+        payload = app._raw_oa_payload_for_selected_scope(months={"2026-01"}, supplemental_oa_row_ids=set())
+
+        oa_ids = {row["id"] for row in payload["open"]["oa"]}
+        self.assertEqual(oa_ids, {"oa-existing-001", "oa-existing-002"})
+        self.assertEqual(payload["summary"]["oa_count"], 2)
 
     def test_get_api_workbench_persists_salary_auto_match_into_pair_relations(self) -> None:
         app = build_application()

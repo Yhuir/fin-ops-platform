@@ -78,12 +78,13 @@ export default function SettingsAccessAccountsSection({
                 <input
                   value={account.username}
                   disabled={controlsDisabled}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
                     onUpdateManagedAccessAccount(account.id, (current) => ({
                       ...current,
-                      username: event.currentTarget.value,
-                    }))
-                  }
+                      username: value,
+                    }));
+                  }}
                 />
               </label>
               <label className="project-export-select-field">
@@ -92,12 +93,13 @@ export default function SettingsAccessAccountsSection({
                   aria-label={`权限级别-${account.username}`}
                   value={account.role}
                   disabled={controlsDisabled}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    const value = event.currentTarget.value as WorkbenchAccessRole;
                     onUpdateManagedAccessAccount(account.id, (current) => ({
                       ...current,
-                      role: event.currentTarget.value as WorkbenchAccessRole,
-                    }))
-                  }
+                      role: value,
+                    }));
+                  }}
                 >
                   <option value="full_access">所有操作均可</option>
                   <option value="read_export_only">只可看和只可导出</option>

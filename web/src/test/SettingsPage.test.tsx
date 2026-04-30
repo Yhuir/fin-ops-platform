@@ -13,7 +13,7 @@ describe("Settings page", () => {
     expect(screen.queryByRole("heading", { name: "关联台设置" })).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "关联台设置" })).not.toBeInTheDocument();
 
-    const tree = screen.getByRole("tree", { name: "设置分类" });
+    const tree = await screen.findByRole("tree", { name: "设置分类" });
     expect(within(tree).getByRole("treeitem", { name: /项目状态/ })).toHaveAttribute("aria-selected", "true");
 
     expect(screen.getByRole("region", { name: "项目状态管理" })).toBeInTheDocument();

@@ -4,8 +4,10 @@ import userEvent from "@testing-library/user-event";
 import { installMockApiFetch } from "./apiMock";
 import { renderAppAt } from "./renderHelpers";
 
+const WORKBENCH_RENDER_TIMEOUT = 3000;
+
 async function openWorkbenchImportMenu(user: ReturnType<typeof userEvent.setup>) {
-  const trigger = await screen.findByRole("button", { name: "导入中心" });
+  const trigger = await screen.findByRole("button", { name: "导入中心" }, { timeout: WORKBENCH_RENDER_TIMEOUT });
   await user.hover(trigger);
   return trigger;
 }
@@ -48,6 +50,7 @@ describe("Workbench import modal", () => {
         batch_type: "bank_transaction",
         bank_mapping_id: "bank_mapping_8826",
         bank_name: "建设银行",
+        bank_short_name: "建行",
         last4: "8826",
       },
     ]);

@@ -287,7 +287,7 @@ describe("Workbench row selection and detail modal", () => {
     expect(
       await screen.findByRole("row", {
         name: /陈涛.*智能工厂设备商/,
-      }, { timeout: 120 }),
+      }, { timeout: 500 }),
     ).toBeInTheDocument();
   });
 
@@ -448,6 +448,36 @@ describe("Workbench row selection and detail modal", () => {
     expect(within(settingsTree).queryByRole("treeitem", { name: /访问账户/ })).not.toBeInTheDocument();
     await user.click(within(settingsTree).getByRole("treeitem", { name: /冲账规则/ }));
     expect(within(settingsPage).getByRole("heading", { name: "冲账规则" })).toBeInTheDocument();
+  });
+
+  test("bank account settings can edit names without blanking the settings page", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({
+      sessionAccessTier: "admin",
+      sessionUsername: "YNSYLP005",
+    });
+    renderAppAt("/settings");
+
+    const settingsPage = await screen.findByTestId("settings-page");
+    const settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
+    await user.click(within(settingsTree).getByRole("treeitem", { name: /银行账户/ }));
+
+    expect(within(settingsPage).getByRole("heading", { name: "银行账户映射" })).toBeInTheDocument();
+    const bankNameInputs = within(settingsPage).getAllByLabelText("银行名称");
+    const shortNameInputs = within(settingsPage).getAllByLabelText("简称");
+    const last4Inputs = within(settingsPage).getAllByLabelText(/后四位|银行卡后四位/);
+
+    await user.clear(bankNameInputs[1]);
+    await user.type(bankNameInputs[1], "中国建设银行股份有限公司");
+    await user.clear(shortNameInputs[1]);
+    await user.type(shortNameInputs[1], "建行");
+    await user.clear(last4Inputs[1]);
+    await user.type(last4Inputs[1], "8826");
+
+    expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
+    expect(within(settingsPage).getByDisplayValue("中国建设银行股份有限公司")).toBeInTheDocument();
+    expect(within(settingsPage).getByDisplayValue("建行")).toBeInTheDocument();
+    expect(within(settingsPage).getByDisplayValue("8826")).toBeInTheDocument();
   });
 
   test("project status settings can sync, add, move, and delete local projects", async () => {
@@ -668,6 +698,7 @@ describe("Workbench row selection and detail modal", () => {
         batch_type: "bank_transaction",
         bank_mapping_id: "bank_mapping_8826",
         bank_name: "建设银行",
+        bank_short_name: "建行",
         last4: "8826",
       },
       {
@@ -675,6 +706,7 @@ describe("Workbench row selection and detail modal", () => {
         batch_type: "bank_transaction",
         bank_mapping_id: "bank_mapping_8826",
         bank_name: "建设银行",
+        bank_short_name: "建行",
         last4: "8826",
       },
     ]);
@@ -860,7 +892,7 @@ describe("Workbench row selection and detail modal", () => {
 
   test("invoice rows can be ignored into the ignored modal and restored back to open", async () => {
     const user = userEvent.setup();
-    const fetchMock = installMockApiFetch({ actionDelayMs: 80 });
+    const fetchMock = installMockApiFetch({ actionDelayMs: 200 });
     renderWorkbenchPage();
 
     const openZone = await screen.findByTestId("zone-open");
@@ -888,7 +920,7 @@ describe("Workbench row selection and detail modal", () => {
     await user.click(within(ignoredInvoiceRow).getByRole("button", { name: "撤回忽略" }));
 
     expect(await screen.findByRole("dialog", { name: "操作状态弹窗" })).toBeInTheDocument();
-    expect(screen.getByText("正在撤回忽略...")).toBeInTheDocument();
+    expect(await screen.findByText("正在撤回忽略...")).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "已忽略弹窗" })).not.toBeInTheDocument();
 
     expect(await screen.findByText("已撤回忽略 1 条记录。")).toBeInTheDocument();

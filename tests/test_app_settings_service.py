@@ -76,6 +76,38 @@ class AppSettingsServiceTests(unittest.TestCase):
         )
         self.assertEqual(payload["oa_retention"], {"cutoff_date": "2026-01-01"})
 
+    def test_update_settings_persists_bank_account_short_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[
+                    {
+                        "id": "bank_mapping_8826",
+                        "last4": "8826",
+                        "bank_name": "中国光大银行股份有限公司",
+                        "short_name": "光大",
+                    }
+                ],
+                allowed_usernames=[],
+                readonly_export_usernames=[],
+                admin_usernames=[],
+            )
+
+            payload = build_application(data_dir=Path(temp_dir))._app_settings_service.get_settings_payload()
+
+        self.assertEqual(
+            payload["bank_account_mappings"],
+            [
+                {
+                    "id": "bank_mapping_8826",
+                    "last4": "8826",
+                    "bank_name": "中国光大银行股份有限公司",
+                    "short_name": "光大",
+                }
+            ],
+        )
+
     def test_invalid_oa_retention_cutoff_date_falls_back_to_default(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

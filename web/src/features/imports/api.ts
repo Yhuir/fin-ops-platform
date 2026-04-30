@@ -27,6 +27,7 @@ type ApiImportFile = {
   override_batch_type?: "input_invoice" | "output_invoice" | "bank_transaction" | null;
   selected_bank_mapping_id?: string | null;
   selected_bank_name?: string | null;
+  selected_bank_short_name?: string | null;
   selected_bank_last4?: string | null;
   detected_bank_name?: string | null;
   detected_last4?: string | null;
@@ -152,6 +153,7 @@ function mapImportPayload(payload: ApiImportSessionPayload): ImportSessionPayloa
       overrideBatchType: file.override_batch_type,
       selectedBankMappingId: file.selected_bank_mapping_id,
       selectedBankName: file.selected_bank_name,
+      selectedBankShortName: file.selected_bank_short_name,
       selectedBankLast4: file.selected_bank_last4,
       detectedBankName: file.detected_bank_name,
       detectedLast4: file.detected_last4,
@@ -198,6 +200,7 @@ export async function previewImportFiles(
           ...(override.batchType ? { batch_type: override.batchType } : {}),
           ...(override.bankMappingId ? { bank_mapping_id: override.bankMappingId } : {}),
           ...(override.bankName ? { bank_name: override.bankName } : {}),
+          ...(override.bankShortName ? { bank_short_name: override.bankShortName } : {}),
           ...(override.last4 ? { last4: override.last4 } : {}),
         })),
       ),
@@ -219,6 +222,7 @@ export async function retryImportFiles(
     batchType?: ImportBatchType | null;
     bankMappingId?: string | null;
     bankName?: string | null;
+    bankShortName?: string | null;
     last4?: string | null;
   }>,
 ): Promise<ImportSessionPayload> {
@@ -238,6 +242,7 @@ export async function retryImportFiles(
             ...(override.batchType ? { batch_type: override.batchType } : {}),
             ...(override.bankMappingId ? { bank_mapping_id: override.bankMappingId } : {}),
             ...(override.bankName ? { bank_name: override.bankName } : {}),
+            ...(override.bankShortName ? { bank_short_name: override.bankShortName } : {}),
             ...(override.last4 ? { last4: override.last4 } : {}),
           },
         ]),

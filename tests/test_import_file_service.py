@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
 import unittest
 
-from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile
+from openpyxl import Workbook
+
+from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile, is_company_identity
 from fin_ops_platform.services.imports import ImportNormalizationService
 
 
 ROOT = Path(__file__).resolve().parents[1]
-INVOICE_JAN = ROOT / "fixtures" / "发票信息导出1-3月" / "全量发票查询导出结果-2026年1月.xlsx"
+INVOICE_JAN = ROOT / "fixtures" / "进发票信息导出1-3月" / "全量发票查询导出结果-2026年1月.xlsx"
 PINGAN_JAN = ROOT / "fixtures" / "测试用银行流水下载" / "平安1-3月" / "2026-01-01至2026-01-31交易明细.xlsx"
 CEB_JAN = ROOT / "fixtures" / "测试用银行流水下载" / "光大1-3月" / "billmx20260320-202601.xls"
 
@@ -50,6 +53,11 @@ class FakeImportEntityRegistry:
 
 
 class ImportFileServiceTests(unittest.TestCase):
+    def test_company_identity_name_keywords_use_yunnan_and_generic_suyuan_names(self) -> None:
+        self.assertTrue(is_company_identity(None, "云南溯源科技有限公司"))
+        self.assertTrue(is_company_identity(None, "溯源科技有限公司"))
+        self.assertTrue(is_company_identity("91330106589876543T", "无关公司名称"))
+
     def test_preview_marks_corrupt_excel_as_file_level_error_instead_of_raising(self) -> None:
         import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
         service = FileImportService(import_service)
@@ -128,6 +136,93 @@ class ImportFileServiceTests(unittest.TestCase):
         self.assertEqual(preview_file.detected_last4, "8826")
         self.assertFalse(preview_file.bank_selection_conflict)
         self.assertIsNone(preview_file.conflict_message)
+
+    def test_preview_does_not_mark_bank_short_name_as_conflict_when_last4_matches(self) -> None:
+        import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
+        service = FileImportService(import_service)
+
+        session = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[
+                UploadedImportFile(
+                    file_name=CEB_JAN.name,
+                    content=CEB_JAN.read_bytes(),
+                    selected_bank_mapping_id="bank_mapping_ceb_8826",
+                    selected_bank_name="中国光大银行股份有限公司",
+                    selected_bank_short_name="光大",
+                    selected_bank_last4="8826",
+                )
+            ],
+        )
+
+        preview_file = session.files[0]
+        self.assertEqual(preview_file.selected_bank_short_name, "光大")
+        self.assertEqual(preview_file.detected_bank_name, "光大银行")
+        self.assertEqual(preview_file.detected_last4, "8826")
+        self.assertFalse(preview_file.bank_selection_conflict)
+        self.assertIsNone(preview_file.conflict_message)
+
+    def test_preview_does_not_mark_bank_legal_name_as_conflict_when_last4_matches(self) -> None:
+        import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
+        service = FileImportService(import_service)
+
+        session = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[
+                UploadedImportFile(
+                    file_name=CEB_JAN.name,
+                    content=CEB_JAN.read_bytes(),
+                    selected_bank_mapping_id="bank_mapping_ceb_8826",
+                    selected_bank_name="中国光大银行股份有限公司",
+                    selected_bank_last4="8826",
+                )
+            ],
+        )
+
+        preview_file = session.files[0]
+        self.assertEqual(preview_file.detected_bank_name, "光大银行")
+        self.assertEqual(preview_file.detected_last4, "8826")
+        self.assertFalse(preview_file.bank_selection_conflict)
+        self.assertIsNone(preview_file.conflict_message)
+
+    def test_preview_accepts_ceb_xlsx_statement_with_yuan_amount_headers(self) -> None:
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["中国光大银行对公账户对账单"])
+        sheet.append(["查询日期：2026-04-24 11:19:56"])
+        sheet.append(["交易日期：20260101-20260423", "", "借贷方向：全部"])
+        sheet.append(["账号：39610188000598826", "", "账户名称：云南溯源科技有限公司"])
+        sheet.append(["借方笔数：1", "", "借方发生额汇总：23,053.31"])
+        sheet.append(["贷方笔数：0", "", "贷方发生额汇总：0.00"])
+        sheet.append(["交易日期", "交易时间", "借方发生额（元）", "贷方发生额（元）", "账户余额（元）", "对方账号", "对方名称", "摘要"])
+        sheet.append(["2026-04-23", "11:18:17", "23,053.31", "", "3,518.86", "2502046609100018276", "云南辰飞机电工程有限公司", "货款"])
+        buffer = BytesIO()
+        workbook.save(buffer)
+        import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
+        service = FileImportService(import_service)
+
+        session = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[
+                UploadedImportFile(
+                    file_name="光大银行EXCEL账户明细_39610188000598826_20260101-20260423_260424111837.xlsx",
+                    content=buffer.getvalue(),
+                    selected_bank_mapping_id="bank_mapping_ceb_8826",
+                    selected_bank_name="光大银行",
+                    selected_bank_short_name="光大",
+                    selected_bank_last4="8826",
+                )
+            ],
+        )
+
+        preview_file = session.files[0]
+        self.assertEqual(preview_file.status, "preview_ready")
+        self.assertEqual(preview_file.template_code, "ceb_transaction_detail")
+        self.assertEqual(preview_file.detected_bank_name, "光大银行")
+        self.assertEqual(preview_file.detected_last4, "8826")
+        self.assertEqual(preview_file.row_count, 1)
+        self.assertEqual(preview_file.success_count, 1)
+        self.assertFalse(preview_file.bank_selection_conflict)
 
 
 if __name__ == "__main__":

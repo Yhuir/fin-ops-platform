@@ -4,9 +4,11 @@ export default function SettingsBankAccountsSection({
   controlsDisabled,
   mappings,
   bankNameDraft,
+  bankShortNameDraft,
   last4Draft,
   canAddMapping,
   onChangeBankNameDraft,
+  onChangeBankShortNameDraft,
   onChangeLast4Draft,
   onAddMapping,
   onUpdateMapping,
@@ -41,6 +43,14 @@ export default function SettingsBankAccountsSection({
               onChange={(event) => onChangeLast4Draft(event.currentTarget.value.replace(/\D/g, ""))}
             />
           </label>
+          <label className="project-export-select-field">
+            <span>简称</span>
+            <input
+              value={bankShortNameDraft}
+              disabled={controlsDisabled}
+              onChange={(event) => onChangeBankShortNameDraft(event.currentTarget.value)}
+            />
+          </label>
           <button
             className="primary-button"
             type="button"
@@ -60,9 +70,10 @@ export default function SettingsBankAccountsSection({
                 <input
                   value={mapping.bankName}
                   disabled={controlsDisabled}
-                  onChange={(event) =>
-                    onUpdateMapping(mapping.id, (current) => ({ ...current, bankName: event.currentTarget.value }))
-                  }
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    onUpdateMapping(mapping.id, (current) => ({ ...current, bankName: value }));
+                  }}
                 />
               </label>
               <label className="project-export-select-field">
@@ -71,12 +82,24 @@ export default function SettingsBankAccountsSection({
                   maxLength={4}
                   value={mapping.last4}
                   disabled={controlsDisabled}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    const value = event.currentTarget.value.replace(/\D/g, "").slice(0, 4);
                     onUpdateMapping(mapping.id, (current) => ({
                       ...current,
-                      last4: event.currentTarget.value.replace(/\D/g, "").slice(0, 4),
-                    }))
-                  }
+                      last4: value,
+                    }));
+                  }}
+                />
+              </label>
+              <label className="project-export-select-field">
+                <span>简称</span>
+                <input
+                  value={mapping.shortName}
+                  disabled={controlsDisabled}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    onUpdateMapping(mapping.id, (current) => ({ ...current, shortName: value }));
+                  }}
                 />
               </label>
               <button

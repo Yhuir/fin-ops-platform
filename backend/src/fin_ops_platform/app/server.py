@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -16,6 +17,8 @@ from time import monotonic
 from typing import Callable, Iterable
 from urllib.parse import parse_qs, quote, unquote, urlparse
 from uuid import uuid4
+
+from pymongo.errors import PyMongoError
 
 from fin_ops_platform import __version__
 from fin_ops_platform.app.auth import (
@@ -1049,6 +1052,14 @@ class Application:
                 {
                     "error": "oa_role_sync_failed",
                     "message": f"OA 角色同步失败：{exc}",
+                },
+            )
+        except PyMongoError as exc:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "app_settings_persistence_failed",
+                    "message": f"设置保存失败：无法写入 app Mongo，请检查 139.155.5.132:27017 连接后重试。底层错误：{exc}",
                 },
             )
         self._invalidate_workbench_read_models()
@@ -2766,6 +2777,7 @@ class Application:
                     batch_type_override=override.get("batch_type"),
                     selected_bank_mapping_id=override.get("bank_mapping_id"),
                     selected_bank_name=override.get("bank_name"),
+                    selected_bank_short_name=override.get("bank_short_name"),
                     selected_bank_last4=override.get("last4"),
                 )
                 for file, override in zip(files, file_overrides)
@@ -2884,7 +2896,7 @@ class Application:
             normalized.append(
                 {
                     key: value.strip()
-                    for key in ("template_code", "batch_type", "bank_mapping_id", "bank_name", "last4")
+                    for key in ("template_code", "batch_type", "bank_mapping_id", "bank_name", "bank_short_name", "last4")
                     if isinstance((value := raw_override.get(key)), str) and value.strip()
                 }
             )
@@ -3253,10 +3265,14 @@ class Application:
 
         scoped_months = self._retained_oa_months_for_all_scope(cutoff_date)
         supplemental_oa_row_ids = self._supplemental_retained_oa_row_ids(cutoff_date)
-        for scoped_month in scoped_months:
-            self._workbench_query_service._sync_oa_rows(scoped_month)
-        if supplemental_oa_row_ids:
-            self._workbench_query_service.sync_oa_row_ids(supplemental_oa_row_ids)
+        oa_adapter = self._workbench_query_service._oa_adapter
+        suppress_attachment_parse = getattr(oa_adapter, "suppress_attachment_invoice_background_parse", None)
+        parse_context = suppress_attachment_parse() if callable(suppress_attachment_parse) else nullcontext()
+        with parse_context:
+            for scoped_month in scoped_months:
+                self._workbench_query_service._sync_oa_rows(scoped_month)
+            if supplemental_oa_row_ids:
+                self._workbench_query_service.sync_oa_row_ids(supplemental_oa_row_ids)
         return self._serialize_value(
             self._raw_oa_payload_for_selected_scope(
                 months=set(scoped_months),
@@ -3345,7 +3361,7 @@ class Application:
         paired: dict[str, list[dict[str, object]]] = {"oa": [], "bank": [], "invoice": []}
         open_rows: dict[str, list[dict[str, object]]] = {"oa": [], "bank": [], "invoice": []}
 
-        for row in self._workbench_query_service._records_by_id.values():
+        for row in self._workbench_query_service.list_record_snapshots():
             row_type = str(row.get("type", "")).strip()
             row_month = str(row.get("_month", "")).strip()
             include_row = False

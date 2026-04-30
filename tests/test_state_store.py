@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from bson.binary import Binary
 
+from fin_ops_platform.services.import_file_service import FileImportPreviewItem
 from fin_ops_platform.services.state_store import (
     DEFAULT_APP_MONGO_DATABASE,
     ApplicationStateStore,
@@ -128,6 +129,25 @@ class FakeGridFSBucket:
 
 
 class StateStoreTests(unittest.TestCase):
+    def test_serialize_file_import_preview_item_tolerates_missing_new_fields_from_old_pickle(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = ApplicationStateStore(Path(temp_dir))
+            item = FileImportPreviewItem(
+                id="import_file_0001",
+                file_name="old.xlsx",
+                template_code=None,
+                batch_type=None,
+                status="unrecognized_template",
+                message="无法识别文件模板。",
+                row_count=0,
+            )
+            delattr(item, "selected_bank_short_name")
+
+            serialized = store._serialize_value(item)
+
+        self.assertIn("selected_bank_short_name", serialized)
+        self.assertIsNone(serialized["selected_bank_short_name"])
+
     def test_uses_explicit_app_mongo_config_with_default_app_database(self) -> None:
         with TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)

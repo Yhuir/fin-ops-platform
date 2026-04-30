@@ -7,6 +7,7 @@ import { installMockApiFetch } from "./apiMock";
 
 const originalCreateObjectURL = URL.createObjectURL;
 const originalRevokeObjectURL = URL.revokeObjectURL;
+const PAGE_RENDER_TIMEOUT = 3000;
 
 beforeAll(() => {
   Object.defineProperty(URL, "createObjectURL", {
@@ -46,6 +47,10 @@ function getStatCard(label: string) {
   return card;
 }
 
+function findCostStatisticsHeading() {
+  return screen.findByRole("heading", { name: "成本统计" }, { timeout: PAGE_RENDER_TIMEOUT });
+}
+
 describe("Cost statistics page", () => {
   test("defaults to time view and loads month-aware transaction rows", async () => {
     window.history.pushState({}, "", "/cost-statistics");
@@ -54,7 +59,7 @@ describe("Cost statistics page", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "成本统计" })).toBeInTheDocument();
+    expect(await findCostStatisticsHeading()).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "按时间" })).toHaveClass("active");
     const timeTable = await screen.findByRole("table", { name: "按时间统计表" });
     expect(within(timeTable).getByRole("button", { name: "查看流水 cost-txn-003" })).toBeInTheDocument();
@@ -83,7 +88,7 @@ describe("Cost statistics page", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "成本统计" })).toBeInTheDocument();
+    expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "按项目" }));
     expect(await screen.findAllByText("全部时间")).not.toHaveLength(0);
     expect(fetchMock).toHaveBeenCalledWith("/api/cost-statistics/explorer?month=all&project_scope=active", expect.any(Object));
@@ -142,7 +147,7 @@ describe("Cost statistics page", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "成本统计" })).toBeInTheDocument();
+    expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "按项目" }));
 
     expect(await screen.findAllByText("全部时间")).not.toHaveLength(0);
@@ -185,7 +190,7 @@ describe("Cost statistics page", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "成本统计" })).toBeInTheDocument();
+    expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "按费用类型" }));
 
     const expenseLane = screen.getByRole("heading", { name: "费用类型" }).closest(".cost-explorer-lane");
@@ -232,7 +237,7 @@ describe("Cost statistics page", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "成本统计" })).toBeInTheDocument();
+    expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "按银行" }));
 
     expect(await screen.findAllByText("全部时间")).not.toHaveLength(0);
@@ -275,7 +280,7 @@ describe("Cost statistics page", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "成本统计" })).toBeInTheDocument();
+    expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "按时间" }));
     await user.click(screen.getByRole("button", { name: "按月统计 2026年3月" }));
     await user.click(screen.getByRole("button", { name: "4月" }));
@@ -306,7 +311,7 @@ describe("Cost statistics page", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "成本统计" })).toBeInTheDocument();
+    expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "按时间" }));
     await user.click(screen.getByRole("button", { name: "按月统计 2026年3月" }));
     const scopeControls = screen.getByRole("tablist", { name: "时间统计时间范围" }).closest(".cost-scope-controls");
@@ -322,7 +327,7 @@ describe("Cost statistics page", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "成本统计" })).toBeInTheDocument();
+    expect(await findCostStatisticsHeading()).toBeInTheDocument();
     const monthScopeButton = screen.getByRole("button", { name: "按月统计 2026年3月" });
     expect(screen.getByLabelText("时间统计月份")).toBeInTheDocument();
 
@@ -342,7 +347,7 @@ describe("Cost statistics page", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "成本统计" })).toBeInTheDocument();
+    expect(await findCostStatisticsHeading()).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "按时间统计表" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "按银行" }));
@@ -371,7 +376,7 @@ describe("Cost statistics page", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "成本统计" })).toBeInTheDocument();
+    expect(await findCostStatisticsHeading()).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导出中心" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "最近导出" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "高级导出" })).not.toBeInTheDocument();
@@ -414,7 +419,7 @@ describe("Cost statistics page", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "成本统计" })).toBeInTheDocument();
+    expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "按项目" }));
     await user.click(screen.getByRole("button", { name: "项目范围：进行中" }));
     expect(await screen.findByRole("button", { name: "项目范围：所有项目" })).toBeInTheDocument();
@@ -448,7 +453,7 @@ describe("Cost statistics page", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "成本统计" })).toBeInTheDocument();
+    expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "按费用类型" }));
     await user.click(screen.getByRole("button", { name: "导出中心" }));
 

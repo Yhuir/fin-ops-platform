@@ -138,6 +138,10 @@ function normalizeMockBankNameForConflict(bankName: string | null) {
   return String(bankName ?? "").replace(/\s+/g, "").replace(/银行$/, "");
 }
 
+function mockBankNameAliasMatches(selectedAlias: string, detectedAlias: string) {
+  return selectedAlias === detectedAlias || selectedAlias.includes(detectedAlias) || detectedAlias.includes(selectedAlias);
+}
+
 function buildImportPreviewPayload(
   fileNames: string[],
   overrides: Array<Record<string, string | null | undefined>> = [],
@@ -177,15 +181,21 @@ function buildImportPreviewPayload(
       const templateCode = override.template_code ?? (isInvoice ? "invoice_export" : detectedBank.templateCode);
       const batchType = override.batch_type ?? (isInvoice ? "input_invoice" : "bank_transaction");
       const selectedBankName = override.bank_name ?? null;
+      const selectedBankShortName = override.bank_short_name ?? null;
       const selectedBankLast4 = override.last4 ?? null;
       const selectedBankMappingId = override.bank_mapping_id ?? null;
+      const selectedBankAliases = [selectedBankName, selectedBankShortName]
+        .map((item) => normalizeMockBankNameForConflict(item ?? ""))
+        .filter(Boolean);
+      const detectedBankAlias = normalizeMockBankNameForConflict(detectedBank.bankName);
+      const bankNameMatches = selectedBankAliases.some((alias) => mockBankNameAliasMatches(alias, detectedBankAlias));
       const bankSelectionConflict = !isInvoice && (
-        (selectedBankName !== null && normalizeMockBankNameForConflict(selectedBankName) !== normalizeMockBankNameForConflict(detectedBank.bankName))
+        (selectedBankAliases.length > 0 && !bankNameMatches)
         || (selectedBankLast4 !== null && selectedBankLast4 !== detectedBank.last4)
       );
       const conflictMessage = bankSelectionConflict
         ? [
-          selectedBankName && selectedBankName !== detectedBank.bankName
+          selectedBankAliases.length > 0 && !bankNameMatches
             ? `银行选择为${selectedBankName}，系统识别为${detectedBank.bankName}`
             : null,
           selectedBankLast4 && selectedBankLast4 !== detectedBank.last4
@@ -213,6 +223,7 @@ function buildImportPreviewPayload(
         override_batch_type: override.batch_type ?? null,
         selected_bank_mapping_id: selectedBankMappingId,
         selected_bank_name: selectedBankName,
+        selected_bank_short_name: selectedBankShortName,
         selected_bank_last4: selectedBankLast4,
         detected_bank_name: isInvoice ? null : detectedBank.bankName,
         detected_last4: isInvoice ? null : detectedBank.last4,
@@ -2567,6 +2578,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         id: "bank_mapping_8826",
         last4: "8826",
         bank_name: "建设银行",
+        short_name: "建行",
       },
     ],
     access_control: {
@@ -2663,7 +2675,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           ? (jsonBody.completed_project_ids as string[])
           : workbenchSettingsState.projects.completed_project_ids;
         const bankAccountMappings = Array.isArray(jsonBody.bank_account_mappings)
-          ? (jsonBody.bank_account_mappings as Array<{ id?: string; last4?: string; bank_name?: string; bankName?: string }>)
+          ? (jsonBody.bank_account_mappings as Array<{ id?: string; last4?: string; bank_name?: string; bankName?: string; short_name?: string; shortName?: string }>)
           : workbenchSettingsState.bank_account_mappings;
         workbenchSettingsState = {
           projects: {
@@ -2674,6 +2686,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             id: item.id ?? `bank_mapping_${item.last4 ?? "0000"}`,
             last4: item.last4 ?? "0000",
             bank_name: item.bank_name ?? item.bankName ?? "未识别银行",
+            short_name: item.short_name ?? item.shortName ?? "",
           })),
           access_control: {
             allowed_usernames: Array.isArray(jsonBody.allowed_usernames)

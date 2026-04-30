@@ -267,6 +267,44 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
         self.assertEqual(auto_results[0].rule_code, "internal_transfer_pair")
         self.assertEqual(len(auto_results[0].transaction_ids), 2)
 
+    def test_list_auto_pair_candidates_rejects_internal_transfer_when_income_and_expense_accounts_are_same(self) -> None:
+        import_service = ImportNormalizationService()
+        preview = import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="same-account-internal-transfer.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220001",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-02-03",
+                    "trade_time": "2026-02-03 09:15:00",
+                    "pay_receive_time": "2026-02-03 09:15:00",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "debit_amount": "50000.00",
+                    "credit_amount": "",
+                    "summary": "内部往来支出",
+                },
+                {
+                    "account_no": "62220001",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-02-03",
+                    "trade_time": "2026-02-03 10:02:00",
+                    "pay_receive_time": "2026-02-03 10:02:00",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "debit_amount": "",
+                    "credit_amount": "50000.00",
+                    "summary": "内部往来收入",
+                },
+            ],
+        )
+        import_service.confirm_import(preview.id)
+
+        service = LiveWorkbenchService(import_service, MatchingEngineService(import_service))
+        auto_results = service.list_auto_pair_candidates("all")
+
+        self.assertEqual(auto_results, [])
+
     def test_list_auto_pair_candidates_detects_salary_transactions_for_personal_counterparties(self) -> None:
         import_service = ImportNormalizationService()
         preview = import_service.preview_import(

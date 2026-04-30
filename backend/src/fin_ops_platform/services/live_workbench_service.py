@@ -327,6 +327,8 @@ class LiveWorkbenchService:
             for inflow in inflows:
                 if inflow.id in used_ids or inflow.amount != outflow.amount:
                     continue
+                if not self._internal_transfer_bank_accounts_are_distinct(outflow, inflow):
+                    continue
                 inflow_time = self._parse_transaction_time(inflow)
                 if inflow_time is None:
                     continue
@@ -457,6 +459,12 @@ class LiveWorkbenchService:
         return is_company_identity(None, transaction.account_name) and is_company_identity(None, transaction.counterparty_name_raw)
 
     @staticmethod
+    def _internal_transfer_bank_accounts_are_distinct(outflow: BankTransaction, inflow: BankTransaction) -> bool:
+        outflow_account = clean_account_no(outflow.account_no)
+        inflow_account = clean_account_no(inflow.account_no)
+        return bool(outflow_account and inflow_account and outflow_account != inflow_account)
+
+    @staticmethod
     def _is_salary_personal_candidate(transaction: BankTransaction) -> bool:
         if transaction.txn_direction != TransactionDirection.OUTFLOW:
             return False
@@ -569,6 +577,10 @@ def payload_from_cache_row(row: dict[str, Any]) -> dict[str, Any]:
     payload["summary_fields"] = dict(row["_summary_fields"])
     payload["detail_fields"] = dict(row["_detail_fields"])
     return payload
+
+
+def clean_account_no(value: str | None) -> str:
+    return "".join(char for char in str(value or "").strip() if char.isalnum())
 
 
 def _parse_datetime(value: str | None) -> datetime | None:

@@ -65,9 +65,11 @@ export type SettingsBankAccountsSectionProps = {
   controlsDisabled: boolean;
   mappings: BankAccountMapping[];
   bankNameDraft: string;
+  bankShortNameDraft: string;
   last4Draft: string;
   canAddMapping: boolean;
   onChangeBankNameDraft: (value: string) => void;
+  onChangeBankShortNameDraft: (value: string) => void;
   onChangeLast4Draft: (value: string) => void;
   onAddMapping: () => void;
   onUpdateMapping: (mappingId: string, updater: (mapping: BankAccountMapping) => BankAccountMapping) => void;

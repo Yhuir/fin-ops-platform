@@ -370,7 +370,7 @@ class WorkbenchCandidateGroupingService:
 
         oa_amount = self._amount(group.oa_rows[0])
         bank_amount = self._amount(group.bank_rows[0])
-        invoice_amounts = [self._amount(row) for row in group.invoice_rows]
+        invoice_amounts = [self._attachment_invoice_reconciliation_amount(row) for row in group.invoice_rows]
         if oa_amount is None or bank_amount is None or oa_amount != bank_amount:
             return False
         if any(amount is None for amount in invoice_amounts):
@@ -637,6 +637,13 @@ class WorkbenchCandidateGroupingService:
             if total_with_tax is not None:
                 return total_with_tax
         return self._amount_from_value(row.get("amount"))
+
+    def _attachment_invoice_reconciliation_amount(self, row: dict[str, Any]) -> Decimal | None:
+        if self._is_oa_attachment_invoice_row(row):
+            amount = self._amount_from_value(row.get("amount"))
+            if amount is not None:
+                return amount
+        return self._amount(row)
 
     def _amount_bucket(self, amount: Decimal | None) -> Decimal | None:
         if amount is None:

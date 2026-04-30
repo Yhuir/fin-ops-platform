@@ -4,6 +4,8 @@ import unittest
 from pathlib import Path
 from typing import Any
 
+from pymongo.errors import NetworkTimeout
+
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError
 
@@ -52,6 +54,34 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
         self.assertEqual(payload["error"], "oa_role_sync_failed")
         self.assertEqual(settings_payload["access_control"]["allowed_usernames"], ["YNSYLP005"])
         self.assertEqual(settings_payload["access_control"]["readonly_export_usernames"], [])
+
+    def test_settings_update_returns_clear_error_when_app_mongo_save_times_out(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            def raise_timeout(_: dict[str, Any]) -> None:
+                raise NetworkTimeout("139.155.5.132:27017: timed out")
+
+            app._state_store.save_app_settings = raise_timeout
+
+            response = app.handle_request(
+                "POST",
+                "/api/workbench/settings",
+                body=json.dumps(
+                    {
+                        "completed_project_ids": [],
+                        "bank_account_mappings": [],
+                        "allowed_usernames": [],
+                        "readonly_export_usernames": [],
+                        "admin_usernames": [],
+                    }
+                ),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(payload["error"], "app_settings_persistence_failed")
+        self.assertIn("无法写入 app Mongo", payload["message"])
 
     def test_project_sync_endpoint_syncs_oa_projects_into_settings_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

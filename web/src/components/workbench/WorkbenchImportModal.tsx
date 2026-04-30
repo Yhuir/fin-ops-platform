@@ -27,6 +27,7 @@ type FileSelectionState = Record<
   {
     bankMappingId: string;
     bankName: string;
+    bankShortName: string;
     last4: string;
     invoiceBatchType: ImportBatchType | "";
   }
@@ -199,6 +200,7 @@ export default function WorkbenchImportModal({
           return {
             bankMappingId: value,
             bankName: bankOption?.bankName ?? "",
+            bankShortName: bankOption?.shortName ?? "",
             last4: bankOption?.last4 ?? "",
             invoiceBatchType: current[key]?.invoiceBatchType ?? "",
           };
@@ -206,6 +208,7 @@ export default function WorkbenchImportModal({
         : {
           bankMappingId: current[key]?.bankMappingId ?? "",
           bankName: current[key]?.bankName ?? "",
+          bankShortName: current[key]?.bankShortName ?? "",
           last4: current[key]?.last4 ?? "",
           invoiceBatchType: value as ImportBatchType | "",
         },
@@ -236,12 +239,14 @@ export default function WorkbenchImportModal({
       if (mode === "bank_transaction") {
         const bankMappingId = selection?.bankMappingId ?? "";
         const bankName = selection?.bankName ?? "";
+        const bankShortName = selection?.bankShortName ?? "";
         const last4 = selection?.last4 ?? "";
         return {
           fileName: file.name,
           batchType: "bank_transaction",
           bankMappingId,
           bankName,
+          bankShortName,
           last4,
         };
       }
@@ -367,6 +372,7 @@ export default function WorkbenchImportModal({
                 const selection = fileSelections[key] ?? {
                   bankMappingId: "",
                   bankName: "",
+                  bankShortName: "",
                   last4: "",
                   invoiceBatchType: "",
                 };

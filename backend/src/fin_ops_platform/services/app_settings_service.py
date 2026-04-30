@@ -314,6 +314,7 @@ class AppSettingsService:
                 continue
             last4 = str(item.get("last4", "")).strip()
             bank_name = str(item.get("bank_name", "")).strip()
+            short_name = str(item.get("short_name", "")).strip()
             if len(last4) != 4 or not last4.isdigit() or not bank_name:
                 continue
             if last4 in seen_last4:
@@ -324,6 +325,7 @@ class AppSettingsService:
                     "id": str(item.get("id") or f"bank_mapping_{last4}"),
                     "last4": last4,
                     "bank_name": bank_name,
+                    "short_name": short_name,
                 }
             )
         admin_usernames = set(

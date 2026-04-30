@@ -51,6 +51,7 @@ export type ImportFilePreview = {
   overrideBatchType?: ImportBatchType | null;
   selectedBankMappingId?: string | null;
   selectedBankName?: string | null;
+  selectedBankShortName?: string | null;
   selectedBankLast4?: string | null;
   detectedBankName?: string | null;
   detectedLast4?: string | null;
@@ -65,6 +66,7 @@ export type ImportFilePreviewOverride = {
   batchType?: ImportBatchType | null;
   bankMappingId?: string | null;
   bankName?: string | null;
+  bankShortName?: string | null;
   last4?: string | null;
 };
 
