@@ -586,7 +586,7 @@ describe("Workbench row selection and detail modal", () => {
     await user.click(within(passwordDialog).getByRole("button", { name: "确认清理" }));
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/settings/data-reset",
+      "/api/workbench/settings/data-reset/jobs",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -595,7 +595,40 @@ describe("Workbench row selection and detail modal", () => {
         }),
       }),
     );
+    expect(await screen.findByText(/正在清理 app 内部状态。 25%/)).toBeInTheDocument();
     expect(await screen.findAllByText("已完成数据重置。")).not.toHaveLength(0);
+  });
+
+  test("admin data reset progress survives leaving and re-entering settings", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({
+      sessionAccessTier: "admin",
+      sessionUsername: "YNSYLP005",
+      sessionDisplayName: "杨南山",
+      dataResetJobPollsBeforeComplete: 20,
+    });
+    renderAppAt("/");
+
+    let settingsPage = await openWorkbenchSettingsPage(user);
+    let settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
+    await user.click(within(settingsTree).getByRole("treeitem", { name: /数据重置/ }));
+    await user.click(within(settingsPage).getByRole("button", { name: "清除所有银行流水数据" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "确认数据重置" })).getByRole("button", { name: "继续" }));
+    const passwordDialog = await screen.findByRole("dialog", { name: "OA 密码复核" });
+    await user.type(within(passwordDialog).getByLabelText("当前 OA 用户密码"), "correct-password");
+    await user.click(within(passwordDialog).getByRole("button", { name: "确认清理" }));
+
+    expect(await within(settingsPage).findByRole("button", { name: /正在清理 app 内部状态。 25%/ })).toBeDisabled();
+
+    await user.click(screen.getByRole("link", { name: "关联台" }));
+    await screen.findByTestId("zone-open");
+    settingsPage = await openWorkbenchSettingsPage(user);
+    settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
+    await user.click(within(settingsTree).getByRole("treeitem", { name: /数据重置/ }));
+
+    expect(await within(settingsPage).findByRole("button", { name: /正在清理 app 内部状态。 25%/ })).toBeDisabled();
+    expect(within(settingsPage).getByRole("button", { name: "清除所有发票（进销）数据" })).toBeDisabled();
+    expect(within(settingsPage).getByRole("button", { name: "清除所有 OA 数据并重新写入" })).toBeDisabled();
   });
 
   test("data reset password failure does not show success feedback", async () => {
@@ -642,7 +675,7 @@ describe("Workbench row selection and detail modal", () => {
 
     expect(screen.queryByRole("dialog", { name: "OA 密码复核" })).not.toBeInTheDocument();
     expect(
-      fetchMock.mock.calls.some(([url]) => url === "/api/workbench/settings/data-reset"),
+      fetchMock.mock.calls.some(([url]) => url === "/api/workbench/settings/data-reset/jobs"),
     ).toBe(false);
     expect(screen.queryByText("已完成数据重置。")).not.toBeInTheDocument();
   });

@@ -10,12 +10,13 @@ import os
 from pathlib import Path
 import pickle
 import re
-from typing import Any
+from typing import Any, Callable, TypeVar
 from urllib.parse import quote_plus
 
 from bson.binary import Binary
 from gridfs import GridFSBucket
 from pymongo import MongoClient
+from pymongo.errors import PyMongoError
 
 
 FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -56,6 +57,7 @@ APP_SETTINGS_DOCUMENT_ID = "settings"
 GRIDFS_BUCKET_NAME = "import_file_blobs"
 GRIDFS_REF_PREFIX = "gridfs://"
 MONGO_ONLY_STORAGE_MODE = "mongo_only"
+T = TypeVar("T")
 
 
 @dataclass(slots=True)
@@ -225,6 +227,19 @@ class ApplicationStateStore:
     def mongo_database_name(self) -> str | None:
         return self._mongo_settings.database if self._mongo_settings is not None else None
 
+    @staticmethod
+    def _run_mongo_operation(operation: Callable[[], T]) -> T:
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                return operation()
+            except (OSError, PyMongoError, TimeoutError) as exc:
+                last_error = exc
+                if attempt == 0:
+                    continue
+        assert last_error is not None
+        raise last_error
+
     def load_app_settings(self) -> dict[str, Any]:
         default_payload = {
             "completed_project_ids": [],
@@ -330,7 +345,9 @@ class ApplicationStateStore:
         if not normalized_cache_key:
             return None
         if self._mongo_database is not None:
-            document = self._mongo_detailed_collections["oa_attachment_invoice_cache"].find_one({"_id": normalized_cache_key})
+            document = self._run_mongo_operation(
+                lambda: self._mongo_detailed_collections["oa_attachment_invoice_cache"].find_one({"_id": normalized_cache_key})
+            )
             payload = self._load_binary_payload(document)
             return dict(payload) if isinstance(payload, dict) else None
 
@@ -350,15 +367,17 @@ class ApplicationStateStore:
         normalized_payload = dict(payload if isinstance(payload, dict) else {})
         normalized_payload["cache_key"] = normalized_cache_key
         if self._mongo_database is not None:
-            self._mongo_detailed_collections["oa_attachment_invoice_cache"].update_one(
-                {"_id": normalized_cache_key},
-                {
-                    "$set": {
-                        "payload": Binary(pickle.dumps(normalized_payload)),
-                        "updated_at": datetime.now(UTC),
-                    }
-                },
-                upsert=True,
+            self._run_mongo_operation(
+                lambda: self._mongo_detailed_collections["oa_attachment_invoice_cache"].update_one(
+                    {"_id": normalized_cache_key},
+                    {
+                        "$set": {
+                            "payload": Binary(pickle.dumps(normalized_payload)),
+                            "updated_at": datetime.now(UTC),
+                        }
+                    },
+                    upsert=True,
+                )
             )
             return
 
@@ -427,10 +446,12 @@ class ApplicationStateStore:
     ) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
         if self._mongo_database is not None:
-            self._save_workbench_pair_relations_detailed(
-                normalized_snapshot,
-                datetime.now(UTC),
-                changed_case_ids=changed_case_ids,
+            self._run_mongo_operation(
+                lambda: self._save_workbench_pair_relations_detailed(
+                    normalized_snapshot,
+                    datetime.now(UTC),
+                    changed_case_ids=changed_case_ids,
+                )
             )
             return
 
@@ -459,10 +480,12 @@ class ApplicationStateStore:
     ) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
         if self._mongo_database is not None:
-            self._save_workbench_read_models_detailed(
-                normalized_snapshot,
-                datetime.now(UTC),
-                changed_scope_keys=changed_scope_keys,
+            self._run_mongo_operation(
+                lambda: self._save_workbench_read_models_detailed(
+                    normalized_snapshot,
+                    datetime.now(UTC),
+                    changed_scope_keys=changed_scope_keys,
+                )
             )
             return
 
@@ -530,12 +553,16 @@ class ApplicationStateStore:
         if self._mongo_database is not None:
             updated_at = datetime.now(UTC)
             if changed_row_ids is None:
-                self._save_workbench_overrides_detailed(workbench_overrides_snapshot, updated_at)
+                self._run_mongo_operation(
+                    lambda: self._save_workbench_overrides_detailed(workbench_overrides_snapshot, updated_at)
+                )
             else:
-                self._save_workbench_overrides_detailed_incremental(
-                    workbench_overrides_snapshot,
-                    updated_at,
-                    changed_row_ids,
+                self._run_mongo_operation(
+                    lambda: self._save_workbench_overrides_detailed_incremental(
+                        workbench_overrides_snapshot,
+                        updated_at,
+                        changed_row_ids,
+                    )
                 )
             return
 
@@ -608,7 +635,9 @@ class ApplicationStateStore:
 
     def clear_oa_attachment_invoice_cache(self) -> int:
         if self._mongo_database is not None:
-            result = self._mongo_detailed_collections["oa_attachment_invoice_cache"].delete_many({})
+            result = self._run_mongo_operation(
+                lambda: self._mongo_detailed_collections["oa_attachment_invoice_cache"].delete_many({})
+            )
             return int(result.deleted_count)
 
         if self._storage_mode == MONGO_ONLY_STORAGE_MODE:

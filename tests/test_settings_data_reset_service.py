@@ -1,20 +1,70 @@
 import json
 import os
 import tempfile
+import time
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
+from threading import Event
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import BatchType
-from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter
+from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, MongoOASettings
+from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
 from fin_ops_platform.services.oa_identity_service import OAIdentityServiceError, OAUserIdentity
 from fin_ops_platform.services.settings_data_reset_service import (
     RESET_BANK_TRANSACTIONS_ACTION,
     RESET_INVOICES_ACTION,
     RESET_OA_AND_REBUILD_ACTION,
 )
+
+
+class RetentionScopedMongoWorkbenchOAAdapter(MongoOAAdapter):
+    def __init__(self, *, form_documents: dict[str, list[dict]], project_documents: list[dict]) -> None:
+        super().__init__(settings=MongoOASettings(host="127.0.0.1", database="form_data_db"))
+        self._form_documents = form_documents
+        self._project_documents = project_documents
+        self.month_calls: list[str] = []
+        self.bulk_call_count = 0
+
+    def list_available_months(self) -> list[str]:
+        months: set[str] = set()
+        for documents in self._form_documents.values():
+            for document in documents:
+                data = document.get("data", {})
+                application_date = str(data.get("applicationDate") or data.get("ApplicationDate") or "")
+                if len(application_date) >= 7:
+                    months.add(application_date[:7])
+        return sorted(months)
+
+    def list_application_records(self, month: str):
+        self.month_calls.append(month)
+        return super().list_application_records(month)
+
+    def list_all_application_records(self):
+        self.bulk_call_count += 1
+        raise AssertionError("should not bulk scan all OA records")
+
+    def _load_form_documents(self, form_id: str, month: str | None = None) -> list[dict]:
+        documents = list(self._form_documents.get(str(form_id), []))
+        if month is None:
+            return documents
+        return [
+            document
+            for document in documents
+            if str(
+                document.get("data", {}).get("applicationDate")
+                or document.get("data", {}).get("ApplicationDate")
+                or ""
+            ).startswith(month)
+        ]
+
+    def _load_project_documents(self) -> list[dict]:
+        return list(self._project_documents)
+
+    def _load_form_month_documents(self, form_id: str) -> list[dict]:
+        return list(self._form_documents.get(str(form_id), []))
 
 
 class SettingsDataResetServiceTests(unittest.TestCase):
@@ -221,6 +271,235 @@ class SettingsDataResetServiceTests(unittest.TestCase):
         self.assertNotIn("oa_password", payload)
         self.assertNotIn("correct-password", response.body)
 
+    def test_reset_job_api_creates_queryable_job_without_storing_password(self) -> None:
+        with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
+                user_id="1",
+                username="YNSYLP005",
+                nickname="管理员",
+                display_name="管理员",
+                dept_id="01",
+                dept_name="财务部",
+                roles=["finance_admin"],
+                permissions=[],
+            )
+            app._oa_identity_service.verify_current_user_password = lambda token, password: (
+                token == "admin-token" and password == "correct-password"
+            )
+
+            create_response = app.handle_request(
+                "POST",
+                "/api/workbench/settings/data-reset/jobs",
+                body=json.dumps(
+                    {
+                        "action": RESET_BANK_TRANSACTIONS_ACTION,
+                        "oa_password": "correct-password",
+                    }
+                ),
+                headers={"Authorization": "Bearer admin-token"},
+            )
+            create_payload = json.loads(create_response.body)
+            job_id = create_payload["job"]["job_id"]
+
+            deadline = time.monotonic() + 3
+            job_payload = create_payload["job"]
+            while time.monotonic() < deadline:
+                query_response = app.handle_request(
+                    "GET",
+                    f"/api/workbench/settings/data-reset/jobs/{job_id}",
+                    headers={"Authorization": "Bearer admin-token"},
+                )
+                job_payload = json.loads(query_response.body)["job"]
+                if job_payload["status"] == "completed":
+                    break
+                time.sleep(0.02)
+
+        self.assertEqual(create_response.status_code, 202)
+        self.assertEqual(query_response.status_code, 200)
+        self.assertEqual(job_payload["job_id"], job_id)
+        self.assertEqual(job_payload["action"], RESET_BANK_TRANSACTIONS_ACTION)
+        self.assertEqual(job_payload["status"], "completed")
+        self.assertEqual(job_payload["phase"], "complete")
+        self.assertEqual(job_payload["current"], job_payload["total"])
+        self.assertEqual(job_payload["percent"], 100)
+        self.assertIn("result", job_payload)
+        self.assertNotIn("oa_password", json.dumps(job_payload, ensure_ascii=False))
+        self.assertNotIn("correct-password", json.dumps(job_payload, ensure_ascii=False))
+
+    def test_reset_job_api_exposes_active_running_job_for_page_reentry(self) -> None:
+        with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
+                user_id="1",
+                username="YNSYLP005",
+                nickname="管理员",
+                display_name="管理员",
+                dept_id="01",
+                dept_name="财务部",
+                roles=["finance_admin"],
+                permissions=[],
+            )
+            app._oa_identity_service.verify_current_user_password = lambda token, password: (
+                token == "admin-token" and password == "correct-password"
+            )
+
+            original_execute = app._settings_data_reset_service.execute
+            release_job = Event()
+
+            def slow_execute(action: str, **kwargs: object):
+                progress_callback = kwargs.get("progress_callback")
+                if callable(progress_callback):
+                    progress_callback("persist_state", "正在写入银行流水重置结果。", 2, 4)
+                release_job.wait(timeout=2)
+                return original_execute(action, **kwargs)
+
+            app._settings_data_reset_service.execute = slow_execute
+            create_response = app.handle_request(
+                "POST",
+                "/api/workbench/settings/data-reset/jobs",
+                body=json.dumps(
+                    {
+                        "action": RESET_BANK_TRANSACTIONS_ACTION,
+                        "oa_password": "correct-password",
+                    }
+                ),
+                headers={"Authorization": "Bearer admin-token"},
+            )
+            create_payload = json.loads(create_response.body)
+            job_id = create_payload["job"]["job_id"]
+
+            active_payload = None
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                active_response = app.handle_request(
+                    "GET",
+                    "/api/workbench/settings/data-reset/jobs/active",
+                    headers={"Authorization": "Bearer admin-token"},
+                )
+                active_payload = json.loads(active_response.body)["job"]
+                if active_payload is not None and active_payload["status"] == "running":
+                    break
+                time.sleep(0.02)
+
+            release_job.set()
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                completed_response = app.handle_request(
+                    "GET",
+                    f"/api/workbench/settings/data-reset/jobs/{job_id}",
+                    headers={"Authorization": "Bearer admin-token"},
+                )
+                completed_payload = json.loads(completed_response.body)["job"]
+                if completed_payload["status"] in {"completed", "failed"}:
+                    break
+                time.sleep(0.02)
+
+        self.assertEqual(create_response.status_code, 202)
+        self.assertEqual(active_response.status_code, 200)
+        self.assertIsNotNone(active_payload)
+        self.assertEqual(active_payload["job_id"], job_id)
+        self.assertEqual(active_payload["action"], RESET_BANK_TRANSACTIONS_ACTION)
+        self.assertEqual(active_payload["status"], "running")
+        self.assertGreater(active_payload["percent"], 0)
+
+    def test_reset_oa_job_rebuilds_progress_with_retained_months_only(self) -> None:
+        with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[],
+                allowed_usernames=[],
+                readonly_export_usernames=[],
+                admin_usernames=["YNSYLP005"],
+                oa_retention={"cutoff_date": "2026-02-01"},
+            )
+            app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
+                user_id="1",
+                username="YNSYLP005",
+                nickname="管理员",
+                display_name="管理员",
+                dept_id="01",
+                dept_name="财务部",
+                roles=["finance_admin"],
+                permissions=[],
+            )
+            app._oa_identity_service.verify_current_user_password = lambda token, password: (
+                token == "admin-token" and password == "correct-password"
+            )
+            adapter = RetentionScopedMongoWorkbenchOAAdapter(
+                form_documents={
+                    "2": [
+                        {
+                            "_id": "payment-doc-old",
+                            "form_id": "2",
+                            "data": {
+                                "applicationDate": "2026-01-20",
+                                "userName": "旧单据",
+                                "fromTitle": "支付申请",
+                                "amount": "100",
+                                "beneficiary": "旧供应商",
+                                "cause": "旧付款",
+                                "projectName": "oa-project-001",
+                                "flowRequestId": "2046",
+                            },
+                        },
+                        {
+                            "_id": "payment-doc-new",
+                            "form_id": "2",
+                            "data": {
+                                "applicationDate": "2026-02-20",
+                                "userName": "近期单据",
+                                "fromTitle": "支付申请",
+                                "amount": "200",
+                                "beneficiary": "新供应商",
+                                "cause": "近期付款",
+                                "projectName": "oa-project-001",
+                                "flowRequestId": "2047",
+                            },
+                        },
+                    ],
+                    "32": [],
+                },
+                project_documents=[
+                    {"_id": "oa-project-001", "data": {"name": "云南溯源科技", "code": "YNSY"}},
+                ],
+            )
+            app._workbench_query_service._oa_adapter = adapter
+
+            response = app.handle_request(
+                "POST",
+                "/api/workbench/settings/data-reset/jobs",
+                body=json.dumps(
+                    {
+                        "action": RESET_OA_AND_REBUILD_ACTION,
+                        "oa_password": "correct-password",
+                    }
+                ),
+                headers={"Authorization": "Bearer admin-token"},
+            )
+            payload = json.loads(response.body)
+            job_id = payload["job"]["job_id"]
+
+            deadline = time.monotonic() + 3
+            job_payload = payload["job"]
+            while time.monotonic() < deadline:
+                query_response = app.handle_request(
+                    "GET",
+                    f"/api/workbench/settings/data-reset/jobs/{job_id}",
+                    headers={"Authorization": "Bearer admin-token"},
+                )
+                job_payload = json.loads(query_response.body)["job"]
+                if job_payload["status"] == "completed":
+                    break
+                time.sleep(0.02)
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(query_response.status_code, 200)
+        self.assertEqual(job_payload["status"], "completed")
+        self.assertEqual(job_payload["percent"], 100)
+        self.assertEqual(job_payload["result"]["rebuild_status"], "completed")
+
     def test_reset_api_allows_local_dev_admin_with_local_dev_password(self) -> None:
         with self._without_default_test_auth(), self._temporary_env(
             FIN_OPS_DEV_ALLOW_LOCAL_SESSION="1",
@@ -317,6 +596,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 )
             payload = json.loads(response.body)
             rebuilt_payload = app._build_api_workbench_payload("all")
+            retained_attachment_cache_entry = app._state_store.load_oa_attachment_invoice_cache_entry("cache-oa-old")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["action"], RESET_OA_AND_REBUILD_ACTION)
@@ -324,17 +604,17 @@ class SettingsDataResetServiceTests(unittest.TestCase):
         self.assertEqual(
             payload["cleared_collections"],
             [
-                "oa_attachment_invoice_cache",
                 "workbench_row_overrides",
                 "workbench_pair_relations",
                 "workbench_read_models",
             ],
         )
-        self.assertEqual(payload["deleted_counts"]["oa_attachment_invoice_cache"], 1)
+        self.assertNotIn("oa_attachment_invoice_cache", payload["deleted_counts"])
         self.assertEqual(payload["deleted_counts"]["workbench_read_models"], 1)
         self.assertEqual(payload["deleted_counts"]["workbench_pair_relations"], 1)
         self.assertEqual(payload["deleted_counts"]["workbench_row_overrides"], 1)
-        self.assertIsNone(app._state_store.load_oa_attachment_invoice_cache_entry("cache-oa-old"))
+        self.assertIsNotNone(retained_attachment_cache_entry)
+        self.assertEqual(retained_attachment_cache_entry["invoice_no"], "INV-OLD")
         self.assertEqual(app._workbench_pair_relation_service.snapshot()["pair_relations"], {})
         self.assertEqual(app._workbench_override_service.snapshot()["row_overrides"], {})
         raw_builder.assert_called_once_with("all")
@@ -490,7 +770,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
         self.assertNotIn("oa-pay-2048", rebuilt_oa_ids)
         self.assertFalse(any(form_id == "32" for form_id, _month in load_calls))
 
-    def test_reset_oa_and_rebuild_reparses_attachment_invoices_before_writing_read_model(self) -> None:
+    def test_reset_oa_and_rebuild_reuses_cached_attachment_invoices_without_reparsing(self) -> None:
         with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)
             (data_dir / "oa_mongo_config.json").write_text(
@@ -597,6 +877,18 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 "total_with_tax": "127.00",
                 "attachment_name": "invoice-a.pdf",
             }
+            cache_key = MongoOAAdapter._attachment_invoice_cache_key(
+                {"fileName": "invoice-a.pdf", "filePath": "/oa/invoice-a.pdf", "suffix": "pdf"}
+            )
+            app._state_store.save_oa_attachment_invoice_cache_entry(
+                cache_key,
+                {
+                    "cache_key": cache_key,
+                    "parser_version": OAAttachmentInvoiceService.PARSER_VERSION,
+                    "invoices": [parsed_invoice],
+                    "parsed_at": "2026-04-01T00:00:00",
+                },
+            )
             with patch.object(MongoOAAdapter, "_load_project_documents", autospec=True, return_value=[]), patch.object(
                 MongoOAAdapter,
                 "_load_form_documents",
@@ -609,7 +901,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 side_effect=load_form_month_documents,
             ), patch(
                 "fin_ops_platform.services.mongo_oa_adapter.OAAttachmentInvoiceService.parse_files",
-                return_value=[parsed_invoice],
+                side_effect=AssertionError("reset OA should not re-run attachment invoice OCR"),
             ) as parse_files:
                 response = app.handle_request(
                     "POST",
@@ -627,12 +919,40 @@ class SettingsDataResetServiceTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["rebuild_status"], "completed")
-        parse_files.assert_called()
+        parse_files.assert_not_called()
         rebuilt_invoice_ids = _flatten_group_rows(rebuilt_payload, "invoice")
         self.assertEqual(rebuilt_invoice_ids, ["oa-att-inv-oa-exp-exp-attach-001-0-01"])
         invoice_rows = _flatten_group_payload_rows(rebuilt_payload, "invoice")
         self.assertEqual(invoice_rows[0]["source_kind"], "oa_attachment_invoice")
         self.assertEqual(invoice_rows[0]["detail_fields"]["发票号码"], "40512344")
+
+    def test_reset_oa_attachment_parse_is_limited_to_retained_months(self) -> None:
+        class CaptureParseAdapter:
+            def __init__(self) -> None:
+                self.parsed_months: list[str] = []
+
+            def list_available_months(self) -> list[str]:
+                return ["2023-06", "2025-12", "2026-01", "2026-02", "2026-03", "2026-04"]
+
+            def parse_attachment_invoices_for_months(self, months: list[str]) -> None:
+                self.parsed_months.extend(months)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[],
+                allowed_usernames=[],
+                readonly_export_usernames=[],
+                admin_usernames=[],
+                oa_retention={"cutoff_date": "2026-01-01"},
+            )
+            adapter = CaptureParseAdapter()
+            app._workbench_query_service._oa_adapter = adapter
+
+            app._parse_oa_attachment_invoices_for_reset_rebuild()
+
+        self.assertEqual(adapter.parsed_months, ["2026-01", "2026-02", "2026-03", "2026-04"])
 
     def test_reset_api_rejects_missing_oa_password_without_clearing_data(self) -> None:
         with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:

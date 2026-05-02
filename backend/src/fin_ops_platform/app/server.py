@@ -42,6 +42,7 @@ from fin_ops_platform.services.ledgers import LedgerReminderService
 from fin_ops_platform.services.live_workbench_service import LiveWorkbenchService
 from fin_ops_platform.services.matching import MatchingEngineService
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, load_mongo_oa_settings
+from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
 from fin_ops_platform.services.oa_identity_service import (
     OAIdentityConfigurationError,
     OAIdentityService,
@@ -70,6 +71,7 @@ from fin_ops_platform.services.seeds import build_demo_seed
 
 OA_INVOICE_OFFSET_AUTO_MATCH_MODE = "oa_invoice_offset_auto_match"
 OA_INVOICE_OFFSET_TAG = "冲"
+WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-04-30-oa-attachment-tags"
 SYSTEM_AUTO_PAIR_RELATION_MODES = {
     "salary_personal_auto_match",
     "internal_transfer_pair",
@@ -90,6 +92,41 @@ class Response:
             "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         }
     )
+
+
+@dataclass(slots=True)
+class DataResetJob:
+    job_id: str
+    action: str
+    status: str
+    phase: str
+    message: str
+    current: int
+    total: int
+    percent: int
+    created_at: str
+    updated_at: str
+    result: dict[str, object] | None = None
+    error: str | None = None
+
+    def to_payload(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "job_id": self.job_id,
+            "action": self.action,
+            "status": self.status,
+            "phase": self.phase,
+            "message": self.message,
+            "current": self.current,
+            "total": self.total,
+            "percent": self.percent,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+        if self.result is not None:
+            payload["result"] = self.result
+        if self.error:
+            payload["error"] = self.error
+        return payload
 
 
 class StatePersistenceError(RuntimeError):
@@ -123,6 +160,8 @@ ROW_ID_MONTH_RE = re.compile(r"(20\d{2})(\d{2})")
 class Application:
     def __init__(self, *, data_dir: Path | None = None) -> None:
         self._state_store = ApplicationStateStore(data_dir) if data_dir is not None else None
+        self._data_reset_jobs: dict[str, DataResetJob] = {}
+        self._data_reset_jobs_lock = Lock()
         self._seed_payload = build_demo_seed()
         self._initialize_runtime_services(self._load_persisted_state())
 
@@ -326,6 +365,13 @@ class Application:
         if method == "DELETE" and route_path.startswith("/api/workbench/settings/projects/"):
             project_id = unquote(route_path.rsplit("/", 1)[-1])
             return self._handle_api_workbench_settings_project_delete(project_id)
+        if method == "POST" and route_path == "/api/workbench/settings/data-reset/jobs":
+            return self._handle_api_workbench_settings_data_reset_job_create(body, headers)
+        if method == "GET" and route_path == "/api/workbench/settings/data-reset/jobs/active":
+            return self._handle_api_workbench_settings_data_reset_active_job(headers)
+        if method == "GET" and route_path.startswith("/api/workbench/settings/data-reset/jobs/"):
+            job_id = unquote(route_path.rsplit("/", 1)[-1])
+            return self._handle_api_workbench_settings_data_reset_job(job_id, headers)
         if method == "POST" and route_path == "/api/workbench/settings/data-reset":
             return self._handle_api_workbench_settings_data_reset(body, headers)
         if method == "GET" and route_path.startswith("/api/workbench/rows/"):
@@ -785,6 +831,8 @@ class Application:
     def _route_requires_oa_access(self, route_path: str) -> bool:
         if route_path == "/api/session/me":
             return False
+        if route_path.startswith("/api/workbench/settings/data-reset/jobs/"):
+            return False
         protected_prefixes = (
             "/api/",
             "/workbench",
@@ -1150,8 +1198,87 @@ class Application:
         body: str | bytes | None,
         headers: dict[str, str] | None,
     ) -> Response:
-        if self._settings_data_reset_service is None:
+        payload, error = self._validate_settings_data_reset_request(body, headers)
+        if error is not None:
+            return error
+        action = str(payload.get("action") or "").strip()
+        try:
+            result = self._execute_settings_data_reset(action)
+        except ValueError:
+            return self._unsupported_settings_data_reset_response()
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _handle_api_workbench_settings_data_reset_job_create(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        payload, error = self._validate_settings_data_reset_request(body, headers)
+        if error is not None:
+            return error
+        action = str(payload.get("action") or "").strip()
+        if action not in self._settings_data_reset_service.supported_actions():
+            return self._unsupported_settings_data_reset_response()
+
+        active_job = self._active_data_reset_job()
+        if active_job is not None:
             return self._json_response(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": "settings_data_reset_job_running",
+                    "message": "已有数据重置任务正在执行，请等待当前任务完成。",
+                    "job": active_job.to_payload(),
+                },
+            )
+
+        now = datetime.now().isoformat()
+        job = DataResetJob(
+            job_id=uuid4().hex,
+            action=action,
+            status="queued",
+            phase="queued",
+            message="数据重置任务已排队。",
+            current=0,
+            total=100,
+            percent=0,
+            created_at=now,
+            updated_at=now,
+        )
+        with self._data_reset_jobs_lock:
+            self._data_reset_jobs[job.job_id] = job
+        Thread(target=self._run_settings_data_reset_job, args=(job.job_id,), daemon=True).start()
+        return self._json_response(HTTPStatus.ACCEPTED, {"job": job.to_payload()})
+
+    def _handle_api_workbench_settings_data_reset_job(
+        self,
+        job_id: str,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        normalized_job_id = str(job_id or "").strip()
+        with self._data_reset_jobs_lock:
+            job = self._data_reset_jobs.get(normalized_job_id)
+            payload = job.to_payload() if job is not None else None
+        if payload is None:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "settings_data_reset_job_not_found", "message": "数据重置任务不存在或已过期。"},
+            )
+        return self._json_response(HTTPStatus.OK, {"job": payload})
+
+    def _handle_api_workbench_settings_data_reset_active_job(
+        self,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        active_job = self._active_data_reset_job()
+        return self._json_response(HTTPStatus.OK, {"job": active_job.to_payload() if active_job is not None else None})
+
+    def _validate_settings_data_reset_request(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> tuple[dict[str, object], Response | None]:
+        if self._settings_data_reset_service is None:
+            return {}, self._json_response(
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 {
                     "error": "settings_data_reset_unavailable",
@@ -1160,13 +1287,13 @@ class Application:
             )
         admin_session, admin_error = self._resolve_admin_session(headers)
         if admin_error is not None:
-            return admin_error
+            return {}, admin_error
         payload, error = self._load_json_body(body)
         if error is not None:
-            return error
+            return {}, error
         action = str(payload.get("action") or "").strip()
         if not action:
-            return self._json_response(
+            return {}, self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
                     "error": "invalid_workbench_settings_reset_request",
@@ -1175,37 +1302,151 @@ class Application:
             )
         oa_password = payload.get("oa_password")
         if not isinstance(oa_password, str) or not oa_password:
-            return self._oa_password_verification_failed_response()
+            return {}, self._oa_password_verification_failed_response()
         password_error = self._verify_reset_oa_password(admin_session, oa_password)
         if password_error is not None:
-            return password_error
+            return {}, password_error
+        return dict(payload), None
+
+    def _unsupported_settings_data_reset_response(self) -> Response:
+        return self._json_response(
+            HTTPStatus.BAD_REQUEST,
+            {
+                "error": "invalid_workbench_settings_reset_request",
+                "message": "unsupported action.",
+                "supported_actions": self._settings_data_reset_service.supported_actions(),
+                "protected_targets": self._settings_data_reset_service.protected_targets(),
+            },
+        )
+
+    def _execute_settings_data_reset(
+        self,
+        action: str,
+        progress: Callable[[str, str, int], None] | None = None,
+    ) -> dict[str, object]:
+        if progress is not None:
+            progress("clear", "正在清理 app 内部状态。", 5)
+        service_progress_end = 15 if action == RESET_OA_AND_REBUILD_ACTION else 80
+
+        def service_progress(phase: str, message: str, current: int, total: int) -> None:
+            if progress is None:
+                return
+            safe_total = max(int(total), 1)
+            safe_current = max(0, min(int(current), safe_total))
+            percent = 5 + round((safe_current / safe_total) * (service_progress_end - 5))
+            progress(phase, message, percent)
+
         try:
-            result = self._settings_data_reset_service.execute(action)
+            result = self._settings_data_reset_service.execute(action, progress_callback=service_progress)
         except ValueError:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "invalid_workbench_settings_reset_request",
-                    "message": "unsupported action.",
-                    "supported_actions": self._settings_data_reset_service.supported_actions(),
-                    "protected_targets": self._settings_data_reset_service.protected_targets(),
-                },
-            )
+            raise
+        if progress is not None:
+            reload_percent = 15 if action == RESET_OA_AND_REBUILD_ACTION else 90
+            progress("reload", "正在重新载入运行时服务。", reload_percent)
         self._reload_runtime_services()
         self._search_service.clear_cache()
         if action == RESET_OA_AND_REBUILD_ACTION:
             try:
-                self._parse_oa_attachment_invoices_for_reset_rebuild()
+                if progress is not None:
+                    progress("rebuild", "正在按 OA 导入设置重新拉取 OA 并重建关联台缓存。", 95)
                 self._build_api_workbench_payload("all")
                 result.rebuild_status = "completed"
-                result.message = "已按模式 B 清空 OA 相关缓存与人工状态，并完成 OA 重建。"
+                result.message = "已按 OA 导入设置重新拉取 OA 并重建关联台，已保留 OA 附件发票解析结果。"
             except Exception as exc:
                 result.status = "partial"
                 result.rebuild_status = "failed"
-                result.message = f"已按模式 B 清空 OA 相关缓存与人工状态，但 OA 重建失败：{exc}"
-        return self._json_response(HTTPStatus.OK, result.to_payload())
+                result.message = f"已清空 OA 工作台人工状态并保留 OA 附件发票解析结果，但 OA 重建失败：{exc}"
+        if progress is not None:
+            progress("complete", "数据重置已完成。", 100)
+        return result.to_payload()
 
-    def _parse_oa_attachment_invoices_for_reset_rebuild(self) -> None:
+    def _active_data_reset_job(self) -> DataResetJob | None:
+        with self._data_reset_jobs_lock:
+            for job in self._data_reset_jobs.values():
+                if job.status in {"queued", "running"}:
+                    return job
+        return None
+
+    def _run_settings_data_reset_job(self, job_id: str) -> None:
+        def update(phase: str, message: str, percent: int) -> None:
+            self._update_data_reset_job(
+                job_id,
+                status="running",
+                phase=phase,
+                message=message,
+                current=max(0, min(int(percent), 100)),
+                total=100,
+                percent=max(0, min(int(percent), 100)),
+            )
+
+        with self._data_reset_jobs_lock:
+            job = self._data_reset_jobs.get(job_id)
+            action = job.action if job is not None else ""
+        if not action:
+            return
+        update("start", "数据重置任务已开始。", 1)
+        try:
+            result = self._execute_settings_data_reset(action, progress=update)
+        except Exception as exc:
+            self._update_data_reset_job(
+                job_id,
+                status="failed",
+                phase="failed",
+                message="数据重置失败。",
+                current=100,
+                total=100,
+                percent=100,
+                error=str(exc),
+            )
+            return
+
+        failed = str(result.get("status") or "") == "partial" or str(result.get("rebuild_status") or "") == "failed"
+        self._update_data_reset_job(
+            job_id,
+            status="failed" if failed else "completed",
+            phase="failed" if failed else "complete",
+            message=str(result.get("message") or ("数据重置失败。" if failed else "数据重置已完成。")),
+            current=100,
+            total=100,
+            percent=100,
+            result=result,
+            error=str(result.get("message") or "") if failed else None,
+        )
+
+    def _update_data_reset_job(
+        self,
+        job_id: str,
+        *,
+        status: str,
+        phase: str,
+        message: str,
+        current: int,
+        total: int,
+        percent: int,
+        result: dict[str, object] | None = None,
+        error: str | None = None,
+    ) -> None:
+        with self._data_reset_jobs_lock:
+            job = self._data_reset_jobs.get(job_id)
+            if job is None:
+                return
+            job.status = status
+            job.phase = phase
+            job.message = message
+            job.current = current
+            job.total = total
+            job.percent = percent
+            job.updated_at = datetime.now().isoformat()
+            if result is not None:
+                job.result = result
+            if error is not None:
+                job.error = error
+
+    def _parse_oa_attachment_invoices_for_reset_rebuild(
+        self,
+        *,
+        progress: Callable[[str, str, int], None] | None = None,
+    ) -> None:
         adapter = self._workbench_query_service._oa_adapter
         parse_attachment_invoices_for_months = getattr(adapter, "parse_attachment_invoices_for_months", None)
         if not callable(parse_attachment_invoices_for_months):
@@ -1215,7 +1456,16 @@ class Application:
             months = self._workbench_query_service.list_available_months()
         else:
             months = self._retained_oa_months_for_all_scope(cutoff_date)
-        parse_attachment_invoices_for_months(months)
+        if not months:
+            return
+        total_months = len(months)
+        for index, month in enumerate(months, start=1):
+            if progress is not None:
+                percent = 20 + int(((index - 1) / total_months) * 70)
+                progress("parse_oa_attachments", f"正在解析 OA 附件发票（{index}/{total_months}）：{month}", percent)
+            parse_attachment_invoices_for_months([month])
+        if progress is not None:
+            progress("parse_oa_attachments", f"OA 附件发票解析完成（{total_months}/{total_months}）。", 90)
 
     def _handle_api_workbench_row_detail(self, row_id: str) -> Response:
         try:
@@ -3112,6 +3362,7 @@ class Application:
             scope_started_at = monotonic()
             raw_payload = self._build_raw_workbench_payload(scope_key)
             grouped_payload = self._group_row_payload(raw_payload)
+            self._apply_workbench_runtime_metadata(grouped_payload)
             ignored_rows = self._extract_ignored_rows(raw_payload)
             self._workbench_read_model_service.upsert_read_model(
                 scope_key=scope_key,
@@ -3226,6 +3477,7 @@ class Application:
 
         raw_payload = self._build_raw_workbench_payload(month)
         grouped_payload = self._group_row_payload(raw_payload)
+        self._apply_workbench_runtime_metadata(grouped_payload)
         ignored_rows = self._extract_ignored_rows(raw_payload)
         if not self._can_persist_workbench_payload(grouped_payload):
             if fallback_read_model is not None:
@@ -3255,6 +3507,17 @@ class Application:
         read_model = self._get_or_build_workbench_read_model(month)
         payload = read_model.get("payload")
         return self._apply_oa_retention_to_grouped_payload(payload if isinstance(payload, dict) else {})
+
+    def _apply_workbench_runtime_metadata(self, payload: dict[str, object]) -> None:
+        payload["workbench_read_model_schema_version"] = WORKBENCH_READ_MODEL_SCHEMA_VERSION
+        parser_version = self._current_oa_attachment_invoice_parser_version()
+        if parser_version:
+            payload["oa_attachment_invoice_parser_version"] = parser_version
+
+    def _current_oa_attachment_invoice_parser_version(self) -> str:
+        if isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter):
+            return OAAttachmentInvoiceService.PARSER_VERSION
+        return ""
 
     def _build_api_workbench_ignored_rows_payload(self, month: str) -> list[dict[str, object]]:
         read_model = self._get_or_build_workbench_read_model(month)
@@ -3480,6 +3743,13 @@ class Application:
         if self._cached_payload_needs_oa_invoice_offset_rebuild(payload):
             return False
         if isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter):
+            cached_schema_version = str(payload.get("workbench_read_model_schema_version") or "").strip()
+            if cached_schema_version != WORKBENCH_READ_MODEL_SCHEMA_VERSION:
+                return False
+            expected_parser_version = self._current_oa_attachment_invoice_parser_version()
+            cached_parser_version = str(payload.get("oa_attachment_invoice_parser_version") or "").strip()
+            if expected_parser_version and cached_parser_version != expected_parser_version:
+                return False
             summary = payload.get("summary")
             if isinstance(summary, dict):
                 try:

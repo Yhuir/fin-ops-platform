@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from bson.binary import Binary
+from pymongo.errors import AutoReconnect
 
 from fin_ops_platform.services.import_file_service import FileImportPreviewItem
 from fin_ops_platform.services.state_store import (
@@ -17,11 +18,17 @@ from fin_ops_platform.services.state_store import (
     FILE_METADATA_COLLECTION,
     LEGACY_APP_MONGO_COLLECTION,
     META_COLLECTION,
+    OA_ATTACHMENT_INVOICE_CACHE_COLLECTION,
     STATE_COLLECTIONS,
     WORKBENCH_READ_MODELS_COLLECTION,
     WORKBENCH_PAIR_RELATIONS_COLLECTION,
     load_mongo_state_settings,
 )
+
+
+class FakeDeleteResult:
+    def __init__(self, deleted_count: int) -> None:
+        self.deleted_count = deleted_count
 
 
 class FakeCollection:
@@ -65,11 +72,12 @@ class FakeCollection:
         if upsert or query["_id"] in self.documents:
             self.documents[query["_id"]] = dict(replacement)
 
-    def delete_many(self, query: dict | None = None) -> None:
+    def delete_many(self, query: dict | None = None) -> FakeDeleteResult:
         self.delete_many_calls += 1
         if not query:
+            deleted_count = len(self.documents)
             self.documents.clear()
-            return
+            return FakeDeleteResult(deleted_count)
         to_delete = [
             key
             for key, document in self.documents.items()
@@ -77,6 +85,7 @@ class FakeCollection:
         ]
         for key in to_delete:
             self.documents.pop(key, None)
+        return FakeDeleteResult(len(to_delete))
 
     def count_documents(self, query: dict | None = None) -> int:
         return len(self.find(query))
@@ -97,6 +106,30 @@ class FakeMongoClient:
 
     def __getitem__(self, database_name: str) -> FakeDatabase:
         return self.databases.setdefault(database_name, FakeDatabase())
+
+
+class FailOnceCollection(FakeCollection):
+    def __init__(self, *, fail_method: str) -> None:
+        super().__init__()
+        self._fail_method = fail_method
+        self._failed = False
+
+    def _maybe_fail_once(self, method_name: str) -> None:
+        if self._fail_method == method_name and not self._failed:
+            self._failed = True
+            raise AutoReconnect("mock connection closed")
+
+    def find_one(self, query: dict) -> dict | None:
+        self._maybe_fail_once("find_one")
+        return super().find_one(query)
+
+    def update_one(self, query: dict, update: dict, upsert: bool = False) -> None:
+        self._maybe_fail_once("update_one")
+        return super().update_one(query, update, upsert=upsert)
+
+    def delete_many(self, query: dict | None = None) -> FakeDeleteResult:
+        self._maybe_fail_once("delete_many")
+        return super().delete_many(query)
 
 
 class FakeGridFSDownloadStream:
@@ -788,6 +821,87 @@ class StateStoreTests(unittest.TestCase):
                 "invoices": [{"invoice_no": "40512344", "attachment_name": "invoice-a.pdf"}],
             },
         )
+
+    def test_mongo_oa_attachment_invoice_cache_save_retries_transient_autoreconnect(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "app_mongo_config.json").write_text(
+                json.dumps({"host": "127.0.0.1", "database": "fin_ops_platform_app"}),
+                encoding="utf-8",
+            )
+            fake_client = FakeMongoClient()
+            db = fake_client["fin_ops_platform_app"]
+            db.collections[OA_ATTACHMENT_INVOICE_CACHE_COLLECTION] = FailOnceCollection(fail_method="update_one")
+
+            with patch("fin_ops_platform.services.state_store.MongoClient", return_value=fake_client):
+                with patch(
+                    "fin_ops_platform.services.state_store.GridFSBucket",
+                    side_effect=lambda db, bucket_name: FakeGridFSBucket(db, bucket_name),
+                ):
+                    store = ApplicationStateStore(data_dir)
+                    store.save_oa_attachment_invoice_cache_entry(
+                        "cache-key-001",
+                        {"invoices": [{"invoice_no": "40512344"}]},
+                    )
+
+            collection = db[OA_ATTACHMENT_INVOICE_CACHE_COLLECTION]
+            self.assertEqual(collection.update_one_calls, 1)
+            self.assertIn("cache-key-001", collection.documents)
+
+    def test_mongo_oa_attachment_invoice_cache_load_retries_transient_autoreconnect(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "app_mongo_config.json").write_text(
+                json.dumps({"host": "127.0.0.1", "database": "fin_ops_platform_app"}),
+                encoding="utf-8",
+            )
+            fake_client = FakeMongoClient()
+            db = fake_client["fin_ops_platform_app"]
+            collection = FailOnceCollection(fail_method="find_one")
+            collection.documents["cache-key-001"] = {
+                "_id": "cache-key-001",
+                "payload": Binary(pickle.dumps({"cache_key": "cache-key-001", "invoices": [{"invoice_no": "40512344"}]})),
+            }
+            db.collections[OA_ATTACHMENT_INVOICE_CACHE_COLLECTION] = collection
+
+            with patch("fin_ops_platform.services.state_store.MongoClient", return_value=fake_client):
+                with patch(
+                    "fin_ops_platform.services.state_store.GridFSBucket",
+                    side_effect=lambda db, bucket_name: FakeGridFSBucket(db, bucket_name),
+                ):
+                    store = ApplicationStateStore(data_dir)
+                    cached = store.load_oa_attachment_invoice_cache_entry("cache-key-001")
+
+            self.assertEqual(cached, {"cache_key": "cache-key-001", "invoices": [{"invoice_no": "40512344"}]})
+
+    def test_mongo_reset_oa_collections_retry_transient_autoreconnect(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "app_mongo_config.json").write_text(
+                json.dumps({"host": "127.0.0.1", "database": "fin_ops_platform_app"}),
+                encoding="utf-8",
+            )
+            fake_client = FakeMongoClient()
+            db = fake_client["fin_ops_platform_app"]
+            cache_collection = FailOnceCollection(fail_method="delete_many")
+            cache_collection.documents["cache-key-001"] = {"_id": "cache-key-001", "payload": Binary(pickle.dumps({}))}
+            db.collections[OA_ATTACHMENT_INVOICE_CACHE_COLLECTION] = cache_collection
+            read_model_collection = FailOnceCollection(fail_method="delete_many")
+            read_model_collection.documents["all"] = {"_id": "all", "payload": Binary(pickle.dumps({}))}
+            db.collections[WORKBENCH_READ_MODELS_COLLECTION] = read_model_collection
+
+            with patch("fin_ops_platform.services.state_store.MongoClient", return_value=fake_client):
+                with patch(
+                    "fin_ops_platform.services.state_store.GridFSBucket",
+                    side_effect=lambda db, bucket_name: FakeGridFSBucket(db, bucket_name),
+                ):
+                    store = ApplicationStateStore(data_dir)
+                    deleted_count = store.clear_oa_attachment_invoice_cache()
+                    store.save_workbench_read_models({})
+
+            self.assertEqual(deleted_count, 1)
+            self.assertEqual(cache_collection.delete_many_calls, 1)
+            self.assertEqual(read_model_collection.delete_many_calls, 1)
 
 
 if __name__ == "__main__":

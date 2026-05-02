@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, Callable
 
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.state_store import ApplicationStateStore
@@ -18,6 +18,8 @@ PROHIBITED_RESET_TARGETS = (
     "fin_ops_platform_app.*_meta",
     "fin_ops_platform_app.import_file_metadata",
 )
+
+SettingsDataResetProgressCallback = Callable[[str, str, int, int], None]
 
 
 @dataclass(slots=True)
@@ -68,24 +70,36 @@ class SettingsDataResetService:
     def protected_targets() -> list[str]:
         return list(PROHIBITED_RESET_TARGETS)
 
-    def execute(self, action: str) -> SettingsDataResetResult:
+    def execute(
+        self,
+        action: str,
+        *,
+        progress_callback: SettingsDataResetProgressCallback | None = None,
+    ) -> SettingsDataResetResult:
         normalized_action = str(action or "").strip()
         if normalized_action == RESET_BANK_TRANSACTIONS_ACTION:
-            return self._reset_bank_transactions()
+            return self._reset_bank_transactions(progress_callback=progress_callback)
         if normalized_action == RESET_INVOICES_ACTION:
-            return self._reset_invoices()
+            return self._reset_invoices(progress_callback=progress_callback)
         if normalized_action == RESET_OA_AND_REBUILD_ACTION:
-            return self._reset_oa_and_rebuild()
+            return self._reset_oa_and_rebuild(progress_callback=progress_callback)
         raise ValueError(f"unsupported reset action: {normalized_action}")
 
-    def _reset_bank_transactions(self) -> SettingsDataResetResult:
+    def _reset_bank_transactions(
+        self,
+        *,
+        progress_callback: SettingsDataResetProgressCallback | None,
+    ) -> SettingsDataResetResult:
+        self._emit_progress(progress_callback, "prepare_imports", "正在统计银行流水域数据。", 0, 4)
         imports_snapshot, import_deleted_counts = self._build_filtered_imports_snapshot(
             remove_bank_transactions=True,
             remove_invoices=False,
         )
+        self._emit_progress(progress_callback, "prepare_file_imports", "正在统计银行流水导入文件。", 1, 4)
         file_imports_snapshot, removed_file_paths, file_deleted_counts = self._build_filtered_file_imports_snapshot(
             removed_batch_types={BatchType.BANK_TRANSACTION.value}
         )
+        self._emit_progress(progress_callback, "persist_state", "正在写入银行流水重置结果。", 2, 4)
         self._state_store.save(
             {
                 "imports": imports_snapshot,
@@ -96,6 +110,7 @@ class SettingsDataResetService:
                 "workbench_read_models": {},
             }
         )
+        self._emit_progress(progress_callback, "delete_import_files", "正在删除银行流水导入文件。", 3, 4)
         deleted_blob_count = self._state_store.delete_import_files(removed_file_paths)
         deleted_counts = {
             **import_deleted_counts,
@@ -128,15 +143,23 @@ class SettingsDataResetService:
             message="已清除银行流水域数据，并保留发票与 OA 源数据。",
         )
 
-    def _reset_invoices(self) -> SettingsDataResetResult:
+    def _reset_invoices(
+        self,
+        *,
+        progress_callback: SettingsDataResetProgressCallback | None,
+    ) -> SettingsDataResetResult:
+        self._emit_progress(progress_callback, "prepare_imports", "正在统计发票域数据。", 0, 5)
         imports_snapshot, import_deleted_counts = self._build_filtered_imports_snapshot(
             remove_bank_transactions=False,
             remove_invoices=True,
         )
+        self._emit_progress(progress_callback, "prepare_file_imports", "正在统计发票导入文件。", 1, 5)
         file_imports_snapshot, removed_file_paths, file_deleted_counts = self._build_filtered_file_imports_snapshot(
             removed_batch_types={BatchType.INPUT_INVOICE.value, BatchType.OUTPUT_INVOICE.value}
         )
+        self._emit_progress(progress_callback, "prepare_tax_certified_imports", "正在统计税金认证记录。", 2, 5)
         tax_deleted_counts = self._tax_import_deleted_counts()
+        self._emit_progress(progress_callback, "persist_state", "正在写入发票重置结果。", 3, 5)
         self._state_store.save(
             {
                 "imports": imports_snapshot,
@@ -148,6 +171,7 @@ class SettingsDataResetService:
             }
         )
         self._state_store.save_tax_certified_imports({})
+        self._emit_progress(progress_callback, "delete_import_files", "正在删除发票导入文件。", 4, 5)
         deleted_blob_count = self._state_store.delete_import_files(removed_file_paths)
         deleted_counts = {
             **import_deleted_counts,
@@ -186,13 +210,18 @@ class SettingsDataResetService:
             message="已清除发票域数据、税金认证记录及相关工作台状态，不影响 OA 源数据。",
         )
 
-    def _reset_oa_and_rebuild(self) -> SettingsDataResetResult:
+    def _reset_oa_and_rebuild(
+        self,
+        *,
+        progress_callback: SettingsDataResetProgressCallback | None,
+    ) -> SettingsDataResetResult:
+        self._emit_progress(progress_callback, "clear_oa_state", "正在清空 OA 工作台人工状态。", 0, 2)
         deleted_counts = {
-            "oa_attachment_invoice_cache": self._state_store.clear_oa_attachment_invoice_cache(),
             "workbench_row_overrides": len(self._row_overrides()),
             "workbench_pair_relations": len(self._pair_relations()),
             "workbench_read_models": len(self._read_models()),
         }
+        self._emit_progress(progress_callback, "persist_state", "正在写入 OA 重置结果。", 1, 2)
         self._state_store.save_workbench_overrides({})
         self._state_store.save_workbench_pair_relations({})
         self._state_store.save_workbench_read_models({})
@@ -200,7 +229,6 @@ class SettingsDataResetService:
             action=RESET_OA_AND_REBUILD_ACTION,
             status="completed",
             cleared_collections=[
-                "oa_attachment_invoice_cache",
                 "workbench_row_overrides",
                 "workbench_pair_relations",
                 "workbench_read_models",
@@ -208,8 +236,19 @@ class SettingsDataResetService:
             deleted_counts=deleted_counts,
             protected_targets=self.protected_targets(),
             rebuild_status="pending",
-            message="已按模式 B 清空 OA 相关缓存与人工状态，后续需要执行 OA 重建。",
+            message="已清空 OA 工作台人工状态与读模型，后续需要重新拉取 OA 并重建关联台。",
         )
+
+    @staticmethod
+    def _emit_progress(
+        progress_callback: SettingsDataResetProgressCallback | None,
+        phase: str,
+        message: str,
+        current: int,
+        total: int,
+    ) -> None:
+        if progress_callback is not None:
+            progress_callback(phase, message, current, total)
 
     def _build_filtered_imports_snapshot(
         self,

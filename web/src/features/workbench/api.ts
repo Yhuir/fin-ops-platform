@@ -11,6 +11,7 @@ import type {
   WorkbenchProjectSetting,
   WorkbenchSettings,
   WorkbenchSettingsDataResetAction,
+  WorkbenchSettingsDataResetJob,
   WorkbenchSettingsDataResetResult,
   WorkbenchSummary,
   WorkbenchOaStatus,
@@ -258,6 +259,7 @@ type WorkbenchSettingsUpdatePayload = {
 type ApiWorkbenchSettingsDataResetResult = {
   action: WorkbenchSettingsDataResetAction;
   status: string;
+  job_id?: string;
   cleared_collections?: string[];
   deleted_counts?: Record<string, number>;
   protected_targets?: string[];
@@ -265,9 +267,28 @@ type ApiWorkbenchSettingsDataResetResult = {
   message?: string;
 };
 
+type ApiWorkbenchSettingsDataResetJob = {
+  job_id?: string;
+  action?: WorkbenchSettingsDataResetAction;
+  status?: string;
+  phase?: string;
+  message?: string;
+  current?: number;
+  total?: number;
+  percent?: number;
+  result?: ApiWorkbenchSettingsDataResetResult | null;
+  error?: string | null;
+};
+
+type ApiWorkbenchSettingsDataResetJobResponse = {
+  job?: ApiWorkbenchSettingsDataResetJob | null;
+};
+
 type WorkbenchSettingsDataResetPayload = {
   action: WorkbenchSettingsDataResetAction;
   oaPassword: string;
+  onProgress?: (job: WorkbenchSettingsDataResetJob) => void;
+  pollIntervalMs?: number;
 };
 
 type ApiWorkbenchSettingsProjectMutationResult = {
@@ -851,8 +872,8 @@ export async function fetchWorkbenchSettings(signal?: AbortSignal): Promise<Work
   return fetchWorkbenchSettingsWithProgress(signal);
 }
 
-function clampPercent(value: number) {
-  if (!Number.isFinite(value)) {
+function clampPercent(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
     return 0;
   }
   return Math.min(100, Math.max(0, Math.round(value)));
@@ -893,10 +914,98 @@ export async function saveWorkbenchSettings(
   return mapWorkbenchSettings(payload);
 }
 
+function mapDataResetResult(result: ApiWorkbenchSettingsDataResetResult): WorkbenchSettingsDataResetResult {
+  return {
+    action: result.action,
+    status: result.status,
+    jobId: result.job_id,
+    clearedCollections: result.cleared_collections ?? [],
+    deletedCounts: result.deleted_counts ?? {},
+    protectedTargets: result.protected_targets ?? [],
+    rebuildStatus: result.rebuild_status ?? "unknown",
+    message: result.message ?? "数据重置已完成。",
+  };
+}
+
+function mapDataResetJob(payload: ApiWorkbenchSettingsDataResetJob): WorkbenchSettingsDataResetJob {
+  const result = payload.result ? mapDataResetResult(payload.result) : null;
+  return {
+    jobId: String(payload.job_id ?? result?.jobId ?? ""),
+    action: payload.action ?? result?.action ?? "reset_bank_transactions",
+    status: payload.status ?? result?.status ?? "unknown",
+    phase: payload.phase ?? "",
+    message: payload.message ?? result?.message ?? "",
+    current: typeof payload.current === "number" && Number.isFinite(payload.current) ? payload.current : 0,
+    total: typeof payload.total === "number" && Number.isFinite(payload.total) ? payload.total : 0,
+    percent: clampPercent(payload.percent),
+    result,
+    error: payload.error ?? null,
+  };
+}
+
+function isDataResetJobTerminal(status: string) {
+  return ["completed", "failed", "error", "cancelled", "canceled"].includes(status);
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function fetchWorkbenchSettingsDataResetJob(jobId: string): Promise<WorkbenchSettingsDataResetJob> {
+  const payload = await requestJson<ApiWorkbenchSettingsDataResetJobResponse>(
+    `/api/workbench/settings/data-reset/jobs/${encodeURIComponent(jobId)}`,
+  );
+  return mapDataResetJob(payload.job ?? {});
+}
+
+export async function fetchActiveWorkbenchSettingsDataResetJob(): Promise<WorkbenchSettingsDataResetJob | null> {
+  const payload = await requestJson<ApiWorkbenchSettingsDataResetJobResponse>(
+    "/api/workbench/settings/data-reset/jobs/active",
+  );
+  return payload.job ? mapDataResetJob(payload.job) : null;
+}
+
+async function waitForWorkbenchSettingsDataResetJob(
+  initialJob: WorkbenchSettingsDataResetJob,
+  payload: Pick<WorkbenchSettingsDataResetPayload, "onProgress" | "pollIntervalMs">,
+): Promise<WorkbenchSettingsDataResetResult> {
+  payload.onProgress?.(initialJob);
+
+  let job = initialJob;
+  const pollIntervalMs = Math.max(100, payload.pollIntervalMs ?? 800);
+  while (!isDataResetJobTerminal(job.status)) {
+    await wait(pollIntervalMs);
+    job = await fetchWorkbenchSettingsDataResetJob(job.jobId);
+    payload.onProgress?.(job);
+  }
+
+  if (job.status === "completed") {
+    return job.result ?? {
+      action: job.action,
+      status: job.status,
+      jobId: job.jobId,
+      clearedCollections: [],
+      deletedCounts: {},
+      protectedTargets: [],
+      rebuildStatus: "unknown",
+      message: job.message || "数据重置已完成。",
+    };
+  }
+
+  throw new Error(job.error || job.message || "数据重置失败，请稍后重试。");
+}
+
+export async function resumeWorkbenchSettingsDataResetJob(
+  job: WorkbenchSettingsDataResetJob,
+  payload: Pick<WorkbenchSettingsDataResetPayload, "onProgress" | "pollIntervalMs"> = {},
+): Promise<WorkbenchSettingsDataResetResult> {
+  return waitForWorkbenchSettingsDataResetJob(job, payload);
+}
+
 export async function resetWorkbenchSettingsData(
   payload: WorkbenchSettingsDataResetPayload,
 ): Promise<WorkbenchSettingsDataResetResult> {
-  const result = await requestJson<ApiWorkbenchSettingsDataResetResult>("/api/workbench/settings/data-reset", {
+  const createdPayload = await requestJson<ApiWorkbenchSettingsDataResetJobResponse>("/api/workbench/settings/data-reset/jobs", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -906,15 +1015,8 @@ export async function resetWorkbenchSettingsData(
       oa_password: payload.oaPassword,
     }),
   });
-  return {
-    action: result.action,
-    status: result.status,
-    clearedCollections: result.cleared_collections ?? [],
-    deletedCounts: result.deleted_counts ?? {},
-    protectedTargets: result.protected_targets ?? [],
-    rebuildStatus: result.rebuild_status ?? "unknown",
-    message: result.message ?? "数据重置已完成。",
-  };
+  const createdJob = mapDataResetJob(createdPayload.job ?? {});
+  return waitForWorkbenchSettingsDataResetJob(createdJob, payload);
 }
 
 export async function syncWorkbenchSettingsProjects(actorId: string): Promise<WorkbenchSettings> {

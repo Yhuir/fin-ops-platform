@@ -443,6 +443,76 @@ describe("Workbench columns and inline actions", () => {
     expect(within(pairedGroup).queryByText("发票类型")).not.toBeInTheDocument();
   });
 
+  test("renders invoice source tags under the direction tag line", () => {
+    const createInvoiceRow = (id: string, sourceKind?: string) => ({
+      id,
+      caseId: `case:${id}`,
+      recordType: "invoice" as const,
+      sourceKind,
+      label: "进项发票",
+      status: "待人工核查",
+      statusCode: "manual_review",
+      statusTone: "danger",
+      exceptionHandled: false,
+      amount: "49.50",
+      counterparty: "弥勒市豪荟酒店",
+      actionVariant: "detail-only" as const,
+      availableActions: ["detail"],
+      detailFields: [],
+      tableValues: {
+        sellerName: id === "inv-oa-source" ? "OA附件销方" : "人工导入销方",
+        sellerTaxId: "92532526MA6NTMA00H",
+        invoiceType: "进项专票",
+      },
+    });
+
+    render(
+      <div>
+        <WorkbenchRecordCard
+          actionMode="default"
+          canMutateData
+          columns={[{ key: "sellerName", label: "销方名称/识别号" }]}
+          onOpenDetail={() => {}}
+          onRowAction={() => {}}
+          onSelectRow={() => {}}
+          paneId="invoice"
+          row={createInvoiceRow("inv-oa-source", "oa_attachment_invoice")}
+          rowState="idle"
+          showWorkflowActions
+          zoneId="open"
+        />
+        <WorkbenchRecordCard
+          actionMode="default"
+          canMutateData
+          columns={[{ key: "sellerName", label: "销方名称/识别号" }]}
+          onOpenDetail={() => {}}
+          onRowAction={() => {}}
+          onSelectRow={() => {}}
+          paneId="invoice"
+          row={createInvoiceRow("inv-manual-source")}
+          rowState="idle"
+          showWorkflowActions
+          zoneId="open"
+        />
+      </div>,
+    );
+
+    const oaRow = screen.getByRole("row", { name: /OA附件销方/ });
+    const manualRow = screen.getByRole("row", { name: /人工导入销方/ });
+    const oaSourceTag = within(oaRow).getByText("OA附件");
+    const manualSourceTag = within(manualRow).getByText("人工导入");
+
+    expect(oaSourceTag).toHaveClass("inline-meta-tag");
+    expect(manualSourceTag).toHaveClass("inline-meta-tag");
+    const oaDirectionStack = within(oaRow).getByText("进").closest(".invoice-direction-stack");
+    const manualDirectionStack = within(manualRow).getByText("进").closest(".invoice-direction-stack");
+
+    expect(oaDirectionStack).not.toBeNull();
+    expect(manualDirectionStack).not.toBeNull();
+    expect(oaSourceTag.closest(".invoice-direction-stack")).toBe(oaDirectionStack);
+    expect(manualSourceTag.closest(".invoice-direction-stack")).toBe(manualDirectionStack);
+  });
+
   test("renders invoice code number and issue date tag without the issue date filter menu", async () => {
     installMockApiFetch();
     renderWorkbenchPage();

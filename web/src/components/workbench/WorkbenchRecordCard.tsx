@@ -233,7 +233,7 @@ function renderCellValue(
   }
 
   if (paneId === "invoice" && column.key === "sellerName") {
-    return renderInvoicePartyValue(value, row.tableValues.sellerTaxId ?? "", row.tableValues.invoiceType ?? "");
+    return renderInvoicePartyValue(value, row.tableValues.sellerTaxId ?? "", row.tableValues.invoiceType ?? "", row.sourceKind);
   }
 
   if (paneId === "invoice" && column.key === "buyerName") {
@@ -532,22 +532,25 @@ function renderInlineDateTimeTag(value: string) {
   );
 }
 
-function renderInvoicePartyValue(value: string, taxId: string, invoiceType: string) {
+function renderInvoicePartyValue(value: string, taxId: string, invoiceType: string, sourceKind?: string) {
   const flowLabel = resolveInvoiceFlowLabel(invoiceType);
+  const sourceLabel = flowLabel ? resolveInvoiceSourceLabel(sourceKind) : null;
+  const hasTaxId = taxId !== "--" && taxId !== "—" && taxId !== "";
 
   return (
     <span className="compound-cell-value invoice-party-value">
-      <span className="compound-cell-primary invoice-tax-id-value">
+      <span className="compound-cell-primary invoice-party-primary">
         {flowLabel ? (
-          <span className={`invoice-flow-tag invoice-flow-tag-${flowLabel === "销" ? "output" : "input"}`}>{flowLabel}</span>
+          <span className="invoice-direction-stack">
+            <span className={`invoice-flow-tag invoice-flow-tag-${flowLabel === "销" ? "output" : "input"}`}>{flowLabel}</span>
+            {sourceLabel ? <span className="inline-meta-tag invoice-source-tag">{sourceLabel}</span> : null}
+          </span>
         ) : null}
-        <span className="cell-text-value cell-text-value-full">{value}</span>
-      </span>
-      {taxId !== "--" && taxId !== "—" && taxId !== "" ? (
-        <span className="compound-cell-secondary">
-          <span className="cell-text-value cell-text-value-full cell-subtext-value">{taxId}</span>
+        <span className="invoice-party-text-stack">
+          <span className="cell-text-value cell-text-value-full">{value}</span>
+          {hasTaxId ? <span className="cell-text-value cell-text-value-full cell-subtext-value">{taxId}</span> : null}
         </span>
-      ) : null}
+      </span>
     </span>
   );
 }
@@ -625,4 +628,8 @@ function resolveInvoiceFlowLabel(invoiceType: string) {
     return "进";
   }
   return null;
+}
+
+function resolveInvoiceSourceLabel(sourceKind: string | undefined) {
+  return sourceKind === "oa_attachment_invoice" ? "OA附件" : "人工导入";
 }

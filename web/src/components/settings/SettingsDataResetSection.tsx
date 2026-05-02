@@ -3,6 +3,7 @@ import type { SettingsDataResetSectionProps } from "./types";
 export default function SettingsDataResetSection({
   controlsDisabled,
   dataResetStatus,
+  dataResetProgress,
   actions,
   onOpenDataResetConfirm,
 }: SettingsDataResetSectionProps) {
@@ -29,22 +30,36 @@ export default function SettingsDataResetSection({
           </div>
         ) : null}
         <div className="data-reset-actions">
-          {actions.map((item) => (
-            <article key={item.action} className="data-reset-card">
-              <div>
-                <strong>{item.title}</strong>
-                <p>{item.description}</p>
-              </div>
-              <button
-                className="secondary-button danger-button"
-                type="button"
-                disabled={controlsDisabled}
-                onClick={() => onOpenDataResetConfirm(item.action)}
-              >
-                {item.label}
-              </button>
-            </article>
-          ))}
+          {actions.map((item) => {
+            const progress = dataResetProgress?.action === item.action ? dataResetProgress : null;
+            const isRunning = dataResetProgress !== null;
+            const progressLabel = progress
+              ? `${progress.message || "正在清理"} ${progress.percent}%`
+              : item.label;
+            return (
+              <article key={item.action} className="data-reset-card">
+                <div>
+                  <strong>{item.title}</strong>
+                  <p>{item.description}</p>
+                </div>
+                <button
+                  className={`secondary-button danger-button data-reset-action-button${progress ? " data-reset-action-button-progress" : ""}`}
+                  type="button"
+                  disabled={controlsDisabled || isRunning}
+                  onClick={() => onOpenDataResetConfirm(item.action)}
+                >
+                  {progress ? (
+                    <span
+                      aria-hidden="true"
+                      className="data-reset-action-button-progress-bar"
+                      style={{ width: `${progress.percent}%` }}
+                    />
+                  ) : null}
+                  <span className="data-reset-action-button-label">{progressLabel}</span>
+                </button>
+              </article>
+            );
+          })}
         </div>
       </div>
     </section>

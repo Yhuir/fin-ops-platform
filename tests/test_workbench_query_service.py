@@ -61,6 +61,39 @@ class AttachmentAwareOAAdapter:
         return [AttachmentRecord()]
 
 
+class UnparsedAttachmentRecord:
+    def __init__(self) -> None:
+        self.id = "oa-unparsed-202603-001"
+        self.month = "2026-03"
+        self.section = "open"
+        self.case_id = None
+        self.applicant = "胡瑢"
+        self.project_name = "玉烟维护项目"
+        self.apply_type = "日常报销"
+        self.amount = "54.00"
+        self.counterparty_name = ""
+        self.reason = "高速过路费"
+        self.relation_code = "pending_match"
+        self.relation_label = "待找流水与发票"
+        self.relation_tone = "warn"
+        self.expense_type = "车辆使用费"
+        self.expense_content = "高速过路费"
+        self.detail_fields = {
+            "OA单号": "OA-UNPARSED-001",
+            "申请日期": "2026-03-28",
+            "明细行号": "0",
+        }
+        self.attachment_invoices = []
+        self.attachment_file_count = 2
+
+
+class UnparsedAttachmentOAAdapter:
+    def list_application_records(self, month: str) -> list[object]:
+        if month != "2026-03":
+            return []
+        return [UnparsedAttachmentRecord()]
+
+
 class BulkOAAdapter:
     def __init__(self, records: list[OAApplicationRecord]) -> None:
         self._records = records
@@ -170,6 +203,16 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
         self.assertIn("40512344", oa_detail["detail_fields"]["附件发票摘要"])
         self.assertEqual(invoice_detail["detail_fields"]["来源OA单号"], "OA-ATT-001")
         self.assertEqual(invoice_detail["detail_fields"]["发票号码"], "40512344")
+
+    def test_unparsed_attachment_oa_row_gets_unparsed_invoice_tag(self) -> None:
+        service = WorkbenchQueryService(oa_adapter=UnparsedAttachmentOAAdapter())
+
+        payload = service.get_workbench("2026-03")
+
+        oa_row = payload["open"]["oa"][0]
+        self.assertIn("未解析发票", oa_row["tags"])
+        self.assertEqual(oa_row["detail_fields"]["附件发票数量"], "0")
+        self.assertEqual(oa_row["detail_fields"]["附件发票识别情况"], "已解析 0 / 2")
 
     def test_all_workbench_prefers_bulk_oa_read_when_adapter_supports_it(self) -> None:
         adapter = BulkOAAdapter(

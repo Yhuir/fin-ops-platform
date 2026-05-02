@@ -1818,6 +1818,36 @@ body.column-layout-dragging {
   font-size: 11px;
 }
 
+.invoice-party-primary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.invoice-direction-stack,
+.invoice-party-text-stack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+}
+
+.invoice-direction-stack {
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.invoice-party-text-stack {
+  gap: 6px;
+}
+
+.invoice-source-tag {
+  padding-inline: 7px;
+  white-space: nowrap;
+}
+
 .invoice-flow-tag {
   display: inline-flex;
   min-width: 16px;
@@ -4524,6 +4554,38 @@ body.column-layout-dragging {
   color: #486581;
   font-size: 12px;
   line-height: 1.65;
+}
+
+.data-reset-action-button {
+  position: relative;
+  min-width: 190px;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.data-reset-action-button-progress {
+  color: #7f1d1d;
+  border-color: #fecaca;
+  background: #fff7ed;
+}
+
+.data-reset-action-button-progress-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: linear-gradient(90deg, rgba(248, 113, 113, 0.22), rgba(251, 146, 60, 0.18));
+  transition: width 180ms ease-out;
+  z-index: 0;
+}
+
+.data-reset-action-button-label {
+  position: relative;
+  z-index: 1;
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .data-reset-status {

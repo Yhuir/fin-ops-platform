@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import SettingsAccessAccountsSection from "../settings/SettingsAccessAccountsSection";
 import SettingsBankAccountsSection from "../settings/SettingsBankAccountsSection";
@@ -22,6 +22,7 @@ import type {
   WorkbenchProjectSetting,
   WorkbenchSettings,
   WorkbenchSettingsDataResetAction,
+  WorkbenchSettingsDataResetJob,
   WorkbenchSettingsDataResetResult,
 } from "../../features/workbench/types";
 
@@ -30,6 +31,7 @@ type WorkbenchSettingsModalProps = {
   isSaving: boolean;
   canSave: boolean;
   canManageAccessControl: boolean;
+  activeDataResetJob: WorkbenchSettingsDataResetJob | null;
   onSave: (payload: {
     completedProjectIds: string[];
     bankAccountMappings: BankAccountMapping[];
@@ -44,6 +46,7 @@ type WorkbenchSettingsModalProps = {
   onDataReset: (payload: {
     action: WorkbenchSettingsDataResetAction;
     oaPassword: string;
+    onProgress?: (job: WorkbenchSettingsDataResetJob) => void;
   }) => Promise<WorkbenchSettingsDataResetResult>;
   onSyncProjects: () => Promise<WorkbenchSettings>;
   onCreateProject: (payload: {
@@ -161,6 +164,7 @@ function parseResetErrorMessage(message: string) {
 }
 
 export default function WorkbenchSettingsModal({
+  activeDataResetJob,
   settings,
   isSaving,
   canSave,
@@ -196,6 +200,7 @@ export default function WorkbenchSettingsModal({
   const [dataResetDialog, setDataResetDialog] = useState<DataResetDialogState>(null);
   const [dataResetPassword, setDataResetPassword] = useState("");
   const [dataResetStatus, setDataResetStatus] = useState<DataResetStatus | null>(null);
+  const [dataResetProgress, setDataResetProgress] = useState<WorkbenchSettingsDataResetJob | null>(null);
   const [isDataResetting, setIsDataResetting] = useState(false);
 
   const controlsDisabled = !canSave || isSaving || isDataResetting || isProjectActionBusy;
@@ -213,6 +218,22 @@ export default function WorkbenchSettingsModal({
       ]).filter((project, index, rows) => rows.findIndex((row) => row.id === project.id) === index),
     [completedProjectIds, settings.projects.active, settings.projects.completed],
   );
+
+  useEffect(() => {
+    const isTerminal =
+      activeDataResetJob === null ||
+      ["completed", "failed", "error", "cancelled", "canceled"].includes(activeDataResetJob.status);
+    if (!isTerminal && activeDataResetJob !== null) {
+      setDataResetStatus(null);
+      setDataResetProgress(activeDataResetJob);
+      setIsDataResetting(true);
+      return;
+    }
+    if (activeDataResetJob === null && dataResetProgress !== null && isDataResetting) {
+      setDataResetProgress(null);
+      setIsDataResetting(false);
+    }
+  }, [activeDataResetJob, dataResetProgress, isDataResetting]);
 
   const canAddMapping =
     last4Draft.trim().length === 4 && /^\d{4}$/.test(last4Draft.trim()) && bankNameDraft.trim().length > 0;
@@ -458,19 +479,27 @@ export default function WorkbenchSettingsModal({
     }
     setIsDataResetting(true);
     setDataResetStatus(null);
+    setDataResetProgress(null);
     try {
       const result = await onDataReset({
         action: dataResetDialog.action,
         oaPassword: dataResetPassword,
+        onProgress: (job) => {
+          setDataResetPassword("");
+          setDataResetDialog(null);
+          setDataResetProgress(job);
+        },
       });
       setDataResetPassword("");
       setDataResetDialog(null);
+      setDataResetProgress(null);
       setDataResetStatus({
         tone: "success",
         message: result.message || "数据重置已完成。",
       });
     } catch (error) {
       setDataResetPassword("");
+      setDataResetProgress(null);
       setDataResetStatus({
         tone: "error",
         message: error instanceof Error ? parseResetErrorMessage(error.message) : "数据重置失败，请稍后重试。",
@@ -589,6 +618,7 @@ export default function WorkbenchSettingsModal({
                 <SettingsDataResetSection
                   controlsDisabled={controlsDisabled}
                   dataResetStatus={dataResetStatus}
+                  dataResetProgress={dataResetProgress}
                   actions={DATA_RESET_ACTIONS}
                   onOpenDataResetConfirm={handleOpenDataResetConfirm}
                 />

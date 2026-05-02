@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pymongo.errors import ServerSelectionTimeoutError
 
-from fin_ops_platform.app.server import Application, build_application
+from fin_ops_platform.app.server import Application, WORKBENCH_READ_MODEL_SCHEMA_VERSION, build_application
 from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, MongoOASettings
@@ -194,6 +194,136 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual(payload["summary"]["oa_count"], 99)
         self.assertEqual(payload["paired"]["groups"][0]["oa_rows"][0]["id"], "oa-cached-001")
+
+    def test_get_api_workbench_rebuilds_cached_mongo_read_model_when_attachment_parser_version_changes(self) -> None:
+        app = build_application()
+        app._workbench_query_service._oa_adapter = MongoOAAdapter(
+            settings=MongoOASettings(host="127.0.0.1", database="form_data_db")
+        )
+        app._workbench_read_model_service.upsert_read_model(
+            scope_key="2026-03",
+            payload={
+                "month": "2026-03",
+                "oa_status": {"code": "ready", "message": "OA 已同步"},
+                "workbench_read_model_schema_version": WORKBENCH_READ_MODEL_SCHEMA_VERSION,
+                "oa_attachment_invoice_parser_version": "old-parser",
+                "summary": {
+                    "oa_count": 99,
+                    "bank_count": 0,
+                    "invoice_count": 18,
+                    "paired_count": 0,
+                    "open_count": 99,
+                    "exception_count": 0,
+                },
+                "paired": {"groups": []},
+                "open": {"groups": []},
+            },
+            ignored_rows=[],
+            generated_at="2026-04-08T11:00:00+00:00",
+        )
+        raw_payload = {
+            "month": "2026-03",
+            "oa_status": {"code": "ready", "message": "OA 已同步"},
+            "summary": {
+                "oa_count": 1,
+                "bank_count": 0,
+                "invoice_count": 0,
+                "paired_count": 0,
+                "open_count": 1,
+                "exception_count": 0,
+            },
+            "paired": {"oa": [], "bank": [], "invoice": []},
+            "open": {
+                "oa": [
+                    {
+                        "id": "oa-rebuilt-001",
+                        "type": "oa",
+                        "case_id": None,
+                        "applicant": "胡瑢",
+                        "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"},
+                    }
+                ],
+                "bank": [],
+                "invoice": [],
+            },
+        }
+
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload) as build_raw:
+            response = app.handle_request("GET", "/api/workbench?month=2026-03")
+
+        self.assertEqual(response.status_code, 200)
+        build_raw.assert_called_once_with("2026-03")
+        payload = json.loads(response.body)
+        self.assertEqual(payload["summary"]["oa_count"], 1)
+        self.assertEqual(payload["open"]["groups"][0]["oa_rows"][0]["id"], "oa-rebuilt-001")
+        read_model = app._workbench_read_model_service.get_read_model("2026-03")
+        assert read_model is not None
+        self.assertEqual(
+            read_model["payload"]["oa_attachment_invoice_parser_version"],
+            app._current_oa_attachment_invoice_parser_version(),
+        )
+        self.assertEqual(read_model["payload"]["workbench_read_model_schema_version"], WORKBENCH_READ_MODEL_SCHEMA_VERSION)
+
+    def test_get_api_workbench_rebuilds_cached_mongo_read_model_when_schema_version_missing(self) -> None:
+        app = build_application()
+        app._workbench_query_service._oa_adapter = MongoOAAdapter(
+            settings=MongoOASettings(host="127.0.0.1", database="form_data_db")
+        )
+        app._workbench_read_model_service.upsert_read_model(
+            scope_key="2026-03",
+            payload={
+                "month": "2026-03",
+                "oa_status": {"code": "ready", "message": "OA 已同步"},
+                "oa_attachment_invoice_parser_version": app._current_oa_attachment_invoice_parser_version(),
+                "summary": {
+                    "oa_count": 99,
+                    "bank_count": 0,
+                    "invoice_count": 18,
+                    "paired_count": 0,
+                    "open_count": 99,
+                    "exception_count": 0,
+                },
+                "paired": {"groups": []},
+                "open": {"groups": []},
+            },
+            ignored_rows=[],
+            generated_at="2026-04-08T11:00:00+00:00",
+        )
+        raw_payload = {
+            "month": "2026-03",
+            "oa_status": {"code": "ready", "message": "OA 已同步"},
+            "summary": {
+                "oa_count": 1,
+                "bank_count": 0,
+                "invoice_count": 0,
+                "paired_count": 0,
+                "open_count": 1,
+                "exception_count": 0,
+            },
+            "paired": {"oa": [], "bank": [], "invoice": []},
+            "open": {
+                "oa": [
+                    {
+                        "id": "oa-rebuilt-schema-001",
+                        "type": "oa",
+                        "case_id": None,
+                        "applicant": "胡瑢",
+                        "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"},
+                    }
+                ],
+                "bank": [],
+                "invoice": [],
+            },
+        }
+
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload) as build_raw:
+            response = app.handle_request("GET", "/api/workbench?month=2026-03")
+
+        self.assertEqual(response.status_code, 200)
+        build_raw.assert_called_once_with("2026-03")
+        payload = json.loads(response.body)
+        self.assertEqual(payload["summary"]["oa_count"], 1)
+        self.assertEqual(payload["open"]["groups"][0]["oa_rows"][0]["id"], "oa-rebuilt-schema-001")
 
     def test_get_api_workbench_rebuilds_when_cached_read_model_oa_status_is_not_ready(self) -> None:
         app = build_application()

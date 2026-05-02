@@ -144,9 +144,23 @@ export type WorkbenchSettingsDataResetAction =
 export type WorkbenchSettingsDataResetResult = {
   action: WorkbenchSettingsDataResetAction;
   status: string;
+  jobId?: string;
   clearedCollections: string[];
   deletedCounts: Record<string, number>;
   protectedTargets: string[];
   rebuildStatus: string;
   message: string;
+};
+
+export type WorkbenchSettingsDataResetJob = {
+  jobId: string;
+  action: WorkbenchSettingsDataResetAction;
+  status: string;
+  phase: string;
+  message: string;
+  current: number;
+  total: number;
+  percent: number;
+  result: WorkbenchSettingsDataResetResult | null;
+  error: string | null;
 };

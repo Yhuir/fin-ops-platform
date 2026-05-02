@@ -311,14 +311,20 @@ class WorkbenchQueryService:
             "tone": record.relation_tone,
         }
         attachment_invoices = self._attachment_invoices(record)
+        attachment_file_count = self._attachment_file_count(record)
         detail_fields = deepcopy(record.detail_fields)
         detail_fields.update(
             build_attachment_invoice_detail_fields(
                 attachment_invoices,
-                attachment_file_count=self._attachment_file_count(record),
+                attachment_file_count=attachment_file_count,
             )
         )
         case_id = record.case_id or (self._oa_attachment_case_id(record.id) if attachment_invoices else None)
+        tags = self._oa_row_tags(
+            existing_tags=getattr(record, "tags", []),
+            attachment_invoice_count=len(attachment_invoices),
+            attachment_file_count=attachment_file_count,
+        )
         return {
             "id": record.id,
             "type": "oa",
@@ -333,6 +339,7 @@ class WorkbenchQueryService:
             "reason": record.reason,
             "oa_bank_relation": relation,
             "available_actions": self.available_actions("oa", record.section),
+            "tags": tags,
             "_month": record.month,
             "_section": record.section,
             "_summary_fields": {
@@ -346,6 +353,22 @@ class WorkbenchQueryService:
             },
             "_detail_fields": detail_fields,
         }
+
+    @staticmethod
+    def _oa_row_tags(
+        *,
+        existing_tags: object,
+        attachment_invoice_count: int,
+        attachment_file_count: int,
+    ) -> list[str]:
+        tags = [
+            str(tag).strip()
+            for tag in list(existing_tags or [])
+            if str(tag).strip()
+        ] if isinstance(existing_tags, list) else []
+        if attachment_file_count > 0 and attachment_invoice_count == 0 and "未解析发票" not in tags:
+            tags.append("未解析发票")
+        return tags
 
     def _merge_existing_attachment_invoice_row(
         self,

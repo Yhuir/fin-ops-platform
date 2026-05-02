@@ -41,6 +41,7 @@ type MockApiOptions = {
     message: string;
   };
   dataResetPasswordShouldFail?: boolean;
+  dataResetJobPollsBeforeComplete?: number;
 };
 
 const templateRegistry = [
@@ -2612,6 +2613,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     },
   };
 
+  const dataResetJobs = new Map<string, Record<string, unknown>>();
+
   const handlers: Record<string, MockFetchHandler> = {
     "/api/session/me": () => {
       if (options.sessionMode === "expired") {
@@ -3386,6 +3389,80 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           },
         },
       });
+    }
+    if ((init?.method ?? "GET").toUpperCase() === "POST" && url.pathname === "/api/workbench/settings/data-reset/jobs") {
+      if (options.dataResetPasswordShouldFail || !jsonBody?.oa_password) {
+        return jsonResponse({
+          status: 403,
+          body: {
+            error: "oa_password_verification_failed",
+            message: "当前 OA 用户密码复核失败，未执行数据重置。",
+          },
+        });
+      }
+      const action = String(jsonBody.action ?? "");
+      const jobId = `mock-reset-job-${dataResetJobs.size + 1}`;
+      const job = {
+        job_id: jobId,
+        action,
+        status: "running",
+        phase: "clear",
+        message: "正在清理 app 内部状态。",
+        current: 25,
+        total: 100,
+        percent: 25,
+        result: null,
+        error: null,
+      };
+      dataResetJobs.set(jobId, job);
+      return jsonResponse({ status: 202, body: { job } });
+    }
+    if (url.pathname === "/api/workbench/settings/data-reset/jobs/active") {
+      const activeJob = Array.from(dataResetJobs.values()).find((job) => {
+        const status = String(job.status ?? "");
+        return status === "queued" || status === "running";
+      }) ?? null;
+      return jsonResponse({ body: { job: activeJob } });
+    }
+    if (url.pathname.startsWith("/api/workbench/settings/data-reset/jobs/")) {
+      const jobId = decodeURIComponent(url.pathname.split("/").pop() ?? "");
+      const existing = dataResetJobs.get(jobId);
+      const action = String(existing?.action ?? "reset_bank_transactions");
+      const currentPollCount = Number(existing?.poll_count ?? 0) + 1;
+      const pollsBeforeComplete = options.dataResetJobPollsBeforeComplete ?? 0;
+      if (existing && currentPollCount <= pollsBeforeComplete) {
+        const runningJob = {
+          ...existing,
+          poll_count: currentPollCount,
+          status: "running",
+        };
+        dataResetJobs.set(jobId, runningJob);
+        return jsonResponse({ body: { job: runningJob } });
+      }
+      const job = {
+        job_id: jobId,
+        action,
+        status: "completed",
+        phase: "complete",
+        message: "已完成数据重置。",
+        current: 100,
+        total: 100,
+        percent: 100,
+        result: {
+          action,
+          status: "completed",
+          cleared_collections: ["workbench_read_models"],
+          deleted_counts: {
+            workbench_read_models: 1,
+          },
+          protected_targets: ["form_data_db.form_data"],
+          rebuild_status: action === "reset_oa_and_rebuild" ? "completed" : "not_applicable",
+          message: "已完成数据重置。",
+        },
+        error: null,
+      };
+      dataResetJobs.set(jobId, job);
+      return jsonResponse({ body: { job } });
     }
 
     const handler = handlers[url.pathname];

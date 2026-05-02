@@ -4,6 +4,7 @@ import type {
   WorkbenchOaImportSettings,
   WorkbenchProjectSetting,
   WorkbenchSettingsDataResetAction,
+  WorkbenchSettingsDataResetJob,
 } from "../../features/workbench/types";
 
 export type ManagedAccessAccount = {
@@ -112,6 +113,7 @@ export type SettingsAccessAccountsSectionProps = {
 export type SettingsDataResetSectionProps = {
   controlsDisabled: boolean;
   dataResetStatus: DataResetStatus | null;
+  dataResetProgress: WorkbenchSettingsDataResetJob | null;
   actions: DataResetActionConfig[];
   onOpenDataResetConfirm: (action: WorkbenchSettingsDataResetAction) => void;
 };

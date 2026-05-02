@@ -7,8 +7,10 @@ import { useSession, useSessionPermissions } from "../contexts/SessionContext";
 import {
   createWorkbenchSettingsProject,
   deleteWorkbenchSettingsProject,
+  fetchActiveWorkbenchSettingsDataResetJob,
   fetchWorkbenchSettingsWithProgress,
   resetWorkbenchSettingsData,
+  resumeWorkbenchSettingsDataResetJob,
   saveWorkbenchSettings,
   syncWorkbenchSettingsProjects,
   type WorkbenchBootstrapProgress,
@@ -16,6 +18,7 @@ import {
 import type {
   WorkbenchSettings,
   WorkbenchSettingsDataResetAction,
+  WorkbenchSettingsDataResetJob,
   WorkbenchSettingsDataResetResult,
 } from "../features/workbench/types";
 
@@ -59,6 +62,7 @@ export default function SettingsPage() {
     indeterminate: true,
   });
   const [pageFeedback, setPageFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
+  const [activeDataResetJob, setActiveDataResetJob] = useState<WorkbenchSettingsDataResetJob | null>(null);
 
   const loadSettings = useCallback(async (signal?: AbortSignal) => {
     setIsLoading(true);
@@ -90,6 +94,47 @@ export default function SettingsPage() {
       controller.abort();
     };
   }, [loadSettings]);
+
+  useEffect(() => {
+    if (!canAdminAccess) {
+      setActiveDataResetJob(null);
+      return;
+    }
+    let cancelled = false;
+
+    async function restoreActiveDataResetJob() {
+      try {
+        const job = await fetchActiveWorkbenchSettingsDataResetJob();
+        if (cancelled || job === null || ["completed", "failed", "error", "cancelled", "canceled"].includes(job.status)) {
+          return;
+        }
+        setActiveDataResetJob(job);
+        const result = await resumeWorkbenchSettingsDataResetJob(job, {
+          onProgress: (nextJob) => {
+            if (!cancelled) {
+              setActiveDataResetJob(nextJob);
+            }
+          },
+        });
+        if (cancelled) {
+          return;
+        }
+        setActiveDataResetJob(null);
+        await loadSettings();
+        setPageFeedback({ tone: "success", message: result.message });
+      } catch (error) {
+        if (!cancelled) {
+          setActiveDataResetJob(null);
+          setPageFeedback({ tone: "error", message: normalizeSettingsError(error, "数据重置状态恢复失败，请稍后重试。") });
+        }
+      }
+    }
+
+    void restoreActiveDataResetJob();
+    return () => {
+      cancelled = true;
+    };
+  }, [canAdminAccess, loadSettings]);
 
   useEffect(() => {
     if (loadError) {
@@ -139,11 +184,19 @@ export default function SettingsPage() {
   const handleSettingsDataReset = async (payload: {
     action: WorkbenchSettingsDataResetAction;
     oaPassword: string;
+    onProgress?: (job: WorkbenchSettingsDataResetJob) => void;
   }): Promise<WorkbenchSettingsDataResetResult> => {
     if (!canAdminAccess) {
       throw new Error("当前账号没有管理员权限，不能执行数据重置。");
     }
-    const result = await resetWorkbenchSettingsData(payload);
+    const result = await resetWorkbenchSettingsData({
+      ...payload,
+      onProgress: (job) => {
+        setActiveDataResetJob(job);
+        payload.onProgress?.(job);
+      },
+    });
+    setActiveDataResetJob(null);
     await loadSettings();
     setPageFeedback({ tone: "success", message: result.message });
     return result;
@@ -223,6 +276,7 @@ export default function SettingsPage() {
           canSave={canMutateData}
           isSaving={isSaving}
           settings={settings}
+          activeDataResetJob={activeDataResetJob}
           onCreateProject={handleCreateSettingsProject}
           onDataReset={handleSettingsDataReset}
           onDeleteProject={handleDeleteSettingsProject}
