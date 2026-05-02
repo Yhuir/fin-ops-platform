@@ -40,6 +40,7 @@ type MockApiOptions = {
     code: "idle" | "loading" | "ready" | "error";
     message: string;
   };
+  workbenchOaSyncStatuses?: Array<Record<string, unknown>>;
   dataResetPasswordShouldFail?: boolean;
   dataResetJobPollsBeforeComplete?: number;
 };
@@ -2614,6 +2615,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   };
 
   const dataResetJobs = new Map<string, Record<string, unknown>>();
+  let workbenchOaSyncStatusIndex = 0;
 
   const handlers: Record<string, MockFetchHandler> = {
     "/api/session/me": () => {
@@ -2674,6 +2676,26 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         return { status: 500, body: { message: "workbench failed" } };
       }
       return { body: toGroupedWorkbenchPayload(cloneJson(workbenchStateStore.get(month)), options.workbenchOaStatus) };
+    },
+    "/api/oa-sync/status": () => {
+      const statuses = options.workbenchOaSyncStatuses;
+      if (statuses && statuses.length > 0) {
+        const status = statuses[Math.min(workbenchOaSyncStatusIndex, statuses.length - 1)];
+        workbenchOaSyncStatusIndex += 1;
+        return { body: cloneJson(status) };
+      }
+      return {
+        body: {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          last_seen_change_at: null,
+          last_synced_at: "2026-04-01T12:00:00+08:00",
+          lag_seconds: 0,
+          failed_event_count: 0,
+          version: 0,
+        },
+      };
     },
     "/api/workbench/ignored": ({ url }) => {
       const month = url.searchParams.get("month") ?? "";

@@ -234,6 +234,102 @@ class MongoOAAdapter(OAAdapter):
     def set_attachment_invoice_cache_updated_callback(self, callback: Callable[[list[str]], None] | None) -> None:
         self._attachment_invoice_cache_updated_callback = callback
 
+    def invalidate_records_cache(self, months: list[str] | None = None) -> None:
+        normalized_months = {
+            str(month).strip()
+            for month in list(months or [])
+            if MONTH_RE.match(str(month).strip())
+        }
+        if not normalized_months:
+            self._records_cache.clear()
+            self._available_months_cache = None
+            self._project_name_cache = None
+            return
+        for month in normalized_months:
+            self._records_cache.pop(month, None)
+        self._records_cache.pop("__all__", None)
+        self._available_months_cache = None
+
+    def poll_sync_fingerprints(self) -> dict[str, str]:
+        self._sync_import_settings_cache()
+        if self._mongo_temporarily_unavailable():
+            self._set_read_status("error", "OA 连接失败")
+            return {}
+
+        documents_by_month: dict[str, list[dict[str, Any]]] = {}
+        enabled_forms = (
+            (self._settings.payment_request_form_id, OA_IMPORT_FORM_TYPE_PAYMENT),
+            (self._settings.expense_claim_form_id, OA_IMPORT_FORM_TYPE_EXPENSE),
+        )
+        for form_id, form_type in enabled_forms:
+            if not self._should_include_form_type(form_type):
+                continue
+            documents = self._find_documents(
+                self._build_form_query(form_id),
+                projection=self._polling_fingerprint_projection(),
+            )
+            if self._mongo_temporarily_unavailable():
+                self._set_read_status("error", "OA 连接失败")
+                return {}
+            for document in documents:
+                data = self._document_data(document)
+                if not self._should_include_document(form_type, data):
+                    continue
+                month = self._derive_month(data, document)
+                if not MONTH_RE.match(month):
+                    continue
+                fingerprint_document = self._polling_fingerprint_document(form_type, document)
+                documents_by_month.setdefault(month, []).append(fingerprint_document)
+
+        fingerprints = {
+            month: self._hash_polling_documents(documents)
+            for month, documents in documents_by_month.items()
+        }
+        all_documents = [
+            document
+            for month in sorted(documents_by_month)
+            for document in documents_by_month[month]
+        ]
+        fingerprints["all"] = self._hash_polling_documents(all_documents)
+        self._set_read_status("ready", "OA 已同步")
+        return fingerprints
+
+    @staticmethod
+    def _polling_fingerprint_projection() -> dict[str, int]:
+        return {
+            "_id": 1,
+            "form_id": 1,
+            "modifiedTime": 1,
+            "createdTime": 1,
+            "data": 1,
+        }
+
+    def _polling_fingerprint_document(self, form_type: str, document: dict[str, Any]) -> dict[str, Any]:
+        data = self._document_data(document)
+        return {
+            "_id": self._document_id(document),
+            "form_type": form_type,
+            "external_id": self._document_external_id(
+                self._settings.payment_request_form_id if form_type == OA_IMPORT_FORM_TYPE_PAYMENT else self._settings.expense_claim_form_id,
+                document,
+            ),
+            "month": self._derive_month(data, document),
+            "status": self._canonical_status_key(data),
+            "modifiedTime": self._datetime_string(document.get("modifiedTime")),
+            "createdTime": self._datetime_string(document.get("createdTime")),
+            "data": data,
+        }
+
+    @staticmethod
+    def _hash_polling_documents(documents: list[dict[str, Any]]) -> str:
+        normalized_payload = json.dumps(
+            sorted(documents, key=lambda item: (str(item.get("form_type")), str(item.get("external_id")), str(item.get("_id")))),
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        )
+        return hashlib.sha256(normalized_payload.encode("utf-8")).hexdigest()
+
     @contextmanager
     def suppress_attachment_invoice_background_parse(self):
         self._attachment_invoice_parse_suppression_depth += 1

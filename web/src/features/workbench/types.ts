@@ -117,6 +117,18 @@ export type WorkbenchOaStatus = {
   message: string;
 };
 
+export type WorkbenchOaSyncStatus = {
+  status: string;
+  message: string;
+  dirtyScopes: string[];
+  changedScopes: string[];
+  lastSeenChangeAt: string | null;
+  lastSyncedAt: string | null;
+  lagSeconds: number | null;
+  failedEventCount: number;
+  version: number | null;
+};
+
 export type WorkbenchData = {
   month: string;
   oaStatus: WorkbenchOaStatus;

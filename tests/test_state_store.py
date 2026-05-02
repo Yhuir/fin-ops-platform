@@ -822,6 +822,17 @@ class StateStoreTests(unittest.TestCase):
             },
         )
 
+    def test_oa_sync_state_persists_locally_across_store_instances(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            store = ApplicationStateStore(data_dir)
+            store.save_oa_sync_state({"poll_fingerprints": {"2026-03": "fingerprint-001", "all": "fingerprint-all"}})
+
+            reloaded_store = ApplicationStateStore(data_dir)
+            state = reloaded_store.load_oa_sync_state()
+
+        self.assertEqual(state["poll_fingerprints"], {"2026-03": "fingerprint-001", "all": "fingerprint-all"})
+
     def test_mongo_oa_attachment_invoice_cache_save_retries_transient_autoreconnect(self) -> None:
         with TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)

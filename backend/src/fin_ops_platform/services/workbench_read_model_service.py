@@ -112,7 +112,9 @@ class WorkbenchReadModelService:
 
     @staticmethod
     def _scope_type_for_key(scope_key: str) -> str:
-        return "all_time" if scope_key == "all" else "month"
+        normalized_scope_key = str(scope_key or "").strip()
+        terminal_scope = normalized_scope_key.rsplit(":", 1)[-1]
+        return "all_time" if terminal_scope == "all" else "month"
 
     @staticmethod
     def _timestamp() -> str:

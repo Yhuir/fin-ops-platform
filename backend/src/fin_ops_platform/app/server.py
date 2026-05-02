@@ -13,9 +13,9 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock, Thread
-from time import monotonic
+from time import monotonic, sleep
 from typing import Callable, Iterable
-from urllib.parse import parse_qs, quote, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 from uuid import uuid4
 
 from pymongo.errors import PyMongoError
@@ -50,6 +50,7 @@ from fin_ops_platform.services.oa_identity_service import (
     OASessionExpiredError,
 )
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError, OARoleSyncService
+from fin_ops_platform.services.oa_sync_service import OASyncService
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
 from fin_ops_platform.services.search_service import MONTH_RE as SEARCH_MONTH_RE, SUPPORTED_SCOPES as SEARCH_SUPPORTED_SCOPES, SUPPORTED_STATUSES as SEARCH_SUPPORTED_STATUSES, SearchService
@@ -162,6 +163,18 @@ class Application:
         self._state_store = ApplicationStateStore(data_dir) if data_dir is not None else None
         self._data_reset_jobs: dict[str, DataResetJob] = {}
         self._data_reset_jobs_lock = Lock()
+        persisted_oa_sync_state = self._state_store.load_oa_sync_state() if self._state_store is not None else {}
+        self._oa_sync_service = OASyncService()
+        persisted_poll_fingerprints = persisted_oa_sync_state.get("poll_fingerprints", {})
+        self._oa_sync_poll_fingerprints = (
+            dict(persisted_poll_fingerprints)
+            if isinstance(persisted_poll_fingerprints, dict)
+            else {}
+        )
+        self._oa_sync_rebuild_lock = Lock()
+        self._oa_sync_rebuild_scheduled = False
+        self._oa_sync_polling_lock = Lock()
+        self._oa_sync_polling_started = False
         self._seed_payload = build_demo_seed()
         self._initialize_runtime_services(self._load_persisted_state())
 
@@ -334,6 +347,8 @@ class Application:
         if method == "GET" and route_path == "/api/workbench":
             month = query.get("month", [None])[0]
             return self._handle_api_workbench(month)
+        if method == "GET" and route_path == "/api/oa-sync/status":
+            return self._handle_api_oa_sync_status()
         if method == "GET" and route_path == "/api/search":
             q = query.get("q", [""])[0]
             scope = query.get("scope", ["all"])[0]
@@ -718,6 +733,9 @@ class Application:
         current_month = month or "all"
         return self._json_response(HTTPStatus.OK, self._build_api_workbench_payload(current_month))
 
+    def _handle_api_oa_sync_status(self) -> Response:
+        return self._json_response(HTTPStatus.OK, self._oa_sync_service.status_payload())
+
     def _handle_api_search(
         self,
         *,
@@ -960,19 +978,194 @@ class Application:
             return
         scope_keys.add("all")
         normalized_scope_keys = sorted(scope_keys)
-        self._search_service.clear_cache()
-        self._invalidate_workbench_read_model_scopes(normalized_scope_keys)
-        if self._state_store is None:
+        self._handle_oa_source_changed(normalized_scope_keys, reason="oa_attachment_invoice_cache")
+
+    def _handle_oa_source_changed(
+        self,
+        scope_keys: list[str],
+        *,
+        reason: str = "oa_changed",
+        schedule_rebuild: bool = True,
+    ) -> None:
+        normalized_scope_keys = self._normalize_oa_sync_scope_keys(scope_keys)
+        if not normalized_scope_keys:
             return
-        self._persist_workbench_read_models_best_effort(
-            snapshot=self._workbench_read_model_service.snapshot(),
-            changed_scope_keys=normalized_scope_keys,
-            operation="invalidate_read_models_after_oa_attachment_invoice_cache",
+        self._oa_sync_service.mark_changed(normalized_scope_keys, reason=reason)
+        if schedule_rebuild:
+            self._schedule_oa_sync_dirty_scope_rebuild()
+
+    def start_oa_sync_polling_worker(self, *, interval_seconds: float | None = None) -> bool:
+        adapter = self._workbench_query_service._oa_adapter
+        poll_sync_fingerprints = getattr(adapter, "poll_sync_fingerprints", None)
+        if not callable(poll_sync_fingerprints):
+            return False
+        with self._oa_sync_polling_lock:
+            if self._oa_sync_polling_started:
+                return True
+            self._oa_sync_polling_started = True
+        resolved_interval = interval_seconds
+        if resolved_interval is None:
+            try:
+                resolved_interval = float(os.getenv("FIN_OPS_OA_POLL_INTERVAL_SECONDS", "5"))
+            except ValueError:
+                resolved_interval = 5
+        Thread(
+            target=self._run_oa_sync_polling_worker,
+            kwargs={"interval_seconds": max(2.0, float(resolved_interval))},
+            daemon=True,
+        ).start()
+        return True
+
+    def _run_oa_sync_polling_worker(self, *, interval_seconds: float) -> None:
+        while True:
+            self._poll_oa_source_once()
+            sleep(interval_seconds)
+
+    def _poll_oa_source_once(self) -> list[str]:
+        adapter = self._workbench_query_service._oa_adapter
+        poll_sync_fingerprints = getattr(adapter, "poll_sync_fingerprints", None)
+        if not callable(poll_sync_fingerprints):
+            return []
+        try:
+            current_fingerprints = poll_sync_fingerprints()
+        except Exception as exc:
+            self._oa_sync_service.mark_error(f"OA 轮询失败：{exc}")
+            return []
+        if not isinstance(current_fingerprints, dict):
+            self._oa_sync_service.mark_error("OA 轮询失败：返回值无效")
+            return []
+
+        normalized_current = {
+            str(scope_key).strip(): str(fingerprint)
+            for scope_key, fingerprint in current_fingerprints.items()
+            if str(scope_key).strip() and str(fingerprint)
+        }
+        previous_fingerprints = {
+            str(scope_key).strip(): str(fingerprint)
+            for scope_key, fingerprint in self._oa_sync_poll_fingerprints.items()
+            if str(scope_key).strip() and str(fingerprint)
+        }
+        is_initial_snapshot = not previous_fingerprints
+        changed_scopes = [] if is_initial_snapshot else sorted(
+            scope_key
+            for scope_key in set(normalized_current).union(previous_fingerprints)
+            if normalized_current.get(scope_key) != previous_fingerprints.get(scope_key)
         )
-        self._schedule_workbench_read_model_persist(
-            changed_scope_keys=normalized_scope_keys,
-            action_name="oa_attachment_invoice_cache",
-        )
+        changed_scopes = self._filter_oa_poll_changed_scopes_for_retention(changed_scopes)
+        self._oa_sync_poll_fingerprints = dict(normalized_current)
+        if self._state_store is not None:
+            self._state_store.save_oa_sync_state(
+                {
+                    "poll_fingerprints": dict(normalized_current),
+                    "last_polled_at": datetime.now().isoformat(),
+                }
+            )
+        if changed_scopes:
+            self._handle_oa_source_changed(changed_scopes, reason="oa_polling")
+        return changed_scopes
+
+    def _filter_oa_poll_changed_scopes_for_retention(self, changed_scopes: list[str]) -> list[str]:
+        normalized_scopes = {
+            str(scope).strip()
+            for scope in list(changed_scopes or [])
+            if str(scope).strip()
+        }
+        if not normalized_scopes:
+            return []
+        cutoff_date = self._parse_oa_retention_date(self._app_settings_service.get_oa_retention_cutoff_date())
+        if cutoff_date is None:
+            return sorted(normalized_scopes)
+        cutoff_month = cutoff_date.strftime("%Y-%m")
+        retained_months = {
+            scope
+            for scope in normalized_scopes
+            if SEARCH_MONTH_RE.match(scope) and scope >= cutoff_month
+        }
+        if retained_months:
+            return sorted({*retained_months, "all"})
+        if any(scope != "all" and SEARCH_MONTH_RE.match(scope) for scope in normalized_scopes):
+            return []
+        return sorted(normalized_scopes)
+
+    def _schedule_oa_sync_dirty_scope_rebuild(self) -> None:
+        with self._oa_sync_rebuild_lock:
+            if self._oa_sync_rebuild_scheduled:
+                return
+            self._oa_sync_rebuild_scheduled = True
+        Thread(target=self._run_scheduled_oa_sync_dirty_scope_rebuild, daemon=True).start()
+
+    def _run_scheduled_oa_sync_dirty_scope_rebuild(self) -> None:
+        try:
+            self._rebuild_oa_sync_dirty_scopes_once()
+        finally:
+            with self._oa_sync_rebuild_lock:
+                self._oa_sync_rebuild_scheduled = False
+            if self._oa_sync_service.status_payload().get("dirty_scopes"):
+                self._schedule_oa_sync_dirty_scope_rebuild()
+
+    def _rebuild_oa_sync_dirty_scopes_once(self) -> None:
+        scope_keys = self._oa_sync_service.take_dirty_scopes()
+        if not scope_keys:
+            return
+        try:
+            self._hot_rebuild_workbench_read_model_scopes(scope_keys)
+        except Exception as exc:
+            self._oa_sync_service.mark_error(f"OA 同步刷新失败：{exc}", scopes=scope_keys)
+            return
+        self._oa_sync_service.mark_synced(scope_keys)
+
+    def _hot_rebuild_workbench_read_model_scopes(self, scope_keys: list[str]) -> None:
+        normalized_scope_keys = self._normalize_oa_sync_scope_keys(scope_keys)
+        if not normalized_scope_keys:
+            return
+        read_model_scope_keys = self._expand_workbench_read_model_scope_keys_for_base_scopes(normalized_scope_keys)
+        self._search_service.clear_cache()
+        invalidate_records_cache = getattr(self._workbench_query_service._oa_adapter, "invalidate_records_cache", None)
+        if callable(invalidate_records_cache):
+            invalidate_records_cache([scope_key for scope_key in normalized_scope_keys if scope_key != "all"])
+        for scope_key in read_model_scope_keys:
+            base_scope_key = self._workbench_read_model_base_scope_key(scope_key)
+            raw_payload = self._build_raw_workbench_payload(base_scope_key)
+            grouped_payload = self._group_row_payload(raw_payload)
+            self._apply_workbench_runtime_metadata(grouped_payload)
+            ignored_rows = self._extract_ignored_rows(raw_payload)
+            if not self._can_persist_workbench_payload(grouped_payload):
+                raise RuntimeError(str(grouped_payload.get("oa_status", {}).get("message") or "OA read model is not ready"))
+            self._workbench_read_model_service.upsert_read_model(
+                scope_key=scope_key,
+                payload=grouped_payload,
+                ignored_rows=ignored_rows,
+            )
+        if self._state_store is not None:
+            self._persist_workbench_read_models_best_effort(
+                snapshot=self._workbench_read_model_service.snapshot_scope_keys(read_model_scope_keys),
+                changed_scope_keys=read_model_scope_keys,
+                operation="oa_sync_hot_rebuild_read_models",
+            )
+
+    def _expand_workbench_read_model_scope_keys_for_base_scopes(self, base_scope_keys: list[str]) -> list[str]:
+        normalized_base_scope_keys = {
+            self._workbench_read_model_base_scope_key(scope_key)
+            for scope_key in list(base_scope_keys or [])
+            if str(scope_key).strip()
+        }
+        expanded = set(normalized_base_scope_keys)
+        for scope_key in self._workbench_read_model_service.list_scope_keys():
+            base_scope_key = self._workbench_read_model_base_scope_key(scope_key)
+            if base_scope_key in normalized_base_scope_keys:
+                expanded.add(scope_key)
+        return sorted(expanded)
+
+    @staticmethod
+    def _normalize_oa_sync_scope_keys(scope_keys: list[str]) -> list[str]:
+        normalized = {
+            str(scope_key).strip()
+            for scope_key in list(scope_keys or [])
+            if str(scope_key).strip()
+        }
+        if any(scope_key != "all" for scope_key in normalized):
+            normalized.add("all")
+        return sorted(normalized)
 
     def _enforce_route_access(
         self,
@@ -3360,7 +3553,8 @@ class Application:
         rebuild_started_at = monotonic()
         for scope_key in scope_keys:
             scope_started_at = monotonic()
-            raw_payload = self._build_raw_workbench_payload(scope_key)
+            base_scope_key = self._workbench_read_model_base_scope_key(scope_key)
+            raw_payload = self._build_raw_workbench_payload(base_scope_key)
             grouped_payload = self._group_row_payload(raw_payload)
             self._apply_workbench_runtime_metadata(grouped_payload)
             ignored_rows = self._extract_ignored_rows(raw_payload)
@@ -3456,8 +3650,9 @@ class Application:
         payload["issue_count"] = run.issue_count
         return payload
 
-    def _get_or_build_workbench_read_model(self, month: str) -> dict[str, object]:
-        cached_read_model = self._workbench_read_model_service.get_read_model(month)
+    def _get_or_build_workbench_read_model(self, month: str, *, visibility_key: str = "global") -> dict[str, object]:
+        read_model_scope_key = self._workbench_read_model_scope_key(month, visibility_key=visibility_key)
+        cached_read_model = self._workbench_read_model_service.get_read_model(read_model_scope_key)
         fallback_read_model: dict[str, object] | None = None
         if isinstance(cached_read_model, dict):
             cached_payload = cached_read_model.get("payload")
@@ -3482,29 +3677,29 @@ class Application:
         if not self._can_persist_workbench_payload(grouped_payload):
             if fallback_read_model is not None:
                 return fallback_read_model
-            self._workbench_read_model_service.delete_read_model(month)
+            self._workbench_read_model_service.delete_read_model(read_model_scope_key)
             return {
-                "scope_key": month,
+                "scope_key": read_model_scope_key,
                 "scope_type": "all_time" if month == "all" else "month",
                 "generated_at": datetime.now().isoformat(),
                 "payload": grouped_payload,
                 "ignored_rows": ignored_rows,
             }
         read_model = self._workbench_read_model_service.upsert_read_model(
-            scope_key=month,
+            scope_key=read_model_scope_key,
             payload=grouped_payload,
             ignored_rows=ignored_rows,
         )
         if self._state_store is not None:
             self._persist_workbench_read_models_best_effort(
-                snapshot=self._workbench_read_model_service.snapshot_scope_keys([month]),
-                changed_scope_keys=[month],
+                snapshot=self._workbench_read_model_service.snapshot_scope_keys([read_model_scope_key]),
+                changed_scope_keys=[read_model_scope_key],
                 operation="get_or_build_read_model",
             )
         return read_model
 
-    def _build_api_workbench_payload(self, month: str) -> dict[str, object]:
-        read_model = self._get_or_build_workbench_read_model(month)
+    def _build_api_workbench_payload(self, month: str, *, visibility_key: str = "global") -> dict[str, object]:
+        read_model = self._get_or_build_workbench_read_model(month, visibility_key=visibility_key)
         payload = read_model.get("payload")
         return self._apply_oa_retention_to_grouped_payload(payload if isinstance(payload, dict) else {})
 
@@ -3519,10 +3714,26 @@ class Application:
             return OAAttachmentInvoiceService.PARSER_VERSION
         return ""
 
-    def _build_api_workbench_ignored_rows_payload(self, month: str) -> list[dict[str, object]]:
-        read_model = self._get_or_build_workbench_read_model(month)
+    def _build_api_workbench_ignored_rows_payload(self, month: str, *, visibility_key: str = "global") -> list[dict[str, object]]:
+        read_model = self._get_or_build_workbench_read_model(month, visibility_key=visibility_key)
         ignored_rows = read_model.get("ignored_rows")
         return self._serialize_value(ignored_rows if isinstance(ignored_rows, list) else [])
+
+    @staticmethod
+    def _workbench_read_model_scope_key(month: str, *, visibility_key: str = "global") -> str:
+        normalized_month = str(month or "").strip() or "all"
+        normalized_visibility = str(visibility_key or "global").strip() or "global"
+        if normalized_visibility == "global":
+            return normalized_month
+        return f"visibility:{normalized_visibility}:{normalized_month}"
+
+    @staticmethod
+    def _workbench_read_model_base_scope_key(scope_key: str) -> str:
+        normalized_scope_key = str(scope_key or "").strip()
+        if not normalized_scope_key.startswith("visibility:"):
+            return normalized_scope_key or "all"
+        terminal_scope = normalized_scope_key.rsplit(":", 1)[-1].strip()
+        return terminal_scope or "all"
 
     def _build_raw_workbench_payload(self, month: str) -> dict[str, object]:
         if self._live_workbench_service.has_rows_for_month(month):
@@ -4099,13 +4310,16 @@ class Application:
         for scope_key in list(snapshot.get("read_models", {}).keys()):
             self._workbench_read_model_service.delete_read_model(str(scope_key))
 
-    def _invalidate_workbench_read_model_scopes(self, scope_keys: list[str]) -> None:
-        for scope_key in {
+    def _invalidate_workbench_read_model_scopes(self, scope_keys: list[str]) -> list[str]:
+        normalized_scope_keys = {
             str(scope_key).strip()
             for scope_key in list(scope_keys or [])
             if str(scope_key).strip()
-        }:
+        }
+        expanded_scope_keys = self._expand_workbench_read_model_scope_keys_for_base_scopes(list(normalized_scope_keys))
+        for scope_key in expanded_scope_keys:
             self._workbench_read_model_service.delete_read_model(scope_key)
+        return expanded_scope_keys
 
     def _scope_keys_for_row_ids(
         self,
@@ -4706,6 +4920,8 @@ def build_application(*, data_dir: Path | None = None) -> Application:
 
 def run_http_server(host: str, port: int, app: Application | None = None) -> None:
     application = app or build_application()
+    if os.getenv("FIN_OPS_OA_POLLING_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}:
+        application.start_oa_sync_polling_worker()
     handler_factory = _build_handler_factory(application)
     server = ThreadingHTTPServer((host, port), handler_factory)
     print(f"Serving fin-ops-platform foundation API on http://{host}:{port}")

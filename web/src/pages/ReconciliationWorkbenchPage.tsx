@@ -19,6 +19,7 @@ import {
   cancelWorkbenchException,
   confirmWorkbenchLink,
   fetchIgnoredWorkbenchRows,
+  fetchWorkbenchOaSyncStatus,
   fetchWorkbenchRowDetail,
   fetchWorkbenchSettings,
   fetchWorkbenchWithProgress,
@@ -42,6 +43,7 @@ import type {
   IgnoredWorkbenchData,
   WorkbenchCandidateGroup,
   WorkbenchData,
+  WorkbenchOaSyncStatus,
   WorkbenchRecord,
   WorkbenchSettings,
 } from "../features/workbench/types";
@@ -118,6 +120,8 @@ function normalizeSearchKeyword(value: string) {
 
 const READONLY_ACTION_MESSAGE = "当前账号仅支持查看和导出，不能执行写操作。";
 const WORKBENCH_VIEW_MONTH = "all";
+const OA_SYNC_POLL_INTERVAL_MS = 3_000;
+const OA_SYNC_REFRESH_DEBOUNCE_MS = 120;
 
 export default function ReconciliationWorkbenchPage() {
   const navigate = useNavigate();
@@ -179,9 +183,12 @@ export default function ReconciliationWorkbenchPage() {
   const [pairedDisplayState, setPairedDisplayState] = useState(createEmptyWorkbenchZoneDisplayState);
   const [openDisplayState, setOpenDisplayState] = useState(createEmptyWorkbenchZoneDisplayState);
   const columnLayoutSaveRequestIdRef = useRef(0);
+  const oaSyncRefreshTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const previousOaSyncStatusRef = useRef<WorkbenchOaSyncStatus | null>(null);
   const deferredPairedDisplayState = useDeferredValue(pairedDisplayState);
   const deferredOpenDisplayState = useDeferredValue(openDisplayState);
   const routeState = location.state as WorkbenchRouteState;
+  const [oaSyncShellStatus, setOaSyncShellStatus] = useState<{ level: "ok" | "pending" | "error"; reason: string } | null>(null);
 
   const updateZoneDisplayState = useCallback((
     zoneId: "paired" | "open",
@@ -395,6 +402,48 @@ export default function ReconciliationWorkbenchPage() {
     void loadWorkbenchData(month, undefined, { background: true, includeAuxiliary: false });
   }, []);
 
+  const scheduleOaSyncWorkbenchRefresh = useCallback(() => {
+    if (oaSyncRefreshTimeoutRef.current !== null) {
+      window.clearTimeout(oaSyncRefreshTimeoutRef.current);
+    }
+    oaSyncRefreshTimeoutRef.current = window.setTimeout(() => {
+      oaSyncRefreshTimeoutRef.current = null;
+      refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
+    }, OA_SYNC_REFRESH_DEBOUNCE_MS);
+  }, [refreshWorkbenchDataInBackground]);
+
+  const oaSyncScopesAffectWorkbench = useCallback((scopes: string[]) => {
+    return scopes.includes("all") || scopes.includes(WORKBENCH_VIEW_MONTH) || scopes.includes(currentMonth);
+  }, [currentMonth]);
+
+  const applyOaSyncStatus = useCallback((status: WorkbenchOaSyncStatus) => {
+    const previousStatus = previousOaSyncStatusRef.current;
+    const message = status.message || (status.status === "refreshing" ? "OA 正在同步" : "OA 已同步");
+
+    if (status.status === "refreshing") {
+      setOaSyncShellStatus({ level: "pending", reason: message });
+    } else if (status.status === "error") {
+      setOaSyncShellStatus({ level: "error", reason: message || "OA 同步失败" });
+    } else {
+      setOaSyncShellStatus({ level: "ok", reason: message });
+    }
+
+    if (previousStatus && status.status !== "refreshing") {
+      const versionChanged = status.version !== null && status.version !== previousStatus.version;
+      const lastSyncedAtChanged = status.lastSyncedAt !== previousStatus.lastSyncedAt;
+      const affectedScopes = status.changedScopes.length > 0
+        ? status.changedScopes
+        : status.dirtyScopes.length > 0
+          ? status.dirtyScopes
+          : previousStatus.dirtyScopes;
+      if ((status.changedScopes.length > 0 || versionChanged || lastSyncedAtChanged) && oaSyncScopesAffectWorkbench(affectedScopes)) {
+        scheduleOaSyncWorkbenchRefresh();
+      }
+    }
+
+    previousOaSyncStatusRef.current = status;
+  }, [oaSyncScopesAffectWorkbench, scheduleOaSyncWorkbenchRefresh]);
+
   const applyLocalConfirmLink = useCallback((rowIds: string[], caseId?: string) => {
     setWorkbenchData((current) => (current ? updateWorkbenchAfterConfirmLink(current, rowIds, caseId) : current));
   }, []);
@@ -504,6 +553,38 @@ export default function ReconciliationWorkbenchPage() {
   }, []);
 
   useEffect(() => {
+    let isActive = true;
+    let pollController: AbortController | null = null;
+
+    const pollOaSyncStatus = () => {
+      pollController?.abort();
+      const controller = new AbortController();
+      pollController = controller;
+      void fetchWorkbenchOaSyncStatus(controller.signal)
+        .then((status) => {
+          if (!isActive || controller.signal.aborted) {
+            return;
+          }
+          applyOaSyncStatus(status);
+        })
+        .catch(() => undefined);
+    };
+
+    pollOaSyncStatus();
+    const intervalId = window.setInterval(pollOaSyncStatus, OA_SYNC_POLL_INTERVAL_MS);
+
+    return () => {
+      isActive = false;
+      window.clearInterval(intervalId);
+      pollController?.abort();
+      if (oaSyncRefreshTimeoutRef.current !== null) {
+        window.clearTimeout(oaSyncRefreshTimeoutRef.current);
+        oaSyncRefreshTimeoutRef.current = null;
+      }
+    };
+  }, [applyOaSyncStatus]);
+
+  useEffect(() => {
     document.body.classList.toggle("workbench-focus-mode", expandedZoneId !== null);
     return () => {
       document.body.classList.remove("workbench-focus-mode");
@@ -517,6 +598,14 @@ export default function ReconciliationWorkbenchPage() {
     }
     if (lastActionMessage) {
       setWorkbenchStatus({ level: "pending", reason: lastActionMessage });
+      return;
+    }
+    if (workbenchData?.oaStatus?.code === "error" && workbenchData.oaStatus.message) {
+      setWorkbenchStatus({ level: "error", reason: workbenchData.oaStatus.message });
+      return;
+    }
+    if (oaSyncShellStatus) {
+      setWorkbenchStatus(oaSyncShellStatus);
       return;
     }
     if (isLoading || isRefreshing) {
@@ -541,6 +630,7 @@ export default function ReconciliationWorkbenchPage() {
     loadError,
     loadProgress.label,
     loadProgress.percent,
+    oaSyncShellStatus,
     setWorkbenchStatus,
     workbenchData?.oaStatus?.code,
     workbenchData?.oaStatus?.message,

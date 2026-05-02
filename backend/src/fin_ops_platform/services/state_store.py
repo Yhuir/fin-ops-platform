@@ -46,6 +46,7 @@ WORKBENCH_PAIR_RELATIONS_COLLECTION = "workbench_pair_relations"
 WORKBENCH_READ_MODELS_META_COLLECTION = "workbench_read_models_meta"
 WORKBENCH_READ_MODELS_COLLECTION = "workbench_read_models"
 OA_ATTACHMENT_INVOICE_CACHE_COLLECTION = "oa_attachment_invoice_cache"
+OA_SYNC_STATE_COLLECTION = "oa_sync_state"
 APP_SETTINGS_COLLECTION = "app_settings"
 TAX_CERTIFIED_IMPORTS_META_COLLECTION = "tax_certified_imports_meta"
 TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION = "tax_certified_import_sessions"
@@ -149,6 +150,7 @@ class ApplicationStateStore:
         self._import_file_root = root / "import_files"
         self._app_settings_path = root / "app_settings.json"
         self._oa_attachment_invoice_cache_path = root / "oa_attachment_invoice_cache.json"
+        self._oa_sync_state_path = root / "oa_sync_state.pkl"
         self._tax_certified_imports_path = root / "tax_certified_imports.pkl"
         self._data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -200,6 +202,7 @@ class ApplicationStateStore:
                 "workbench_read_models_meta": self._mongo_database[WORKBENCH_READ_MODELS_META_COLLECTION],
                 "workbench_read_models": self._mongo_database[WORKBENCH_READ_MODELS_COLLECTION],
                 "oa_attachment_invoice_cache": self._mongo_database[OA_ATTACHMENT_INVOICE_CACHE_COLLECTION],
+                "oa_sync_state": self._mongo_database[OA_SYNC_STATE_COLLECTION],
                 "app_settings": self._mongo_database[APP_SETTINGS_COLLECTION],
                 "tax_certified_imports_meta": self._mongo_database[TAX_CERTIFIED_IMPORTS_META_COLLECTION],
                 "tax_certified_import_sessions": self._mongo_database[TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION],
@@ -393,6 +396,45 @@ class ApplicationStateStore:
             json.dumps(cache_payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+    def load_oa_sync_state(self) -> dict[str, Any]:
+        if self._mongo_database is not None:
+            document = self._run_mongo_operation(
+                lambda: self._mongo_detailed_collections["oa_sync_state"].find_one({"_id": STATE_DOCUMENT_ID})
+            )
+            payload = self._load_binary_payload(document)
+            return dict(payload) if isinstance(payload, dict) else {}
+
+        if not self._oa_sync_state_path.exists():
+            return {}
+        try:
+            with self._oa_sync_state_path.open("rb") as handle:
+                loaded = pickle.load(handle)  # noqa: S301 - local app state file.
+        except (FileNotFoundError, pickle.PickleError, EOFError):
+            return {}
+        return dict(loaded) if isinstance(loaded, dict) else {}
+
+    def save_oa_sync_state(self, snapshot: dict[str, Any]) -> None:
+        normalized_snapshot = dict(snapshot if isinstance(snapshot, dict) else {})
+        if self._mongo_database is not None:
+            self._run_mongo_operation(
+                lambda: self._mongo_detailed_collections["oa_sync_state"].update_one(
+                    {"_id": STATE_DOCUMENT_ID},
+                    {
+                        "$set": {
+                            "payload": Binary(pickle.dumps(normalized_snapshot)),
+                            "updated_at": datetime.now(UTC),
+                        }
+                    },
+                    upsert=True,
+                )
+            )
+            return
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        with self._oa_sync_state_path.open("wb") as handle:
+            pickle.dump(normalized_snapshot, handle)
 
     def load_tax_certified_imports(self) -> dict[str, Any]:
         if self._mongo_database is not None:
@@ -732,6 +774,7 @@ class ApplicationStateStore:
                         "workbench_read_models_meta": WORKBENCH_READ_MODELS_META_COLLECTION,
                         "workbench_read_models": WORKBENCH_READ_MODELS_COLLECTION,
                         "oa_attachment_invoice_cache": OA_ATTACHMENT_INVOICE_CACHE_COLLECTION,
+                        "oa_sync_state": OA_SYNC_STATE_COLLECTION,
                         "tax_certified_imports_meta": TAX_CERTIFIED_IMPORTS_META_COLLECTION,
                         "tax_certified_import_sessions": TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION,
                         "tax_certified_import_batches": TAX_CERTIFIED_IMPORT_BATCHES_COLLECTION,

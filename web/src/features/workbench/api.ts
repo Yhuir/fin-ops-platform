@@ -17,6 +17,7 @@ import type {
   WorkbenchOaStatus,
   WorkbenchColumnLayouts,
   WorkbenchOaImportOption,
+  WorkbenchOaSyncStatus,
 } from "./types";
 
 export type WorkbenchBootstrapProgress = {
@@ -95,6 +96,24 @@ type ApiWorkbenchPayload = {
   open: {
     groups: ApiWorkbenchGroup[];
   };
+};
+
+type ApiWorkbenchOaSyncStatus = {
+  status?: string;
+  message?: string;
+  dirty_scopes?: unknown[];
+  dirtyScopes?: unknown[];
+  changed_scopes?: unknown[];
+  changedScopes?: unknown[];
+  last_seen_change_at?: string | null;
+  lastSeenChangeAt?: string | null;
+  last_synced_at?: string | null;
+  lastSyncedAt?: string | null;
+  lag_seconds?: number | null;
+  lagSeconds?: number | null;
+  failed_event_count?: number | null;
+  failedEventCount?: number | null;
+  version?: number | null;
 };
 
 type ApiIgnoredWorkbenchPayload = {
@@ -769,6 +788,36 @@ async function requestJsonWithByteProgress<T>(
 
 export async function fetchWorkbench(month: string, signal?: AbortSignal): Promise<WorkbenchData> {
   return fetchWorkbenchWithProgress(month, signal);
+}
+
+function cleanOaSyncScopeList(value: unknown[] | undefined) {
+  return Array.isArray(value)
+    ? value.map((item) => String(item).trim()).filter(Boolean)
+    : [];
+}
+
+export async function fetchWorkbenchOaSyncStatus(signal?: AbortSignal): Promise<WorkbenchOaSyncStatus> {
+  const payload = await requestJson<ApiWorkbenchOaSyncStatus>("/api/oa-sync/status", { method: "GET", signal });
+  const status = String(payload.status ?? "synced").trim() || "synced";
+  return {
+    status,
+    message: String(payload.message ?? (status === "refreshing" ? "OA 正在同步" : "OA 已同步")).trim(),
+    dirtyScopes: cleanOaSyncScopeList(payload.dirtyScopes ?? payload.dirty_scopes),
+    changedScopes: cleanOaSyncScopeList(payload.changedScopes ?? payload.changed_scopes),
+    lastSeenChangeAt: payload.lastSeenChangeAt ?? payload.last_seen_change_at ?? null,
+    lastSyncedAt: payload.lastSyncedAt ?? payload.last_synced_at ?? null,
+    lagSeconds: typeof payload.lagSeconds === "number"
+      ? payload.lagSeconds
+      : typeof payload.lag_seconds === "number"
+        ? payload.lag_seconds
+        : null,
+    failedEventCount: typeof payload.failedEventCount === "number"
+      ? payload.failedEventCount
+      : typeof payload.failed_event_count === "number"
+        ? payload.failed_event_count
+        : 0,
+    version: typeof payload.version === "number" ? payload.version : null,
+  };
 }
 
 export async function fetchWorkbenchWithProgress(

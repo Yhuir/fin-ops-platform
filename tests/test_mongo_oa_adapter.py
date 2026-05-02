@@ -115,6 +115,24 @@ class QueryRecordingCollection:
         return []
 
 
+class MutableDocumentCollection:
+    def __init__(self, documents: list[dict]) -> None:
+        self.documents = documents
+        self.queries: list[dict] = []
+        self.projections: list[dict | None] = []
+
+    def find(self, query: dict, projection: dict | None = None) -> list[dict]:
+        self.queries.append(query)
+        self.projections.append(dict(projection) if isinstance(projection, dict) else None)
+        form_query = query.get("form_id")
+        allowed_form_ids = set(form_query.get("$in", [])) if isinstance(form_query, dict) else {form_query}
+        return [
+            dict(document)
+            for document in self.documents
+            if document.get("form_id") in allowed_form_ids
+        ]
+
+
 class FlakyMonthCollection:
     def __init__(self) -> None:
         self.call_count = 0
@@ -1231,6 +1249,100 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual([record.id for record in first_records], [record.id for record in second_records])
         self.assertEqual(adapter.form_load_calls.count(("2", "2026-03")), 1)
         self.assertEqual(adapter.form_load_calls.count(("32", "2026-03")), 1)
+
+    def test_invalidate_records_cache_clears_only_target_month_and_all_snapshot(self) -> None:
+        adapter = CountingStubMongoOAAdapter(
+            form_documents={
+                "2": [
+                    {
+                        "_id": "payment-doc-mar",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2026-03-08",
+                            "userName": "胡瑢",
+                            "fromTitle": "支付申请",
+                            "amount": "100",
+                            "beneficiary": "供应商 A",
+                            "cause": "三月付款",
+                            "flowRequestId": "2047",
+                        },
+                    },
+                    {
+                        "_id": "payment-doc-apr",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2026-04-08",
+                            "userName": "胡瑢",
+                            "fromTitle": "支付申请",
+                            "amount": "200",
+                            "beneficiary": "供应商 B",
+                            "cause": "四月付款",
+                            "flowRequestId": "2048",
+                        },
+                    },
+                ],
+                "32": [],
+            },
+            project_documents=[],
+            settings=MongoOASettings(host="127.0.0.1", database="form_data_db", cache_ttl_seconds=30),
+        )
+
+        adapter.list_application_records("2026-03")
+        adapter.list_application_records("2026-04")
+        adapter.list_all_application_records()
+        adapter.invalidate_records_cache(["2026-03"])
+        adapter.list_application_records("2026-03")
+        adapter.list_application_records("2026-04")
+        adapter.list_all_application_records()
+
+        self.assertEqual(adapter.form_load_calls.count(("2", "2026-03")), 2)
+        self.assertEqual(adapter.form_load_calls.count(("2", "2026-04")), 1)
+        self.assertEqual(adapter.form_load_calls.count(("2", None)), 2)
+
+    def test_poll_sync_fingerprints_hashes_enabled_oa_documents_by_month_and_all(self) -> None:
+        collection = MutableDocumentCollection(
+            [
+                {
+                    "_id": "pay-1",
+                    "form_id": "2",
+                    "modifiedTime": "2026-03-18T10:00:00",
+                    "data": {
+                        "applicationDate": "2026-03-18",
+                        "amount": "100",
+                        "beneficiary": "供应商 A",
+                        "cause": "三月付款",
+                        "flowRequestId": "1001",
+                        "status": "已完成",
+                    },
+                },
+                {
+                    "_id": "exp-1",
+                    "form_id": "32",
+                    "modifiedTime": "2026-04-02T10:00:00",
+                    "data": {
+                        "ApplicationDate": "2026-04-02",
+                        "Amount": "200",
+                        "Reimbursement Personnel": "张三",
+                        "flowRequestId": "2001",
+                        "status": "已完成",
+                    },
+                },
+            ]
+        )
+        adapter = QueryRecordingMongoOAAdapter(collection)
+
+        first = adapter.poll_sync_fingerprints()
+        collection.documents[0]["data"]["amount"] = "101"
+        second = adapter.poll_sync_fingerprints()
+
+        self.assertCountEqual(first.keys(), ["2026-03", "2026-04", "all"])
+        self.assertEqual(first["2026-04"], second["2026-04"])
+        self.assertNotEqual(first["2026-03"], second["2026-03"])
+        self.assertNotEqual(first["all"], second["all"])
+        self.assertEqual(len(collection.projections), 4)
+        for projection in collection.projections:
+            self.assertIn("data", projection)
+            self.assertIn("modifiedTime", projection)
 
     def test_load_form_documents_pushes_month_filter_into_query(self) -> None:
         collection = QueryRecordingCollection()

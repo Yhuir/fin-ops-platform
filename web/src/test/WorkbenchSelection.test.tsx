@@ -1,10 +1,15 @@
 import { screen, within } from "@testing-library/react";
 import { waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { vi } from "vitest";
+import { afterEach, vi } from "vitest";
 
 import { installMockApiFetch } from "./apiMock";
 import { renderAppAt, renderWorkbenchPage } from "./renderHelpers";
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 async function openWorkbenchImportMenu(user: ReturnType<typeof userEvent.setup>) {
   const trigger = await screen.findByRole("button", { name: "导入中心" });
@@ -891,6 +896,83 @@ describe("Workbench row selection and detail modal", () => {
     expect(statusIndicator).toHaveClass("error");
     expect(statusIndicator.textContent).toBe("");
     expect(document.querySelector(".global-status-text")).toBeNull();
+  });
+
+  test("OA sync polling marks refreshing status and coalesces synced refreshes", async () => {
+    const fetchMock = installMockApiFetch({
+      workbenchOaSyncStatuses: [
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          last_seen_change_at: null,
+          last_synced_at: "2026-04-01T11:59:00+08:00",
+          lag_seconds: 0,
+          failed_event_count: 0,
+          version: 1,
+        },
+        {
+          status: "refreshing",
+          message: "OA 正在同步，关联台稍后更新",
+          dirty_scopes: ["2026-03"],
+          last_seen_change_at: "2026-04-01T12:00:00+08:00",
+          last_synced_at: "2026-04-01T11:59:00+08:00",
+          lag_seconds: 60,
+          failed_event_count: 0,
+          version: 2,
+        },
+        {
+          status: "refreshing",
+          message: "OA 正在同步，关联台稍后更新",
+          dirty_scopes: ["2026-03"],
+          last_seen_change_at: "2026-04-01T12:00:00+08:00",
+          last_synced_at: "2026-04-01T11:59:00+08:00",
+          lag_seconds: 61,
+          failed_event_count: 0,
+          version: 2,
+        },
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          changed_scopes: ["all"],
+          last_seen_change_at: "2026-04-01T12:00:00+08:00",
+          last_synced_at: "2026-04-01T12:00:00+08:00",
+          lag_seconds: 0,
+          failed_event_count: 0,
+          version: 3,
+        },
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          changed_scopes: ["all"],
+          last_seen_change_at: "2026-04-01T12:00:01+08:00",
+          last_synced_at: "2026-04-01T12:00:01+08:00",
+          lag_seconds: 0,
+          failed_event_count: 0,
+          version: 4,
+        },
+      ],
+    });
+    renderAppAt("/");
+
+    await screen.findByRole("status", { name: "OA 已同步" });
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/oa-sync/events"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/oa-sync/status"))).toBe(true);
+
+    await waitFor(() => {
+      const refreshingIndicator = screen.getByRole("status", { name: "OA 正在同步，关联台稍后更新" });
+      expect(refreshingIndicator).toHaveClass("pending");
+    }, { timeout: 5_000 });
+
+    const initialWorkbenchFetchCount = fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/workbench?")).length;
+
+    await waitFor(() => {
+      const workbenchFetchCount = fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/workbench?")).length;
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/oa-sync/status")).length).toBeGreaterThan(2);
+      expect(workbenchFetchCount).toBe(initialWorkbenchFetchCount + 1);
+    }, { timeout: 8_000 });
   });
 
   test("read-only export users can search and view details but cannot see write actions", async () => {
