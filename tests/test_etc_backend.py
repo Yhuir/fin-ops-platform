@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from io import BytesIO
 import json
@@ -402,10 +403,18 @@ class EtcServiceTests(unittest.TestCase):
         self.assertTrue(all(Path(upload).suffix == ".pdf" for upload in fake_oa.uploads))
         self.assertEqual(after_draft[0].status, EtcInvoiceStatus.UNSUBMITTED)
         payload = fake_oa.draft_payloads[0]["payload"]
+        data = payload["data"]
         self.assertTrue(payload["isDraft"])
         self.assertEqual(payload["formId"], 2)
-        self.assertIn("ETC批量提交", json.dumps(payload, ensure_ascii=False))
-        self.assertIn(f"etc_batch_id={draft.etc_batch_id}", json.dumps(payload, ensure_ascii=False))
+        self.assertEqual(data["applicationDate"], date.today().isoformat())
+        self.assertEqual(data["paymentProof"], "车辆使用费（汽油、过路、保险、维修、税费等）")
+        self.assertEqual(data["projectName"], "6486ca70cd6cae5d4e2b0b48")
+        self.assertEqual(data["cause"], f"ETC批量提交\netc_batch_id={draft.etc_batch_id}")
+        uploaded_resources = json.loads(data["resources"])
+        self.assertEqual(uploaded_resources, [
+            {"name": "ETC001.pdf", "url": "oa-file-1"},
+            {"name": "ETC002.pdf", "url": "oa-file-2"},
+        ])
         self.assertEqual(confirmed.status, "submitted_confirmed")
         self.assertEqual(revoked["updated"], 2)
         self.assertEqual(not_submitted.status, "not_submitted")
