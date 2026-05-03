@@ -48,7 +48,7 @@ describe("Workbench pane display model", () => {
     expect(buildWorkbenchDisplayGroups(groups, createEmptyWorkbenchZoneDisplayState())).toEqual(groups);
   });
 
-  test("filters current pane rows but keeps related rows from the same group in sibling panes", () => {
+  test("keeps the matched candidate group visible across panes while searching by one pane", () => {
     const groups: WorkbenchCandidateGroup[] = [
       {
         id: "group-1",
@@ -74,11 +74,11 @@ describe("Workbench pane display model", () => {
     const paneRows = buildWorkbenchPaneRows(displayGroups);
 
     expect(displayGroups).toHaveLength(1);
-    expect(displayGroups[0].rows.oa).toHaveLength(1);
+    expect(displayGroups[0].rows.oa).toHaveLength(2);
     expect(displayGroups[0].rows.oa[0]?.id).toBe("oa-1");
     expect(displayGroups[0].rows.bank).toHaveLength(1);
     expect(displayGroups[0].rows.invoice).toHaveLength(1);
-    expect(paneRows.oa.map((row) => row.id)).toEqual(["oa-1"]);
+    expect(paneRows.oa.map((row) => row.id)).toEqual(["oa-1", "oa-2"]);
     expect(paneRows.bank.map((row) => row.id)).toEqual(["bank-1"]);
     expect(paneRows.invoice.map((row) => row.id)).toEqual(["invoice-1"]);
   });
@@ -248,7 +248,7 @@ describe("Workbench pane display model", () => {
     expect(within(openOaPane).queryByRole("searchbox", { name: "搜索 OA" })).not.toBeInTheDocument();
     expect(within(openOaPane).getByRole("button", { name: "搜索 OA，当前关键词 陈涛" })).toHaveTextContent("陈涛");
 
-    fireEvent.click(within(openBankPane).getByRole("button", { name: "搜索 银行流水" }));
+    fireEvent.click(within(openBankPane).getByRole("button", { name: "搜索 银行流水，当前关键词 陈涛" }));
     expect(within(openBankPane).getByRole("searchbox", { name: "搜索 银行流水" })).toBeInTheDocument();
     expect(within(openOaPane).getByRole("button", { name: "搜索 OA，当前关键词 陈涛" })).toHaveTextContent("陈涛");
 

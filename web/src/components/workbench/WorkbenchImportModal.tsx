@@ -5,12 +5,14 @@ import {
   previewImportFiles,
   resolveImportApiErrorMessage,
 } from "../../features/imports/api";
+import { confirmEtcImportSession, previewEtcZipFiles } from "../../features/etc/api";
 import type {
   ImportBatchType,
   ImportFilePreview,
   ImportFilePreviewOverride,
   ImportSessionPayload,
 } from "../../features/imports/types";
+import type { EtcImportItem, EtcImportPreviewResult } from "../../features/etc/types";
 import type { BankAccountMapping } from "../../features/workbench/types";
 
 export type WorkbenchImportMode = "bank_transaction" | "invoice" | "etc_invoice";
@@ -46,6 +48,14 @@ const STATUS_LABELS: Record<string, string> = {
   confirmed: "已确认导入",
   skipped: "已跳过",
   reverted: "已撤销",
+};
+
+const ETC_IMPORT_STATUS_LABELS: Record<string, string> = {
+  imported: "新增",
+  created: "新增",
+  duplicate_skipped: "重复跳过",
+  attachment_completed: "附件补齐",
+  failed: "异常",
 };
 
 function buildSelectedFileKey(file: File) {
@@ -90,6 +100,14 @@ function isExcelFile(file: File) {
   return normalizedName.endsWith(".xls") || normalizedName.endsWith(".xlsx");
 }
 
+function isZipFile(file: File) {
+  return file.name.toLowerCase().endsWith(".zip");
+}
+
+function etcStatusLabel(status: string) {
+  return ETC_IMPORT_STATUS_LABELS[status] ?? status;
+}
+
 function formatSelectedBankAccountLabel(file: Pick<ImportFilePreview, "selectedBankName" | "selectedBankLast4">) {
   return `${file.selectedBankName ?? ""} ${file.selectedBankLast4 ?? ""}`.trim();
 }
@@ -104,6 +122,8 @@ export default function WorkbenchImportModal({
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [fileSelections, setFileSelections] = useState<FileSelectionState>({});
   const [previewPayload, setPreviewPayload] = useState<ImportSessionPayload | null>(null);
+  const [etcPreviewPayload, setEtcPreviewPayload] = useState<EtcImportPreviewResult | null>(null);
+  const [etcImported, setEtcImported] = useState(false);
   const [conflictDialogOpen, setConflictDialogOpen] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
   const [isPreviewing, setIsPreviewing] = useState(false);
@@ -111,13 +131,16 @@ export default function WorkbenchImportModal({
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const title = mode === "bank_transaction" ? "银行流水导入" : mode === "etc_invoice" ? "ETC发票导入" : "发票导入";
-  const uploadLabel = mode === "bank_transaction" ? "上传银行流水文件" : mode === "etc_invoice" ? "上传ETC发票文件" : "上传发票文件";
+  const uploadLabel = mode === "bank_transaction" ? "上传银行流水文件" : mode === "etc_invoice" ? "上传ETC zip" : "上传发票文件";
   const canUseBankImport = mode !== "bank_transaction" || bankOptions.length > 0;
   const bankOptionMap = useMemo(
     () => new Map(bankOptions.map((item) => [item.id, item])),
     [bankOptions],
   );
   const allFilesConfigured = selectedFiles.length > 0 && selectedFiles.every((file) => {
+    if (mode === "etc_invoice") {
+      return isZipFile(file);
+    }
     const selection = fileSelections[buildSelectedFileKey(file)];
     return mode === "bank_transaction" ? Boolean(selection?.bankMappingId) : Boolean(selection?.invoiceBatchType);
   });
@@ -127,6 +150,7 @@ export default function WorkbenchImportModal({
     [previewPayload],
   );
   const canConfirm = confirmableFileIds.length > 0 && !isPreviewing && !isConfirming;
+  const canConfirmEtc = Boolean(etcPreviewPayload?.sessionId) && !etcImported && !isPreviewing && !isConfirming;
   const conflictingPreviewFiles = useMemo(
     () => previewPayload?.files.filter((file) => canConfirmFile(file) && file.bankSelectionConflict) ?? [],
     [previewPayload],
@@ -141,23 +165,28 @@ export default function WorkbenchImportModal({
   function updateFiles(nextFiles: File[]) {
     setSelectedFiles((current) => mergeSelectedFiles(current, nextFiles));
     setPreviewPayload(null);
+    setEtcPreviewPayload(null);
+    setEtcImported(false);
     setConflictDialogOpen(false);
     setFeedbackMessage(null);
     setErrorMessage(null);
   }
 
   function applyDroppedFiles(files: File[]) {
-    const validFiles = files.filter(isExcelFile);
-    const invalidFiles = files.filter((file) => !isExcelFile(file));
+    const isSupportedFile = mode === "etc_invoice" ? isZipFile : isExcelFile;
+    const validFiles = files.filter(isSupportedFile);
+    const invalidFiles = files.filter((file) => !isSupportedFile(file));
     if (validFiles.length > 0) {
       updateFiles(validFiles);
     } else if (invalidFiles.length > 0) {
       setPreviewPayload(null);
+      setEtcPreviewPayload(null);
+      setEtcImported(false);
       setConflictDialogOpen(false);
       setFeedbackMessage(null);
     }
     if (invalidFiles.length > 0) {
-      setErrorMessage("仅支持 .xls/.xlsx");
+      setErrorMessage(mode === "etc_invoice" ? "仅支持 .zip" : "仅支持 .xls/.xlsx");
     }
   }
 
@@ -228,6 +257,8 @@ export default function WorkbenchImportModal({
       return next;
     });
     setPreviewPayload(null);
+    setEtcPreviewPayload(null);
+    setEtcImported(false);
     setConflictDialogOpen(false);
     setFeedbackMessage(null);
     setErrorMessage(null);
@@ -259,6 +290,31 @@ export default function WorkbenchImportModal({
   }
 
   async function handlePreview() {
+    if (mode === "etc_invoice") {
+      if (selectedFiles.length === 0) {
+        setErrorMessage("请先选择至少一个 ETC zip 文件。");
+        return;
+      }
+      if (!selectedFiles.every(isZipFile)) {
+        setErrorMessage("ETC发票导入仅支持 zip 文件。");
+        return;
+      }
+      setIsPreviewing(true);
+      setErrorMessage(null);
+      setFeedbackMessage(null);
+      try {
+        const payload = await previewEtcZipFiles(selectedFiles);
+        setEtcPreviewPayload(payload);
+        setEtcImported(false);
+        setPreviewPayload(null);
+        setFeedbackMessage(`已完成 ${selectedFiles.length} 个 ETC zip 文件预览。`);
+      } catch (error) {
+        setErrorMessage(resolveImportApiErrorMessage(error, "ETC zip 预览失败，请稍后重试。"));
+      } finally {
+        setIsPreviewing(false);
+      }
+      return;
+    }
     if (!canUseBankImport) {
       setErrorMessage("设置里还没有银行账户映射，请先在设置中维护银行。");
       return;
@@ -283,6 +339,25 @@ export default function WorkbenchImportModal({
   }
 
   async function submitConfirm() {
+    if (mode === "etc_invoice") {
+      if (!etcPreviewPayload?.sessionId) {
+        setErrorMessage("请先预览 ETC zip 文件。");
+        return;
+      }
+      setIsConfirming(true);
+      setErrorMessage(null);
+      try {
+        const payload = await confirmEtcImportSession(etcPreviewPayload.sessionId);
+        setEtcPreviewPayload(payload);
+        setEtcImported(true);
+        setFeedbackMessage("已导入 ETC票据管理");
+      } catch (error) {
+        setErrorMessage(resolveImportApiErrorMessage(error, "确认导入失败，请稍后重试。"));
+      } finally {
+        setIsConfirming(false);
+      }
+      return;
+    }
     if (!previewPayload || confirmableFileIds.length === 0) {
       setErrorMessage("没有可确认导入的文件。");
       return;
@@ -325,7 +400,7 @@ export default function WorkbenchImportModal({
               {mode === "bank_transaction"
                 ? "上传一个或多个银行流水文件，并在预览前为每个文件选择对应账户。"
                 : mode === "etc_invoice"
-                  ? "上传一个或多个 ETC 发票文件，并在预览前为每个文件选择进项票或销项票。"
+                  ? "上传一个或多个 ETC zip 文件，先预览，确认后写入 ETC票据管理。"
                 : "上传一个或多个发票文件，并在预览前为每个文件选择进项票或销项票。"}
             </p>
           </div>
@@ -345,12 +420,16 @@ export default function WorkbenchImportModal({
             onDrop={handleDropzoneDrop}
           >
             <strong>{uploadLabel}</strong>
-            <span>支持一次选择多个 Excel 文件；每个文件完成选择后才能开始预览。</span>
+            <span>
+              {mode === "etc_invoice"
+                ? "支持一次选择多个 zip 文件；确认导入前不会写入 ETC票据管理。"
+                : "支持一次选择多个 Excel 文件；每个文件完成选择后才能开始预览。"}
+            </span>
             <input
               id={inputId}
               multiple
               type="file"
-              accept=".xlsx,.xls"
+              accept={mode === "etc_invoice" ? ".zip,application/zip" : ".xlsx,.xls"}
               disabled={isPreviewing || isConfirming}
               onChange={(event) => {
                 setIsDragActive(false);
@@ -396,6 +475,11 @@ export default function WorkbenchImportModal({
                           ))}
                         </select>
                       </label>
+                    ) : mode === "etc_invoice" ? (
+                      <div className="import-file-meta">
+                        <span>ETC zip</span>
+                        <span>确认后导入 ETC票据管理</span>
+                      </div>
                     ) : (
                       <label className="import-select-field">
                         <span>票据方向</span>
@@ -456,6 +540,46 @@ export default function WorkbenchImportModal({
               </div>
             </section>
           ) : null}
+          {etcPreviewPayload ? (
+            <section className="workbench-import-preview" aria-label="ETC导入预览结果">
+              <div className="export-center-preview-header">
+                <h3>预览结果</h3>
+                <span>{selectedFiles.length} 个 zip</span>
+              </div>
+              <div className="stats-row import-session-stats">
+                <div className="stat-card">
+                  <span>新增</span>
+                  <strong>{etcPreviewPayload.imported}</strong>
+                </div>
+                <div className="stat-card">
+                  <span>重复跳过</span>
+                  <strong>{etcPreviewPayload.duplicatesSkipped}</strong>
+                </div>
+                <div className="stat-card">
+                  <span>附件补齐</span>
+                  <strong>{etcPreviewPayload.attachmentsCompleted}</strong>
+                </div>
+                <div className="stat-card warn">
+                  <span>异常</span>
+                  <strong>{etcPreviewPayload.failed}</strong>
+                </div>
+              </div>
+              <div className="workbench-import-preview-list">
+                {etcPreviewPayload.items.map((item: EtcImportItem, index) => (
+                  <article key={`${item.invoiceNumber || item.fileName}-${index}`} className={`workbench-import-preview-item status-${item.status}`}>
+                    <header>
+                      <strong>{item.invoiceNumber || "未识别"}</strong>
+                      <span>{etcStatusLabel(item.status)}</span>
+                    </header>
+                    <div className="import-file-meta">
+                      <span>{item.fileName || "未识别文件"}</span>
+                    </div>
+                    <p>{item.reason || "无"}</p>
+                  </article>
+                ))}
+              </div>
+            </section>
+          ) : null}
         </div>
 
         <footer className="export-center-modal-footer">
@@ -465,7 +589,7 @@ export default function WorkbenchImportModal({
           <button className="secondary-button" type="button" onClick={handlePreview} disabled={!canPreview}>
             {isPreviewing ? "预览中..." : "开始预览"}
           </button>
-          <button className="primary-button" type="button" onClick={handleConfirm} disabled={!canConfirm}>
+          <button className="primary-button" type="button" onClick={handleConfirm} disabled={mode === "etc_invoice" ? !canConfirmEtc : !canConfirm}>
             {isConfirming ? "确认中..." : "确认导入"}
           </button>
         </footer>

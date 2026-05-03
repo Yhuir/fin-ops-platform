@@ -94,6 +94,38 @@ class UnparsedAttachmentOAAdapter:
         return [UnparsedAttachmentRecord()]
 
 
+class EtcBatchRecord:
+    def __init__(self) -> None:
+        self.id = "oa-etc-202605-001"
+        self.month = "2026-05"
+        self.section = "open"
+        self.case_id = None
+        self.applicant = "刘际涛"
+        self.project_name = "云南溯源科技"
+        self.apply_type = "支付申请"
+        self.amount = "53.84"
+        self.counterparty_name = "云南高速通行费"
+        self.reason = "ETC批量提交\netc_batch_id=etc_20260503_001"
+        self.relation_code = "pending_match"
+        self.relation_label = "待找流水与发票"
+        self.relation_tone = "warn"
+        self.expense_type = "车辆使用费"
+        self.expense_content = self.reason
+        self.detail_fields = {"OA单号": "OA-ETC-001", "申请日期": "2026-05-03"}
+        self.attachment_invoices = []
+        self.attachment_file_count = 0
+        self.source = "etc_batch"
+        self.etc_batch_id = "etc_20260503_001"
+        self.tags = ["ETC批量提交"]
+
+
+class EtcBatchOAAdapter:
+    def list_application_records(self, month: str) -> list[object]:
+        if month != "2026-05":
+            return []
+        return [EtcBatchRecord()]
+
+
 class BulkOAAdapter:
     def __init__(self, records: list[OAApplicationRecord]) -> None:
         self._records = records
@@ -213,6 +245,19 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
         self.assertIn("未解析发票", oa_row["tags"])
         self.assertEqual(oa_row["detail_fields"]["附件发票数量"], "0")
         self.assertEqual(oa_row["detail_fields"]["附件发票识别情况"], "已解析 0 / 2")
+
+    def test_etc_batch_oa_row_keeps_source_and_waits_only_for_bank(self) -> None:
+        service = WorkbenchQueryService(oa_adapter=EtcBatchOAAdapter())
+
+        payload = service.get_workbench("2026-05")
+
+        oa_row = payload["open"]["oa"][0]
+        self.assertEqual(oa_row["source"], "etc_batch")
+        self.assertEqual(oa_row["etc_batch_id"], "etc_20260503_001")
+        self.assertEqual(oa_row["etcBatchId"], "etc_20260503_001")
+        self.assertIn("ETC批量提交", oa_row["tags"])
+        self.assertEqual(oa_row["oa_bank_relation"]["label"], "待找流水")
+        self.assertNotIn("待找发票", oa_row["tags"])
 
     def test_all_workbench_prefers_bulk_oa_read_when_adapter_supports_it(self) -> None:
         adapter = BulkOAAdapter(

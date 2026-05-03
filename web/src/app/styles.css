@@ -6407,3 +6407,277 @@ body.column-layout-dragging {
     flex-basis: auto;
   }
 }
+
+.etc-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.etc-page-header,
+.etc-filter-bar,
+.etc-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.etc-page-header {
+  padding: 18px 20px;
+  border: 1px solid #d8e1eb;
+  background: #ffffff;
+}
+
+.etc-page-header h1,
+.etc-panel-heading h2 {
+  margin: 0;
+}
+
+.etc-filter-bar {
+  flex-wrap: wrap;
+}
+
+.etc-filter-bar label {
+  display: grid;
+  gap: 5px;
+  color: #486581;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.etc-filter-bar input,
+.etc-filter-bar select {
+  min-height: 34px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 6px 8px;
+  color: #102a43;
+}
+
+.etc-import-link,
+.etc-filter-bar button,
+.etc-panel-heading button,
+.etc-primary-action,
+.etc-dialog-actions button,
+.etc-status-groups button {
+  min-height: 34px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #243b53;
+  padding: 0 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.etc-panel-heading button:disabled,
+.etc-primary-action:disabled,
+.etc-dialog-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.etc-import-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.etc-filter-bar {
+  justify-content: flex-start;
+  padding: 12px;
+  border: 1px solid #d8e1eb;
+  background: #f9fbfe;
+}
+
+.etc-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(360px, 2fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.etc-left-layout {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(0, 2fr);
+  gap: 12px;
+}
+
+.etc-status-groups,
+.etc-invoice-panel,
+.etc-basket {
+  border: 1px solid #d8e1eb;
+  background: #ffffff;
+}
+
+.etc-status-groups {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 12px;
+}
+
+.etc-status-groups button {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.etc-status-groups button.active {
+  border-color: #0f4c81;
+  background: #eef7ff;
+  color: #0f4c81;
+}
+
+.etc-invoice-panel,
+.etc-basket {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+
+.etc-panel-heading {
+  min-height: 42px;
+}
+
+.etc-panel-heading p {
+  margin: 4px 0 0;
+  color: #486581;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.etc-invoice-list,
+.etc-basket-list {
+  display: grid;
+  gap: 8px;
+}
+
+.etc-ticket-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #dbe3ef;
+  background: #ffffff;
+}
+
+.etc-ticket-row.submitted {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.etc-ticket-row.in-basket {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.etc-row-check {
+  display: flex;
+  align-items: start;
+  padding-top: 2px;
+}
+
+.etc-row-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.etc-badge {
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.etc-row-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px 12px;
+  margin-top: 8px;
+  color: #486581;
+  font-size: 12px;
+}
+
+.etc-basket-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid #dbe3ef;
+  background: #f9fbfe;
+}
+
+.etc-basket-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.etc-primary-action {
+  min-height: 42px;
+  border-color: #0f4c81;
+  background: #0f4c81;
+  color: #ffffff;
+}
+
+.etc-primary-action:disabled {
+  border-color: #cbd5e1;
+  background: #e2e8f0;
+  color: #64748b;
+}
+
+.etc-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.etc-dialog {
+  width: min(520px, 100%);
+  border: 1px solid #d8e1eb;
+  background: #ffffff;
+  padding: 20px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
+}
+
+.etc-dialog h2 {
+  margin: 0 0 12px;
+}
+
+.etc-dialog p {
+  margin: 8px 0;
+}
+
+.etc-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+@media (max-width: 1100px) {
+  .etc-layout,
+  .etc-left-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .etc-row-fields {
+    grid-template-columns: 1fr;
+  }
+}

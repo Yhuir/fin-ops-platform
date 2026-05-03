@@ -52,6 +52,7 @@ TAX_CERTIFIED_IMPORTS_META_COLLECTION = "tax_certified_imports_meta"
 TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION = "tax_certified_import_sessions"
 TAX_CERTIFIED_IMPORT_BATCHES_COLLECTION = "tax_certified_import_batches"
 TAX_CERTIFIED_IMPORT_RECORDS_COLLECTION = "tax_certified_import_records"
+ETC_STATE_COLLECTION = "etc_state"
 STATE_DOCUMENT_ID = "current_state"
 META_DOCUMENT_ID = "_meta"
 APP_SETTINGS_DOCUMENT_ID = "settings"
@@ -152,6 +153,7 @@ class ApplicationStateStore:
         self._oa_attachment_invoice_cache_path = root / "oa_attachment_invoice_cache.json"
         self._oa_sync_state_path = root / "oa_sync_state.pkl"
         self._tax_certified_imports_path = root / "tax_certified_imports.pkl"
+        self._etc_state_path = root / "etc" / "etc_state.pkl"
         self._data_dir.mkdir(parents=True, exist_ok=True)
 
         self._mongo_settings = load_mongo_state_settings(root)
@@ -208,6 +210,7 @@ class ApplicationStateStore:
                 "tax_certified_import_sessions": self._mongo_database[TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION],
                 "tax_certified_import_batches": self._mongo_database[TAX_CERTIFIED_IMPORT_BATCHES_COLLECTION],
                 "tax_certified_import_records": self._mongo_database[TAX_CERTIFIED_IMPORT_RECORDS_COLLECTION],
+                "etc_state": self._mongo_database[ETC_STATE_COLLECTION],
             }
             self._mongo_file_bucket = GridFSBucket(self._mongo_database, bucket_name=GRIDFS_BUCKET_NAME)
             self._ensure_mongo_metadata()
@@ -468,6 +471,41 @@ class ApplicationStateStore:
         if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
             raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         with self._tax_certified_imports_path.open("wb") as handle:
+            pickle.dump(normalized_snapshot, handle)
+
+    def load_etc_state(self) -> dict[str, Any]:
+        if self._mongo_database is not None:
+            document = self._mongo_detailed_collections["etc_state"].find_one({"_id": STATE_DOCUMENT_ID})
+            payload = self._load_binary_payload(document)
+            return payload if isinstance(payload, dict) else {}
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        if not self._etc_state_path.exists():
+            return {}
+        with self._etc_state_path.open("rb") as handle:
+            loaded = pickle.load(handle)  # noqa: S301 - trusted local application state
+        return loaded if isinstance(loaded, dict) else {}
+
+    def save_etc_state(self, snapshot: dict[str, Any]) -> None:
+        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
+        if self._mongo_database is not None:
+            self._mongo_detailed_collections["etc_state"].update_one(
+                {"_id": STATE_DOCUMENT_ID},
+                {
+                    "$set": {
+                        "payload": Binary(pickle.dumps(normalized_snapshot)),
+                        "updated_at": datetime.now(UTC),
+                    }
+                },
+                upsert=True,
+            )
+            return
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        self._etc_state_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._etc_state_path.open("wb") as handle:
             pickle.dump(normalized_snapshot, handle)
 
     def load_workbench_pair_relations(self) -> dict[str, Any]:

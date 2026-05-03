@@ -297,6 +297,40 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual(reimbursement.detail_fields["费用类型"], "运费/邮费/杂费")
         self.assertEqual(reimbursement.detail_fields["费用内容"], "工控机改标签邮寄费用")
 
+    def test_payment_request_marks_etc_batch_from_oa_text_marker(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [
+                    {
+                        "_id": "payment-etc-batch",
+                        "form_id": "2",
+                        "modifiedTime": "2026-05-03T09:00:00",
+                        "data": {
+                            "applicationDate": "2026-05-03",
+                            "userName": "刘际涛",
+                            "amount": "53.84",
+                            "beneficiary": "云南高速通行费",
+                            "cause": "ETC批量提交\netc_batch_id=etc_20260503_001\n\n2026-02-27 云ADA0381 13.07",
+                            "projectName": "6486ca70cd6cae5d4e2b0b48",
+                            "flowRequestId": "etc-flow-001",
+                        },
+                    }
+                ],
+                "32": [],
+            },
+            project_documents=[
+                {"_id": "6486ca70cd6cae5d4e2b0b48", "data": {"name": "云南溯源科技", "code": "YNSY"}},
+            ],
+        )
+
+        records = adapter.list_application_records("2026-05")
+
+        self.assertEqual(len(records), 1)
+        payment = records[0]
+        self.assertEqual(getattr(payment, "source", None), "etc_batch")
+        self.assertEqual(getattr(payment, "etc_batch_id", None), "etc_20260503_001")
+        self.assertIn("ETC批量提交", getattr(payment, "tags", []))
+
     def test_list_all_application_records_returns_records_across_months(self) -> None:
         adapter = StubMongoOAAdapter(
             form_documents={

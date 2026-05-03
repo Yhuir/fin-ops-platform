@@ -46,6 +46,23 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         self.assertTrue(result["requires_note"])
         self.assertCountEqual(result["mismatch_fields"], ["oa_total", "bank_total"])
 
+    def test_etc_batch_oa_bank_mismatch_without_invoice_requires_note(self) -> None:
+        oa_row = self._oa_row("100")
+        oa_row["source"] = "etc_batch"
+        oa_row["etc_batch_id"] = "etc_20260503_001"
+
+        result = self.service.check(
+            {
+                "oa": [oa_row],
+                "bank": [self._bank_row("90")],
+                "invoice": [],
+            }
+        )
+
+        self.assertEqual(result["status"], "mismatch")
+        self.assertTrue(result["requires_note"])
+        self.assertCountEqual(result["mismatch_fields"], ["oa_total", "bank_total"])
+
     def test_flags_all_totals_when_three_amounts_all_differ(self) -> None:
         result = self.service.check(
             {

@@ -19,7 +19,13 @@ from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
 from fin_ops_platform.services.imports import clean_string
-from fin_ops_platform.services.oa_adapter import OAAdapter, OAApplicationRecord, OAReadStatus, build_attachment_invoice_detail_fields
+from fin_ops_platform.services.oa_adapter import (
+    OAAdapter,
+    OAApplicationRecord,
+    OAReadStatus,
+    build_attachment_invoice_detail_fields,
+    detect_etc_batch_metadata,
+)
 from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
 
 
@@ -686,6 +692,7 @@ class MongoOAAdapter(OAAdapter):
         external_id = self._payment_external_id(data, document)
         expense_type = self._resolve_expense_type(data, reason)
         expense_content = reason
+        etc_metadata = detect_etc_batch_metadata(data)
         return OAApplicationRecord(
             id=f"oa-pay-{external_id}",
             month=self._derive_month(data, document),
@@ -702,6 +709,9 @@ class MongoOAAdapter(OAAdapter):
             relation_tone="warn",
             expense_type=expense_type,
             expense_content=expense_content,
+            source=etc_metadata.get("source"),
+            etc_batch_id=etc_metadata.get("etc_batch_id"),
+            tags=list(etc_metadata.get("tags") or []),
             detail_fields={
                 "OA单号": self._payment_form_no(data, document),
                 "表单ID": self._settings.payment_request_form_id,
@@ -747,6 +757,7 @@ class MongoOAAdapter(OAAdapter):
             attachment_files = self._attachment_files(item)
             record_month = self._derive_month(data, document)
             attachment_invoices = self._parse_attachment_invoices(attachment_files, month=record_month)
+            etc_metadata = detect_etc_batch_metadata(data, item)
             detail_fields = {
                 "OA单号": self._expense_form_no(data, document),
                 "表单ID": self._settings.expense_claim_form_id,
@@ -785,6 +796,9 @@ class MongoOAAdapter(OAAdapter):
                     detail_fields=detail_fields,
                     attachment_invoices=attachment_invoices,
                     attachment_file_count=len(attachment_files),
+                    source=etc_metadata.get("source"),
+                    etc_batch_id=etc_metadata.get("etc_batch_id"),
+                    tags=list(etc_metadata.get("tags") or []),
                 )
             )
         return records

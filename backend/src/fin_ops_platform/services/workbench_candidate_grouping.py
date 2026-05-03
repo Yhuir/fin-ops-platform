@@ -17,6 +17,8 @@ SINGLE_BANK_AUTO_PAIRED_CODES = {"salary_personal_auto_match"}
 MULTI_BANK_AUTO_PAIRED_CODES = {"internal_transfer_pair"}
 OA_INVOICE_AUTO_PAIRED_CODES = {"oa_invoice_offset_auto_match"}
 AUTO_PAIRED_CODES = {*SINGLE_BANK_AUTO_PAIRED_CODES, *MULTI_BANK_AUTO_PAIRED_CODES, *OA_INVOICE_AUTO_PAIRED_CODES}
+ETC_BATCH_SOURCE = "etc_batch"
+ETC_BATCH_TAG = "ETC批量提交"
 
 
 @dataclass(slots=True)
@@ -339,6 +341,8 @@ class WorkbenchCandidateGroupingService:
             return False
         if self._qualifies_for_attachment_invoice_auto_close(group):
             return True
+        if self._qualifies_for_etc_batch_oa_bank_auto_close(group):
+            return True
 
         total_count = len(group.oa_rows) + len(group.bank_rows) + len(group.invoice_rows)
         if total_count < 2:
@@ -376,6 +380,23 @@ class WorkbenchCandidateGroupingService:
         if any(amount is None for amount in invoice_amounts):
             return False
         return sum(invoice_amounts, ZERO) == oa_amount
+
+    def _qualifies_for_etc_batch_oa_bank_auto_close(self, group: CandidateGroup) -> bool:
+        if len(group.oa_rows) != 1 or len(group.bank_rows) != 1 or group.invoice_rows:
+            return False
+        if not self._is_etc_batch_oa_row(group.oa_rows[0]):
+            return False
+        bank_direction = self._direction(group.bank_rows[0])
+        oa_direction = self._direction(group.oa_rows[0])
+        if bank_direction is None or bank_direction != oa_direction:
+            return False
+        oa_amount = self._amount(group.oa_rows[0])
+        bank_amount = self._amount(group.bank_rows[0])
+        if oa_amount is None or bank_amount is None or oa_amount != bank_amount:
+            return False
+        oa_counterparty = self._counterparty(group.oa_rows[0])
+        bank_counterparty = self._counterparty(group.bank_rows[0])
+        return oa_counterparty is not None and oa_counterparty == bank_counterparty
 
     def _group_has_danger(self, group: CandidateGroup) -> bool:
         return any(self._relation_tone(row) == "danger" for row in [*group.oa_rows, *group.bank_rows, *group.invoice_rows])
@@ -462,6 +483,9 @@ class WorkbenchCandidateGroupingService:
                 for row in [*group.oa_rows, *group.invoice_rows]
             }
             if relation_codes and relation_codes.issubset(OA_INVOICE_AUTO_PAIRED_CODES):
+                return True
+        if row_type_count == 2 and group.oa_rows and group.bank_rows and not group.invoice_rows:
+            if any(self._is_etc_batch_oa_row(row) for row in group.oa_rows):
                 return True
         return row_type_count >= 3
 
@@ -679,6 +703,15 @@ class WorkbenchCandidateGroupingService:
     @staticmethod
     def _is_oa_attachment_invoice_row(row: dict[str, Any]) -> bool:
         return str(row.get("source_kind", "")) == "oa_attachment_invoice"
+
+    @staticmethod
+    def _is_etc_batch_oa_row(row: dict[str, Any]) -> bool:
+        if str(row.get("source", "")).strip() == ETC_BATCH_SOURCE:
+            return True
+        if str(row.get("etc_batch_id") or row.get("etcBatchId") or "").strip():
+            return True
+        tags = [str(tag).strip() for tag in list(row.get("tags") or []) if str(tag).strip()]
+        return ETC_BATCH_TAG in tags
 
     def _attachment_group_primary_row(self, group: CandidateGroup) -> dict[str, Any] | None:
         if len(group.oa_rows) != 1 or group.bank_rows:

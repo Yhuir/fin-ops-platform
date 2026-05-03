@@ -9,6 +9,91 @@ function hasExactTextContent(text: string) {
 }
 
 describe("Import center", () => {
+  test("renders ETC invoice import without generic template workflow or unsupported notice", async () => {
+    installMockApiFetch();
+
+    renderAppAt("/imports?intent=etc_invoice");
+
+    expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
+    expect(screen.getByText("仅支持 zip，先预览再确认导入 ETC票据管理。")).toBeInTheDocument();
+    expect(screen.queryByText("当前入口已保留")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "模板库" })).not.toBeInTheDocument();
+    expect(screen.queryByText("模板改判")).not.toBeInTheDocument();
+  });
+
+  test("rejects non-zip files for ETC import and keeps preview unavailable", async () => {
+    const user = userEvent.setup({ applyAccept: false });
+    installMockApiFetch();
+
+    renderAppAt("/imports?intent=etc_invoice");
+
+    const input = (await screen.findByLabelText("上传文件")) as HTMLInputElement;
+    await user.upload(input, [
+      new File(["not zip"], "README.md", { type: "text/markdown" }),
+      new File(["xlsx"], "etc.xlsx", {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+    ]);
+
+    expect(screen.getAllByText("ETC发票导入仅支持 zip 文件，已拒绝 2 个非 zip 文件。").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "开始预览" })).toBeDisabled();
+    expect(screen.getByText(hasExactTextContent("当前已选择 0 个文件"))).toBeInTheDocument();
+  });
+
+  test("previews multiple ETC zip files with ETC endpoint and does not confirm", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+
+    renderAppAt("/imports?intent=etc_invoice");
+
+    const input = (await screen.findByLabelText("上传文件")) as HTMLInputElement;
+    await user.upload(input, [
+      new File(["zip-a"], "etc-2026-03.zip", { type: "application/zip" }),
+      new File(["zip-b"], "etc-2026-04.zip", { type: "application/zip" }),
+    ]);
+    await user.click(screen.getByRole("button", { name: "开始预览" }));
+
+    expect(await screen.findByRole("heading", { name: "ETC导入预览" })).toBeInTheDocument();
+    expect(screen.getByText("etc_import_session_0001")).toBeInTheDocument();
+    expect(screen.getByText("ETC-2026-005")).toBeInTheDocument();
+    expect(screen.getAllByText("etc-2026-03.zip").length).toBeGreaterThan(0);
+    expect(screen.getByText("新发票待导入")).toBeInTheDocument();
+    expect(screen.getAllByText("附件补齐").length).toBeGreaterThan(0);
+
+    const previewCall = fetchMock.mock.calls.find(([url]) => String(url) === "/api/etc/import/preview");
+    expect(previewCall).toBeTruthy();
+    const formData = (previewCall?.[1] as RequestInit).body as FormData;
+    expect((formData.getAll("files") as File[]).map((file) => file.name)).toEqual([
+      "etc-2026-03.zip",
+      "etc-2026-04.zip",
+    ]);
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/imports/files/preview")).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/etc/import/confirm")).toBe(false);
+  });
+
+  test("confirms ETC preview session and shows imported feedback", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+
+    renderAppAt("/imports?intent=etc_invoice");
+
+    const input = (await screen.findByLabelText("上传文件")) as HTMLInputElement;
+    await user.upload(input, [new File(["zip-a"], "etc-2026-03.zip", { type: "application/zip" })]);
+    await user.click(screen.getByRole("button", { name: "开始预览" }));
+
+    expect(await screen.findByRole("heading", { name: "ETC导入预览" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "确认导入 ETC票据管理" }));
+
+    await waitFor(() => {
+      expect(screen.getAllByText("已导入 ETC票据管理").length).toBeGreaterThan(0);
+    });
+    const confirmCall = fetchMock.mock.calls.find(([url]) => String(url) === "/api/etc/import/confirm");
+    expect(confirmCall).toBeTruthy();
+    expect(JSON.parse(String((confirmCall?.[1] as RequestInit).body))).toEqual({
+      sessionId: "etc_import_session_0001",
+    });
+  });
+
   test("uploads multiple files for preview and shows recognized template results", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();

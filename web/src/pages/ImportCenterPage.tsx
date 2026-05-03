@@ -10,6 +10,7 @@ import {
   retryImportFiles,
   revertImportBatch,
 } from "../features/imports/api";
+import { confirmEtcImportSession, previewEtcZipFiles } from "../features/etc/api";
 import type {
   ImportBatchType,
   ImportFilePreview,
@@ -17,6 +18,7 @@ import type {
   ImportTemplate,
   MatchingRunSummary,
 } from "../features/imports/types";
+import type { EtcImportConfirmResult, EtcImportItem, EtcImportPreviewResult } from "../features/etc/types";
 import { useImportProgress } from "../contexts/ImportProgressContext";
 
 type FileOverrideState = Record<
@@ -53,6 +55,14 @@ const DECISION_LABELS: Record<string, string> = {
   duplicate_skipped: "重复跳过",
   suspected_duplicate: "疑似重复",
   error: "异常",
+};
+
+const ETC_IMPORT_STATUS_LABELS: Record<string, string> = {
+  imported: "新增",
+  created: "新增",
+  duplicate_skipped: "重复跳过",
+  attachment_completed: "附件补齐",
+  failed: "异常",
 };
 
 const BATCH_TYPE_LABELS: Record<ImportBatchType, string> = {
@@ -148,52 +158,84 @@ function resolveIntentMeta(intent: string | null) {
         title: "银行流水导入",
         description: "批量导入银行流水文件，系统会自动识别模板并进入标准预览、确认导入链路。",
         unsupported: false,
+        isEtcInvoice: false,
       };
     case "invoice":
       return {
         title: "发票导入",
         description: "导入进项或销项发票文件。系统会自动识别模板；如果方向识别不对，可在文件卡片中手动改判。",
         unsupported: false,
+        isEtcInvoice: false,
       };
     case "output_invoice":
       return {
         title: "销项发票导入",
         description: "导入销项发票文件。系统会自动识别模板；如果方向识别不对，可在文件卡片中手动改判。",
         unsupported: false,
+        isEtcInvoice: false,
       };
     case "input_invoice":
       return {
         title: "进项发票导入",
         description: "导入进项发票文件。系统会自动识别模板；如果方向识别不对，可在文件卡片中手动改判。",
         unsupported: false,
+        isEtcInvoice: false,
       };
     case "etc_invoice":
       return {
         title: "ETC发票导入",
-        description: "该入口已预留，后续会接入 ETC 发票的专用识别和导入逻辑。",
-        unsupported: true,
+        description: "仅支持 zip，先预览再确认导入 ETC票据管理。",
+        unsupported: false,
+        isEtcInvoice: true,
       };
     case "certified_invoice":
       return {
         title: "已认证发票导入",
         description: "该入口已预留，后续会接入已认证发票的专用导入逻辑。",
         unsupported: true,
+        isEtcInvoice: false,
       };
     default:
       return {
         title: "导入中心",
         description: "自动识别发票与银行模板，支持批量上传、逐文件预览、重试改判、确认导入和批次回退。",
         unsupported: false,
+        isEtcInvoice: false,
       };
   }
+}
+
+function isZipFile(file: File) {
+  return file.name.toLowerCase().endsWith(".zip");
+}
+
+function formatEtcRejectedMessage(count: number) {
+  return `ETC发票导入仅支持 zip 文件，已拒绝 ${count} 个非 zip 文件。`;
+}
+
+function etcStatusLabel(status: string) {
+  return ETC_IMPORT_STATUS_LABELS[status] ?? status;
+}
+
+function etcStatusTone(status: string) {
+  if (status === "imported" || status === "created" || status === "attachment_completed") {
+    return "success";
+  }
+  if (status === "duplicate_skipped") {
+    return "neutral";
+  }
+  return "warn";
 }
 
 export default function ImportCenterPage() {
   const [searchParams] = useSearchParams();
   const { setProgress, clearProgress } = useImportProgress();
   const intentMeta = resolveIntentMeta(searchParams.get("intent"));
+  const isEtcInvoiceImport = intentMeta.isEtcInvoice;
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [previewPayload, setPreviewPayload] = useState<ImportSessionPayload | null>(null);
+  const [etcPreviewPayload, setEtcPreviewPayload] = useState<EtcImportPreviewResult | null>(null);
+  const [etcConfirmPayload, setEtcConfirmPayload] = useState<EtcImportConfirmResult | null>(null);
   const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
   const [expandedFileIds, setExpandedFileIds] = useState<string[]>([]);
   const [fileOverrides, setFileOverrides] = useState<FileOverrideState>({});
@@ -209,10 +251,12 @@ export default function ImportCenterPage() {
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const headerStatusMessage = errorMessage
     ? null
-    : isTemplateLoading
+    : isTemplateLoading && !isEtcInvoiceImport
       ? "模板加载中..."
-      : isConfirmLoading && previewPayload
-        ? `正在确认导入 ${selectedFileIds.length} 个文件...`
+      : isConfirmLoading && (previewPayload || etcPreviewPayload)
+        ? isEtcInvoiceImport
+          ? "正在确认导入 ETC票据管理..."
+          : `正在确认导入 ${selectedFileIds.length} 个文件...`
         : isPreviewLoading
           ? `正在预览 ${selectedFiles.length} 个文件...`
           : retryingFileId && previewPayload
@@ -225,6 +269,12 @@ export default function ImportCenterPage() {
     let ignore = false;
 
     async function loadTemplates() {
+      if (isEtcInvoiceImport) {
+        setIsTemplateLoading(false);
+        setTemplates([]);
+        setTemplateErrorMessage(null);
+        return;
+      }
       setIsTemplateLoading(true);
       try {
         const payload = await fetchImportTemplates();
@@ -247,11 +297,18 @@ export default function ImportCenterPage() {
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [isEtcInvoiceImport]);
 
   useEffect(() => {
     if (errorMessage) {
       setProgress({ tone: "error", label: errorMessage });
+      return;
+    }
+    if (isConfirmLoading && isEtcInvoiceImport && etcPreviewPayload) {
+      setProgress({
+        tone: "loading",
+        label: "正在确认导入 ETC票据管理",
+      });
       return;
     }
     if (isConfirmLoading && previewPayload) {
@@ -298,6 +355,8 @@ export default function ImportCenterPage() {
     feedbackMessage,
     isConfirmLoading,
     isPreviewLoading,
+    etcPreviewPayload,
+    isEtcInvoiceImport,
     previewPayload,
     retryingFileId,
     revertingBatchId,
@@ -310,9 +369,15 @@ export default function ImportCenterPage() {
 
   const handleFileChange = (files: FileList | null) => {
     const nextFiles = files ? Array.from(files) : [];
-    setSelectedFiles((current) => mergeSelectedFiles(current, nextFiles));
+    const acceptedFiles = isEtcInvoiceImport ? nextFiles.filter(isZipFile) : nextFiles;
+    const rejectedCount = nextFiles.length - acceptedFiles.length;
+    setSelectedFiles((current) => mergeSelectedFiles(current, acceptedFiles));
+    setPreviewPayload(null);
+    setEtcPreviewPayload(null);
+    setEtcConfirmPayload(null);
+    setMatchingRun(null);
     setFeedbackMessage(null);
-    setErrorMessage(null);
+    setErrorMessage(rejectedCount > 0 ? formatEtcRejectedMessage(rejectedCount) : null);
   };
 
   const handleDrop = (event: React.DragEvent<HTMLLabelElement>) => {
@@ -343,10 +408,23 @@ export default function ImportCenterPage() {
       setErrorMessage("请先选择至少一个导入文件。");
       return;
     }
+    if (isEtcInvoiceImport && selectedFiles.some((file) => !isZipFile(file))) {
+      setErrorMessage("ETC发票导入仅支持 zip 文件。");
+      return;
+    }
     setIsPreviewLoading(true);
     setErrorMessage(null);
     setFeedbackMessage(null);
     try {
+      if (isEtcInvoiceImport) {
+        const payload = await previewEtcZipFiles(selectedFiles);
+        setEtcPreviewPayload(payload);
+        setEtcConfirmPayload(null);
+        setPreviewPayload(null);
+        setMatchingRun(null);
+        setFeedbackMessage(`已完成 ${selectedFiles.length} 个 ETC zip 文件预览。`);
+        return;
+      }
       const payload = await previewImportFiles(selectedFiles);
       setSelectedFileIds(payload.files.filter(canSelectFile).map((file) => file.id));
       applyPreviewPayload(payload, `已完成 ${payload.files.length} 个文件的预览识别。`);
@@ -359,6 +437,24 @@ export default function ImportCenterPage() {
   };
 
   const handleConfirm = async () => {
+    if (isEtcInvoiceImport) {
+      if (!etcPreviewPayload?.sessionId) {
+        return;
+      }
+      setIsConfirmLoading(true);
+      setErrorMessage(null);
+      try {
+        const payload = await confirmEtcImportSession(etcPreviewPayload.sessionId);
+        setEtcConfirmPayload(payload);
+        setEtcPreviewPayload(payload);
+        setFeedbackMessage("已导入 ETC票据管理");
+      } catch (error) {
+        setErrorMessage(resolveImportApiErrorMessage(error, "确认导入失败，请稍后重试。"));
+      } finally {
+        setIsConfirmLoading(false);
+      }
+      return;
+    }
     if (!previewPayload || selectedFileIds.length === 0) {
       return;
     }
@@ -473,6 +569,7 @@ export default function ImportCenterPage() {
         </div>
       ) : null}
 
+      {!isEtcInvoiceImport ? (
       <section className="import-template-panel">
         <div className="import-panel-header">
           <div>
@@ -503,6 +600,7 @@ export default function ImportCenterPage() {
           ))}
         </div>
       </section>
+      ) : null}
 
       <section className="import-upload-panel">
         <label
@@ -512,11 +610,16 @@ export default function ImportCenterPage() {
           onDrop={handleDrop}
         >
           <span className="import-dropzone-title">拖拽文件到这里，或点击选择文件</span>
-          <span className="import-dropzone-meta">支持一次上传多份 `.xlsx / .xls`，系统会自动识别发票与银行模板，并保留原始文件副本。</span>
+          <span className="import-dropzone-meta">
+            {isEtcInvoiceImport
+              ? "支持一次选择多个 zip 文件；上传后先预览，确认后写入 ETC票据管理。"
+              : "支持一次上传多份 `.xlsx / .xls`，系统会自动识别发票与银行模板，并保留原始文件副本。"}
+          </span>
           <input
             id="import-file-input"
             aria-label="上传文件"
             className="import-file-input"
+            accept={isEtcInvoiceImport ? ".zip,application/zip" : undefined}
             multiple
             type="file"
             onChange={(event) => {
@@ -543,7 +646,76 @@ export default function ImportCenterPage() {
 
       {errorMessage ? <div className="state-panel error">{errorMessage}</div> : null}
 
-      {matchingRun ? (
+      {isEtcInvoiceImport && etcPreviewPayload ? (
+        <section className="import-files-panel">
+          <div className="import-panel-header">
+            <div>
+              <h2>ETC导入预览</h2>
+              <p>确认前请核对摘要和每张发票状态；确认后才会导入 ETC票据管理。</p>
+            </div>
+            <button
+              className="primary-button"
+              type="button"
+              disabled={!etcPreviewPayload.sessionId || isConfirmLoading}
+              onClick={handleConfirm}
+            >
+              {isConfirmLoading ? "确认中..." : "确认导入 ETC票据管理"}
+            </button>
+          </div>
+
+          {etcConfirmPayload ? <div className="state-panel success">已导入 ETC票据管理</div> : null}
+
+          <section className="stats-row import-session-stats">
+            <div className="stat-card">
+              <span>会话编号</span>
+              <strong>{etcPreviewPayload.sessionId}</strong>
+            </div>
+            <div className="stat-card">
+              <span>新增</span>
+              <strong>{etcPreviewPayload.imported}</strong>
+            </div>
+            <div className="stat-card">
+              <span>重复跳过</span>
+              <strong>{etcPreviewPayload.duplicatesSkipped}</strong>
+            </div>
+            <div className="stat-card">
+              <span>附件补齐</span>
+              <strong>{etcPreviewPayload.attachmentsCompleted}</strong>
+            </div>
+            <div className="stat-card warn">
+              <span>异常</span>
+              <strong>{etcPreviewPayload.failed}</strong>
+            </div>
+          </section>
+
+          <table className="import-row-table">
+            <thead>
+              <tr>
+                <th>发票号码</th>
+                <th>文件名</th>
+                <th>状态</th>
+                <th>原因</th>
+              </tr>
+            </thead>
+            <tbody>
+              {etcPreviewPayload.items.map((item: EtcImportItem, index) => (
+                <tr key={`${item.invoiceNumber || item.fileName}-${index}`}>
+                  <td>{item.invoiceNumber || "未识别"}</td>
+                  <td>{item.fileName || "未识别"}</td>
+                  <td>
+                    <span className={`status-chip tone-${etcStatusTone(item.status)}`}>
+                      {etcStatusLabel(item.status)}
+                    </span>
+                  </td>
+                  <td>{item.reason || "无"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      ) : null}
+
+      {!isEtcInvoiceImport && matchingRun ? (
         <section className="import-result-panel">
           <div className="import-panel-header">
             <div>
@@ -573,7 +745,7 @@ export default function ImportCenterPage() {
         </section>
       ) : null}
 
-      {previewPayload ? (
+      {!isEtcInvoiceImport && previewPayload ? (
         <>
           <section className="stats-row import-session-stats">
             <div className="stat-card">

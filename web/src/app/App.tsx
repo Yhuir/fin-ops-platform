@@ -76,6 +76,12 @@ function AppShell() {
             >
               银行明细
             </NavLink>
+            <NavLink
+              to="/etc-tickets"
+              className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
+            >
+              ETC票据管理
+            </NavLink>
           </nav>
           {progress ? (
             <div className={`global-progress-chip ${progress.tone}`} aria-live="polite">

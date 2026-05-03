@@ -3205,6 +3205,57 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(withdraw_response.status_code, 200)
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-NO-HISTORY"))
 
+    def test_etc_batch_oa_api_tags_wait_only_for_bank(self) -> None:
+        app = build_application()
+        raw_payload = build_etc_batch_raw_payload(bank_amount=None)
+
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            response = app.handle_request("GET", "/api/workbench?month=2026-06")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        oa_row = flatten_groups(payload["open"]["groups"], "oa")[0]
+        self.assertIn("ETC批量提交", oa_row["tags"])
+        self.assertIn("待找流水", oa_row["tags"])
+        self.assertNotIn("待找发票", oa_row["tags"])
+        self.assertNotIn("待找流水与发票", oa_row["tags"])
+
+    def test_etc_batch_oa_bank_amount_mismatch_keeps_mismatch_tag_without_invoice(self) -> None:
+        app = build_application()
+        raw_payload = build_etc_batch_raw_payload(bank_amount="90.00")
+
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            app.handle_request("GET", "/api/workbench?month=2026-06")
+
+        row_ids = ["oa-etc-202606-001", "bk-etc-202606-001"]
+        confirmed_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link",
+            json.dumps(
+                {
+                    "month": "2026-06",
+                    "row_ids": row_ids,
+                    "case_id": "CASE-ETC-MISMATCH",
+                    "note": "ETC批量提交与流水金额不一致，待复核",
+                }
+            ),
+        )
+
+        self.assertEqual(confirmed_response.status_code, 200)
+        relation = app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-ETC-MISMATCH")
+        assert relation is not None
+        self.assertEqual(relation["amount_check"]["status"], "mismatch")
+
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            updated_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-06").body)
+        paired_oa = next(
+            row for row in flatten_groups(updated_payload["paired"]["groups"], "oa") if row["id"] == "oa-etc-202606-001"
+        )
+        self.assertIn("ETC批量提交", paired_oa["tags"])
+        self.assertIn("金额不一致", paired_oa["tags"])
+        self.assertNotIn("待找发票", paired_oa["tags"])
+        self.assertEqual(paired_oa["oa_bank_relation"]["label"], "已关联流水")
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -3335,6 +3386,57 @@ def build_relation_amount_raw_payload(*, invoice_amount: str) -> dict[str, objec
                     "available_actions": ["detail"],
                 }
             ],
+        },
+    }
+
+
+def build_etc_batch_raw_payload(*, bank_amount: str | None) -> dict[str, object]:
+    bank_rows: list[dict[str, object]] = []
+    if bank_amount is not None:
+        bank_rows.append(
+            {
+                "id": "bk-etc-202606-001",
+                "type": "bank",
+                "case_id": "",
+                "trade_time": "2026-06-03 09:00:00",
+                "debit_amount": bank_amount,
+                "credit_amount": "",
+                "counterparty_name": "云南高速通行费",
+                "invoice_relation": {"code": "pending_match", "label": "待匹配", "tone": "warn"},
+                "available_actions": ["detail"],
+            }
+        )
+    return {
+        "month": "2026-06",
+        "summary": {
+            "oa_count": 1,
+            "bank_count": len(bank_rows),
+            "invoice_count": 0,
+            "paired_count": 0,
+            "open_count": 1 + len(bank_rows),
+            "exception_count": 0,
+        },
+        "paired": {"oa": [], "bank": [], "invoice": []},
+        "open": {
+            "oa": [
+                {
+                    "id": "oa-etc-202606-001",
+                    "type": "oa",
+                    "source": "etc_batch",
+                    "etc_batch_id": "etc_20260503_001",
+                    "etcBatchId": "etc_20260503_001",
+                    "tags": ["ETC批量提交"],
+                    "case_id": "",
+                    "apply_type": "支付申请",
+                    "amount": "100.00",
+                    "counterparty_name": "云南高速通行费",
+                    "reason": "ETC批量提交\netc_batch_id=etc_20260503_001",
+                    "oa_bank_relation": {"code": "pending_match", "label": "待找流水", "tone": "warn"},
+                    "available_actions": ["detail"],
+                }
+            ],
+            "bank": bank_rows,
+            "invoice": [],
         },
     }
 

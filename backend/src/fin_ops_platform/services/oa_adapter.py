@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 from typing import Any, Protocol
 
 from fin_ops_platform.services.imports import clean_string
+
+
+ETC_BATCH_SOURCE = "etc_batch"
+ETC_BATCH_TAG = "ETC批量提交"
+ETC_BATCH_ID_RE = re.compile(r"etc_batch_id\s*=\s*([^\s,;，；]+)", re.IGNORECASE)
 
 
 @dataclass(slots=True)
@@ -26,6 +32,9 @@ class OAApplicationRecord:
     detail_fields: dict[str, str] = field(default_factory=dict)
     attachment_invoices: list[dict[str, str]] = field(default_factory=list)
     attachment_file_count: int = 0
+    source: str | None = None
+    etc_batch_id: str | None = None
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -104,3 +113,42 @@ def build_attachment_invoice_detail_fields(
     if summary_items:
         detail_fields["附件发票摘要"] = "；".join(summary_items)
     return detail_fields
+
+
+def detect_etc_batch_metadata(*values: Any) -> dict[str, Any]:
+    text = "\n".join(_iter_text_values(values))
+    if ETC_BATCH_TAG not in text:
+        return {}
+    match = ETC_BATCH_ID_RE.search(text)
+    if not match:
+        return {}
+    etc_batch_id = clean_string(match.group(1))
+    if not etc_batch_id:
+        return {}
+    return {
+        "source": ETC_BATCH_SOURCE,
+        "etc_batch_id": etc_batch_id,
+        "tags": [ETC_BATCH_TAG],
+    }
+
+
+def _iter_text_values(values: Any) -> list[str]:
+    texts: list[str] = []
+
+    def visit(value: Any) -> None:
+        if value in (None, ""):
+            return
+        if isinstance(value, dict):
+            for child in value.values():
+                visit(child)
+            return
+        if isinstance(value, (list, tuple, set)):
+            for child in value:
+                visit(child)
+            return
+        text = clean_string(value)
+        if text:
+            texts.append(text)
+
+    visit(values)
+    return texts

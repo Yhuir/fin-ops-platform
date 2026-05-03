@@ -15,7 +15,7 @@ from pathlib import Path
 from threading import Lock, Thread
 from time import monotonic, sleep
 from typing import Callable, Iterable
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 from uuid import uuid4
 
 from pymongo.errors import PyMongoError
@@ -25,6 +25,7 @@ from fin_ops_platform.app.auth import (
     ForbiddenOAAccessError,
     OARequestSession,
     UnauthorizedOASessionError,
+    extract_oa_token,
     resolve_oa_request_session,
 )
 from fin_ops_platform.app.routes_tax import TaxApiRoutes
@@ -36,6 +37,19 @@ from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
 from fin_ops_platform.services.bank_details_service import BankDetailsService
 from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
+from fin_ops_platform.services.etc_service import (
+    EtcBatchNotFoundError,
+    EtcDraftRequestError,
+    EtcOAClientError,
+    EtcInvoiceNotFoundError,
+    EtcInvoiceRequestError,
+    EtcInvoiceStatus,
+    HttpEtcOAClient,
+    NotConfiguredEtcOAClient,
+    EtcService,
+    EtcServiceError,
+    UploadedEtcZipFile,
+)
 from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.integrations import IntegrationHubService
@@ -266,6 +280,7 @@ class Application:
         )
         self._bank_details_service = BankDetailsService(self._import_service)
         self._tax_certified_import_service = TaxCertifiedImportService(state_store=self._state_store)
+        self._etc_service = EtcService(state_store=self._state_store)
         self._settings_data_reset_service = (
             SettingsDataResetService(
                 state_store=self._state_store,
@@ -381,6 +396,31 @@ class Application:
                 status=status,
                 limit=limit,
             )
+        if method == "POST" and route_path == "/api/etc/import/preview":
+            return self._handle_api_etc_import_preview(body, headers)
+        if method == "POST" and route_path == "/api/etc/import/confirm":
+            return self._handle_api_etc_import_confirm(body)
+        if method == "POST" and route_path == "/api/etc/import":
+            return self._handle_api_etc_import(body, headers)
+        if method == "GET" and route_path == "/api/etc/invoices":
+            return self._handle_api_etc_invoices(
+                status=query.get("status", [None])[0],
+                month=query.get("month", [None])[0],
+                plate=query.get("plate", [None])[0],
+                keyword=query.get("keyword", [None])[0],
+                page=query.get("page", [None])[0],
+                page_size=query.get("page_size", [None])[0],
+            )
+        if method == "POST" and route_path == "/api/etc/invoices/revoke-submitted":
+            return self._handle_api_etc_revoke_submitted(body)
+        if method == "POST" and route_path == "/api/etc/batches/draft":
+            return self._handle_api_etc_batch_draft(body, headers)
+        if method == "POST" and route_path.startswith("/api/etc/batches/") and route_path.endswith("/confirm-submitted"):
+            batch_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_etc_batch_confirm_submitted(batch_id)
+        if method == "POST" and route_path.startswith("/api/etc/batches/") and route_path.endswith("/mark-not-submitted"):
+            batch_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_etc_batch_mark_not_submitted(batch_id)
         if method == "GET" and route_path == "/api/session/me":
             return self._handle_api_session_me(headers)
         if method == "GET" and route_path == "/api/workbench/ignored":
@@ -655,6 +695,13 @@ class Application:
                 "/matching/results",
                 "/api/workbench",
                 "/api/search",
+                "/api/etc/import/preview",
+                "/api/etc/import/confirm",
+                "/api/etc/invoices",
+                "/api/etc/invoices/revoke-submitted",
+                "/api/etc/batches/draft",
+                "/api/etc/batches/{batch_id}/confirm-submitted",
+                "/api/etc/batches/{batch_id}/mark-not-submitted",
                 "/api/session/me",
                 "/api/workbench/ignored",
                 "/api/workbench/settings",
@@ -713,6 +760,7 @@ class Application:
                 "workbench_global_search_foundation",
                 "cost_statistics_foundation",
                 "cost_statistics_export",
+                "etc_invoice_management",
             ],
             "storage": {
                 "mode": self._state_store.storage_mode if self._state_store is not None else "memory",
@@ -739,6 +787,7 @@ class Application:
                 "integrations",
                 "workbench v2 contracts",
                 "tax offset api",
+                "etc invoice management",
             ],
             "planned": ["costing"],
         }
@@ -806,6 +855,173 @@ class Application:
             limit=resolved_limit,
         )
         return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_etc_import(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
+        return self._json_response(
+            HTTPStatus.GONE,
+            {
+                "error": "etc_direct_import_removed",
+                "message": "Use /api/etc/import/preview and /api/etc/import/confirm.",
+            },
+        )
+
+    def _handle_api_etc_import_preview(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
+        _fields, files, error = self._load_multipart_body(body, headers)
+        if error is not None:
+            return error
+        if not files:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_etc_import_request", "message": "At least one zip file is required."},
+            )
+        invalid_files = [file.file_name for file in files if not file.file_name.lower().endswith(".zip")]
+        if invalid_files:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_etc_import_request", "message": "Only .zip files can be imported."},
+            )
+        uploads = [UploadedEtcZipFile(file_name=file.file_name, content=file.content) for file in files]
+        payload = self._etc_service.preview_import_zips(uploads)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_etc_import_confirm(self, body: str | bytes | None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        session_id = payload.get("sessionId")
+        if not isinstance(session_id, str) or not session_id.strip():
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_etc_import_request", "message": "sessionId is required."},
+            )
+        try:
+            result = self._etc_service.confirm_import_session(session_id.strip())
+        except EtcServiceError as error:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_import_session_not_found", "message": str(error)})
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "sessionId": session_id.strip(),
+                **self._etc_service.import_result_payload(result),
+            },
+        )
+
+    def _handle_api_etc_invoices(
+        self,
+        *,
+        status: str | None,
+        month: str | None,
+        plate: str | None,
+        keyword: str | None,
+        page: str | None,
+        page_size: str | None,
+    ) -> Response:
+        try:
+            resolved_page = int(page) if page not in (None, "") else 1
+            resolved_page_size = int(page_size) if page_size not in (None, "") else 50
+            invoices, total, counts = self._etc_service.list_invoices(
+                status=status or None,
+                month=month or None,
+                plate=plate or None,
+                keyword=keyword or None,
+                page=resolved_page,
+                page_size=resolved_page_size,
+            )
+        except (ValueError, EtcInvoiceRequestError) as error:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_etc_invoice_request", "message": str(error)},
+            )
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "items": invoices,
+                "counts": counts,
+                "page": max(resolved_page, 1),
+                "pageSize": min(max(resolved_page_size, 1), 500),
+                "total": total,
+            },
+        )
+
+    def _handle_api_etc_revoke_submitted(self, body: str | bytes | None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        invoice_ids = payload.get("invoiceIds")
+        if not isinstance(invoice_ids, list) or not all(isinstance(item, str) for item in invoice_ids):
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_etc_invoice_request", "message": "invoiceIds must be a string array."},
+            )
+        try:
+            result = self._etc_service.revoke_submitted(invoice_ids)
+        except EtcInvoiceNotFoundError as error:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_invoice_not_found", "message": str(error)})
+        except EtcInvoiceRequestError as error:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_etc_invoice_request", "message": str(error)},
+            )
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _handle_api_etc_batch_draft(self, body: str | bytes | None, headers: dict[str, str] | None = None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        invoice_ids = payload.get("invoiceIds")
+        if not isinstance(invoice_ids, list) or not all(isinstance(item, str) for item in invoice_ids):
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_etc_draft_request", "message": "invoiceIds must be a string array."},
+            )
+        try:
+            result = self._etc_service.create_oa_draft(invoice_ids, oa_client=self._build_etc_oa_client(headers))
+        except EtcInvoiceNotFoundError as error:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_invoice_not_found", "message": str(error)})
+        except EtcDraftRequestError as error:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_etc_draft_request", "message": str(error)},
+            )
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "batchId": result.batch_id,
+                "etcBatchId": result.etc_batch_id,
+                "oaDraftId": result.oa_draft_id,
+                "oaDraftUrl": result.oa_draft_url,
+            },
+        )
+
+    def _build_etc_oa_client(self, headers: dict[str, str] | None) -> HttpEtcOAClient | None:
+        if not isinstance(self._etc_service.oa_client, NotConfiguredEtcOAClient):
+            return None
+        token = extract_oa_token(headers)
+        if not token:
+            return None
+        try:
+            return HttpEtcOAClient(token=token)
+        except EtcOAClientError:
+            return None
+
+    def _handle_api_etc_batch_confirm_submitted(self, batch_id: str) -> Response:
+        try:
+            batch = self._etc_service.confirm_submitted(batch_id)
+        except EtcBatchNotFoundError as error:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_batch_not_found", "message": str(error)})
+        except EtcDraftRequestError as error:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_etc_batch_request", "message": str(error)},
+            )
+        return self._json_response(HTTPStatus.OK, {"batch": batch})
+
+    def _handle_api_etc_batch_mark_not_submitted(self, batch_id: str) -> Response:
+        try:
+            batch = self._etc_service.mark_not_submitted(batch_id)
+        except EtcBatchNotFoundError as error:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_batch_not_found", "message": str(error)})
+        return self._json_response(HTTPStatus.OK, {"batch": batch})
 
     def _handle_api_session_me(self, headers: dict[str, str] | None) -> Response:
         try:
@@ -5070,12 +5286,14 @@ class Application:
         has_oa = bool(group.get("oa_rows"))
         has_bank = bool(group.get("bank_rows"))
         has_invoice = bool(group.get("invoice_rows"))
+        has_etc_batch_oa = self._group_has_etc_batch_oa(group)
         if has_oa and has_invoice and not has_bank:
             add("待找流水")
         elif has_oa and has_bank and not has_invoice:
-            add("待找发票")
+            if not has_etc_batch_oa:
+                add("待找发票")
         elif has_oa and not has_bank and not has_invoice:
-            add("待找流水与发票")
+            add("待找流水" if has_etc_batch_oa else "待找流水与发票")
         elif has_bank and has_invoice and not has_oa:
             add("待找OA")
 
@@ -5105,11 +5323,27 @@ class Application:
         if relation_mode == "salary_personal_auto_match":
             add("工资")
         for tag in tags:
-            if tag in {"冲", "内部往来", "工资", "非税"}:
+            if tag in {"ETC批量提交", "冲", "内部往来", "工资", "非税"}:
                 add(tag)
         if any(str(row.get(key, "")).find("非税") >= 0 for key in ("summary", "remark", "reason", "purpose")):
             add("非税")
         return visible
+
+    @staticmethod
+    def _group_has_etc_batch_oa(group: dict[str, object]) -> bool:
+        for row in list(group.get("oa_rows") or []):
+            if isinstance(row, dict) and Application._is_etc_batch_oa_row(row):
+                return True
+        return False
+
+    @staticmethod
+    def _is_etc_batch_oa_row(row: dict[str, object]) -> bool:
+        if str(row.get("source", "")).strip() == "etc_batch":
+            return True
+        if str(row.get("etc_batch_id") or row.get("etcBatchId") or "").strip():
+            return True
+        tags = [str(tag).strip() for tag in list(row.get("tags") or []) if str(tag).strip()]
+        return "ETC批量提交" in tags
 
     @staticmethod
     def _decimal_from_value(value: object) -> Decimal | None:

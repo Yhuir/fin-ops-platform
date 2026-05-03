@@ -1013,7 +1013,7 @@ describe("Workbench row selection and detail modal", () => {
     ]);
   });
 
-  test("ETC invoice import opens a dialog and sends per-file invoice directions", async () => {
+  test("ETC invoice import opens a dialog and uses zip preview before confirm", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderAppAt("/");
@@ -1021,30 +1021,29 @@ describe("Workbench row selection and detail modal", () => {
     await openWorkbenchImportMenu(user);
     await user.click(await screen.findByRole("button", { name: "ETC发票导入" }));
     const dialog = await screen.findByRole("dialog", { name: "ETC发票导入" });
-    const input = within(dialog).getByLabelText("上传ETC发票文件") as HTMLInputElement;
-    const etcFile = new File(["etc-invoice"], "ETC一月发票.xlsx", {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    const input = within(dialog).getByLabelText("上传ETC zip") as HTMLInputElement;
+    const etcZip = new File(["etc-zip"], "ETC一月发票.zip", {
+      type: "application/zip",
       lastModified: 1,
     });
 
-    await user.upload(input, [etcFile]);
-    const previewButton = within(dialog).getByRole("button", { name: "开始预览" });
-    expect(previewButton).toBeDisabled();
+    await user.upload(input, [etcZip]);
+    await user.click(within(dialog).getByRole("button", { name: "开始预览" }));
 
-    await user.selectOptions(within(dialog).getByLabelText("票据方向 ETC一月发票.xlsx"), "input_invoice");
-    await user.click(previewButton);
+    expect(await within(dialog).findByText("已完成 1 个 ETC zip 文件预览。")).toBeInTheDocument();
+    expect(within(dialog).getByText("ETC-2026-005")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "确认导入" }));
 
-    expect(await within(dialog).findByText("已完成 1 个文件的预览识别。")).toBeInTheDocument();
-    const previewCall = fetchMock.mock.calls.find(([url]) => String(url) === "/imports/files/preview");
+    await waitFor(() => {
+      expect(within(dialog).getAllByText("已导入 ETC票据管理").length).toBeGreaterThan(0);
+    });
+    const previewCall = fetchMock.mock.calls.find(([url]) => String(url) === "/api/etc/import/preview");
     expect(previewCall).toBeTruthy();
     const formData = (previewCall?.[1] as RequestInit).body as FormData;
-    expect(JSON.parse(String(formData.get("file_overrides")))).toEqual([
-      {
-        file_name: "ETC一月发票.xlsx",
-        template_code: "invoice_export",
-        batch_type: "input_invoice",
-      },
-    ]);
+    expect((formData.getAll("files") as File[]).map((file) => file.name)).toEqual(["ETC一月发票.zip"]);
+    const confirmCall = fetchMock.mock.calls.find(([url]) => String(url) === "/api/etc/import/confirm");
+    expect(confirmCall).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/imports/files/preview")).toBe(false);
   });
 
   test("import completion marks the global status icon pending and returns to synced", async () => {

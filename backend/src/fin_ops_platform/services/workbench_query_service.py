@@ -6,10 +6,13 @@ from typing import Any
 
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
 from fin_ops_platform.services.oa_adapter import (
+    ETC_BATCH_SOURCE,
+    ETC_BATCH_TAG,
     InMemoryOAAdapter,
     OAAdapter,
     OAApplicationRecord,
     build_attachment_invoice_detail_fields,
+    detect_etc_batch_metadata,
 )
 
 
@@ -305,9 +308,12 @@ class WorkbenchQueryService:
         return refreshed
 
     def _build_oa_row(self, record: OAApplicationRecord) -> dict[str, Any]:
+        source_metadata = self._oa_source_metadata(record)
+        source = source_metadata.get("source")
+        etc_batch_id = source_metadata.get("etc_batch_id")
         relation = {
             "code": record.relation_code,
-            "label": record.relation_label,
+            "label": self._oa_relation_label(record, source=source),
             "tone": record.relation_tone,
         }
         attachment_invoices = self._attachment_invoices(record)
@@ -321,7 +327,7 @@ class WorkbenchQueryService:
         )
         case_id = record.case_id or (self._oa_attachment_case_id(record.id) if attachment_invoices else None)
         tags = self._oa_row_tags(
-            existing_tags=getattr(record, "tags", []),
+            existing_tags=list(source_metadata.get("tags") or []),
             attachment_invoice_count=len(attachment_invoices),
             attachment_file_count=attachment_file_count,
         )
@@ -340,6 +346,9 @@ class WorkbenchQueryService:
             "oa_bank_relation": relation,
             "available_actions": self.available_actions("oa", record.section),
             "tags": tags,
+            "source": source,
+            "etc_batch_id": etc_batch_id,
+            "etcBatchId": etc_batch_id,
             "_month": record.month,
             "_section": record.section,
             "_summary_fields": {
@@ -353,6 +362,36 @@ class WorkbenchQueryService:
             },
             "_detail_fields": detail_fields,
         }
+
+    @staticmethod
+    def _oa_source_metadata(record: OAApplicationRecord | object) -> dict[str, Any]:
+        detected = detect_etc_batch_metadata(
+            getattr(record, "reason", ""),
+            getattr(record, "expense_content", ""),
+            getattr(record, "detail_fields", {}),
+        )
+        source = str(getattr(record, "source", "") or detected.get("source") or "").strip()
+        etc_batch_id = str(getattr(record, "etc_batch_id", "") or detected.get("etc_batch_id") or "").strip()
+        tags = [
+            str(tag).strip()
+            for tag in [*list(getattr(record, "tags", []) or []), *list(detected.get("tags") or [])]
+            if str(tag).strip()
+        ]
+        if source == ETC_BATCH_SOURCE and etc_batch_id and ETC_BATCH_TAG not in tags:
+            tags.append(ETC_BATCH_TAG)
+        return {
+            "source": source or None,
+            "etc_batch_id": etc_batch_id or None,
+            "tags": tags,
+        }
+
+    @staticmethod
+    def _oa_relation_label(record: OAApplicationRecord | object, *, source: str | None) -> str:
+        relation_code = str(getattr(record, "relation_code", "") or "")
+        relation_label = str(getattr(record, "relation_label", "") or "")
+        if source == ETC_BATCH_SOURCE and relation_code == "pending_match":
+            return "待找流水"
+        return relation_label
 
     @staticmethod
     def _oa_row_tags(

@@ -213,7 +213,7 @@ describe("Workbench candidate grouping layout", () => {
     const groupRow = await screen.findByTestId("candidate-group-open-row:oa-o-202603-002");
     const emptyCells = within(groupRow).getAllByText("-");
 
-    expect(within(groupRow).getByText("孙悦")).toBeInTheDocument();
+    expect(within(groupRow).getByText("孙敏")).toBeInTheDocument();
     expect(emptyCells).toHaveLength(2);
   });
 
@@ -224,7 +224,7 @@ describe("Workbench candidate grouping layout", () => {
     const openZone = await screen.findByTestId("zone-open");
     const invoicePane = within(openZone).getByTestId("pane-invoice");
     const groupRow = await screen.findByTestId("candidate-group-open-row:oa-o-202603-002");
-    const diagnostics = within(invoicePane).getByRole("button", { name: "进销项发票附件统计：OA附件 1，已解析 0，已导入 2" });
+    const diagnostics = within(invoicePane).getByRole("button", { name: "进销项发票附件统计：OA附件 1，已解析 0，已导入 3" });
 
     expect(diagnostics).toHaveTextContent("进销项发票");
     expect(within(invoicePane).getByText("OA里的发票附件数量")).toBeInTheDocument();

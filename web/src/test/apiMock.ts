@@ -100,6 +100,201 @@ function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+function createEtcInvoiceStore() {
+  let invoices = [
+    {
+      id: "etc-inv-001",
+      invoice_number: "ETC-2026-001",
+      issue_date: "2026-02-27",
+      passage_start_date: "2026-02-27",
+      passage_end_date: "2026-02-27",
+      plate_number: "云ADA0381",
+      seller_name: "云南高速通行费",
+      buyer_name: "云南溯源科技",
+      amount_without_tax: "12.34",
+      tax_amount: "0.73",
+      total_amount: "13.07",
+      status: "unsubmitted" as const,
+      has_pdf: true,
+      has_xml: true,
+    },
+    {
+      id: "etc-inv-002",
+      invoice_number: "ETC-2026-002",
+      issue_date: "2026-02-27",
+      passage_start_date: "2026-02-27",
+      passage_end_date: "2026-02-27",
+      plate_number: "云ADA0381",
+      seller_name: "云南高速通行费",
+      buyer_name: "云南溯源科技",
+      amount_without_tax: "18.10",
+      tax_amount: "1.09",
+      total_amount: "19.19",
+      status: "unsubmitted" as const,
+      has_pdf: true,
+      has_xml: true,
+    },
+    {
+      id: "etc-inv-003",
+      invoice_number: "ETC-2026-003",
+      issue_date: "2026-02-28",
+      passage_start_date: "2026-02-28",
+      passage_end_date: "2026-02-28",
+      plate_number: "云A8H66Q",
+      seller_name: "昆明绕城高速",
+      buyer_name: "云南溯源科技",
+      amount_without_tax: "20.14",
+      tax_amount: "1.21",
+      total_amount: "21.35",
+      status: "unsubmitted" as const,
+      has_pdf: false,
+      has_xml: true,
+    },
+    {
+      id: "etc-inv-004",
+      invoice_number: "ETC-2026-004",
+      issue_date: "2026-01-18",
+      passage_start_date: "2026-01-18",
+      passage_end_date: "2026-01-18",
+      plate_number: "云ADA0381",
+      seller_name: "云南高速通行费",
+      buyer_name: "云南溯源科技",
+      amount_without_tax: "30.00",
+      tax_amount: "1.80",
+      total_amount: "31.80",
+      status: "submitted" as const,
+      has_pdf: true,
+      has_xml: true,
+    },
+  ];
+
+  const counts = () => ({
+    unsubmitted: invoices.filter((invoice) => invoice.status === "unsubmitted").length,
+    submitted: invoices.filter((invoice) => invoice.status === "submitted").length,
+  });
+
+  return {
+    list({ status, month, plate, keyword }: { status?: string | null; month?: string | null; plate?: string | null; keyword?: string | null }) {
+      const normalizedKeyword = String(keyword ?? "").trim();
+      const normalizedPlate = String(plate ?? "").trim();
+      const rows = invoices.filter((invoice) => {
+        if (status && invoice.status !== status) {
+          return false;
+        }
+        if (month && !invoice.issue_date.startsWith(month)) {
+          return false;
+        }
+        if (normalizedPlate && !invoice.plate_number.includes(normalizedPlate)) {
+          return false;
+        }
+        if (normalizedKeyword) {
+          const searchable = `${invoice.invoice_number} ${invoice.seller_name} ${invoice.buyer_name} ${invoice.plate_number}`;
+          if (!searchable.includes(normalizedKeyword)) {
+            return false;
+          }
+        }
+        return true;
+      });
+      return {
+        counts: counts(),
+        items: cloneJson(rows),
+        pagination: {
+          page: 1,
+          page_size: 100,
+          total: rows.length,
+        },
+      };
+    },
+    previewZip(fileNames: string[]) {
+      return {
+        sessionId: "etc_import_session_0001",
+        imported: 1,
+        duplicatesSkipped: 1,
+        attachmentsCompleted: 1,
+        failed: 1,
+        items: [
+          {
+            invoiceNumber: "ETC-2026-005",
+            fileName: fileNames[0] ?? "etc-2026-03.zip",
+            status: "imported",
+            reason: "新发票待导入",
+          },
+          {
+            invoiceNumber: "ETC-2026-001",
+            fileName: fileNames[0] ?? "etc-2026-03.zip",
+            status: "duplicate_skipped",
+            reason: "发票号码已存在",
+          },
+          {
+            invoiceNumber: "ETC-2026-003",
+            fileName: fileNames[1] ?? fileNames[0] ?? "etc-2026-04.zip",
+            status: "attachment_completed",
+            reason: "已补齐 PDF 附件",
+          },
+          {
+            invoiceNumber: "",
+            fileName: fileNames[1] ?? fileNames[0] ?? "etc-2026-04.zip",
+            status: "failed",
+            reason: "zip 内缺少可识别 XML",
+          },
+        ],
+      };
+    },
+    confirmImport() {
+      if (!invoices.some((invoice) => invoice.id === "etc-inv-005")) {
+        invoices = [
+          ...invoices,
+          {
+            id: "etc-inv-005",
+            invoice_number: "ETC-2026-005",
+            issue_date: "2026-03-01",
+            passage_start_date: "2026-03-01",
+            passage_end_date: "2026-03-01",
+            plate_number: "云A8H66Q",
+            seller_name: "云南高速通行费",
+            buyer_name: "云南溯源科技",
+            amount_without_tax: "7.55",
+            tax_amount: "0.45",
+            total_amount: "8.00",
+            status: "unsubmitted" as const,
+            has_pdf: true,
+            has_xml: true,
+          },
+        ];
+      }
+      return {
+        sessionId: "etc_import_session_0001",
+        imported: 1,
+        duplicatesSkipped: 1,
+        attachmentsCompleted: 1,
+        failed: 1,
+        items: [
+          {
+            invoiceNumber: "ETC-2026-005",
+            fileName: "etc-2026-03.zip",
+            status: "imported",
+            reason: "已导入 ETC票据管理",
+          },
+        ],
+      };
+    },
+    markSubmitted(invoiceIds: string[]) {
+      invoices = invoices.map((invoice) =>
+        invoiceIds.includes(invoice.id)
+          ? { ...invoice, status: "submitted" as const }
+          : invoice,
+      );
+    },
+    markUnsubmitted(invoiceIds: string[]) {
+      invoices = invoices.map((invoice) =>
+        invoiceIds.includes(invoice.id)
+          ? { ...invoice, status: "unsubmitted" as const }
+          : invoice,
+      );
+    },
+  };
+}
+
 function detectMockBankSelection(fileName: string) {
   if (fileName.includes("historydetail")) {
     return {
@@ -2689,6 +2884,9 @@ function isBinaryLikeResponse(value: MockFetchResult): value is Response {
 
 export function installMockApiFetch(options: MockApiOptions = {}) {
   let latestImportSession = buildImportPreviewPayload([]);
+  const etcInvoiceStore = createEtcInvoiceStore();
+  let latestEtcImportPreview = etcInvoiceStore.previewZip([]);
+  let latestEtcDraftInvoiceIds: string[] = [];
   const workbenchStateStore = createWorkbenchStateStore();
   const ignoredRowStore = createIgnoredRowStore();
   const taxOffsetStateStore = createTaxOffsetStateStore();
@@ -3242,6 +3440,55 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         : [];
       return { body: calculateTaxPayload(month, selectedOutputIds, selectedInputIds, taxOffsetStateStore.get(month)) };
     },
+    "/api/etc/invoices": ({ url }) => ({
+      body: etcInvoiceStore.list({
+        status: url.searchParams.get("status"),
+        month: url.searchParams.get("month"),
+        plate: url.searchParams.get("plate"),
+        keyword: url.searchParams.get("keyword"),
+      }),
+    }),
+    "/api/etc/import/preview": ({ formData }) => {
+      const fileNames = (formData?.getAll("files") as File[] | undefined)?.map((file) => file.name) ?? [];
+      latestEtcImportPreview = etcInvoiceStore.previewZip(fileNames);
+      return { body: cloneJson(latestEtcImportPreview) };
+    },
+    "/api/etc/import/confirm": ({ jsonBody }) => {
+      const sessionId = String(jsonBody?.sessionId ?? jsonBody?.session_id ?? "");
+      if (sessionId !== latestEtcImportPreview.sessionId) {
+        return {
+          status: 404,
+          body: {
+            error: "etc_import_session_not_found",
+            message: "ETC 导入预览会话不存在。",
+          },
+        };
+      }
+      return {
+        body: etcInvoiceStore.confirmImport(),
+      };
+    },
+    "/api/etc/batches/draft": ({ jsonBody }) => {
+      latestEtcDraftInvoiceIds = Array.isArray(jsonBody?.invoiceIds)
+        ? (jsonBody.invoiceIds as string[])
+        : [];
+      return {
+        body: {
+          batchId: "etc_batch_001",
+          oaDraftId: "oa_draft_001",
+          oaDraftUrl: "https://oa.example.test/etc-draft-001",
+        },
+      };
+    },
+    "/api/etc/invoices/revoke-submitted": ({ jsonBody }) => {
+      const invoiceIds = Array.isArray(jsonBody?.invoiceIds) ? (jsonBody.invoiceIds as string[]) : [];
+      etcInvoiceStore.markUnsubmitted(invoiceIds);
+      return {
+        body: {
+          ok: true,
+        },
+      };
+    },
     "/api/bank-details/accounts": () => ({
       body: {
         total_balance: "130500.50",
@@ -3677,6 +3924,13 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     }
     if (url.pathname.startsWith("/imports/files/sessions/")) {
       return jsonResponse({ body: latestImportSession });
+    }
+    if (url.pathname === "/api/etc/batches/etc_batch_001/confirm-submitted") {
+      etcInvoiceStore.markSubmitted(latestEtcDraftInvoiceIds);
+      return jsonResponse({ body: { ok: true } });
+    }
+    if (url.pathname === "/api/etc/batches/etc_batch_001/mark-not-submitted") {
+      return jsonResponse({ body: { ok: true } });
     }
     if (url.pathname.startsWith("/imports/batches/") && url.pathname.endsWith("/revert")) {
       const batchId = url.pathname.split("/")[3] ?? "";

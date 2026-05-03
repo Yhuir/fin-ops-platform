@@ -226,6 +226,49 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-001"])
         self.assertEqual([row["id"] for row in group["bank_rows"]], ["bk-001"])
 
+    def test_etc_batch_oa_bank_group_auto_closes_without_invoice(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-05",
+            oa_rows=[
+                {
+                    "id": "oa-etc-001",
+                    "type": "oa",
+                    "source": "etc_batch",
+                    "etc_batch_id": "etc_20260503_001",
+                    "tags": ["ETC批量提交"],
+                    "case_id": None,
+                    "apply_type": "支付申请",
+                    "amount": "53.84",
+                    "counterparty_name": "云南高速通行费",
+                    "oa_bank_relation": {"code": "pending_match", "label": "待找流水", "tone": "warn"},
+                    "available_actions": ["detail", "confirm_link", "mark_exception"],
+                }
+            ],
+            bank_rows=[
+                {
+                    "id": "bk-etc-001",
+                    "type": "bank",
+                    "case_id": None,
+                    "trade_time": "2026-05-03 14:22",
+                    "debit_amount": "53.84",
+                    "credit_amount": "",
+                    "counterparty_name": "云南高速通行费",
+                    "invoice_relation": {"code": "pending_match", "label": "待匹配", "tone": "warn"},
+                    "available_actions": ["detail", "view_relation", "cancel_link", "handle_exception"],
+                }
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 1)
+        self.assertEqual(payload["summary"]["open_count"], 0)
+        group = payload["paired"]["groups"][0]
+        self.assertEqual(group["group_type"], "auto_closed")
+        self.assertEqual(group["oa_rows"][0]["oa_bank_relation"]["label"], "已关联流水")
+        self.assertEqual(group["bank_rows"][0]["invoice_relation"]["label"], "已关联OA")
+        self.assertEqual(group["invoice_rows"], [])
+
     def test_keeps_exact_open_case_bank_invoice_group_in_open_until_oa_exists(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(
