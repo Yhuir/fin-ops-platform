@@ -883,9 +883,7 @@ class EtcService:
         attachment_ids: list[str] = []
         for invoice in invoices:
             assert invoice.pdf_file_path is not None
-            assert invoice.xml_file_path is not None
             attachment_ids.append(oa_client.upload_attachment(Path(invoice.pdf_file_path)))
-            attachment_ids.append(oa_client.upload_attachment(Path(invoice.xml_file_path)))
         return attachment_ids
 
     def _build_oa_draft_payload(self, batch: EtcBatch, invoices: list[EtcInvoice], attachment_ids: list[str]) -> dict[str, object]:

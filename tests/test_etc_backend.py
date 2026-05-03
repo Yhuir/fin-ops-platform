@@ -398,7 +398,8 @@ class EtcServiceTests(unittest.TestCase):
             not_submitted = service.mark_not_submitted(draft.batch_id)
 
         self.assertEqual(draft.oa_draft_id, "oa-draft-001")
-        self.assertEqual(len(fake_oa.uploads), 4)
+        self.assertEqual(len(fake_oa.uploads), 2)
+        self.assertTrue(all(Path(upload).suffix == ".pdf" for upload in fake_oa.uploads))
         self.assertEqual(after_draft[0].status, EtcInvoiceStatus.UNSUBMITTED)
         payload = fake_oa.draft_payloads[0]["payload"]
         self.assertTrue(payload["isDraft"])
