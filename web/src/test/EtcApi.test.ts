@@ -139,6 +139,18 @@ describe("etc api", () => {
     });
   });
 
+  test("reports HTML responses as deployment or proxy errors", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("<html><head><title>405 Not Allowed</title></head></html>", {
+        status: 405,
+        headers: { "Content-Type": "text/html" },
+      }),
+    );
+    global.fetch = fetchMock as typeof fetch;
+
+    await expect(createEtcOaDraft(["etc-inv-001"])).rejects.toThrow("ETC 接口返回了 HTML 页面");
+  });
+
   test("previews ETC zip files and maps camelCase import item fields", async () => {
     document.cookie = "Admin-Token=mock-cookie-token";
     const fetchMock = vi.fn().mockResolvedValue(

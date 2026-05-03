@@ -97,9 +97,24 @@ async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
     credentials: init.credentials ?? "include",
   });
   const rawText = await response.text();
-  const payload = rawText.trim().length > 0 ? JSON.parse(rawText) as T : {} as T;
+  const trimmedText = rawText.trim();
+  let payload = {} as T;
+  if (trimmedText.length > 0) {
+    try {
+      payload = JSON.parse(trimmedText) as T;
+    } catch (error) {
+      const contentType = response.headers.get("Content-Type") ?? "";
+      const looksLikeHtml = trimmedText.startsWith("<") || contentType.toLowerCase().includes("text/html");
+      if (looksLikeHtml) {
+        throw new Error("ETC 接口返回了 HTML 页面，请检查 fin-ops 后端代理路径或服务器部署配置。");
+      }
+      throw new Error("ETC 接口返回了无效 JSON。");
+    }
+  }
   if (!response.ok) {
-    throw new Error(rawText.trim() || "ETC API request failed");
+    const errorPayload = payload as { message?: unknown; error?: unknown };
+    const message = typeof errorPayload.message === "string" ? errorPayload.message : "";
+    throw new Error(message || trimmedText || "ETC API request failed");
   }
   return payload;
 }
