@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import time
 import unittest
 
 from openpyxl import Workbook
@@ -53,6 +54,18 @@ def build_multipart_payload(
 
 
 class ImportFormalizationApiTests(unittest.TestCase):
+    def _wait_for_background_job(self, app, job_id: str) -> dict[str, object]:
+        deadline = time.monotonic() + 3
+        job_payload: dict[str, object] = {}
+        while time.monotonic() < deadline:
+            job_response = app.handle_request("GET", f"/api/background-jobs/{job_id}")
+            self.assertEqual(job_response.status_code, 200)
+            job_payload = json.loads(job_response.body)["job"]
+            if job_payload["status"] in {"succeeded", "partial_success", "failed"}:
+                return job_payload
+            time.sleep(0.02)
+        return job_payload
+
     def test_confirmed_import_persists_across_restart_and_refreshes_api_workbench(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -81,10 +94,11 @@ class ImportFormalizationApiTests(unittest.TestCase):
                     }
                 ),
             )
-            self.assertEqual(confirm_response.status_code, 200)
+            self.assertEqual(confirm_response.status_code, 202)
             confirm_payload = json.loads(confirm_response.body)
-            self.assertIn("matching_run", confirm_payload)
-            self.assertGreater(confirm_payload["matching_run"]["result_count"], 0)
+            job_payload = self._wait_for_background_job(app, confirm_payload["job"]["job_id"])
+            self.assertEqual(job_payload["status"], "succeeded")
+            self.assertGreater(job_payload["result_summary"]["matching_results"], 0)
 
             restarted = build_application(data_dir=Path(temp_dir))
             session_response = restarted.handle_request(
@@ -243,7 +257,11 @@ class ImportFormalizationApiTests(unittest.TestCase):
                 ),
             )
             confirm_payload = json.loads(confirm_response.body)
-            batch_id = confirm_payload["files"][0]["batch_id"]
+            job_payload = self._wait_for_background_job(app, confirm_payload["job"]["job_id"])
+            self.assertEqual(job_payload["status"], "succeeded")
+            session_response = app.handle_request("GET", f"/imports/files/sessions/{preview_payload['session']['id']}")
+            session_payload = json.loads(session_response.body)
+            batch_id = session_payload["files"][0]["batch_id"]
 
             download_response = app.handle_request("GET", f"/imports/batches/{batch_id}/download")
             self.assertEqual(download_response.status_code, 200)

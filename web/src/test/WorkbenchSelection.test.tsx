@@ -1013,12 +1013,33 @@ describe("Workbench row selection and detail modal", () => {
     ]);
   });
 
-  test("ETC invoice import opens a dialog and uses zip preview before confirm", async () => {
+  test("ETC invoice import starts a background job and leaves header progress after closing", async () => {
     const user = userEvent.setup();
-    const fetchMock = installMockApiFetch();
+    const fetchMock = installMockApiFetch({
+      backgroundJobs: [
+        {
+          job_id: "job_etc_001",
+          type: "etc_invoice_import",
+          label: "导入 ETC发票",
+          short_label: "正在导入 ETC发票 3/31",
+          status: "running",
+          phase: "persist_items",
+          current: 3,
+          total: 31,
+          percent: 10,
+          message: "正在导入 ETC发票。",
+          result_summary: {},
+          error: null,
+          created_at: "2026-05-03T10:00:00+00:00",
+          updated_at: "2026-05-03T10:00:02+00:00",
+          finished_at: null,
+        },
+      ],
+    });
     renderAppAt("/");
 
     await openWorkbenchImportMenu(user);
+    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("正在导入 ETC发票 3/31");
     await user.click(await screen.findByRole("button", { name: "ETC发票导入" }));
     const dialog = await screen.findByRole("dialog", { name: "ETC发票导入" });
     const input = within(dialog).getByLabelText("上传ETC zip") as HTMLInputElement;
@@ -1035,8 +1056,11 @@ describe("Workbench row selection and detail modal", () => {
     await user.click(within(dialog).getByRole("button", { name: "确认导入" }));
 
     await waitFor(() => {
-      expect(within(dialog).getAllByText("已导入 ETC票据管理").length).toBeGreaterThan(0);
+      expect(within(dialog).getAllByText("已开始后台导入").length).toBeGreaterThan(0);
     });
+    await user.click(within(dialog).getByRole("button", { name: "关闭" }));
+    expect(screen.queryByRole("dialog", { name: "ETC发票导入" })).not.toBeInTheDocument();
+    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("正在导入 ETC发票 3/31");
     const previewCall = fetchMock.mock.calls.find(([url]) => String(url) === "/api/etc/import/preview");
     expect(previewCall).toBeTruthy();
     const formData = (previewCall?.[1] as RequestInit).body as FormData;

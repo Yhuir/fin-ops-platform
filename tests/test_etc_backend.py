@@ -6,6 +6,7 @@ from io import BytesIO
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import time
 import unittest
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -312,6 +313,23 @@ class EtcServiceTests(unittest.TestCase):
         invoice_by_no = {invoice.invoice_number: invoice for invoice in invoices}
         self.assertTrue(invoice_by_no["ETC001"].pdf_file_path)
 
+    def test_reimport_completes_attachment_when_stored_pdf_file_is_missing(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir))
+            service.import_zips([UploadedEtcZipFile("initial.zip", etc_zip(["ETC001"], include_pdf=True))])
+            invoices, _total, _counts = service.list_invoices(page=1, page_size=20)
+            self.assertTrue(invoices[0].pdf_file_path)
+            Path(str(invoices[0].pdf_file_path)).unlink()
+
+            preview = service.preview_import_zips([UploadedEtcZipFile("repair.zip", etc_zip(["ETC001"], include_pdf=True))])
+            confirmed = service.confirm_import_session(str(preview["sessionId"]))
+            repaired, _total, _counts = service.list_invoices(page=1, page_size=20)
+
+            self.assertEqual(preview["summary"], {"imported": 0, "duplicatesSkipped": 0, "attachmentsCompleted": 1, "failed": 0})
+            self.assertEqual(confirmed.attachments_completed, 1)
+            self.assertTrue(repaired[0].pdf_file_path)
+            self.assertTrue(Path(str(repaired[0].pdf_file_path)).exists())
+
     def test_import_reports_missing_xml_and_malformed_xml_without_blocking_other_zips(self) -> None:
         with TemporaryDirectory() as temp_dir:
             service = EtcService(data_dir=Path(temp_dir))
@@ -424,6 +442,116 @@ class EtcServiceTests(unittest.TestCase):
 
 
 class EtcApiTests(unittest.TestCase):
+    def _wait_for_job(self, app, job_id: str, *, timeout: float = 2.0) -> dict[str, object]:
+        deadline = time.monotonic() + timeout
+        payload: dict[str, object] = {}
+        while time.monotonic() < deadline:
+            response = app.handle_request("GET", f"/api/background-jobs/{job_id}")
+            payload = json.loads(response.body)
+            job = payload.get("job", {})
+            if isinstance(job, dict) and job.get("status") in {"succeeded", "partial_success", "failed"}:
+                return job
+            time.sleep(0.02)
+        self.fail(f"background job {job_id} did not finish: {payload}")
+
+    def test_etc_confirm_returns_background_job_and_imports_asynchronously(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            body, headers = multipart({"outer.zip": etc_zip(["ETC001", "ETC002"], nested=True)})
+
+            preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+            preview_payload = json.loads(preview_response.body)
+            before_confirm_response = app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20")
+            confirm_response = app.handle_request(
+                "POST",
+                "/api/etc/import/confirm",
+                json.dumps({"sessionId": preview_payload["sessionId"]}),
+            )
+            confirm_payload = json.loads(confirm_response.body)
+            job = confirm_payload["job"]
+            completed_job = self._wait_for_job(app, job["job_id"])
+            query_response = app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20")
+
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(json.loads(before_confirm_response.body)["total"], 0)
+        self.assertEqual(confirm_response.status_code, 202)
+        self.assertEqual(job["type"], "etc_invoice_import")
+        self.assertEqual(job["total"], 2)
+        self.assertEqual(completed_job["status"], "succeeded")
+        self.assertEqual(completed_job["current"], 2)
+        self.assertEqual(completed_job["total"], 2)
+        self.assertEqual(completed_job["result_summary"]["created"], 2)
+        self.assertEqual(completed_job["result_summary"]["imported"], 2)
+        self.assertEqual(completed_job["result_summary"]["total"], 2)
+        self.assertEqual(json.loads(query_response.body)["total"], 2)
+
+    def test_etc_invoice_api_reports_attachment_existence_flags(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            body, headers = multipart({"outer.zip": etc_zip(["ETC001"])})
+
+            preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+            session_id = json.loads(preview_response.body)["sessionId"]
+            confirm_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id}))
+            job = json.loads(confirm_response.body)["job"]
+            self._wait_for_job(app, job["job_id"])
+            query_response = app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20")
+
+        payload = json.loads(query_response.body)
+        self.assertEqual(payload["total"], 1)
+        self.assertTrue(payload["items"][0]["has_pdf"])
+        self.assertTrue(payload["items"][0]["has_xml"])
+
+    def test_etc_confirm_repeated_session_returns_same_job_without_duplicate_import(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            body, headers = multipart({"outer.zip": etc_zip(["ETC001"], nested=True)})
+
+            preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+            session_id = json.loads(preview_response.body)["sessionId"]
+            first_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id}))
+            first_job = json.loads(first_response.body)["job"]
+            second_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id}))
+            second_job = json.loads(second_response.body)["job"]
+            self._wait_for_job(app, first_job["job_id"])
+            query_response = app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20")
+
+        self.assertEqual(first_response.status_code, 202)
+        self.assertEqual(second_response.status_code, 202)
+        self.assertEqual(second_job["job_id"], first_job["job_id"])
+        self.assertEqual(json.loads(query_response.body)["total"], 1)
+
+    def test_etc_confirm_job_partial_success_when_some_items_fail(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            body, headers = multipart(
+                {
+                    "mixed.zip": zip_bytes(
+                        {
+                            "xml/ETC001.xml": etc_xml("ETC001"),
+                            "pdf/ETC001.pdf": fake_pdf("ETC001"),
+                            "xml/bad.xml": b"<Invoice>",
+                        }
+                    )
+                }
+            )
+
+            preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+            session_id = json.loads(preview_response.body)["sessionId"]
+            confirm_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id}))
+            job = json.loads(confirm_response.body)["job"]
+            completed_job = self._wait_for_job(app, job["job_id"])
+            query_response = app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20")
+
+        self.assertEqual(confirm_response.status_code, 202)
+        self.assertEqual(job["total"], 2)
+        self.assertEqual(completed_job["status"], "partial_success")
+        self.assertEqual(completed_job["current"], 2)
+        self.assertEqual(completed_job["result_summary"]["created"], 1)
+        self.assertEqual(completed_job["result_summary"]["failed"], 1)
+        self.assertEqual(completed_job["result_summary"]["total"], 2)
+        self.assertEqual(json.loads(query_response.body)["total"], 1)
+
     def test_import_query_revoke_and_batch_api_round_trip(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -438,6 +566,8 @@ class EtcApiTests(unittest.TestCase):
                 "/api/etc/import/confirm",
                 json.dumps({"sessionId": preview_payload["sessionId"]}),
             )
+            import_confirm_payload = json.loads(import_confirm_response.body)
+            self._wait_for_job(app, import_confirm_payload["job"]["job_id"])
             query_response = app.handle_request("GET", "/api/etc/invoices?status=unsubmitted&month=2026-02&page=1&page_size=1")
             draft_response = app.handle_request(
                 "POST",
@@ -458,11 +588,9 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(preview_payload["imported"], 2)
         self.assertEqual(before_confirm_response.status_code, 200)
         self.assertEqual(json.loads(before_confirm_response.body)["total"], 0)
-        self.assertEqual(import_confirm_response.status_code, 200)
-        confirm_payload = json.loads(import_confirm_response.body)
-        self.assertEqual(confirm_payload["sessionId"], preview_payload["sessionId"])
-        self.assertEqual(confirm_payload["summary"]["imported"], 2)
-        self.assertEqual(confirm_payload["imported"], 2)
+        self.assertEqual(import_confirm_response.status_code, 202)
+        self.assertEqual(import_confirm_payload["job"]["type"], "etc_invoice_import")
+        self.assertEqual(import_confirm_payload["job"]["total"], 2)
         self.assertEqual(query_response.status_code, 200)
         query_payload = json.loads(query_response.body)
         self.assertEqual(query_payload["total"], 2)
@@ -512,6 +640,27 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(json.loads(missing_batch.body)["error"], "etc_batch_not_found")
         self.assertEqual(bad_revoke.status_code, 400)
         self.assertEqual(json.loads(bad_revoke.body)["error"], "invalid_etc_invoice_request")
+
+    def test_etc_draft_returns_clear_error_when_oa_token_is_missing(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            body, headers = multipart({"outer.zip": etc_zip(["ETC001"])})
+
+            preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+            session_id = json.loads(preview_response.body)["sessionId"]
+            confirm_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id}))
+            job = json.loads(confirm_response.body)["job"]
+            self._wait_for_job(app, job["job_id"])
+            draft_response = app.handle_request(
+                "POST",
+                "/api/etc/batches/draft",
+                json.dumps({"invoiceIds": ["etc_invoice_0001"]}),
+            )
+
+        self.assertEqual(draft_response.status_code, 400)
+        payload = json.loads(draft_response.body)
+        self.assertEqual(payload["error"], "invalid_etc_draft_request")
+        self.assertIn("OA 登录 token 缺失", payload["message"])
 
 
 if __name__ == "__main__":

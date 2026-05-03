@@ -71,7 +71,7 @@ describe("Import center", () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/etc/import/confirm")).toBe(false);
   });
 
-  test("confirms ETC preview session and shows imported feedback", async () => {
+  test("confirms ETC preview session and shows background job feedback", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
 
@@ -85,7 +85,7 @@ describe("Import center", () => {
     await user.click(screen.getByRole("button", { name: "确认导入 ETC票据管理" }));
 
     await waitFor(() => {
-      expect(screen.getAllByText("已导入 ETC票据管理").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("已开始后台导入").length).toBeGreaterThan(0);
     });
     const confirmCall = fetchMock.mock.calls.find(([url]) => String(url) === "/api/etc/import/confirm");
     expect(confirmCall).toBeTruthy();

@@ -12,7 +12,7 @@ import mimetypes
 import os
 import pickle
 import re
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 import xml.etree.ElementTree as ET
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urljoin
@@ -437,6 +437,29 @@ class EtcService:
         session.confirmed_at = datetime.now(UTC)
         return result
 
+    def get_import_session_item_total(self, session_id: str) -> int:
+        session = self._import_sessions.get(session_id)
+        if session is None:
+            raise EtcServiceError("ETC import session not found.")
+        return len(session.preview_result.items)
+
+    def confirm_import_session_with_progress(
+        self,
+        session_id: str,
+        progress_callback: Callable[[EtcImportResult], None] | None = None,
+    ) -> EtcImportResult:
+        session = self._import_sessions.get(session_id)
+        if session is None:
+            raise EtcServiceError("ETC import session not found.")
+        if session.confirmed_result is not None:
+            if progress_callback is not None:
+                progress_callback(session.confirmed_result)
+            return session.confirmed_result
+        result = self._process_import_zips(session.uploads, persist=True, progress_callback=progress_callback)
+        session.confirmed_result = result
+        session.confirmed_at = datetime.now(UTC)
+        return result
+
     def import_result_payload(self, result: EtcImportResult) -> dict[str, object]:
         return {
             **result.summary_payload(),
@@ -451,10 +474,19 @@ class EtcService:
             **payload,
         }
 
-    def _process_import_zips(self, uploads: list[UploadedEtcZipFile], *, persist: bool) -> EtcImportResult:
+    def _process_import_zips(
+        self,
+        uploads: list[UploadedEtcZipFile],
+        *,
+        persist: bool,
+        progress_callback: Callable[[EtcImportResult], None] | None = None,
+    ) -> EtcImportResult:
         result = EtcImportResult()
         preview_state: dict[str, tuple[bool, bool]] = {
-            invoice.invoice_number: (bool(invoice.xml_file_path), bool(invoice.pdf_file_path))
+            invoice.invoice_number: (
+                self._stored_invoice_file_exists(invoice.xml_file_path),
+                self._stored_invoice_file_exists(invoice.pdf_file_path),
+            )
             for invoice in self._invoices.values()
         }
         for upload in uploads:
@@ -463,11 +495,15 @@ class EtcService:
             except BadZipFile as exc:
                 result.failed += 1
                 result.items.append(EtcImportItem(upload.file_name, None, "failed", f"zip 解析失败: {exc}"))
+                if progress_callback is not None:
+                    progress_callback(result)
                 continue
             xml_entries = [entry for entry in entries if self._is_xml_entry(entry.path)]
             if not xml_entries:
                 result.failed += 1
                 result.items.append(EtcImportItem(upload.file_name, None, "failed", "缺 XML，不能生成 ETC 发票记录。"))
+                if progress_callback is not None:
+                    progress_callback(result)
                 continue
             pdf_entries = [entry for entry in entries if self._is_pdf_entry(entry.path)]
             for xml_entry in xml_entries:
@@ -489,6 +525,8 @@ class EtcService:
                 elif status == "attachment_completed":
                     result.attachments_completed += 1
                 result.items.append(EtcImportItem(xml_entry.path, parsed.invoice_number, status))
+                if progress_callback is not None:
+                    progress_callback(result)
         if persist:
             self._persist()
         return result
@@ -732,15 +770,17 @@ class EtcService:
     ) -> str:
         existing_id = self._invoice_numbers.get(parsed.invoice_number)
         existing = self._invoices.get(existing_id) if existing_id else None
-        if existing is not None and existing.xml_file_path and existing.pdf_file_path:
+        existing_has_xml = existing is not None and self._stored_invoice_file_exists(existing.xml_file_path)
+        existing_has_pdf = existing is not None and self._stored_invoice_file_exists(existing.pdf_file_path)
+        if existing is not None and existing_has_xml and existing_has_pdf:
             return "duplicate_skipped"
 
         xml_path, xml_hash = (None, None)
         pdf_path, pdf_hash = (None, None)
         now = datetime.now(UTC)
-        if existing is None or not existing.xml_file_path:
+        if existing is None or not existing_has_xml:
             xml_path, xml_hash = self._store_invoice_file(parsed, "invoice.xml", xml_entry.content)
-        if pdf_entry is not None and (existing is None or not existing.pdf_file_path):
+        if pdf_entry is not None and (existing is None or not existing_has_pdf):
             pdf_path, pdf_hash = self._store_invoice_file(parsed, "invoice.pdf", pdf_entry.content)
 
         if existing is None:
@@ -773,16 +813,20 @@ class EtcService:
             return "imported"
 
         completed = False
-        if not existing.xml_file_path and xml_path:
+        if not existing_has_xml and xml_path:
             existing.xml_file_path = xml_path
             existing.xml_file_hash = xml_hash
             completed = True
-        if not existing.pdf_file_path and pdf_path:
+        if not existing_has_pdf and pdf_path:
             existing.pdf_file_path = pdf_path
             existing.pdf_file_hash = pdf_hash
             completed = True
         existing.updated_at = now
         return "attachment_completed" if completed else "duplicate_skipped"
+
+    @staticmethod
+    def _stored_invoice_file_exists(path: str | None) -> bool:
+        return bool(path and Path(path).exists())
 
     def _store_invoice_file(self, parsed: ParsedEtcXml, file_name: str, content: bytes) -> tuple[str, str]:
         month = parsed.issue_date[:7] if parsed.issue_date else "unknown"

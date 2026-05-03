@@ -446,8 +446,7 @@ export default function ImportCenterPage() {
       try {
         const payload = await confirmEtcImportSession(etcPreviewPayload.sessionId);
         setEtcConfirmPayload(payload);
-        setEtcPreviewPayload(payload);
-        setFeedbackMessage("已导入 ETC票据管理");
+        setFeedbackMessage(payload.job ? "已开始后台导入" : "已导入 ETC票据管理");
       } catch (error) {
         setErrorMessage(resolveImportApiErrorMessage(error, "确认导入失败，请稍后重试。"));
       } finally {
@@ -464,7 +463,9 @@ export default function ImportCenterPage() {
       const payload = await confirmImportFiles(previewPayload.session.id, selectedFileIds);
       applyPreviewPayload(
         payload,
-        `已确认导入 ${summarizeSelection(payload.files, selectedFileIds)} 个文件，并自动触发匹配闭环。`,
+        payload.job
+          ? `已开始后台导入 ${summarizeSelection(payload.files, selectedFileIds)} 个文件。`
+          : `已确认导入 ${summarizeSelection(payload.files, selectedFileIds)} 个文件，并自动触发匹配闭环。`,
       );
       setSelectedFileIds([]);
     } catch (error) {
@@ -663,7 +664,7 @@ export default function ImportCenterPage() {
             </button>
           </div>
 
-          {etcConfirmPayload ? <div className="state-panel success">已导入 ETC票据管理</div> : null}
+          {etcConfirmPayload ? <div className="state-panel success">{etcConfirmPayload.job ? "已开始后台导入" : "已导入 ETC票据管理"}</div> : null}
 
           <section className="stats-row import-session-stats">
             <div className="stat-card">

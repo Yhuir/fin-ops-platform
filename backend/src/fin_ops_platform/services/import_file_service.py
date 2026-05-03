@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from io import BytesIO
 import re
-from typing import Any
+from typing import Any, Callable
 import warnings
 
 from openpyxl import load_workbook
@@ -211,7 +211,13 @@ class FileImportService:
     def get_session(self, session_id: str) -> FileImportSession:
         return self._sessions[session_id]
 
-    def confirm_session(self, *, session_id: str, selected_file_ids: list[str]) -> FileImportSession:
+    def confirm_session(
+        self,
+        *,
+        session_id: str,
+        selected_file_ids: list[str],
+        progress_callback: Callable[[FileImportSession, int, int], None] | None = None,
+    ) -> FileImportSession:
         session = self._sessions[session_id]
         selected = set(selected_file_ids)
         known_ids = {item.id for item in session.files}
@@ -220,21 +226,31 @@ class FileImportService:
             raise KeyError(f"Unknown selected file ids: {', '.join(unknown_ids)}")
 
         confirmed_any = False
+        selected_items = [item for item in session.files if item.id in selected]
+        progress_total = len(selected_items)
+        progress_current = 0
         for item in session.files:
             if item.id not in selected:
                 if item.status == "preview_ready":
                     item.status = "skipped"
                     item.batch_id = None
                 continue
+            progress_current += 1
             if item.status == "confirmed":
                 confirmed_any = True
+                if progress_callback is not None:
+                    progress_callback(session, progress_current, progress_total)
                 continue
             if not item.preview_batch_id:
+                if progress_callback is not None:
+                    progress_callback(session, progress_current, progress_total)
                 continue
             batch = self._import_service.confirm_import(item.preview_batch_id)
             item.batch_id = batch.id
             item.status = "confirmed"
             confirmed_any = True
+            if progress_callback is not None:
+                progress_callback(session, progress_current, progress_total)
 
         session.status = "confirmed" if confirmed_any else "skipped"
         self._sessions[session.id] = session

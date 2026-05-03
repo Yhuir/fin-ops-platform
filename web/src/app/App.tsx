@@ -1,11 +1,13 @@
 import { BrowserRouter, NavLink } from "react-router-dom";
 
 import SessionGate from "../components/auth/SessionGate";
+import BackgroundProgressBlock from "../components/common/BackgroundProgressBlock";
 import WorkbenchHeaderControls from "../components/workbench/WorkbenchHeaderControls";
 import { AppChromeProvider, useAppChrome } from "../contexts/AppChromeContext";
 import { ImportProgressProvider, useImportProgress } from "../contexts/ImportProgressContext";
 import { MonthProvider } from "../contexts/MonthContext";
 import { SessionProvider } from "../contexts/SessionContext";
+import { BackgroundJobProgressProvider, useBackgroundJobProgress } from "../features/backgroundJobs/BackgroundJobProgressProvider";
 import AppRouter from "./router";
 import { APP_BASE_PATH, isOaEmbeddedMode } from "./runtime";
 import "./styles.css";
@@ -28,6 +30,7 @@ function HeaderStatusIndicator({ level, reason }: { level: "ok" | "pending" | "e
 function AppShell() {
   const { workbenchHeaderActions, workbenchStatus } = useAppChrome();
   const { progress } = useImportProgress();
+  const { primaryJob, extraCount, connectionFailed, acknowledgeJob } = useBackgroundJobProgress();
   const embedded = isOaEmbeddedMode();
 
   return (
@@ -39,6 +42,23 @@ function AppShell() {
             <div className="global-title">财务运营平台</div>
           </div>
           {workbenchStatus ? <HeaderStatusIndicator level={workbenchStatus.level} reason={workbenchStatus.reason} /> : null}
+          {primaryJob ? (
+            <BackgroundProgressBlock
+              kind="job"
+              job={primaryJob}
+              extraCount={extraCount}
+              onAcknowledge={(jobId) => {
+                void acknowledgeJob(jobId);
+              }}
+            />
+          ) : connectionFailed ? (
+            <BackgroundProgressBlock kind="connection_error" />
+          ) : progress ? (
+            <div className={`global-progress-chip ${progress.tone}`} aria-live="polite">
+              <span className="global-progress-label">进度</span>
+              <strong>{progress.label}</strong>
+            </div>
+          ) : null}
         </div>
         <div className="header-actions">
           {workbenchHeaderActions ? (
@@ -83,12 +103,6 @@ function AppShell() {
               ETC票据管理
             </NavLink>
           </nav>
-          {progress ? (
-            <div className={`global-progress-chip ${progress.tone}`} aria-live="polite">
-              <span className="global-progress-label">进度</span>
-              <strong>{progress.label}</strong>
-            </div>
-          ) : null}
         </div>
       </header>
       <main className={`page-body${embedded ? " embedded" : ""}`}>
@@ -109,7 +123,9 @@ export default function App() {
           <SessionProvider>
             <AppChromeProvider initialShellHeaderMounted>
               <SessionGate>
-                <AppShell />
+                <BackgroundJobProgressProvider>
+                  <AppShell />
+                </BackgroundJobProgressProvider>
               </SessionGate>
             </AppChromeProvider>
           </SessionProvider>

@@ -43,6 +43,7 @@ type MockApiOptions = {
   workbenchOaSyncStatuses?: Array<Record<string, unknown>>;
   dataResetPasswordShouldFail?: boolean;
   dataResetJobPollsBeforeComplete?: number;
+  backgroundJobs?: Array<Record<string, unknown>>;
 };
 
 const templateRegistry = [
@@ -241,41 +242,32 @@ function createEtcInvoiceStore() {
       };
     },
     confirmImport() {
-      if (!invoices.some((invoice) => invoice.id === "etc-inv-005")) {
-        invoices = [
-          ...invoices,
-          {
-            id: "etc-inv-005",
-            invoice_number: "ETC-2026-005",
-            issue_date: "2026-03-01",
-            passage_start_date: "2026-03-01",
-            passage_end_date: "2026-03-01",
-            plate_number: "云A8H66Q",
-            seller_name: "云南高速通行费",
-            buyer_name: "云南溯源科技",
-            amount_without_tax: "7.55",
-            tax_amount: "0.45",
-            total_amount: "8.00",
-            status: "unsubmitted" as const,
-            has_pdf: true,
-            has_xml: true,
-          },
-        ];
-      }
       return {
-        sessionId: "etc_import_session_0001",
-        imported: 1,
-        duplicatesSkipped: 1,
-        attachmentsCompleted: 1,
-        failed: 1,
-        items: [
-          {
-            invoiceNumber: "ETC-2026-005",
-            fileName: "etc-2026-03.zip",
-            status: "imported",
-            reason: "已导入 ETC票据管理",
+        job: {
+          job_id: "job_etc_import_0001",
+          type: "etc_invoice_import",
+          label: "导入 ETC发票",
+          short_label: "正在导入 ETC发票 0/4",
+          status: "queued",
+          phase: "queued",
+          current: 0,
+          total: 4,
+          percent: 0,
+          message: "ETC发票导入任务已创建。",
+          result_summary: {
+            created: 0,
+            imported: 0,
+            updated: 0,
+            attachments_completed: 0,
+            duplicates: 0,
+            failed: 0,
+            total: 4,
           },
-        ],
+          error: null,
+          created_at: "2026-05-03T10:00:00+00:00",
+          updated_at: "2026-05-03T10:00:00+00:00",
+          finished_at: null,
+        },
       };
     },
     markSubmitted(invoiceIds: string[]) {
@@ -2989,6 +2981,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   };
 
   const dataResetJobs = new Map<string, Record<string, unknown>>();
+  let backgroundJobs = cloneJson(options.backgroundJobs ?? []);
   let workbenchOaSyncStatusIndex = 0;
 
   const handlers: Record<string, MockFetchHandler> = {
@@ -3071,6 +3064,11 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       };
     },
+    "/api/background-jobs/active": () => ({
+      body: {
+        jobs: cloneJson(backgroundJobs),
+      },
+    }),
     "/api/workbench/ignored": ({ url }) => {
       const month = url.searchParams.get("month") ?? "";
       return {
@@ -3465,6 +3463,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         };
       }
       return {
+        status: 202,
         body: etcInvoiceStore.confirmImport(),
       };
     },
@@ -4031,6 +4030,22 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       };
       dataResetJobs.set(jobId, job);
       return jsonResponse({ body: { job } });
+    }
+    if (
+      (init?.method ?? "GET").toUpperCase() === "POST"
+      && url.pathname.startsWith("/api/background-jobs/")
+      && url.pathname.endsWith("/acknowledge")
+    ) {
+      const jobId = decodeURIComponent(url.pathname.split("/")[3] ?? "");
+      backgroundJobs = backgroundJobs.filter((job) => String(job.job_id ?? job.jobId ?? "") !== jobId);
+      return jsonResponse({
+        body: {
+          job: {
+            job_id: jobId,
+            status: "acknowledged",
+          },
+        },
+      });
     }
 
     const handler = handlers[url.pathname];

@@ -23,6 +23,7 @@ from pymongo.errors import PyMongoError
 from fin_ops_platform import __version__
 from fin_ops_platform.app.auth import (
     ForbiddenOAAccessError,
+    OAAuthError,
     OARequestSession,
     UnauthorizedOASessionError,
     extract_oa_token,
@@ -36,6 +37,11 @@ from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
 from fin_ops_platform.services.bank_details_service import BankDetailsService
+from fin_ops_platform.services.background_job_service import (
+    BackgroundJobAccessError,
+    BackgroundJobNotFoundError,
+    BackgroundJobService,
+)
 from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
 from fin_ops_platform.services.etc_service import (
     EtcBatchNotFoundError,
@@ -70,6 +76,8 @@ from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
 from fin_ops_platform.services.search_service import MONTH_RE as SEARCH_MONTH_RE, SUPPORTED_SCOPES as SEARCH_SUPPORTED_SCOPES, SUPPORTED_STATUSES as SEARCH_SUPPORTED_STATUSES, SearchService
 from fin_ops_platform.services.settings_data_reset_service import (
+    RESET_BANK_TRANSACTIONS_ACTION,
+    RESET_INVOICES_ACTION,
     RESET_OA_AND_REBUILD_ACTION,
     SettingsDataResetService,
 )
@@ -281,6 +289,7 @@ class Application:
         self._bank_details_service = BankDetailsService(self._import_service)
         self._tax_certified_import_service = TaxCertifiedImportService(state_store=self._state_store)
         self._etc_service = EtcService(state_store=self._state_store)
+        self._background_job_service = BackgroundJobService(self._state_store)
         self._settings_data_reset_service = (
             SettingsDataResetService(
                 state_store=self._state_store,
@@ -396,10 +405,18 @@ class Application:
                 status=status,
                 limit=limit,
             )
+        if method == "GET" and route_path == "/api/background-jobs/active":
+            return self._handle_api_background_jobs_active(headers)
+        if method == "GET" and route_path.startswith("/api/background-jobs/"):
+            job_id = unquote(route_path.rsplit("/", 1)[-1])
+            return self._handle_api_background_job(job_id, headers)
+        if method == "POST" and route_path.startswith("/api/background-jobs/") and route_path.endswith("/acknowledge"):
+            job_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_background_job_acknowledge(job_id, headers)
         if method == "POST" and route_path == "/api/etc/import/preview":
             return self._handle_api_etc_import_preview(body, headers)
         if method == "POST" and route_path == "/api/etc/import/confirm":
-            return self._handle_api_etc_import_confirm(body)
+            return self._handle_api_etc_import_confirm(body, headers)
         if method == "POST" and route_path == "/api/etc/import":
             return self._handle_api_etc_import(body, headers)
         if method == "GET" and route_path == "/api/etc/invoices":
@@ -652,7 +669,7 @@ class Application:
         if method == "POST" and route_path == "/imports/files/preview":
             return self._handle_import_file_preview(body, headers)
         if method == "POST" and route_path == "/imports/files/confirm":
-            return self._handle_import_file_confirm(body)
+            return self._handle_import_file_confirm(body, headers)
         if method == "POST" and route_path == "/imports/files/retry":
             return self._handle_import_file_retry(body)
         if method == "GET" and route_path.startswith("/imports/files/sessions/"):
@@ -695,6 +712,9 @@ class Application:
                 "/matching/results",
                 "/api/workbench",
                 "/api/search",
+                "/api/background-jobs/active",
+                "/api/background-jobs/{job_id}",
+                "/api/background-jobs/{job_id}/acknowledge",
                 "/api/etc/import/preview",
                 "/api/etc/import/confirm",
                 "/api/etc/invoices",
@@ -761,6 +781,7 @@ class Application:
                 "cost_statistics_foundation",
                 "cost_statistics_export",
                 "etc_invoice_management",
+                "background_job_foundation",
             ],
             "storage": {
                 "mode": self._state_store.storage_mode if self._state_store is not None else "memory",
@@ -865,6 +886,44 @@ class Application:
             },
         )
 
+    def _handle_api_background_jobs_active(self, headers: dict[str, str] | None) -> Response:
+        owner_user_id = self._resolve_background_job_owner(headers)
+        jobs = self._background_job_service.list_active_jobs(owner_user_id, include_system=True)
+        return self._json_response(HTTPStatus.OK, {"jobs": [job.to_payload() for job in jobs]})
+
+    def _handle_api_background_job(self, job_id: str, headers: dict[str, str] | None) -> Response:
+        owner_user_id = self._resolve_background_job_owner(headers)
+        try:
+            job = self._background_job_service.get_job(job_id, owner_user_id)
+        except (BackgroundJobNotFoundError, BackgroundJobAccessError):
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "background_job_not_found", "message": "后台任务不存在或不可见。"},
+            )
+        return self._json_response(HTTPStatus.OK, {"job": job.to_payload()})
+
+    def _handle_api_background_job_acknowledge(self, job_id: str, headers: dict[str, str] | None) -> Response:
+        owner_user_id = self._resolve_background_job_owner(headers)
+        try:
+            job = self._background_job_service.acknowledge_job(job_id, owner_user_id)
+        except (BackgroundJobNotFoundError, BackgroundJobAccessError):
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "background_job_not_found", "message": "后台任务不存在或不可见。"},
+            )
+        return self._json_response(HTTPStatus.OK, {"job": job.to_payload()})
+
+    def _resolve_background_job_owner(self, headers: dict[str, str] | None) -> str:
+        try:
+            session = resolve_oa_request_session(
+                headers,
+                identity_service=self._oa_identity_service,
+                access_control_service=self._access_control_service,
+            )
+        except (OAAuthError, OAIdentityConfigurationError, OAIdentityServiceError, OASessionExpiredError):
+            return "web_finance_user"
+        return session.identity.username or session.identity.user_id or "web_finance_user"
+
     def _handle_api_etc_import_preview(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
         _fields, files, error = self._load_multipart_body(body, headers)
         if error is not None:
@@ -884,7 +943,7 @@ class Application:
         payload = self._etc_service.preview_import_zips(uploads)
         return self._json_response(HTTPStatus.OK, payload)
 
-    def _handle_api_etc_import_confirm(self, body: str | bytes | None) -> Response:
+    def _handle_api_etc_import_confirm(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
@@ -894,17 +953,87 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_etc_import_request", "message": "sessionId is required."},
             )
+        normalized_session_id = session_id.strip()
         try:
-            result = self._etc_service.confirm_import_session(session_id.strip())
+            total = self._etc_service.get_import_session_item_total(normalized_session_id)
         except EtcServiceError as error:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_import_session_not_found", "message": str(error)})
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "sessionId": session_id.strip(),
-                **self._etc_service.import_result_payload(result),
-            },
+
+        owner_user_id = self._resolve_background_job_owner(headers)
+        idempotency_key = f"etc_import_session:{normalized_session_id}"
+        initial_summary = {
+            "created": 0,
+            "imported": 0,
+            "updated": 0,
+            "attachments_completed": 0,
+            "duplicates": 0,
+            "failed": 0,
+            "total": total,
+        }
+        job, created = self._background_job_service.create_or_get_idempotent_job_with_created(
+            job_type="etc_invoice_import",
+            label="导入 ETC发票",
+            owner_user_id=owner_user_id,
+            idempotency_key=idempotency_key,
+            phase="queued",
+            current=0,
+            total=total,
+            message="ETC发票导入任务已创建。",
+            result_summary=initial_summary,
+            source={"session_id": normalized_session_id},
+            affected_scopes=["etc_invoices"],
+            reuse_any_status=True,
         )
+        if not created:
+            return self._json_response(HTTPStatus.ACCEPTED, {"job": job.to_payload()})
+
+        def run_etc_import(running_job):
+            def progress_callback(result) -> None:
+                summary = self._etc_import_job_summary(result, total)
+                self._background_job_service.update_progress(
+                    running_job.job_id,
+                    phase="persist_items",
+                    message=f"正在导入 ETC发票 {summary['total_current']}/{total}。",
+                    current=int(summary["total_current"]),
+                    total=total,
+                    result_summary={key: value for key, value in summary.items() if key != "total_current"},
+                )
+
+            result = self._etc_service.confirm_import_session_with_progress(
+                normalized_session_id,
+                progress_callback=progress_callback,
+            )
+            summary = self._etc_import_job_summary(result, total)
+            result_summary = {key: value for key, value in summary.items() if key != "total_current"}
+            status = "partial_success" if result.failed > 0 else "succeeded"
+            message = "ETC发票导入部分完成。" if status == "partial_success" else "ETC发票导入完成。"
+            self._background_job_service.succeed_job(
+                running_job.job_id,
+                message,
+                result_summary=result_summary,
+                status=status,
+            )
+            return result_summary
+
+        self._background_job_service.run_job(job, run_etc_import)
+        return self._json_response(
+            HTTPStatus.ACCEPTED,
+            {"job": job.to_payload()},
+        )
+
+    @staticmethod
+    def _etc_import_job_summary(result, total: int) -> dict[str, int]:
+        total_current = result.imported + result.attachments_completed + result.duplicates_skipped + result.failed
+        return {
+            "created": result.imported,
+            "imported": result.imported,
+            "updated": result.attachments_completed,
+            "attachments_completed": result.attachments_completed,
+            "duplicates": result.duplicates_skipped,
+            "failed": result.failed,
+            "total": total,
+            "total_current": total_current,
+        }
 
     def _handle_api_etc_invoices(
         self,
@@ -935,13 +1064,24 @@ class Application:
         return self._json_response(
             HTTPStatus.OK,
             {
-                "items": invoices,
+                "items": [self._serialize_etc_invoice(invoice) for invoice in invoices],
                 "counts": counts,
                 "page": max(resolved_page, 1),
                 "pageSize": min(max(resolved_page_size, 1), 500),
                 "total": total,
             },
         )
+
+    @staticmethod
+    def _serialize_etc_invoice(invoice: object) -> dict[str, object]:
+        payload = Application._serialize_value(invoice)
+        if not isinstance(payload, dict):
+            return {}
+        pdf_path = payload.get("pdf_file_path")
+        xml_path = payload.get("xml_file_path")
+        payload["has_pdf"] = bool(isinstance(pdf_path, str) and pdf_path and Path(pdf_path).exists())
+        payload["has_xml"] = bool(isinstance(xml_path, str) and xml_path and Path(xml_path).exists())
+        return payload
 
     def _handle_api_etc_revoke_submitted(self, body: str | bytes | None) -> Response:
         payload, error = self._load_json_body(body)
@@ -978,6 +1118,11 @@ class Application:
             result = self._etc_service.create_oa_draft(invoice_ids, oa_client=self._build_etc_oa_client(headers))
         except EtcInvoiceNotFoundError as error:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_invoice_not_found", "message": str(error)})
+        except EtcOAClientError as error:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_etc_draft_request", "message": str(error)},
+            )
         except EtcDraftRequestError as error:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
@@ -998,11 +1143,8 @@ class Application:
             return None
         token = extract_oa_token(headers)
         if not token:
-            return None
-        try:
-            return HttpEtcOAClient(token=token)
-        except EtcOAClientError:
-            return None
+            raise EtcOAClientError("OA 登录 token 缺失，请从 OA 内打开本 app 或重新登录 OA 后再创建草稿。")
+        return HttpEtcOAClient(token=token)
 
     def _handle_api_etc_batch_confirm_submitted(self, batch_id: str) -> Response:
         try:
@@ -1652,34 +1794,69 @@ class Application:
         if action not in self._settings_data_reset_service.supported_actions():
             return self._unsupported_settings_data_reset_response()
 
-        active_job = self._active_data_reset_job()
+        owner_user_id = self._resolve_background_job_owner(headers)
+        active_job = self._active_data_reset_background_job(owner_user_id)
         if active_job is not None:
             return self._json_response(
                 HTTPStatus.CONFLICT,
                 {
                     "error": "settings_data_reset_job_running",
                     "message": "已有数据重置任务正在执行，请等待当前任务完成。",
-                    "job": active_job.to_payload(),
+                    "job": self._serialize_data_reset_background_job(active_job),
                 },
             )
 
-        now = datetime.now().isoformat()
-        job = DataResetJob(
-            job_id=uuid4().hex,
-            action=action,
-            status="queued",
+        job = self._background_job_service.create_job(
+            job_type="settings_data_reset",
+            label=self._data_reset_job_label(action),
+            owner_user_id=owner_user_id,
+            visibility="system",
             phase="queued",
-            message="数据重置任务已排队。",
-            current=0,
+            current=1,
             total=100,
-            percent=0,
-            created_at=now,
-            updated_at=now,
+            message="数据重置任务已排队。",
+            result_summary={"action": action},
+            source={"action": action},
+            affected_scopes=["settings", "workbench"],
         )
-        with self._data_reset_jobs_lock:
-            self._data_reset_jobs[job.job_id] = job
-        Thread(target=self._run_settings_data_reset_job, args=(job.job_id,), daemon=True).start()
-        return self._json_response(HTTPStatus.ACCEPTED, {"job": job.to_payload()})
+        self._background_job_service.run_job(job, lambda running_job: self._run_settings_data_reset_background_job(running_job, action))
+        return self._json_response(HTTPStatus.ACCEPTED, {"job": self._serialize_data_reset_background_job(job)})
+
+    def _run_settings_data_reset_background_job(self, running_job, action: str) -> dict[str, object]:
+        def update(phase: str, message: str, percent: int) -> None:
+            self._background_job_service.update_progress(
+                running_job.job_id,
+                phase=phase,
+                message=message,
+                current=max(0, min(int(percent), 100)),
+                total=100,
+                result_summary={"action": action},
+            )
+
+        update("start", "数据重置任务已开始。", 1)
+        result = self._execute_settings_data_reset(action, progress=update)
+        failed = str(result.get("status") or "") == "partial" or str(result.get("rebuild_status") or "") == "failed"
+        self._background_job_service.update_progress(
+            running_job.job_id,
+            phase="failed" if failed else "complete",
+            message=str(result.get("message") or ("数据重置失败。" if failed else "数据重置已完成。")),
+            current=100,
+            total=100,
+            result_summary=result,
+        )
+        if failed:
+            self._background_job_service.fail_job(
+                running_job.job_id,
+                str(result.get("message") or "数据重置失败。"),
+                str(result.get("message") or "数据重置失败。"),
+            )
+        else:
+            self._background_job_service.succeed_job(
+                running_job.job_id,
+                str(result.get("message") or "数据重置已完成。"),
+                result_summary=result,
+            )
+        return result
 
     def _handle_api_workbench_settings_data_reset_job(
         self,
@@ -1687,22 +1864,31 @@ class Application:
         headers: dict[str, str] | None,
     ) -> Response:
         normalized_job_id = str(job_id or "").strip()
-        with self._data_reset_jobs_lock:
-            job = self._data_reset_jobs.get(normalized_job_id)
-            payload = job.to_payload() if job is not None else None
-        if payload is None:
+        owner_user_id = self._resolve_background_job_owner(headers)
+        try:
+            job = self._background_job_service.get_job(normalized_job_id, owner_user_id)
+        except (BackgroundJobNotFoundError, BackgroundJobAccessError):
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
                 {"error": "settings_data_reset_job_not_found", "message": "数据重置任务不存在或已过期。"},
             )
-        return self._json_response(HTTPStatus.OK, {"job": payload})
+        if job.type != "settings_data_reset":
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "settings_data_reset_job_not_found", "message": "数据重置任务不存在或已过期。"},
+            )
+        return self._json_response(HTTPStatus.OK, {"job": self._serialize_data_reset_background_job(job)})
 
     def _handle_api_workbench_settings_data_reset_active_job(
         self,
         headers: dict[str, str] | None,
     ) -> Response:
-        active_job = self._active_data_reset_job()
-        return self._json_response(HTTPStatus.OK, {"job": active_job.to_payload() if active_job is not None else None})
+        owner_user_id = self._resolve_background_job_owner(headers)
+        active_job = self._active_data_reset_background_job(owner_user_id)
+        return self._json_response(
+            HTTPStatus.OK,
+            {"job": self._serialize_data_reset_background_job(active_job) if active_job is not None else None},
+        )
 
     def _validate_settings_data_reset_request(
         self,
@@ -1798,6 +1984,54 @@ class Application:
                 if job.status in {"queued", "running"}:
                     return job
         return None
+
+    def _active_data_reset_background_job(self, owner_user_id: str):
+        for job in self._background_job_service.list_active_jobs(owner_user_id, include_system=True):
+            if job.type == "settings_data_reset" and job.status in {"queued", "running"}:
+                return job
+        return None
+
+    @staticmethod
+    def _data_reset_job_label(action: str) -> str:
+        if action == RESET_BANK_TRANSACTIONS_ACTION:
+            return "重置银行流水"
+        if action == RESET_INVOICES_ACTION:
+            return "重置发票数据"
+        if action == RESET_OA_AND_REBUILD_ACTION:
+            return "重置OA数据"
+        return "数据重置"
+
+    @staticmethod
+    def _serialize_data_reset_background_job(job) -> dict[str, object]:
+        result = dict(job.result_summary) if isinstance(job.result_summary, dict) else {}
+        action = str(job.source.get("action") or result.get("action") or "")
+        status = str(job.status)
+        legacy_status = {
+            "succeeded": "completed",
+            "partial_success": "failed",
+            "cancelled": "cancelled",
+            "acknowledged": "completed",
+        }.get(status, status)
+        payload: dict[str, object] = {
+            "job_id": job.job_id,
+            "action": action,
+            "status": legacy_status,
+            "phase": job.phase,
+            "message": job.message,
+            "current": job.current,
+            "total": job.total,
+            "percent": job.percent,
+            "created_at": job.created_at,
+            "updated_at": job.updated_at,
+        }
+        if job.error:
+            payload["error"] = job.error
+        if result and ("cleared_collections" in result or "deleted_counts" in result or legacy_status == "completed"):
+            result.setdefault("action", action)
+            result.setdefault("status", legacy_status)
+            result.setdefault("job_id", job.job_id)
+            payload["result"] = result
+        return payload
 
     def _run_settings_data_reset_job(self, job_id: str) -> None:
         def update(phase: str, message: str, percent: int) -> None:
@@ -3754,7 +3988,7 @@ class Application:
         self._persist_state_with_workbench_invalidation()
         return self._json_response(HTTPStatus.OK, self._serialize_file_session(session))
 
-    def _handle_import_file_confirm(self, body: str | bytes | None) -> Response:
+    def _handle_import_file_confirm(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
@@ -3768,24 +4002,98 @@ class Application:
                     "message": "session_id and selected_file_ids are required.",
                 },
             )
+        normalized_session_id = str(session_id)
+        normalized_selected_file_ids = [str(item) for item in selected_file_ids]
         try:
-            session = self._file_import_service.confirm_session(
-                session_id=str(session_id),
-                selected_file_ids=[str(item) for item in selected_file_ids],
-            )
+            session = self._file_import_service.get_session(normalized_session_id)
         except KeyError as exc:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
                 {"error": "import_file_session_not_found", "message": str(exc)},
             )
-        matching_run = None
-        if any(file.status == "confirmed" for file in session.files):
-            matching_run = self._matching_service.run(triggered_by=f"import_session:{session.id}")
-        self._persist_state_with_workbench_invalidation()
+
+        selected = set(normalized_selected_file_ids)
+        unknown_ids = sorted(selected - {item.id for item in session.files})
+        if unknown_ids:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "import_file_session_not_found", "message": f"Unknown selected file ids: {', '.join(unknown_ids)}"},
+            )
+        total = len(normalized_selected_file_ids)
+        label = self._file_import_job_label(session, normalized_selected_file_ids)
+        owner_user_id = self._resolve_background_job_owner(headers)
+        selected_key = ",".join(sorted(normalized_selected_file_ids))
+        job, created = self._background_job_service.create_or_get_idempotent_job_with_created(
+            job_type="file_import",
+            label=label,
+            owner_user_id=owner_user_id,
+            idempotency_key=f"file_import_session:{normalized_session_id}:{selected_key}",
+            phase="queued",
+            current=0,
+            total=total,
+            message=f"{label}任务已创建。",
+            result_summary={"confirmed": 0, "selected": total, "matching_results": 0},
+            source={"session_id": normalized_session_id, "selected_file_ids": normalized_selected_file_ids},
+            affected_scopes=["imports", "workbench"],
+        )
+        if created:
+            def run_file_import(running_job):
+                def progress_callback(progress_session, current: int, progress_total: int) -> None:
+                    confirmed_count = sum(1 for file in progress_session.files if file.id in selected and file.status == "confirmed")
+                    self._background_job_service.update_progress(
+                        running_job.job_id,
+                        phase="confirm_files",
+                        message=f"正在{label} {current}/{max(progress_total, 1)}。",
+                        current=current,
+                        total=progress_total,
+                        result_summary={
+                            "confirmed": confirmed_count,
+                            "selected": progress_total,
+                            "matching_results": 0,
+                        },
+                    )
+
+                confirmed_session = self._file_import_service.confirm_session(
+                    session_id=normalized_session_id,
+                    selected_file_ids=normalized_selected_file_ids,
+                    progress_callback=progress_callback,
+                )
+                matching_run = None
+                if any(file.status == "confirmed" for file in confirmed_session.files):
+                    matching_run = self._matching_service.run(triggered_by=f"import_session:{confirmed_session.id}")
+                self._persist_state_with_workbench_invalidation()
+                confirmed_count = sum(1 for file in confirmed_session.files if file.id in selected and file.status == "confirmed")
+                result_summary = {
+                    "confirmed": confirmed_count,
+                    "selected": total,
+                    "matching_results": matching_run.result_count if matching_run is not None else 0,
+                }
+                self._background_job_service.succeed_job(
+                    running_job.job_id,
+                    f"{label}完成。",
+                    result_summary=result_summary,
+                )
+                return result_summary
+
+            self._background_job_service.run_job(job, run_file_import)
+
         response_payload = self._serialize_file_session(session)
-        if matching_run is not None:
-            response_payload["matching_run"] = self._serialize_matching_run(matching_run)
-        return self._json_response(HTTPStatus.OK, response_payload)
+        response_payload["job"] = job.to_payload()
+        return self._json_response(HTTPStatus.ACCEPTED, response_payload)
+
+    @staticmethod
+    def _file_import_job_label(session, selected_file_ids: list[str]) -> str:
+        selected = set(selected_file_ids)
+        batch_types = {
+            file.batch_type.value if isinstance(file.batch_type, BatchType) else str(file.batch_type)
+            for file in session.files
+            if file.id in selected and file.batch_type is not None
+        }
+        if batch_types == {BatchType.BANK_TRANSACTION.value}:
+            return "导入 银行流水"
+        if batch_types and batch_types.issubset({BatchType.INPUT_INVOICE.value, BatchType.OUTPUT_INVOICE.value}):
+            return "导入 发票"
+        return "导入文件"
 
     def _handle_import_file_retry(self, body: str | bytes | None) -> Response:
         payload, error = self._load_json_body(body)

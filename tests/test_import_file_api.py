@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from time import sleep
 import unittest
 
 from fin_ops_platform.app.server import build_application
@@ -258,8 +259,25 @@ class ImportFileApiTests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(confirm_response.status_code, 200)
+        self.assertEqual(confirm_response.status_code, 202)
         confirm_payload = json.loads(confirm_response.body)
+        self.assertEqual(confirm_payload["job"]["type"], "file_import")
+        job_id = confirm_payload["job"]["job_id"]
+        job_payload = confirm_payload["job"]
+        for _ in range(20):
+            job_response = app.handle_request("GET", f"/api/background-jobs/{job_id}")
+            job_payload = json.loads(job_response.body)["job"]
+            if job_payload["status"] == "succeeded":
+                break
+            sleep(0.02)
+        self.assertEqual(job_payload["status"], "succeeded")
+
+        session_response = app.handle_request(
+            "GET",
+            f"/imports/files/sessions/{preview_payload['session']['id']}",
+        )
+        self.assertEqual(session_response.status_code, 200)
+        confirm_payload = json.loads(session_response.body)
         confirmed_file = next(item for item in confirm_payload["files"] if item["id"] == invoice_file["id"])
         skipped_file = next(item for item in confirm_payload["files"] if item["id"] == pingan_file["id"])
 
@@ -273,13 +291,7 @@ class ImportFileApiTests(unittest.TestCase):
         batch_payload = json.loads(batch_response.body)
         self.assertEqual(batch_payload["batch"]["batch_type"], "input_invoice")
 
-        session_response = app.handle_request(
-            "GET",
-            f"/imports/files/sessions/{preview_payload['session']['id']}",
-        )
-        self.assertEqual(session_response.status_code, 200)
-        session_payload = json.loads(session_response.body)
-        session_file = next(item for item in session_payload["files"] if item["id"] == invoice_file["id"])
+        session_file = next(item for item in confirm_payload["files"] if item["id"] == invoice_file["id"])
         self.assertEqual(session_file["status"], "confirmed")
 
 

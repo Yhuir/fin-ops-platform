@@ -53,6 +53,7 @@ TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION = "tax_certified_import_sessions"
 TAX_CERTIFIED_IMPORT_BATCHES_COLLECTION = "tax_certified_import_batches"
 TAX_CERTIFIED_IMPORT_RECORDS_COLLECTION = "tax_certified_import_records"
 ETC_STATE_COLLECTION = "etc_state"
+BACKGROUND_JOBS_COLLECTION = "background_jobs"
 STATE_DOCUMENT_ID = "current_state"
 META_DOCUMENT_ID = "_meta"
 APP_SETTINGS_DOCUMENT_ID = "settings"
@@ -154,6 +155,7 @@ class ApplicationStateStore:
         self._oa_sync_state_path = root / "oa_sync_state.pkl"
         self._tax_certified_imports_path = root / "tax_certified_imports.pkl"
         self._etc_state_path = root / "etc" / "etc_state.pkl"
+        self._background_jobs_path = root / "background_jobs.pkl"
         self._data_dir.mkdir(parents=True, exist_ok=True)
 
         self._mongo_settings = load_mongo_state_settings(root)
@@ -211,6 +213,7 @@ class ApplicationStateStore:
                 "tax_certified_import_batches": self._mongo_database[TAX_CERTIFIED_IMPORT_BATCHES_COLLECTION],
                 "tax_certified_import_records": self._mongo_database[TAX_CERTIFIED_IMPORT_RECORDS_COLLECTION],
                 "etc_state": self._mongo_database[ETC_STATE_COLLECTION],
+                "background_jobs": self._mongo_database[BACKGROUND_JOBS_COLLECTION],
             }
             self._mongo_file_bucket = GridFSBucket(self._mongo_database, bucket_name=GRIDFS_BUCKET_NAME)
             self._ensure_mongo_metadata()
@@ -506,6 +509,80 @@ class ApplicationStateStore:
             raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         self._etc_state_path.parent.mkdir(parents=True, exist_ok=True)
         with self._etc_state_path.open("wb") as handle:
+            pickle.dump(normalized_snapshot, handle)
+
+    def load_background_jobs(self) -> dict[str, dict[str, Any]]:
+        if self._mongo_database is not None:
+            jobs: dict[str, dict[str, Any]] = {}
+            documents = self._run_mongo_operation(
+                lambda: list(self._mongo_detailed_collections["background_jobs"].find({}))
+            )
+            for document in documents:
+                payload = self._load_binary_payload(document)
+                if not isinstance(payload, dict):
+                    payload = {
+                        key: value
+                        for key, value in document.items()
+                        if key not in {"_id", "payload", "updated_at"}
+                    }
+                job_id = str(payload.get("job_id") or document.get("_id") or "").strip()
+                if job_id:
+                    payload["job_id"] = job_id
+                    jobs[job_id] = dict(payload)
+            return jobs
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        if not self._background_jobs_path.exists():
+            return {}
+        try:
+            with self._background_jobs_path.open("rb") as handle:
+                loaded = pickle.load(handle)  # noqa: S301 - trusted local application state
+        except (FileNotFoundError, pickle.PickleError, EOFError):
+            return {}
+        if not isinstance(loaded, dict):
+            return {}
+        return {
+            str(job_id): dict(payload)
+            for job_id, payload in loaded.items()
+            if isinstance(payload, dict)
+        }
+
+    def save_background_jobs(self, snapshot: dict[str, dict[str, Any]]) -> None:
+        normalized_snapshot = {
+            str(job_id): dict(payload)
+            for job_id, payload in (snapshot if isinstance(snapshot, dict) else {}).items()
+            if isinstance(payload, dict)
+        }
+        if self._mongo_database is not None:
+            collection = self._mongo_detailed_collections["background_jobs"]
+            self._run_mongo_operation(lambda: collection.delete_many({}))
+            updated_at = datetime.now(UTC)
+            for job_id, payload in normalized_snapshot.items():
+                normalized_payload = dict(payload)
+                normalized_payload["job_id"] = job_id
+                self._run_mongo_operation(
+                    lambda job_id=job_id, normalized_payload=normalized_payload: collection.replace_one(
+                        {"_id": job_id},
+                        {
+                            "_id": job_id,
+                            "job_id": job_id,
+                            "owner_user_id": normalized_payload.get("owner_user_id"),
+                            "visibility": normalized_payload.get("visibility"),
+                            "status": normalized_payload.get("status"),
+                            "type": normalized_payload.get("type"),
+                            "idempotency_key": normalized_payload.get("idempotency_key"),
+                            "payload": Binary(pickle.dumps(normalized_payload)),
+                            "updated_at": updated_at,
+                        },
+                        upsert=True,
+                    )
+                )
+            return
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        with self._background_jobs_path.open("wb") as handle:
             pickle.dump(normalized_snapshot, handle)
 
     def load_workbench_pair_relations(self) -> dict[str, Any]:
@@ -835,6 +912,8 @@ class ApplicationStateStore:
                         "tax_certified_import_sessions": TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION,
                         "tax_certified_import_batches": TAX_CERTIFIED_IMPORT_BATCHES_COLLECTION,
                         "tax_certified_import_records": TAX_CERTIFIED_IMPORT_RECORDS_COLLECTION,
+                        "etc_state": ETC_STATE_COLLECTION,
+                        "background_jobs": BACKGROUND_JOBS_COLLECTION,
                     },
                     "file_metadata_collection": FILE_METADATA_COLLECTION,
                     "gridfs_bucket": GRIDFS_BUCKET_NAME,

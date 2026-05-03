@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 
@@ -10,6 +10,38 @@ afterEach(() => {
 });
 
 describe("ETC ticket management page", () => {
+  test("refreshes invoice list when ETC import background job completes", async () => {
+    const fetchMock = installMockApiFetch({
+      backgroundJobs: [
+        {
+          job_id: "job_etc_import_0001",
+          type: "etc_invoice_import",
+          label: "导入 ETC发票",
+          short_label: "导入 ETC发票完成 4/4",
+          status: "succeeded",
+          phase: "complete",
+          current: 4,
+          total: 4,
+          percent: 100,
+          message: "ETC发票导入完成。",
+          result_summary: { created: 1, imported: 1, updated: 1, attachments_completed: 1, duplicates: 1, failed: 1, total: 4 },
+          error: null,
+          created_at: "2026-05-03T10:00:00+00:00",
+          updated_at: "2026-05-03T10:00:04+00:00",
+          finished_at: "2026-05-03T10:00:04+00:00",
+        },
+      ],
+    });
+    renderAppAt("/etc-tickets");
+
+    await screen.findByTestId("etc-ticket-management-page");
+
+    await waitFor(() => {
+      const invoiceListCalls = fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/etc/invoices"));
+      expect(invoiceListCalls.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
   test("navigation opens ETC page and displays status and current list counts", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
@@ -93,7 +125,13 @@ describe("ETC ticket management page", () => {
 
   test("creates OA draft, opens draft URL, and refreshes after result confirmation", async () => {
     const user = userEvent.setup();
-    const openMock = vi.fn();
+    const openedWindow = {
+      closed: false,
+      close: vi.fn(),
+      location: { href: "about:blank" },
+      opener: {},
+    };
+    const openMock = vi.fn(() => openedWindow);
     vi.stubGlobal("open", openMock);
     const fetchMock = installMockApiFetch();
     renderAppAt("/etc-tickets");
@@ -110,7 +148,8 @@ describe("ETC ticket management page", () => {
     expect(dialog).toHaveTextContent("需要在 OA 中检查并手动提交");
     await user.click(within(dialog).getByRole("button", { name: "确认创建草稿" }));
 
-    expect(openMock).toHaveBeenCalledWith("https://oa.example.test/etc-draft-001", "_blank", "noopener,noreferrer");
+    expect(openMock).toHaveBeenCalledWith("about:blank", "_blank");
+    await waitFor(() => expect(openedWindow.location.href).toBe("https://oa.example.test/etc-draft-001"));
     const resultDialog = await screen.findByRole("dialog", { name: "OA提交结果确认" });
     expect(within(resultDialog).getByRole("button", { name: "确认已提交OA" })).toBeInTheDocument();
     expect(within(resultDialog).getByRole("button", { name: "未提交OA" })).toBeInTheDocument();
@@ -126,7 +165,12 @@ describe("ETC ticket management page", () => {
 
   test("marking the OA draft as not submitted keeps invoice unsubmitted", async () => {
     const user = userEvent.setup();
-    vi.stubGlobal("open", vi.fn());
+    vi.stubGlobal("open", vi.fn(() => ({
+      closed: false,
+      close: vi.fn(),
+      location: { href: "about:blank" },
+      opener: {},
+    })));
     const fetchMock = installMockApiFetch();
     renderAppAt("/etc-tickets");
 

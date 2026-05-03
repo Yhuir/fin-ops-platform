@@ -1,4 +1,5 @@
 import { readOATokenCookie } from "../session/api";
+import { mapBackgroundJob, type ApiBackgroundJob } from "../backgroundJobs/api";
 import type {
   EtcImportConfirmResult,
   EtcImportItem,
@@ -41,6 +42,7 @@ type ApiEtcInvoicePayload = {
 };
 
 type ApiEtcImportSummary = {
+  job?: ApiBackgroundJob;
   sessionId?: string;
   session_id?: string;
   summary?: {
@@ -154,6 +156,13 @@ function mapEtcImportResult(payload: ApiEtcImportSummary): EtcImportPreviewResul
   };
 }
 
+function mapEtcImportConfirmResult(payload: ApiEtcImportSummary): EtcImportConfirmResult {
+  return {
+    ...mapEtcImportResult(payload),
+    ...(payload.job ? { job: mapBackgroundJob(payload.job) } : {}),
+  };
+}
+
 export async function fetchEtcInvoices(query: EtcInvoiceQuery = {}): Promise<EtcInvoiceListPayload> {
   const params = new URLSearchParams();
   if (query.status) {
@@ -212,7 +221,7 @@ export async function confirmEtcImportSession(sessionId: string): Promise<EtcImp
     },
     body: JSON.stringify({ sessionId }),
   });
-  return mapEtcImportResult(payload);
+  return mapEtcImportConfirmResult(payload);
 }
 
 export async function createEtcOaDraft(invoiceIds: string[]): Promise<EtcOaDraftPayload> {

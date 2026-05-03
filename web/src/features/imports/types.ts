@@ -1,3 +1,5 @@
+import type { BackgroundJob } from "../backgroundJobs/types";
+
 export type ImportBatchType = "input_invoice" | "output_invoice" | "bank_transaction";
 
 export type ImportFileStatus =
@@ -92,4 +94,5 @@ export type ImportSessionPayload = {
   session: ImportSessionSummary;
   files: ImportFilePreview[];
   matchingRun?: MatchingRunSummary;
+  job?: BackgroundJob;
 };

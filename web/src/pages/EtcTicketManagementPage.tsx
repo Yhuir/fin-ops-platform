@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 
@@ -9,6 +9,7 @@ import {
   markEtcBatchNotSubmitted,
   revokeEtcSubmittedInvoices,
 } from "../features/etc/api";
+import { useBackgroundJobProgress } from "../features/backgroundJobs/BackgroundJobProgressProvider";
 import type { EtcInvoice, EtcInvoiceCounts, EtcInvoiceStatus, EtcOaDraftPayload } from "../features/etc/types";
 
 const initialCounts: EtcInvoiceCounts = {
@@ -56,6 +57,7 @@ function DialogShell({
 }
 
 export default function EtcTicketManagementPage() {
+  const { jobs } = useBackgroundJobProgress();
   const [activeStatus, setActiveStatus] = useState<EtcInvoiceStatus>("unsubmitted");
   const [month, setMonth] = useState("");
   const [plate, setPlate] = useState("");
@@ -69,7 +71,9 @@ export default function EtcTicketManagementPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [revokeDialogOpen, setRevokeDialogOpen] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [draftCreating, setDraftCreating] = useState(false);
   const [draftResult, setDraftResult] = useState<EtcOaDraftPayload | null>(null);
+  const refreshedImportJobIdsRef = useRef<Set<string>>(new Set());
 
   const loadInvoices = async (signal?: AbortSignal) => {
     setLoading(true);
@@ -101,6 +105,20 @@ export default function EtcTicketManagementPage() {
     void loadInvoices(controller.signal);
     return () => controller.abort();
   }, [activeStatus, month, plate, keyword]);
+
+  useEffect(() => {
+    const completedImportJobs = jobs.filter(
+      (job) =>
+        job.type === "etc_invoice_import"
+        && (job.status === "succeeded" || job.status === "partial_success")
+        && !refreshedImportJobIdsRef.current.has(job.jobId),
+    );
+    if (completedImportJobs.length === 0) {
+      return;
+    }
+    completedImportJobs.forEach((job) => refreshedImportJobIdsRef.current.add(job.jobId));
+    void loadInvoices();
+  }, [jobs]);
 
   const basketTotal = useMemo(
     () => basket.reduce((sum, invoice) => sum + Number(invoice.totalAmount || 0), 0),
@@ -160,9 +178,30 @@ export default function EtcTicketManagementPage() {
 
   const handleCreateDraft = async () => {
     setActionError(null);
-    const result = await createEtcOaDraft(basket.map((invoice) => invoice.id));
-    setDraftResult(result);
-    window.open(result.oaDraftUrl, "_blank", "noopener,noreferrer");
+    setDraftCreating(true);
+    const draftWindow = window.open("about:blank", "_blank");
+    if (draftWindow) {
+      draftWindow.opener = null;
+    }
+    try {
+      const result = await createEtcOaDraft(basket.map((invoice) => invoice.id));
+      setDraftResult(result);
+      if (!result.oaDraftUrl) {
+        throw new Error("OA 草稿地址为空，请在 OA 系统中手动查找刚创建的草稿。");
+      }
+      if (draftWindow && !draftWindow.closed) {
+        draftWindow.location.href = result.oaDraftUrl;
+      } else {
+        window.location.assign(result.oaDraftUrl);
+      }
+    } catch (caught) {
+      if (draftWindow && !draftWindow.closed) {
+        draftWindow.close();
+      }
+      setActionError(caught instanceof Error ? caught.message : "OA 草稿创建失败。");
+    } finally {
+      setDraftCreating(false);
+    }
   };
 
   const handleResultConfirmation = async (submitted: boolean) => {
@@ -357,7 +396,9 @@ export default function EtcTicketManagementPage() {
               <p>需要在 OA 中检查并手动提交。</p>
               <div className="etc-dialog-actions">
                 <button type="button" onClick={() => setCreateDialogOpen(false)}>取消</button>
-                <button type="button" onClick={handleCreateDraft}>确认创建草稿</button>
+                <button type="button" onClick={handleCreateDraft} disabled={draftCreating}>
+                  {draftCreating ? "正在创建..." : "确认创建草稿"}
+                </button>
               </div>
             </>
           )}

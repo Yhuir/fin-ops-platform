@@ -348,9 +348,8 @@ export default function WorkbenchImportModal({
       setErrorMessage(null);
       try {
         const payload = await confirmEtcImportSession(etcPreviewPayload.sessionId);
-        setEtcPreviewPayload(payload);
         setEtcImported(true);
-        setFeedbackMessage("已导入 ETC票据管理");
+        setFeedbackMessage(payload.job ? "已开始后台导入" : "已导入 ETC票据管理");
       } catch (error) {
         setErrorMessage(resolveImportApiErrorMessage(error, "确认导入失败，请稍后重试。"));
       } finally {
@@ -366,6 +365,11 @@ export default function WorkbenchImportModal({
     setErrorMessage(null);
     try {
       const payload = await confirmImportFiles(previewPayload.session.id, confirmableFileIds);
+      if (payload.job) {
+        setFeedbackMessage("已开始后台导入");
+        setIsConfirming(false);
+        return;
+      }
       await onImported(payload);
     } catch (error) {
       setErrorMessage(resolveImportApiErrorMessage(error, "确认导入失败，请稍后重试。"));

@@ -5,6 +5,7 @@ import type {
   ImportTemplate,
   MatchingRunSummary,
 } from "./types";
+import { mapBackgroundJob, type ApiBackgroundJob } from "../backgroundJobs/api";
 import { readOATokenCookie } from "../session/api";
 
 type ApiImportFile = {
@@ -43,6 +44,7 @@ type ApiImportFile = {
 };
 
 type ApiImportSessionPayload = {
+  job?: ApiBackgroundJob;
   session: {
     id: string;
     imported_by: string;
@@ -168,6 +170,7 @@ function mapImportPayload(payload: ApiImportSessionPayload): ImportSessionPayloa
       })),
     })),
     matchingRun: mapMatchingRun(payload.matching_run),
+    ...(payload.job ? { job: mapBackgroundJob(payload.job) } : {}),
   };
 }
 

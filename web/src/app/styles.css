@@ -211,6 +211,108 @@ body.workbench-focus-mode .global-header {
   background: #fff1f1;
 }
 
+.background-progress-block {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: min(360px, 38vw);
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid #c9d7e6;
+  border-radius: 8px;
+  background: #f9fbfe;
+  color: #243b53;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.background-progress-block strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.background-progress-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #2563eb;
+}
+
+.background-progress-block.running,
+.background-progress-block.queued {
+  border-color: #a9d2f7;
+  background: #eef7ff;
+}
+
+.background-progress-block.running .background-progress-dot {
+  animation: status-pulse 1.4s ease-in-out infinite;
+}
+
+.background-progress-block.succeeded {
+  border-color: #b4e0c4;
+  background: #effaf2;
+}
+
+.background-progress-block.succeeded .background-progress-dot {
+  background: #16a34a;
+}
+
+.background-progress-block.partial_success {
+  border-color: #f7d58c;
+  background: #fff8e6;
+}
+
+.background-progress-block.partial_success .background-progress-dot {
+  background: #d97706;
+}
+
+.background-progress-block.failed {
+  border-color: #f3b5b5;
+  background: #fff1f1;
+}
+
+.background-progress-block.failed .background-progress-dot {
+  background: #dc2626;
+}
+
+.background-progress-extra {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  color: #102a43;
+  font-size: 11px;
+}
+
+.background-progress-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #486581;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.background-progress-close:hover,
+.background-progress-close:focus-visible {
+  background: rgba(15, 23, 42, 0.08);
+  color: #102a43;
+}
+
 .month-picker,
 .month-picker-trigger,
 .nav-link {

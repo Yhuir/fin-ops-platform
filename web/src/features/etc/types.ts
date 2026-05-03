@@ -1,3 +1,5 @@
+import type { BackgroundJob } from "../backgroundJobs/types";
+
 export type EtcInvoiceStatus = "unsubmitted" | "submitted";
 
 export type EtcInvoice = {
@@ -72,7 +74,9 @@ export type EtcImportPreviewResult = {
   items: EtcImportItem[];
 };
 
-export type EtcImportConfirmResult = EtcImportPreviewResult;
+export type EtcImportConfirmResult = EtcImportPreviewResult & {
+  job?: BackgroundJob;
+};
 
 export type EtcOaDraftPayload = {
   batchId: string;

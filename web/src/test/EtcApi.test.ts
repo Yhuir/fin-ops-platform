@@ -250,4 +250,52 @@ describe("etc api", () => {
       ],
     });
   });
+
+  test("confirms ETC import session and maps background job response", async () => {
+    document.cookie = "Admin-Token=mock-cookie-token";
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          job: {
+            job_id: "job_etc_001",
+            type: "etc_invoice_import",
+            label: "导入 ETC发票",
+            short_label: "正在导入 ETC发票 0/31",
+            status: "queued",
+            phase: "queued",
+            current: 0,
+            total: 31,
+            percent: 0,
+            message: "ETC发票导入任务已创建。",
+            result_summary: {},
+            error: null,
+            created_at: "2026-05-03T10:00:00+00:00",
+            updated_at: "2026-05-03T10:00:00+00:00",
+            finished_at: null,
+          },
+        }),
+        { status: 202, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    global.fetch = fetchMock as typeof fetch;
+
+    const result = await confirmEtcImportSession("etc_import_session_001");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/etc/import/confirm",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        body: JSON.stringify({ sessionId: "etc_import_session_001" }),
+      }),
+    );
+    expect(result.job).toMatchObject({
+      jobId: "job_etc_001",
+      type: "etc_invoice_import",
+      shortLabel: "正在导入 ETC发票 0/31",
+      status: "queued",
+      current: 0,
+      total: 31,
+    });
+  });
 });
