@@ -93,33 +93,64 @@ function withAuthHeaders(headers?: HeadersInit) {
   return nextHeaders;
 }
 
+function uniqueUrls(urls: string[]) {
+  return urls.filter((url, index) => urls.indexOf(url) === index);
+}
+
+function requestUrlCandidates(path: string) {
+  const trimmed = String(path).trim();
+  const primaryUrl = apiUrl(trimmed);
+  if (/^https?:\/\//i.test(trimmed)) {
+    return [primaryUrl];
+  }
+  const withLeadingSlash = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  if (withLeadingSlash.startsWith("/api/") || withLeadingSlash.startsWith("/imports/")) {
+    return uniqueUrls([primaryUrl, withLeadingSlash, `/fin-ops-api${withLeadingSlash}`]);
+  }
+  return [primaryUrl];
+}
+
+function htmlResponseError(url: string, response: Response, body: string) {
+  const snippet = body.replace(/\s+/g, " ").slice(0, 120);
+  return new Error(`ETC 接口返回了 HTML 页面：${response.status} ${url}。请检查 fin-ops 后端代理路径或服务器部署配置。${snippet ? ` 响应片段：${snippet}` : ""}`);
+}
+
 async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(apiUrl(url), {
-    ...init,
-    headers: withAuthHeaders(init.headers),
-    credentials: init.credentials ?? "include",
-  });
-  const rawText = await response.text();
-  const trimmedText = rawText.trim();
-  let payload = {} as T;
-  if (trimmedText.length > 0) {
-    try {
-      payload = JSON.parse(trimmedText) as T;
-    } catch (error) {
-      const contentType = response.headers.get("Content-Type") ?? "";
-      const looksLikeHtml = trimmedText.startsWith("<") || contentType.toLowerCase().includes("text/html");
-      if (looksLikeHtml) {
-        throw new Error("ETC 接口返回了 HTML 页面，请检查 fin-ops 后端代理路径或服务器部署配置。");
+  let lastHtmlError: Error | null = null;
+  const candidates = requestUrlCandidates(url);
+  for (const candidateUrl of candidates) {
+    const response = await fetch(candidateUrl, {
+      ...init,
+      headers: withAuthHeaders(init.headers),
+      credentials: init.credentials ?? "include",
+    });
+    const rawText = await response.text();
+    const trimmedText = rawText.trim();
+    let payload = {} as T;
+    if (trimmedText.length > 0) {
+      try {
+        payload = JSON.parse(trimmedText) as T;
+      } catch (error) {
+        const contentType = response.headers.get("Content-Type") ?? "";
+        const looksLikeHtml = trimmedText.startsWith("<") || contentType.toLowerCase().includes("text/html");
+        if (looksLikeHtml) {
+          lastHtmlError = htmlResponseError(candidateUrl, response, trimmedText);
+          continue;
+        }
+        throw new Error("ETC 接口返回了无效 JSON。");
       }
-      throw new Error("ETC 接口返回了无效 JSON。");
     }
+    if (!response.ok) {
+      const errorPayload = payload as { message?: unknown; error?: unknown };
+      const message = typeof errorPayload.message === "string" ? errorPayload.message : "";
+      throw new Error(message || trimmedText || "ETC API request failed");
+    }
+    return payload;
   }
-  if (!response.ok) {
-    const errorPayload = payload as { message?: unknown; error?: unknown };
-    const message = typeof errorPayload.message === "string" ? errorPayload.message : "";
-    throw new Error(message || trimmedText || "ETC API request failed");
+  if (lastHtmlError) {
+    throw lastHtmlError;
   }
-  return payload;
+  throw new Error("ETC API request failed");
 }
 
 function normalizeMoney(value: string | number | null | undefined) {

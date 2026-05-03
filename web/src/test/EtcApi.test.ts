@@ -140,15 +140,49 @@ describe("etc api", () => {
   });
 
   test("reports HTML responses as deployment or proxy errors", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
+    const fetchMock = vi.fn().mockImplementation(async () => (
       new Response("<html><head><title>405 Not Allowed</title></head></html>", {
         status: 405,
         headers: { "Content-Type": "text/html" },
-      }),
-    );
+      })
+    ));
     global.fetch = fetchMock as typeof fetch;
 
     await expect(createEtcOaDraft(["etc-inv-001"])).rejects.toThrow("ETC 接口返回了 HTML 页面");
+  });
+
+  test("retries alternate API entrypoint when current ETC endpoint returns HTML", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url === "/api/etc/batches/draft") {
+        return new Response("<html><head><title>405 Not Allowed</title></head></html>", {
+          status: 405,
+          headers: { "Content-Type": "text/html" },
+        });
+      }
+      if (url === "/fin-ops-api/api/etc/batches/draft") {
+        return new Response(
+          JSON.stringify({
+            batchId: "etc_batch_001",
+            etcBatchId: "etc_20260503_001",
+            oaDraftId: "oa_draft_001",
+            oaDraftUrl: "https://oa.example.test/draft/001",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      throw new Error(`unexpected url ${url}`);
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const draftResult = await createEtcOaDraft(["etc-inv-001"]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/etc/batches/draft",
+      "/fin-ops-api/api/etc/batches/draft",
+    ]);
+    expect(draftResult.oaDraftUrl).toBe("https://oa.example.test/draft/001");
   });
 
   test("previews ETC zip files and maps camelCase import item fields", async () => {
