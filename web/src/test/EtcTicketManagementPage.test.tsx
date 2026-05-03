@@ -142,17 +142,19 @@ describe("ETC ticket management page", () => {
     await user.click(within(page).getByRole("button", { name: "提交OA支付申请" }));
 
     const dialog = await screen.findByRole("dialog", { name: "创建OA支付申请草稿" });
-    expect(dialog).toHaveTextContent("将创建 OA 支付申请草稿，并打开已预填的 OA 修改表单");
+    expect(dialog).toHaveTextContent("将创建 OA 支付申请草稿，并打开 OA 支付申请列表");
     expect(dialog).toHaveTextContent("app 不会自动提交 OA");
-    expect(dialog).toHaveTextContent("需要在 OA 中检查并手动提交");
+    expect(dialog).toHaveTextContent("需要在 OA 中检查当前 ETC 批次草稿并手动提交");
     await user.click(within(dialog).getByRole("button", { name: "确认创建草稿" }));
 
     expect(openMock).toHaveBeenCalledWith("about:blank", "_blank");
     await waitFor(() => expect(openedWindow.location.href).toContain("https://oa.example.test/oa/#/normal/forms/form/2"));
-    expect(openedWindow.location.href).toContain("finOpsEtcAutoEdit=1");
-    expect(decodeURIComponent(openedWindow.location.href)).toContain("etc_20260503_001");
+    expect(openedWindow.location.href).not.toContain("finOpsEtcAutoEdit");
+    expect(openedWindow.location.href).not.toContain("conditions");
+    expect(openedWindow.location.href).not.toContain("id=");
     const resultDialog = await screen.findByRole("dialog", { name: "OA提交结果确认" });
-    expect(resultDialog).toHaveTextContent("自动进入当前批次的“修改”表单");
+    expect(resultDialog).toHaveTextContent("OA 草稿已创建，并已打开支付申请列表");
+    expect(resultDialog).toHaveTextContent("批次号：etc_20260503_001");
     expect(within(resultDialog).getByRole("button", { name: "确认已提交OA" })).toBeInTheDocument();
     expect(within(resultDialog).getByRole("button", { name: "未提交OA" })).toBeInTheDocument();
 

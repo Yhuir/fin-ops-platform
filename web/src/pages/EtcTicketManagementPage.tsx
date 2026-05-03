@@ -10,7 +10,7 @@ import {
   revokeEtcSubmittedInvoices,
 } from "../features/etc/api";
 import { useBackgroundJobProgress } from "../features/backgroundJobs/BackgroundJobProgressProvider";
-import { buildEtcOaDraftReviewUrl, startEtcOaDraftAutoEdit } from "../features/etc/oaNavigation";
+import { buildEtcOaDraftReviewUrl } from "../features/etc/oaNavigation";
 import type { EtcInvoice, EtcInvoiceCounts, EtcInvoiceStatus, EtcOaDraftPayload } from "../features/etc/types";
 
 const initialCounts: EtcInvoiceCounts = {
@@ -190,10 +190,9 @@ export default function EtcTicketManagementPage() {
       if (!result.oaDraftUrl) {
         throw new Error("OA 草稿地址为空，请在 OA 系统中手动查找刚创建的草稿。");
       }
-      const reviewUrl = buildEtcOaDraftReviewUrl(result.oaDraftUrl, result.etcBatchId);
+      const reviewUrl = buildEtcOaDraftReviewUrl(result.oaDraftUrl);
       if (draftWindow && !draftWindow.closed) {
         draftWindow.location.href = reviewUrl;
-        startEtcOaDraftAutoEdit(draftWindow, result.etcBatchId);
       } else {
         window.location.assign(reviewUrl);
       }
@@ -385,8 +384,9 @@ export default function EtcTicketManagementPage() {
         <DialogShell title={draftResult ? "OA提交结果确认" : "创建OA支付申请草稿"}>
           {draftResult ? (
             <>
-              <p>OA 草稿已打开，并会尝试自动进入当前批次的“修改”表单。</p>
-              <p>如果 OA 页面停在列表，请点击当前 ETC 批次行的“修改”进入已预填表单。</p>
+              <p>OA 草稿已创建，并已打开支付申请列表。</p>
+              <p>请在 OA 中检查当前 ETC 批次草稿，确认无误后手动提交。</p>
+              <p>批次号：{draftResult.etcBatchId}</p>
               <div className="etc-dialog-actions">
                 <button type="button" onClick={() => handleResultConfirmation(true)}>确认已提交OA</button>
                 <button type="button" onClick={() => handleResultConfirmation(false)}>未提交OA</button>
@@ -394,9 +394,9 @@ export default function EtcTicketManagementPage() {
             </>
           ) : (
             <>
-              <p>将创建 OA 支付申请草稿，并打开已预填的 OA 修改表单。</p>
+              <p>将创建 OA 支付申请草稿，并打开 OA 支付申请列表。</p>
               <p>app 不会自动提交 OA。</p>
-              <p>需要在 OA 中检查并手动提交。</p>
+              <p>需要在 OA 中检查当前 ETC 批次草稿并手动提交。</p>
               <div className="etc-dialog-actions">
                 <button type="button" onClick={() => setCreateDialogOpen(false)}>取消</button>
                 <button type="button" onClick={handleCreateDraft} disabled={draftCreating}>
