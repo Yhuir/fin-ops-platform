@@ -62,6 +62,7 @@ class EtcOAClientError(RuntimeError):
 class EtcUploadedAttachment:
     name: str
     url: str
+    size: int = 0
 
 
 class EtcOAClient(Protocol):
@@ -334,30 +335,31 @@ class EtcDraftResult:
 
 @dataclass(frozen=True, slots=True)
 class EtcOAFormFieldMapping:
-    applicant: str = "applicant"
+    applicant: str = "userName"
     application_date: str = "applicationDate"
+    category: str = "category"
     payment_proof: str = "paymentProof"
     project_name: str = "projectName"
     amount: str = "amount"
     cause: str = "cause"
-    attachments: str = "resources"
-    payment_proof_value: str = "车辆使用费（汽油、过路、保险、维修、税费等）"
+    attachments: str = "field101"
+    category_value: str = "s5"
+    payment_proof_value: str = ""
     project_name_value: str = "6486ca70cd6cae5d4e2b0b48"
 
     @classmethod
     def from_environment(cls) -> EtcOAFormFieldMapping:
         return cls(
-            applicant=os.getenv("FIN_OPS_ETC_OA_FIELD_APPLICANT", "applicant"),
+            applicant=os.getenv("FIN_OPS_ETC_OA_FIELD_APPLICANT", "userName"),
             application_date=os.getenv("FIN_OPS_ETC_OA_FIELD_APPLICATION_DATE", "applicationDate"),
+            category=os.getenv("FIN_OPS_ETC_OA_FIELD_CATEGORY", "category"),
             payment_proof=os.getenv("FIN_OPS_ETC_OA_FIELD_PAYMENT_PROOF", "paymentProof"),
             project_name=os.getenv("FIN_OPS_ETC_OA_FIELD_PROJECT_NAME", "projectName"),
             amount=os.getenv("FIN_OPS_ETC_OA_FIELD_AMOUNT", "amount"),
             cause=os.getenv("FIN_OPS_ETC_OA_FIELD_CAUSE", "cause"),
-            attachments=os.getenv("FIN_OPS_ETC_OA_FIELD_ATTACHMENTS", "resources"),
-            payment_proof_value=(
-                os.getenv("FIN_OPS_ETC_OA_PAYMENT_PROOF_VALUE", "车辆使用费（汽油、过路、保险、维修、税费等）").strip()
-                or "车辆使用费（汽油、过路、保险、维修、税费等）"
-            ),
+            attachments=os.getenv("FIN_OPS_ETC_OA_FIELD_ATTACHMENTS", "field101"),
+            category_value=os.getenv("FIN_OPS_ETC_OA_CATEGORY_VALUE", "s5").strip() or "s5",
+            payment_proof_value=os.getenv("FIN_OPS_ETC_OA_PAYMENT_PROOF_VALUE", "").strip(),
             project_name_value=(
                 os.getenv("FIN_OPS_ETC_OA_PROJECT_VALUE", "6486ca70cd6cae5d4e2b0b48").strip()
                 or "6486ca70cd6cae5d4e2b0b48"
@@ -909,23 +911,27 @@ class EtcService:
         attachments: list[EtcUploadedAttachment] = []
         for invoice in invoices:
             assert invoice.pdf_file_path is not None
-            attachment_url = oa_client.upload_attachment(Path(invoice.pdf_file_path))
-            attachments.append(EtcUploadedAttachment(name=f"{invoice.invoice_number}.pdf", url=attachment_url))
+            pdf_path = Path(invoice.pdf_file_path)
+            attachment_url = oa_client.upload_attachment(pdf_path)
+            attachments.append(
+                EtcUploadedAttachment(
+                    name=f"{invoice.invoice_number}.pdf",
+                    url=attachment_url,
+                    size=pdf_path.stat().st_size,
+                )
+            )
         return attachments
 
     def _build_oa_draft_payload(self, batch: EtcBatch, attachments: list[EtcUploadedAttachment]) -> dict[str, object]:
         cause = batch.oa_marker
-        uploaded_resources = [
-            {"name": attachment.name, "url": attachment.url}
-            for attachment in attachments
-        ]
         data = {
             self._form_mapping.application_date: date.today().isoformat(),
+            self._form_mapping.category: self._form_mapping.category_value,
             self._form_mapping.payment_proof: self._form_mapping.payment_proof_value,
             self._form_mapping.project_name: self._form_mapping.project_name_value,
             self._form_mapping.amount: f"{batch.total_amount:.2f}",
             self._form_mapping.cause: cause,
-            self._form_mapping.attachments: json.dumps(uploaded_resources, ensure_ascii=False),
+            self._form_mapping.attachments: self._build_oa_upload_custom_value(attachments),
         }
         return {
             "formId": 2,
@@ -935,6 +941,46 @@ class EtcService:
             "oa_marker": batch.oa_marker,
             "invoiceIds": list(batch.invoice_ids),
         }
+
+    @staticmethod
+    def _build_oa_upload_custom_value(attachments: list[EtcUploadedAttachment]) -> dict[str, list[dict[str, object]]]:
+        base_uid = int(datetime.now(UTC).timestamp() * 1000)
+        items: list[dict[str, object]] = []
+        for index, attachment in enumerate(attachments, start=1):
+            uid = base_uid + index
+            suffix = Path(attachment.name).suffix.lstrip(".").lower()
+            items.append(
+                {
+                    "name": attachment.name,
+                    "percentage": 100,
+                    "raw": {"uid": uid},
+                    "response": {
+                        "data": attachment.url,
+                        "dataSize": 1,
+                        "description": "上传完成",
+                        "errorCode": 0,
+                        "extra": {
+                            "createdTime": None,
+                            "downloads": None,
+                            "fileIndex": None,
+                            "fileName": attachment.name,
+                            "filePath": attachment.url,
+                            "folderId": None,
+                            "folderList": None,
+                            "id": None,
+                            "modifiedTime": None,
+                            "suffix": suffix,
+                            "targetId": None,
+                            "targetName": None,
+                        },
+                        "success": True,
+                    },
+                    "size": attachment.size,
+                    "status": "success",
+                    "uid": uid,
+                }
+            )
+        return {"list": items}
 
     def _get_invoice(self, invoice_id: str) -> EtcInvoice:
         invoice = self._invoices.get(invoice_id)

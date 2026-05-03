@@ -412,14 +412,18 @@ class EtcServiceTests(unittest.TestCase):
         self.assertTrue(payload["isDraft"])
         self.assertEqual(payload["formId"], 2)
         self.assertEqual(data["applicationDate"], date.today().isoformat())
-        self.assertEqual(data["paymentProof"], "车辆使用费（汽油、过路、保险、维修、税费等）")
+        self.assertEqual(data["category"], "s5")
+        self.assertEqual(data["paymentProof"], "")
         self.assertEqual(data["projectName"], "6486ca70cd6cae5d4e2b0b48")
         self.assertEqual(data["cause"], f"ETC批量提交\netc_batch_id={draft.etc_batch_id}")
-        uploaded_resources = json.loads(data["resources"])
-        self.assertEqual(uploaded_resources, [
-            {"name": "ETC001.pdf", "url": "oa-file-1"},
-            {"name": "ETC002.pdf", "url": "oa-file-2"},
-        ])
+        uploaded_invoices = data["field101"]["list"]
+        self.assertEqual(
+            [(item["name"], item["response"]["data"], item["response"]["extra"]["fileName"]) for item in uploaded_invoices],
+            [
+                ("ETC001.pdf", "oa-file-1", "ETC001.pdf"),
+                ("ETC002.pdf", "oa-file-2", "ETC002.pdf"),
+            ],
+        )
         self.assertEqual(confirmed.status, "submitted_confirmed")
         self.assertEqual(revoked["updated"], 2)
         self.assertEqual(not_submitted.status, "not_submitted")
