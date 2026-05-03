@@ -1,3 +1,5 @@
+import { apiUrl } from "../../app/runtime";
+
 export type SessionAccessTier = "denied" | "read_export_only" | "full_access" | "admin";
 
 export type SessionUser = {
@@ -92,7 +94,7 @@ export async function fetchSessionMe(signal?: AbortSignal): Promise<SessionPaylo
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch("/api/session/me", {
+  const response = await fetch(apiUrl("/api/session/me"), {
     method: "GET",
     headers,
     credentials: "include",

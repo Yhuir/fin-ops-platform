@@ -1,4 +1,5 @@
 import { readOATokenCookie } from "../session/api";
+import { apiUrl } from "../../app/runtime";
 import type { BackgroundJob, BackgroundJobActivePayload, BackgroundJobStatus } from "./types";
 
 export type ApiBackgroundJob = {
@@ -39,7 +40,7 @@ function withAuthHeaders(headers?: HeadersInit) {
 }
 
 async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(url, {
+  const response = await fetch(apiUrl(url), {
     ...init,
     headers: withAuthHeaders(init.headers),
     credentials: init.credentials ?? "include",

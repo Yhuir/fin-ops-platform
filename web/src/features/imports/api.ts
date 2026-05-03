@@ -7,6 +7,7 @@ import type {
 } from "./types";
 import { mapBackgroundJob, type ApiBackgroundJob } from "../backgroundJobs/api";
 import { readOATokenCookie } from "../session/api";
+import { apiUrl } from "../../app/runtime";
 
 type ApiImportFile = {
   id: string;
@@ -81,7 +82,7 @@ async function requestJson<T>(url: string, init: RequestInit = {}) {
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const response = await fetch(url, {
+  const response = await fetch(apiUrl(url), {
     ...init,
     headers,
     credentials: init.credentials ?? "include",

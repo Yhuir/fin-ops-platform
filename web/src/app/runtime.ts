@@ -19,6 +19,21 @@ function isEmbeddedInFrame(): boolean {
 }
 
 export const APP_BASE_PATH = normalizeBasePath(import.meta.env.VITE_APP_BASE_PATH);
+export const API_BASE_PATH = normalizeBasePath(
+  import.meta.env.VITE_API_BASE_PATH ?? (APP_BASE_PATH === "/fin-ops/" ? "/fin-ops-api/" : "/"),
+);
+
+export function apiUrl(path: string): string {
+  const trimmed = String(path).trim();
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  const withLeadingSlash = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  if (API_BASE_PATH === "/") {
+    return withLeadingSlash;
+  }
+  return `${API_BASE_PATH.slice(0, -1)}${withLeadingSlash}`;
+}
 
 export function isOaEmbeddedMode(): boolean {
   if (typeof window === "undefined") {
