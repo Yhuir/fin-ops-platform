@@ -20,6 +20,7 @@ class DeploymentConfig:
     frontend_base_path: str
     remote_frontend_dir: str
     remote_backend_dir: str
+    remote_data_dir: str
     remote_service_name: str
     remote_extract_root: str
     skip_build: bool
@@ -36,6 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--frontend-base-path", default="/fin-ops/", help="Frontend base path")
     parser.add_argument("--remote-frontend-dir", default="/www/wwwroot/fin-ops/dist", help="Remote frontend dist directory")
     parser.add_argument("--remote-backend-dir", default="/opt/fin-ops/current/backend", help="Remote backend directory")
+    parser.add_argument("--remote-data-dir", default="/opt/fin-ops/data", help="Remote persistent runtime data directory")
     parser.add_argument("--remote-service-name", default="fin-ops.service", help="Remote systemd service name")
     parser.add_argument("--remote-extract-root", default="/tmp/fin-ops-release", help="Remote temporary extract directory")
     parser.add_argument("--skip-build", action="store_true", help="Skip local frontend build")
@@ -62,6 +64,7 @@ def build_config(args: argparse.Namespace, *, root_dir: Path) -> DeploymentConfi
         frontend_base_path=normalize_base_path(args.frontend_base_path),
         remote_frontend_dir=args.remote_frontend_dir,
         remote_backend_dir=args.remote_backend_dir,
+        remote_data_dir=args.remote_data_dir.rstrip("/") or "/opt/fin-ops/data",
         remote_service_name=args.remote_service_name,
         remote_extract_root=args.remote_extract_root.rstrip("/") or "/tmp/fin-ops-release",
         skip_build=bool(args.skip_build),
@@ -72,19 +75,38 @@ def build_config(args: argparse.Namespace, *, root_dir: Path) -> DeploymentConfi
 
 
 def build_remote_deploy_script(config: DeploymentConfig) -> str:
+    legacy_data_dir = str(Path(config.remote_backend_dir) / ".runtime" / "fin_ops_platform")
+    service_dropin_dir = f"/etc/systemd/system/{config.remote_service_name}.d"
+    service_dropin_path = f"{service_dropin_dir}/10-fin-ops-env.conf"
     commands = [
         "set -euo pipefail",
         f"REMOTE_ROOT={shlex.quote(config.remote_extract_root)}",
+        f"REMOTE_DATA_DIR={shlex.quote(config.remote_data_dir)}",
         "rm -rf \"$REMOTE_ROOT\"",
         "mkdir -p \"$REMOTE_ROOT\"",
         "tar -xzf - -C \"$REMOTE_ROOT\"",
         f"mkdir -p {shlex.quote(str(Path(config.remote_frontend_dir).parent))}",
         f"mkdir -p {shlex.quote(str(Path(config.remote_backend_dir).parent))}",
+        "mkdir -p \"$REMOTE_DATA_DIR\"",
+        f"if [ -d {shlex.quote(legacy_data_dir)} ]; then cp -an {shlex.quote(legacy_data_dir)}/. \"$REMOTE_DATA_DIR\"/; fi",
         f"rm -rf {shlex.quote(config.remote_frontend_dir)}",
         f"rm -rf {shlex.quote(config.remote_backend_dir)}",
         f"mv \"$REMOTE_ROOT\"/dist {shlex.quote(config.remote_frontend_dir)}",
         f"mv \"$REMOTE_ROOT\"/backend {shlex.quote(config.remote_backend_dir)}",
         "if [ ! -d /opt/fin-ops/venv ]; then python3 -m venv /opt/fin-ops/venv; fi",
+        f"mkdir -p {shlex.quote(service_dropin_dir)}",
+        (
+            f"cat > {shlex.quote(service_dropin_path)} <<'EOF'\n"
+            "[Service]\n"
+            f"Environment=FIN_OPS_DATA_DIR={config.remote_data_dir}\n"
+            "Environment=FIN_OPS_OA_BASE_URL=https://www.yn-sourcing.com/prod-api\n"
+            "Environment=FIN_OPS_ETC_OA_BASE_URL=https://www.yn-sourcing.com/prod-api\n"
+            "Environment=FIN_OPS_ETC_OA_FILE_UPLOAD_PATH=/file/upload\n"
+            "Environment=FIN_OPS_ETC_OA_FORM_DRAFT_PATH=/forms/form/{form_id}/records/record\n"
+            "Environment=FIN_OPS_ETC_OA_DRAFT_URL_TEMPLATE=https://www.yn-sourcing.com/oa/#/normal/forms/form/{form_id}?formId={form_id}&id={draft_id}\n"
+            "EOF"
+        ),
+        "systemctl daemon-reload",
     ]
     if not config.skip_pip:
         commands.append(

@@ -44,6 +44,7 @@ class DeployOAScriptTest(unittest.TestCase):
             frontend_base_path="/fin-ops/",
             remote_frontend_dir="/www/wwwroot/fin-ops/dist",
             remote_backend_dir="/opt/fin-ops/current/backend",
+            remote_data_dir="/opt/fin-ops/data",
             remote_service_name="fin-ops.service",
             remote_extract_root="/tmp/fin-ops-release",
             skip_build=False,
@@ -56,6 +57,10 @@ class DeployOAScriptTest(unittest.TestCase):
 
         self.assertIn("/www/wwwroot/fin-ops/dist", remote_script)
         self.assertIn("/opt/fin-ops/current/backend", remote_script)
+        self.assertIn("REMOTE_DATA_DIR=/opt/fin-ops/data", remote_script)
+        self.assertIn("cp -an /opt/fin-ops/current/backend/.runtime/fin_ops_platform/.", remote_script)
+        self.assertIn("Environment=FIN_OPS_DATA_DIR=/opt/fin-ops/data", remote_script)
+        self.assertIn("systemctl daemon-reload", remote_script)
         self.assertIn("systemctl restart fin-ops.service", remote_script)
         self.assertIn("nginx -t", remote_script)
         self.assertIn("nginx -s reload", remote_script)
@@ -70,6 +75,7 @@ class DeployOAScriptTest(unittest.TestCase):
             frontend_base_path="/fin-ops/",
             remote_frontend_dir="/www/wwwroot/fin-ops/dist",
             remote_backend_dir="/opt/fin-ops/current/backend",
+            remote_data_dir="/opt/fin-ops/data",
             remote_service_name="fin-ops.service",
             remote_extract_root="/tmp/fin-ops-release",
             skip_build=True,

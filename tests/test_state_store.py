@@ -22,6 +22,7 @@ from fin_ops_platform.services.state_store import (
     STATE_COLLECTIONS,
     WORKBENCH_READ_MODELS_COLLECTION,
     WORKBENCH_PAIR_RELATIONS_COLLECTION,
+    default_data_dir,
     load_mongo_state_settings,
 )
 
@@ -162,6 +163,11 @@ class FakeGridFSBucket:
 
 
 class StateStoreTests(unittest.TestCase):
+    def test_default_data_dir_honors_environment_override(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            with patch.dict(os.environ, {"FIN_OPS_DATA_DIR": temp_dir}):
+                self.assertEqual(default_data_dir(), Path(temp_dir))
+
     def test_serialize_file_import_preview_item_tolerates_missing_new_fields_from_old_pickle(self) -> None:
         with TemporaryDirectory() as temp_dir:
             store = ApplicationStateStore(Path(temp_dir))
