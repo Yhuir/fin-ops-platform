@@ -1,7 +1,3 @@
-upstream fin_ops_web {
-    server 127.0.0.1:4173;
-}
-
 upstream fin_ops_api {
     server 127.0.0.1:8001;
 }
@@ -12,13 +8,34 @@ server {
 
     # OA main site locations are omitted here.
 
-    location /fin-ops/ {
-        proxy_pass http://fin_ops_web/fin-ops/;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+    # Canonicalize the app mount point before React Router handles sub-routes.
+    location = /fin-ops {
+        return 301 /fin-ops/;
+    }
+
+    # Hashed Vite assets should be served as immutable files. Missing assets must
+    # return 404 instead of falling back to index.html, otherwise browser module
+    # loading errors are hard to diagnose.
+    location ^~ /fin-ops/assets/ {
+        alias /www/wwwroot/fin-ops/dist/assets/;
+        try_files $uri =404;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # The HTML shell is intentionally not cached, so users pick up a freshly
+    # deployed asset manifest after refresh.
+    location = /fin-ops/index.html {
+        alias /www/wwwroot/fin-ops/dist/index.html;
+        add_header Cache-Control "no-store";
+    }
+
+    # React Router history fallback. Every non-asset /fin-ops/* path must serve
+    # the fin-ops HTML shell, not the outer corporate/OA site.
+    location ^~ /fin-ops/ {
+        alias /www/wwwroot/fin-ops/dist/;
+        try_files $uri $uri/ /fin-ops/index.html;
+        add_header Cache-Control "no-store";
     }
 
     location /api/ {

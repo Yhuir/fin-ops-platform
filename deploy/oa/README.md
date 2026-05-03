@@ -217,6 +217,7 @@ VITE_APP_BASE_PATH=/fin-ops/
 这份示例覆盖了：
 
 - `/fin-ops/` -> 前端静态资源
+- `/fin-ops/*` -> React Router history fallback 到 `/fin-ops/index.html`
 - `/fin-ops-api/` -> Python 后端
 - `/api/` 和 `/imports/` 在 `/fin-ops/` 页面内反代到 `/fin-ops-api/`
 
@@ -225,6 +226,8 @@ VITE_APP_BASE_PATH=/fin-ops/
 - `fin-ops` 前端页面内部实际仍然请求 `/api/*`
 - 因为页面和 API 都在同域下，所以浏览器 cookie 仍然能被携带
 - 前端还会主动附带 `Authorization`
+- `location ^~ /fin-ops/` 必须放在官网/OA 兜底 location 之前；否则刷新 `/fin-ops/cost-statistics`、`/fin-ops/settings` 这类深层路由会被外层站点接走，浏览器拿到的不是 fin-ops 的 `index.html`，页面会空白或显示错误站点。
+- `/fin-ops/assets/` 必须单独 `try_files $uri =404`，不要 fallback 到 `index.html`。Vite 的 hashed asset 可以长期缓存；HTML shell 必须 `no-store`，确保发布后刷新能拿到最新 asset manifest。
 
 ## OA 菜单配置
 
@@ -282,6 +285,19 @@ OA 菜单仍然按 Prompt 29 的口径配置：
 8. 用授权账号联调 iframe、搜索、导出、税金抵扣、成本统计
 9. 用未授权账号验证菜单不可见和 `403`
 10. 再正式面向生产用户开放
+
+### 深层路由刷新验收
+
+生产 nginx 配置完成后，必须验证这些 URL 都返回 fin-ops 的 HTML shell，而不是公司官网/OA 外层页面：
+
+```bash
+curl -s https://www.yn-sourcing.com/fin-ops/ | grep '银企核销工作台'
+curl -s https://www.yn-sourcing.com/fin-ops/cost-statistics | grep '银企核销工作台'
+curl -s https://www.yn-sourcing.com/fin-ops/settings | grep '银企核销工作台'
+curl -sI https://www.yn-sourcing.com/fin-ops/assets/not-exist.js | grep '404'
+```
+
+如果 `/fin-ops/cost-statistics` 返回公司官网标题或 `js/app.*.js`、`css/app.*.css`，说明该请求没有命中 fin-ops 的 `location ^~ /fin-ops/`，需要调整 nginx location 优先级后 `nginx -t && nginx -s reload`。
 
 ## 联调验收清单
 
