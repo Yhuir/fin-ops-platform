@@ -88,6 +88,14 @@ class EtcOAHttpClientSettings:
     draft_url_template: str = "https://www.yn-sourcing.com/oa/#/normal/forms/form/{form_id}?formId={form_id}&id={draft_id}"
     request_timeout_ms: int = 20000
 
+    def __post_init__(self) -> None:
+        if self.base_url is None:
+            return
+        trimmed = self.base_url.strip().rstrip("/")
+        if trimmed.endswith("/oa") and not trimmed.endswith("/oa-api"):
+            trimmed = f"{trimmed}-api"
+        object.__setattr__(self, "base_url", trimmed)
+
     @classmethod
     def from_environment(cls) -> "EtcOAHttpClientSettings":
         return cls(

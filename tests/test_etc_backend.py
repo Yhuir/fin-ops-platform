@@ -220,6 +220,11 @@ class EtcServiceTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertIn("Bearer oa-token", str(calls[0].headers))
 
+    def test_http_oa_settings_treats_oa_page_base_as_oa_api_base(self) -> None:
+        settings = EtcOAHttpClientSettings(base_url="https://www.yn-sourcing.com/oa")
+
+        self.assertEqual(settings.base_url, "https://www.yn-sourcing.com/oa-api")
+
     def test_service_persists_invoice_metadata_through_state_store_when_available(self) -> None:
         with TemporaryDirectory() as temp_dir:
             store = MemoryEtcStateStore(Path(temp_dir))
