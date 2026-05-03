@@ -2926,6 +2926,285 @@ class WorkbenchV2ApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_confirm_link_preview_and_submit_require_note_for_amount_mismatch(self) -> None:
+        app = build_application()
+        raw_payload = build_relation_amount_raw_payload(invoice_amount="99.99")
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            app.handle_request("GET", "/api/workbench?month=2026-05")
+
+        row_ids = ["oa-o-202605-001", "bk-o-202605-001", "iv-o-202605-001"]
+        preview_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link/preview",
+            json.dumps({"month": "2026-05", "row_ids": row_ids, "case_id": "CASE-AMOUNT-MISMATCH"}),
+        )
+
+        self.assertEqual(preview_response.status_code, 200)
+        preview_payload = json.loads(preview_response.body)
+        self.assertEqual(preview_payload["operation"], "confirm_link")
+        self.assertTrue(preview_payload["requires_note"])
+        self.assertTrue(preview_payload["can_submit"])
+        self.assertEqual(preview_payload["amount_summary"]["status"], "mismatch")
+        self.assertEqual(len(preview_payload["before"]["groups"]), 3)
+        self.assertEqual(len(preview_payload["after"]["groups"]), 1)
+
+        rejected_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link",
+            json.dumps({"month": "2026-05", "row_ids": row_ids, "case_id": "CASE-AMOUNT-MISMATCH"}),
+        )
+
+        self.assertEqual(rejected_response.status_code, 400)
+        self.assertEqual(json.loads(rejected_response.body)["error"], "workbench_pair_relation_note_required")
+
+        confirmed_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link",
+            json.dumps(
+                {
+                    "month": "2026-05",
+                    "row_ids": row_ids,
+                    "case_id": "CASE-AMOUNT-MISMATCH",
+                    "note": "发票尾差待复核",
+                }
+            ),
+        )
+
+        self.assertEqual(confirmed_response.status_code, 200)
+        relation = app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-AMOUNT-MISMATCH")
+        assert relation is not None
+        self.assertEqual(relation["note"], "发票尾差待复核")
+        self.assertEqual(relation["amount_check"]["status"], "mismatch")
+        history = app._workbench_pair_relation_service.list_history()
+        self.assertEqual(history[-1]["note"], "发票尾差待复核")
+        self.assertEqual(history[-1]["amount_check"]["status"], "mismatch")
+
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            updated_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-05").body)
+        paired_invoice = next(
+            row for row in flatten_groups(updated_payload["paired"]["groups"], "invoice") if row["id"] == "iv-o-202605-001"
+        )
+        self.assertIn("金额不一致", paired_invoice["tags"])
+
+    def test_confirm_link_preview_preserves_existing_case_group_before_submit(self) -> None:
+        app = build_application()
+        raw_payload = build_relation_amount_raw_payload(invoice_amount="100.00")
+        raw_payload["open"]["oa"][0]["case_id"] = "CASE-EXISTING-PARTIAL"
+        raw_payload["open"]["invoice"][0]["case_id"] = "CASE-EXISTING-PARTIAL"
+        raw_payload["open"]["bank"][0]["case_id"] = ""
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            app.handle_request("GET", "/api/workbench?month=2026-05")
+
+        row_ids = ["oa-o-202605-001", "bk-o-202605-001", "iv-o-202605-001"]
+        preview_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link/preview",
+            json.dumps({"month": "2026-05", "row_ids": row_ids, "case_id": "CASE-FULL"}),
+        )
+
+        self.assertEqual(preview_response.status_code, 200)
+        preview_payload = json.loads(preview_response.body)
+        before_groups = preview_payload["before"]["groups"]
+        self.assertEqual(len(before_groups), 2)
+        existing_group = next(group for group in before_groups if group["group_id"] == "case:CASE-EXISTING-PARTIAL")
+        self.assertEqual([row["id"] for row in existing_group["oa_rows"]], ["oa-o-202605-001"])
+        self.assertEqual([row["id"] for row in existing_group["invoice_rows"]], ["iv-o-202605-001"])
+        self.assertEqual(existing_group["bank_rows"], [])
+        self.assertIn("selected:bk-o-202605-001", [group["group_id"] for group in before_groups])
+        self.assertEqual(len(preview_payload["after"]["groups"]), 1)
+
+    def test_withdraw_link_restores_previous_relation_snapshot(self) -> None:
+        app = build_application()
+        raw_payload = build_relation_amount_raw_payload(invoice_amount="100.00")
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            app.handle_request("GET", "/api/workbench?month=2026-05")
+
+        partial_row_ids = ["oa-o-202605-001", "iv-o-202605-001"]
+        full_row_ids = ["oa-o-202605-001", "bk-o-202605-001", "iv-o-202605-001"]
+        partial_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link",
+            json.dumps({"month": "2026-05", "row_ids": partial_row_ids, "case_id": "CASE-PARTIAL"}),
+        )
+        self.assertEqual(partial_response.status_code, 200)
+
+        full_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link",
+            json.dumps({"month": "2026-05", "row_ids": full_row_ids, "case_id": "CASE-FULL"}),
+        )
+        self.assertEqual(full_response.status_code, 200)
+
+        preview_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/withdraw-link/preview",
+            json.dumps({"month": "2026-05", "row_ids": full_row_ids}),
+        )
+        self.assertEqual(preview_response.status_code, 200)
+        preview_payload = json.loads(preview_response.body)
+        self.assertTrue(preview_payload["can_submit"])
+        self.assertEqual(preview_payload["restored_relations"][0]["case_id"], "CASE-PARTIAL")
+        self.assertEqual(len(preview_payload["before"]["groups"]), 1)
+        after_group_ids = [group["group_id"] for group in preview_payload["after"]["groups"]]
+        self.assertIn("case:CASE-PARTIAL", after_group_ids)
+        self.assertIn("selected:bk-o-202605-001", after_group_ids)
+
+        withdraw_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/withdraw-link",
+            json.dumps({"month": "2026-05", "row_ids": full_row_ids, "note": "撤回最近一次关联"}),
+        )
+        self.assertEqual(withdraw_response.status_code, 200)
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id("bk-o-202605-001"))
+        restored = app._workbench_pair_relation_service.get_active_relation_by_row_id("oa-o-202605-001")
+        assert restored is not None
+        self.assertEqual(restored["case_id"], "CASE-PARTIAL")
+        self.assertCountEqual(restored["row_ids"], partial_row_ids)
+        self.assertEqual(app._workbench_pair_relation_service.list_history()[-1]["operation_type"], "withdraw_link")
+
+    def test_withdraw_link_restores_case_group_that_existed_before_confirm(self) -> None:
+        app = build_application()
+        raw_payload = build_relation_amount_raw_payload(invoice_amount="100.00")
+        raw_payload["open"]["oa"][0]["case_id"] = "CASE-EXISTING-PARTIAL"
+        raw_payload["open"]["invoice"][0]["case_id"] = "CASE-EXISTING-PARTIAL"
+        raw_payload["open"]["bank"][0]["case_id"] = ""
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            app.handle_request("GET", "/api/workbench?month=2026-05")
+
+        full_row_ids = ["oa-o-202605-001", "bk-o-202605-001", "iv-o-202605-001"]
+        full_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link",
+            json.dumps({"month": "2026-05", "row_ids": full_row_ids, "case_id": "CASE-FULL"}),
+        )
+        self.assertEqual(full_response.status_code, 200)
+
+        preview_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/withdraw-link/preview",
+            json.dumps({"month": "2026-05", "row_ids": full_row_ids}),
+        )
+
+        self.assertEqual(preview_response.status_code, 200)
+        preview_payload = json.loads(preview_response.body)
+        after_groups = preview_payload["after"]["groups"]
+        self.assertEqual(len(after_groups), 2)
+        restored_group = next(group for group in after_groups if group["group_id"] == "case:CASE-EXISTING-PARTIAL")
+        self.assertEqual([row["id"] for row in restored_group["oa_rows"]], ["oa-o-202605-001"])
+        self.assertEqual([row["id"] for row in restored_group["invoice_rows"]], ["iv-o-202605-001"])
+        self.assertEqual(restored_group["bank_rows"], [])
+        bank_group = next(group for group in after_groups if group["group_id"] == "selected:bk-o-202605-001")
+        self.assertEqual([row["id"] for row in bank_group["bank_rows"]], ["bk-o-202605-001"])
+
+    def test_withdraw_link_without_history_restores_oa_attachment_invoice_relation(self) -> None:
+        app = build_application()
+        raw_payload = build_relation_amount_raw_payload(invoice_amount="500.00")
+        raw_payload["open"]["oa"][0]["id"] = "oa-exp-2066-2"
+        raw_payload["open"]["oa"][0]["case_id"] = "CASE-AUTO-0001"
+        raw_payload["open"]["oa"][0]["amount"] = "500.00"
+        raw_payload["open"]["bank"][0]["id"] = "txn_imported_0640"
+        raw_payload["open"]["bank"][0]["case_id"] = "CASE-AUTO-0001"
+        raw_payload["open"]["bank"][0]["debit_amount"] = "9,370.53"
+        raw_payload["open"]["invoice"][0]["id"] = "oa-att-inv-oa-exp-2066-2-01"
+        raw_payload["open"]["invoice"][0]["case_id"] = "CASE-AUTO-0001"
+        raw_payload["open"]["invoice"][0]["source_kind"] = "oa_attachment_invoice"
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            app.handle_request("GET", "/api/workbench?month=2026-05")
+
+        full_row_ids = ["oa-exp-2066-2", "txn_imported_0640", "oa-att-inv-oa-exp-2066-2-01"]
+        app._workbench_pair_relation_service.create_active_relation(
+            case_id="CASE-AUTO-0001",
+            row_ids=full_row_ids,
+            row_types=["oa", "bank", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="test",
+            month_scope="2026-05",
+        )
+
+        preview_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/withdraw-link/preview",
+            json.dumps({"month": "2026-05", "row_ids": full_row_ids}),
+        )
+
+        self.assertEqual(preview_response.status_code, 200)
+        preview_payload = json.loads(preview_response.body)
+        after_groups = preview_payload["after"]["groups"]
+        self.assertEqual(preview_payload["amount_summary"]["status"], "mismatch")
+        self.assertEqual(preview_payload["amount_summary"]["before"]["oa_total"], "500.00")
+        self.assertEqual(preview_payload["amount_summary"]["before"]["bank_total"], "9370.53")
+        self.assertEqual(preview_payload["amount_summary"]["before"]["invoice_total"], "500.00")
+        self.assertEqual(preview_payload["amount_summary"]["after"]["oa_total"], "500.00")
+        self.assertEqual(preview_payload["amount_summary"]["after"]["bank_total"], "9370.53")
+        self.assertEqual(preview_payload["amount_summary"]["after"]["invoice_total"], "500.00")
+        self.assertEqual(preview_payload["amount_summary"]["mismatch_fields"], ["bank_total"])
+        self.assertEqual(len(after_groups), 2)
+        restored_group = next(group for group in after_groups if group["group_id"] == "case:CASE-OA-ATT-oa-exp-2066-2")
+        self.assertEqual([row["id"] for row in restored_group["oa_rows"]], ["oa-exp-2066-2"])
+        self.assertEqual([row["id"] for row in restored_group["invoice_rows"]], ["oa-att-inv-oa-exp-2066-2-01"])
+        self.assertEqual(restored_group["bank_rows"], [])
+        bank_group = next(group for group in after_groups if group["bank_rows"])
+        self.assertEqual([row["id"] for row in bank_group["bank_rows"]], ["txn_imported_0640"])
+        self.assertEqual(preview_payload["restored_relations"][0]["relation_mode"], "oa_attachment_invoice")
+
+        withdraw_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/withdraw-link",
+            json.dumps({"month": "2026-05", "row_ids": full_row_ids}),
+        )
+
+        self.assertEqual(withdraw_response.status_code, 200)
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-AUTO-0001"))
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id("txn_imported_0640"))
+        restored_relation = app._workbench_pair_relation_service.get_active_relation_by_row_id("oa-exp-2066-2")
+        assert restored_relation is not None
+        self.assertEqual(restored_relation["case_id"], "CASE-OA-ATT-oa-exp-2066-2")
+        self.assertCountEqual(restored_relation["row_ids"], ["oa-exp-2066-2", "oa-att-inv-oa-exp-2066-2-01"])
+
+    def test_withdraw_link_without_history_falls_back_to_cancelling_active_relation(self) -> None:
+        app = build_application()
+        app._workbench_pair_relation_service.create_active_relation(
+            case_id="CASE-NO-HISTORY",
+            row_ids=["oa-no-history", "bk-no-history"],
+            row_types=["oa", "bank"],
+            relation_mode="manual_confirmed",
+            created_by="test",
+            amount_check={
+                "status": "mismatch",
+                "direction": "payment",
+                "oa_total": "100.00",
+                "bank_total": "90.00",
+                "invoice_total": None,
+                "mismatch_fields": ["oa_total", "bank_total"],
+                "requires_note": True,
+            },
+        )
+
+        response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/withdraw-link/preview",
+            json.dumps({"month": "all", "row_ids": ["oa-no-history", "bk-no-history"]}),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        preview_payload = json.loads(response.body)
+        self.assertEqual(preview_payload["operation"], "withdraw_link")
+        self.assertEqual(len(preview_payload["before"]["groups"]), 1)
+        self.assertEqual(preview_payload["amount_summary"]["status"], "mismatch")
+        self.assertEqual(preview_payload["amount_summary"]["before"]["oa_total"], "100.00")
+        self.assertEqual(preview_payload["amount_summary"]["before"]["bank_total"], "90.00")
+        after_group_ids = [group["group_id"] for group in preview_payload["after"]["groups"]]
+        self.assertEqual(after_group_ids, ["selected:oa-no-history", "selected:bk-no-history"])
+        self.assertEqual(preview_payload["restored_relations"], [])
+
+        withdraw_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/withdraw-link",
+            json.dumps({"month": "all", "row_ids": ["oa-no-history", "bk-no-history"]}),
+        )
+        self.assertEqual(withdraw_response.status_code, 200)
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-NO-HISTORY"))
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -3007,6 +3286,56 @@ def build_oa_retention_invoice_row(row_id: str, case_id: str, issue_date: str) -
         "amount": "100.00",
         "invoice_bank_relation": {"code": "pending_collection", "label": "待匹配流水", "tone": "warn"},
         "available_actions": ["detail"],
+    }
+
+
+def build_relation_amount_raw_payload(*, invoice_amount: str) -> dict[str, object]:
+    return {
+        "month": "2026-05",
+        "summary": {"oa_count": 1, "bank_count": 1, "invoice_count": 1, "paired_count": 0, "open_count": 3, "exception_count": 0},
+        "paired": {"oa": [], "bank": [], "invoice": []},
+        "open": {
+            "oa": [
+                {
+                    "id": "oa-o-202605-001",
+                    "type": "oa",
+                    "case_id": "",
+                    "apply_type": "支付申请",
+                    "amount": "100.00",
+                    "counterparty_name": "测试供应商",
+                    "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"},
+                    "available_actions": ["detail"],
+                }
+            ],
+            "bank": [
+                {
+                    "id": "bk-o-202605-001",
+                    "type": "bank",
+                    "case_id": "",
+                    "trade_time": "2026-05-02 09:00:00",
+                    "debit_amount": "100.00",
+                    "credit_amount": "",
+                    "counterparty_name": "测试供应商",
+                    "invoice_relation": {"code": "pending_match", "label": "待匹配", "tone": "warn"},
+                    "available_actions": ["detail"],
+                }
+            ],
+            "invoice": [
+                {
+                    "id": "iv-o-202605-001",
+                    "type": "invoice",
+                    "case_id": "",
+                    "seller_name": "测试供应商",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "issue_date": "2026-05-02",
+                    "amount": invoice_amount,
+                    "total_with_tax": invoice_amount,
+                    "invoice_type": "进项专票",
+                    "invoice_bank_relation": {"code": "pending_collection", "label": "待匹配流水", "tone": "warn"},
+                    "available_actions": ["detail"],
+                }
+            ],
+        },
     }
 
 

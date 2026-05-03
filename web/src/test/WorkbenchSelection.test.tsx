@@ -22,6 +22,29 @@ async function openWorkbenchSettingsPage(user: ReturnType<typeof userEvent.setup
   return await screen.findByTestId("settings-page");
 }
 
+function expectRelationPreviewSummary(section: HTMLElement) {
+  const summary = within(section).getByTestId("relation-preview-summary");
+  expect(within(summary).getByText("金额核对")).toBeInTheDocument();
+  expect(within(summary).getByTestId("relation-preview-summary-metric-oa")).toBeInTheDocument();
+  expect(within(summary).getByTestId("relation-preview-summary-metric-bank")).toBeInTheDocument();
+  expect(within(summary).getByTestId("relation-preview-summary-metric-invoice")).toBeInTheDocument();
+  expect(within(summary).queryByText(/\d+\s*[项条]/)).not.toBeInTheDocument();
+  return summary;
+}
+
+function expectRelationPreviewTriPane(section: HTMLElement) {
+  expect(within(section).getByTestId("tri-pane")).toBeInTheDocument();
+  const oaPane = within(section).getByTestId("pane-oa");
+  const bankPane = within(section).getByTestId("pane-bank");
+  const invoicePane = within(section).getByTestId("pane-invoice");
+  expect(within(oaPane).getByText("OA")).toBeInTheDocument();
+  expect(within(oaPane).getByText(/\d+ [项条]/)).toBeInTheDocument();
+  expect(within(bankPane).getByText("流水")).toBeInTheDocument();
+  expect(within(bankPane).getByText(/\d+ [项条]/)).toBeInTheDocument();
+  expect(within(invoicePane).getByText("发票")).toBeInTheDocument();
+  expect(within(invoicePane).getByText(/\d+ [项条]/)).toBeInTheDocument();
+}
+
 describe("Workbench row selection and detail modal", () => {
   test("clicking an open row toggles multi-selection without opening the detail modal", async () => {
     const user = userEvent.setup();
@@ -131,7 +154,7 @@ describe("Workbench row selection and detail modal", () => {
     expect(screen.queryByRole("dialog", { name: "详情弹窗" })).not.toBeInTheDocument();
   });
 
-  test("open zone header confirm link posts the currently selected rows", async () => {
+  test("open zone header confirm link opens preview before submit", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderWorkbenchPage();
@@ -151,6 +174,54 @@ describe("Workbench row selection and detail modal", () => {
     await user.click(openInvoiceRow);
     await user.click(screen.getByRole("button", { name: "确认关联" }));
 
+    const dialog = await screen.findByRole("dialog", { name: "关联预览" });
+    expect(within(dialog).getByRole("heading", { name: "操作前" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading", { name: "操作后" })).toBeInTheDocument();
+    const before = within(dialog).getByTestId("relation-preview-before");
+    const after = within(dialog).getByTestId("relation-preview-after");
+    expect(before).toHaveClass("relation-preview-section-before");
+    expect(after).toHaveClass("relation-preview-section-after");
+    expectRelationPreviewSummary(before);
+    expectRelationPreviewSummary(after);
+    expectRelationPreviewTriPane(before);
+    expectRelationPreviewTriPane(after);
+    const beforeGroups = within(before).getAllByTestId(/^candidate-group-/);
+    expect(beforeGroups).toHaveLength(1);
+    expect(within(beforeGroups[0]).getByRole("row", { name: /陈涛.*智能工厂设备商/ })).toHaveClass(
+      "record-card-sheet-row",
+    );
+    expect(within(beforeGroups[0]).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toHaveClass(
+      "record-card-sheet-row",
+    );
+    expect(within(beforeGroups[0]).getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toHaveClass(
+      "record-card-sheet-row",
+    );
+    const afterGroups = within(after).getAllByTestId(/^candidate-group-/);
+    expect(afterGroups).toHaveLength(1);
+    expect(afterGroups[0]).toHaveClass("candidate-group-row-sheet");
+    expect(within(afterGroups[0]).getByRole("row", { name: /陈涛.*智能工厂设备商/ })).toHaveClass("record-card-sheet-row");
+    expect(within(afterGroups[0]).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toHaveClass("record-card-sheet-row");
+    expect(within(afterGroups[0]).getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toHaveClass("record-card-sheet-row");
+    expect(within(dialog).queryByText("杭州张三广告有限公司")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("ETC过路费")).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/actions/confirm-link/preview",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          month: "all",
+          row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
+          case_id: "CASE-202603-101",
+        }),
+      }),
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/workbench/actions/confirm-link",
+      expect.anything(),
+    );
+
+    await user.click(within(dialog).getByRole("button", { name: "确认关联" }));
+
     expect(await screen.findByText("已确认 3 条记录关联。")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/workbench/actions/confirm-link",
@@ -161,6 +232,46 @@ describe("Workbench row selection and detail modal", () => {
           row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
           case_id: "CASE-202603-101",
         }),
+      }),
+    );
+  });
+
+  test("amount mismatch preview requires note before confirm submit", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderWorkbenchPage();
+
+    await user.click(await screen.findByRole("row", { name: /林晨.*尾差设备商/ }));
+    await user.click(await screen.findByRole("row", { name: /2026-03-29.*尾差设备商/ }));
+    await user.click(await screen.findByRole("row", { name: /91330108MA27B4011E.*杭州溯源科技有限公司/ }));
+    await user.click(screen.getByRole("button", { name: "确认关联" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "关联预览" });
+    expect(within(dialog).getByText("金额不一致，请填写备注。")).toBeInTheDocument();
+    const after = within(dialog).getByTestId("relation-preview-after");
+    const summary = expectRelationPreviewSummary(after);
+    const invoiceMetric = within(summary).getByTestId("relation-preview-summary-metric-invoice");
+    expect(
+      invoiceMetric.classList.contains("mismatch")
+        || invoiceMetric.classList.contains("relation-preview-summary-metric-mismatch"),
+    ).toBe(true);
+    const deltaBlocks = within(dialog).getAllByTestId("relation-preview-delta");
+    expect(deltaBlocks.length).toBeGreaterThan(0);
+    deltaBlocks.forEach((deltaBlock) => {
+      expect(deltaBlock).toHaveTextContent("差额");
+      expect(deltaBlock).not.toHaveTextContent(/OA\s*-|流水\s*-|发票\s*-/);
+    });
+    expect(within(dialog).getByRole("button", { name: "确认关联" })).toBeDisabled();
+
+    await user.type(within(dialog).getByRole("textbox", { name: "备注" }), "发票税额尾差，财务已复核");
+    await user.click(within(dialog).getByRole("button", { name: "确认关联" }));
+
+    expect(await screen.findByText("已确认 3 条记录关联。")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/actions/confirm-link",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining("\"note\":\"发票税额尾差，财务已复核\""),
       }),
     );
   });
@@ -206,6 +317,15 @@ describe("Workbench row selection and detail modal", () => {
     await user.click(openInvoiceRow);
     await user.click(screen.getByRole("button", { name: "确认关联" }));
 
+    const dialog = await screen.findByRole("dialog", { name: "关联预览" });
+    const after = within(dialog).getByTestId("relation-preview-after");
+    const afterSummary = expectRelationPreviewSummary(after);
+    const emptyOaMetric = within(afterSummary).getByTestId("relation-preview-summary-metric-oa");
+    expect(within(emptyOaMetric).getByText("-")).toBeInTheDocument();
+    expect(emptyOaMetric).not.toHaveClass("mismatch");
+    expect(within(after).getByTestId("pane-oa")).not.toHaveClass("mismatch");
+    await user.click(within(dialog).getByRole("button", { name: "确认关联" }));
+
     expect(await screen.findByText("已确认 2 条记录关联。")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/workbench/actions/confirm-link",
@@ -235,6 +355,8 @@ describe("Workbench row selection and detail modal", () => {
     await user.click(openBankRow);
     await user.click(openInvoiceRow);
     await user.click(screen.getByRole("button", { name: "确认关联" }));
+    const preview = await screen.findByRole("dialog", { name: "关联预览" });
+    await user.click(within(preview).getByRole("button", { name: "确认关联" }));
 
     expect(await screen.findByRole("dialog", { name: "操作状态弹窗" })).toBeInTheDocument();
     expect(screen.getByText("正在确认关联...")).toBeInTheDocument();
@@ -265,6 +387,8 @@ describe("Workbench row selection and detail modal", () => {
     await user.click(openBankRow);
     await user.click(openInvoiceRow);
     await user.click(screen.getByRole("button", { name: "确认关联" }));
+    const preview = await screen.findByRole("dialog", { name: "关联预览" });
+    await user.click(within(preview).getByRole("button", { name: "确认关联" }));
 
     expect(await screen.findByRole("dialog", { name: "操作状态弹窗" })).toBeInTheDocument();
     expect(await screen.findByText("已确认 2 条记录关联。")).toBeInTheDocument();
@@ -313,20 +437,95 @@ describe("Workbench row selection and detail modal", () => {
 
     await user.click(pairedBankRow);
     await user.click(pairedInvoiceRow);
-    await user.click(within(pairedZone).getByRole("button", { name: "取消配对" }));
+    await user.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));
+
+    const preview = await screen.findByRole("dialog", { name: "关联预览" });
+    expect(within(preview).getByText("撤回关联预览")).toBeInTheDocument();
+    expect(within(preview).getByRole("heading", { name: "操作前" })).toBeInTheDocument();
+    expect(within(preview).getByRole("heading", { name: "操作后" })).toBeInTheDocument();
+    const before = within(preview).getByTestId("relation-preview-before");
+    const after = within(preview).getByTestId("relation-preview-after");
+    expectRelationPreviewSummary(before);
+    expectRelationPreviewSummary(after);
+    expectRelationPreviewTriPane(before);
+    expectRelationPreviewTriPane(after);
+    expect(within(before).getAllByTestId(/^candidate-group-/)).toHaveLength(1);
+    const afterGroups = within(after).getAllByTestId(/^candidate-group-/);
+    expect(afterGroups).toHaveLength(2);
+    const restoredGroup = afterGroups.find((group) => within(group).queryByRole("row", { name: /赵华.*华东设备供应商/ }));
+    expect(restoredGroup).toBeDefined();
+    expect(within(restoredGroup!).getByRole("row", { name: /91310000MA1K8A001X.*华东设备供应商/ })).toBeInTheDocument();
+    expect(within(restoredGroup!).queryByRole("row", { name: /2026-03-25 14:22.*华东设备供应商/ })).not.toBeInTheDocument();
+    const bankOnlyGroup = afterGroups.find((group) => within(group).queryByRole("row", { name: /2026-03-25 14:22.*华东设备供应商/ }));
+    expect(bankOnlyGroup).toBeDefined();
+    expect(within(bankOnlyGroup!).queryByRole("row", { name: /赵华.*华东设备供应商/ })).not.toBeInTheDocument();
+    await user.click(within(preview).getByRole("button", { name: "确认撤回" }));
 
     expect(await screen.findByRole("dialog", { name: "操作状态弹窗" })).toBeInTheDocument();
-    expect(await screen.findByText("已取消 1 组配对。")).toBeInTheDocument();
+    expect(await screen.findByText("已撤回 1 组关联。")).toBeInTheDocument();
     expect(
       within(pairedZone).queryByRole("row", {
         name: /2026-03-25 14:22.*华东设备供应商/,
       }),
     ).not.toBeInTheDocument();
-    expect(
-      within(openZone).getByRole("row", {
-        name: /2026-03-25 14:22.*华东设备供应商/,
-      }),
-    ).toBeInTheDocument();
+    const openGroupsAfterWithdraw = within(openZone).getAllByTestId(/^candidate-group-/);
+    const restoredOpenGroup = openGroupsAfterWithdraw.find((group) => within(group).queryByRole("row", { name: /赵华.*华东设备供应商/ }));
+    expect(restoredOpenGroup).toBeDefined();
+    expect(within(restoredOpenGroup!).getByRole("row", { name: /91310000MA1K8A001X.*华东设备供应商/ })).toBeInTheDocument();
+    expect(within(restoredOpenGroup!).queryByRole("row", { name: /2026-03-25 14:22.*华东设备供应商/ })).not.toBeInTheDocument();
+    const bankOnlyOpenGroup = openGroupsAfterWithdraw.find((group) =>
+      within(group).queryByRole("row", { name: /2026-03-25 14:22.*华东设备供应商/ }),
+    );
+    expect(bankOnlyOpenGroup).toBeDefined();
+    expect(within(bankOnlyOpenGroup!).queryByRole("row", { name: /赵华.*华东设备供应商/ })).not.toBeInTheDocument();
+    expect(within(bankOnlyOpenGroup!).queryByRole("row", { name: /91310000MA1K8A001X.*华东设备供应商/ })).not.toBeInTheDocument();
+  });
+
+  test("open zone enables withdraw link only for groups with history", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    renderWorkbenchPage();
+
+    const openZone = await screen.findByTestId("zone-open");
+    const withdrawButton = within(openZone).getByRole("button", { name: "撤回关联" });
+    expect(withdrawButton).toBeDisabled();
+
+    await user.click(await within(openZone).findByRole("row", { name: /孙敏.*华东设备供应商/ }));
+
+    expect(withdrawButton).toBeEnabled();
+
+    await user.click(withdrawButton);
+    const preview = await screen.findByRole("dialog", { name: "关联预览" });
+    expect(within(preview).getByText("撤回关联预览")).toBeInTheDocument();
+    const before = within(preview).getByTestId("relation-preview-before");
+    const after = within(preview).getByTestId("relation-preview-after");
+    expectRelationPreviewSummary(before);
+    expectRelationPreviewSummary(after);
+    expectRelationPreviewTriPane(before);
+    expectRelationPreviewTriPane(after);
+  });
+
+  test("unified pane search filters candidate groups across all panes and highlights matches", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    renderWorkbenchPage();
+
+    const openZone = await screen.findByTestId("zone-open");
+    const openOaPane = within(openZone).getByTestId("pane-oa");
+
+    await user.click(within(openOaPane).getByRole("button", { name: "搜索 OA" }));
+    await user.type(within(openOaPane).getByLabelText("搜索 OA"), "智能工厂");
+
+    expect(within(openZone).getByRole("row", { name: /陈涛.*智能工厂设备商/ })).toBeInTheDocument();
+    expect(within(openZone).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeInTheDocument();
+    expect(within(openZone).getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toBeInTheDocument();
+    expect(within(openZone).queryByText("杭州张三广告有限公司")).not.toBeInTheDocument();
+    expect(within(openZone).getAllByText("智能工厂").length).toBeGreaterThan(0);
+    expect(within(openZone).getAllByText("智能工厂").some((node) => node.classList.contains("search-hit"))).toBe(true);
+
+    await user.click(within(openOaPane).getByRole("button", { name: "清空搜索 OA" }));
+
+    expect(within(openZone).getAllByText("杭州张三广告有限公司").length).toBeGreaterThan(0);
   });
 
   test("open zone header actions stay disabled until enough rows are selected", async () => {
@@ -993,7 +1192,7 @@ describe("Workbench row selection and detail modal", () => {
     expect(screen.queryByRole("button", { name: "ETC发票导入" })).not.toBeInTheDocument();
     expect(within(openZone).getByRole("button", { name: "确认关联" })).toBeDisabled();
     expect(within(openZone).getByRole("button", { name: "异常处理" })).toBeDisabled();
-    expect(within(pairedZone).getByRole("button", { name: "取消配对" })).toBeDisabled();
+    expect(within(pairedZone).getByRole("button", { name: "撤回关联" })).toBeDisabled();
 
     const invoiceRow = within(openZone).getByRole("row", {
       name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
@@ -1012,13 +1211,13 @@ describe("Workbench row selection and detail modal", () => {
     expect(within(settingsPage).getByRole("button", { name: "保存设置" })).toBeDisabled();
   });
 
-  test("paired zone cancel action stays disabled until at least two rows are selected", async () => {
+  test("paired zone withdraw action enables when one row in a relation is selected", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     renderWorkbenchPage();
 
     const pairedZone = await screen.findByTestId("zone-paired");
-    const cancelButton = within(pairedZone).getByRole("button", { name: "取消配对" });
+    const cancelButton = within(pairedZone).getByRole("button", { name: "撤回关联" });
 
     expect(cancelButton).toBeDisabled();
 
@@ -1027,16 +1226,12 @@ describe("Workbench row selection and detail modal", () => {
     });
 
     await user.click(pairedBankRow);
-    expect(cancelButton).toBeDisabled();
-
-    const pairedInvoiceRow = within(pairedZone).getByRole("row", {
-      name: /91310000MA1K8A001X.*华东设备供应商/,
-    });
-
-    await user.click(pairedInvoiceRow);
     await waitFor(() => {
-      expect(within(pairedZone).getByRole("button", { name: "取消配对" })).toBeEnabled();
+      expect(within(pairedZone).getByRole("button", { name: "撤回关联" })).toBeEnabled();
     });
+    await user.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));
+
+    expect(await screen.findByRole("dialog", { name: "关联预览" })).toBeInTheDocument();
   });
 
   test("invoice rows can be ignored into the ignored modal and restored back to open", async () => {
@@ -1139,17 +1334,18 @@ describe("Workbench row selection and detail modal", () => {
 
     await user.click(pairedBankRow);
     await user.click(pairedInvoiceRow);
-    await user.click(within(pairedZone).getByRole("button", { name: "取消配对" }));
+    await user.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));
+    const preview = await screen.findByRole("dialog", { name: "关联预览" });
+    await user.click(within(preview).getByRole("button", { name: "确认撤回" }));
 
-    expect(await screen.findByText("已取消 1 组配对。")).toBeInTheDocument();
+    expect(await screen.findByText("已撤回 1 组关联。")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/actions/cancel-link",
+      "/api/workbench/actions/withdraw-link",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
           month: "all",
-          row_id: "bk-p-202603-001",
-          comment: "由关联台批量取消配对",
+          row_ids: ["oa-p-202603-001", "bk-p-202603-001", "iv-p-202603-001"],
         }),
       }),
     );

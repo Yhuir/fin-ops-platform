@@ -570,6 +570,41 @@ class StateStoreTests(unittest.TestCase):
             self.assertEqual(db["workbench_pair_relations"].delete_many_calls, 0)
             self.assertEqual(db["workbench_pair_relations"].replace_one_calls, 1)
 
+    def test_save_workbench_pair_relations_persists_history_metadata(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            snapshot = {
+                "pair_relations": {
+                    "CASE-A": {
+                        "case_id": "CASE-A",
+                        "row_ids": ["oa-1", "bk-1"],
+                        "row_types": ["oa", "bank"],
+                        "status": "active",
+                    }
+                },
+                "pair_relation_history": [
+                    {
+                        "operation_id": "op-1",
+                        "operation_type": "confirm_link",
+                        "before_relations": [],
+                        "after_relations": [{"case_id": "CASE-A", "row_ids": ["oa-1", "bk-1"]}],
+                        "affected_row_ids": ["oa-1", "bk-1"],
+                        "note": "金额不一致说明",
+                        "amount_check": {"status": "mismatch"},
+                        "created_by": "test",
+                        "created_at": "2026-05-02T00:00:00+00:00",
+                    }
+                ],
+            }
+            store = ApplicationStateStore(data_dir)
+            store.save_workbench_pair_relations(snapshot)
+
+            reloaded = ApplicationStateStore(data_dir)
+            loaded = reloaded.load_workbench_pair_relations()
+
+        self.assertEqual(loaded["pair_relation_history"][0]["operation_type"], "confirm_link")
+        self.assertEqual(loaded["pair_relation_history"][0]["amount_check"]["status"], "mismatch")
+
     def test_save_workbench_read_models_persists_and_loads_snapshot(self) -> None:
         with TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)

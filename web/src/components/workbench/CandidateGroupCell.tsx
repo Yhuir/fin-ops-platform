@@ -19,12 +19,14 @@ type CandidateGroupCellProps = {
   scrollTestId: string;
   actionMode?: "default" | "cancel-exception-only";
   highlightedRowId?: string | null;
+  searchQuery?: string;
   getRowState: (row: WorkbenchRecord, zoneId: "paired" | "open") => WorkbenchRowState;
   onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "open") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
   showWorkflowActions: boolean;
   canMutateData: boolean;
+  readOnly?: boolean;
 };
 
 function CandidateGroupCell({
@@ -37,12 +39,14 @@ function CandidateGroupCell({
   scrollTestId,
   actionMode = "default",
   highlightedRowId,
+  searchQuery = "",
   getRowState,
   onSelectRow,
   onOpenDetail,
   onRowAction,
   showWorkflowActions,
   canMutateData,
+  readOnly = false,
 }: CandidateGroupCellProps) {
   const isSingleRecord = records.length === 1;
 
@@ -73,6 +77,7 @@ function CandidateGroupCell({
             columnGridStyle={columnGridStyle}
             columns={columns}
             highlighted={highlightedRowId === row.id}
+            searchQuery={searchQuery}
             key={row.id}
             onOpenDetail={onOpenDetail}
             onRowAction={onRowAction}
@@ -83,6 +88,7 @@ function CandidateGroupCell({
             sheetRowMode={isSingleRecord ? "stretched" : "split"}
             showWorkflowActions={showWorkflowActions}
             canMutateData={canMutateData}
+            readOnly={readOnly}
             zoneId={zoneId}
           />
         ))}

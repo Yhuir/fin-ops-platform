@@ -36,10 +36,13 @@ type WorkbenchZoneProps = {
   onClearSelection?: () => void;
   primarySelectionActionLabel?: string;
   secondarySelectionActionLabel?: string;
+  tertiarySelectionActionLabel?: string;
   onPrimarySelectionAction?: () => void;
   onSecondarySelectionAction?: () => void;
+  onTertiarySelectionAction?: () => void;
   primarySelectionActionDisabled?: boolean;
   secondarySelectionActionDisabled?: boolean;
+  tertiarySelectionActionDisabled?: boolean;
   auxiliaryHeaderActions?: Array<{
     label: string;
     onClick: () => void;
@@ -92,10 +95,13 @@ function WorkbenchZone({
   onClearSelection,
   primarySelectionActionLabel,
   secondarySelectionActionLabel,
+  tertiarySelectionActionLabel,
   onPrimarySelectionAction,
   onSecondarySelectionAction,
+  onTertiarySelectionAction,
   primarySelectionActionDisabled,
   secondarySelectionActionDisabled,
+  tertiarySelectionActionDisabled,
   auxiliaryHeaderActions,
   onTogglePaneSearch,
   onClosePaneSearch,
@@ -152,6 +158,16 @@ function WorkbenchZone({
                     onClick={onSecondarySelectionAction}
                   >
                     {secondarySelectionActionLabel}
+                  </button>
+                ) : null}
+                {tertiarySelectionActionLabel ? (
+                  <button
+                    className="zone-selection-btn"
+                    disabled={tertiarySelectionActionDisabled}
+                    type="button"
+                    onClick={onTertiarySelectionAction}
+                  >
+                    {tertiarySelectionActionLabel}
                   </button>
                 ) : null}
               </div>

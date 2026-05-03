@@ -420,11 +420,11 @@ function buildWorkbenchRowPayload(month: string) {
   return {
     month,
     summary: {
-      oa_count: 4,
-      bank_count: 3,
-      invoice_count: 3,
+      oa_count: 5,
+      bank_count: 4,
+      invoice_count: 4,
       paired_count: 3,
-      open_count: 7,
+      open_count: 10,
       exception_count: 1,
     },
     paired: {
@@ -509,17 +509,33 @@ function buildWorkbenchRowPayload(month: string) {
           id: "oa-o-202603-002",
           type: "oa",
           case_id: null,
-          applicant: "孙悦",
-          project_name: "维保补录项目",
+          applicant: "孙敏",
+          project_name: "华东补录项目",
           apply_type: "服务费申请",
           amount: "9,800.00",
-          counterparty_name: "独立服务商",
+          counterparty_name: "华东设备供应商",
           reason: "月度巡检服务待付款",
           oa_bank_relation: { code: "pending_match", label: "待找流水与发票", tone: "warn" },
           detail_fields: {
             审批完成时间: "2026-03-26 09:20",
             附件发票数量: "0",
             附件发票识别情况: "已解析 0 / 6",
+          },
+          available_actions: ["detail", "confirm_link", "withdraw_link", "mark_exception", "ignore"],
+        },
+        {
+          id: "oa-o-202603-003",
+          type: "oa",
+          case_id: "CASE-202603-102",
+          applicant: "林晨",
+          project_name: "金额差异项目",
+          apply_type: "供应商付款申请",
+          amount: "10,000.00",
+          counterparty_name: "尾差设备商",
+          reason: "设备尾款待复核",
+          oa_bank_relation: { code: "pending_match", label: "待找流水与发票", tone: "warn" },
+          detail_fields: {
+            审批完成时间: "2026-03-29 18:10",
           },
           available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
         },
@@ -555,6 +571,21 @@ function buildWorkbenchRowPayload(month: string) {
           repayment_date: null,
           available_actions: ["detail", "view_relation", "cancel_link", "handle_exception"],
         },
+        {
+          id: "bk-o-202603-003",
+          type: "bank",
+          case_id: "CASE-202603-102",
+          trade_time: "2026-03-29 10:18",
+          debit_amount: "10,000.00",
+          credit_amount: null,
+          counterparty_name: "尾差设备商",
+          payment_account_label: "建设银行 1138",
+          invoice_relation: { code: "pending_invoice_match", label: "待关联设备票", tone: "warn" },
+          pay_receive_time: "2026-03-29 10:18",
+          remark: "设备尾款存在发票尾差",
+          repayment_date: null,
+          available_actions: ["detail", "view_relation", "cancel_link", "handle_exception"],
+        },
       ],
       invoice: [
         {
@@ -575,6 +606,26 @@ function buildWorkbenchRowPayload(month: string) {
           available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
           detail_fields: {
             发票号码: "12561048",
+          },
+        },
+        {
+          id: "iv-o-202603-003",
+          type: "invoice",
+          case_id: "CASE-202603-102",
+          seller_tax_no: "91330108MA27B4011E",
+          seller_name: "尾差设备商",
+          buyer_tax_no: "91310000MA1K8A001X",
+          buyer_name: "杭州溯源科技有限公司",
+          issue_date: "2026-03-29",
+          amount: "9,999.99",
+          tax_rate: "13%",
+          tax_amount: "1,150.44",
+          total_with_tax: "9,999.99",
+          invoice_type: "进项专票",
+          invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
+          available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+          detail_fields: {
+            发票号码: "12561049",
           },
         },
       ],
@@ -1123,6 +1174,131 @@ function moveWorkbenchGroup(payload: RawWorkbenchPayload, source: RawWorkbenchSe
   }
 
   return true;
+}
+
+function findWorkbenchRowsByIds(
+  workbenchStateStore: ReturnType<typeof createWorkbenchStateStore>,
+  month: string,
+  rowIds: string[],
+) {
+  const payload = workbenchStateStore.get(month);
+  const rowsById = new Map<string, RawWorkbenchRow>();
+  for (const section of ["paired", "open"] as const) {
+    for (const pane of ["oa", "bank", "invoice"] as const) {
+      for (const row of payload[section][pane]) {
+        rowsById.set(String(row.id), row);
+      }
+    }
+  }
+  return rowIds.map((rowId) => rowsById.get(rowId)).filter((row): row is RawWorkbenchRow => Boolean(row));
+}
+
+function buildRelationPreviewGroups(
+  rows: RawWorkbenchRow[],
+  caseId: string,
+  section: "paired" | "open",
+  mode: "together" | "separate" | "restored-with-ungrouped" = "together",
+) {
+  if (mode === "separate") {
+    const groupedRows = new Map<string, RawWorkbenchRow[]>();
+    for (const row of rows) {
+      const existingCaseId = typeof row.case_id === "string" ? row.case_id.trim() : "";
+      const groupKey = existingCaseId ? `case:${existingCaseId}` : `selected:${String(row.id)}`;
+      const groupRows = groupedRows.get(groupKey) ?? [];
+      groupRows.push(row);
+      groupedRows.set(groupKey, groupRows);
+    }
+    return Array.from(groupedRows.values()).flatMap((groupRows) => {
+      const firstRow = groupRows[0];
+      const existingCaseId = typeof firstRow?.case_id === "string" ? firstRow.case_id.trim() : "";
+      return buildRelationPreviewGroups(groupRows, existingCaseId, section, "together");
+    });
+  }
+
+  const panes: Record<RawWorkbenchPaneKey, RawWorkbenchRow[]> = { oa: [], bank: [], invoice: [] };
+  const restoredRows = mode === "restored-with-ungrouped" ? rows.slice(0, 2) : rows;
+  const ungroupedRows = mode === "restored-with-ungrouped" ? rows.slice(2) : [];
+  for (const row of restoredRows) {
+    const pane = row.type === "oa" || row.type === "bank" || row.type === "invoice" ? row.type : null;
+    if (!pane) {
+      continue;
+    }
+    panes[pane].push({
+      ...row,
+      case_id: caseId,
+    });
+  }
+  return [
+    ...buildGroups(panes, section),
+    ...ungroupedRows.flatMap((row) => buildRelationPreviewGroups([{ ...row, case_id: "" }], "", "open", "together")),
+  ];
+}
+
+function buildWithdrawAfterPreviewGroups(rows: RawWorkbenchRow[]) {
+  const restoredRows = rows.filter((row) => row.type !== "bank");
+  const restoredRowIds = new Set(restoredRows.map((row) => String(row.id)));
+  const ungroupedRows = rows.filter((row) => !restoredRowIds.has(String(row.id)));
+  return [
+    ...(restoredRows.length >= 2 ? buildRelationPreviewGroups(restoredRows, "CASE-RESTORED", "open", "together") : []),
+    ...ungroupedRows.flatMap((row) => buildRelationPreviewGroups([{ ...row, case_id: "" }], "", "open", "together")),
+  ];
+}
+
+function buildMockRelationPreview({
+  operation,
+  month,
+  rowIds,
+  caseId,
+  workbenchStateStore,
+}: {
+  operation: "confirm_link" | "withdraw_link";
+  month: string;
+  rowIds: string[];
+  caseId: string;
+  workbenchStateStore: ReturnType<typeof createWorkbenchStateStore>;
+}) {
+  const rows = findWorkbenchRowsByIds(workbenchStateStore, month, rowIds);
+  const isMismatch = rowIds.includes("iv-o-202603-003") || caseId === "CASE-202603-102";
+  const amountSummary = {
+    before: {
+      oa_total: isMismatch ? "10000.00" : "58000.00",
+      bank_total: isMismatch ? "10000.00" : "58000.00",
+      invoice_total: isMismatch ? "9999.99" : "58000.00",
+    },
+    after: {
+      oa_total: isMismatch ? "10000.00" : "58000.00",
+      bank_total: isMismatch ? "10000.00" : "58000.00",
+      invoice_total: isMismatch ? "9999.99" : "58000.00",
+    },
+    status: isMismatch ? "mismatch" : "matched",
+    direction: "payment",
+    mismatch_fields: isMismatch ? ["invoice_total"] : [],
+  };
+  return {
+    operation,
+    can_submit: true,
+    requires_note: isMismatch && operation === "confirm_link",
+    message: isMismatch && operation === "confirm_link" ? "金额不一致，请填写备注。" : "",
+    before: {
+      groups: buildRelationPreviewGroups(
+        rows,
+        caseId,
+        operation === "withdraw_link" ? "paired" : "open",
+        operation === "withdraw_link" ? "together" : "separate",
+      ),
+    },
+    after: {
+      groups:
+        operation === "withdraw_link"
+          ? buildWithdrawAfterPreviewGroups(rows)
+          : buildRelationPreviewGroups(rows, caseId, "paired", "together"),
+    },
+    amount_summary: amountSummary,
+    restored_relations:
+      operation === "withdraw_link"
+        ? [{ case_id: "CASE-RESTORED", row_ids: rows.filter((row) => row.type !== "bank").map((row) => String(row.id)) }]
+        : [],
+  };
 }
 
 function buildWorkbenchDetail(rowId: string) {
@@ -3066,6 +3242,84 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         : [];
       return { body: calculateTaxPayload(month, selectedOutputIds, selectedInputIds, taxOffsetStateStore.get(month)) };
     },
+    "/api/bank-details/accounts": () => ({
+      body: {
+        total_balance: "130500.50",
+        balance_account_count: 1,
+        missing_balance_account_count: 1,
+        accounts: [
+          {
+            account_key: "icbc:6386",
+            bank_name: "工商银行",
+            account_last4: "6386",
+            display_name: "工商银行 6386",
+            latest_balance: "130500.50",
+            latest_balance_at: "2026-05-01 16:30:00",
+            has_balance: true,
+            transaction_count: 1,
+          },
+          {
+            account_key: "bocom:3847",
+            bank_name: "交通银行",
+            account_last4: "3847",
+            display_name: "交通银行 3847",
+            latest_balance: null,
+            latest_balance_at: null,
+            has_balance: false,
+            transaction_count: 0,
+          },
+        ],
+      },
+    }),
+    "/api/bank-details/transactions": ({ url }) => {
+      const accountKey = url.searchParams.get("account_key");
+      const dateFrom = url.searchParams.get("date_from");
+      const dateTo = url.searchParams.get("date_to");
+      const rows = accountKey === "icbc:6386"
+        ? [
+          {
+            id: "bank-detail-001",
+            trade_time: "2026-05-01 10:30:00",
+            counterparty_name: "云南溯源科技有限公司",
+            direction: "income",
+            direction_label: "收",
+            amount: "20000.00",
+            balance: "130500.50",
+            summary: "项目回款",
+            purpose: "货款",
+            bank_name: "工商银行",
+            account_last4: "6386",
+          },
+        ]
+        : [];
+      return {
+        body: {
+          account_key: accountKey,
+          date_from: dateFrom,
+          date_to: dateTo,
+          rows,
+          pagination: {
+            page: 1,
+            page_size: 100,
+            total: rows.length,
+          },
+        },
+      };
+    },
+    "/api/workbench/actions/confirm-link/preview": ({ jsonBody }) => {
+      const rowIds = Array.isArray(jsonBody?.row_ids) ? (jsonBody.row_ids as string[]) : [];
+      const month = String(jsonBody?.month ?? "");
+      const caseId = typeof jsonBody?.case_id === "string" ? jsonBody.case_id : "preview:confirm";
+      return {
+        body: buildMockRelationPreview({
+          operation: "confirm_link",
+          month,
+          rowIds,
+          caseId,
+          workbenchStateStore,
+        }),
+      };
+    },
     "/api/workbench/actions/confirm-link": ({ jsonBody }) => {
       const rowIds = Array.isArray(jsonBody?.row_ids) ? (jsonBody.row_ids as string[]) : [];
       const month = String(jsonBody?.month ?? "");
@@ -3088,6 +3342,44 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           affected_row_ids: rowIds,
           case_id: typeof jsonBody?.case_id === "string" ? jsonBody.case_id : undefined,
           message: `已确认 ${rowIds.length} 条记录关联。`,
+        },
+      };
+    },
+    "/api/workbench/actions/withdraw-link/preview": ({ jsonBody }) => {
+      const rowIds = Array.isArray(jsonBody?.row_ids) ? (jsonBody.row_ids as string[]) : [];
+      const month = String(jsonBody?.month ?? "");
+      return {
+        body: buildMockRelationPreview({
+          operation: "withdraw_link",
+          month,
+          rowIds,
+          caseId: "preview:withdraw",
+          workbenchStateStore,
+        }),
+      };
+    },
+    "/api/workbench/actions/withdraw-link": ({ jsonBody }) => {
+      const rowIds = Array.isArray(jsonBody?.row_ids) ? (jsonBody.row_ids as string[]) : [];
+      const month = String(jsonBody?.month ?? "");
+      const touchedMonths = new Set(
+        rowIds
+          .map((rowId) => (month === "all" ? workbenchStateStore.resolveMonthForRow(rowId) : month))
+          .filter(Boolean) as string[],
+      );
+      for (const resolvedMonth of touchedMonths) {
+        const payload = workbenchStateStore.get(resolvedMonth);
+        for (const rowId of rowIds) {
+          moveWorkbenchGroup(payload, "paired", "open", rowId);
+        }
+      }
+      return {
+        body: {
+          success: true,
+          action: "withdraw_link",
+          month,
+          affected_row_ids: rowIds,
+          restored_relations: [],
+          message: "已撤回 1 组关联。",
         },
       };
     },

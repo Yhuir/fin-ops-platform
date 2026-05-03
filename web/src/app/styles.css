@@ -5923,3 +5923,487 @@ body.column-layout-dragging {
     gap: 4px;
   }
 }
+
+.relation-preview-modal {
+  width: min(1180px, calc(100vw - 48px));
+}
+
+.relation-preview-message {
+  border: 1px solid #dbe3ef;
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #334155;
+}
+
+.relation-preview-message.warning {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.relation-preview-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.relation-preview-stack > .relation-preview-tri-pane-section + .relation-preview-tri-pane-section {
+  border-top: 1px solid #dbe3ef;
+  padding-top: 14px;
+}
+
+.relation-preview-section {
+  display: grid;
+  gap: 10px;
+}
+
+.relation-preview-section h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.relation-preview-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.relation-preview-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0 9px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.relation-preview-status-matched {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.relation-preview-status-mismatch {
+  border-color: #fbbf24;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.relation-preview-status-pending {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #475569;
+}
+
+.relation-preview-tri-pane-section {
+  min-width: 0;
+}
+
+.relation-preview-section-before {
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  padding: 10px 12px 12px;
+  background: #f8fafc;
+}
+
+.relation-preview-section-after {
+  border: 1px solid #d4e7e2;
+  border-radius: 8px;
+  padding: 10px 12px 12px;
+  background: #f5fbf9;
+}
+
+.relation-preview-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.relation-preview-summary-inline {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  grid-template-columns: none;
+  gap: 8px 12px;
+  padding: 7px 10px;
+  background: #ffffff;
+}
+
+.relation-preview-summary-title {
+  flex: 0 0 auto;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.relation-preview-summary-value-list {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 6px 0;
+  min-width: min(360px, 100%);
+}
+
+.relation-preview-summary-metric {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #475569;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.relation-preview-summary-inline .relation-preview-summary-metric {
+  display: inline-flex;
+  align-items: baseline;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #475569;
+}
+
+.relation-preview-summary-inline .relation-preview-summary-metric + .relation-preview-summary-metric::before {
+  content: "·";
+  margin: 0 9px 0 3px;
+  color: #94a3b8;
+  font-weight: 700;
+}
+
+.relation-preview-summary-metric strong {
+  min-width: 0;
+  color: #0f172a;
+  font-size: 13px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.relation-preview-summary-inline .relation-preview-summary-metric strong {
+  font-size: 12px;
+  text-align: left;
+}
+
+.relation-preview-summary-label {
+  color: #334155;
+  font-weight: 700;
+}
+
+.relation-preview-summary-count {
+  color: #64748b;
+}
+
+.relation-preview-summary-metric.mismatch {
+  border-color: #fbbf24;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.relation-preview-summary-inline .relation-preview-summary-metric.mismatch,
+.relation-preview-summary-inline .relation-preview-summary-metric-mismatch {
+  border: 0;
+  background: transparent;
+  color: #92400e;
+}
+
+.relation-preview-summary-metric.mismatch strong,
+.relation-preview-summary-metric.mismatch .relation-preview-summary-label {
+  color: #92400e;
+}
+
+.relation-preview-delta {
+  margin: -2px 0 0;
+  color: #92400e;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.relation-preview-delta-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  margin: 0 0 0 auto;
+  padding: 0 8px;
+  border: 1px solid #f5d08a;
+  border-radius: 999px;
+  background: #fff8e6;
+  color: #92400e;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.relation-preview-tri-pane {
+  min-height: 0;
+  gap: 6px;
+  overflow: visible;
+}
+
+.relation-preview-tri-pane-head,
+.relation-preview-tri-pane-footer {
+  gap: 6px;
+}
+
+.relation-preview-tri-pane-pane {
+  min-width: 0;
+}
+
+.relation-preview-pane-header {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 7px 8px;
+}
+
+.relation-preview-tri-pane-body {
+  max-height: 34vh;
+  overflow: auto;
+}
+
+.relation-preview-tri-pane .candidate-pane-scroll {
+  overflow-x: hidden;
+}
+
+.relation-preview-tri-pane .candidate-group-row {
+  border-radius: 8px;
+}
+
+.relation-preview-tri-pane .record-card {
+  cursor: default;
+}
+
+.relation-preview-pane {
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.relation-preview-pane.mismatch {
+  border-color: #f59e0b;
+  box-shadow: inset 0 0 0 1px #f59e0b;
+}
+
+.relation-preview-note {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: #334155;
+}
+
+.relation-preview-note textarea {
+  min-height: 74px;
+  resize: vertical;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px;
+  font: inherit;
+}
+
+.search-hit {
+  border-radius: 4px;
+  background: #fef3c7;
+  color: #92400e;
+  font-weight: 700;
+  padding: 0 2px;
+}
+
+.bank-details-page {
+  display: grid;
+  gap: 16px;
+}
+
+.bank-details-header,
+.bank-details-layout,
+.bank-transaction-toolbar,
+.bank-balance-summary,
+.bank-balance-strip {
+  display: flex;
+  gap: 12px;
+}
+
+.bank-details-header {
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.bank-details-header h1,
+.bank-transaction-toolbar h2 {
+  margin: 0;
+}
+
+.bank-balance-summary,
+.bank-balance-chip,
+.bank-account-node {
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.bank-balance-summary {
+  align-items: center;
+  padding: 10px 12px;
+}
+
+.bank-balance-summary div,
+.bank-balance-chip {
+  display: grid;
+  gap: 4px;
+}
+
+.bank-balance-summary span,
+.bank-balance-chip span,
+.bank-account-node small,
+.bank-transaction-toolbar p {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.bank-balance-strip {
+  flex-wrap: wrap;
+}
+
+.bank-balance-chip {
+  min-width: 160px;
+  padding: 10px;
+}
+
+.bank-details-layout {
+  align-items: flex-start;
+}
+
+.bank-account-tree {
+  display: grid;
+  gap: 8px;
+  width: 260px;
+  flex: 0 0 260px;
+}
+
+.bank-account-node {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  padding: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bank-account-node.active {
+  border-color: #2563eb;
+  box-shadow: inset 3px 0 0 #2563eb;
+}
+
+.bank-transaction-panel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.bank-transaction-toolbar {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.bank-date-filter {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bank-date-filter button {
+  height: 34px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.bank-date-filter label {
+  display: grid;
+  gap: 4px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.bank-date-filter input {
+  height: 34px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0 8px;
+}
+
+.bank-transaction-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #ffffff;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.bank-transaction-table th,
+.bank-transaction-table td {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 10px;
+  text-align: left;
+}
+
+.direction-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #dcfce7;
+  color: #166534;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.direction-tag.expense {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+@media (max-width: 980px) {
+  .bank-details-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .relation-preview-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .bank-details-layout,
+  .bank-details-header,
+  .bank-transaction-toolbar {
+    flex-direction: column;
+  }
+
+  .bank-account-tree {
+    width: 100%;
+    flex-basis: auto;
+  }
+}

@@ -500,7 +500,25 @@ class ApplicationStateStore:
         if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
             raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
-        current_payload["workbench_pair_relations"] = normalized_snapshot
+        if changed_case_ids is None:
+            current_payload["workbench_pair_relations"] = normalized_snapshot
+        else:
+            existing_snapshot = current_payload.get("workbench_pair_relations")
+            merged_snapshot = dict(existing_snapshot) if isinstance(existing_snapshot, dict) else {}
+            existing_relations = merged_snapshot.get("pair_relations")
+            merged_relations = dict(existing_relations) if isinstance(existing_relations, dict) else {}
+            incoming_relations = normalized_snapshot.get("pair_relations")
+            if isinstance(incoming_relations, dict):
+                merged_relations.update(incoming_relations)
+            merged_snapshot.update(
+                {
+                    key: value
+                    for key, value in normalized_snapshot.items()
+                    if key != "pair_relations"
+                }
+            )
+            merged_snapshot["pair_relations"] = merged_relations
+            current_payload["workbench_pair_relations"] = merged_snapshot
         with self._legacy_state_path.open("wb") as handle:
             pickle.dump(current_payload, handle)
 
@@ -1314,6 +1332,8 @@ class ApplicationStateStore:
                             "status": serialized_relation.get("status"),
                             "relation_mode": serialized_relation.get("relation_mode"),
                             "month_scope": serialized_relation.get("month_scope"),
+                            "note": serialized_relation.get("note"),
+                            "amount_check": serialized_relation.get("amount_check"),
                             "created_by": serialized_relation.get("created_by"),
                             "created_at": serialized_relation.get("created_at"),
                             "updated_at": serialized_relation.get("updated_at"),
@@ -1350,6 +1370,8 @@ class ApplicationStateStore:
                         "status": serialized_relation.get("status"),
                         "relation_mode": serialized_relation.get("relation_mode"),
                         "month_scope": serialized_relation.get("month_scope"),
+                        "note": serialized_relation.get("note"),
+                        "amount_check": serialized_relation.get("amount_check"),
                         "created_by": serialized_relation.get("created_by"),
                         "created_at": serialized_relation.get("created_at"),
                         "updated_at": serialized_relation.get("updated_at"),

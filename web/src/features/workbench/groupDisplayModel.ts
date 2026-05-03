@@ -8,6 +8,7 @@ export type WorkbenchPaneTimeFilter =
 export type WorkbenchZoneDisplayState = {
   activePaneId: WorkbenchRecordType | null;
   openSearchPaneId: WorkbenchRecordType | null;
+  unifiedSearchQuery: string;
   draftSearchQueryByPane: Record<WorkbenchRecordType, string>;
   searchQueryByPane: Record<WorkbenchRecordType, string>;
   filtersByPaneAndColumn: Record<WorkbenchRecordType, Record<string, string[]>>;
@@ -19,6 +20,7 @@ export function createEmptyWorkbenchZoneDisplayState(): WorkbenchZoneDisplayStat
   return {
     activePaneId: null,
     openSearchPaneId: null,
+    unifiedSearchQuery: "",
     draftSearchQueryByPane: {
       oa: "",
       bank: "",
@@ -56,7 +58,7 @@ export function buildWorkbenchDisplayGroups(
     return groups;
   }
 
-  const normalizedQuery = normalizeWorkbenchSearchText(state.searchQueryByPane[activePaneId] ?? "");
+  const normalizedQuery = normalizeWorkbenchSearchText(state.unifiedSearchQuery || state.searchQueryByPane[activePaneId] || "");
   const activeFilters = state.filtersByPaneAndColumn[activePaneId] ?? {};
   const hasActiveFilters = Object.values(activeFilters).some((values) => values.length > 0);
   const sortDirection = state.sortByPane[activePaneId];
@@ -66,11 +68,20 @@ export function buildWorkbenchDisplayGroups(
   const displayGroups = !normalizedQuery && !hasActiveFilters && !hasActiveTimeFilter
     ? groups
     : groups.flatMap((group) => {
+      if (normalizedQuery) {
+        const groupMatches = (["oa", "bank", "invoice"] as const).some((paneId) =>
+          group.rows[paneId].some((row) => matchesWorkbenchRowText(row, normalizedQuery)),
+        );
+        if (!groupMatches) {
+          return [];
+        }
+      }
+
       const matchedRows = group.rows[activePaneId].filter((row) =>
-        matchesWorkbenchRow(row, activePaneId, normalizedQuery, activeFilters, activeTimeFilter),
+        matchesWorkbenchRow(row, activePaneId, "", activeFilters, activeTimeFilter),
       );
 
-      if (matchedRows.length === 0) {
+      if ((hasActiveFilters || hasActiveTimeFilter) && matchedRows.length === 0) {
         return [];
       }
 
@@ -79,7 +90,7 @@ export function buildWorkbenchDisplayGroups(
           ...group,
           rows: {
             ...group.rows,
-            [activePaneId]: matchedRows,
+            [activePaneId]: hasActiveFilters || hasActiveTimeFilter ? matchedRows : group.rows[activePaneId],
           },
         },
       ];
@@ -166,10 +177,7 @@ function matchesWorkbenchRow(
   }
 
   if (normalizedQuery) {
-    const normalizedHaystack = normalizeWorkbenchSearchText(
-      [row.label, row.status, row.amount, row.counterparty, ...Object.values(row.tableValues)].join(" "),
-    );
-    if (!normalizedHaystack.includes(normalizedQuery)) {
+    if (!matchesWorkbenchRowText(row, normalizedQuery)) {
       return false;
     }
   }
@@ -227,8 +235,20 @@ function normalizeWorkbenchSearchText(value: string) {
   return value.replace(/\s+/g, "").trim().toLowerCase();
 }
 
+export function workbenchRowMatchesUnifiedSearch(row: WorkbenchRecord, query: string) {
+  const normalizedQuery = normalizeWorkbenchSearchText(query);
+  return normalizedQuery ? matchesWorkbenchRowText(row, normalizedQuery) : false;
+}
+
+function matchesWorkbenchRowText(row: WorkbenchRecord, normalizedQuery: string) {
+  const normalizedHaystack = normalizeWorkbenchSearchText(
+    [row.label, row.status, row.amount, row.counterparty, ...Object.values(row.tableValues), ...(row.tags ?? [])].join(" "),
+  );
+  return normalizedHaystack.includes(normalizedQuery);
+}
+
 function paneHasWorkbenchCriteria(state: WorkbenchZoneDisplayState, paneId: WorkbenchRecordType) {
-  const normalizedQuery = normalizeWorkbenchSearchText(state.searchQueryByPane[paneId] ?? "");
+  const normalizedQuery = normalizeWorkbenchSearchText(state.unifiedSearchQuery || state.searchQueryByPane[paneId] || "");
   if (normalizedQuery) {
     return true;
   }

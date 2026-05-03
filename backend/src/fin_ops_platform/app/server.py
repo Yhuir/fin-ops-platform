@@ -34,6 +34,7 @@ from fin_ops_platform.services.access_control_service import AccessControlServic
 from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
+from fin_ops_platform.services.bank_details_service import BankDetailsService
 from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
 from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -63,6 +64,7 @@ from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedI
 from fin_ops_platform.services.tax_offset_service import TaxOffsetService
 from fin_ops_platform.services.workbench_candidate_grouping import WorkbenchCandidateGroupingService
 from fin_ops_platform.services.workbench_action_service import WorkbenchActionService
+from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
@@ -201,6 +203,7 @@ class Application:
         self._workbench_pair_relation_service = WorkbenchPairRelationService.from_snapshot(
             persisted_state.get("workbench_pair_relations"),
         )
+        self._workbench_amount_check_service = WorkbenchAmountCheckService()
         self._workbench_read_model_service = WorkbenchReadModelService.from_snapshot(
             persisted_state.get("workbench_read_models"),
         )
@@ -261,6 +264,7 @@ class Application:
             self._matching_service,
             bank_account_resolver=bank_account_resolver,
         )
+        self._bank_details_service = BankDetailsService(self._import_service)
         self._tax_certified_import_service = TaxCertifiedImportService(state_store=self._state_store)
         self._settings_data_reset_service = (
             SettingsDataResetService(
@@ -347,6 +351,19 @@ class Application:
         if method == "GET" and route_path == "/api/workbench":
             month = query.get("month", [None])[0]
             return self._handle_api_workbench(month)
+        if method == "GET" and route_path == "/api/bank-details/accounts":
+            return self._handle_api_bank_details_accounts(
+                date_from=query.get("date_from", [None])[0],
+                date_to=query.get("date_to", [None])[0],
+            )
+        if method == "GET" and route_path == "/api/bank-details/transactions":
+            return self._handle_api_bank_details_transactions(
+                account_key=query.get("account_key", [None])[0],
+                date_from=query.get("date_from", [None])[0],
+                date_to=query.get("date_to", [None])[0],
+                page=query.get("page", [None])[0],
+                page_size=query.get("page_size", [None])[0],
+            )
         if method == "GET" and route_path == "/api/oa-sync/status":
             return self._handle_api_oa_sync_status()
         if method == "GET" and route_path == "/api/search":
@@ -402,6 +419,8 @@ class Application:
                 status=response.status_code,
             )
             return response
+        if method == "POST" and route_path == "/api/workbench/actions/confirm-link/preview":
+            return self._handle_api_workbench_confirm_link_preview(body)
         if method == "POST" and route_path == "/api/workbench/actions/mark-exception":
             return self._handle_api_workbench_mark_exception(body)
         if method == "POST" and route_path == "/api/workbench/actions/cancel-link":
@@ -414,6 +433,10 @@ class Application:
                 status=response.status_code,
             )
             return response
+        if method == "POST" and route_path == "/api/workbench/actions/withdraw-link/preview":
+            return self._handle_api_workbench_withdraw_link_preview(body)
+        if method == "POST" and route_path == "/api/workbench/actions/withdraw-link":
+            return self._handle_api_workbench_withdraw_link(body, request_id=request_id)
         if method == "POST" and route_path == "/api/workbench/actions/update-bank-exception":
             return self._handle_api_workbench_update_bank_exception(body)
         if method == "POST" and route_path == "/api/workbench/actions/oa-bank-exception":
@@ -1986,6 +2009,19 @@ class Application:
             return error
         return self._handle_live_workbench_confirm_link(payload, request_id=request_id)
 
+    def _handle_api_workbench_confirm_link_preview(self, body: str | None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            preview = self._preview_confirm_link(payload)
+        except (KeyError, TypeError, ValueError) as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_confirm_link_preview_request", "message": str(exc)},
+            )
+        return self._json_response(HTTPStatus.OK, preview)
+
     def _handle_api_workbench_mark_exception(self, body: str | None) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
@@ -2000,6 +2036,30 @@ class Application:
         if error is not None:
             return error
         return self._handle_live_workbench_cancel_link(payload, request_id=request_id)
+
+    def _handle_api_workbench_withdraw_link_preview(self, body: str | None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            preview = self._preview_withdraw_link(payload)
+        except KeyError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": str(exc).strip("'") or "workbench_pair_relation_no_withdraw_history", "message": str(exc)},
+            )
+        except (TypeError, ValueError) as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_withdraw_link_preview_request", "message": str(exc)},
+            )
+        return self._json_response(HTTPStatus.OK, preview)
+
+    def _handle_api_workbench_withdraw_link(self, body: str | None, *, request_id: str | None = None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        return self._handle_live_workbench_withdraw_link(payload, request_id=request_id)
 
     def _handle_api_workbench_update_bank_exception(self, body: str | None) -> Response:
         payload, error = self._load_json_body(body)
@@ -2047,6 +2107,36 @@ class Application:
     def _handle_api_tax_offset(self, month: str | None) -> Response:
         current_month = month or datetime.now().strftime("%Y-%m")
         return self._json_response(HTTPStatus.OK, self._tax_api_routes.get_tax_offset(current_month))
+
+    def _handle_api_bank_details_accounts(self, *, date_from: str | None, date_to: str | None) -> Response:
+        return self._json_response(
+            HTTPStatus.OK,
+            self._bank_details_service.list_accounts(date_from=date_from, date_to=date_to),
+        )
+
+    def _handle_api_bank_details_transactions(
+        self,
+        *,
+        account_key: str | None,
+        date_from: str | None,
+        date_to: str | None,
+        page: str | None,
+        page_size: str | None,
+    ) -> Response:
+        try:
+            payload = self._bank_details_service.list_transactions(
+                account_key=account_key,
+                date_from=date_from,
+                date_to=date_to,
+                page=int(page or 1),
+                page_size=int(page_size or 100),
+            )
+        except ValueError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_bank_details_request", "message": str(exc)},
+            )
+        return self._json_response(HTTPStatus.OK, payload)
 
     def _list_tax_offset_oa_attachment_invoice_rows(self, month: str) -> list[dict[str, object]]:
         return self._workbench_query_service.list_attachment_invoice_rows_by_issue_month(month)
@@ -2209,10 +2299,31 @@ class Application:
             month = str(payload["month"])
             row_ids = self._normalize_row_ids(list(payload["row_ids"]))
             case_id = str(payload["case_id"]) if payload.get("case_id") is not None else None
+            note = str(payload.get("note") or payload.get("comment") or "").strip()
         except (KeyError, TypeError, ValueError) as exc:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_confirm_link_request", "message": str(exc)},
+            )
+
+        row_types = self._resolved_row_types_for_row_ids(row_ids, month=month)
+        if not self._can_confirm_link_row_types(row_ids=row_ids, row_types=row_types, month=month):
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "invalid_confirm_link_request",
+                    "message": "confirm link requires rows from at least two panes.",
+                },
+            )
+        amount_check = self._amount_check_for_row_ids(row_ids, month=month, allow_direct=False)
+        if amount_check.get("requires_note") and not note:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "workbench_pair_relation_note_required",
+                    "message": "金额不一致或方向不确定，请填写备注。",
+                    "amount_check": amount_check,
+                },
             )
 
         resolve_rows_started_at = monotonic()
@@ -2226,14 +2337,27 @@ class Application:
             )
 
         resolved_case_id = case_id or self._workbench_override_service._next_case_id()
+        before_relations = self._workbench_pair_relation_service.active_relations_for_row_ids(row_ids)
+        selected_rows = self._resolve_rows_for_amount_check(row_ids, month=month, allow_direct=False)
+        history_before_relations = self._merge_relation_snapshots(
+            before_relations,
+            self._synthetic_existing_case_relations(
+                selected_rows,
+                existing_relations=before_relations,
+                month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
+            ),
+        )
         pair_relation_started_at = monotonic()
-        self._workbench_pair_relation_service.create_active_relation(
+        self._workbench_pair_relation_service.replace_with_confirmed_relation(
             case_id=resolved_case_id,
             row_ids=row_ids,
-            row_types=self._row_types_for_row_ids(row_ids),
+            row_types=row_types,
             relation_mode="manual_confirmed",
             created_by="system",
             month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
+            note=note,
+            amount_check=amount_check,
+            before_relations=history_before_relations,
         )
         if request_id is not None:
             self._emit_workbench_action_timing(
@@ -2256,7 +2380,10 @@ class Application:
             )
         schedule_started_at = monotonic()
         self._schedule_workbench_pair_relation_persist(
-            changed_case_ids=[resolved_case_id],
+            changed_case_ids=[
+                *[str(relation.get("case_id", "")) for relation in before_relations if str(relation.get("case_id", "")).strip()],
+                resolved_case_id,
+            ],
             request_id=request_id,
             action_name=action_name,
         )
@@ -2280,9 +2407,47 @@ class Application:
                 "month": month,
                 "case_id": resolved_case_id,
                 "affected_row_ids": row_ids,
+                "amount_check": amount_check,
                 "message": f"已确认 {len(row_ids)} 条记录关联。",
             },
         )
+
+    def _preview_confirm_link(self, payload: dict[str, object]) -> dict[str, object]:
+        month = str(payload["month"])
+        row_ids = self._normalize_row_ids(list(payload["row_ids"]))
+        row_types = self._resolved_row_types_for_row_ids(row_ids, month=month)
+        if not self._can_confirm_link_row_types(row_ids=row_ids, row_types=row_types, month=month):
+            raise ValueError("confirm link requires rows from at least two panes.")
+        rows = self._resolve_rows_for_amount_check(row_ids, month=month, allow_direct=True)
+        rows_by_type = self._rows_by_type(rows)
+        amount_check = self._amount_check_for_rows_by_type(rows_by_type)
+        before_relations = self._workbench_pair_relation_service.active_relations_for_row_ids(row_ids)
+        before_groups = self._relation_groups(before_relations, selected_rows=rows, ungrouped_selected_rows="separate")
+        case_id = str(payload.get("case_id") or "preview:confirm")
+        after_relation = {
+            "case_id": case_id,
+            "row_ids": row_ids,
+            "row_types": row_types,
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
+            "amount_check": amount_check,
+        }
+        after_groups = self._relation_groups([after_relation], selected_rows=rows)
+        requires_note = bool(amount_check.get("requires_note"))
+        return {
+            "operation": "confirm_link",
+            "can_submit": True,
+            "requires_note": requires_note,
+            "message": "金额不一致，请填写备注。" if requires_note else "",
+            "before": {"groups": before_groups},
+            "after": {"groups": after_groups},
+            "amount_summary": {
+                "before": amount_check,
+                "after": amount_check,
+                **amount_check,
+            },
+        }
 
     def _handle_live_workbench_mark_exception(self, payload: dict[str, object]) -> Response:
         try:
@@ -2422,6 +2587,126 @@ class Application:
                 "message": "已取消关联并回退为待处理。",
             },
         )
+
+    def _handle_live_workbench_withdraw_link(
+        self,
+        payload: dict[str, object],
+        *,
+        request_id: str | None = None,
+    ) -> Response:
+        action_name = "withdraw_link"
+        try:
+            month = str(payload["month"])
+            raw_row_ids = payload.get("row_ids")
+            if raw_row_ids is None and payload.get("row_id") is not None:
+                raw_row_ids = [payload.get("row_id")]
+            row_ids = self._normalize_row_ids(list(raw_row_ids or []))
+            note = str(payload.get("note") or payload.get("comment") or "").strip()
+        except (KeyError, TypeError, ValueError) as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_withdraw_link_request", "message": str(exc)},
+            )
+
+        try:
+            preview = self._workbench_pair_relation_service.preview_withdraw_for_row_ids(row_ids)
+        except KeyError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": str(exc).strip("'") or "workbench_pair_relation_no_withdraw_history", "message": str(exc)},
+            )
+
+        active_relation = preview["active_relation"]
+        _rows, after_relations, affected_row_ids = self._withdraw_rows_and_after_relations(
+            active_relation=active_relation,
+            after_relations=list(preview.get("after_relations") or []),
+            month=month,
+        )
+        restored_relations, _history = self._workbench_pair_relation_service.withdraw_latest_for_row_ids(
+            row_ids,
+            created_by="system",
+            note=note,
+            fallback_after_relations=after_relations,
+        )
+        changed_scope_keys = list(
+            self._scope_keys_for_row_ids(
+                month=month,
+                row_ids=affected_row_ids,
+                month_scope=str(active_relation.get("month_scope") or ""),
+            )
+        )
+        self._invalidate_workbench_read_model_scopes(changed_scope_keys)
+        changed_case_ids = [
+            str(active_relation.get("case_id") or ""),
+            *[str(relation.get("case_id") or "") for relation in restored_relations],
+        ]
+        self._schedule_workbench_pair_relation_persist(
+            changed_case_ids=changed_case_ids,
+            request_id=request_id,
+            action_name=action_name,
+        )
+        self._schedule_workbench_read_model_persist(
+            changed_scope_keys=changed_scope_keys,
+            request_id=request_id,
+            action_name=action_name,
+        )
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "success": True,
+                "operation": "withdraw_link",
+                "action": "withdraw_link",
+                "month": month,
+                "changed_scopes": changed_scope_keys,
+                "affected_row_ids": affected_row_ids,
+                "restored_relations": restored_relations,
+            },
+        )
+
+    def _preview_withdraw_link(self, payload: dict[str, object]) -> dict[str, object]:
+        month = str(payload["month"])
+        raw_row_ids = payload.get("row_ids")
+        if raw_row_ids is None and payload.get("row_id") is not None:
+            raw_row_ids = [payload.get("row_id")]
+        row_ids = self._normalize_row_ids(list(raw_row_ids or []))
+        preview = self._workbench_pair_relation_service.preview_withdraw_for_row_ids(row_ids)
+        active_relation = preview["active_relation"]
+        rows, after_relations, _affected_row_ids = self._withdraw_rows_and_after_relations(
+            active_relation=active_relation,
+            after_relations=list(preview.get("after_relations") or []),
+            month=month,
+        )
+        before_groups = self._relation_groups([active_relation], selected_rows=rows)
+        after_groups = self._relation_groups(after_relations, selected_rows=rows, ungrouped_selected_rows="separate")
+        amount_check = self._amount_check_for_withdraw_preview(active_relation=active_relation, rows=rows)
+        return {
+            "operation": "withdraw_link",
+            "can_submit": True,
+            "requires_note": False,
+            "message": "",
+            "before": {"groups": before_groups},
+            "after": {"groups": after_groups},
+            "amount_summary": {
+                "before": amount_check,
+                "after": amount_check,
+                **amount_check,
+            },
+            "restored_relations": after_relations,
+        }
+
+    def _amount_check_for_withdraw_preview(
+        self,
+        *,
+        active_relation: dict[str, object],
+        rows: list[dict[str, object]],
+    ) -> dict[str, object]:
+        relation_amount_check = active_relation.get("amount_check")
+        if isinstance(relation_amount_check, dict) and any(
+            relation_amount_check.get(key) is not None
+            for key in ("oa_total", "bank_total", "invoice_total")
+        ):
+            return dict(relation_amount_check)
+        return self._amount_check_for_rows_by_type(self._rows_by_type(rows))
 
     def _handle_live_workbench_update_bank_exception(self, payload: dict[str, object]) -> Response:
         try:
@@ -3671,9 +3956,10 @@ class Application:
                 fallback_read_model = cached_read_model
 
         raw_payload = self._build_raw_workbench_payload(month)
-        grouped_payload = self._group_row_payload(raw_payload)
+        relation_payload = self._apply_pair_relations_to_payload(raw_payload)
+        grouped_payload = self._group_row_payload(relation_payload)
         self._apply_workbench_runtime_metadata(grouped_payload)
-        ignored_rows = self._extract_ignored_rows(raw_payload)
+        ignored_rows = self._extract_ignored_rows(relation_payload)
         if not self._can_persist_workbench_payload(grouped_payload):
             if fallback_read_model is not None:
                 return fallback_read_model
@@ -3701,7 +3987,8 @@ class Application:
     def _build_api_workbench_payload(self, month: str, *, visibility_key: str = "global") -> dict[str, object]:
         read_model = self._get_or_build_workbench_read_model(month, visibility_key=visibility_key)
         payload = read_model.get("payload")
-        return self._apply_oa_retention_to_grouped_payload(payload if isinstance(payload, dict) else {})
+        retained = self._apply_oa_retention_to_grouped_payload(payload if isinstance(payload, dict) else {})
+        return self._derive_tags_for_grouped_payload(retained)
 
     def _apply_workbench_runtime_metadata(self, payload: dict[str, object]) -> None:
         payload["workbench_read_model_schema_version"] = WORKBENCH_READ_MODEL_SCHEMA_VERSION
@@ -4423,6 +4710,416 @@ class Application:
                         rows_by_id[str(row["id"])] = row
         return rows_by_id
 
+    def _resolve_rows_for_amount_check(
+        self,
+        row_ids: list[str],
+        *,
+        month: str,
+        allow_direct: bool,
+    ) -> list[dict[str, object]]:
+        resolved = self._resolve_rows_from_cached_read_models(row_ids, month_hint=month)
+        rows: list[dict[str, object]] = []
+        missing: list[str] = []
+        for row_id in row_ids:
+            row = resolved.get(row_id)
+            if row is None:
+                missing.append(row_id)
+            else:
+                rows.append(row)
+        if missing and allow_direct:
+            try:
+                rows.extend(self._resolve_live_rows_direct(missing, month_hint=month))
+            except KeyError:
+                rows.extend({"id": row_id, "type": self._row_type_for_row_id(row_id)} for row_id in missing)
+            missing = []
+        for row_id in missing:
+            rows.append({"id": row_id, "type": self._row_type_for_row_id(row_id)})
+        return rows
+
+    @staticmethod
+    def _rows_by_type(rows: list[dict[str, object]]) -> dict[str, list[dict[str, object]]]:
+        rows_by_type: dict[str, list[dict[str, object]]] = {"oa": [], "bank": [], "invoice": []}
+        for row in rows:
+            row_type = str(row.get("type", ""))
+            if row_type in rows_by_type:
+                rows_by_type[row_type].append(row)
+        return rows_by_type
+
+    def _amount_check_for_row_ids(self, row_ids: list[str], *, month: str, allow_direct: bool) -> dict[str, object]:
+        rows = self._resolve_rows_for_amount_check(row_ids, month=month, allow_direct=allow_direct)
+        return self._amount_check_for_rows_by_type(self._rows_by_type(rows))
+
+    def _amount_check_for_rows_by_type(self, rows_by_type: dict[str, list[dict[str, object]]]) -> dict[str, object]:
+        amount_check = self._workbench_amount_check_service.check(rows_by_type)
+        if (
+            amount_check.get("status") == "unknown"
+            and amount_check.get("oa_total") is None
+            and amount_check.get("bank_total") is None
+            and amount_check.get("invoice_total") is None
+        ):
+            amount_check["status"] = "matched"
+            amount_check["direction"] = "unknown"
+            amount_check["requires_note"] = False
+        return amount_check
+
+    def _can_confirm_link_row_types(self, *, row_ids: list[str], row_types: list[str], month: str) -> bool:
+        known_types = {row_type for row_type in row_types if row_type != "unknown"}
+        if len(known_types) >= 2:
+            return True
+        if known_types == {"bank"}:
+            return self._is_balanced_bank_only_selection(row_ids=row_ids, month=month)
+        return False
+
+    def _resolved_row_types_for_row_ids(self, row_ids: list[str], *, month: str) -> list[str]:
+        fallback_types = self._row_types_for_row_ids(row_ids)
+        if "unknown" not in fallback_types:
+            return fallback_types
+        rows = self._resolve_rows_for_amount_check(row_ids, month=month, allow_direct=True)
+        rows_by_id = {str(row.get("id", "")): row for row in rows}
+        resolved_types: list[str] = []
+        for index, row_id in enumerate(row_ids):
+            row_type = str(rows_by_id.get(row_id, {}).get("type") or fallback_types[index])
+            resolved_types.append(row_type if row_type else "unknown")
+        return resolved_types
+
+    def _is_balanced_bank_only_selection(self, *, row_ids: list[str], month: str) -> bool:
+        if len(row_ids) < 2:
+            return False
+        rows = self._resolve_rows_for_amount_check(row_ids, month=month, allow_direct=True)
+        debit_total = Decimal("0.00")
+        credit_total = Decimal("0.00")
+        has_debit = False
+        has_credit = False
+        for row in rows:
+            if str(row.get("type", "")) != "bank":
+                return False
+            debit = self._decimal_from_value(row.get("debit_amount"))
+            credit = self._decimal_from_value(row.get("credit_amount"))
+            if debit is not None and debit > 0:
+                debit_total += debit
+                has_debit = True
+            if credit is not None and credit > 0:
+                credit_total += credit
+                has_credit = True
+        return has_debit and has_credit and debit_total == credit_total
+
+    def _relation_groups(
+        self,
+        relations: list[dict[str, object]],
+        *,
+        selected_rows: list[dict[str, object]],
+        ungrouped_selected_rows: str = "single",
+    ) -> list[dict[str, object]]:
+        rows_by_id = {str(row.get("id", "")): self._serialize_value(row) for row in selected_rows}
+        groups: list[dict[str, object]] = []
+        grouped_row_ids: set[str] = set()
+        for relation in relations:
+            group = {
+                "group_id": f"case:{relation.get('case_id', '')}",
+                "group_type": str(relation.get("relation_mode") or "manual_confirmed"),
+                "match_confidence": "high",
+                "reason": "relation_snapshot",
+                "oa_rows": [],
+                "bank_rows": [],
+                "invoice_rows": [],
+            }
+            row_ids = [str(row_id) for row_id in list(relation.get("row_ids") or [])]
+            row_types = [str(row_type) for row_type in list(relation.get("row_types") or [])]
+            for index, row_id in enumerate(row_ids):
+                grouped_row_ids.add(row_id)
+                row_type = row_types[index] if index < len(row_types) else self._row_type_for_row_id(row_id)
+                row = dict(rows_by_id.get(row_id) or {"id": row_id, "type": row_type})
+                row["case_id"] = str(relation.get("case_id") or "")
+                row["tags"] = self._derive_workbench_row_tags(row, group, relation)
+                if row_type == "oa":
+                    group["oa_rows"].append(row)
+                elif row_type == "bank":
+                    group["bank_rows"].append(row)
+                elif row_type == "invoice":
+                    group["invoice_rows"].append(row)
+            groups.append(group)
+        ungrouped_rows = [
+            row
+            for row in selected_rows
+            if str(row.get("id", "")).strip() and str(row.get("id", "")).strip() not in grouped_row_ids
+        ]
+        if ungrouped_selected_rows == "separate":
+            selected_groups: dict[str, dict[str, object]] = {str(group.get("group_id", "")): group for group in groups}
+            for row in ungrouped_rows:
+                row_id = str(row.get("id", "")).strip()
+                case_id = str(row.get("case_id") or "").strip()
+                group_id = f"case:{case_id}" if case_id else f"selected:{row_id}"
+                group = selected_groups.get(group_id)
+                if group is None:
+                    group = {
+                        "group_id": group_id,
+                        "group_type": "selection",
+                        "match_confidence": "low",
+                        "reason": "selected_existing_case" if case_id else "selected_row",
+                        "oa_rows": [],
+                        "bank_rows": [],
+                        "invoice_rows": [],
+                    }
+                    selected_groups[group_id] = group
+                    groups.append(group)
+                row_type = str(row.get("type", ""))
+                if row_type == "oa":
+                    group["oa_rows"].append(row)
+                elif row_type == "bank":
+                    group["bank_rows"].append(row)
+                elif row_type == "invoice":
+                    group["invoice_rows"].append(row)
+        elif not groups and ungrouped_rows:
+            group = {
+                "group_id": "selected",
+                "group_type": "selection",
+                "match_confidence": "low",
+                "reason": "selected_rows",
+                "oa_rows": [],
+                "bank_rows": [],
+                "invoice_rows": [],
+            }
+            for row in ungrouped_rows:
+                row_type = str(row.get("type", ""))
+                if row_type == "oa":
+                    group["oa_rows"].append(row)
+                elif row_type == "bank":
+                    group["bank_rows"].append(row)
+                elif row_type == "invoice":
+                    group["invoice_rows"].append(row)
+            groups.append(group)
+        return groups
+
+    def _withdraw_rows_and_after_relations(
+        self,
+        *,
+        active_relation: dict[str, object],
+        after_relations: list[dict[str, object]],
+        month: str,
+    ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[str]]:
+        affected_row_ids = self._normalize_row_ids(
+            [
+                *list(active_relation.get("row_ids") or []),
+                *[row_id for relation in after_relations for row_id in list(relation.get("row_ids") or [])],
+            ]
+        )
+        rows = self._resolve_rows_for_amount_check(affected_row_ids, month=month, allow_direct=True)
+        if after_relations:
+            return rows, after_relations, affected_row_ids
+
+        inferred_relations = self._infer_oa_attachment_withdraw_relations(
+            active_relation=active_relation,
+            rows=rows,
+        )
+        if inferred_relations:
+            affected_row_ids = self._normalize_row_ids(
+                [
+                    *affected_row_ids,
+                    *[row_id for relation in inferred_relations for row_id in list(relation.get("row_ids") or [])],
+                ]
+            )
+        return rows, inferred_relations, affected_row_ids
+
+    def _infer_oa_attachment_withdraw_relations(
+        self,
+        *,
+        active_relation: dict[str, object],
+        rows: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        active_row_ids = {
+            str(row_id).strip()
+            for row_id in list(active_relation.get("row_ids") or [])
+            if str(row_id).strip()
+        }
+        oa_row_ids = [
+            str(row.get("id", "")).strip()
+            for row in rows
+            if str(row.get("id", "")).strip() in active_row_ids and str(row.get("type", "")) == "oa"
+        ]
+        if not oa_row_ids:
+            return []
+
+        invoice_ids_by_oa_id: dict[str, list[str]] = {}
+        for row in rows:
+            invoice_id = str(row.get("id", "")).strip()
+            is_invoice_row = str(row.get("type", "")) == "invoice" or invoice_id.startswith("oa-att-inv-")
+            if invoice_id not in active_row_ids or not is_invoice_row:
+                continue
+            source_oa_id = self._oa_id_from_attachment_invoice_id(invoice_id, oa_row_ids)
+            if source_oa_id:
+                invoice_ids_by_oa_id.setdefault(source_oa_id, []).append(invoice_id)
+
+        month_scope = str(active_relation.get("month_scope") or "all")
+        inferred_relations: list[dict[str, object]] = []
+        for oa_row_id in oa_row_ids:
+            invoice_ids = invoice_ids_by_oa_id.get(oa_row_id, [])
+            if not invoice_ids:
+                continue
+            inferred_relations.append(
+                {
+                    "case_id": f"CASE-OA-ATT-{oa_row_id}",
+                    "row_ids": [oa_row_id, *invoice_ids],
+                    "row_types": ["oa", *(["invoice"] * len(invoice_ids))],
+                    "status": "active",
+                    "relation_mode": "oa_attachment_invoice",
+                    "month_scope": month_scope,
+                }
+            )
+        return inferred_relations
+
+    @staticmethod
+    def _oa_id_from_attachment_invoice_id(invoice_id: str, oa_row_ids: list[str]) -> str | None:
+        prefix = "oa-att-inv-"
+        if not invoice_id.startswith(prefix):
+            return None
+        tail = invoice_id[len(prefix):]
+        for oa_row_id in sorted(oa_row_ids, key=len, reverse=True):
+            if tail == oa_row_id or tail.startswith(f"{oa_row_id}-"):
+                return oa_row_id
+        return None
+
+    def _synthetic_existing_case_relations(
+        self,
+        rows: list[dict[str, object]],
+        *,
+        existing_relations: list[dict[str, object]],
+        month_scope: str,
+    ) -> list[dict[str, object]]:
+        covered_row_ids = {
+            str(row_id).strip()
+            for relation in existing_relations
+            for row_id in list(relation.get("row_ids") or [])
+            if str(row_id).strip()
+        }
+        rows_by_case_id: dict[str, list[dict[str, object]]] = {}
+        for row in rows:
+            row_id = str(row.get("id", "")).strip()
+            case_id = str(row.get("case_id") or "").strip()
+            if not row_id or not case_id or row_id in covered_row_ids:
+                continue
+            rows_by_case_id.setdefault(case_id, []).append(row)
+
+        relations: list[dict[str, object]] = []
+        for case_id, case_rows in rows_by_case_id.items():
+            if len(case_rows) < 2:
+                continue
+            relations.append(
+                {
+                    "case_id": case_id,
+                    "row_ids": [str(row.get("id", "")).strip() for row in case_rows],
+                    "row_types": [str(row.get("type", "")).strip() for row in case_rows],
+                    "status": "active",
+                    "relation_mode": "existing_case",
+                    "month_scope": month_scope,
+                }
+            )
+        return relations
+
+    @staticmethod
+    def _merge_relation_snapshots(
+        primary_relations: list[dict[str, object]],
+        secondary_relations: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        merged: dict[str, dict[str, object]] = {}
+        for relation in [*primary_relations, *secondary_relations]:
+            case_id = str(relation.get("case_id") or "").strip()
+            if not case_id:
+                continue
+            merged[case_id] = relation
+        return list(merged.values())
+
+    def _derive_tags_for_grouped_payload(self, payload: dict[str, object]) -> dict[str, object]:
+        result = self._serialize_value(payload)
+        for section in ("paired", "open"):
+            section_payload = result.get(section, {})
+            if not isinstance(section_payload, dict):
+                continue
+            for group in list(section_payload.get("groups", [])):
+                if not isinstance(group, dict):
+                    continue
+                relation = self._relation_for_group(group)
+                for key in ("oa_rows", "bank_rows", "invoice_rows"):
+                    for row in list(group.get(key, [])):
+                        if isinstance(row, dict):
+                            row["tags"] = self._derive_workbench_row_tags(row, group, relation)
+        return result
+
+    def _relation_for_group(self, group: dict[str, object]) -> dict[str, object] | None:
+        for key in ("oa_rows", "bank_rows", "invoice_rows"):
+            for row in list(group.get(key, [])):
+                if not isinstance(row, dict):
+                    continue
+                relation = self._workbench_pair_relation_service.get_active_relation_by_row_id(str(row.get("id", "")))
+                if isinstance(relation, dict):
+                    return relation
+        return None
+
+    def _derive_workbench_row_tags(
+        self,
+        row: dict[str, object],
+        group: dict[str, object],
+        relation: dict[str, object] | None,
+    ) -> list[str]:
+        tags = [str(tag).strip() for tag in list(row.get("tags") or []) if str(tag).strip()]
+        visible: list[str] = []
+
+        def add(tag: str) -> None:
+            if tag and tag not in visible:
+                visible.append(tag)
+
+        has_oa = bool(group.get("oa_rows"))
+        has_bank = bool(group.get("bank_rows"))
+        has_invoice = bool(group.get("invoice_rows"))
+        if has_oa and has_invoice and not has_bank:
+            add("待找流水")
+        elif has_oa and has_bank and not has_invoice:
+            add("待找发票")
+        elif has_oa and not has_bank and not has_invoice:
+            add("待找流水与发票")
+        elif has_bank and has_invoice and not has_oa:
+            add("待找OA")
+
+        amount_check = relation.get("amount_check") if isinstance(relation, dict) else None
+        if isinstance(amount_check, dict) and str(amount_check.get("status")) == "mismatch":
+            add("金额不一致")
+
+        row_type = str(row.get("type", ""))
+        if row_type == "invoice":
+            if str(row.get("source_kind", "")) == "oa_attachment_invoice":
+                add("OA附件")
+            else:
+                add("人工导入")
+            invoice_type = str(row.get("invoice_type") or "")
+            add("销" if "销" in invoice_type or invoice_type == "output" else "进")
+        elif row_type == "bank":
+            debit = self._decimal_from_value(row.get("debit_amount"))
+            credit = self._decimal_from_value(row.get("credit_amount"))
+            if credit is not None and credit > 0:
+                add("收")
+            elif debit is not None and debit > 0:
+                add("支")
+
+        relation_mode = str(relation.get("relation_mode")) if isinstance(relation, dict) else ""
+        if relation_mode == "internal_transfer_pair":
+            add("内部往来")
+        if relation_mode == "salary_personal_auto_match":
+            add("工资")
+        for tag in tags:
+            if tag in {"冲", "内部往来", "工资", "非税"}:
+                add(tag)
+        if any(str(row.get(key, "")).find("非税") >= 0 for key in ("summary", "remark", "reason", "purpose")):
+            add("非税")
+        return visible
+
+    @staticmethod
+    def _decimal_from_value(value: object) -> Decimal | None:
+        if value in (None, "", "--", "—"):
+            return None
+        try:
+            return Decimal(str(value).replace(",", ""))
+        except Exception:
+            return None
+
     def _group_for_row_id(self, payload: dict[str, object], row_id: str) -> dict[str, object] | None:
         for section in ("paired", "open"):
             section_payload = payload.get(section, {})
@@ -4454,9 +5151,16 @@ class Application:
     @staticmethod
     def _row_type_for_row_id(row_id: str) -> str:
         lowered_row_id = str(row_id).strip().lower()
+        if lowered_row_id.startswith("oa-att-inv-"):
+            return "invoice"
         if lowered_row_id.startswith("oa-"):
             return "oa"
-        if lowered_row_id.startswith("bk-") or lowered_row_id.startswith("txn-") or lowered_row_id.startswith("bank-"):
+        if (
+            lowered_row_id.startswith("bk-")
+            or lowered_row_id.startswith("txn-")
+            or lowered_row_id.startswith("txn_")
+            or lowered_row_id.startswith("bank-")
+        ):
             return "bank"
         if lowered_row_id.startswith("iv-") or lowered_row_id.startswith("invoice-"):
             return "invoice"

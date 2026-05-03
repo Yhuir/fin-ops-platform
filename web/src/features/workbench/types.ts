@@ -100,6 +100,37 @@ export type WorkbenchCandidateGroup = {
   matchConfidence: WorkbenchMatchConfidence;
   reason: string;
   rows: WorkbenchPaneRows;
+  canWithdraw?: boolean;
+};
+
+export type WorkbenchAmountSummaryTotals = {
+  oaTotal: string;
+  bankTotal: string;
+  invoiceTotal: string;
+};
+
+export type WorkbenchAmountSummary = {
+  before: WorkbenchAmountSummaryTotals;
+  after: WorkbenchAmountSummaryTotals;
+  status: "matched" | "mismatch" | "unknown";
+  direction: "payment" | "receipt" | "unknown";
+  mismatchFields: string[];
+};
+
+export type WorkbenchRelationPreviewOperation = "confirm_link" | "withdraw_link";
+
+export type WorkbenchRelationPreview = {
+  operation: WorkbenchRelationPreviewOperation;
+  canSubmit: boolean;
+  requiresNote: boolean;
+  message: string;
+  before: {
+    groups: WorkbenchCandidateGroup[];
+  };
+  after: {
+    groups: WorkbenchCandidateGroup[];
+  };
+  amountSummary: WorkbenchAmountSummary;
 };
 
 export type WorkbenchSummary = {

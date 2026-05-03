@@ -37,12 +37,14 @@ type WorkbenchRecordCardProps = {
   rowState: WorkbenchRowState;
   actionMode?: "default" | "cancel-exception-only";
   highlighted?: boolean;
+  searchQuery?: string;
   sheetRowMode?: "stretched" | "split";
   onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "open") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
   showWorkflowActions: boolean;
   canMutateData: boolean;
+  readOnly?: boolean;
 };
 
 function WorkbenchRecordCard({
@@ -54,16 +56,18 @@ function WorkbenchRecordCard({
   rowState,
   actionMode = "default",
   highlighted = false,
+  searchQuery = "",
   sheetRowMode = "split",
   onSelectRow,
   onOpenDetail,
   onRowAction,
   showWorkflowActions,
   canMutateData,
+  readOnly = false,
 }: WorkbenchRecordCardProps) {
   const columns = columnsProp ?? getWorkbenchColumns(paneId);
-  const hasActionColumn = actionMode === "cancel-exception-only" || paneId === "invoice";
-  const showInlineDetail = actionMode === "default" && (paneId === "oa" || paneId === "bank");
+  const hasActionColumn = !readOnly && (actionMode === "cancel-exception-only" || paneId === "invoice");
+  const showInlineDetail = !readOnly && actionMode === "default" && (paneId === "oa" || paneId === "bank");
   const sheetStateClass =
     rowState === "selected"
       ? " record-card-sheet-selected"
@@ -81,7 +85,7 @@ function WorkbenchRecordCard({
       data-search-highlighted={highlighted ? "true" : "false"}
       role="row"
       style={columnGridStyle}
-      onClick={() => onSelectRow(row, zoneId)}
+      onClick={readOnly ? undefined : () => onSelectRow(row, zoneId)}
     >
       {columns.map((column) => {
         const value = row.tableValues[column.key] ?? "--";
@@ -92,7 +96,7 @@ function WorkbenchRecordCard({
             role="cell"
           >
             <div className="record-card-cell-content">
-              {renderCellValue(column, value, row, paneId, showInlineDetail, () => onOpenDetail(row))}
+              {renderCellValue(column, value, row, paneId, showInlineDetail, () => onOpenDetail(row), searchQuery)}
             </div>
           </div>
         );
@@ -133,6 +137,7 @@ export default memo(WorkbenchRecordCard, (previousProps, nextProps) => (
   && previousProps.sheetRowMode === nextProps.sheetRowMode
   && previousProps.showWorkflowActions === nextProps.showWorkflowActions
   && previousProps.canMutateData === nextProps.canMutateData
+  && previousProps.readOnly === nextProps.readOnly
   && previousProps.onSelectRow === nextProps.onSelectRow
   && previousProps.onOpenDetail === nextProps.onOpenDetail
   && previousProps.onRowAction === nextProps.onRowAction
@@ -192,6 +197,7 @@ function renderCellValue(
   paneId: WorkbenchRecordType,
   showInlineDetail: boolean,
   onOpenDetail: () => void,
+  searchQuery = "",
 ) {
   if (column.kind === "status") {
     return <span className="status-tag">{value}</span>;
@@ -211,6 +217,7 @@ function renderCellValue(
       row.tableValues.applicationType ?? "",
       row.tableValues.reconciliationStatus ?? "",
       row.tags ?? [],
+      searchQuery,
     );
   }
 
@@ -248,7 +255,7 @@ function renderCellValue(
     return renderInvoiceAmountValue(value, row.tableValues.taxRate ?? "", row.tableValues.taxAmount ?? "");
   }
 
-  return <span className={buildTextValueClassName(column)}>{value}</span>;
+  return <span className={buildTextValueClassName(column)}>{highlightSearchText(value, searchQuery)}</span>;
 }
 
 function renderOaApplicantValue(
@@ -432,6 +439,7 @@ function renderOaProjectValue(
   applicationType: string,
   reconciliationStatus: string,
   tags: string[] = [],
+  searchQuery = "",
 ) {
   const hasApplicationType = applicationType !== "--" && applicationType !== "—" && applicationType !== "";
   const hasReconciliationStatus =
@@ -440,7 +448,7 @@ function renderOaProjectValue(
 
   return (
     <span className="compound-cell-value">
-      <span className="compound-cell-primary cell-text-value cell-text-value-full">{projectName}</span>
+      <span className="compound-cell-primary cell-text-value cell-text-value-full">{highlightSearchText(projectName, searchQuery)}</span>
       {hasApplicationType || hasReconciliationStatus || visibleTags.length > 0 ? (
         <span className="compound-cell-secondary compound-cell-secondary-nowrap">
           {hasApplicationType ? <span className="inline-meta-tag">{applicationType}</span> : null}
@@ -453,6 +461,24 @@ function renderOaProjectValue(
         </span>
       ) : null}
     </span>
+  );
+}
+
+function highlightSearchText(value: string, query: string) {
+  const normalizedQuery = query.replace(/\s+/g, "").trim();
+  if (!normalizedQuery) {
+    return value;
+  }
+  const matchIndex = value.toLowerCase().indexOf(normalizedQuery.toLowerCase());
+  if (matchIndex < 0) {
+    return value;
+  }
+  return (
+    <>
+      {value.slice(0, matchIndex)}
+      <span className="search-hit">{value.slice(matchIndex, matchIndex + normalizedQuery.length)}</span>
+      {value.slice(matchIndex + normalizedQuery.length)}
+    </>
   );
 }
 

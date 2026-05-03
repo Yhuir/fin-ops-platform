@@ -70,6 +70,12 @@ function AppShell() {
             >
               成本统计
             </NavLink>
+            <NavLink
+              to="/bank-details"
+              className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
+            >
+              银行明细
+            </NavLink>
           </nav>
           {progress ? (
             <div className={`global-progress-chip ${progress.tone}`} aria-live="polite">

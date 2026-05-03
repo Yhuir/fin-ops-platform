@@ -7,6 +7,7 @@ import DetailDrawer from "../components/workbench/DetailDrawer";
 import IgnoredItemsModal from "../components/workbench/IgnoredItemsModal";
 import OaBankExceptionModal from "../components/workbench/OaBankExceptionModal";
 import ProcessedExceptionsModal from "../components/workbench/ProcessedExceptionsModal";
+import RelationPreviewTriPane from "../components/workbench/RelationPreviewTriPane";
 import WorkbenchHeaderControls from "../components/workbench/WorkbenchHeaderControls";
 import WorkbenchImportModal, { type WorkbenchImportMode } from "../components/workbench/WorkbenchImportModal";
 import WorkbenchSearchModal from "../components/workbench/WorkbenchSearchModal";
@@ -15,7 +16,6 @@ import type { WorkbenchPane } from "../components/workbench/ResizableTriPane";
 import { type WorkbenchRouteState, useAppChrome } from "../contexts/AppChromeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import {
-  cancelWorkbenchLink,
   cancelWorkbenchException,
   confirmWorkbenchLink,
   fetchIgnoredWorkbenchRows,
@@ -25,9 +25,12 @@ import {
   fetchWorkbenchWithProgress,
   ignoreWorkbenchRow,
   markWorkbenchException,
+  previewWorkbenchConfirmLink,
+  previewWorkbenchWithdrawLink,
   saveWorkbenchSettings,
   submitOaBankException,
   unignoreWorkbenchRow,
+  withdrawWorkbenchLink,
 } from "../features/workbench/api";
 import {
   buildWorkbenchDisplayGroups,
@@ -45,6 +48,7 @@ import type {
   WorkbenchData,
   WorkbenchOaSyncStatus,
   WorkbenchRecord,
+  WorkbenchRelationPreview,
   WorkbenchSettings,
 } from "../features/workbench/types";
 import { createEmptySearchResponse, fetchWorkbenchSearch } from "../features/search/api";
@@ -64,6 +68,12 @@ type ActionDialogState = {
   phase: "loading" | "result";
   title: string;
   message: string;
+};
+
+type RelationPreviewDialogState = {
+  preview: WorkbenchRelationPreview;
+  rowIds: string[];
+  caseId?: string;
 };
 
 type OaBankExceptionDialogState = {
@@ -160,6 +170,7 @@ export default function ReconciliationWorkbenchPage() {
   const [lastActionMessage, setLastActionMessage] = useState<string | null>(null);
   const [expandedZoneId, setExpandedZoneId] = useState<"paired" | "open" | null>(null);
   const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(null);
+  const [relationPreviewDialog, setRelationPreviewDialog] = useState<RelationPreviewDialogState | null>(null);
   const [ignoredData, setIgnoredData] = useState<IgnoredWorkbenchData>({ month: WORKBENCH_VIEW_MONTH, rows: [] });
   const [workbenchSettings, setWorkbenchSettings] = useState<WorkbenchSettings | null>(null);
   const [importModalMode, setImportModalMode] = useState<WorkbenchImportMode | null>(null);
@@ -208,8 +219,9 @@ export default function ReconciliationWorkbenchPage() {
         ...current,
         openSearchPaneId: isOpen ? null : paneId,
         draftSearchQueryByPane: {
-          ...current.draftSearchQueryByPane,
-          [paneId]: isOpen ? current.draftSearchQueryByPane[paneId] : current.searchQueryByPane[paneId],
+          oa: isOpen ? current.draftSearchQueryByPane.oa : current.unifiedSearchQuery,
+          bank: isOpen ? current.draftSearchQueryByPane.bank : current.unifiedSearchQuery,
+          invoice: isOpen ? current.draftSearchQueryByPane.invoice : current.unifiedSearchQuery,
         },
       };
       return {
@@ -229,7 +241,7 @@ export default function ReconciliationWorkbenchPage() {
         openSearchPaneId: null,
         draftSearchQueryByPane: {
           ...current.draftSearchQueryByPane,
-          [paneId]: current.searchQueryByPane[paneId],
+          [paneId]: current.unifiedSearchQuery,
         },
       };
       return {
@@ -244,13 +256,16 @@ export default function ReconciliationWorkbenchPage() {
       const nextState: WorkbenchZoneDisplayState = {
         ...current,
         draftSearchQueryByPane: {
-          ...current.draftSearchQueryByPane,
-          [paneId]: "",
+          oa: "",
+          bank: "",
+          invoice: "",
         },
         searchQueryByPane: {
-          ...current.searchQueryByPane,
-          [paneId]: "",
+          oa: "",
+          bank: "",
+          invoice: "",
         },
+        unifiedSearchQuery: "",
       };
       return {
         ...nextState,
@@ -264,14 +279,17 @@ export default function ReconciliationWorkbenchPage() {
       updateZoneDisplayState(zoneId, (current) => {
         const nextState: WorkbenchZoneDisplayState = {
           ...current,
-          draftSearchQueryByPane: {
-            ...current.draftSearchQueryByPane,
-            [paneId]: query,
+        draftSearchQueryByPane: {
+            oa: query,
+            bank: query,
+            invoice: query,
           },
           searchQueryByPane: {
-            ...current.searchQueryByPane,
-            [paneId]: query,
+            oa: query,
+            bank: query,
+            invoice: query,
           },
+          unifiedSearchQuery: query,
         };
         return {
           ...nextState,
@@ -450,6 +468,10 @@ export default function ReconciliationWorkbenchPage() {
 
   const applyLocalCancelLink = useCallback((rowIds: string[]) => {
     setWorkbenchData((current) => (current ? updateWorkbenchAfterCancelLink(current, rowIds) : current));
+  }, []);
+
+  const applyLocalWithdrawLink = useCallback((rowIds: string[], afterGroups: WorkbenchCandidateGroup[]) => {
+    setWorkbenchData((current) => (current ? updateWorkbenchAfterWithdrawLink(current, rowIds, afterGroups) : current));
   }, []);
 
   const applyLocalHandledException = useCallback((rowIds: string[], exceptionCode: string, label: string) => {
@@ -888,9 +910,19 @@ export default function ReconciliationWorkbenchPage() {
 
   const canConfirmOpenSelection = openSelectionSummary.bank > 0 && openSelectionSummary.oa + openSelectionSummary.invoice > 0;
   const canHandleOpenSelectionException = openSelectionSummary.total > 0;
+  const canWithdrawOpenSelection = useMemo(() => {
+    if (selectedOpenRowIds.length === 0) {
+      return false;
+    }
+    const selectedRowIdSet = new Set(selectedOpenRowIds);
+    return (workbenchData?.open.groups ?? []).some((group) =>
+      group.canWithdraw
+      && [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice].some((row) => selectedRowIdSet.has(row.id)),
+    );
+  }, [selectedOpenRowIds, workbenchData?.open.groups]);
   const isOpenConfirmSelectionDisabled = openSelectionSummary.total < 2;
   const isOpenExceptionSelectionDisabled = openSelectionSummary.total < 1;
-  const isPairedCancelSelectionDisabled = pairedSelectionSummary.total < 2;
+  const isPairedCancelSelectionDisabled = pairedSelectionSummary.total < 1;
 
   const collectCaseRowIds = useCallback((row: WorkbenchRecord) => {
     const containingGroup = allGroups.find((group) =>
@@ -1170,22 +1202,7 @@ export default function ReconciliationWorkbenchPage() {
       return;
     }
     setOaBankExceptionDialog(null);
-    await runBlockingAction({
-      loadingMessage: "正在确认关联...",
-      action: async () => {
-        const result = await confirmWorkbenchLink({
-          month: WORKBENCH_VIEW_MONTH,
-          rowIds: rows.map((row) => row.id),
-          caseId: resolveSelectedCaseId(rows),
-        });
-        clearOpenSelection();
-        applyLocalConfirmLink(
-          rows.map((row) => row.id),
-          resolveSelectedCaseId(rows),
-        );
-        return result.message;
-      },
-    });
+    await openConfirmPreview(rows);
   };
 
   const handleRowAction = useCallback(async (row: WorkbenchRecord, action: WorkbenchInlineAction) => {
@@ -1200,18 +1217,9 @@ export default function ReconciliationWorkbenchPage() {
     }
 
     if (action === "confirm-match") {
-      await runBlockingAction({
-        loadingMessage: "正在确认关联...",
-        action: async () => {
-        const result = await confirmWorkbenchLink({
-          month: WORKBENCH_VIEW_MONTH,
-          rowIds: collectCaseRowIds(row),
-          caseId: row.caseId,
-        });
-        applyLocalConfirmLink(collectCaseRowIds(row), row.caseId);
-        return result.message;
-      },
-    });
+      const rowIds = collectCaseRowIds(row);
+      const rowsById = new Map(allRows.map((candidate) => [candidate.id, candidate]));
+      await openConfirmPreview(rowIds.map((rowId) => rowsById.get(rowId)).filter((candidate): candidate is WorkbenchRecord => Boolean(candidate)));
       return;
     }
 
@@ -1254,18 +1262,9 @@ export default function ReconciliationWorkbenchPage() {
     }
 
     if (action === "unlink") {
-      await runBlockingAction({
-        loadingMessage: "正在取消配对...",
-        action: async () => {
-        const result = await cancelWorkbenchLink({
-          month: WORKBENCH_VIEW_MONTH,
-          rowId: row.id,
-          comment: "由关联台取消关联",
-        });
-        applyLocalCancelLink([row.id]);
-        return result.message;
-      },
-    });
+      const rowIds = collectCaseRowIds(row);
+      const rowsById = new Map(allRows.map((candidate) => [candidate.id, candidate]));
+      await openWithdrawPreview(rowIds.map((rowId) => rowsById.get(rowId)).filter((candidate): candidate is WorkbenchRecord => Boolean(candidate)));
       return;
     }
 
@@ -1285,12 +1284,13 @@ export default function ReconciliationWorkbenchPage() {
     openCancelProcessedExceptionDialog,
     openOaBankExceptionDialog,
     applyLocalCancelException,
-    applyLocalCancelLink,
     applyLocalConfirmLink,
+    applyLocalWithdrawLink,
     applyLocalHandledException,
     applyLocalIgnoreRow,
     refreshWorkbenchDataInBackground,
     runBlockingAction,
+    allRows,
   ]);
 
   const handleSelectRow = useCallback((row: WorkbenchRecord, zoneId: "paired" | "open") => {
@@ -1306,6 +1306,66 @@ export default function ReconciliationWorkbenchPage() {
     return caseIds.length === 1 ? caseIds[0] : undefined;
   };
 
+  const openConfirmPreview = async (rows: WorkbenchRecord[]) => {
+    const rowIds = rows.map((row) => row.id);
+    const caseId = resolveSelectedCaseId(rows);
+    const preview = await previewWorkbenchConfirmLink({
+      month: WORKBENCH_VIEW_MONTH,
+      rowIds,
+      caseId,
+    });
+    setRelationPreviewDialog({ preview, rowIds, caseId });
+  };
+
+  const openWithdrawPreview = async (rows: WorkbenchRecord[]) => {
+    const rowIds = rows.map((row) => row.id);
+    const preview = await previewWorkbenchWithdrawLink({
+      month: WORKBENCH_VIEW_MONTH,
+      rowIds,
+    });
+    setRelationPreviewDialog({ preview, rowIds, caseId: resolveSelectedCaseId(rows) });
+  };
+
+  const handleSubmitRelationPreview = async (note: string) => {
+    if (!relationPreviewDialog) {
+      return;
+    }
+    const { preview, rowIds, caseId } = relationPreviewDialog;
+    setRelationPreviewDialog(null);
+    if (preview.operation === "confirm_link") {
+      await runBlockingAction({
+        loadingMessage: "正在确认关联...",
+        action: async () => {
+          const result = await confirmWorkbenchLink({
+            month: WORKBENCH_VIEW_MONTH,
+            rowIds,
+            caseId,
+            note,
+          });
+          clearOpenSelection();
+          applyLocalConfirmLink(rowIds, caseId);
+          return result.message;
+        },
+      });
+      return;
+    }
+
+    await runBlockingAction({
+      loadingMessage: "正在撤回关联...",
+      action: async () => {
+        const result = await withdrawWorkbenchLink({
+          month: WORKBENCH_VIEW_MONTH,
+          rowIds,
+          note,
+        });
+        clearPairedSelection();
+        clearOpenSelection();
+        applyLocalWithdrawLink(rowIds, preview.after.groups);
+        return result.message;
+      },
+    });
+  };
+
   const handleConfirmOpenSelection = async () => {
     if (!canMutateData) {
       openActionResultDialog(READONLY_ACTION_MESSAGE);
@@ -1319,22 +1379,26 @@ export default function ReconciliationWorkbenchPage() {
       openActionResultDialog("确认关联至少需要选择 1 条银行流水，并同时选择 OA 或发票。");
       return;
     }
-    await runBlockingAction({
-      loadingMessage: "正在确认关联...",
-      action: async () => {
-        const result = await confirmWorkbenchLink({
-          month: WORKBENCH_VIEW_MONTH,
-          rowIds: selectedOpenRows.map((row) => row.id),
-          caseId: resolveSelectedCaseId(selectedOpenRows),
-        });
-        clearOpenSelection();
-        applyLocalConfirmLink(
-          selectedOpenRows.map((row) => row.id),
-          resolveSelectedCaseId(selectedOpenRows),
-        );
-        return result.message;
-      },
-    });
+    await openConfirmPreview(selectedOpenRows);
+  };
+
+  const handleWithdrawOpenSelection = async () => {
+    if (!canMutateData) {
+      openActionResultDialog(READONLY_ACTION_MESSAGE);
+      return;
+    }
+    if (!canWithdrawOpenSelection) {
+      openActionResultDialog("当前选择没有可撤回的关联历史。");
+      return;
+    }
+    const selectedRowIdSet = new Set(selectedOpenRowIds);
+    const selectedGroups = (workbenchData?.open.groups ?? []).filter((group) =>
+      group.canWithdraw
+      && [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice].some((row) => selectedRowIdSet.has(row.id)),
+    );
+    await openWithdrawPreview(
+      selectedGroups.flatMap((group) => [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice]),
+    );
   };
 
   const handleClearOpenSelection = () => {
@@ -1412,26 +1476,9 @@ export default function ReconciliationWorkbenchPage() {
       openActionResultDialog("请先选择已配对记录。");
       return;
     }
-    await runBlockingAction({
-      loadingMessage: "正在取消配对...",
-      action: async () => {
-        await Promise.all(
-          selectedGroups.map((group) => {
-            const representativeRow = [...group.rows.bank, ...group.rows.oa, ...group.rows.invoice][0];
-            return cancelWorkbenchLink({
-              month: WORKBENCH_VIEW_MONTH,
-              rowId: representativeRow.id,
-              comment: "由关联台批量取消配对",
-            });
-          }),
-        );
-        clearPairedSelection();
-        applyLocalCancelLink(
-          selectedGroups.flatMap((group) => [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice].map((row) => row.id)),
-        );
-        return `已取消 ${selectedGroups.length} 组配对。`;
-      },
-    });
+    await openWithdrawPreview(
+      selectedGroups.flatMap((group) => [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice]),
+    );
   };
 
   const handleUnignoreRow = async (row: WorkbenchRecord) => {
@@ -1565,7 +1612,7 @@ export default function ReconciliationWorkbenchPage() {
       sourceGroups={workbenchData?.paired.groups ?? []}
       highlightedRowId={highlightedRowId}
       panes={pairedPanes}
-      primarySelectionActionLabel="取消配对"
+      primarySelectionActionLabel="撤回关联"
       selectionSummary={pairedSelectionSummary}
       title={`已配对 ${workbenchData?.summary.pairedCount ?? 0} 条`}
       tone="success"
@@ -1591,6 +1638,8 @@ export default function ReconciliationWorkbenchPage() {
       onSelectRow={handleSelectRow}
       onSecondarySelectionAction={handleOpenSelectionException}
       secondarySelectionActionDisabled={isOpenExceptionSelectionDisabled || !canMutateData}
+      onTertiarySelectionAction={handleWithdrawOpenSelection}
+      tertiarySelectionActionDisabled={!canWithdrawOpenSelection || !canMutateData}
       onToggleExpand={toggleOpenExpand}
       displayState={openDisplayState}
       onColumnFilterChange={handleColumnFilterChange}
@@ -1606,6 +1655,7 @@ export default function ReconciliationWorkbenchPage() {
       panes={openPanes}
       primarySelectionActionLabel="确认关联"
       secondarySelectionActionLabel="异常处理"
+      tertiarySelectionActionLabel="撤回关联"
       selectionSummary={openSelectionSummary}
       title={`未配对 ${workbenchData?.summary.openCount ?? 0} 条`}
       tone="warning"
@@ -1657,6 +1707,14 @@ export default function ReconciliationWorkbenchPage() {
         />
       ) : null}
       <DetailDrawer error={detailError} loading={isDetailLoading} row={detailRow} onClose={handleCloseDetail} />
+      {relationPreviewDialog ? (
+        <RelationPreviewDialog
+          preview={relationPreviewDialog.preview}
+          columnLayouts={workbenchSettings?.workbenchColumnLayouts}
+          onClose={() => setRelationPreviewDialog(null)}
+          onSubmit={handleSubmitRelationPreview}
+        />
+      ) : null}
       {actionDialog ? (
         <ActionStatusModal
           message={actionDialog.message}
@@ -1739,6 +1797,73 @@ export default function ReconciliationWorkbenchPage() {
           onSubmitSearch={handleSubmitSearch}
         />
       ) : null}
+    </div>
+  );
+}
+
+function RelationPreviewDialog({
+  preview,
+  columnLayouts,
+  onClose,
+  onSubmit,
+}: {
+  preview: WorkbenchRelationPreview;
+  columnLayouts?: WorkbenchSettings["workbenchColumnLayouts"];
+  onClose: () => void;
+  onSubmit: (note: string) => void;
+}) {
+  const [note, setNote] = useState("");
+  const isWithdraw = preview.operation === "withdraw_link";
+  const submitLabel = isWithdraw ? "确认撤回" : "确认关联";
+  const title = isWithdraw ? "撤回关联预览" : "确认关联预览";
+  const noteRequired = preview.requiresNote;
+  const canSubmit = preview.canSubmit && (!noteRequired || note.trim().length > 0);
+
+  return (
+    <div className="detail-modal-backdrop">
+      <button aria-label="关闭关联预览" className="detail-modal-backdrop-foreground" type="button" onClick={onClose} />
+      <section aria-label="关联预览" aria-modal="true" className="detail-modal relation-preview-modal" role="dialog">
+        <header className="detail-modal-header">
+          <div>
+            <div className="modal-eyebrow">关联预览</div>
+            <h2>{title}</h2>
+          </div>
+          <button aria-label="关闭关联预览" className="detail-close-btn" type="button" onClick={onClose}>
+            ×
+          </button>
+        </header>
+        {preview.message ? <div className={`relation-preview-message ${preview.requiresNote ? "warning" : ""}`}>{preview.message}</div> : null}
+        <div className="relation-preview-stack">
+          <RelationPreviewTriPane
+            title="操作前"
+            testId="relation-preview-before"
+            groups={preview.before.groups}
+            totals={preview.amountSummary.before}
+            mismatchFields={preview.amountSummary.mismatchFields}
+            columnLayouts={columnLayouts}
+          />
+          <RelationPreviewTriPane
+            title="操作后"
+            testId="relation-preview-after"
+            groups={preview.after.groups}
+            totals={preview.amountSummary.after}
+            mismatchFields={preview.amountSummary.mismatchFields}
+            columnLayouts={columnLayouts}
+          />
+        </div>
+        <label className="relation-preview-note">
+          <span>备注{noteRequired ? "（必填）" : ""}</span>
+          <textarea aria-label="备注" value={note} onChange={(event) => setNote(event.target.value)} />
+        </label>
+        <footer className="detail-modal-actions">
+          <button className="secondary-btn" type="button" onClick={onClose}>
+            取消
+          </button>
+          <button className="primary-action-btn" disabled={!canSubmit} type="button" onClick={() => onSubmit(note.trim())}>
+            {submitLabel}
+          </button>
+        </footer>
+      </section>
     </div>
   );
 }
@@ -1952,6 +2077,58 @@ function updateWorkbenchAfterCancelLink(data: WorkbenchData, rowIds: string[]) {
   });
 }
 
+function updateWorkbenchAfterWithdrawLink(
+  data: WorkbenchData,
+  rowIds: string[],
+  afterGroups: WorkbenchCandidateGroup[],
+) {
+  if (afterGroups.length === 0) {
+    return updateWorkbenchAfterCancelLink(data, rowIds);
+  }
+
+  const targetRowIds = new Set(rowIds);
+  const restoredOpenGroups = afterGroups.flatMap((group, index) => {
+    const restoredGroup: WorkbenchCandidateGroup = {
+      ...group,
+      id: `local-open-withdraw-${group.id}-${index}`,
+      reason: group.reason || "撤回关联后恢复关系",
+      rows: {
+        oa: group.rows.oa.map((row) => updateWorkbenchRowForWithdrawPreview(row, group)),
+        bank: group.rows.bank.map((row) => updateWorkbenchRowForWithdrawPreview(row, group)),
+        invoice: group.rows.invoice.map((row) => updateWorkbenchRowForWithdrawPreview(row, group)),
+      },
+    };
+    return flattenGroups([restoredGroup]).length > 0 ? [restoredGroup] : [];
+  });
+
+  return rebuildWorkbenchSummary({
+    ...data,
+    paired: {
+      groups: removeRowsFromWorkbenchGroups(data.paired.groups, targetRowIds),
+    },
+    open: {
+      groups: [
+        ...restoredOpenGroups,
+        ...removeRowsFromWorkbenchGroups(data.open.groups, targetRowIds),
+      ],
+    },
+  });
+}
+
+function removeRowsFromWorkbenchGroups(groups: WorkbenchCandidateGroup[], rowIds: Set<string>) {
+  return groups.flatMap((group) => {
+    const nextGroup = {
+      ...group,
+      rows: {
+        oa: group.rows.oa.filter((row) => !rowIds.has(row.id)),
+        bank: group.rows.bank.filter((row) => !rowIds.has(row.id)),
+        invoice: group.rows.invoice.filter((row) => !rowIds.has(row.id)),
+      },
+    };
+    return flattenGroups([nextGroup]).length > 0 ? [nextGroup] : [];
+  });
+}
+
 function updateWorkbenchAfterHandledException(data: WorkbenchData, rowIds: string[], exceptionCode: string, label: string) {
   const targetRowIds = new Set(rowIds);
   const nextOpenGroups = data.open.groups.map((group) => ({
@@ -2153,6 +2330,36 @@ function updateWorkbenchRowForOpen(row: WorkbenchRecord, label: string): Workben
       invoiceRelationStatus: row.recordType === "bank" ? label : row.tableValues.invoiceRelationStatus,
     },
   };
+}
+
+function updateWorkbenchRowForWithdrawPreview(row: WorkbenchRecord, group: WorkbenchCandidateGroup): WorkbenchRecord {
+  const caseId = group.id.startsWith("case:") ? group.id.slice("case:".length) : undefined;
+  const openRow = updateWorkbenchRowForOpen(row, withdrawPreviewOpenLabel(row, group));
+  return {
+    ...openRow,
+    caseId,
+    tags: row.tags,
+  };
+}
+
+function withdrawPreviewOpenLabel(row: WorkbenchRecord, group: WorkbenchCandidateGroup) {
+  const hasOa = group.rows.oa.length > 0;
+  const hasBank = group.rows.bank.length > 0;
+  const hasInvoice = group.rows.invoice.length > 0;
+  const rowCount = group.rows.oa.length + group.rows.bank.length + group.rows.invoice.length;
+  if (rowCount <= 1) {
+    return "待重新处理";
+  }
+  if (hasOa && hasInvoice && !hasBank) {
+    return "待找流水";
+  }
+  if (hasOa && hasBank && !hasInvoice) {
+    return "待找发票";
+  }
+  if (hasBank && hasInvoice && !hasOa) {
+    return "待找OA";
+  }
+  return pendingLabelForRow(row);
 }
 
 const LEGACY_HANDLED_EXCEPTION_CODES = new Set([

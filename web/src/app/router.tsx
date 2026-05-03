@@ -5,6 +5,7 @@ import ReconciliationWorkbenchPage from "../pages/ReconciliationWorkbenchPage";
 import TaxOffsetPage from "../pages/TaxOffsetPage";
 import CostStatisticsPage from "../pages/CostStatisticsPage";
 import SettingsPage from "../pages/SettingsPage";
+import BankDetailsPage from "../pages/BankDetailsPage";
 
 export default function AppRouter() {
   return (
@@ -13,6 +14,7 @@ export default function AppRouter() {
       <Route path="/imports" element={<ImportCenterPage />} />
       <Route path="/tax-offset" element={<TaxOffsetPage />} />
       <Route path="/cost-statistics" element={<CostStatisticsPage />} />
+      <Route path="/bank-details" element={<BankDetailsPage />} />
       <Route path="/settings" element={<SettingsPage />} />
       <Route path="*" element={<Navigate replace to="/" />} />
     </Routes>

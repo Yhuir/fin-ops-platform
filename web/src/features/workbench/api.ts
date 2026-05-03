@@ -8,6 +8,7 @@ import type {
   WorkbenchPaneRows,
   WorkbenchRecord,
   WorkbenchRecordType,
+  WorkbenchRelationPreview,
   WorkbenchProjectSetting,
   WorkbenchSettings,
   WorkbenchSettingsDataResetAction,
@@ -192,6 +193,37 @@ type ApiWorkbenchGroup = {
   oa_rows: ApiWorkbenchRow[];
   bank_rows: ApiWorkbenchRow[];
   invoice_rows: ApiWorkbenchRow[];
+  can_withdraw?: boolean;
+};
+
+type ApiWorkbenchAmountSummary = {
+  before?: {
+    oa_total?: string | null;
+    bank_total?: string | null;
+    invoice_total?: string | null;
+  };
+  after?: {
+    oa_total?: string | null;
+    bank_total?: string | null;
+    invoice_total?: string | null;
+  };
+  status?: "matched" | "mismatch" | "unknown";
+  direction?: "payment" | "receipt" | "unknown";
+  mismatch_fields?: string[];
+};
+
+type ApiWorkbenchRelationPreview = {
+  operation?: "confirm_link" | "withdraw_link";
+  can_submit?: boolean;
+  requires_note?: boolean;
+  message?: string;
+  before?: {
+    groups?: ApiWorkbenchGroup[];
+  };
+  after?: {
+    groups?: ApiWorkbenchGroup[];
+  };
+  amount_summary?: ApiWorkbenchAmountSummary;
 };
 
 type ApiWorkbenchActionResult = {
@@ -208,6 +240,13 @@ type ConfirmLinkPayload = {
   month: string;
   rowIds: string[];
   caseId?: string;
+  note?: string;
+};
+
+type WithdrawLinkPayload = {
+  month: string;
+  rowIds: string[];
+  note?: string;
 };
 
 type MarkExceptionPayload = {
@@ -522,6 +561,47 @@ function mapGroup(group: ApiWorkbenchGroup): WorkbenchCandidateGroup {
       oa: group.oa_rows.map(mapRow),
       bank: group.bank_rows.map(mapRow),
       invoice: group.invoice_rows.map(mapRow),
+    },
+    canWithdraw: Boolean(
+      group.can_withdraw
+      || [...group.oa_rows, ...group.bank_rows, ...group.invoice_rows].some((row) =>
+        row.available_actions?.includes("withdraw_link") || row.available_actions?.includes("cancel_link")),
+    ),
+  };
+}
+
+function mapAmountTotals(totals: ApiWorkbenchAmountSummary["before"] | undefined) {
+  return {
+    oaTotal: toDisplayValue(totals?.oa_total, "-"),
+    bankTotal: toDisplayValue(totals?.bank_total, "-"),
+    invoiceTotal: toDisplayValue(totals?.invoice_total, "-"),
+  };
+}
+
+function mapRelationPreview(payload: ApiWorkbenchRelationPreview): WorkbenchRelationPreview {
+  const amountSummary = payload.amount_summary ?? {};
+  const hasAmountSummary = Boolean(payload.amount_summary);
+  return {
+    operation: payload.operation === "withdraw_link" ? "withdraw_link" : "confirm_link",
+    canSubmit: payload.can_submit !== false,
+    requiresNote: Boolean(payload.requires_note),
+    message: String(payload.message ?? "").trim(),
+    before: {
+      groups: (payload.before?.groups ?? []).map(mapGroup),
+    },
+    after: {
+      groups: (payload.after?.groups ?? []).map(mapGroup),
+    },
+    amountSummary: {
+      before: mapAmountTotals(amountSummary.before),
+      after: mapAmountTotals(amountSummary.after),
+      status: hasAmountSummary
+        ? amountSummary.status === "mismatch" || amountSummary.status === "unknown" ? amountSummary.status : "matched"
+        : "unknown",
+      direction: hasAmountSummary
+        ? amountSummary.direction === "receipt" || amountSummary.direction === "unknown" ? amountSummary.direction : "payment"
+        : "unknown",
+      mismatchFields: (amountSummary.mismatch_fields ?? []).map((field) => String(field)),
     },
   };
 }
@@ -1117,7 +1197,28 @@ export async function fetchWorkbenchRowDetail(rowId: string, signal?: AbortSigna
 }
 
 export async function confirmWorkbenchLink(payload: ConfirmLinkPayload) {
+  const requestBody: {
+    month: string;
+    row_ids: string[];
+    case_id?: string;
+    note?: string;
+  } = {
+    month: payload.month,
+    row_ids: payload.rowIds,
+    case_id: payload.caseId,
+  };
+  if (payload.note?.trim()) {
+    requestBody.note = payload.note.trim();
+  }
   return requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/confirm-link", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(requestBody),
+  });
+}
+
+export async function previewWorkbenchConfirmLink(payload: ConfirmLinkPayload): Promise<WorkbenchRelationPreview> {
+  const result = await requestJson<ApiWorkbenchRelationPreview>("/api/workbench/actions/confirm-link/preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -1125,6 +1226,38 @@ export async function confirmWorkbenchLink(payload: ConfirmLinkPayload) {
       row_ids: payload.rowIds,
       case_id: payload.caseId,
     }),
+  });
+  return mapRelationPreview(result);
+}
+
+export async function previewWorkbenchWithdrawLink(payload: WithdrawLinkPayload): Promise<WorkbenchRelationPreview> {
+  const result = await requestJson<ApiWorkbenchRelationPreview>("/api/workbench/actions/withdraw-link/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      month: payload.month,
+      row_ids: payload.rowIds,
+    }),
+  });
+  return mapRelationPreview(result);
+}
+
+export async function withdrawWorkbenchLink(payload: WithdrawLinkPayload) {
+  const requestBody: {
+    month: string;
+    row_ids: string[];
+    note?: string;
+  } = {
+    month: payload.month,
+    row_ids: payload.rowIds,
+  };
+  if (payload.note?.trim()) {
+    requestBody.note = payload.note.trim();
+  }
+  return requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/withdraw-link", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(requestBody),
   });
 }
 
