@@ -3474,8 +3474,9 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       return {
         body: {
           batchId: "etc_batch_001",
+          etcBatchId: "etc_20260503_001",
           oaDraftId: "oa_draft_001",
-          oaDraftUrl: "https://oa.example.test/etc-draft-001",
+          oaDraftUrl: "https://oa.example.test/oa/#/normal/forms/form/2?formId=2&id=oa_draft_001",
         },
       };
     },

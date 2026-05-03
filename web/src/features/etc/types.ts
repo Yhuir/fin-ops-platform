@@ -80,6 +80,7 @@ export type EtcImportConfirmResult = EtcImportPreviewResult & {
 
 export type EtcOaDraftPayload = {
   batchId: string;
+  etcBatchId: string;
   oaDraftId: string;
   oaDraftUrl: string;
 };

@@ -76,6 +76,8 @@ type ApiEtcImportItem = {
 type ApiEtcOaDraftPayload = {
   batchId?: string;
   batch_id?: string;
+  etcBatchId?: string;
+  etc_batch_id?: string;
   oaDraftId?: string;
   oa_draft_id?: string;
   oaDraftUrl?: string;
@@ -250,6 +252,7 @@ export async function createEtcOaDraft(invoiceIds: string[]): Promise<EtcOaDraft
   });
   return {
     batchId: payload.batchId ?? payload.batch_id ?? "",
+    etcBatchId: payload.etcBatchId ?? payload.etc_batch_id ?? "",
     oaDraftId: payload.oaDraftId ?? payload.oa_draft_id ?? "",
     oaDraftUrl: payload.oaDraftUrl ?? payload.oa_draft_url ?? "",
   };
