@@ -11,10 +11,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function openWorkbenchImportMenu(_user: ReturnType<typeof userEvent.setup>) {
-  return await screen.findByRole("link", { name: "导入中心" });
-}
-
 async function openWorkbenchSettingsPage(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("link", { name: "设置" }));
   return await screen.findByTestId("settings-page");
@@ -681,21 +677,31 @@ describe("Workbench row selection and detail modal", () => {
     await user.click(within(settingsTree).getByRole("treeitem", { name: /银行账户/ }));
 
     expect(within(settingsPage).getByRole("heading", { name: "银行账户映射" })).toBeInTheDocument();
-    const bankNameInputs = within(settingsPage).getAllByLabelText("银行名称");
-    const shortNameInputs = within(settingsPage).getAllByLabelText("简称");
-    const last4Inputs = within(settingsPage).getAllByLabelText(/后四位|银行卡后四位/);
+    const bankNameCell = within(settingsPage).getByRole("gridcell", { name: "建设银行" });
+    await user.dblClick(bankNameCell);
+    const bankNameInput = within(bankNameCell).getByRole("textbox");
+    await user.clear(bankNameInput);
+    await user.type(bankNameInput, "中国建设银行股份有限公司");
+    await user.keyboard("{Enter}");
 
-    await user.clear(bankNameInputs[1]);
-    await user.type(bankNameInputs[1], "中国建设银行股份有限公司");
-    await user.clear(shortNameInputs[1]);
-    await user.type(shortNameInputs[1], "建行");
-    await user.clear(last4Inputs[1]);
-    await user.type(last4Inputs[1], "8826");
+    const shortNameCell = within(settingsPage).getByRole("gridcell", { name: "建行" });
+    await user.dblClick(shortNameCell);
+    const shortNameInput = within(shortNameCell).getByRole("textbox");
+    await user.clear(shortNameInput);
+    await user.type(shortNameInput, "建行");
+    await user.keyboard("{Enter}");
+
+    const last4Cell = within(settingsPage).getByRole("gridcell", { name: "8826" });
+    await user.dblClick(last4Cell);
+    const last4Input = within(last4Cell).getByRole("textbox");
+    await user.clear(last4Input);
+    await user.type(last4Input, "8826");
+    await user.keyboard("{Enter}");
 
     expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
-    expect(within(settingsPage).getByDisplayValue("中国建设银行股份有限公司")).toBeInTheDocument();
-    expect(within(settingsPage).getByDisplayValue("建行")).toBeInTheDocument();
-    expect(within(settingsPage).getByDisplayValue("8826")).toBeInTheDocument();
+    expect(within(settingsPage).getByRole("gridcell", { name: "中国建设银行股份有限公司" })).toBeInTheDocument();
+    expect(within(settingsPage).getByRole("gridcell", { name: "建行" })).toBeInTheDocument();
+    expect(within(settingsPage).getByRole("gridcell", { name: "8826" })).toBeInTheDocument();
   });
 
   test("project status settings can sync, add, move, and delete local projects", async () => {
@@ -912,15 +918,15 @@ describe("Workbench row selection and detail modal", () => {
     expect(screen.queryByRole("button", { name: "清除所有 OA 数据并重新写入" })).not.toBeInTheDocument();
   });
 
-  test("bank import opens a dialog and sends per-file bank mapping overrides", async () => {
+  test("bank import standalone page sends per-file bank mapping overrides", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
-    renderAppAt("/");
+    renderAppAt("/imports/bank-transactions");
 
-    await openWorkbenchImportMenu(user);
-    await user.click(await screen.findByRole("link", { name: "银行流水导入" }));
-    const dialog = await screen.findByRole("dialog", { name: "银行流水导入" });
-    const input = within(dialog).getByLabelText("上传银行流水文件") as HTMLInputElement;
+    expect(await screen.findByRole("heading", { name: "银行流水导入" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "银行流水导入" })).not.toBeInTheDocument();
+    const input =
+      (screen.queryByLabelText("上传银行流水文件") ?? screen.getByLabelText("上传文件")) as HTMLInputElement;
     const bankFile = new File(["bank-demo"], "historydetail14080.xlsx", {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       lastModified: 1,
@@ -931,15 +937,15 @@ describe("Workbench row selection and detail modal", () => {
     });
 
     await user.upload(input, [bankFile, secondBankFile]);
-    const previewButton = within(dialog).getByRole("button", { name: "开始预览" });
+    const previewButton = screen.getByRole("button", { name: "开始预览" });
     expect(previewButton).toBeDisabled();
 
-    await user.selectOptions(within(dialog).getByLabelText("对应账户 historydetail14080.xlsx"), "bank_mapping_8826");
-    await user.selectOptions(within(dialog).getByLabelText("对应账户 2026-01-01至2026-01-31交易明细.xlsx"), "bank_mapping_8826");
+    await user.selectOptions(screen.getByLabelText("对应账户 historydetail14080.xlsx"), "bank_mapping_8826");
+    await user.selectOptions(screen.getByLabelText("对应账户 2026-01-01至2026-01-31交易明细.xlsx"), "bank_mapping_8826");
     expect(previewButton).toBeEnabled();
     await user.click(previewButton);
 
-    expect(await within(dialog).findByText("已完成 2 个文件的预览识别。")).toBeInTheDocument();
+    expect(await screen.findByText("已完成 2 个文件的预览识别。")).toBeInTheDocument();
     const previewCall = fetchMock.mock.calls.find(([url]) => String(url) === "/imports/files/preview");
     expect(previewCall).toBeTruthy();
     const formData = (previewCall?.[1] as RequestInit).body as FormData;
@@ -963,19 +969,17 @@ describe("Workbench row selection and detail modal", () => {
     ]);
   });
 
-  test("invoice import combines input and output entry points and sends per-file directions", async () => {
+  test("invoice import standalone page combines input and output directions per file", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
-    renderAppAt("/");
+    renderAppAt("/imports/invoices");
 
-    await openWorkbenchImportMenu(user);
-    expect(await screen.findByRole("link", { name: "发票导入" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "发票导入" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "销项发票导入" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "进项发票导入" })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("link", { name: "发票导入" }));
-    const dialog = await screen.findByRole("dialog", { name: "发票导入" });
-    const input = within(dialog).getByLabelText("上传发票文件") as HTMLInputElement;
+    const input =
+      (screen.queryByLabelText("上传发票文件") ?? screen.getByLabelText("上传文件")) as HTMLInputElement;
     const outputFile = new File(["invoice-output"], "一月发票.xlsx", {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       lastModified: 1,
@@ -986,14 +990,14 @@ describe("Workbench row selection and detail modal", () => {
     });
 
     await user.upload(input, [outputFile, inputFile]);
-    const previewButton = within(dialog).getByRole("button", { name: "开始预览" });
+    const previewButton = screen.getByRole("button", { name: "开始预览" });
     expect(previewButton).toBeDisabled();
 
-    await user.selectOptions(within(dialog).getByLabelText("票据方向 一月发票.xlsx"), "output_invoice");
-    await user.selectOptions(within(dialog).getByLabelText("票据方向 二月发票.xlsx"), "input_invoice");
+    await user.selectOptions(screen.getByLabelText("票据方向 一月发票.xlsx"), "output_invoice");
+    await user.selectOptions(screen.getByLabelText("票据方向 二月发票.xlsx"), "input_invoice");
     await user.click(previewButton);
 
-    expect(await within(dialog).findByText("已完成 2 个文件的预览识别。")).toBeInTheDocument();
+    expect(await screen.findByText("已完成 2 个文件的预览识别。")).toBeInTheDocument();
     const previewCall = fetchMock.mock.calls.find(([url]) => String(url) === "/imports/files/preview");
     expect(previewCall).toBeTruthy();
     const formData = (previewCall?.[1] as RequestInit).body as FormData;
@@ -1011,7 +1015,7 @@ describe("Workbench row selection and detail modal", () => {
     ]);
   });
 
-  test("ETC invoice import starts a background job and leaves header progress after closing", async () => {
+  test("ETC invoice import standalone page starts a background job through the ETC API", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({
       backgroundJobs: [
@@ -1034,30 +1038,28 @@ describe("Workbench row selection and detail modal", () => {
         },
       ],
     });
-    renderAppAt("/");
+    renderAppAt("/imports/etc-invoices");
 
-    await openWorkbenchImportMenu(user);
+    expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "ETC发票导入" })).not.toBeInTheDocument();
     expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("正在导入 ETC发票 3/31");
-    await user.click(await screen.findByRole("link", { name: "ETC发票导入" }));
-    const dialog = await screen.findByRole("dialog", { name: "ETC发票导入" });
-    const input = within(dialog).getByLabelText("上传ETC zip") as HTMLInputElement;
+    const input =
+      (screen.queryByLabelText("上传ETC zip") ?? screen.getByLabelText("上传文件")) as HTMLInputElement;
     const etcZip = new File(["etc-zip"], "ETC一月发票.zip", {
       type: "application/zip",
       lastModified: 1,
     });
 
     await user.upload(input, [etcZip]);
-    await user.click(within(dialog).getByRole("button", { name: "开始预览" }));
+    await user.click(screen.getByRole("button", { name: "开始预览" }));
 
-    expect(await within(dialog).findByText("已完成 1 个 ETC zip 文件预览。")).toBeInTheDocument();
-    expect(within(dialog).getByText("ETC-2026-005")).toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "确认导入" }));
+    expect(await screen.findByText("已完成 1 个 ETC zip 文件预览。")).toBeInTheDocument();
+    expect(screen.getByText("ETC-2026-005")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /确认导入/ }));
 
     await waitFor(() => {
-      expect(within(dialog).getAllByText("已开始后台导入").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("已开始后台导入").length).toBeGreaterThan(0);
     });
-    await user.click(within(dialog).getByRole("button", { name: "关闭" }));
-    expect(screen.queryByRole("dialog", { name: "ETC发票导入" })).not.toBeInTheDocument();
     expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("正在导入 ETC发票 3/31");
     const previewCall = fetchMock.mock.calls.find(([url]) => String(url) === "/api/etc/import/preview");
     expect(previewCall).toBeTruthy();
@@ -1068,40 +1070,35 @@ describe("Workbench row selection and detail modal", () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/imports/files/preview")).toBe(false);
   });
 
-  test("import completion marks the global status icon pending and returns to synced", async () => {
+  test("invoice import standalone page confirms selected preview files without a workbench dialog", async () => {
     const user = userEvent.setup();
-    installMockApiFetch({ workbenchLoadDelayMs: 160 });
-    renderAppAt("/");
+    const fetchMock = installMockApiFetch({ workbenchLoadDelayMs: 160 });
+    renderAppAt("/imports/invoices");
 
-    await openWorkbenchImportMenu(user);
-    await user.click(await screen.findByRole("link", { name: "发票导入" }));
-    const dialog = await screen.findByRole("dialog", { name: "发票导入" });
-    const input = within(dialog).getByLabelText("上传发票文件") as HTMLInputElement;
+    expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "发票导入" })).not.toBeInTheDocument();
+    const input =
+      (screen.queryByLabelText("上传发票文件") ?? screen.getByLabelText("上传文件")) as HTMLInputElement;
     const inputFile = new File(["invoice-input"], "二月发票.xlsx", {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       lastModified: 2,
     });
 
     await user.upload(input, [inputFile]);
-    await user.selectOptions(within(dialog).getByLabelText("票据方向 二月发票.xlsx"), "input_invoice");
-    await user.click(within(dialog).getByRole("button", { name: "开始预览" }));
-    expect(await within(dialog).findByText("已完成 1 个文件的预览识别。")).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("票据方向 二月发票.xlsx"), "input_invoice");
+    await user.click(screen.getByRole("button", { name: "开始预览" }));
+    expect(await screen.findByText("已完成 1 个文件的预览识别。")).toBeInTheDocument();
 
-    await user.click(within(dialog).getByRole("button", { name: "确认导入" }));
+    await user.click(screen.getByRole("button", { name: /确认导入/ }));
 
     await waitFor(() => {
-      const statusIndicator = screen.getByRole("status", { name: "已导入 1 个文件，正在刷新关联台。" });
-      expect(statusIndicator).toHaveClass("pending");
-      expect(statusIndicator.textContent).toBe("");
+      expect(screen.getByText("已确认导入")).toBeInTheDocument();
     });
-    expect(document.querySelector(".global-status-text")).toBeNull();
-    expect(screen.queryByText("已导入 1 个文件，正在后台刷新关联台。")).not.toBeInTheDocument();
-    expect(document.querySelector(".action-feedback")).toBeNull();
-
-    await waitFor(() => {
-      const statusIndicator = screen.getByRole("status", { name: "OA 已同步" });
-      expect(statusIndicator).toHaveClass("ok");
-      expect(statusIndicator.textContent).toBe("");
+    const confirmCall = fetchMock.mock.calls.find(([url]) => String(url) === "/imports/files/confirm");
+    expect(confirmCall).toBeTruthy();
+    expect(JSON.parse(String((confirmCall?.[1] as RequestInit).body))).toEqual({
+      session_id: "import_session_0001",
+      selected_file_ids: ["import_file_0001"],
     });
   });
 

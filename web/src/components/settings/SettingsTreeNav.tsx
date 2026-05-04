@@ -1,11 +1,12 @@
+import Box from "@mui/material/Box";
 import List from "@mui/material/List";
 import ListItem from "@mui/material/ListItem";
 import ListItemButton from "@mui/material/ListItemButton";
 import ListItemText from "@mui/material/ListItemText";
-import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 
+import { settingsTokens } from "./settingsDesign";
 import type { SettingsNavigationItem, SettingsSectionId } from "./types";
 
 type SettingsTreeNavProps = {
@@ -39,36 +40,88 @@ export default function SettingsTreeNav({
   }
 
   return (
-    <Paper component="aside" className="settings-tree-panel" aria-label="设置导航" variant="outlined">
-      <Stack className="settings-nav-header" direction="row" alignItems="center" justifyContent="space-between">
-        <Typography component="h3" variant="subtitle2">设置分类</Typography>
-        <Typography component="span" variant="caption">{items.length}</Typography>
+    <Box component="aside" aria-label="设置导航" sx={{ width: "100%" }}>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1.5, px: 0.5 }}>
+        <Typography
+          component="h2"
+          variant="caption"
+          sx={{ color: settingsTokens.textSecondary, fontWeight: 600, textTransform: "uppercase" }}
+        >
+          设置分类
+        </Typography>
+        <Typography component="span" variant="caption" sx={{ color: settingsTokens.textMuted }}>
+          {items.length}
+        </Typography>
       </Stack>
-      <List className="settings-tree" role="tree" aria-label="设置分类" dense disablePadding>
-        {items.map((item) => (
-          <ListItem key={item.id} disablePadding role="none">
-            <ListItemButton
-              aria-controls={panelId(item.id)}
-              role="treeitem"
-              aria-selected={activeSectionId === item.id}
-              className="settings-tree-item"
-              selected={activeSectionId === item.id}
-              onClick={() => onSelect(item.id)}
-            >
-              <ListItemText
-                className="settings-tree-copy"
-                primary={item.label}
-                secondary={item.description}
-                primaryTypographyProps={{ component: "strong", variant: "body2" }}
-                secondaryTypographyProps={{ component: "small" }}
-              />
-              <Typography className="settings-tree-count" component="span" variant="caption">
-                {item.count}
-              </Typography>
-            </ListItemButton>
-          </ListItem>
-        ))}
+      <List role="tree" aria-label="设置分类" dense disablePadding>
+        {items.map((item) => {
+          const selected = activeSectionId === item.id;
+          return (
+            <ListItem key={item.id} disablePadding role="none">
+              <ListItemButton
+                aria-controls={panelId(item.id)}
+                role="treeitem"
+                aria-selected={selected}
+                selected={selected}
+                onClick={() => onSelect(item.id)}
+                sx={{
+                  position: "relative",
+                  minHeight: 56,
+                  borderRadius: 0,
+                  py: 1,
+                  pr: 1,
+                  pl: 2,
+                  borderLeft: `2px solid ${selected ? settingsTokens.primary : settingsTokens.borderSubtle}`,
+                  color: settingsTokens.textPrimary,
+                  "&:hover": {
+                    bgcolor: settingsTokens.layer01Hover,
+                  },
+                  "&.Mui-focusVisible": {
+                    outline: `2px solid ${settingsTokens.primary}`,
+                    outlineOffset: "-2px",
+                  },
+                  ...(selected
+                    ? {
+                        bgcolor: settingsTokens.selected,
+                        "&.Mui-selected": {
+                          bgcolor: settingsTokens.selected,
+                        },
+                        "&.Mui-selected:hover": {
+                          bgcolor: settingsTokens.selected,
+                        },
+                      }
+                    : {}),
+                }}
+              >
+                <ListItemText
+                  primary={item.label}
+                  secondary={item.description}
+                  primaryTypographyProps={{
+                    component: "strong",
+                    variant: "body2",
+                    sx: {
+                      color: selected ? settingsTokens.textPrimary : settingsTokens.textPrimary,
+                      fontWeight: selected ? 600 : 400,
+                      letterSpacing: "0.16px",
+                    },
+                  }}
+                  secondaryTypographyProps={{
+                    component: "small",
+                    sx: { color: settingsTokens.textSecondary, fontSize: "12px", mt: 0.25 },
+                  }}
+                />
+                <Typography
+                  component="span"
+                  variant="caption"
+                  sx={{ color: selected ? settingsTokens.primary : settingsTokens.textMuted, ml: 1, fontWeight: 600 }}
+                >
+                  {item.count}
+                </Typography>
+              </ListItemButton>
+            </ListItem>
+          );
+        })}
       </List>
-    </Paper>
+    </Box>
   );
 }

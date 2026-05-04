@@ -1,10 +1,8 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 
-import type { WorkbenchImportMode } from "../components/workbench/WorkbenchImportModal";
+import type { ImportWorkflowMode } from "../features/imports/importRoutes";
 
-export type WorkbenchHeaderIntent =
-  | { type: "open_search" }
-  | { type: "open_import"; mode: WorkbenchImportMode };
+export type WorkbenchHeaderIntent = { type: "open_search" };
 
 export type WorkbenchRouteState = {
   workbenchHeaderIntent?: WorkbenchHeaderIntent;
@@ -12,7 +10,7 @@ export type WorkbenchRouteState = {
 
 export type WorkbenchHeaderActions = {
   canMutateData: boolean;
-  onOpenImport: (mode: WorkbenchImportMode) => void;
+  onOpenImport: (mode: ImportWorkflowMode) => void;
   onOpenSearch: () => void;
   onOpenSettings: () => void;
 };

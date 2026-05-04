@@ -61,7 +61,7 @@ describe("Bank details page", () => {
     await user.click(within(page).getByRole("button", { name: /交通银行 3847/ }));
 
     expect(await within(page).findByText("当前时间范围内没有流水。")).toBeInTheDocument();
-    expect(within(page).getByLabelText("交通银行 3847 余额")).toHaveTextContent("余额为空");
+    expect(within(page).getByLabelText(/交通银行 3847 余额/)).toHaveTextContent("余额为空");
     expect(within(page).getAllByText("130,500.50").length).toBeGreaterThan(0);
 
     await user.click(within(page).getByRole("button", { name: "上月" }));
@@ -86,5 +86,47 @@ describe("Bank details page", () => {
         expect.any(Object),
       );
     });
+  });
+
+  test("ignores aborted bank detail requests", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const rawUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const url = new URL(rawUrl, "http://localhost");
+      if (url.pathname === "/api/bank-details/accounts") {
+        return new Response(JSON.stringify({
+          total_balance: "130500.50",
+          balance_account_count: 1,
+          missing_balance_account_count: 0,
+          accounts: [
+            {
+              account_key: "icbc:6386",
+              bank_name: "工商银行",
+              account_last4: "6386",
+              display_name: "工商银行 6386",
+              latest_balance: "130500.50",
+              latest_balance_at: "2026-05-01 16:30:00",
+              has_balance: true,
+              transaction_count: 1,
+            },
+          ],
+        }), { status: 200 });
+      }
+      if (url.pathname === "/api/bank-details/transactions") {
+        throw new Error("signal is aborted without reason");
+      }
+      throw new Error(`Unhandled fetch mock for ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringMatching(/^\/api\/bank-details\/transactions/),
+        expect.any(Object),
+      );
+    });
+    await expect(within(page).findByText("signal is aborted without reason", {}, { timeout: 1000 })).rejects.toThrow();
   });
 });

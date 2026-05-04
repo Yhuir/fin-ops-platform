@@ -1,17 +1,18 @@
 import { useRef, useState, type FocusEvent } from "react";
+import { Link as RouterLink } from "react-router-dom";
 
-import type { WorkbenchImportMode } from "./WorkbenchImportModal";
+import { importWorkflowPath, type ImportWorkflowMode } from "../../features/imports/importRoutes";
 import WorkbenchSearchBox from "./WorkbenchSearchBox";
 
 type WorkbenchHeaderControlsProps = {
   canMutateData: boolean;
   className?: string;
-  onOpenImport: (mode: WorkbenchImportMode) => void;
+  onOpenImport: (mode: ImportWorkflowMode) => void;
   onOpenSearch: () => void;
   onOpenSettings: () => void;
 };
 
-const IMPORT_ACTIONS: Array<{ label: string; mode: WorkbenchImportMode }> = [
+const IMPORT_ACTIONS: Array<{ label: string; mode: ImportWorkflowMode }> = [
   { label: "银行流水导入", mode: "bank_transaction" },
   { label: "发票导入", mode: "invoice" },
   { label: "ETC发票导入", mode: "etc_invoice" },
@@ -73,15 +74,15 @@ export default function WorkbenchHeaderControls({
               pointerIntentRef.current = true;
             }}
           >
-            导入中心
+            导入
           </button>
-          <div aria-label="导入中心菜单" className="workbench-import-menu">
+          <div aria-label="导入菜单" className="workbench-import-menu">
             {IMPORT_ACTIONS.map((action) => (
-              <button
+              <RouterLink
                 key={action.mode}
                 className="workbench-import-menu-item"
                 tabIndex={importMenuOpen ? 0 : -1}
-                type="button"
+                to={importWorkflowPath(action.mode)}
                 onClick={() => {
                   setImportMenuHovered(false);
                   setImportMenuFocused(false);
@@ -89,7 +90,7 @@ export default function WorkbenchHeaderControls({
                 }}
               >
                 {action.label}
-              </button>
+              </RouterLink>
             ))}
           </div>
         </div>

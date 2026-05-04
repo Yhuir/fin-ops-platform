@@ -17,6 +17,7 @@ import { type WorkbenchHeaderIntent, useAppChrome } from "../contexts/AppChromeC
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import { calculateTaxOffset, fetchTaxOffsetMonth } from "../features/tax/api";
+import { importWorkflowPath } from "../features/imports/importRoutes";
 import type {
   TaxCertifiedImportConfirmResult,
   TaxMonthData,
@@ -74,7 +75,7 @@ export default function TaxOffsetPage() {
   useLayoutEffect(() => {
     setWorkbenchHeaderActions({
       canMutateData,
-      onOpenImport: (mode) => handleRouteToWorkbenchIntent({ type: "open_import", mode }),
+      onOpenImport: (mode) => navigate(importWorkflowPath(mode)),
       onOpenSearch: () => handleRouteToWorkbenchIntent({ type: "open_search" }),
       onOpenSettings: () => navigate("/settings"),
     });

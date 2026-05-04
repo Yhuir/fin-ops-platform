@@ -8,7 +8,6 @@ import IgnoredItemsModal from "../components/workbench/IgnoredItemsModal";
 import OaBankExceptionModal from "../components/workbench/OaBankExceptionModal";
 import ProcessedExceptionsModal from "../components/workbench/ProcessedExceptionsModal";
 import RelationPreviewTriPane from "../components/workbench/RelationPreviewTriPane";
-import WorkbenchImportModal, { type WorkbenchImportMode } from "../components/workbench/WorkbenchImportModal";
 import WorkbenchSearchModal from "../components/workbench/WorkbenchSearchModal";
 import WorkbenchZone from "../components/workbench/WorkbenchZone";
 import type { WorkbenchPane } from "../components/workbench/ResizableTriPane";
@@ -61,7 +60,6 @@ import type {
 import { useMonth } from "../contexts/MonthContext";
 import useWorkbenchSelection from "../hooks/useWorkbenchSelection";
 import type { WorkbenchInlineAction } from "../components/workbench/RowActions";
-import type { ImportSessionPayload } from "../features/imports/types";
 
 type ActionDialogState = {
   phase: "loading" | "result";
@@ -172,7 +170,6 @@ export default function ReconciliationWorkbenchPage() {
   const [relationPreviewDialog, setRelationPreviewDialog] = useState<RelationPreviewDialogState | null>(null);
   const [ignoredData, setIgnoredData] = useState<IgnoredWorkbenchData>({ month: WORKBENCH_VIEW_MONTH, rows: [] });
   const [workbenchSettings, setWorkbenchSettings] = useState<WorkbenchSettings | null>(null);
-  const [importModalMode, setImportModalMode] = useState<WorkbenchImportMode | null>(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchScope, setSearchScope] = useState<WorkbenchSearchScope>("all");
@@ -776,15 +773,6 @@ export default function ReconciliationWorkbenchPage() {
     [deferredOpenDisplayState, visibleOpenGroups],
   );
 
-  const importBankOptions = useMemo(
-    () => [...(workbenchSettings?.bankAccountMappings ?? [])].sort((left, right) => {
-      const leftLabel = `${left.bankName} ${left.last4}`.trim();
-      const rightLabel = `${right.bankName} ${right.last4}`.trim();
-      return leftLabel.localeCompare(rightLabel, "zh-Hans-CN");
-    }),
-    [workbenchSettings?.bankAccountMappings],
-  );
-
   const searchProjectOptions = useMemo(() => {
     const candidates = new Set<string>();
 
@@ -1018,18 +1006,8 @@ export default function ReconciliationWorkbenchPage() {
     if (intent.type === "open_search") {
       handleOpenSearchModal();
     }
-    if (intent.type === "open_import") {
-      setImportModalMode(intent.mode);
-    }
     navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
   }, [handleOpenSearchModal, location.pathname, location.search, navigate, routeState]);
-
-  const handleWorkbenchImportComplete = useCallback((payload: ImportSessionPayload) => {
-    const confirmedCount = payload.files.filter((file) => file.status === "confirmed").length;
-    setImportModalMode(null);
-    setLastActionMessage(`已导入 ${confirmedCount} 个文件，正在刷新关联台。`);
-    refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
-  }, [refreshWorkbenchDataInBackground]);
 
   const handleJumpToSearchResult = (jumpTarget: WorkbenchSearchJumpTarget) => {
     handleCloseDetail();
@@ -1674,14 +1652,6 @@ export default function ReconciliationWorkbenchPage() {
         ) : null}
       </div>
 
-      {importModalMode ? (
-        <WorkbenchImportModal
-          mode={importModalMode}
-          bankOptions={importBankOptions}
-          onClose={() => setImportModalMode(null)}
-          onImported={handleWorkbenchImportComplete}
-        />
-      ) : null}
       <DetailDrawer error={detailError} loading={isDetailLoading} row={detailRow} onClose={handleCloseDetail} />
       {relationPreviewDialog ? (
         <RelationPreviewDialog

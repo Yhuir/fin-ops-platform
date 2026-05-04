@@ -243,11 +243,11 @@ export default function EtcTicketManagementPage() {
         actions={
           <Button
             component={RouterLink}
-            to="/imports?intent=etc_invoice"
+            to="/imports/etc-invoices"
             variant="outlined"
             endIcon={<ArrowForwardOutlinedIcon />}
           >
-            去导入中心导入 ETC 发票
+            导入 ETC 发票
           </Button>
         }
       >

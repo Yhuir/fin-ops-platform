@@ -119,7 +119,7 @@ describe("ETC ticket management page", () => {
     expect(await within(page).findByRole("button", { name: "未提交 4" })).toBeInTheDocument();
   });
 
-  test("links to import center instead of importing ETC zip files directly", async () => {
+  test("links to the standalone ETC invoice import page instead of importing ETC zip files directly", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderAppAt("/etc-tickets");
@@ -129,9 +129,10 @@ describe("ETC ticket management page", () => {
     expect(within(page).queryByRole("button", { name: "导入zip" })).not.toBeInTheDocument();
     expect(within(page).queryByRole("region", { name: "导入摘要" })).not.toBeInTheDocument();
 
-    await user.click(within(page).getByRole("link", { name: "去导入中心导入 ETC 发票" }));
+    await user.click(within(page).getByRole("link", { name: "导入 ETC 发票" }));
 
     expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/imports/etc-invoices");
     expect(fetchMock).not.toHaveBeenCalledWith(
       "/api/etc/import",
       expect.objectContaining({ method: "POST", body: expect.any(FormData) }),

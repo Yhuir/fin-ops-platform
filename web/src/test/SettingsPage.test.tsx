@@ -68,8 +68,9 @@ describe("Settings page", () => {
     await user.click(within(tree).getByRole("treeitem", { name: /数据重置/ }));
     await user.click(within(settingsPage).getByRole("button", { name: "清除所有银行流水数据" }));
 
-    expect(await screen.findByRole("dialog", { name: "确认数据重置" })).toBeInTheDocument();
-    expect(screen.getByText("已导入银行流水会被清空")).toBeInTheDocument();
+    const confirmDialog = await screen.findByRole("dialog", { name: "确认数据重置" });
+    expect(confirmDialog).toBeInTheDocument();
+    expect(within(confirmDialog).getByText("已导入银行流水会被清空")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "继续" }));
     expect(await screen.findByRole("dialog", { name: "OA 密码复核" })).toBeInTheDocument();

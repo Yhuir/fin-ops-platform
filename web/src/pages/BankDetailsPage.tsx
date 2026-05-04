@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState, type FocusEvent, type FormEvent, type MouseEvent } from "react";
-import AccountBalanceOutlinedIcon from "@mui/icons-material/AccountBalanceOutlined";
 import Box from "@mui/material/Box";
-import ButtonBase from "@mui/material/ButtonBase";
 import Chip from "@mui/material/Chip";
 import Divider from "@mui/material/Divider";
 import Paper from "@mui/material/Paper";
 import List from "@mui/material/List";
 import ListItem from "@mui/material/ListItem";
+import ListItemButton from "@mui/material/ListItemButton";
+import ListItemText from "@mui/material/ListItemText";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import ToggleButton from "@mui/material/ToggleButton";
@@ -91,6 +91,16 @@ function formatPickerDate(value: Dayjs | null) {
   return value?.isValid() ? value.format("YYYY-MM-DD") : null;
 }
 
+function isAbortLikeError(caught: unknown) {
+  if (caught instanceof DOMException && caught.name === "AbortError") {
+    return true;
+  }
+  if (caught instanceof Error) {
+    return caught.name === "AbortError" || /aborted|abort/i.test(caught.message);
+  }
+  return false;
+}
+
 function EmptyTransactionOverlay() {
   return (
     <Stack alignItems="center" justifyContent="center" sx={{ height: "100%", px: 2, textAlign: "center" }}>
@@ -103,20 +113,20 @@ const transactionColumns: GridColDef<BankDetailTransaction>[] = [
   {
     field: "tradeTime",
     headerName: "交易时间",
-    width: 170,
     minWidth: 160,
+    flex: 1,
   },
   {
     field: "counterpartyName",
     headerName: "对方户名",
-    width: 220,
-    minWidth: 190,
+    minWidth: 200,
+    flex: 1.35,
   },
   {
     field: "amount",
     headerName: "金额",
-    width: 160,
-    minWidth: 150,
+    minWidth: 170,
+    flex: 0.95,
     align: "right",
     headerAlign: "right",
     renderCell: ({ row }) => (
@@ -136,8 +146,8 @@ const transactionColumns: GridColDef<BankDetailTransaction>[] = [
   {
     field: "balance",
     headerName: "余额",
-    width: 150,
     minWidth: 140,
+    flex: 0.85,
     align: "right",
     headerAlign: "right",
     valueFormatter: (value) => formatMoney(value as string | null),
@@ -145,14 +155,14 @@ const transactionColumns: GridColDef<BankDetailTransaction>[] = [
   {
     field: "summary",
     headerName: "摘要",
-    width: 180,
     minWidth: 150,
+    flex: 1,
   },
   {
     field: "purpose",
     headerName: "用途",
-    width: 140,
-    minWidth: 120,
+    minWidth: 130,
+    flex: 0.8,
   },
 ];
 
@@ -173,6 +183,7 @@ export default function BankDetailsPage() {
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
+    setError(null);
     fetchBankDetailAccounts(controller.signal)
       .then((payload) => {
         setAccountsData({
@@ -182,8 +193,16 @@ export default function BankDetailsPage() {
         });
         setSelectedAccountKey((current) => current ?? payload.accounts[0]?.accountKey ?? null);
       })
-      .catch((caught) => setError(caught instanceof Error ? caught.message : "银行明细加载失败。"))
-      .finally(() => setLoading(false));
+      .catch((caught) => {
+        if (!isAbortLikeError(caught)) {
+          setError(caught instanceof Error ? caught.message : "银行明细加载失败。");
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      });
     return () => controller.abort();
   }, []);
 
@@ -194,6 +213,7 @@ export default function BankDetailsPage() {
     }
     const controller = new AbortController();
     setRowLoading(true);
+    setError(null);
     fetchBankDetailTransactions({
       accountKey: selectedAccountKey,
       dateFrom: dateFilter.dateFrom,
@@ -201,8 +221,16 @@ export default function BankDetailsPage() {
       signal: controller.signal,
     })
       .then((payload) => setRows(payload.rows))
-      .catch((caught) => setError(caught instanceof Error ? caught.message : "银行流水加载失败。"))
-      .finally(() => setRowLoading(false));
+      .catch((caught) => {
+        if (!isAbortLikeError(caught)) {
+          setError(caught instanceof Error ? caught.message : "银行流水加载失败。");
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setRowLoading(false);
+        }
+      });
     return () => controller.abort();
   }, [dateFilter.dateFrom, dateFilter.dateTo, selectedAccountKey]);
 
@@ -247,72 +275,66 @@ export default function BankDetailsPage() {
       <PageScaffold
         className="bank-details-page"
         title="银行明细"
-        description="已导入流水"
         actions={(
-          <Paper className="bank-balance-summary" elevation={0}>
-            <Stack spacing={0.5}>
+          <Stack direction="row" flexWrap="wrap" alignItems="center" justifyContent="flex-end" gap={1}>
+            <Box sx={{ minWidth: 0, textAlign: { xs: "left", sm: "right" } }}>
               <Typography color="text.secondary" variant="caption">总余额</Typography>
-              <Typography component="strong" variant="h6" fontWeight={800}>
+              <Typography component="strong" variant="subtitle1" fontWeight={800} sx={{ display: "block" }}>
                 {displayBalance(accountsData.totalBalance)}
               </Typography>
-            </Stack>
+            </Box>
             {accountsData.missingBalanceAccountCount > 0 ? (
               <Chip label={`${accountsData.missingBalanceAccountCount} 个账户无余额`} size="small" color="warning" variant="outlined" />
             ) : null}
-          </Paper>
+          </Stack>
         )}
       >
         <Stack spacing={2}>
           {error ? <StatePanel tone="error">{error}</StatePanel> : null}
           {loading ? <StatePanel tone="loading" compact>正在加载银行明细。</StatePanel> : null}
           {!loading && accountsData.accounts.length === 0 ? (
-            <StatePanel tone="empty">暂无银行流水，请先在导入中心导入银行流水。</StatePanel>
+            <StatePanel tone="empty">暂无银行流水，请先在银行流水导入页面导入。</StatePanel>
           ) : null}
-
-          <Stack component="section" className="bank-balance-strip" direction="row" flexWrap="wrap" gap={1} aria-label="账户余额">
-            {accountsData.accounts.map((account) => (
-              <Chip
-                key={account.accountKey}
-                aria-label={`${account.displayName} 余额`}
-                className="bank-balance-chip"
-                icon={<AccountBalanceOutlinedIcon />}
-                label={(
-                  <Stack component="span" spacing={0.25}>
-                    <Typography component="span" variant="caption" color="text.secondary">{account.displayName}</Typography>
-                    <Typography component="strong" variant="body2" fontWeight={800}>{displayBalance(account.latestBalance)}</Typography>
-                  </Stack>
-                )}
-                variant="outlined"
-              />
-            ))}
-          </Stack>
 
           <Box className="bank-details-layout">
             <Paper component="aside" className="bank-account-tree" elevation={0}>
-              <Typography className="bank-section-title" component="h2" variant="subtitle2">银行账户</Typography>
+              <Stack className="bank-account-heading" direction="row" alignItems="center" justifyContent="space-between">
+                <Typography className="bank-section-title" component="h2" variant="subtitle2">银行账户</Typography>
+                <Chip className="bank-account-total-chip" label={`${accountsData.accounts.length} 个`} size="small" variant="outlined" />
+              </Stack>
               <List aria-label="银行账户" dense disablePadding>
                 {accountsData.accounts.map((account) => {
                   const selected = account.accountKey === selectedAccountKey;
                   return (
                     <ListItem key={account.accountKey} disablePadding>
-                      <ButtonBase
+                      <ListItemButton
                         aria-current={selected ? "true" : undefined}
+                        aria-label={`${account.displayName} 余额 ${displayBalance(account.latestBalance)}`}
                         className={`bank-account-node${selected ? " active" : ""}`}
                         component="button"
-                        type="button"
                         onClick={() => setSelectedAccountKey(account.accountKey)}
                       >
-                        <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
-                          <Typography component="span" fontWeight={800}>{account.displayName}</Typography>
-                          <Chip label={`${account.transactionCount} 条`} size="small" variant="outlined" />
-                        </Stack>
-                        <Typography component="strong" variant="body2" fontWeight={800}>
-                          {displayBalance(account.latestBalance)}
-                        </Typography>
-                        <Typography component="small" color="text.secondary" variant="caption">
-                          当前范围 {account.transactionCount} 条
-                        </Typography>
-                      </ButtonBase>
+                        <ListItemText
+                          disableTypography
+                          primary={(
+                            <Stack direction="row" alignItems="center" spacing={0.75} minWidth={0}>
+                              <Typography className="bank-account-name" component="span">{account.bankName}</Typography>
+                              <Typography className="bank-account-last4" component="span">{account.accountLast4}</Typography>
+                            </Stack>
+                          )}
+                          secondary={(
+                            <Stack direction="row" alignItems="center" spacing={0.75} minWidth={0}>
+                              <Chip className="bank-account-count-chip" label={`${account.transactionCount} 条`} size="small" variant="outlined" />
+                              {!account.hasBalance ? (
+                                <Chip className="bank-account-empty-chip" label="余额为空" size="small" variant="outlined" />
+                              ) : null}
+                            </Stack>
+                          )}
+                        />
+                        <Box className="bank-account-balance">
+                          <Typography component="strong">{displayBalance(account.latestBalance)}</Typography>
+                        </Box>
+                      </ListItemButton>
                     </ListItem>
                   );
                 })}
@@ -420,17 +442,34 @@ export default function BankDetailsPage() {
 
               <Divider />
 
-              <Box className="bank-transaction-grid">
+              <Box className="bank-transaction-grid" sx={{ height: { xs: 520, lg: 560 }, minHeight: 420, width: "100%" }}>
                 <DataGrid
                   aria-label="交易流水"
                   columns={transactionColumns}
                   rows={rows}
                   loading={rowLoading}
-                  disableColumnMenu
                   disableRowSelectionOnClick
-                  disableVirtualization
                   hideFooter
+                  showToolbar
+                  getRowClassName={(params) => (params.indexRelativeToCurrentPage % 2 === 0 ? "bank-grid-row-even" : "bank-grid-row-odd")}
+                  localeText={{ toolbarQuickFilterPlaceholder: "搜索流水" }}
+                  slotProps={{
+                    toolbar: {
+                      quickFilterProps: {
+                        debounceMs: 200,
+                      },
+                    },
+                  }}
                   slots={{ noRowsOverlay: EmptyTransactionOverlay }}
+                  sx={{
+                    height: "100%",
+                    borderColor: "#c6c6c6",
+                    borderRadius: 0,
+                    "--DataGrid-overlayHeight": "320px",
+                    "& .MuiDataGrid-columnHeaders": {
+                      backgroundColor: "#f4f4f4",
+                    },
+                  }}
                 />
               </Box>
             </Paper>

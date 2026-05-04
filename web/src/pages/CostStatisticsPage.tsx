@@ -23,6 +23,7 @@ import {
   type CostExportParams,
   type PreviewCostExportParams,
 } from "../features/cost-statistics/api";
+import { importWorkflowPath } from "../features/imports/importRoutes";
 import type {
   CostExpenseTypeExplorerRow,
   CostProjectScope,
@@ -371,7 +372,7 @@ export default function CostStatisticsPage() {
   useLayoutEffect(() => {
     setWorkbenchHeaderActions({
       canMutateData,
-      onOpenImport: (mode) => handleRouteToWorkbenchIntent({ type: "open_import", mode }),
+      onOpenImport: (mode) => navigate(importWorkflowPath(mode)),
       onOpenSearch: () => handleRouteToWorkbenchIntent({ type: "open_search" }),
       onOpenSettings: () => navigate("/settings"),
     });

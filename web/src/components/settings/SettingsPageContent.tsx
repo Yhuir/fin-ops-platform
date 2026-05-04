@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 
 import Alert from "@mui/material/Alert";
+import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import CircularProgress from "@mui/material/CircularProgress";
 import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
-import List from "@mui/material/List";
-import ListItem from "@mui/material/ListItem";
-import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
+import { ThemeProvider } from "@mui/material/styles";
 
 import { useSession } from "../../contexts/SessionContext";
 import type {
@@ -30,6 +30,15 @@ import SettingsOaInvoiceOffsetSection from "./SettingsOaInvoiceOffsetSection";
 import SettingsOaRetentionSection from "./SettingsOaRetentionSection";
 import SettingsProjectsSection from "./SettingsProjectsSection";
 import SettingsTreeNav from "./SettingsTreeNav";
+import {
+  settingsButtonSx,
+  settingsContentSx,
+  settingsHeaderSx,
+  settingsLayoutSx,
+  settingsNavShellSx,
+  settingsTheme,
+  settingsTokens,
+} from "./settingsDesign";
 import type {
   DataResetActionConfig,
   DataResetStatus,
@@ -531,20 +540,60 @@ export default function SettingsPageContent({
   }
 
   return (
-    <>
-      <Paper aria-label="设置内容" className="settings-page-panel" component="section" variant="outlined">
-        <div className="settings-page-body workbench-settings-body">
-          {!canSave ? <Alert severity="warning" className="settings-state-banner">当前账号仅支持查看和导出，不能保存设置。</Alert> : null}
+    <ThemeProvider theme={settingsTheme}>
+      <Box sx={settingsLayoutSx}>
+        <Box component="nav" sx={settingsNavShellSx}>
+          <SettingsTreeNav
+            items={settingsNavigationItems}
+            activeSectionId={activeSectionId}
+            onSelect={setActiveSectionId}
+          />
+        </Box>
 
-          <div className="settings-two-column-layout">
-            <SettingsTreeNav
-              items={settingsNavigationItems}
-              activeSectionId={activeSectionId}
-              onSelect={setActiveSectionId}
-            />
+        <Box aria-label="设置内容" component="section" sx={settingsContentSx}>
+          <Box component="header" sx={[settingsHeaderSx, { px: 0, pt: 0, mb: 3 }]}>
+            <Box sx={{ minWidth: 0 }}>
+              <Typography component="h1" variant="h4" sx={{ color: settingsTokens.textPrimary }}>
+                设置
+              </Typography>
+              <Typography
+                component="p"
+                variant="body2"
+                sx={{ color: settingsTokens.textSecondary, mt: 0.5, maxWidth: 720 }}
+              >
+                管理关联台项目、账户、OA导入与高风险维护配置。
+              </Typography>
+              {!canSave ? (
+                <Alert severity="warning" sx={{ mt: 1.5, py: 0.5 }}>
+                  当前账号仅支持查看和导出，不能保存设置。
+                </Alert>
+              ) : null}
+            </Box>
+            <Stack
+              direction="row"
+              alignItems="center"
+              justifyContent={{ xs: "space-between", md: "flex-end" }}
+              spacing={2}
+              sx={{ flexShrink: 0 }}
+            >
+              <Typography component="span" variant="caption" sx={{ color: settingsTokens.textMuted }}>
+                {isSaving ? "正在保存变更" : "变更需手动保存"}
+              </Typography>
+              <Button
+                type="button"
+                variant="contained"
+                disableElevation
+                disabled={controlsDisabled}
+                onClick={handleSave}
+                sx={settingsButtonSx}
+                startIcon={isSaving ? <CircularProgress size={16} color="inherit" /> : null}
+              >
+                {isSaving ? "保存中..." : "保存设置"}
+              </Button>
+            </Stack>
+          </Box>
 
-            <div className="settings-content-panel">
-              {activeSectionId === "projects" ? (
+            {activeSectionId === "projects" ? (
                 <SettingsProjectsSection
                   activeProjects={activeProjects}
                   completedProjects={completedProjects}
@@ -636,15 +685,8 @@ export default function SettingsPageContent({
                   onOpenDataResetConfirm={handleOpenDataResetConfirm}
                 />
               ) : null}
-            </div>
-          </div>
-        </div>
-        <Stack className="settings-page-footer" direction="row" justifyContent="flex-end">
-          <Button type="button" variant="contained" disabled={controlsDisabled} onClick={handleSave}>
-            {isSaving ? "保存中..." : "保存设置"}
-          </Button>
-        </Stack>
-      </Paper>
+        </Box>
+      </Box>
       {dataResetDialog ? (
         <DataResetDialog
           config={dataResetActionConfig(dataResetDialog.action)}
@@ -657,7 +699,7 @@ export default function SettingsPageContent({
           onSubmit={handleConfirmDataReset}
         />
       ) : null}
-    </>
+    </ThemeProvider>
   );
 }
 
@@ -680,23 +722,53 @@ function DataResetDialog({
   onPasswordChange: (value: string) => void;
   onSubmit: () => void;
 }) {
+  const dialogPaperProps = {
+    sx: {
+      border: `1px solid ${settingsTokens.borderSubtle}`,
+      borderRadius: "4px",
+      boxShadow: "none",
+    },
+  };
+
   if (step === "confirm") {
     return (
-      <Dialog open onClose={onCancel} aria-labelledby="data-reset-confirm-title" maxWidth="sm" fullWidth>
-        <DialogTitle id="data-reset-confirm-title">确认数据重置</DialogTitle>
-        <DialogContent>
+      <Dialog
+        open
+        onClose={onCancel}
+        aria-labelledby="data-reset-confirm-title"
+        maxWidth="sm"
+        fullWidth
+        PaperProps={dialogPaperProps}
+      >
+        <DialogTitle id="data-reset-confirm-title" sx={{ color: settingsTokens.textPrimary }}>
+          确认数据重置
+        </DialogTitle>
+        <DialogContent dividers>
           <Stack spacing={2}>
-            <Typography variant="body2">{config.description}</Typography>
-            <List dense className="data-reset-impact-list">
+            <Typography variant="body2" sx={{ color: settingsTokens.textPrimary }}>
+              {config.description}
+            </Typography>
+            <Box component="ul" sx={{ pl: 2, m: 0, "& li": { mb: 0.5 } }}>
               {config.impact.map((item) => (
-                <ListItem key={item}>{item}</ListItem>
+                <Typography component="li" variant="body2" color="text.secondary" key={item}>
+                  {item}
+                </Typography>
               ))}
-            </List>
+            </Box>
           </Stack>
         </DialogContent>
-        <DialogActions>
-          <Button type="button" onClick={onCancel}>取消</Button>
-          <Button color="error" type="button" variant="contained" onClick={onContinue}>
+        <DialogActions sx={{ p: 2, px: 3 }}>
+          <Button type="button" onClick={onCancel} sx={{ color: settingsTokens.textSecondary }}>
+            取消
+          </Button>
+          <Button
+            color="error"
+            type="button"
+            variant="contained"
+            onClick={onContinue}
+            disableElevation
+            sx={{ borderRadius: "4px" }}
+          >
             继续
           </Button>
         </DialogActions>
@@ -705,11 +777,22 @@ function DataResetDialog({
   }
 
   return (
-    <Dialog open onClose={isBusy ? undefined : onCancel} aria-labelledby="data-reset-password-title" maxWidth="sm" fullWidth>
-      <DialogTitle id="data-reset-password-title">OA 密码复核</DialogTitle>
-      <DialogContent>
-        <Stack spacing={2} sx={{ pt: 0.5 }}>
-          <Typography variant="body2">请输入当前 OA 用户密码以确认本次高风险操作。</Typography>
+    <Dialog
+      open
+      onClose={isBusy ? undefined : onCancel}
+      aria-labelledby="data-reset-password-title"
+      maxWidth="sm"
+      fullWidth
+      PaperProps={dialogPaperProps}
+    >
+      <DialogTitle id="data-reset-password-title" sx={{ color: settingsTokens.textPrimary }}>
+        OA 密码复核
+      </DialogTitle>
+      <DialogContent dividers>
+        <Stack spacing={2} sx={{ pt: 1 }}>
+          <Typography variant="body2" sx={{ color: settingsTokens.textPrimary }}>
+            请输入当前 OA 用户密码以确认本次高风险操作。
+          </Typography>
           <TextField
             autoComplete="current-password"
             autoFocus
@@ -720,14 +803,31 @@ function DataResetDialog({
             value={password}
             disabled={isBusy}
             onChange={(event) => onPasswordChange(event.currentTarget.value)}
+            sx={{
+              "& .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline": {
+                borderColor: settingsTokens.primary,
+              },
+              "& .MuiInputLabel-root.Mui-focused": {
+                color: settingsTokens.primary,
+              },
+            }}
           />
         </Stack>
       </DialogContent>
-      <DialogActions>
-        <Button type="button" disabled={isBusy} onClick={onCancel}>
+      <DialogActions sx={{ p: 2, px: 3 }}>
+        <Button type="button" disabled={isBusy} onClick={onCancel} sx={{ color: settingsTokens.textSecondary }}>
           取消
         </Button>
-        <Button color="error" type="button" variant="contained" disabled={isBusy || !password} onClick={onSubmit}>
+        <Button
+          color="error"
+          type="button"
+          variant="contained"
+          disabled={isBusy || !password}
+          onClick={onSubmit}
+          disableElevation
+          sx={{ borderRadius: "4px" }}
+          startIcon={isBusy ? <CircularProgress size={16} color="inherit" /> : null}
+        >
           {isBusy ? "清理中..." : "确认清理"}
         </Button>
       </DialogActions>

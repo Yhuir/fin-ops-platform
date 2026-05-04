@@ -2,10 +2,13 @@ import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import Alert from "@mui/material/Alert";
+import Box from "@mui/material/Box";
+import Stack from "@mui/material/Stack";
 
 import SettingsPageContent from "../components/settings/SettingsPageContent";
 import { type WorkbenchHeaderIntent, useAppChrome } from "../contexts/AppChromeContext";
 import { useSession, useSessionPermissions } from "../contexts/SessionContext";
+import { importWorkflowPath } from "../features/imports/importRoutes";
 import {
   createWorkbenchSettingsProject,
   deleteWorkbenchSettingsProject,
@@ -256,7 +259,7 @@ export default function SettingsPage() {
   useLayoutEffect(() => {
     setWorkbenchHeaderActions({
       canMutateData,
-      onOpenImport: (mode) => handleRouteToWorkbenchIntent({ type: "open_import", mode }),
+      onOpenImport: (mode) => navigate(importWorkflowPath(mode)),
       onOpenSearch: () => handleRouteToWorkbenchIntent({ type: "open_search" }),
       onOpenSettings: handleStayOnSettings,
     });
@@ -266,12 +269,14 @@ export default function SettingsPage() {
   }, [canMutateData, handleRouteToWorkbenchIntent, handleStayOnSettings, setWorkbenchHeaderActions]);
 
   return (
-    <div className="page-stack settings-page-shell" data-testid="settings-page">
-      {pageFeedback ? (
-        <Alert severity={pageFeedback.tone === "error" ? "error" : "success"}>{pageFeedback.message}</Alert>
-      ) : null}
-      {loadError ? <Alert severity="error">{loadError}</Alert> : null}
-      {isLoading && !loadError ? <Alert severity="info">正在同步关联台设置...</Alert> : null}
+    <Box data-testid="settings-page" sx={{ display: "flex", flexDirection: "column", flex: 1, height: "100%" }}>
+      <Stack spacing={2} sx={{ mb: 3 }}>
+        {pageFeedback ? (
+          <Alert severity={pageFeedback.tone === "error" ? "error" : "success"}>{pageFeedback.message}</Alert>
+        ) : null}
+        {loadError ? <Alert severity="error">{loadError}</Alert> : null}
+        {isLoading && !loadError ? <Alert severity="info">正在同步关联台设置...</Alert> : null}
+      </Stack>
       {!isLoading && !loadError && settings ? (
         <SettingsPageContent
           canManageAccessControl={canAdminAccess}
@@ -286,6 +291,6 @@ export default function SettingsPage() {
           onSyncProjects={handleSyncSettingsProjects}
         />
       ) : null}
-    </div>
+    </Box>
   );
 }
