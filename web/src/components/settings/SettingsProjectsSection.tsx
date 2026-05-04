@@ -1,3 +1,11 @@
+import Alert from "@mui/material/Alert";
+import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import Paper from "@mui/material/Paper";
+import Stack from "@mui/material/Stack";
+import TextField from "@mui/material/TextField";
+import Typography from "@mui/material/Typography";
+
 import type { WorkbenchProjectSetting } from "../../features/workbench/types";
 import type { SettingsProjectsSectionProps } from "./types";
 
@@ -19,32 +27,35 @@ function ProjectRow({
   onDeleteProject: (project: WorkbenchProjectSetting) => Promise<void> | void;
 }) {
   return (
-    <div className={`settings-project-row${rowClassName ? ` ${rowClassName}` : ""}`}>
-      <span className="settings-project-main">
-        <strong>{project.projectName}</strong>
-        <small>{project.projectCode} / 来源：{project.source === "manual" ? "本地" : "OA"}</small>
-      </span>
-      <span className="settings-project-actions">
-        <button
+    <Paper className={`settings-project-row${rowClassName ? ` ${rowClassName}` : ""}`} variant="outlined">
+      <Box className="settings-project-main">
+        <Typography component="strong" variant="body2">{project.projectName}</Typography>
+        <Typography component="small" variant="caption">{project.projectCode} / 来源：{project.source === "manual" ? "本地" : "OA"}</Typography>
+      </Box>
+      <Stack className="settings-project-actions" direction="row" spacing={1}>
+        <Button
           aria-label={`${project.projectName} ${toggleLabel}`}
-          className="secondary-button"
+          size="small"
           type="button"
+          variant="outlined"
           disabled={controlsDisabled}
           onClick={() => onToggleCompleted(project.id)}
         >
           {toggleLabel}
-        </button>
-        <button
+        </Button>
+        <Button
           aria-label={`${project.projectName} ${deleteLabel}`}
-          className="secondary-button danger-button"
+          color="error"
+          size="small"
           type="button"
+          variant="outlined"
           disabled={controlsDisabled}
           onClick={() => void onDeleteProject(project)}
         >
           {deleteLabel}
-        </button>
-      </span>
-    </div>
+        </Button>
+      </Stack>
+    </Paper>
   );
 }
 
@@ -65,63 +76,62 @@ export default function SettingsProjectsSection({
   canAddProject,
 }: SettingsProjectsSectionProps) {
   return (
-    <section
+    <Paper
+      component="section"
       aria-labelledby="settings-section-projects-title"
-      className="cost-explorer-lane settings-section-panel"
+      className="settings-section-panel"
       id="settings-section-projects"
       role="region"
+      variant="outlined"
     >
-      <div className="cost-explorer-lane-header settings-section-header">
-        <h3 id="settings-section-projects-title">项目状态管理</h3>
-      </div>
+      <Stack className="settings-section-header" direction="row" alignItems="center" justifyContent="space-between">
+        <Typography id="settings-section-projects-title" component="h3" variant="subtitle1">项目状态管理</Typography>
+      </Stack>
       <div className="settings-section-body">
-        <div className="settings-project-toolbar">
-          <button
-            className="secondary-button"
+        <Stack className="settings-project-toolbar" direction="row" spacing={1.5} useFlexGap flexWrap="wrap">
+          <Button
+            size="small"
             type="button"
+            variant="outlined"
             disabled={controlsDisabled}
             onClick={() => void onSyncProjects()}
           >
             {isProjectActionBusy ? "同步中..." : "从 OA 拉取项目"}
-          </button>
-          <label className="project-export-select-field">
-            <span>项目编码</span>
-            <input
-              aria-label="项目编码"
-              value={projectCodeDraft}
-              disabled={controlsDisabled}
-              onChange={(event) => onChangeProjectCodeDraft(event.currentTarget.value)}
-            />
-          </label>
-          <label className="project-export-select-field">
-            <span>项目名称</span>
-            <input
-              aria-label="项目名称"
-              value={projectNameDraft}
-              disabled={controlsDisabled}
-              onChange={(event) => onChangeProjectNameDraft(event.currentTarget.value)}
-            />
-          </label>
-          <button
-            className="primary-button"
+          </Button>
+          <TextField
+            label="项目编码"
+            size="small"
+            value={projectCodeDraft}
+            disabled={controlsDisabled}
+            onChange={(event) => onChangeProjectCodeDraft(event.currentTarget.value)}
+          />
+          <TextField
+            label="项目名称"
+            size="small"
+            value={projectNameDraft}
+            disabled={controlsDisabled}
+            onChange={(event) => onChangeProjectNameDraft(event.currentTarget.value)}
+          />
+          <Button
             type="button"
+            variant="contained"
             disabled={!canAddProject || controlsDisabled}
             onClick={() => void onAddProject()}
           >
             新增本地项目
-          </button>
-        </div>
+          </Button>
+        </Stack>
         {projectActionStatus ? (
-          <div className={`state-panel project-action-status project-action-status-${projectActionStatus.tone}`}>
+          <Alert className="project-action-status" severity={projectActionStatus.tone === "error" ? "error" : "success"}>
             {projectActionStatus.message}
-          </div>
+          </Alert>
         ) : null}
         <div className="settings-project-columns">
-          <div className="settings-project-column">
-            <div className="settings-project-column-head">
-              <strong>进行中项目</strong>
-              <span>{activeProjects.length} 个</span>
-            </div>
+          <Paper className="settings-project-column" variant="outlined">
+            <Stack className="settings-project-column-head" direction="row" alignItems="center" justifyContent="space-between">
+              <Typography component="strong" variant="body2">进行中项目</Typography>
+              <Typography component="span" variant="caption">{activeProjects.length} 个</Typography>
+            </Stack>
             <div className="settings-project-list">
               {activeProjects.map((project) => (
                 <ProjectRow
@@ -135,12 +145,12 @@ export default function SettingsProjectsSection({
                 />
               ))}
             </div>
-          </div>
-          <div className="settings-project-column">
-            <div className="settings-project-column-head">
-              <strong>已完成项目</strong>
-              <span>{completedProjects.length} 个</span>
-            </div>
+          </Paper>
+          <Paper className="settings-project-column" variant="outlined">
+            <Stack className="settings-project-column-head" direction="row" alignItems="center" justifyContent="space-between">
+              <Typography component="strong" variant="body2">已完成项目</Typography>
+              <Typography component="span" variant="caption">{completedProjects.length} 个</Typography>
+            </Stack>
             <div className="settings-project-list">
               {completedProjects.map((project) => (
                 <ProjectRow
@@ -155,9 +165,9 @@ export default function SettingsProjectsSection({
                 />
               ))}
             </div>
-          </div>
+          </Paper>
         </div>
       </div>
-    </section>
+    </Paper>
   );
 }

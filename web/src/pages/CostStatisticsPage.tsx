@@ -8,7 +8,9 @@ import ExportCenterModal, {
   type ExportRangeMode,
 } from "../components/cost-statistics/ExportCenterModal";
 import CostStatisticsSummaryCards from "../components/cost-statistics/CostStatisticsSummaryCards";
-import CostStatisticsTable from "../components/cost-statistics/CostStatisticsTable";
+import CostStatisticsTable, {
+  type CostStatisticsTableColumn,
+} from "../components/cost-statistics/CostStatisticsTable";
 import CostTransactionDetailModal from "../components/cost-statistics/CostTransactionDetailModal";
 import { type WorkbenchHeaderIntent, useAppChrome } from "../contexts/AppChromeContext";
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
@@ -1120,40 +1122,48 @@ export default function CostStatisticsPage() {
     await runExport(params);
   }
 
-  const timeColumns = [
-    { key: "tradeTime", header: "时间", render: (row: CostTimeRow) => row.tradeTime },
-    { key: "projectName", header: "项目名", render: (row: CostTimeRow) => row.projectName },
-    { key: "expenseType", header: "费用类型", render: (row: CostTimeRow) => row.expenseType },
-    {
-      key: "amount",
-      header: "金额",
-      cellClassName: "cost-table-cell-money",
-      render: (row: CostTimeRow) => ({
-        amount: row.amount,
-        direction: row.direction,
-        paymentAccountLabel: row.paymentAccountLabel,
-      }),
-    },
-    { key: "expenseContent", header: "费用内容", render: (row: CostTimeRow) => row.expenseContent },
-  ];
+  const timeColumns = useMemo<CostStatisticsTableColumn<CostTimeRow>[]>(
+    () => [
+      { key: "tradeTime", header: "时间", width: 170, render: (row) => row.tradeTime },
+      { key: "projectName", header: "项目名", flex: 1.4, render: (row) => row.projectName },
+      { key: "expenseType", header: "费用类型", width: 150, render: (row) => row.expenseType },
+      {
+        key: "amount",
+        header: "金额",
+        width: 190,
+        cellClassName: "cost-table-cell-money",
+        render: (row) => ({
+          amount: row.amount,
+          direction: row.direction,
+          paymentAccountLabel: row.paymentAccountLabel,
+        }),
+      },
+      { key: "expenseContent", header: "费用内容", flex: 1.2, render: (row) => row.expenseContent },
+    ],
+    [],
+  );
 
-  const transactionColumns = [
-    { key: "tradeTime", header: "时间", render: (row: CostTimeRow) => row.tradeTime },
-    viewMode === "expenseType"
-      ? { key: "projectName", header: "项目名", render: (row: CostTimeRow) => row.projectName }
-      : { key: "counterpartyName", header: "对方户名", render: (row: CostTimeRow) => row.counterpartyName },
-    {
-      key: "amount",
-      header: "金额",
-      cellClassName: "cost-table-cell-money",
-      render: (row: CostTimeRow) => ({
-        amount: row.amount,
-        direction: row.direction,
-        paymentAccountLabel: row.paymentAccountLabel,
-      }),
-    },
-    { key: "expenseContent", header: "费用内容", render: (row: CostTimeRow) => row.expenseContent },
-  ];
+  const transactionColumns = useMemo<CostStatisticsTableColumn<CostTimeRow>[]>(
+    () => [
+      { key: "tradeTime", header: "时间", width: 170, render: (row) => row.tradeTime },
+      viewMode === "expenseType"
+        ? { key: "projectName", header: "项目名", flex: 1, render: (row) => row.projectName }
+        : { key: "counterpartyName", header: "对方户名", flex: 1, render: (row) => row.counterpartyName },
+      {
+        key: "amount",
+        header: "金额",
+        width: 180,
+        cellClassName: "cost-table-cell-money",
+        render: (row) => ({
+          amount: row.amount,
+          direction: row.direction,
+          paymentAccountLabel: row.paymentAccountLabel,
+        }),
+      },
+      { key: "expenseContent", header: "费用内容", flex: 1.1, render: (row) => row.expenseContent },
+    ],
+    [viewMode],
+  );
 
   const activeTransactionId =
     selectedTimeTransactionId ?? selectedProjectTransactionId ?? selectedBankTransactionId ?? selectedExpenseTransactionId;

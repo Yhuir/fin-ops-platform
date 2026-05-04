@@ -1,3 +1,7 @@
+import Paper from "@mui/material/Paper";
+import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
+
 import type { TaxSummary } from "../../features/tax/types";
 
 type TaxSummaryCardsProps = {
@@ -18,16 +22,21 @@ export default function TaxSummaryCards({ summary }: TaxSummaryCardsProps) {
   ] as const;
 
   return (
-    <div className="stats-row">
+    <Stack className="stats-row" direction="row" flexWrap="wrap" gap={1.5}>
       {cards.map((card) => (
-        <div
+        <Paper
           key={card.label}
           className={`stat-card${card.tone === "warn" ? " warn" : ""}${card.tone === "success" ? " success" : ""}`}
+          variant="outlined"
         >
-          <span>{card.label}</span>
-          <strong>{card.value}</strong>
-        </div>
+          <Typography component="span" color="text.secondary">
+            {card.label}
+          </Typography>
+          <Typography component="strong" variant="h6" fontWeight={800}>
+            {card.value}
+          </Typography>
+        </Paper>
       ))}
-    </div>
+    </Stack>
   );
 }

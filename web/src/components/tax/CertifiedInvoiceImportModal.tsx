@@ -1,5 +1,18 @@
-import { type DragEvent, useId, useMemo, useState } from "react";
+import Alert from "@mui/material/Alert";
+import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import Chip from "@mui/material/Chip";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogTitle from "@mui/material/DialogTitle";
+import LinearProgress from "@mui/material/LinearProgress";
+import Paper from "@mui/material/Paper";
+import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
+import { useMemo, useState } from "react";
 
+import FileDropzone from "../common/FileDropzone";
 import { useSession } from "../../contexts/SessionContext";
 import {
   confirmTaxCertifiedImport,
@@ -26,13 +39,11 @@ export default function CertifiedInvoiceImportModal({
   onClose,
   onImported,
 }: CertifiedInvoiceImportModalProps) {
-  const inputId = useId();
   const session = useSession();
   const canMutateData =
     session.status === "authenticated" ? session.session.canMutateData : false;
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [previewResult, setPreviewResult] = useState<TaxCertifiedImportPreviewResult | null>(null);
-  const [isDragActive, setIsDragActive] = useState(false);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -69,35 +80,6 @@ export default function CertifiedInvoiceImportModal({
       }
       setErrorMessage("仅支持 .xls/.xlsx");
     }
-  }
-
-  function handleDropzoneDragOver(event: DragEvent<HTMLLabelElement>) {
-    event.preventDefault();
-    if (!canMutateData || isPreviewing || isConfirming) {
-      return;
-    }
-    setIsDragActive(true);
-  }
-
-  function handleDropzoneDragLeave(event: DragEvent<HTMLLabelElement>) {
-    event.preventDefault();
-    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
-      return;
-    }
-    setIsDragActive(false);
-  }
-
-  function handleDropzoneDrop(event: DragEvent<HTMLLabelElement>) {
-    event.preventDefault();
-    setIsDragActive(false);
-    if (!canMutateData || isPreviewing || isConfirming) {
-      return;
-    }
-    const files = Array.from(event.dataTransfer.files ?? []);
-    if (files.length === 0) {
-      return;
-    }
-    applyDroppedFiles(files);
   }
 
   async function handlePreview() {
@@ -137,119 +119,127 @@ export default function CertifiedInvoiceImportModal({
   }
 
   return (
-    <div className="export-center-modal-layer" role="presentation">
-      <button
-        aria-label="关闭已认证发票导入"
-        className="export-center-modal-backdrop"
-        type="button"
-        onClick={onClose}
-      />
-      <section
-        aria-labelledby="certified-invoice-import-modal-title"
-        aria-modal="true"
-        className="export-center-modal certified-import-modal"
-        role="dialog"
-      >
-        <header className="export-center-modal-header">
-          <div>
-            <h2 id="certified-invoice-import-modal-title">已认证发票导入</h2>
-            <p>在税金抵扣页内完成已认证发票预览、确认导入和页面刷新，不跳转到关联台导入界面。</p>
-          </div>
-          <button className="secondary-button" type="button" onClick={onClose} disabled={isConfirming}>
-            关闭
-          </button>
-        </header>
+    <Dialog
+      aria-labelledby="certified-invoice-import-modal-title"
+      fullWidth
+      maxWidth="md"
+      open
+      onClose={() => {
+        if (!isConfirming) {
+          onClose();
+        }
+      }}
+    >
+      <DialogTitle id="certified-invoice-import-modal-title">
+        已认证发票导入
+      </DialogTitle>
 
-        <div className="export-center-modal-body certified-import-body">
-          <label
-            className={`certified-import-dropzone${isDragActive ? " drag-active" : ""}`}
-            htmlFor={inputId}
-            aria-label="选择已认证发票文件"
-            onDragEnter={handleDropzoneDragOver}
-            onDragOver={handleDropzoneDragOver}
-            onDragLeave={handleDropzoneDragLeave}
-            onDrop={handleDropzoneDrop}
-          >
-            <strong>选择已认证发票文件</strong>
-            <span>{fileHint}</span>
-            <input
-              id={inputId}
-              multiple
-              type="file"
-              accept=".xlsx,.xls"
-              disabled={!canMutateData}
-              onChange={(event) => {
-                setIsDragActive(false);
-                updateSelectedFiles(Array.from(event.currentTarget.files ?? []));
-              }}
-            />
-          </label>
+      <DialogContent className="certified-import-body" dividers>
+        <Stack spacing={2}>
+          <Typography color="text.secondary" variant="body2">
+            在税金抵扣页内完成已认证发票预览、确认导入和页面刷新，不跳转到关联台导入界面。
+          </Typography>
 
-          {!canMutateData ? <div className="state-panel">当前账号仅支持查看和导出，不能导入已认证发票。</div> : null}
+          <FileDropzone
+            accept=".xlsx,.xls"
+            disabled={!canMutateData || isPreviewing || isConfirming}
+            errorText={errorMessage}
+            helperText={fileHint}
+            label="选择已认证发票文件"
+            multiple
+            onFiles={applyDroppedFiles}
+          />
+
+          {!canMutateData ? (
+            <Alert severity="info">当前账号仅支持查看和导出，不能导入已认证发票。</Alert>
+          ) : null}
 
           {selectedFiles.length > 0 ? (
-            <div className="certified-import-file-list" aria-label="已选择文件">
+            <Stack className="certified-import-file-list" aria-label="已选择文件" spacing={1}>
               {selectedFiles.map((file) => (
-                <div key={`${file.name}-${file.lastModified}-${file.size}`} className="certified-import-file-item">
-                  <strong>{file.name}</strong>
-                  <span>{(file.size / 1024).toFixed(1)} KB</span>
-                </div>
+                <Paper key={`${file.name}-${file.lastModified}-${file.size}`} className="certified-import-file-item" variant="outlined">
+                  <Typography component="strong" fontWeight={800}>
+                    {file.name}
+                  </Typography>
+                  <Typography component="span" color="text.secondary">
+                    {(file.size / 1024).toFixed(1)} KB
+                  </Typography>
+                </Paper>
               ))}
-            </div>
+            </Stack>
           ) : (
-            <div className="detail-state-panel">当前还没有选择文件。</div>
+            <Alert severity="info" variant="outlined">
+              当前还没有选择文件。
+            </Alert>
           )}
 
-          {isPreviewing ? <div className="detail-state-panel">正在识别已认证发票，请稍候...</div> : null}
-          {isConfirming ? <div className="detail-state-panel">正在导入已认证结果并刷新税金抵扣页面...</div> : null}
-          {errorMessage ? <div className="state-panel error">{errorMessage}</div> : null}
+          {isPreviewing ? (
+            <Box>
+              <Typography color="text.secondary" sx={{ mb: 1 }}>
+                正在识别已认证发票，请稍候...
+              </Typography>
+              <LinearProgress />
+            </Box>
+          ) : null}
+          {isConfirming ? (
+            <Box>
+              <Typography color="text.secondary" sx={{ mb: 1 }}>
+                正在导入已认证结果并刷新税金抵扣页面...
+              </Typography>
+              <LinearProgress />
+            </Box>
+          ) : null}
 
           {previewResult ? (
-            <section className="export-center-preview" aria-label="已认证发票预览结果">
-              <div className="export-center-preview-header">
-                <h3>预览结果</h3>
-                <span>{previewResult.fileCount} 个文件</span>
-              </div>
-              <div className="export-center-preview-body">
-                <div className="export-center-preview-summary certified-import-summary">
-                  <strong>识别记录 {previewResult.summary.recognizedCount} 条</strong>
-                  <span>匹配计划 {previewResult.summary.matchedPlanCount} 条</span>
-                  <span>未进入计划 {previewResult.summary.outsidePlanCount} 条</span>
-                  <span>无效记录 {previewResult.summary.invalidCount} 条</span>
-                </div>
-                <div className="certified-import-preview-files">
+            <Paper className="export-center-preview" component="section" aria-label="已认证发票预览结果" variant="outlined">
+              <Stack className="export-center-preview-header" direction="row" justifyContent="space-between" alignItems="center">
+                <Typography component="h3" variant="subtitle1" fontWeight={800}>
+                  预览结果
+                </Typography>
+                <Chip label={`${previewResult.fileCount} 个文件`} size="small" variant="outlined" />
+              </Stack>
+              <Stack className="export-center-preview-body" spacing={1.5}>
+                <Stack className="export-center-preview-summary certified-import-summary" direction="row" flexWrap="wrap" gap={1}>
+                  <Chip color="primary" label={`识别记录 ${previewResult.summary.recognizedCount} 条`} />
+                  <Chip label={`匹配计划 ${previewResult.summary.matchedPlanCount} 条`} variant="outlined" />
+                  <Chip label={`未进入计划 ${previewResult.summary.outsidePlanCount} 条`} variant="outlined" />
+                  <Chip label={`无效记录 ${previewResult.summary.invalidCount} 条`} variant="outlined" />
+                </Stack>
+                <Stack className="certified-import-preview-files" spacing={1}>
                   {previewResult.files.map((file) => (
-                    <section key={file.id} className="certified-import-preview-file">
-                      <header className="certified-import-preview-file-header">
-                        <strong>{file.fileName}</strong>
-                        <span>{file.month}</span>
-                      </header>
-                      <div className="certified-import-preview-file-meta">
-                        <span>识别 {file.recognizedCount} 条</span>
-                        <span>匹配计划 {file.matchedPlanCount} 条</span>
-                        <span>未进入计划 {file.outsidePlanCount} 条</span>
-                        <span>无效 {file.invalidCount} 条</span>
-                      </div>
-                    </section>
+                    <Paper key={file.id} className="certified-import-preview-file" component="section" variant="outlined">
+                      <Stack className="certified-import-preview-file-header" direction="row" justifyContent="space-between" alignItems="center">
+                        <Typography component="strong" fontWeight={800}>
+                          {file.fileName}
+                        </Typography>
+                        <Chip label={file.month} size="small" variant="outlined" />
+                      </Stack>
+                      <Stack className="certified-import-preview-file-meta" direction="row" flexWrap="wrap" gap={1}>
+                        <Typography component="span">识别 {file.recognizedCount} 条</Typography>
+                        <Typography component="span">匹配计划 {file.matchedPlanCount} 条</Typography>
+                        <Typography component="span">未进入计划 {file.outsidePlanCount} 条</Typography>
+                        <Typography component="span">无效 {file.invalidCount} 条</Typography>
+                      </Stack>
+                    </Paper>
                   ))}
-                </div>
-              </div>
-            </section>
+                </Stack>
+              </Stack>
+            </Paper>
           ) : null}
-        </div>
+        </Stack>
+      </DialogContent>
 
-        <footer className="export-center-modal-footer">
-          <button className="secondary-button" type="button" onClick={onClose} disabled={isConfirming}>
-            取消
-          </button>
-          <button className="secondary-button" type="button" onClick={handlePreview} disabled={!canPreview}>
-            预览识别结果
-          </button>
-          <button className="primary-button" type="button" onClick={handleConfirm} disabled={!canConfirm}>
-            确认导入
-          </button>
-        </footer>
-      </section>
-    </div>
+      <DialogActions>
+        <Button type="button" onClick={onClose} disabled={isConfirming}>
+          取消
+        </Button>
+        <Button type="button" onClick={handlePreview} disabled={!canPreview} variant="outlined">
+          预览识别结果
+        </Button>
+        <Button type="button" onClick={handleConfirm} disabled={!canConfirm} variant="contained">
+          确认导入
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }

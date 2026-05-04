@@ -145,7 +145,8 @@ describe("Workbench global search modal and navigation", () => {
     await user.click(within(dialog).getByRole("tab", { name: "流水" }));
     await user.click(within(dialog).getByRole("button", { name: "按月份" }));
     await user.click(within(dialog).getByRole("button", { name: "搜索月份选择" }));
-    await user.click(await within(dialog).findByRole("button", { name: "4月" }));
+    await user.click(await screen.findByRole("radio", { name: "2026" }));
+    await user.click(screen.getByRole("radio", { name: "四月" }));
     await user.click(within(dialog).getByRole("button", { name: "执行搜索" }));
 
     const bankSection = await within(dialog).findByRole("region", { name: "银行流水 搜索结果" });

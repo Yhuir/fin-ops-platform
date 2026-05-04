@@ -1666,14 +1666,13 @@ export default function ReconciliationWorkbenchPage() {
   return (
     <div className="workbench-shell">
       <div className={`page-stack${expandedZoneId ? " zone-expanded-layout" : ""}`}>
-        {!shellHeaderMounted ? (
-          <WorkbenchHeaderControls
-            canMutateData={canMutateData}
-            onOpenImport={setImportModalMode}
-            onOpenSearch={handleOpenSearchModal}
-            onOpenSettings={handleOpenSettingsPage}
-          />
-        ) : null}
+        <WorkbenchHeaderControls
+          canMutateData={canMutateData}
+          className={shellHeaderMounted ? "page-tools" : undefined}
+          onOpenImport={setImportModalMode}
+          onOpenSearch={handleOpenSearchModal}
+          onOpenSettings={handleOpenSettingsPage}
+        />
         {loadError ? <div className="state-panel error">{loadError}</div> : null}
         {!loadError && oaStatusPanelMessage ? (
           <div className={`state-panel${oaStatus?.code === "error" ? " error" : ""}`}>{oaStatusPanelMessage}</div>

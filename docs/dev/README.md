@@ -22,6 +22,7 @@
 13. `cost-statistics-workbench.md`
 14. `../superpowers/specs/2026-04-01-cost-statistics-workbench-design.md`
 15. `../superpowers/plans/2026-04-01-cost-statistics-workbench.md`
+16. `workbench-datagrid-pro-spike.md`
 16. `../superpowers/specs/2026-04-01-cost-statistics-project-export-design.md`
 17. `../superpowers/specs/2026-03-26-import-formalization-design.md`
 18. `../superpowers/plans/2026-03-26-import-formalization.md`
@@ -43,6 +44,7 @@
 - `cost-statistics-workbench.md`：成本统计页的页面定位、数据口径、下钻层级、接口建议和导出要求
 - `../superpowers/specs/2026-04-01-cost-statistics-workbench-design.md`：成本统计页面的整体产品与技术设计
 - `../superpowers/plans/2026-04-01-cost-statistics-workbench.md`：成本统计页面的分阶段实施计划
+- `workbench-datagrid-pro-spike.md`：当前 Community-only 重构下保留工作台自研三栏核心，并记录未来 DataGrid Pro spike 的边界、问题和通过标准
 - `../superpowers/specs/2026-04-01-cost-statistics-project-export-design.md`：项目明细强导出的工作簿结构、高级导出交互、后端导出任务和导出历史设计
 - `reconciliation-workbench-v2-backend.md` 已在 Prompt 14 后更新，补充了 `/api/workbench`、`/api/tax-offset`、OA adapter 边界与统一动作结果结构
 - `../superpowers/specs/2026-03-26-import-formalization-design.md`：导入正式化 A 的文件上传、模板识别、预览会话、持久化、重试撤销和前端导入中心设计

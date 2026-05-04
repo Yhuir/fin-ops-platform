@@ -9,6 +9,17 @@ function hasExactTextContent(text: string) {
 }
 
 describe("Import center", () => {
+  test("renders the shared MUI file dropzone controls", async () => {
+    installMockApiFetch();
+
+    renderAppAt("/imports?intent=bank_transaction");
+
+    expect(await screen.findByRole("heading", { name: "银行流水导入" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "上传文件" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "浏览文件" })).toBeInTheDocument();
+    expect(screen.getByText(hasExactTextContent("当前已选择 0 个文件"))).toBeInTheDocument();
+  });
+
   test("renders ETC invoice import without generic template workflow or unsupported notice", async () => {
     installMockApiFetch();
 

@@ -1,6 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import type { ReactNode } from "react";
+import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import Checkbox from "@mui/material/Checkbox";
+import Paper from "@mui/material/Paper";
+import Stack from "@mui/material/Stack";
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import TableHead from "@mui/material/TableHead";
+import TableRow from "@mui/material/TableRow";
+import Typography from "@mui/material/Typography";
 
 import type { TaxInvoiceRecord } from "../../features/tax/types";
 import WorkbenchColumnFilterMenu from "../workbench/WorkbenchColumnFilterMenu";
@@ -149,25 +161,29 @@ export default function TaxTable({
   };
 
   return (
-    <section className="tax-panel">
-      <header className="tax-panel-header">
-        <div className="tax-panel-header-copy">
-          <span>{title}</span>
-          <span>
+    <Paper className="tax-panel" component="section" variant="outlined">
+      <Stack className="tax-panel-header" component="header" direction="row" justifyContent="space-between" alignItems="center" gap={1}>
+        <Stack className="tax-panel-header-copy" spacing={0.25}>
+          <Typography component="span" fontWeight={800}>
+            {title}
+          </Typography>
+          <Typography component="span" color="text.secondary">
             {selectable
               ? `已选 ${visibleSelectedCount} / ${displayRows.length}${displayRows.length === rows.length ? "" : `（共 ${rows.length}）`}`
               : `共 ${displayRows.length}${displayRows.length === rows.length ? "" : ` / ${rows.length}`} 条`}
-          </span>
-        </div>
-        <div className="tax-panel-header-actions">
-          <button
+          </Typography>
+        </Stack>
+        <Stack className="tax-panel-header-actions" direction="row" alignItems="center" gap={0.75}>
+          <Button
             aria-label={buildTaxTableSortActionLabel(title, sortDirection)}
             className={`pane-tool-btn pane-sort-btn${sortDirection ? " active" : ""}`}
             type="button"
             onClick={handleToggleSort}
+            size="small"
+            variant={sortDirection ? "contained" : "outlined"}
           >
             <span className="pane-sort-label">{buildTaxTableSortVisualLabel(sortDirection)}</span>
-          </button>
+          </Button>
           <WorkbenchPaneSearch
             open={searchOpen}
             appliedValue={searchQuery}
@@ -179,17 +195,17 @@ export default function TaxTable({
             onToggle={() => setSearchOpen((current) => !current)}
           />
           {headerActions}
-        </div>
-      </header>
-      <div ref={activeTableWrapRef} className="table-wrap tax-table-wrap">
-        <table aria-label={title} className="grid-table tax-grid-table">
-          <thead>
-            <tr>
-              {selectable ? <th className="tax-check-column">选择</th> : null}
-              <th className="tax-column-invoice-no">发票编号</th>
-              <th className="cell-money tax-column-tax-amount">税额</th>
-              <th className="tax-column-counterparty">
-                <span className="tax-column-header-with-filter">
+        </Stack>
+      </Stack>
+      <TableContainer ref={activeTableWrapRef} className="table-wrap tax-table-wrap">
+        <Table aria-label={title} className="grid-table tax-grid-table" size="small" stickyHeader>
+          <TableHead>
+            <TableRow>
+              {selectable ? <TableCell className="tax-check-column">选择</TableCell> : null}
+              <TableCell className="tax-column-invoice-no">发票编号</TableCell>
+              <TableCell className="cell-money tax-column-tax-amount">税额</TableCell>
+              <TableCell className="tax-column-counterparty">
+                <Box className="tax-column-header-with-filter" component="span">
                   <span>对方名称</span>
                   <WorkbenchColumnFilterMenu
                     label="对方名称"
@@ -200,18 +216,18 @@ export default function TaxTable({
                     onClose={() => setCounterpartyFilterOpen(false)}
                     onToggle={() => setCounterpartyFilterOpen((current) => !current)}
                   />
-                </span>
-              </th>
-              <th className="cell-money tax-column-amount-rate">金额（税率）</th>
-            </tr>
-          </thead>
-          <tbody>
+                </Box>
+              </TableCell>
+              <TableCell className="cell-money tax-column-amount-rate">金额（税率）</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
             {displayRows.length === 0 ? (
-              <tr className="workbench-empty-row">
-                <td className="workbench-empty-cell" colSpan={selectable ? 5 : 4}>
+              <TableRow className="workbench-empty-row">
+                <TableCell className="workbench-empty-cell" colSpan={selectable ? 5 : 4}>
                   {hasActiveDisplayFilter ? "当前筛选暂无记录" : "当前栏暂无记录"}
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ) : null}
             {displayRows.map((row) => {
               const checked = selectedIds.includes(row.id);
@@ -223,23 +239,23 @@ export default function TaxTable({
               const taxRateMeta = getTaxRateMeta(row.taxRate);
 
               return (
-                <tr
+                <TableRow
                   key={row.id}
                   className={`${checked ? "tax-row-selected" : ""}${isLocked ? " tax-row-locked" : ""}${isHighlighted ? " tax-row-highlighted" : ""}`}
                   data-certified-highlighted={isHighlighted ? "true" : "false"}
                 >
                   {selectable ? (
-                    <td className="tax-check-column">
-                      <input
-                        aria-label={`${row.invoiceNo} ${row.counterparty}`}
+                    <TableCell className="tax-check-column">
+                      <Checkbox
                         checked={checked}
                         disabled={isLocked || row.isSelectable === false}
-                        type="checkbox"
+                        inputProps={{ "aria-label": `${row.invoiceNo} ${row.counterparty}` }}
                         onChange={() => onToggleRow?.(row.id)}
+                        size="small"
                       />
-                    </td>
+                    </TableCell>
                   ) : null}
-                  <td className="tax-column-invoice-no">
+                  <TableCell className="tax-column-invoice-no">
                     <span className="tax-invoice-no-value">
                       <span className="tax-invoice-meta-row">
                         <span className={invoiceFlow.className}>{invoiceFlow.label}</span>
@@ -248,27 +264,27 @@ export default function TaxTable({
                       </span>
                       <span className="tax-invoice-number">{row.invoiceNo}</span>
                     </span>
-                  </td>
-                  <td className="cell-money tax-column-tax-amount">{row.taxAmount}</td>
-                  <td className="tax-column-counterparty">{row.counterparty}</td>
-                  <td className="cell-money tax-column-amount-rate">
+                  </TableCell>
+                  <TableCell className="cell-money tax-column-tax-amount">{row.taxAmount}</TableCell>
+                  <TableCell className="tax-column-counterparty">{row.counterparty}</TableCell>
+                  <TableCell className="cell-money tax-column-amount-rate">
                     <span className="tax-amount-rate-value">
                       <span className="tax-amount-rate-primary">{row.amount}</span>
                       {taxRateMeta ? <span className={taxRateMeta.className}>({taxRateMeta.label})</span> : null}
                     </span>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               );
             })}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+      </TableContainer>
       {showBottomScrollbar ? (
         <div ref={scrollbarRef} className="tax-horizontal-scrollbar" aria-label={`${title}横向滚动`}>
           <div ref={scrollbarInnerRef} className="tax-horizontal-scrollbar-inner" />
         </div>
       ) : null}
-    </section>
+    </Paper>
   );
 }
 

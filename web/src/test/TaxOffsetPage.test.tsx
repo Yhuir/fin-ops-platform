@@ -107,13 +107,16 @@ describe("Tax offset workbench", () => {
 
     const modal = screen.getByRole("dialog", { name: "已认证发票导入" });
     expect(modal).toBeInTheDocument();
+    expect(modal.closest(".MuiDialog-root")).not.toBeNull();
     expect(window.location.pathname).toBe("/tax-offset");
     expect(screen.queryByRole("heading", { name: "导入中心" })).not.toBeInTheDocument();
 
     const certifiedFile = new File(["mock-xlsx"], "2026年3月 进项认证结果  用途确认信息.xlsx", {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
-    await user.upload(within(modal).getByLabelText("选择已认证发票文件"), certifiedFile);
+    const certifiedDropzone = within(modal).getByLabelText("选择已认证发票文件");
+    expect(certifiedDropzone.closest(".mui-file-dropzone")).not.toBeNull();
+    await user.upload(certifiedDropzone, certifiedFile);
 
     expect(within(modal).getByText(/2026年3月.*用途确认信息\.xlsx/)).toBeInTheDocument();
 
@@ -562,8 +565,8 @@ describe("Tax offset workbench", () => {
     expect(await screen.findByText("销项税额")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "年月选择" }));
-    await user.click(screen.getByRole("button", { name: "2026年" }));
-    await user.click(screen.getByRole("button", { name: "5月" }));
+    await user.click(screen.getByRole("radio", { name: "2026" }));
+    await user.click(screen.getByRole("radio", { name: "五月" }));
 
     expect(await screen.findByText("当前月份没有可用于计划与试算的发票数据。")).toBeInTheDocument();
   });

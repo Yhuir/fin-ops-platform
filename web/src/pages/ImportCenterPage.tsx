@@ -1,6 +1,33 @@
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import ReplayOutlinedIcon from "@mui/icons-material/ReplayOutlined";
+import UndoOutlinedIcon from "@mui/icons-material/UndoOutlined";
+import Alert from "@mui/material/Alert";
+import Accordion from "@mui/material/Accordion";
+import AccordionDetails from "@mui/material/AccordionDetails";
+import AccordionSummary from "@mui/material/AccordionSummary";
+import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import Checkbox from "@mui/material/Checkbox";
+import Chip from "@mui/material/Chip";
+import Divider from "@mui/material/Divider";
+import FormControl from "@mui/material/FormControl";
+import InputLabel from "@mui/material/InputLabel";
+import Paper from "@mui/material/Paper";
+import Select from "@mui/material/Select";
+import Stack from "@mui/material/Stack";
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import TableHead from "@mui/material/TableHead";
+import TableRow from "@mui/material/TableRow";
+import Typography from "@mui/material/Typography";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
+import FileDropzone from "../components/common/FileDropzone";
+import PageScaffold from "../components/common/PageScaffold";
+import StatePanel from "../components/common/StatePanel";
 import {
   confirmImportFiles,
   fetchImportSession,
@@ -143,6 +170,16 @@ function statusTone(status: string) {
     return "neutral";
   }
   return "warn";
+}
+
+function chipColorFromTone(tone: string): "default" | "success" | "warning" {
+  if (tone === "success") {
+    return "success";
+  }
+  if (tone === "warn") {
+    return "warning";
+  }
+  return "default";
 }
 
 function syncSelection(payload: ImportSessionPayload, currentSelected: string[]) {
@@ -367,7 +404,7 @@ export default function ImportCenterPage() {
 
   useEffect(() => () => clearProgress(), [clearProgress]);
 
-  const handleFileChange = (files: FileList | null) => {
+  const handleFileChange = (files: File[] | FileList | null) => {
     const nextFiles = files ? Array.from(files) : [];
     const acceptedFiles = isEtcInvoiceImport ? nextFiles.filter(isZipFile) : nextFiles;
     const rejectedCount = nextFiles.length - acceptedFiles.length;
@@ -378,11 +415,6 @@ export default function ImportCenterPage() {
     setMatchingRun(null);
     setFeedbackMessage(null);
     setErrorMessage(rejectedCount > 0 ? formatEtcRejectedMessage(rejectedCount) : null);
-  };
-
-  const handleDrop = (event: React.DragEvent<HTMLLabelElement>) => {
-    event.preventDefault();
-    handleFileChange(event.dataTransfer.files);
   };
 
   const applyPreviewPayload = (payload: ImportSessionPayload, message?: string) => {
@@ -550,381 +582,379 @@ export default function ImportCenterPage() {
   };
 
   return (
-    <div className="page-stack import-page">
-      <header className="page-header">
-        <div>
-          <h1>{intentMeta.title}</h1>
-          <p>{intentMeta.description}</p>
-        </div>
-        <div className="page-header-actions">
+    <PageScaffold
+      className="import-page"
+      title={intentMeta.title}
+      description={intentMeta.description}
+      actions={
+        <Stack spacing={1} alignItems={{ xs: "stretch", md: "flex-end" }}>
           {headerStatusMessage ? (
-            <div className={feedbackMessage ? "page-note page-note-success" : "page-note page-note-info"}>{headerStatusMessage}</div>
+            <Alert severity={feedbackMessage ? "success" : "info"} variant="outlined" sx={{ py: 0.25 }}>
+              {headerStatusMessage}
+            </Alert>
           ) : null}
-          <div className="page-note">来源用户：web_finance_user</div>
-        </div>
-      </header>
-
+          <Chip label="来源用户：web_finance_user" variant="outlined" size="small" />
+        </Stack>
+      }
+    >
       {intentMeta.unsupported ? (
-        <div className="state-panel">
+        <StatePanel tone="info">
           当前入口已保留，但解析与确认导入逻辑尚未接入。后续补齐逻辑后，这里会直接复用同一套预览与批量确认流程。
-        </div>
+        </StatePanel>
       ) : null}
 
       {!isEtcInvoiceImport ? (
-      <section className="import-template-panel">
-        <div className="import-panel-header">
-          <div>
-            <h2>模板库</h2>
-            <p>系统先自动识别；识别失败或票据方向不对时，可在文件卡片里手动改判后重试。</p>
-          </div>
-          <div className="import-selection-note">
-            {isTemplateLoading ? "模板加载中..." : `已加载 ${templates.length} 个模板`}
-          </div>
-        </div>
-        {templateErrorMessage ? <div className="state-panel error">{templateErrorMessage}</div> : null}
-        <div className="template-card-grid">
-          {templates.map((template) => (
-            <article key={template.templateCode} className="template-card">
-              <div className="template-card-head">
-                <strong>{template.label}</strong>
-                <span>{template.recordType === "invoice" ? "发票" : "银行流水"}</span>
-              </div>
-              <div className="template-card-meta">
-                <span>{template.fileExtensions.join(" / ")}</span>
-                <span>{template.allowedBatchTypes.map((item) => batchTypeLabel(item)).join(" / ")}</span>
-              </div>
-              <div className="template-card-hint">
-                关键表头：{template.requiredHeaders.slice(0, 4).join("、")}
-                {template.requiredHeaders.length > 4 ? "..." : ""}
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
+        <Paper className="import-template-panel" variant="outlined">
+          <Stack className="import-panel-header" direction={{ xs: "column", md: "row" }} alignItems={{ xs: "stretch", md: "center" }} spacing={2}>
+            <Box>
+              <Typography component="h2" variant="h6" fontWeight={800}>
+                模板库
+              </Typography>
+              <Typography color="text.secondary" variant="body2">
+                系统先自动识别；识别失败或票据方向不对时，可在文件卡片里手动改判后重试。
+              </Typography>
+            </Box>
+            <Chip label={isTemplateLoading ? "模板加载中..." : `已加载 ${templates.length} 个模板`} size="small" />
+          </Stack>
+          {templateErrorMessage ? <StatePanel tone="error">{templateErrorMessage}</StatePanel> : null}
+          <Box className="template-card-grid">
+            {templates.map((template) => (
+              <Paper key={template.templateCode} className="template-card" variant="outlined">
+                <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
+                  <Typography fontWeight={800}>{template.label}</Typography>
+                  <Chip label={template.recordType === "invoice" ? "发票" : "银行流水"} size="small" />
+                </Stack>
+                <Stack direction="row" flexWrap="wrap" gap={1}>
+                  <Chip label={template.fileExtensions.join(" / ")} size="small" variant="outlined" />
+                  <Chip label={template.allowedBatchTypes.map((item) => batchTypeLabel(item)).join(" / ")} size="small" variant="outlined" />
+                </Stack>
+                <Typography color="text.secondary" variant="caption">
+                  关键表头：{template.requiredHeaders.slice(0, 4).join("、")}
+                  {template.requiredHeaders.length > 4 ? "..." : ""}
+                </Typography>
+              </Paper>
+            ))}
+          </Box>
+        </Paper>
       ) : null}
 
-      <section className="import-upload-panel">
-        <label
-          className="import-dropzone"
-          htmlFor="import-file-input"
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={handleDrop}
-        >
-          <span className="import-dropzone-title">拖拽文件到这里，或点击选择文件</span>
-          <span className="import-dropzone-meta">
-            {isEtcInvoiceImport
+      <Paper className="import-upload-panel" variant="outlined">
+        <FileDropzone
+          label="上传文件"
+          accept={isEtcInvoiceImport ? ".zip,application/zip" : undefined}
+          disabled={intentMeta.unsupported}
+          helperText={
+            isEtcInvoiceImport
               ? "支持一次选择多个 zip 文件；上传后先预览，确认后写入 ETC票据管理。"
-              : "支持一次上传多份 `.xlsx / .xls`，系统会自动识别发票与银行模板，并保留原始文件副本。"}
-          </span>
-          <input
-            id="import-file-input"
-            aria-label="上传文件"
-            className="import-file-input"
-            accept={isEtcInvoiceImport ? ".zip,application/zip" : undefined}
-            multiple
-            type="file"
-            onChange={(event) => {
-              handleFileChange(event.target.files);
-              event.currentTarget.value = "";
-            }}
-          />
-        </label>
-
-        <div className="import-toolbar">
-          <div className="import-selection-note">
+              : "支持一次上传多份 .xlsx / .xls，系统会自动识别发票与银行模板，并保留原始文件副本。"
+          }
+          onFiles={handleFileChange}
+        />
+        <Stack className="import-toolbar" direction={{ xs: "column", sm: "row" }} alignItems={{ xs: "stretch", sm: "center" }} spacing={2}>
+          <Typography className="import-selection-note" color="text.secondary" variant="body2">
             当前已选择 <strong>{selectedFiles.length}</strong> 个文件
-          </div>
-          <button
-            className="primary-button"
+          </Typography>
+          <Button
+            variant="contained"
             type="button"
             disabled={intentMeta.unsupported || selectedFiles.length === 0 || isPreviewLoading}
             onClick={handlePreview}
           >
             {isPreviewLoading ? "预览中..." : "开始预览"}
-          </button>
-        </div>
-      </section>
+          </Button>
+        </Stack>
+      </Paper>
 
-      {errorMessage ? <div className="state-panel error">{errorMessage}</div> : null}
+      {errorMessage ? <StatePanel tone="error">{errorMessage}</StatePanel> : null}
 
       {isEtcInvoiceImport && etcPreviewPayload ? (
-        <section className="import-files-panel">
-          <div className="import-panel-header">
-            <div>
-              <h2>ETC导入预览</h2>
-              <p>确认前请核对摘要和每张发票状态；确认后才会导入 ETC票据管理。</p>
-            </div>
-            <button
-              className="primary-button"
+        <Paper className="import-files-panel" variant="outlined">
+          <Stack className="import-panel-header" direction={{ xs: "column", md: "row" }} alignItems={{ xs: "stretch", md: "center" }} spacing={2}>
+            <Box>
+              <Typography component="h2" variant="h6" fontWeight={800}>
+                ETC导入预览
+              </Typography>
+              <Typography color="text.secondary" variant="body2">
+                确认前请核对摘要和每张发票状态；确认后才会导入 ETC票据管理。
+              </Typography>
+            </Box>
+            <Button
+              variant="contained"
               type="button"
               disabled={!etcPreviewPayload.sessionId || isConfirmLoading}
               onClick={handleConfirm}
             >
               {isConfirmLoading ? "确认中..." : "确认导入 ETC票据管理"}
-            </button>
-          </div>
+            </Button>
+          </Stack>
 
-          {etcConfirmPayload ? <div className="state-panel success">{etcConfirmPayload.job ? "已开始后台导入" : "已导入 ETC票据管理"}</div> : null}
+          {etcConfirmPayload ? (
+            <StatePanel tone="success">{etcConfirmPayload.job ? "已开始后台导入" : "已导入 ETC票据管理"}</StatePanel>
+          ) : null}
 
-          <section className="stats-row import-session-stats">
-            <div className="stat-card">
-              <span>会话编号</span>
-              <strong>{etcPreviewPayload.sessionId}</strong>
-            </div>
-            <div className="stat-card">
-              <span>新增</span>
-              <strong>{etcPreviewPayload.imported}</strong>
-            </div>
-            <div className="stat-card">
-              <span>重复跳过</span>
-              <strong>{etcPreviewPayload.duplicatesSkipped}</strong>
-            </div>
-            <div className="stat-card">
-              <span>附件补齐</span>
-              <strong>{etcPreviewPayload.attachmentsCompleted}</strong>
-            </div>
-            <div className="stat-card warn">
-              <span>异常</span>
-              <strong>{etcPreviewPayload.failed}</strong>
-            </div>
-          </section>
+          <Box className="stats-row import-session-stats">
+            <Paper className="stat-card" variant="outlined"><span>会话编号</span><strong>{etcPreviewPayload.sessionId}</strong></Paper>
+            <Paper className="stat-card" variant="outlined"><span>新增</span><strong>{etcPreviewPayload.imported}</strong></Paper>
+            <Paper className="stat-card" variant="outlined"><span>重复跳过</span><strong>{etcPreviewPayload.duplicatesSkipped}</strong></Paper>
+            <Paper className="stat-card" variant="outlined"><span>附件补齐</span><strong>{etcPreviewPayload.attachmentsCompleted}</strong></Paper>
+            <Paper className="stat-card warn" variant="outlined"><span>异常</span><strong>{etcPreviewPayload.failed}</strong></Paper>
+          </Box>
 
-          <table className="import-row-table">
-            <thead>
-              <tr>
-                <th>发票号码</th>
-                <th>文件名</th>
-                <th>状态</th>
-                <th>原因</th>
-              </tr>
-            </thead>
-            <tbody>
-              {etcPreviewPayload.items.map((item: EtcImportItem, index) => (
-                <tr key={`${item.invoiceNumber || item.fileName}-${index}`}>
-                  <td>{item.invoiceNumber || "未识别"}</td>
-                  <td>{item.fileName || "未识别"}</td>
-                  <td>
-                    <span className={`status-chip tone-${etcStatusTone(item.status)}`}>
-                      {etcStatusLabel(item.status)}
-                    </span>
-                  </td>
-                  <td>{item.reason || "无"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
+          <TableContainer component={Paper} variant="outlined">
+            <Table size="small" aria-label="ETC导入逐行结果">
+              <TableHead>
+                <TableRow>
+                  <TableCell>发票号码</TableCell>
+                  <TableCell>文件名</TableCell>
+                  <TableCell>状态</TableCell>
+                  <TableCell>原因</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {etcPreviewPayload.items.map((item: EtcImportItem, index) => (
+                  <TableRow key={`${item.invoiceNumber || item.fileName}-${index}`}>
+                    <TableCell>{item.invoiceNumber || "未识别"}</TableCell>
+                    <TableCell>{item.fileName || "未识别"}</TableCell>
+                    <TableCell>
+                      <Chip
+                        label={etcStatusLabel(item.status)}
+                        size="small"
+                        color={chipColorFromTone(etcStatusTone(item.status))}
+                        variant={etcStatusTone(item.status) === "neutral" ? "outlined" : "filled"}
+                      />
+                    </TableCell>
+                    <TableCell>{item.reason || "无"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Paper>
       ) : null}
 
       {!isEtcInvoiceImport && matchingRun ? (
-        <section className="import-result-panel">
-          <div className="import-panel-header">
-            <div>
-              <h2>导入闭环结果</h2>
-              <p>确认导入后已自动触发匹配引擎，工作台回到对应月份会直接刷新导入数据。</p>
-            </div>
-            <div className="page-note">最近一次触发：{matchingRun.triggeredBy}</div>
-          </div>
-          <div className="stats-row import-session-stats">
-            <div className="stat-card">
-              <span>匹配结果</span>
-              <strong>{matchingRun.resultCount}</strong>
-            </div>
-            <div className="stat-card">
-              <span>自动匹配</span>
-              <strong>{matchingRun.automaticCount}</strong>
-            </div>
-            <div className="stat-card">
-              <span>建议匹配</span>
-              <strong>{matchingRun.suggestedCount}</strong>
-            </div>
-            <div className="stat-card warn">
-              <span>人工复核</span>
-              <strong>{matchingRun.manualReviewCount}</strong>
-            </div>
-          </div>
-        </section>
+        <Paper className="import-result-panel" variant="outlined">
+          <Stack className="import-panel-header" direction={{ xs: "column", md: "row" }} alignItems={{ xs: "stretch", md: "center" }} spacing={2}>
+            <Box>
+              <Typography component="h2" variant="h6" fontWeight={800}>
+                导入闭环结果
+              </Typography>
+              <Typography color="text.secondary" variant="body2">
+                确认导入后已自动触发匹配引擎，工作台回到对应月份会直接刷新导入数据。
+              </Typography>
+            </Box>
+            <Chip label={`最近一次触发：${matchingRun.triggeredBy}`} size="small" variant="outlined" />
+          </Stack>
+          <Box className="stats-row import-session-stats">
+            <Paper className="stat-card" variant="outlined"><span>匹配结果</span><strong>{matchingRun.resultCount}</strong></Paper>
+            <Paper className="stat-card" variant="outlined"><span>自动匹配</span><strong>{matchingRun.automaticCount}</strong></Paper>
+            <Paper className="stat-card" variant="outlined"><span>建议匹配</span><strong>{matchingRun.suggestedCount}</strong></Paper>
+            <Paper className="stat-card warn" variant="outlined"><span>人工复核</span><strong>{matchingRun.manualReviewCount}</strong></Paper>
+          </Box>
+        </Paper>
       ) : null}
 
       {!isEtcInvoiceImport && previewPayload ? (
         <>
-          <section className="stats-row import-session-stats">
-            <div className="stat-card">
-              <span>会话编号</span>
-              <strong>{previewPayload.session.id}</strong>
-            </div>
-            <div className="stat-card">
-              <span>文件数</span>
-              <strong>{previewPayload.session.fileCount} 个</strong>
-            </div>
-            <div className="stat-card warn">
-              <span>待确认</span>
-              <strong>{summarizeSelection(previewPayload.files, selectedFileIds)} 个</strong>
-            </div>
-          </section>
+          <Box className="stats-row import-session-stats">
+            <Paper className="stat-card" variant="outlined"><span>会话编号</span><strong>{previewPayload.session.id}</strong></Paper>
+            <Paper className="stat-card" variant="outlined"><span>文件数</span><strong>{previewPayload.session.fileCount} 个</strong></Paper>
+            <Paper className="stat-card warn" variant="outlined"><span>待确认</span><strong>{summarizeSelection(previewPayload.files, selectedFileIds)} 个</strong></Paper>
+          </Box>
 
-          <section className="import-files-panel">
-            <div className="import-panel-header">
-              <div>
-                <h2>文件识别与预览</h2>
-                <p>先看模板识别和逐行结果，再决定是否确认入库或手动改判后重试。</p>
-              </div>
-              <button
-                className="primary-button"
+          <Paper className="import-files-panel" variant="outlined">
+            <Stack className="import-panel-header" direction={{ xs: "column", md: "row" }} alignItems={{ xs: "stretch", md: "center" }} spacing={2}>
+              <Box>
+                <Typography component="h2" variant="h6" fontWeight={800}>
+                  文件识别与预览
+                </Typography>
+                <Typography color="text.secondary" variant="body2">
+                  先看模板识别和逐行结果，再决定是否确认入库或手动改判后重试。
+                </Typography>
+              </Box>
+              <Button
+                variant="contained"
                 type="button"
                 disabled={intentMeta.unsupported || selectedFileIds.length === 0 || isConfirmLoading}
                 onClick={handleConfirm}
               >
                 {isConfirmLoading ? "确认中..." : "确认导入选中文件"}
-              </button>
-            </div>
+              </Button>
+            </Stack>
 
-            <div className="import-file-list">
+            <Stack className="import-file-list" spacing={1.5}>
               {previewPayload.files.map((file) => {
                 const isExpanded = expandedFileIds.includes(file.id);
                 const templateCode = fileOverrides[file.id]?.templateCode || file.templateCode || "";
                 const batchType = fileOverrides[file.id]?.batchType || file.batchType || "";
+                const templateSelectId = `template-${file.id}`;
+                const batchTypeSelectId = `batch-type-${file.id}`;
 
                 return (
-                  <article key={file.id} className={`import-file-card status-${file.status}`}>
-                    <div className="import-file-card-main">
-                      <div className="import-file-card-head">
-                        <label className="import-checkbox">
-                          <input
-                            type="checkbox"
-                            aria-label={`选择 ${file.fileName}`}
+                  <Accordion
+                    key={file.id}
+                    className={`import-file-card status-${file.status}`}
+                    expanded={isExpanded}
+                    onChange={() => toggleExpanded(file.id)}
+                    disableGutters
+                  >
+                    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                      <Stack className="import-file-card-head" direction={{ xs: "column", md: "row" }} alignItems={{ xs: "stretch", md: "center" }} spacing={1.5} sx={{ width: "100%" }}>
+                        <Stack direction="row" alignItems="center" spacing={1} sx={{ minWidth: 0 }}>
+                          <Checkbox
+                            inputProps={{ "aria-label": `选择 ${file.fileName}` }}
                             checked={selectedFileIds.includes(file.id)}
                             disabled={!canSelectFile(file)}
+                            onClick={(event) => event.stopPropagation()}
+                            onFocus={(event) => event.stopPropagation()}
                             onChange={() => toggleFileSelection(file.id)}
                           />
-                          <span>{file.fileName}</span>
-                        </label>
-                        <span className={`status-chip tone-${statusTone(file.status)}`}>{statusLabel(file.status)}</span>
-                      </div>
+                          <Typography fontWeight={800} noWrap title={file.fileName}>
+                            {file.fileName}
+                          </Typography>
+                        </Stack>
+                        <Chip
+                          label={statusLabel(file.status)}
+                          size="small"
+                          color={chipColorFromTone(statusTone(file.status))}
+                          variant={statusTone(file.status) === "neutral" ? "outlined" : "filled"}
+                        />
+                      </Stack>
+                    </AccordionSummary>
+                    <AccordionDetails>
+                      <Stack spacing={1.5}>
+                        <Stack className="import-file-meta" direction="row" flexWrap="wrap" gap={1}>
+                          <Chip label={templateLabel(file.templateCode)} size="small" />
+                          <Chip label={batchTypeLabel(file.batchType)} size="small" variant="outlined" />
+                          <Chip label={`${file.rowCount} 行`} size="small" variant="outlined" />
+                          <Chip label={`新增 ${file.successCount}`} size="small" variant="outlined" />
+                          <Chip label={`异常 ${file.errorCount}`} size="small" color={file.errorCount > 0 ? "warning" : "default"} variant="outlined" />
+                          {file.batchId ? <Chip label={`批次 ${file.batchId}`} size="small" variant="outlined" /> : null}
+                          {file.storedFilePath ? <Chip label="原文件已留存" size="small" color="success" variant="outlined" /> : null}
+                        </Stack>
 
-                      <div className="import-file-meta">
-                        <span>{templateLabel(file.templateCode)}</span>
-                        <span>{batchTypeLabel(file.batchType)}</span>
-                        <span>{file.rowCount} 行</span>
-                        <span>新增 {file.successCount}</span>
-                        <span>异常 {file.errorCount}</span>
-                        {file.batchId ? <span>批次 {file.batchId}</span> : null}
-                        {file.storedFilePath ? <span>原文件已留存</span> : null}
-                      </div>
+                        <Typography color="text.secondary" variant="body2">
+                          {file.message}
+                        </Typography>
 
-                      <div className="import-file-message">{file.message}</div>
-
-                      <div className="import-override-grid">
-                        <label className="import-select-field">
-                          <span>模板改判</span>
-                          <select
-                            aria-label={`模板改判 ${file.fileName}`}
-                            disabled={!canRetryFile(file)}
-                            value={templateCode}
-                            onChange={(event) => handleOverrideChange(file.id, "templateCode", event.target.value)}
-                          >
-                            <option value="">自动识别</option>
-                            {templates.map((template) => (
-                              <option key={template.templateCode} value={template.templateCode}>
-                                {template.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-
-                        {isInvoiceTemplate(templateCode) ? (
-                          <label className="import-select-field">
-                            <span>票据方向</span>
-                            <select
-                              aria-label={`票据方向 ${file.fileName}`}
-                              disabled={!canRetryFile(file)}
-                              value={batchType}
-                              onChange={(event) => handleOverrideChange(file.id, "batchType", event.target.value)}
+                        <Box className="import-override-grid">
+                          <FormControl size="small" fullWidth disabled={!canRetryFile(file)}>
+                            <InputLabel htmlFor={templateSelectId}>模板改判 {file.fileName}</InputLabel>
+                            <Select
+                              native
+                              label={`模板改判 ${file.fileName}`}
+                              value={templateCode}
+                              inputProps={{ id: templateSelectId, "aria-label": `模板改判 ${file.fileName}` }}
+                              onClick={(event) => event.stopPropagation()}
+                              onChange={(event) => handleOverrideChange(file.id, "templateCode", String(event.target.value))}
                             >
-                              <option value="input_invoice">进项发票</option>
-                              <option value="output_invoice">销项发票</option>
-                            </select>
-                          </label>
-                        ) : null}
-                      </div>
-
-                      <div className="import-file-actions">
-                        <button className="secondary-button" type="button" onClick={() => toggleExpanded(file.id)}>
-                          {isExpanded ? "收起逐行预览" : "查看逐行预览"}
-                        </button>
-
-                        {canRetryFile(file) ? (
-                          <button
-                            className="secondary-button"
-                            type="button"
-                            disabled={retryingFileId === file.id}
-                            aria-label={`重新识别 ${file.fileName}`}
-                            onClick={() => void handleRetry(file)}
-                          >
-                            {retryingFileId === file.id ? "重试中..." : "重新识别"}
-                          </button>
-                        ) : null}
-
-                        {file.batchId ? (
-                          <a
-                            className="secondary-button link-button"
-                            href={`/imports/batches/${file.batchId}/download`}
-                            download
-                            aria-label={`下载批次 ${file.id}`}
-                          >
-                            下载批次
-                          </a>
-                        ) : null}
-
-                        {file.batchId && file.status === "confirmed" ? (
-                          <button
-                            className="secondary-button danger-button"
-                            type="button"
-                            disabled={revertingBatchId === file.batchId}
-                            aria-label={`撤销导入 ${file.id}`}
-                            onClick={() => void handleRevert(file)}
-                          >
-                            {revertingBatchId === file.batchId ? "撤销中..." : "撤销导入"}
-                          </button>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    {isExpanded ? (
-                      <div className="import-file-details">
-                        {file.rowResults.length > 0 ? (
-                          <table className="import-row-table">
-                            <thead>
-                              <tr>
-                                <th>行号</th>
-                                <th>类型</th>
-                                <th>判定</th>
-                                <th>原因</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {file.rowResults.slice(0, 8).map((row) => (
-                                <tr key={row.id}>
-                                  <td>{row.rowNo}</td>
-                                  <td>{row.sourceRecordType}</td>
-                                  <td>{DECISION_LABELS[row.decision] ?? row.decision}</td>
-                                  <td>{row.decisionReason}</td>
-                                </tr>
+                              <option value="">自动识别</option>
+                              {templates.map((template) => (
+                                <option key={template.templateCode} value={template.templateCode}>
+                                  {template.label}
+                                </option>
                               ))}
-                            </tbody>
-                          </table>
+                            </Select>
+                          </FormControl>
+
+                          {isInvoiceTemplate(templateCode) ? (
+                            <FormControl size="small" fullWidth disabled={!canRetryFile(file)}>
+                              <InputLabel htmlFor={batchTypeSelectId}>票据方向 {file.fileName}</InputLabel>
+                              <Select
+                                native
+                                label={`票据方向 ${file.fileName}`}
+                                value={batchType}
+                                inputProps={{ id: batchTypeSelectId, "aria-label": `票据方向 ${file.fileName}` }}
+                                onClick={(event) => event.stopPropagation()}
+                                onChange={(event) => handleOverrideChange(file.id, "batchType", String(event.target.value))}
+                              >
+                                <option value="input_invoice">进项发票</option>
+                                <option value="output_invoice">销项发票</option>
+                              </Select>
+                            </FormControl>
+                          ) : null}
+                        </Box>
+
+                        <Stack className="import-file-actions" direction="row" flexWrap="wrap" gap={1}>
+                          {canRetryFile(file) ? (
+                            <Button
+                              variant="outlined"
+                              type="button"
+                              startIcon={<ReplayOutlinedIcon />}
+                              disabled={retryingFileId === file.id}
+                              aria-label={`重新识别 ${file.fileName}`}
+                              onClick={() => void handleRetry(file)}
+                            >
+                              {retryingFileId === file.id ? "重试中..." : "重新识别"}
+                            </Button>
+                          ) : null}
+
+                          {file.batchId ? (
+                            <Button
+                              variant="outlined"
+                              component="a"
+                              href={`/imports/batches/${file.batchId}/download`}
+                              download
+                              aria-label={`下载批次 ${file.id}`}
+                            >
+                              下载批次
+                            </Button>
+                          ) : null}
+
+                          {file.batchId && file.status === "confirmed" ? (
+                            <Button
+                              variant="outlined"
+                              color="error"
+                              type="button"
+                              startIcon={<UndoOutlinedIcon />}
+                              disabled={revertingBatchId === file.batchId}
+                              aria-label={`撤销导入 ${file.id}`}
+                              onClick={() => void handleRevert(file)}
+                            >
+                              {revertingBatchId === file.batchId ? "撤销中..." : "撤销导入"}
+                            </Button>
+                          ) : null}
+                        </Stack>
+
+                        <Divider />
+
+                        {file.rowResults.length > 0 ? (
+                          <TableContainer component={Paper} variant="outlined">
+                            <Table size="small" aria-label={`逐行预览 ${file.fileName}`}>
+                              <TableHead>
+                                <TableRow>
+                                  <TableCell>行号</TableCell>
+                                  <TableCell>类型</TableCell>
+                                  <TableCell>判定</TableCell>
+                                  <TableCell>原因</TableCell>
+                                </TableRow>
+                              </TableHead>
+                              <TableBody>
+                                {file.rowResults.slice(0, 8).map((row) => (
+                                  <TableRow key={row.id}>
+                                    <TableCell>{row.rowNo}</TableCell>
+                                    <TableCell>{row.sourceRecordType}</TableCell>
+                                    <TableCell>{DECISION_LABELS[row.decision] ?? row.decision}</TableCell>
+                                    <TableCell>{row.decisionReason}</TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </TableContainer>
                         ) : (
-                          <div className="empty-subpanel">当前文件没有逐行预览结果。</div>
+                          <StatePanel tone="empty" compact>
+                            当前文件没有逐行预览结果。
+                          </StatePanel>
                         )}
-                      </div>
-                    ) : null}
-                  </article>
+                      </Stack>
+                    </AccordionDetails>
+                  </Accordion>
                 );
               })}
-            </div>
-          </section>
+            </Stack>
+          </Paper>
         </>
       ) : null}
-    </div>
+    </PageScaffold>
   );
 }

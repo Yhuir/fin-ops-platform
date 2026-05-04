@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import Alert from "@mui/material/Alert";
+import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import Stack from "@mui/material/Stack";
 
+import PageScaffold from "../components/common/PageScaffold";
+import StatePanel from "../components/common/StatePanel";
 import CertifiedInvoiceImportModal from "../components/tax/CertifiedInvoiceImportModal";
 import CertifiedResultsDrawer from "../components/tax/CertifiedResultsDrawer";
 import MonthPicker from "../components/MonthPicker";
@@ -277,28 +283,30 @@ export default function TaxOffsetPage() {
   );
 
   return (
-    <div className="page-stack">
-      <header className="page-header">
-        <div>
-          <h1>税金抵扣计划与试算</h1>
-          <p>围绕进项票认证计划与已认证结果，做本月税金抵扣试算与展示，不承担真实税务业务动作。</p>
-        </div>
-        <div className="page-header-actions">
+    <PageScaffold
+      title="税金抵扣计划与试算"
+      description="围绕进项票认证计划与已认证结果，做本月税金抵扣试算与展示，不承担真实税务业务动作。"
+      actions={(
+        <Stack direction="row" alignItems="center" justifyContent="flex-end" flexWrap="wrap" gap={1}>
           {headerStatusMessage ? (
-            <div className={importFeedback ? "page-note page-note-success" : "page-note page-note-info"}>{headerStatusMessage}</div>
+            <Alert className={importFeedback ? "page-note page-note-success" : "page-note page-note-info"} severity={importFeedback ? "success" : "info"}>
+              {headerStatusMessage}
+            </Alert>
           ) : null}
           {canMutateData ? (
-            <button className="secondary-button" type="button" onClick={() => setIsCertifiedImportModalOpen(true)}>
+            <Button type="button" variant="outlined" onClick={() => setIsCertifiedImportModalOpen(true)}>
               已认证发票导入
-            </button>
+            </Button>
           ) : null}
           <MonthPicker value={currentMonth} onChange={setCurrentMonth} />
-        </div>
-      </header>
-
-      {loadError ? <div className="state-panel error">{loadError}</div> : null}
-      {!hasVisibleMonthData && isLoading ? <div className="state-panel">正在加载 {currentMonth} 的税金抵扣计划与已认证结果...</div> : null}
-      {isEmpty ? <div className="state-panel">当前月份没有可用于计划与试算的发票数据。</div> : null}
+        </Stack>
+      )}
+    >
+      {loadError ? <StatePanel tone="error">{loadError}</StatePanel> : null}
+      {!hasVisibleMonthData && isLoading ? (
+        <StatePanel tone="loading">正在加载 {currentMonth} 的税金抵扣计划与已认证结果...</StatePanel>
+      ) : null}
+      {isEmpty ? <StatePanel tone="empty">当前月份没有可用于计划与试算的发票数据。</StatePanel> : null}
 
       {summary ? <TaxSummaryCards summary={summary} /> : null}
 
@@ -312,9 +320,9 @@ export default function TaxOffsetPage() {
         />
       ) : null}
       {!loadError && monthData ? (
-        <div className="tax-offset-workspace">
-          <div className="tax-left-workspace">
-            <div className="tax-layout">
+        <Box className="tax-offset-workspace">
+          <Box className="tax-left-workspace">
+            <Box className="tax-layout">
               <TaxTable
                 selectable={false}
                 showBottomScrollbar={false}
@@ -332,27 +340,31 @@ export default function TaxOffsetPage() {
                 selectedIds={selectedInputIds}
                 headerActions={(
                   <>
-                    <button
+                    <Button
                       className="secondary-button compact"
                       type="button"
                       disabled={selectableInputIds.length === 0 || selectedInputIds.length === selectableInputIds.length}
                       onClick={() => setSelectedInputIds(selectableInputIds)}
+                      size="small"
+                      variant="outlined"
                     >
                       全选
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       className="secondary-button compact"
                       type="button"
                       disabled={selectedInputIds.length === 0}
                       onClick={() => setSelectedInputIds([])}
+                      size="small"
+                      variant="outlined"
                     >
                       清空
-                    </button>
+                    </Button>
                   </>
                 )}
                 onToggleRow={(id) => setSelectedInputIds((currentIds) => toggleSelection(currentIds, id))}
               />
-            </div>
+            </Box>
             <div
               ref={taxLayoutScrollbarRef}
               className="tax-layout-scrollbar"
@@ -360,7 +372,7 @@ export default function TaxOffsetPage() {
             >
               <div ref={taxLayoutScrollbarInnerRef} className="tax-layout-scrollbar-inner" />
             </div>
-          </div>
+          </Box>
           <CertifiedResultsDrawer
             isCollapsed={isCertifiedDrawerCollapsed}
             matchedRows={monthData.certifiedMatchedInvoices}
@@ -368,7 +380,7 @@ export default function TaxOffsetPage() {
             onSelectMatchedRow={(row) => setHighlightedPlanInputId(row.matchedInputId)}
             onToggleCollapse={() => setIsCertifiedDrawerCollapsed((current) => !current)}
           />
-        </div>
+        </Box>
       ) : null}
 
       {isCertifiedImportModalOpen ? (
@@ -378,6 +390,6 @@ export default function TaxOffsetPage() {
           onImported={handleCertifiedImportComplete}
         />
       ) : null}
-    </div>
+    </PageScaffold>
   );
 }

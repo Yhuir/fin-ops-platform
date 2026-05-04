@@ -1,3 +1,10 @@
+import Button from "@mui/material/Button";
+import ButtonBase from "@mui/material/ButtonBase";
+import Chip from "@mui/material/Chip";
+import Paper from "@mui/material/Paper";
+import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
+
 import type { TaxCertifiedInvoiceRecord } from "../../features/tax/types";
 
 type CertifiedResultsDrawerProps = {
@@ -20,34 +27,40 @@ function DrawerGroup({
   onSelect?: (row: TaxCertifiedInvoiceRecord) => void;
 }) {
   return (
-    <section className="tax-certified-group">
-      <header className="tax-certified-group-header">
-        <strong>{title}</strong>
-        <span>{rows.length} 条</span>
-      </header>
-      <div className="tax-certified-group-list">
-        {rows.length === 0 ? <div className="tax-certified-empty">当前分组暂无记录</div> : null}
+    <Paper className="tax-certified-group" component="section" variant="outlined">
+      <Stack className="tax-certified-group-header" direction="row" justifyContent="space-between" alignItems="center">
+        <Typography component="strong" fontWeight={800}>
+          {title}
+        </Typography>
+        <Chip label={`${rows.length} 条`} size="small" variant="outlined" />
+      </Stack>
+      <Stack className="tax-certified-group-list" spacing={1}>
+        {rows.length === 0 ? <Typography className="tax-certified-empty">当前分组暂无记录</Typography> : null}
         {rows.map((row) => (
-          <button
+          <ButtonBase
             key={row.id}
             className="tax-certified-item"
             type="button"
             onClick={() => onSelect?.(row)}
             aria-label={`${buttonLabelPrefix} ${row.invoiceNo}`}
           >
-            <div className="tax-certified-item-head">
-              <strong>{row.invoiceNo}</strong>
-              <span>{row.statusLabel ?? "已认证"}</span>
-            </div>
-            <div className="tax-certified-item-meta">
-              <span>{row.counterparty}</span>
-              <span>{row.issueDate}</span>
-              <span>{row.taxAmount}</span>
-            </div>
-          </button>
+            <Stack spacing={0.75} sx={{ width: "100%" }}>
+              <Stack className="tax-certified-item-head" direction="row" justifyContent="space-between" alignItems="center">
+                <Typography component="strong" fontWeight={800}>
+                  {row.invoiceNo}
+                </Typography>
+                <Chip color="success" label={row.statusLabel ?? "已认证"} size="small" variant="outlined" />
+              </Stack>
+              <Stack className="tax-certified-item-meta" direction="row" flexWrap="wrap" gap={1}>
+                <Typography component="span">{row.counterparty}</Typography>
+                <Typography component="span">{row.issueDate}</Typography>
+                <Typography component="span">{row.taxAmount}</Typography>
+              </Stack>
+            </Stack>
+          </ButtonBase>
         ))}
-      </div>
-    </section>
+      </Stack>
+    </Paper>
   );
 }
 
@@ -61,19 +74,26 @@ export default function CertifiedResultsDrawer({
   const totalCount = matchedRows.length + outsidePlanRows.length;
 
   return (
-    <aside className={`tax-certified-drawer${isCollapsed ? " collapsed" : ""}`} aria-label="已认证结果" role="complementary">
-      <button
+    <Paper
+      className={`tax-certified-drawer${isCollapsed ? " collapsed" : ""}`}
+      aria-label="已认证结果"
+      component="aside"
+      role="complementary"
+      variant="outlined"
+    >
+      <Button
         aria-label={`${isCollapsed ? "展开" : "收起"}已认证结果 ${totalCount}`}
         className="tax-certified-drawer-toggle"
         type="button"
         onClick={onToggleCollapse}
+        variant="text"
       >
         <span>已认证结果</span>
         <strong>{totalCount}</strong>
-      </button>
+      </Button>
 
       {!isCollapsed ? (
-        <div className="tax-certified-drawer-body">
+        <Stack className="tax-certified-drawer-body" spacing={1.5}>
           <DrawerGroup
             title="已匹配计划"
             rows={matchedRows}
@@ -81,8 +101,8 @@ export default function CertifiedResultsDrawer({
             onSelect={onSelectMatchedRow}
           />
           <DrawerGroup title="已认证但未进入计划" rows={outsidePlanRows} buttonLabelPrefix="查看未进入计划的已认证发票" />
-        </div>
+        </Stack>
       ) : null}
-    </aside>
+    </Paper>
   );
 }

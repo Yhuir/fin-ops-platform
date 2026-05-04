@@ -1,13 +1,36 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { vi } from "vitest";
 
-import App from "../app/App";
+import MuiProviders from "../app/MuiProviders";
+import { AppChromeProvider } from "../contexts/AppChromeContext";
+import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
+import type { SessionPayload } from "../features/session/api";
+import CostStatisticsPage from "../pages/CostStatisticsPage";
 import { installMockApiFetch } from "./apiMock";
 
 const originalCreateObjectURL = URL.createObjectURL;
 const originalRevokeObjectURL = URL.revokeObjectURL;
 const PAGE_RENDER_TIMEOUT = 3000;
+const defaultSession: SessionPayload = {
+  allowed: true,
+  userId: 1,
+  username: "TESTFULL001",
+  nickName: "测试全权限",
+  roles: ["fin_ops_user"],
+  permissions: ["finops:app:view"],
+  accessTier: "full_access",
+  canAccessApp: true,
+  canMutateData: true,
+  canAdminAccess: false,
+};
+
+const staticSession: SessionContextValue = {
+  status: "authenticated",
+  session: defaultSession,
+  refresh: () => undefined,
+};
 
 beforeAll(() => {
   Object.defineProperty(URL, "createObjectURL", {
@@ -51,21 +74,35 @@ function findCostStatisticsHeading() {
   return screen.findByRole("heading", { name: "成本统计" }, { timeout: PAGE_RENDER_TIMEOUT });
 }
 
+function renderCostStatisticsPage() {
+  return render(
+    <MemoryRouter initialEntries={["/cost-statistics"]}>
+      <MuiProviders>
+        <AppChromeProvider>
+          <SessionContext.Provider value={staticSession}>
+            <CostStatisticsPage />
+          </SessionContext.Provider>
+        </AppChromeProvider>
+      </MuiProviders>
+    </MemoryRouter>,
+  );
+}
+
 describe("Cost statistics page", () => {
   test("defaults to time view and loads month-aware transaction rows", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
 
-    render(<App />);
+    renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "按时间" })).toHaveClass("active");
-    const timeTable = await screen.findByRole("table", { name: "按时间统计表" });
-    expect(within(timeTable).getByRole("button", { name: "查看流水 cost-txn-003" })).toBeInTheDocument();
-    expect(within(timeTable).queryByRole("button", { name: "查看流水 cost-txn-004" })).not.toBeInTheDocument();
-    expect(within(timeTable).queryByRole("columnheader", { name: "资金方向" })).not.toBeInTheDocument();
-    expect(within(timeTable).getAllByText("支出")[0]).toHaveClass("direction-tag");
+    const timeGrid = await screen.findByRole("grid", { name: "按时间统计表" });
+    expect(within(timeGrid).getByRole("button", { name: "查看流水 cost-txn-003" })).toBeInTheDocument();
+    expect(within(timeGrid).queryByRole("button", { name: "查看流水 cost-txn-004" })).not.toBeInTheDocument();
+    expect(within(timeGrid).queryByRole("columnheader", { name: "资金方向" })).not.toBeInTheDocument();
+    expect(within(timeGrid).getAllByText("支出")[0]).toHaveClass("direction-tag");
     expect(within(getStatCard("时间流水")).getByText("3")).toBeInTheDocument();
     expect(within(getStatCard("支出流水")).getByText("3")).toBeInTheDocument();
     expect(within(getStatCard("支出总额")).getByText("13,360.00")).toBeInTheDocument();
@@ -74,10 +111,10 @@ describe("Cost statistics page", () => {
       expect.any(Object),
     );
 
-    await user.click(screen.getByRole("button", { name: "4月" }));
+    await user.click(screen.getByRole("radio", { name: "四月" }));
 
-    const nextTimeTable = await screen.findByRole("table", { name: "按时间统计表" });
-    expect(within(nextTimeTable).getByRole("button", { name: "查看流水 cost-txn-102" })).toBeInTheDocument();
+    const nextTimeGrid = await screen.findByRole("grid", { name: "按时间统计表" });
+    expect(within(nextTimeGrid).getByRole("button", { name: "查看流水 cost-txn-102" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/cost-statistics/explorer?month=2026-04&project_scope=active", expect.any(Object));
   });
 
@@ -86,7 +123,7 @@ describe("Cost statistics page", () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
 
-    render(<App />);
+    renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "按项目" }));
@@ -114,7 +151,7 @@ describe("Cost statistics page", () => {
 
     await user.click(within(expenseLane as HTMLElement).getByRole("button", { name: /设备货款及材料费/ }));
 
-    const transactionTable = screen.getByRole("table", { name: "项目对应流水表" });
+    const transactionTable = screen.getByRole("grid", { name: "项目对应流水表" });
     expect(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-001" })).toBeInTheDocument();
     expect(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-002" })).toBeInTheDocument();
     expect(within(transactionTable).queryByRole("columnheader", { name: "资金方向" })).not.toBeInTheDocument();
@@ -145,7 +182,7 @@ describe("Cost statistics page", () => {
     const user = userEvent.setup();
     installMockApiFetch();
 
-    render(<App />);
+    renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "按项目" }));
@@ -164,7 +201,7 @@ describe("Cost statistics page", () => {
     expect(screen.getByRole("button", { name: "按年统计 2026年" })).toHaveClass("active");
 
     await user.click(screen.getByRole("button", { name: "按月统计" }));
-    await user.click(screen.getByRole("button", { name: "4月" }));
+    await user.click(screen.getByRole("radio", { name: "四月" }));
     expect(screen.getByRole("button", { name: "按月统计 2026年4月" })).toHaveClass("active");
 
     expect(await within(projectLane as HTMLElement).findByText("昆明卷烟厂动力设备控制系统升级改造项目")).toBeInTheDocument();
@@ -188,7 +225,7 @@ describe("Cost statistics page", () => {
     const user = userEvent.setup();
     installMockApiFetch();
 
-    render(<App />);
+    renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "按费用类型" }));
@@ -197,7 +234,7 @@ describe("Cost statistics page", () => {
     expect(expenseLane).not.toBeNull();
     await user.click(within(expenseLane as HTMLElement).getByRole("button", { name: /交通费/ }));
 
-    const transactionTable = screen.getByRole("table", { name: "按费用类型流水表" });
+    const transactionTable = screen.getByRole("grid", { name: "按费用类型流水表" });
     expect(within(transactionTable).getByText("2026-03-18 17:02:09")).toBeInTheDocument();
     expect(within(transactionTable).getByText("云南溯源科技")).toBeInTheDocument();
     expect(within(transactionTable).getByText("860.00")).toBeInTheDocument();
@@ -219,15 +256,15 @@ describe("Cost statistics page", () => {
     const user = userEvent.setup();
     installMockApiFetch();
 
-    render(<App />);
+    renderCostStatisticsPage();
 
-    expect(await screen.findByRole("table", { name: "按时间统计表" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "5月" }));
+    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: "五月" }));
 
     expect(await screen.findAllByText("当前时间范围没有可用于成本统计的支出流水。")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "按月统计 2026年5月" })).toHaveClass("active");
-    await user.click(screen.getByRole("button", { name: "3月" }));
-    expect(await screen.findByRole("table", { name: "按时间统计表" })).toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: "三月" }));
+    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
   });
 
   test("bank view supports all-time, year, and month drilldown from bank to project to transaction", async () => {
@@ -235,7 +272,7 @@ describe("Cost statistics page", () => {
     const user = userEvent.setup();
     installMockApiFetch();
 
-    render(<App />);
+    renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "按银行" }));
@@ -255,7 +292,7 @@ describe("Cost statistics page", () => {
     expect(within(projectLane as HTMLElement).getByText("100.0%")).toBeInTheDocument();
 
     await user.click(within(projectLane as HTMLElement).getByRole("button", { name: /云南溯源科技/ }));
-    const transactionTable = screen.getByRole("table", { name: "银行对应流水表" });
+    const transactionTable = screen.getByRole("grid", { name: "银行对应流水表" });
     expect(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-001" })).toBeInTheDocument();
     expect(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-002" })).toBeInTheDocument();
 
@@ -266,7 +303,7 @@ describe("Cost statistics page", () => {
     expect(screen.getByRole("button", { name: "按年统计 2026年" })).toHaveClass("active");
 
     await user.click(screen.getByRole("button", { name: "按月统计" }));
-    await user.click(screen.getByRole("button", { name: "4月" }));
+    await user.click(screen.getByRole("radio", { name: "四月" }));
     expect(screen.getByRole("button", { name: "按月统计 2026年4月" })).toHaveClass("active");
 
     expect(await within(bankLane as HTMLElement).findByText("平安银行 账户 8821")).toBeInTheDocument();
@@ -278,14 +315,14 @@ describe("Cost statistics page", () => {
     const user = userEvent.setup();
     installMockApiFetch();
 
-    render(<App />);
+    renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "按时间" }));
     await user.click(screen.getByRole("button", { name: "按月统计 2026年3月" }));
-    await user.click(screen.getByRole("button", { name: "4月" }));
+    await user.click(screen.getByRole("radio", { name: "四月" }));
     expect(await screen.findByRole("button", { name: "按月统计 2026年4月" })).toHaveClass("active");
-    expect(screen.getByRole("table", { name: "按时间统计表" })).toBeInTheDocument();
+    expect(screen.getByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "查看流水 cost-txn-102" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "按费用类型" }));
@@ -309,7 +346,7 @@ describe("Cost statistics page", () => {
     const user = userEvent.setup();
     installMockApiFetch();
 
-    render(<App />);
+    renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "按时间" }));
@@ -325,19 +362,19 @@ describe("Cost statistics page", () => {
     const user = userEvent.setup();
     installMockApiFetch();
 
-    render(<App />);
+    renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     const monthScopeButton = screen.getByRole("button", { name: "按月统计 2026年3月" });
-    expect(screen.getByLabelText("时间统计月份")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "三月" })).toBeInTheDocument();
 
     await user.click(monthScopeButton);
-    expect(screen.queryByLabelText("时间统计月份")).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: "三月" })).not.toBeInTheDocument();
 
     await user.click(monthScopeButton);
-    expect(screen.getByLabelText("时间统计月份")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "三月" })).toBeInTheDocument();
     await user.click(document.body);
-    expect(screen.queryByLabelText("时间统计月份")).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: "三月" })).not.toBeInTheDocument();
   });
 
   test("keeps current content visible while switching views or ranges that trigger background refresh", async () => {
@@ -345,10 +382,10 @@ describe("Cost statistics page", () => {
     const user = userEvent.setup();
     installMockApiFetch();
 
-    render(<App />);
+    renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    expect(screen.getByRole("table", { name: "按时间统计表" })).toBeInTheDocument();
+    expect(screen.getByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "按银行" }));
 
@@ -361,10 +398,10 @@ describe("Cost statistics page", () => {
     const user = userEvent.setup();
     installMockApiFetch({ costErrorMonths: ["2026-04"] });
 
-    render(<App />);
+    renderCostStatisticsPage();
 
-    expect(await screen.findByRole("table", { name: "按时间统计表" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "4月" }));
+    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: "四月" }));
 
     expect(await screen.findByText("成本统计数据加载失败，请稍后重试。")).toBeInTheDocument();
   });
@@ -374,7 +411,7 @@ describe("Cost statistics page", () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
 
-    render(<App />);
+    renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导出中心" })).toBeInTheDocument();
@@ -417,7 +454,7 @@ describe("Cost statistics page", () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
 
-    render(<App />);
+    renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "按项目" }));
@@ -451,7 +488,7 @@ describe("Cost statistics page", () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
 
-    render(<App />);
+    renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "按费用类型" }));

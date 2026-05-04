@@ -1,23 +1,26 @@
-import type { ReactNode } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { DataGrid, type GridColDef, type GridRowParams } from "@mui/x-data-grid";
 
 import BankAccountValue from "../BankAccountValue";
 import DirectionTag from "../DirectionTag";
 
-type CostStatisticsAmountCell = {
+export type CostStatisticsAmountCell = {
   amount: string;
   direction: string;
   paymentAccountLabel?: string;
 };
 
-type CostStatisticsTableColumn<Row> = {
+export type CostStatisticsTableColumn<Row> = {
   key: string;
   header: string;
   headerClassName?: string;
   cellClassName?: string;
+  width?: number;
+  flex?: number;
   render: (row: Row) => ReactNode | CostStatisticsAmountCell;
 };
 
-type CostStatisticsTableProps<Row> = {
+type CostStatisticsTableProps<Row extends object> = {
   ariaLabel: string;
   columns: CostStatisticsTableColumn<Row>[];
   rows: Row[];
@@ -27,7 +30,7 @@ type CostStatisticsTableProps<Row> = {
   getRowActionLabel?: (row: Row) => string;
 };
 
-export default function CostStatisticsTable<Row>({
+export default function CostStatisticsTable<Row extends object>({
   ariaLabel,
   columns,
   rows,
@@ -36,61 +39,72 @@ export default function CostStatisticsTable<Row>({
   onRowClick,
   getRowActionLabel,
 }: CostStatisticsTableProps<Row>) {
+  const onRowClickRef = useRef(onRowClick);
+  const getRowActionLabelRef = useRef(getRowActionLabel);
+
+  useEffect(() => {
+    onRowClickRef.current = onRowClick;
+    getRowActionLabelRef.current = getRowActionLabel;
+  }, [getRowActionLabel, onRowClick]);
+
+  const dataGridColumns = useMemo<GridColDef<Row>[]>(
+    () =>
+      columns.map((column, columnIndex) => ({
+        field: column.key,
+        headerName: column.header,
+        width: column.width,
+        flex: column.flex ?? (column.width ? undefined : 1),
+        minWidth: column.width ? undefined : 140,
+        headerClassName: column.headerClassName,
+        cellClassName: column.cellClassName,
+        sortable: true,
+        renderCell: (params) => {
+          const renderedContent = renderTableCellContent(column.render(params.row));
+          if (columnIndex !== 0) {
+            return renderedContent;
+          }
+          return (
+            <button
+              className="cost-table-row-trigger"
+              type="button"
+              aria-label={getRowActionLabelRef.current ? getRowActionLabelRef.current(params.row) : "查看行详情"}
+              onClick={(event) => {
+                event.stopPropagation();
+                onRowClickRef.current?.(params.row);
+              }}
+            >
+              {renderedContent}
+            </button>
+          );
+        },
+      })),
+    [columns],
+  );
+
+  const gridHeight = rows.length === 0 ? 180 : Math.min(520, 112 + rows.length * 58);
+
   return (
-    <div className="cost-table-shell">
-      <table aria-label={ariaLabel} className="cost-table">
-        <thead>
-          <tr>
-            {columns.map((column) => (
-              <th key={column.key} className={column.headerClassName}>
-                {column.header}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr>
-              <td className="cost-table-empty" colSpan={columns.length}>
-                {emptyLabel}
-              </td>
-            </tr>
-          ) : (
-            rows.map((row, rowIndex) => (
-              <tr
-                key={getRowKey(row)}
-                className={onRowClick ? "cost-table-row clickable" : "cost-table-row"}
-                onClick={onRowClick ? () => onRowClick(row) : undefined}
-              >
-                {columns.map((column, columnIndex) => {
-                  const content = column.render(row);
-                  const renderedContent = renderTableCellContent(content);
-                  const isInteractive = Boolean(onRowClick) && columnIndex === 0;
-                  return (
-                    <td key={column.key} className={column.cellClassName}>
-                      {isInteractive ? (
-                        <button
-                          className="cost-table-row-trigger"
-                          type="button"
-                          aria-label={getRowActionLabel ? getRowActionLabel(row) : `查看第 ${rowIndex + 1} 行`}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onRowClick?.(row);
-                          }}
-                        >
-                          {renderedContent}
-                        </button>
-                      ) : (
-                        renderedContent
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
+    <div className="cost-table-shell cost-data-grid-shell" style={{ height: gridHeight }}>
+      <DataGrid
+        aria-label={ariaLabel}
+        columns={dataGridColumns}
+        rows={rows}
+        getRowId={getRowKey}
+        disableRowSelectionOnClick
+        hideFooter
+        localeText={{ noRowsLabel: emptyLabel }}
+        onRowClick={(params: GridRowParams<Row>) => onRowClickRef.current?.(params.row)}
+        rowHeight={58}
+        columnHeaderHeight={42}
+        sx={{
+          border: 0,
+          "& .MuiDataGrid-cell": {
+            alignItems: "flex-start",
+            py: 1.25,
+            lineHeight: 1.5,
+          },
+        }}
+      />
     </div>
   );
 }

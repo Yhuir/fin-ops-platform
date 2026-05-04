@@ -63,10 +63,12 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
+    expect(await within(page).findByRole("list", { name: "ETC发票列表" })).toBeInTheDocument();
     await user.click(await within(page).findByLabelText("选择发票 ETC-2026-001"));
     await user.click(within(page).getByRole("button", { name: "加入提交篮子" }));
     await user.click(within(page).getByRole("button", { name: "加入提交篮子" }));
 
+    expect(within(page).getByRole("list", { name: "提交篮子发票列表" })).toBeInTheDocument();
     expect(within(page).getByRole("heading", { name: "待提交 1 张" })).toBeInTheDocument();
     expect(within(page).getByText("合计金额 13.07")).toBeInTheDocument();
 
@@ -74,6 +76,19 @@ describe("ETC ticket management page", () => {
     await user.click(within(page).getByRole("button", { name: "移回未提交" }));
 
     expect(within(page).getByRole("heading", { name: "待提交 0 张" })).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "提交OA支付申请" })).toBeDisabled();
+  });
+
+  test("blocks OA draft creation when basket has missing PDF or XML attachment", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    await user.click(await within(page).findByLabelText("选择发票 ETC-2026-003"));
+    await user.click(within(page).getByRole("button", { name: "加入提交篮子" }));
+
+    expect(within(page).getByText("提交篮子存在缺PDF或缺XML的发票，补齐附件后才能创建 OA 草稿。")).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "提交OA支付申请" })).toBeDisabled();
   });
 

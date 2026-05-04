@@ -1,3 +1,11 @@
+import List from "@mui/material/List";
+import ListItem from "@mui/material/ListItem";
+import ListItemButton from "@mui/material/ListItemButton";
+import ListItemText from "@mui/material/ListItemText";
+import Paper from "@mui/material/Paper";
+import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
+
 import type { SettingsNavigationItem, SettingsSectionId } from "./types";
 
 type SettingsTreeNavProps = {
@@ -31,30 +39,36 @@ export default function SettingsTreeNav({
   }
 
   return (
-    <aside className="cost-explorer-lane settings-tree-panel" aria-label="设置导航">
-      <header className="cost-explorer-lane-header settings-nav-header">
-        <h3>设置分类</h3>
-        <span>{items.length}</span>
-      </header>
-      <div className="cost-explorer-list settings-tree" role="tree" aria-label="设置分类">
+    <Paper component="aside" className="settings-tree-panel" aria-label="设置导航" variant="outlined">
+      <Stack className="settings-nav-header" direction="row" alignItems="center" justifyContent="space-between">
+        <Typography component="h3" variant="subtitle2">设置分类</Typography>
+        <Typography component="span" variant="caption">{items.length}</Typography>
+      </Stack>
+      <List className="settings-tree" role="tree" aria-label="设置分类" dense disablePadding>
         {items.map((item) => (
-          <button
-            key={item.id}
-            aria-controls={panelId(item.id)}
-            role="treeitem"
-            aria-selected={activeSectionId === item.id}
-            className={`cost-explorer-item settings-tree-item${activeSectionId === item.id ? " active" : ""}`}
-            type="button"
-            onClick={() => onSelect(item.id)}
-          >
-            <span className="settings-tree-copy">
-              <strong>{item.label}</strong>
-              <small>{item.description}</small>
-            </span>
-            <span className="settings-tree-count">{item.count}</span>
-          </button>
+          <ListItem key={item.id} disablePadding role="none">
+            <ListItemButton
+              aria-controls={panelId(item.id)}
+              role="treeitem"
+              aria-selected={activeSectionId === item.id}
+              className="settings-tree-item"
+              selected={activeSectionId === item.id}
+              onClick={() => onSelect(item.id)}
+            >
+              <ListItemText
+                className="settings-tree-copy"
+                primary={item.label}
+                secondary={item.description}
+                primaryTypographyProps={{ component: "strong", variant: "body2" }}
+                secondaryTypographyProps={{ component: "small" }}
+              />
+              <Typography className="settings-tree-count" component="span" variant="caption">
+                {item.count}
+              </Typography>
+            </ListItemButton>
+          </ListItem>
         ))}
-      </div>
-    </aside>
+      </List>
+    </Paper>
   );
 }

@@ -2,6 +2,7 @@ import { render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 import App from "../app/App";
+import MuiProviders from "../app/MuiProviders";
 import { AppChromeProvider } from "../contexts/AppChromeContext";
 import { MonthProvider } from "../contexts/MonthContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
@@ -35,13 +36,15 @@ export function renderAppAt(pathname: string) {
 export function renderWorkbenchPage() {
   return render(
     <MemoryRouter>
-      <AppChromeProvider>
-        <MonthProvider>
-          <SessionContext.Provider value={staticWorkbenchSession}>
-            <ReconciliationWorkbenchPage />
-          </SessionContext.Provider>
-        </MonthProvider>
-      </AppChromeProvider>
+      <MuiProviders>
+        <AppChromeProvider>
+          <MonthProvider>
+            <SessionContext.Provider value={staticWorkbenchSession}>
+              <ReconciliationWorkbenchPage />
+            </SessionContext.Provider>
+          </MonthProvider>
+        </AppChromeProvider>
+      </MuiProviders>
     </MemoryRouter>,
   );
 }

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import WorkbenchSettingsModal from "../components/workbench/WorkbenchSettingsModal";
+import Alert from "@mui/material/Alert";
+
+import SettingsPageContent from "../components/settings/SettingsPageContent";
 import { type WorkbenchHeaderIntent, useAppChrome } from "../contexts/AppChromeContext";
 import { useSession, useSessionPermissions } from "../contexts/SessionContext";
 import {
@@ -266,12 +268,12 @@ export default function SettingsPage() {
   return (
     <div className="page-stack settings-page-shell" data-testid="settings-page">
       {pageFeedback ? (
-        <div className={`state-panel${pageFeedback.tone === "error" ? " error" : ""}`}>{pageFeedback.message}</div>
+        <Alert severity={pageFeedback.tone === "error" ? "error" : "success"}>{pageFeedback.message}</Alert>
       ) : null}
-      {loadError ? <div className="state-panel error">{loadError}</div> : null}
-      {isLoading && !loadError ? <div className="state-panel">正在同步关联台设置...</div> : null}
+      {loadError ? <Alert severity="error">{loadError}</Alert> : null}
+      {isLoading && !loadError ? <Alert severity="info">正在同步关联台设置...</Alert> : null}
       {!isLoading && !loadError && settings ? (
-        <WorkbenchSettingsModal
+        <SettingsPageContent
           canManageAccessControl={canAdminAccess}
           canSave={canMutateData}
           isSaving={isSaving}

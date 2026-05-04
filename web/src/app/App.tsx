@@ -1,114 +1,110 @@
-import { BrowserRouter, NavLink } from "react-router-dom";
+import { useEffect, useState } from "react";
+import Box from "@mui/material/Box";
+import useMediaQuery from "@mui/material/useMediaQuery";
+import { useTheme } from "@mui/material/styles";
+import { BrowserRouter } from "react-router-dom";
 
 import SessionGate from "../components/auth/SessionGate";
-import BackgroundProgressBlock from "../components/common/BackgroundProgressBlock";
-import WorkbenchHeaderControls from "../components/workbench/WorkbenchHeaderControls";
+import AppSidebar from "../components/shell/AppSidebar";
+import { collapsedSidebarWidth, expandedSidebarWidth } from "../components/shell/AppSidebar";
+import AppTopBar from "../components/shell/AppTopBar";
 import { AppChromeProvider, useAppChrome } from "../contexts/AppChromeContext";
 import { ImportProgressProvider, useImportProgress } from "../contexts/ImportProgressContext";
 import { MonthProvider } from "../contexts/MonthContext";
 import { SessionProvider } from "../contexts/SessionContext";
 import { BackgroundJobProgressProvider, useBackgroundJobProgress } from "../features/backgroundJobs/BackgroundJobProgressProvider";
+import MuiProviders from "./MuiProviders";
 import AppRouter from "./router";
 import { APP_BASE_PATH, isOaEmbeddedMode } from "./runtime";
 import "./styles.css";
 
-function HeaderStatusIndicator({ level, reason }: { level: "ok" | "pending" | "error"; reason: string }) {
-  return (
-    <div
-      aria-label={reason}
-      aria-live="polite"
-      className={`global-status-indicator ${level}`}
-      data-status-reason={reason}
-      role="status"
-      title={reason}
-    >
-      <span className="global-status-dot" aria-hidden="true" />
-    </div>
-  );
+const DEFAULT_SIDEBAR_STORAGE_KEY = "finOps.sidebar.expanded.default";
+const EMBEDDED_OA_SIDEBAR_STORAGE_KEY = "finOps.sidebar.expanded.embeddedOa";
+
+function readPersistedSidebarState(storageKey: string, fallback: boolean) {
+  try {
+    const persisted = window.localStorage.getItem(storageKey);
+    if (persisted === "true") {
+      return true;
+    }
+    if (persisted === "false") {
+      return false;
+    }
+  } catch {
+    return fallback;
+  }
+  return fallback;
+}
+
+function persistSidebarState(storageKey: string, expanded: boolean) {
+  try {
+    window.localStorage.setItem(storageKey, String(expanded));
+  } catch {
+    // localStorage may be unavailable in restrictive embedded shells.
+  }
 }
 
 function AppShell() {
-  const { workbenchHeaderActions, workbenchStatus } = useAppChrome();
+  const { workbenchStatus } = useAppChrome();
   const { progress } = useImportProgress();
   const { primaryJob, extraCount, connectionFailed, acknowledgeJob } = useBackgroundJobProgress();
+  const theme = useTheme();
   const embedded = isOaEmbeddedMode();
+  const isCompact = useMediaQuery(theme.breakpoints.down("md"), { noSsr: true });
+  const storageKey = embedded ? EMBEDDED_OA_SIDEBAR_STORAGE_KEY : DEFAULT_SIDEBAR_STORAGE_KEY;
+  const defaultExpanded = !embedded;
+  const [sidebarExpanded, setSidebarExpanded] = useState(() => readPersistedSidebarState(storageKey, defaultExpanded));
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => {
+    setSidebarExpanded(readPersistedSidebarState(storageKey, defaultExpanded));
+  }, [defaultExpanded, storageKey]);
+
+  useEffect(() => {
+    if (!isCompact) {
+      setMobileOpen(false);
+    }
+  }, [isCompact]);
+
+  const toggleSidebarExpanded = () => {
+    setSidebarExpanded((current) => {
+      const next = !current;
+      persistSidebarState(storageKey, next);
+      return next;
+    });
+  };
+
+  const sidebarWidth = isCompact ? 0 : sidebarExpanded ? expandedSidebarWidth : collapsedSidebarWidth;
 
   return (
-    <div className={`app-shell${embedded ? " embedded-shell" : ""}`}>
-      <header className={`global-header${embedded ? " embedded-header" : ""}`}>
-        <div className="global-header-main">
-          <div className="global-heading-block">
-            <div className="eyebrow">溯源办公系统</div>
-            <div className="global-title">财务运营平台</div>
-          </div>
-          {workbenchStatus ? <HeaderStatusIndicator level={workbenchStatus.level} reason={workbenchStatus.reason} /> : null}
-          {primaryJob ? (
-            <BackgroundProgressBlock
-              kind="job"
-              job={primaryJob}
-              extraCount={extraCount}
-              onAcknowledge={(jobId) => {
-                void acknowledgeJob(jobId);
-              }}
-            />
-          ) : connectionFailed ? (
-            <BackgroundProgressBlock kind="connection_error" />
-          ) : progress ? (
-            <div className={`global-progress-chip ${progress.tone}`} aria-live="polite">
-              <span className="global-progress-label">进度</span>
-              <strong>{progress.label}</strong>
-            </div>
-          ) : null}
-        </div>
-        <div className="header-actions">
-          {workbenchHeaderActions ? (
-            <WorkbenchHeaderControls
-              canMutateData={workbenchHeaderActions.canMutateData}
-              className="shell"
-              onOpenImport={workbenchHeaderActions.onOpenImport}
-              onOpenSearch={workbenchHeaderActions.onOpenSearch}
-              onOpenSettings={workbenchHeaderActions.onOpenSettings}
-            />
-          ) : null}
-          <nav className="nav-links" aria-label="主导航">
-            <NavLink
-              to="/"
-              className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
-              end
-            >
-              关联台
-            </NavLink>
-            <NavLink
-              to="/tax-offset"
-              className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
-            >
-              税金抵扣
-            </NavLink>
-            <NavLink
-              to="/cost-statistics"
-              className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
-            >
-              成本统计
-            </NavLink>
-            <NavLink
-              to="/bank-details"
-              className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
-            >
-              银行明细
-            </NavLink>
-            <NavLink
-              to="/etc-tickets"
-              className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
-            >
-              ETC票据管理
-            </NavLink>
-          </nav>
-        </div>
-      </header>
-      <main className={`page-body${embedded ? " embedded" : ""}`}>
-        <AppRouter />
-      </main>
-    </div>
+    <Box className={`app-shell${embedded ? " embedded-shell" : ""}`} sx={{ "--sidebar-width": `${sidebarWidth}px` }}>
+      <AppSidebar
+        embedded={embedded}
+        isCompact={isCompact}
+        mobileOpen={mobileOpen}
+        expanded={sidebarExpanded}
+        onCloseMobile={() => setMobileOpen(false)}
+        onToggleExpanded={toggleSidebarExpanded}
+      />
+      <Box className="app-shell-content" component="section">
+        <AppTopBar
+          embedded={embedded}
+          isCompact={isCompact}
+          workbenchStatus={workbenchStatus}
+          primaryJob={primaryJob}
+          extraCount={extraCount}
+          connectionFailed={connectionFailed}
+          progress={progress}
+          onOpenMobileSidebar={() => setMobileOpen(true)}
+          onAcknowledgeJob={(jobId) => {
+            void acknowledgeJob(jobId);
+          }}
+        />
+        <main className={`page-body${embedded ? " embedded" : ""}`}>
+          <AppRouter />
+        </main>
+      </Box>
+    </Box>
   );
 }
 
@@ -118,19 +114,21 @@ export default function App() {
       basename={APP_BASE_PATH === "/" ? undefined : APP_BASE_PATH}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
-      <MonthProvider>
-        <ImportProgressProvider>
-          <SessionProvider>
-            <AppChromeProvider initialShellHeaderMounted>
-              <SessionGate>
-                <BackgroundJobProgressProvider>
-                  <AppShell />
-                </BackgroundJobProgressProvider>
-              </SessionGate>
-            </AppChromeProvider>
-          </SessionProvider>
-        </ImportProgressProvider>
-      </MonthProvider>
+      <MuiProviders>
+        <MonthProvider>
+          <ImportProgressProvider>
+            <SessionProvider>
+              <AppChromeProvider initialShellHeaderMounted>
+                <SessionGate>
+                  <BackgroundJobProgressProvider>
+                    <AppShell />
+                  </BackgroundJobProgressProvider>
+                </SessionGate>
+              </AppChromeProvider>
+            </SessionProvider>
+          </ImportProgressProvider>
+        </MonthProvider>
+      </MuiProviders>
     </BrowserRouter>
   );
 }
