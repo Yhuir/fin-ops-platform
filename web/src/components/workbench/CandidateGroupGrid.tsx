@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState, useCallback, useRef, type PointerEvent as ReactPointerEvent } from "react";
+import { Fragment, memo, useEffect, useMemo, useState, useCallback, useRef, type PointerEvent as ReactPointerEvent } from "react";
 
 import {
   collectWorkbenchFilterOptions,
@@ -289,27 +289,30 @@ function CandidateGroupGrid({
           data-testid={`candidate-group-${zoneId}-${group.id}`}
           style={{ gridTemplateColumns: rowTemplateColumns }}
         >
-          {panes.map((pane) => (
-            <div key={`${group.id}-${pane.id}`} className="candidate-group-pane-slot candidate-group-pane-slot-sheet">
-              <CandidateGroupCell
-                actionMode={actionMode}
-                columnGridStyle={paneGridStyleByPane[pane.id as WorkbenchRecordType]}
-                columns={columnsByPane[pane.id as WorkbenchRecordType]}
-                getRowState={getRowState}
-                highlightedRowId={highlightedRowId}
-                searchQuery={displayState.unifiedSearchQuery}
-                onOpenDetail={onOpenDetail}
-                onRowAction={onRowAction}
-                onSelectRow={onSelectRow}
-                paneId={pane.id as WorkbenchRecordType}
-                records={group.rows[pane.id as WorkbenchRecordType]}
-                scrollPaneId={pane.id as WorkbenchRecordType}
-                scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${pane.id}`}
-                showWorkflowActions={zoneId !== "open"}
-                canMutateData={canMutateData}
-                zoneId={zoneId}
-              />
-            </div>
+          {panes.map((pane, paneIndex) => (
+            <Fragment key={`${group.id}-${pane.id}`}>
+              <div className="candidate-group-pane-slot candidate-group-pane-slot-sheet">
+                <CandidateGroupCell
+                  actionMode={actionMode}
+                  columnGridStyle={paneGridStyleByPane[pane.id as WorkbenchRecordType]}
+                  columns={columnsByPane[pane.id as WorkbenchRecordType]}
+                  getRowState={getRowState}
+                  highlightedRowId={highlightedRowId}
+                  searchQuery={displayState.unifiedSearchQuery}
+                  onOpenDetail={onOpenDetail}
+                  onRowAction={onRowAction}
+                  onSelectRow={onSelectRow}
+                  paneId={pane.id as WorkbenchRecordType}
+                  records={group.rows[pane.id as WorkbenchRecordType]}
+                  scrollPaneId={pane.id as WorkbenchRecordType}
+                  scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${pane.id}`}
+                  showWorkflowActions={zoneId !== "open"}
+                  canMutateData={canMutateData}
+                  zoneId={zoneId}
+                />
+              </div>
+              {paneIndex < panes.length - 1 ? <div className="candidate-pane-grid-divider" aria-hidden="true" /> : null}
+            </Fragment>
           ))}
         </div>
       ))}
@@ -333,147 +336,153 @@ function CandidateGroupGrid({
   return (
     <div ref={gridRef} className="candidate-grid">
       <div className="candidate-grid-head" style={{ gridTemplateColumns: rowTemplateColumns }}>
-        {panes.map((pane) => (
-          <section key={pane.id} className="candidate-pane-head pane-card" data-testid={`pane-${pane.id}`}>
-            <div className="pane-header">
-              <div className="pane-header-main">
-                {pane.id === "invoice" ? (
-                  <InvoiceAttachmentDiagnosticsTrigger title={pane.title} diagnostics={invoiceAttachmentDiagnostics} />
-                ) : (
-                  <span>{pane.title}</span>
-                )}
-                <span>{pane.rows.length} 条</span>
-              </div>
-              <div className="pane-header-tools">
-                {pane.id === "bank" ? (
-                  <WorkbenchPaneTimeFilter
-                    availableYears={timeFilterYearsByPane.bank}
-                    filter={displayState.timeFilterByPane.bank}
+        {panes.map((pane, paneIndex) => (
+          <Fragment key={pane.id}>
+            <section className="candidate-pane-head pane-card" data-testid={`pane-${pane.id}`}>
+              <div className="pane-header">
+                <div className="pane-header-main">
+                  {pane.id === "invoice" ? (
+                    <InvoiceAttachmentDiagnosticsTrigger title={pane.title} diagnostics={invoiceAttachmentDiagnostics} />
+                  ) : (
+                    <span>{pane.title}</span>
+                  )}
+                  <span>{pane.rows.length} 条</span>
+                </div>
+                <div className="pane-header-tools">
+                  {pane.id === "bank" ? (
+                    <WorkbenchPaneTimeFilter
+                      availableYears={timeFilterYearsByPane.bank}
+                      filter={displayState.timeFilterByPane.bank}
+                      paneTitle={pane.title}
+                      onChange={(filter) => onPaneTimeFilterChange(zoneId, "bank", filter)}
+                    />
+                  ) : null}
+                  {pane.id === "oa" || pane.id === "bank" || pane.id === "invoice" ? (
+                    (() => {
+                      const sortPaneId: "oa" | "bank" | "invoice" = pane.id;
+                      return (
+                        <button
+                          aria-label={buildPaneSortActionLabel(sortPaneId, displayState.sortByPane[sortPaneId])}
+                          className={`pane-tool-btn pane-sort-btn${displayState.sortByPane[sortPaneId] ? " active" : ""}`}
+                          type="button"
+                          onClick={() => onTogglePaneSort(zoneId, sortPaneId)}
+                        >
+                          <span className="pane-sort-label">{buildPaneSortVisualLabel(displayState.sortByPane[sortPaneId])}</span>
+                        </button>
+                      );
+                    })()
+                  ) : null}
+                  <WorkbenchPaneSearch
+                    open={displayState.openSearchPaneId === pane.id}
+                    appliedValue={displayState.searchQueryByPane[pane.id]}
+                    draftValue={displayState.draftSearchQueryByPane[pane.id]}
                     paneTitle={pane.title}
-                    onChange={(filter) => onPaneTimeFilterChange(zoneId, "bank", filter)}
+                    onChange={(query) => onPaneSearchQueryChange(zoneId, pane.id, query)}
+                    onClear={() => onClearPaneSearch(zoneId, pane.id)}
+                    onClose={() => onClosePaneSearch(zoneId, pane.id)}
+                    onToggle={() => onTogglePaneSearch(zoneId, pane.id)}
                   />
-                ) : null}
-                {pane.id === "oa" || pane.id === "bank" || pane.id === "invoice" ? (
-                  (() => {
-                    const sortPaneId: "oa" | "bank" | "invoice" = pane.id;
-                    return (
-                      <button
-                        aria-label={buildPaneSortActionLabel(sortPaneId, displayState.sortByPane[sortPaneId])}
-                        className={`pane-tool-btn pane-sort-btn${displayState.sortByPane[sortPaneId] ? " active" : ""}`}
-                        type="button"
-                        onClick={() => onTogglePaneSort(zoneId, sortPaneId)}
-                      >
-                        <span className="pane-sort-label">{buildPaneSortVisualLabel(displayState.sortByPane[sortPaneId])}</span>
-                      </button>
-                    );
-                  })()
-                ) : null}
-                <WorkbenchPaneSearch
-                  open={displayState.openSearchPaneId === pane.id}
-                  appliedValue={displayState.searchQueryByPane[pane.id]}
-                  draftValue={displayState.draftSearchQueryByPane[pane.id]}
-                  paneTitle={pane.title}
-                  onChange={(query) => onPaneSearchQueryChange(zoneId, pane.id, query)}
-                  onClear={() => onClearPaneSearch(zoneId, pane.id)}
-                  onClose={() => onClosePaneSearch(zoneId, pane.id)}
-                  onToggle={() => onTogglePaneSearch(zoneId, pane.id)}
-                />
+                </div>
               </div>
-            </div>
-            <div
-              className="candidate-pane-scroll"
-              data-scroll-pane={pane.id}
-              data-testid={`pane-scroll-head-${zoneId}-${pane.id}`}
-              onScroll={(event) => handleSyncScroll(pane.id, event.currentTarget)}
-            >
               <div
-                className={`candidate-pane-columnheaders candidate-pane-columnheaders-${pane.id} ${paneLayoutClass(pane.id)}`}
-                role="row"
-                style={paneGridStyleByPane[pane.id]}
+                className="candidate-pane-scroll"
+                data-scroll-pane={pane.id}
+                data-testid={`pane-scroll-head-${zoneId}-${pane.id}`}
+                onScroll={(event) => handleSyncScroll(pane.id, event.currentTarget)}
               >
-                {columnsByPane[pane.id].map((column) => (
-                  <div
-                    aria-label={column.label}
-                    key={column.key}
-                    data-column-key={column.key}
-                    data-pane-id={pane.id}
-                    className={`candidate-columnheader cell-${column.kind ?? "text"}${column.className ? ` ${column.className}` : ""}`}
-                    role="columnheader"
-                  >
-                    <span className="candidate-columnheader-main">
-                      <button
-                        aria-label={`拖动 ${column.label} 列`}
-                        className="column-drag-handle"
-                        disabled={!canMutateData}
-                        type="button"
-                        onPointerDown={(event) => handleStartColumnDrag(event, pane.id, column.key)}
-                      >
-                        <span className="column-drag-dots" aria-hidden="true">
-                          <span />
-                          <span />
-                          <span />
-                          <span />
-                          <span />
-                          <span />
+                <div
+                  className={`candidate-pane-columnheaders candidate-pane-columnheaders-${pane.id} ${paneLayoutClass(pane.id)}`}
+                  role="row"
+                  style={paneGridStyleByPane[pane.id]}
+                >
+                  {columnsByPane[pane.id].map((column) => (
+                    <div
+                      aria-label={column.label}
+                      key={column.key}
+                      data-column-key={column.key}
+                      data-pane-id={pane.id}
+                      className={`candidate-columnheader cell-${column.kind ?? "text"}${column.className ? ` ${column.className}` : ""}`}
+                      role="columnheader"
+                    >
+                      <span className="candidate-columnheader-main">
+                        <button
+                          aria-label={`拖动 ${column.label} 列`}
+                          className="column-drag-handle"
+                          disabled={!canMutateData}
+                          type="button"
+                          onPointerDown={(event) => handleStartColumnDrag(event, pane.id, column.key)}
+                        >
+                          <span className="column-drag-dots" aria-hidden="true">
+                            <span />
+                            <span />
+                            <span />
+                            <span />
+                            <span />
+                            <span />
+                          </span>
+                        </button>
+                        <span className={`candidate-columnheader-label${column.headerLines ? " candidate-columnheader-label-lines" : ""}`}>
+                          {column.headerLines
+                            ? column.headerLines.map((line) => (
+                              <span key={line} className="candidate-columnheader-label-line">
+                                {line}
+                              </span>
+                            ))
+                            : column.label}
                         </span>
-                      </button>
-                      <span className={`candidate-columnheader-label${column.headerLines ? " candidate-columnheader-label-lines" : ""}`}>
-                        {column.headerLines
-                          ? column.headerLines.map((line) => (
-                            <span key={line} className="candidate-columnheader-label-line">
-                              {line}
-                            </span>
-                          ))
-                          : column.label}
                       </span>
-                    </span>
-                    {column.filterable === false ? null : (
-                      <WorkbenchColumnFilterMenu
-                        label={column.label}
-                        open={openFilterMenu?.paneId === pane.id && openFilterMenu.columnKey === column.key}
-                        options={filterOptionsByPane[pane.id][column.key] ?? []}
-                        selectedValues={displayState.filtersByPaneAndColumn[pane.id][column.key] ?? []}
-                        onClose={() => setOpenFilterMenu(null)}
-                        onToggle={() => handleToggleFilterMenu(pane.id, column.key)}
-                        onChange={(selectedValues) => onColumnFilterChange(zoneId, pane.id, column.key, selectedValues)}
-                      />
-                    )}
-                  </div>
-                ))}
-                {paneHasActionColumn(pane.id) ? (
-                  <div className="candidate-columnheader action-column" role="columnheader">
-                    操作
-                  </div>
-                ) : null}
+                      {column.filterable === false ? null : (
+                        <WorkbenchColumnFilterMenu
+                          label={column.label}
+                          open={openFilterMenu?.paneId === pane.id && openFilterMenu.columnKey === column.key}
+                          options={filterOptionsByPane[pane.id][column.key] ?? []}
+                          selectedValues={displayState.filtersByPaneAndColumn[pane.id][column.key] ?? []}
+                          onClose={() => setOpenFilterMenu(null)}
+                          onToggle={() => handleToggleFilterMenu(pane.id, column.key)}
+                          onChange={(selectedValues) => onColumnFilterChange(zoneId, pane.id, column.key, selectedValues)}
+                        />
+                      )}
+                    </div>
+                  ))}
+                  {paneHasActionColumn(pane.id) ? (
+                    <div className="candidate-columnheader action-column" role="columnheader">
+                      操作
+                    </div>
+                  ) : null}
+                </div>
               </div>
-            </div>
-          </section>
+            </section>
+            {paneIndex < panes.length - 1 ? <div className="candidate-pane-grid-divider candidate-pane-grid-divider-head" aria-hidden="true" /> : null}
+          </Fragment>
         ))}
       </div>
 
       {gridBody}
 
       <div className="candidate-grid-footer" style={{ gridTemplateColumns: rowTemplateColumns }}>
-        {panes.map((pane) => (
-          <div key={`footer-${pane.id}`} className="candidate-pane-footer-slot">
-            <div
-              className="candidate-pane-footer-scroll"
-              data-scroll-pane={pane.id}
-              data-testid={`pane-scrollbar-${zoneId}-${pane.id}`}
-              onScroll={(event) => handleSyncScroll(pane.id, event.currentTarget)}
-            >
+        {panes.map((pane, paneIndex) => (
+          <Fragment key={`footer-${pane.id}`}>
+            <div className="candidate-pane-footer-slot">
               <div
-                className={`candidate-pane-scrollbar-track candidate-pane-columnheaders-${pane.id} ${paneLayoutClass(pane.id)}`}
-                aria-hidden="true"
-                style={paneGridStyleByPane[pane.id]}
+                className="candidate-pane-footer-scroll"
+                data-scroll-pane={pane.id}
+                data-testid={`pane-scrollbar-${zoneId}-${pane.id}`}
+                onScroll={(event) => handleSyncScroll(pane.id, event.currentTarget)}
               >
-                {columnsByPane[pane.id].map((column) => (
-                  <div key={column.key} className="candidate-scrollbar-track-cell" />
-                ))}
-                {paneHasActionColumn(pane.id) ? <div className="candidate-scrollbar-track-cell action-column" /> : null}
+                <div
+                  className={`candidate-pane-scrollbar-track candidate-pane-columnheaders-${pane.id} ${paneLayoutClass(pane.id)}`}
+                  aria-hidden="true"
+                  style={paneGridStyleByPane[pane.id]}
+                >
+                  {columnsByPane[pane.id].map((column) => (
+                    <div key={column.key} className="candidate-scrollbar-track-cell" />
+                  ))}
+                  {paneHasActionColumn(pane.id) ? <div className="candidate-scrollbar-track-cell action-column" /> : null}
+                </div>
               </div>
             </div>
-          </div>
+            {paneIndex < panes.length - 1 ? <div className="candidate-pane-grid-divider candidate-pane-grid-divider-footer" aria-hidden="true" /> : null}
+          </Fragment>
         ))}
       </div>
     </div>

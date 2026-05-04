@@ -21,7 +21,7 @@ type WorkbenchZoneProps = {
   zoneId: "paired" | "open";
   title: string;
   tone: "success" | "warning";
-  meta: string;
+  meta?: string;
   panes: WorkbenchPane[];
   groups?: WorkbenchCandidateGroup[];
   sourceGroups?: WorkbenchCandidateGroup[];
@@ -129,7 +129,7 @@ function WorkbenchZone({
   return (
     <section
       aria-hidden={!isVisible}
-      className={`zone${isExpanded ? " zone-expanded" : ""}${isVisible ? "" : " zone-hidden"}`}
+      className={`zone zone-${tone}${isExpanded ? " zone-expanded" : ""}${isVisible ? "" : " zone-hidden"}`}
       data-testid={`zone-${zoneId}`}
     >
       <header className={`zone-header ${tone}`}>
@@ -137,9 +137,11 @@ function WorkbenchZone({
           <Typography className="zone-title" component="div">
             {title}
           </Typography>
-          <Typography className="zone-meta" component="div">
-            {meta}
-          </Typography>
+          {meta ? (
+            <Typography className="zone-meta" component="div">
+              {meta}
+            </Typography>
+          ) : null}
           {shouldShowSelectionToolbar ? (
             <Stack className="zone-selection-toolbar" direction="row">
               <Stack className="zone-selection-summary" direction="row">

@@ -11,14 +11,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function openWorkbenchImportMenu(user: ReturnType<typeof userEvent.setup>) {
-  const trigger = await screen.findByRole("button", { name: "导入中心" });
-  await user.hover(trigger);
-  return trigger;
+async function openWorkbenchImportMenu(_user: ReturnType<typeof userEvent.setup>) {
+  return await screen.findByRole("link", { name: "导入中心" });
 }
 
 async function openWorkbenchSettingsPage(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByRole("button", { name: "设置" }));
+  await user.click(await screen.findByRole("link", { name: "设置" }));
   return await screen.findByTestId("settings-page");
 }
 
@@ -920,7 +918,7 @@ describe("Workbench row selection and detail modal", () => {
     renderAppAt("/");
 
     await openWorkbenchImportMenu(user);
-    await user.click(await screen.findByRole("button", { name: "银行流水导入" }));
+    await user.click(await screen.findByRole("link", { name: "银行流水导入" }));
     const dialog = await screen.findByRole("dialog", { name: "银行流水导入" });
     const input = within(dialog).getByLabelText("上传银行流水文件") as HTMLInputElement;
     const bankFile = new File(["bank-demo"], "historydetail14080.xlsx", {
@@ -971,11 +969,11 @@ describe("Workbench row selection and detail modal", () => {
     renderAppAt("/");
 
     await openWorkbenchImportMenu(user);
-    expect(await screen.findByRole("button", { name: "发票导入" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "发票导入" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "销项发票导入" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "进项发票导入" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "发票导入" }));
+    await user.click(screen.getByRole("link", { name: "发票导入" }));
     const dialog = await screen.findByRole("dialog", { name: "发票导入" });
     const input = within(dialog).getByLabelText("上传发票文件") as HTMLInputElement;
     const outputFile = new File(["invoice-output"], "一月发票.xlsx", {
@@ -1040,7 +1038,7 @@ describe("Workbench row selection and detail modal", () => {
 
     await openWorkbenchImportMenu(user);
     expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("正在导入 ETC发票 3/31");
-    await user.click(await screen.findByRole("button", { name: "ETC发票导入" }));
+    await user.click(await screen.findByRole("link", { name: "ETC发票导入" }));
     const dialog = await screen.findByRole("dialog", { name: "ETC发票导入" });
     const input = within(dialog).getByLabelText("上传ETC zip") as HTMLInputElement;
     const etcZip = new File(["etc-zip"], "ETC一月发票.zip", {
@@ -1076,7 +1074,7 @@ describe("Workbench row selection and detail modal", () => {
     renderAppAt("/");
 
     await openWorkbenchImportMenu(user);
-    await user.click(await screen.findByRole("button", { name: "发票导入" }));
+    await user.click(await screen.findByRole("link", { name: "发票导入" }));
     const dialog = await screen.findByRole("dialog", { name: "发票导入" });
     const input = within(dialog).getByLabelText("上传发票文件") as HTMLInputElement;
     const inputFile = new File(["invoice-input"], "二月发票.xlsx", {
@@ -1225,7 +1223,7 @@ describe("Workbench row selection and detail modal", () => {
     expect(await screen.findByRole("dialog", { name: "详情弹窗" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭详情" }));
 
-    await user.click(screen.getByRole("button", { name: "搜索" }));
+    await user.click(screen.getByRole("link", { name: "关联台搜索" }));
     expect(await screen.findByRole("dialog", { name: "关联台搜索" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "关闭搜索" }));

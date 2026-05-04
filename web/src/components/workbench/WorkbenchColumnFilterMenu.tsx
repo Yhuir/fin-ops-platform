@@ -36,9 +36,15 @@ function WorkbenchColumnFilterMenu({
       if (!rect) {
         return;
       }
+      const shell = document.querySelector<HTMLElement>(".app-shell");
+      const sidebarWidth = shell
+        ? Number.parseFloat(getComputedStyle(shell).getPropertyValue("--sidebar-width")) || 0
+        : 0;
+      const leftInset = sidebarWidth > 0 ? sidebarWidth + 16 : 8;
+      const maxLeft = Math.max(leftInset, window.innerWidth - popoverWidth - 8);
       setPopoverStyle({
         top: rect.bottom + 8,
-        left: Math.min(Math.max(8, rect.right - popoverWidth), window.innerWidth - popoverWidth - 8),
+        left: Math.min(Math.max(leftInset, rect.right - popoverWidth), maxLeft),
       });
     };
 

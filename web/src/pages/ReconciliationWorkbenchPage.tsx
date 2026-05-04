@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import ActionStatusModal from "../components/workbench/ActionStatusModal";
@@ -8,7 +8,6 @@ import IgnoredItemsModal from "../components/workbench/IgnoredItemsModal";
 import OaBankExceptionModal from "../components/workbench/OaBankExceptionModal";
 import ProcessedExceptionsModal from "../components/workbench/ProcessedExceptionsModal";
 import RelationPreviewTriPane from "../components/workbench/RelationPreviewTriPane";
-import WorkbenchHeaderControls from "../components/workbench/WorkbenchHeaderControls";
 import WorkbenchImportModal, { type WorkbenchImportMode } from "../components/workbench/WorkbenchImportModal";
 import WorkbenchSearchModal from "../components/workbench/WorkbenchSearchModal";
 import WorkbenchZone from "../components/workbench/WorkbenchZone";
@@ -137,7 +136,7 @@ export default function ReconciliationWorkbenchPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { currentMonth } = useMonth();
-  const { setWorkbenchHeaderActions, setWorkbenchStatus, shellHeaderMounted } = useAppChrome();
+  const { setWorkbenchStatus } = useAppChrome();
   const { canMutateData } = useSessionPermissions();
   const {
     detailRow,
@@ -608,8 +607,10 @@ export default function ReconciliationWorkbenchPage() {
 
   useEffect(() => {
     document.body.classList.toggle("workbench-focus-mode", expandedZoneId !== null);
+    document.body.classList.add("workbench-page-mode");
     return () => {
       document.body.classList.remove("workbench-focus-mode");
+      document.body.classList.remove("workbench-page-mode");
     };
   }, [expandedZoneId]);
 
@@ -1009,24 +1010,19 @@ export default function ReconciliationWorkbenchPage() {
     setProcessedExceptionsModalOpen(false);
   };
 
-  const handleOpenSettingsPage = useCallback(() => {
-    navigate("/settings");
-  }, [navigate]);
-
   useEffect(() => {
     const intent = routeState?.workbenchHeaderIntent;
     if (!intent) {
       return;
     }
     if (intent.type === "open_search") {
-      setSearchMonthValue(currentMonth);
-      setSearchModalOpen(true);
+      handleOpenSearchModal();
     }
     if (intent.type === "open_import") {
       setImportModalMode(intent.mode);
     }
     navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
-  }, [currentMonth, location.pathname, location.search, navigate, routeState]);
+  }, [handleOpenSearchModal, location.pathname, location.search, navigate, routeState]);
 
   const handleWorkbenchImportComplete = useCallback((payload: ImportSessionPayload) => {
     const confirmedCount = payload.files.filter((file) => file.status === "confirmed").length;
@@ -1063,16 +1059,6 @@ export default function ReconciliationWorkbenchPage() {
       setIsDetailLoading(false);
     }
   };
-
-  useLayoutEffect(() => {
-    setWorkbenchHeaderActions({
-      canMutateData,
-      onOpenImport: setImportModalMode,
-      onOpenSearch: handleOpenSearchModal,
-      onOpenSettings: handleOpenSettingsPage,
-    });
-    return () => setWorkbenchHeaderActions(null);
-  }, [canMutateData, handleOpenSearchModal, handleOpenSettingsPage, setWorkbenchHeaderActions]);
 
   const openActionResultDialog = useCallback((message: string, title = "操作提示") => {
     setActionDialog({
@@ -1590,7 +1576,6 @@ export default function ReconciliationWorkbenchPage() {
       getRowState={getRowState}
       isExpanded={expandedZoneId === "paired"}
       isVisible={isPairedVisible}
-      meta="自动闭环与人工确认后的记录"
       onClearSelection={handleClearPairedSelection}
       onOpenDetail={handleOpenDetail}
       onPrimarySelectionAction={handleCancelPairedSelection}
@@ -1627,7 +1612,6 @@ export default function ReconciliationWorkbenchPage() {
       getRowState={getRowState}
       isExpanded={expandedZoneId === "open"}
       isVisible={isOpenVisible}
-      meta="等待人工处理、台账跟进或后续单据补齐"
       onClearSelection={handleClearOpenSelection}
       onOpenDetail={handleOpenDetail}
       onPrimarySelectionAction={handleConfirmOpenSelection}
@@ -1666,13 +1650,6 @@ export default function ReconciliationWorkbenchPage() {
   return (
     <div className="workbench-shell">
       <div className={`page-stack${expandedZoneId ? " zone-expanded-layout" : ""}`}>
-        <WorkbenchHeaderControls
-          canMutateData={canMutateData}
-          className={shellHeaderMounted ? "page-tools" : undefined}
-          onOpenImport={setImportModalMode}
-          onOpenSearch={handleOpenSearchModal}
-          onOpenSettings={handleOpenSettingsPage}
-        />
         {loadError ? <div className="state-panel error">{loadError}</div> : null}
         {!loadError && oaStatusPanelMessage ? (
           <div className={`state-panel${oaStatus?.code === "error" ? " error" : ""}`}>{oaStatusPanelMessage}</div>

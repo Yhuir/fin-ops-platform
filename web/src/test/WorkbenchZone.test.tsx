@@ -105,7 +105,6 @@ describe("WorkbenchZone", () => {
         isVisible
         title="已配对"
         tone="success"
-        meta="自动闭环与人工确认后的记录"
         onOpenDetail={() => {}}
         onRowAction={() => {}}
         onSelectRow={() => {}}

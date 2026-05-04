@@ -83,6 +83,7 @@ function AppShell() {
         isCompact={isCompact}
         mobileOpen={mobileOpen}
         expanded={sidebarExpanded}
+        workbenchStatus={workbenchStatus}
         onCloseMobile={() => setMobileOpen(false)}
         onToggleExpanded={toggleSidebarExpanded}
       />
@@ -90,7 +91,6 @@ function AppShell() {
         <AppTopBar
           embedded={embedded}
           isCompact={isCompact}
-          workbenchStatus={workbenchStatus}
           primaryJob={primaryJob}
           extraCount={extraCount}
           connectionFailed={connectionFailed}

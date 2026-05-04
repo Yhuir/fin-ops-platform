@@ -34,7 +34,10 @@ describe("Finance operations shell", () => {
     expect(within(getShellHeader()).queryByRole("button", { name: "导入中心" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "设置" })).toHaveAttribute("href", "/settings");
     expect(screen.getByRole("link", { name: "导入中心" })).toHaveAttribute("href", "/imports");
-    expect(screen.getByRole("link", { name: "银行流水导入" })).toHaveAttribute("href", "/imports?intent=bank_transaction");
+    expect(screen.getByRole("link", { name: "银行流水导入" })).toHaveAttribute("href", "/");
+    await user.click(screen.getByRole("link", { name: "关联台搜索" }));
+    expect(await screen.findByRole("dialog", { name: "关联台搜索" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭搜索" }));
     expect(await screen.findByText("王青", {}, { timeout: WORKBENCH_RENDER_TIMEOUT })).toBeInTheDocument();
     await user.click(screen.getByRole("link", { name: "税金抵扣" }));
 
@@ -87,17 +90,19 @@ describe("Finance operations shell", () => {
     expect(screen.queryByRole("button", { name: "年月选择" })).not.toBeInTheDocument();
   });
 
-  test("keeps the shell header visible inside the OA iframe", async () => {
+  test("keeps the sidebar brand available inside the OA iframe", async () => {
     window.history.pushState({}, "", "/?embedded=oa");
+    const user = userEvent.setup();
     installMockApiFetch();
 
     render(<App />);
 
     expect(await screen.findByText("赵华", {}, { timeout: WORKBENCH_RENDER_TIMEOUT })).toBeInTheDocument();
-    expect(screen.getByText("财务运营平台")).toBeInTheDocument();
-    expect(screen.getByText("溯源办公系统")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "关联台" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "展开菜单" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "展开菜单" }));
+    expect(await screen.findByText("财务运营平台")).toBeInTheDocument();
+    expect(screen.getByText("溯源办公系统")).toBeInTheDocument();
     expect(document.querySelector(".app-shell.embedded-shell")).not.toBeNull();
     expect(document.querySelector(".page-body.embedded")).not.toBeNull();
   });
@@ -148,7 +153,7 @@ describe("Finance operations shell", () => {
     expect(screen.getByRole("link", { name: "导入中心" })).toBeInTheDocument();
   });
 
-  test("navigates to import center with intent from the shell sidebar without leaving the app", async () => {
+  test("opens the workbench bank import dialog from the shell sidebar without leaving the app", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();
     installMockApiFetch();
@@ -160,7 +165,7 @@ describe("Finance operations shell", () => {
     await user.click(screen.getByRole("link", { name: "银行流水导入" }));
 
     expect(await screen.findByRole("heading", { name: "银行流水导入" })).toBeInTheDocument();
-    expect(window.location.pathname).toBe("/imports");
-    expect(window.location.search).toBe("?intent=bank_transaction");
+    expect(window.location.pathname).toBe("/");
+    expect(window.location.search).toBe("");
   });
 });

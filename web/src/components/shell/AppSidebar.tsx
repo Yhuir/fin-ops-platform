@@ -11,7 +11,7 @@ import ListItemText from "@mui/material/ListItemText";
 import Stack from "@mui/material/Stack";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
-import { NavLink, useLocation } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 
 import { sidebarGroups } from "./sidebarItems";
 
@@ -23,6 +23,7 @@ type AppSidebarProps = {
   isCompact: boolean;
   mobileOpen: boolean;
   expanded: boolean;
+  workbenchStatus: { level: "ok" | "pending" | "error"; reason: string } | null;
   onCloseMobile: () => void;
   onToggleExpanded: () => void;
 };
@@ -43,25 +44,50 @@ export default function AppSidebar({
   isCompact,
   mobileOpen,
   expanded,
+  workbenchStatus,
   onCloseMobile,
   onToggleExpanded,
 }: AppSidebarProps) {
   const location = useLocation();
   const width = expanded ? expandedSidebarWidth : collapsedSidebarWidth;
+  const brandStatus = workbenchStatus ?? { level: "ok" as const, reason: "系统状态正常" };
 
   const drawerContent = (
     <Stack className="app-sidebar-content" sx={{ width, height: "100%" }}>
       <Stack className="app-sidebar-brand" direction="row" alignItems="center" justifyContent={expanded ? "space-between" : "center"}>
         {expanded ? (
-          <div>
-            <Typography className="app-sidebar-eyebrow" component="div">
-              导航
-            </Typography>
-            <Typography className="app-sidebar-title" component="div">
-              财务运营
-            </Typography>
-          </div>
-        ) : null}
+          <Stack className="app-sidebar-brand-lockup" direction="row" alignItems="center" spacing={1}>
+            <span
+              aria-label={brandStatus.reason}
+              aria-live="polite"
+              className={`app-sidebar-brand-mark ${brandStatus.level}`}
+              data-status-reason={brandStatus.reason}
+              role="status"
+            >
+              <span className="app-sidebar-brand-dot" />
+            </span>
+            <span>
+              <Typography className="app-sidebar-eyebrow" component="div">
+                溯源办公系统
+              </Typography>
+              <Typography className="app-sidebar-title" component="div">
+                财务运营平台
+              </Typography>
+            </span>
+          </Stack>
+        ) : (
+          <Tooltip title={`溯源办公系统 · 财务运营平台 · ${brandStatus.reason}`} placement="right">
+            <span
+              aria-label={brandStatus.reason}
+              aria-live="polite"
+              className={`app-sidebar-brand-mark ${brandStatus.level}`}
+              data-status-reason={brandStatus.reason}
+              role="status"
+            >
+              <span className="app-sidebar-brand-dot" />
+            </span>
+          </Tooltip>
+        )}
         {!isCompact ? (
           <Tooltip title={expanded ? "折叠菜单" : "展开菜单"} placement="right">
             <IconButton
@@ -88,12 +114,14 @@ export default function AppSidebar({
             <List dense disablePadding aria-label={group.title}>
               {group.items.map((item) => {
                 const Icon = item.icon;
-                const active = isSidebarItemActive(location.pathname, location.search, item.to, item.end);
+                const active = item.active === false ? false : isSidebarItemActive(location.pathname, location.search, item.to, item.end);
+                const LinkComponent = item.active === false ? Link : NavLink;
                 const button = (
                   <ListItemButton
-                    component={NavLink}
+                    component={LinkComponent}
                     to={item.to}
                     end={item.end}
+                    state={item.state}
                     selected={active}
                     aria-label={item.label}
                     className="app-sidebar-link"
@@ -107,7 +135,7 @@ export default function AppSidebar({
                 );
 
                 return (
-                  <ListItem key={item.to} disablePadding className="app-sidebar-item">
+                  <ListItem key={item.id ?? item.to} disablePadding className="app-sidebar-item">
                     {expanded || isCompact ? button : (
                       <Tooltip title={item.label} placement="right">
                         {button}

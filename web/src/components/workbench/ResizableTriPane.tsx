@@ -103,10 +103,7 @@ function ResizableTriPane({
       .join(" ");
   }, [visibleIndices, widths]);
 
-  const rowTemplateColumns = useMemo(
-    () => visibleIndices.map((paneIndex) => `minmax(0, ${Math.max(widths[paneIndex], COLLAPSE_EPSILON)}fr)`).join(" "),
-    [visibleIndices, widths],
-  );
+  const rowTemplateColumns = headerTemplateColumns;
   const visiblePanes = visibleIndices.map((paneIndex) => panes[paneIndex]);
   const effectiveGroups = useMemo(() => groups ?? buildFallbackGroups(panes), [groups, panes]);
 

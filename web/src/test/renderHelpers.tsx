@@ -1,5 +1,5 @@
 import { render } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 
 import App from "../app/App";
 import MuiProviders from "../app/MuiProviders";
@@ -33,6 +33,22 @@ export function renderAppAt(pathname: string) {
   return render(<App />);
 }
 
+function WorkbenchPageHarness() {
+  const navigate = useNavigate();
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => navigate("/", { state: { workbenchHeaderIntent: { type: "open_search" } } })}
+      >
+        关联台搜索
+      </button>
+      <ReconciliationWorkbenchPage />
+    </>
+  );
+}
+
 export function renderWorkbenchPage() {
   return render(
     <MemoryRouter>
@@ -40,7 +56,7 @@ export function renderWorkbenchPage() {
         <AppChromeProvider>
           <MonthProvider>
             <SessionContext.Provider value={staticWorkbenchSession}>
-              <ReconciliationWorkbenchPage />
+              <WorkbenchPageHarness />
             </SessionContext.Provider>
           </MonthProvider>
         </AppChromeProvider>
