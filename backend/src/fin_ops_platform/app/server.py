@@ -33,6 +33,8 @@ from fin_ops_platform.app.routes_tax import TaxApiRoutes
 from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.access_control_service import AccessControlService
+from fin_ops_platform.services.app_health_alert_service import AppHealthAlertService
+from fin_ops_platform.services.app_health_service import AppHealthService
 from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
@@ -42,6 +44,7 @@ from fin_ops_platform.services.background_job_service import (
     BackgroundJobNotFoundError,
     BackgroundJobService,
 )
+from fin_ops_platform.services.cost_statistics_read_model_service import CostStatisticsReadModelService
 from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
 from fin_ops_platform.services.etc_service import (
     EtcBatchNotFoundError,
@@ -83,6 +86,7 @@ from fin_ops_platform.services.settings_data_reset_service import (
 )
 from fin_ops_platform.services.state_store import ApplicationStateStore
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService, UploadedCertifiedImportFile
+from fin_ops_platform.services.tax_offset_read_model_service import TaxOffsetReadModelService
 from fin_ops_platform.services.tax_offset_service import TaxOffsetService
 from fin_ops_platform.services.workbench_candidate_grouping import WorkbenchCandidateGroupingService
 from fin_ops_platform.services.workbench_action_service import WorkbenchActionService
@@ -229,6 +233,12 @@ class Application:
         self._workbench_read_model_service = WorkbenchReadModelService.from_snapshot(
             persisted_state.get("workbench_read_models"),
         )
+        self._cost_statistics_read_model_service = CostStatisticsReadModelService.from_snapshot(
+            persisted_state.get("cost_statistics_read_models"),
+        )
+        self._tax_offset_read_model_service = TaxOffsetReadModelService.from_snapshot(
+            persisted_state.get("tax_offset_read_models"),
+        )
         mongo_oa_settings = load_mongo_oa_settings(self._state_store.data_dir if self._state_store is not None else None)
         oa_adapter = (
             MongoOAAdapter(settings=mongo_oa_settings, attachment_invoice_cache=self._state_store)
@@ -290,6 +300,10 @@ class Application:
         self._tax_certified_import_service = TaxCertifiedImportService(state_store=self._state_store)
         self._etc_service = EtcService(state_store=self._state_store)
         self._background_job_service = BackgroundJobService(self._state_store)
+        self._app_health_service = AppHealthService()
+        self._app_health_alert_service = AppHealthAlertService.from_snapshot(
+            self._state_store.load_app_health_alerts() if self._state_store is not None else {}
+        )
         self._settings_data_reset_service = (
             SettingsDataResetService(
                 state_store=self._state_store,
@@ -390,6 +404,10 @@ class Application:
             )
         if method == "GET" and route_path == "/api/oa-sync/status":
             return self._handle_api_oa_sync_status()
+        if method == "GET" and route_path == "/api/app-health/stream":
+            return self._handle_api_app_health_stream(headers)
+        if method == "GET" and route_path == "/api/app-health":
+            return self._handle_api_app_health(headers)
         if method == "GET" and route_path == "/api/search":
             q = query.get("q", [""])[0]
             scope = query.get("scope", ["all"])[0]
@@ -829,6 +847,170 @@ class Application:
     def _handle_api_oa_sync_status(self) -> Response:
         return self._json_response(HTTPStatus.OK, self._oa_sync_service.status_payload())
 
+    def _handle_api_app_health(self, headers: dict[str, str] | None) -> Response:
+        started_at = monotonic()
+        session, error_response = self._resolve_app_health_session(headers)
+        if error_response is not None:
+            return error_response
+        assert session is not None
+        snapshot = self._build_app_health_snapshot(session, started_at=started_at)
+        return self._json_response(HTTPStatus.OK, snapshot)
+
+    def _handle_api_app_health_stream(self, headers: dict[str, str] | None) -> Response:
+        session, error_response = self._resolve_app_health_session(headers)
+        if error_response is not None:
+            return error_response
+        assert session is not None
+
+        def event_stream() -> Iterable[str]:
+            while True:
+                started_at = monotonic()
+                snapshot = self._build_app_health_snapshot(session, started_at=started_at)
+                heartbeat = {"generated_at": snapshot.get("generated_at")}
+                yield self._app_health_service.serialize_sse_event("app_health", snapshot)
+                yield self._app_health_service.serialize_sse_event("heartbeat", heartbeat)
+                sleep(5)
+
+        return Response(
+            status_code=int(HTTPStatus.OK),
+            body=event_stream(),
+            stream=True,
+            headers={
+                "Content-Type": "text/event-stream; charset=utf-8",
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            },
+        )
+
+    def _resolve_app_health_session(
+        self,
+        headers: dict[str, str] | None,
+    ) -> tuple[OARequestSession | None, Response | None]:
+        try:
+            session = resolve_oa_request_session(
+                headers,
+                identity_service=self._oa_identity_service,
+                access_control_service=self._access_control_service,
+            )
+            if not session.allowed:
+                raise ForbiddenOAAccessError("当前 OA 账户未被授权访问财务运营平台。")
+        except UnauthorizedOASessionError as error:
+            return None, self._json_response(
+                HTTPStatus.UNAUTHORIZED,
+                {
+                    "error": "invalid_oa_session",
+                    "message": str(error) or "缺少 OA 登录态，请从 OA 系统进入。",
+                },
+            )
+        except OASessionExpiredError as error:
+            return None, self._json_response(
+                HTTPStatus.UNAUTHORIZED,
+                {
+                    "error": "invalid_oa_session",
+                    "message": str(error) or "OA 登录状态已过期。",
+                },
+            )
+        except ForbiddenOAAccessError as error:
+            return None, self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {
+                    "error": "forbidden",
+                    "message": str(error) or "当前 OA 账户未被授权访问财务运营平台。",
+                },
+            )
+        except OAIdentityConfigurationError as error:
+            return None, self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "oa_identity_unavailable",
+                    "message": str(error) or "OA 身份服务未配置。",
+                },
+            )
+        except OAIdentityServiceError as error:
+            return None, self._json_response(
+                HTTPStatus.BAD_GATEWAY,
+                {
+                    "error": "oa_identity_lookup_failed",
+                    "message": str(error) or "OA 身份解析失败。",
+                },
+            )
+        return session, None
+
+    def _build_app_health_snapshot(self, session: OARequestSession, *, started_at: float) -> dict[str, object]:
+        owner_user_id = session.identity.username or session.identity.user_id or "web_finance_user"
+        active_jobs = self._background_job_service.list_active_jobs(owner_user_id, include_system=True)
+        oa_sync_payload = self._oa_sync_service.status_payload()
+        state_store_info = {
+            "storage_mode": self._state_store.storage_mode if self._state_store is not None else "memory",
+            "backend": self._state_store.storage_backend if self._state_store is not None else "memory",
+        }
+        snapshot_without_alerts = self._app_health_service.build_snapshot(
+            session=session,
+            active_jobs=active_jobs,
+            oa_sync_payload=oa_sync_payload,
+            state_store_info=state_store_info,
+            rebuild_scheduled=self._is_oa_sync_rebuild_scheduled(),
+            duration_ms=self._duration_ms(started_at),
+            alerts={"active": [], "recent_recovered": []},
+        )
+        alerts = self._app_health_alert_service.evaluate(snapshot_without_alerts)
+        if self._state_store is not None:
+            self._state_store.save_app_health_alerts(self._app_health_alert_service.snapshot())
+        snapshot = self._app_health_service.build_snapshot(
+            session=session,
+            active_jobs=active_jobs,
+            oa_sync_payload=oa_sync_payload,
+            state_store_info=state_store_info,
+            rebuild_scheduled=self._is_oa_sync_rebuild_scheduled(),
+            duration_ms=self._duration_ms(started_at),
+            alerts=alerts,
+        )
+        self._emit_app_health_timing(snapshot)
+        return snapshot
+
+    @staticmethod
+    def _emit_app_health_timing(snapshot: dict[str, object]) -> None:
+        metrics = snapshot.get("metrics") if isinstance(snapshot.get("metrics"), dict) else {}
+        log_payload = {
+            "event": "app_health.snapshot",
+            "status": snapshot.get("status"),
+            "duration_ms": metrics.get("app_health_duration_ms"),
+            "dirty_scope_count": metrics.get("dirty_scope_count"),
+            "background_jobs_running_count": metrics.get("background_jobs_running_count"),
+            "active_alert_count": metrics.get("active_alert_count"),
+        }
+        print(json.dumps(log_payload, ensure_ascii=False))
+
+    def _is_oa_sync_rebuild_scheduled(self) -> bool:
+        with self._oa_sync_rebuild_lock:
+            return self._oa_sync_rebuild_scheduled
+
+    @staticmethod
+    def _is_workbench_read_model_rebuild_job(job: object) -> bool:
+        return AppHealthService.is_workbench_read_model_rebuild_job(job)
+
+    def _workbench_write_freshness_guard(self) -> Response | None:
+        oa_sync_payload = self._oa_sync_service.status_payload()
+        dirty_scopes = [
+            str(scope)
+            for scope in list(oa_sync_payload.get("dirty_scopes", []) or [])
+            if str(scope).strip()
+        ]
+        if not dirty_scopes and not self._is_oa_sync_rebuild_scheduled():
+            return None
+        return self._json_response(
+            HTTPStatus.CONFLICT,
+            {
+                "error": "workbench_stale",
+                "message": "关联台正在同步，请刷新完成后再操作。",
+                "dirty_scopes": dirty_scopes,
+            },
+        )
+
     def _handle_api_search(
         self,
         *,
@@ -1250,6 +1432,10 @@ class Application:
         return round((monotonic() - started_at) * 1000, 3)
 
     @staticmethod
+    def _safe_list_count(value: object) -> int:
+        return len(value) if isinstance(value, list) else 0
+
+    @staticmethod
     def _workbench_timed_action_for_route(*, method: str, route_path: str) -> str | None:
         if method == "POST" and route_path == "/api/workbench/actions/confirm-link":
             return "confirm_link"
@@ -1312,6 +1498,62 @@ class Application:
         except Exception as exc:
             self._emit_workbench_persistence_warning(operation=operation, detail=str(exc))
 
+    def _persist_cost_statistics_read_models_best_effort(
+        self,
+        *,
+        snapshot: dict[str, object],
+        changed_scope_keys: list[str] | None = None,
+        operation: str,
+    ) -> None:
+        if self._state_store is None:
+            return
+        try:
+            self._state_store.save_cost_statistics_read_models(
+                snapshot,
+                changed_scope_keys=changed_scope_keys,
+            )
+        except Exception as exc:
+            print(
+                json.dumps(
+                    {
+                        "kind": "cost_statistics_persistence_warning",
+                        "operation": operation,
+                        "detail": str(exc),
+                        "timestamp": datetime.now().isoformat(),
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+
+    def _persist_tax_offset_read_models_best_effort(
+        self,
+        *,
+        snapshot: dict[str, object],
+        changed_scope_keys: list[str] | None = None,
+        operation: str,
+    ) -> None:
+        if self._state_store is None:
+            return
+        try:
+            self._state_store.save_tax_offset_read_models(
+                snapshot,
+                changed_scope_keys=changed_scope_keys,
+            )
+        except Exception as exc:
+            print(
+                json.dumps(
+                    {
+                        "kind": "tax_offset_persistence_warning",
+                        "operation": operation,
+                        "detail": str(exc),
+                        "timestamp": datetime.now().isoformat(),
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+
     def _persist_workbench_override_change(
         self,
         *,
@@ -1360,6 +1602,10 @@ class Application:
         scope_keys.add("all")
         normalized_scope_keys = sorted(scope_keys)
         self._handle_oa_source_changed(normalized_scope_keys, reason="oa_attachment_invoice_cache")
+        self._invalidate_tax_offset_read_model_scopes(
+            [scope_key for scope_key in normalized_scope_keys if SEARCH_MONTH_RE.match(scope_key)],
+            reason="oa_attachment_invoice_cache",
+        )
 
     def _handle_oa_source_changed(
         self,
@@ -1523,6 +1769,10 @@ class Application:
                 changed_scope_keys=read_model_scope_keys,
                 operation="oa_sync_hot_rebuild_read_models",
             )
+        self._invalidate_cost_statistics_read_model_scopes(
+            normalized_scope_keys,
+            reason="oa_sync_hot_rebuild",
+        )
 
     def _expand_workbench_read_model_scope_keys_for_base_scopes(self, base_scope_keys: list[str]) -> list[str]:
         normalized_base_scope_keys = {
@@ -1963,6 +2213,7 @@ class Application:
             progress("reload", "正在重新载入运行时服务。", reload_percent)
         self._reload_runtime_services()
         self._search_service.clear_cache()
+        self._invalidate_tax_offset_read_models()
         if action == RESET_OA_AND_REBUILD_ACTION:
             try:
                 if progress is not None:
@@ -2283,14 +2534,168 @@ class Application:
 
     def _handle_api_cost_statistics_explorer(self, month: str | None, project_scope: str | None) -> Response:
         current_month = month or datetime.now().strftime("%Y-%m")
+        normalized_project_scope = str(project_scope or "active").strip().lower()
+        started_at = monotonic()
+        cache_hit = False
         try:
-            payload = self._cost_statistics_service.get_explorer(
+            if normalized_project_scope not in {"active", "all"}:
+                raise ValueError("project_scope must be active or all")
+            payload, cache_hit = self._get_or_build_cost_statistics_explorer(
                 current_month,
-                project_scope=project_scope or "active",
+                normalized_project_scope,
             )
         except ValueError as error:
             return self._cost_statistics_project_scope_error_response(error)
+        self._emit_cost_statistics_explorer_metric(
+            month=current_month,
+            project_scope=normalized_project_scope,
+            cache_hit=cache_hit,
+            duration_ms=self._duration_ms(started_at),
+            entry_count=self._cost_statistics_explorer_entry_count(payload),
+        )
         return self._json_response(HTTPStatus.OK, payload)
+
+    def _get_or_build_cost_statistics_explorer(
+        self,
+        month: str,
+        project_scope: str,
+    ) -> tuple[dict[str, object], bool]:
+        read_model_service = self._cost_statistics_read_model_service
+        if read_model_service is not None:
+            cached_read_model = read_model_service.get_read_model(month, project_scope)
+            if isinstance(cached_read_model, dict):
+                cached_payload = cached_read_model.get("payload")
+                if isinstance(cached_payload, dict):
+                    return cached_payload, True
+
+        if month == "all":
+            self._schedule_cost_statistics_cache_warmup(["all"], reason="explorer_all_cache_miss")
+            return self._empty_cost_statistics_explorer_payload(month), False
+
+        payload = self._cost_statistics_service.get_explorer(
+            month,
+            project_scope=project_scope,
+        )
+        if read_model_service is not None:
+            read_model = read_model_service.upsert_read_model(
+                month,
+                project_scope,
+                payload,
+                generated_at=datetime.now().isoformat(),
+                source_scope_keys=[month],
+                cache_status="ready",
+            )
+            scope_key = self._cost_statistics_read_model_scope_key(month, project_scope, read_model=read_model)
+            self._persist_cost_statistics_read_models_best_effort(
+                snapshot=read_model_service.snapshot_scope_keys([scope_key]),
+                changed_scope_keys=[scope_key],
+                operation="upsert_cost_statistics_explorer_read_model",
+            )
+        return payload, False
+
+    @staticmethod
+    def _empty_cost_statistics_explorer_payload(month: str) -> dict[str, object]:
+        return {
+            "month": month,
+            "summary": {
+                "row_count": 0,
+                "transaction_count": 0,
+                "total_amount": "0.00",
+            },
+            "time_rows": [],
+            "project_rows": [],
+            "expense_type_rows": [],
+        }
+
+    @staticmethod
+    def _cost_statistics_explorer_entry_count(payload: dict[str, object]) -> int:
+        time_rows = payload.get("time_rows")
+        if isinstance(time_rows, list):
+            return len(time_rows)
+        summary = payload.get("summary")
+        if isinstance(summary, dict):
+            raw_count = summary.get("transaction_count", summary.get("row_count", 0))
+            try:
+                return int(raw_count)
+            except (TypeError, ValueError):
+                return 0
+        return 0
+
+    def _emit_cost_statistics_explorer_metric(
+        self,
+        *,
+        month: str,
+        project_scope: str,
+        cache_hit: bool,
+        duration_ms: float,
+        entry_count: int,
+    ) -> None:
+        print(
+            json.dumps(
+                {
+                    "kind": "cost_statistics_explorer_metric",
+                    "metric": "cost_statistics.explorer.duration_ms",
+                    "month": month,
+                    "project_scope": project_scope,
+                    "cache_hit": bool(cache_hit),
+                    "duration_ms": round(float(duration_ms), 3),
+                    "entry_count": int(entry_count),
+                    "timestamp": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+
+    def _emit_tax_offset_month_metric(
+        self,
+        *,
+        month: str,
+        cache_hit: bool,
+        duration_ms: float,
+        payload: dict[str, object],
+    ) -> None:
+        print(
+            json.dumps(
+                {
+                    "kind": "tax_offset_month_metric",
+                    "metric": "tax_offset.month.duration_ms",
+                    "month": month,
+                    "cache_hit": bool(cache_hit),
+                    "duration_ms": round(float(duration_ms), 3),
+                    "output_count": self._safe_list_count(payload.get("output_items")),
+                    "input_plan_count": self._safe_list_count(payload.get("input_plan_items")),
+                    "certified_count": self._safe_list_count(payload.get("certified_items")),
+                    "timestamp": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+
+    def _emit_tax_offset_calculate_metric(
+        self,
+        *,
+        month: str,
+        selected_output_count: int,
+        selected_input_count: int,
+        duration_ms: float,
+    ) -> None:
+        print(
+            json.dumps(
+                {
+                    "kind": "tax_offset_calculate_metric",
+                    "metric": "tax_offset.calculate.duration_ms",
+                    "month": month,
+                    "selected_output_count": int(selected_output_count),
+                    "selected_input_count": int(selected_input_count),
+                    "duration_ms": round(float(duration_ms), 3),
+                    "timestamp": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
 
     def _handle_api_cost_statistics_project(
         self,
@@ -2457,6 +2862,9 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
+        freshness_error = self._workbench_write_freshness_guard()
+        if freshness_error is not None:
+            return freshness_error
         return self._handle_live_workbench_confirm_link(payload, request_id=request_id)
 
     def _handle_api_workbench_confirm_link_preview(self, body: str | None) -> Response:
@@ -2476,6 +2884,9 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
+        freshness_error = self._workbench_write_freshness_guard()
+        if freshness_error is not None:
+            return freshness_error
         month = str(payload.get("month", ""))
         if self._live_workbench_service.has_rows_for_month(month):
             return self._handle_live_workbench_mark_exception(payload)
@@ -2485,6 +2896,9 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
+        freshness_error = self._workbench_write_freshness_guard()
+        if freshness_error is not None:
+            return freshness_error
         return self._handle_live_workbench_cancel_link(payload, request_id=request_id)
 
     def _handle_api_workbench_withdraw_link_preview(self, body: str | None) -> Response:
@@ -2509,12 +2923,18 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
+        freshness_error = self._workbench_write_freshness_guard()
+        if freshness_error is not None:
+            return freshness_error
         return self._handle_live_workbench_withdraw_link(payload, request_id=request_id)
 
     def _handle_api_workbench_update_bank_exception(self, body: str | None) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
+        freshness_error = self._workbench_write_freshness_guard()
+        if freshness_error is not None:
+            return freshness_error
         month = str(payload.get("month", ""))
         if self._live_workbench_service.has_rows_for_month(month):
             return self._handle_live_workbench_update_bank_exception(payload)
@@ -2528,6 +2948,9 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
+        freshness_error = self._workbench_write_freshness_guard()
+        if freshness_error is not None:
+            return freshness_error
         month = str(payload.get("month", ""))
         if self._live_workbench_service.has_rows_for_month(month):
             return self._handle_live_workbench_oa_bank_exception(payload)
@@ -2537,6 +2960,9 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
+        freshness_error = self._workbench_write_freshness_guard()
+        if freshness_error is not None:
+            return freshness_error
         month = str(payload.get("month", ""))
         if self._live_workbench_service.has_rows_for_month(month):
             return self._handle_live_workbench_cancel_exception(payload)
@@ -2546,17 +2972,64 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
+        freshness_error = self._workbench_write_freshness_guard()
+        if freshness_error is not None:
+            return freshness_error
         return self._handle_workbench_ignore_row_payload(payload)
 
     def _handle_api_workbench_unignore_row(self, body: str | None) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
+        freshness_error = self._workbench_write_freshness_guard()
+        if freshness_error is not None:
+            return freshness_error
         return self._handle_workbench_unignore_row_payload(payload)
 
     def _handle_api_tax_offset(self, month: str | None) -> Response:
         current_month = month or datetime.now().strftime("%Y-%m")
-        return self._json_response(HTTPStatus.OK, self._tax_api_routes.get_tax_offset(current_month))
+        started_at = monotonic()
+        cache_hit = False
+        try:
+            payload, cache_hit = self._get_or_build_tax_offset_month_payload(current_month)
+        except ValueError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_tax_offset_request", "message": str(exc)},
+            )
+        self._emit_tax_offset_month_metric(
+            month=current_month,
+            cache_hit=cache_hit,
+            duration_ms=self._duration_ms(started_at),
+            payload=payload,
+        )
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _get_or_build_tax_offset_month_payload(self, month: str) -> tuple[dict[str, object], bool]:
+        read_model_service = self._tax_offset_read_model_service
+        if read_model_service is not None:
+            cached_read_model = read_model_service.get_read_model(month)
+            if isinstance(cached_read_model, dict):
+                cached_payload = cached_read_model.get("payload")
+                if isinstance(cached_payload, dict):
+                    return cached_payload, True
+
+        payload = self._tax_api_routes.get_tax_offset(month)
+        if read_model_service is not None:
+            read_model = read_model_service.upsert_read_model(
+                month,
+                payload,
+                generated_at=datetime.now().isoformat(),
+                source_scope_keys=[month],
+                cache_status="ready",
+            )
+            scope_key = self._tax_offset_read_model_scope_key(month, read_model=read_model)
+            self._persist_tax_offset_read_models_best_effort(
+                snapshot=read_model_service.snapshot_scope_keys([scope_key]),
+                changed_scope_keys=[scope_key],
+                operation="upsert_tax_offset_read_model",
+            )
+        return payload, False
 
     def _handle_api_bank_details_accounts(self, *, date_from: str | None, date_to: str | None) -> Response:
         return self._json_response(
@@ -2662,6 +3135,10 @@ class Application:
                 HTTPStatus.NOT_FOUND,
                 {"error": "tax_certified_import_session_not_found", "message": str(exc)},
             )
+        self._invalidate_tax_offset_read_model_scopes(
+            list(getattr(batch, "months", []) or []),
+            reason="tax_certified_import_confirm",
+        )
         return self._json_response(
             HTTPStatus.OK,
             {
@@ -2693,6 +3170,7 @@ class Application:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
+        started_at = monotonic()
         try:
             result = self._tax_api_routes.calculate(payload)
         except (KeyError, TypeError, ValueError) as exc:
@@ -2700,6 +3178,12 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_tax_offset_calculate_request", "message": str(exc)},
             )
+        self._emit_tax_offset_calculate_metric(
+            month=str(payload.get("month") or ""),
+            selected_output_count=self._safe_list_count(payload.get("selected_output_ids")),
+            selected_input_count=self._safe_list_count(payload.get("selected_input_ids")),
+            duration_ms=self._duration_ms(started_at),
+        )
         return self._json_response(HTTPStatus.OK, result)
 
     def _handle_workbench(self, month: str | None) -> Response:
@@ -3863,7 +4347,7 @@ class Application:
             imported_by=imported_by,
             rows=rows,
         )
-        self._persist_state_with_workbench_invalidation()
+        self._persist_state_with_workbench_invalidation(invalidate_cost_statistics=False)
         return self._json_response(HTTPStatus.OK, self._serialize_preview(preview))
 
     def _handle_import_confirm(self, body: str | bytes | None) -> Response:
@@ -3888,7 +4372,13 @@ class Application:
                 HTTPStatus.NOT_FOUND,
                 {"error": "batch_not_found", "batch_id": batch_id},
             )
-        self._persist_state_with_workbench_invalidation()
+        self._invalidate_tax_offset_read_model_scopes(
+            self._tax_offset_scope_keys_for_import_preview(preview),
+            reason="invoice_import_confirm",
+        )
+        self._persist_state_with_workbench_invalidation(
+            cost_statistics_scope_keys=self._cost_statistics_scope_keys_for_import_preview(preview),
+        )
         return self._json_response(
             HTTPStatus.OK,
             {
@@ -3930,6 +4420,7 @@ class Application:
 
     def _handle_import_batch_revert(self, batch_id: str) -> Response:
         try:
+            preview = self._import_service.get_batch(batch_id)
             batch = self._import_service.revert_import(batch_id)
         except KeyError:
             return self._json_response(
@@ -3937,7 +4428,13 @@ class Application:
                 {"error": "batch_not_found", "batch_id": batch_id},
             )
         self._file_import_service.mark_batch_reverted(batch_id)
-        self._persist_state_with_workbench_invalidation()
+        self._invalidate_tax_offset_read_model_scopes(
+            self._tax_offset_scope_keys_for_import_preview(preview),
+            reason="invoice_import_revert",
+        )
+        self._persist_state_with_workbench_invalidation(
+            cost_statistics_scope_keys=self._cost_statistics_scope_keys_for_import_preview(preview),
+        )
         return self._json_response(HTTPStatus.OK, {"batch": self._serialize_value(batch)})
 
     def _handle_import_templates(self) -> Response:
@@ -4061,7 +4558,19 @@ class Application:
                 matching_run = None
                 if any(file.status == "confirmed" for file in confirmed_session.files):
                     matching_run = self._matching_service.run(triggered_by=f"import_session:{confirmed_session.id}")
-                self._persist_state_with_workbench_invalidation()
+                self._invalidate_tax_offset_read_model_scopes(
+                    self._tax_offset_scope_keys_for_import_file_session(
+                        confirmed_session,
+                        normalized_selected_file_ids,
+                    ),
+                    reason="invoice_file_import_confirm",
+                )
+                self._persist_state_with_workbench_invalidation(
+                    cost_statistics_scope_keys=self._cost_statistics_scope_keys_for_import_file_session(
+                        confirmed_session,
+                        normalized_selected_file_ids,
+                    ),
+                )
                 confirmed_count = sum(1 for file in confirmed_session.files if file.id in selected and file.status == "confirmed")
                 result_summary = {
                     "confirmed": confirmed_count,
@@ -4224,10 +4733,101 @@ class Application:
             "normalized_rows": self._serialize_value(preview.normalized_rows),
         }
 
+    def _cost_statistics_scope_keys_for_import_preview(self, preview: object) -> list[str]:
+        normalized_rows = getattr(preview, "normalized_rows", [])
+        return self._cost_statistics_scope_keys_for_import_rows(normalized_rows)
+
+    def _cost_statistics_scope_keys_for_import_file_session(
+        self,
+        session: object,
+        selected_file_ids: list[str],
+    ) -> list[str]:
+        selected = {str(file_id) for file_id in list(selected_file_ids or []) if str(file_id)}
+        normalized_rows: list[object] = []
+        for item in list(getattr(session, "files", []) or []):
+            if str(getattr(item, "id", "")) not in selected:
+                continue
+            if str(getattr(item, "status", "")) != "confirmed":
+                continue
+            normalized_rows.extend(list(getattr(item, "normalized_rows", []) or []))
+        return self._cost_statistics_scope_keys_for_import_rows(normalized_rows)
+
+    def _tax_offset_scope_keys_for_import_preview(self, preview: object) -> list[str]:
+        batch = getattr(preview, "batch", None)
+        if getattr(batch, "batch_type", None) not in (BatchType.OUTPUT_INVOICE, BatchType.INPUT_INVOICE):
+            return []
+        normalized_rows = getattr(preview, "normalized_rows", [])
+        return self._tax_offset_scope_keys_for_import_rows(normalized_rows)
+
+    def _tax_offset_scope_keys_for_import_file_session(
+        self,
+        session: object,
+        selected_file_ids: list[str],
+    ) -> list[str]:
+        selected = {str(file_id) for file_id in list(selected_file_ids or []) if str(file_id)}
+        normalized_rows: list[object] = []
+        for item in list(getattr(session, "files", []) or []):
+            if str(getattr(item, "id", "")) not in selected:
+                continue
+            if str(getattr(item, "status", "")) != "confirmed":
+                continue
+            if getattr(item, "batch_type", None) not in (BatchType.OUTPUT_INVOICE, BatchType.INPUT_INVOICE):
+                continue
+            normalized_rows.extend(list(getattr(item, "normalized_rows", []) or []))
+        return self._tax_offset_scope_keys_for_import_rows(normalized_rows)
+
+    @staticmethod
+    def _tax_offset_scope_keys_for_import_rows(rows: object) -> list[str]:
+        months: set[str] = set()
+        for row in list(rows or []):
+            if not isinstance(row, dict):
+                continue
+            raw_value = str(row.get("invoice_date") or row.get("issue_date") or row.get("date") or "").strip()
+            if len(raw_value) < 7:
+                continue
+            month = raw_value[:7]
+            if SEARCH_MONTH_RE.match(month):
+                months.add(month)
+        return sorted(months)
+
+    @staticmethod
+    def _cost_statistics_scope_keys_for_import_rows(rows: object) -> list[str]:
+        months: set[str] = set()
+        date_fields = (
+            "txn_date",
+            "invoice_date",
+            "issue_date",
+            "trade_time",
+            "pay_receive_time",
+            "date",
+        )
+        for row in list(rows or []):
+            if not isinstance(row, dict):
+                continue
+            for field in date_fields:
+                raw_value = str(row.get(field) or "").strip()
+                if len(raw_value) < 7:
+                    continue
+                month = raw_value[:7]
+                if SEARCH_MONTH_RE.match(month):
+                    months.add(month)
+                    break
+        return sorted(months) if months else ["all"]
+
     def _persist_state(self) -> None:
         self._search_service.clear_cache()
         if self._state_store is None:
             return
+        cost_statistics_snapshot = (
+            self._cost_statistics_read_model_service.snapshot()
+            if self._cost_statistics_read_model_service is not None
+            else {}
+        )
+        tax_offset_snapshot = (
+            self._tax_offset_read_model_service.snapshot()
+            if self._tax_offset_read_model_service is not None
+            else {}
+        )
         self._state_store.save(
             {
                 "imports": self._import_service.snapshot(),
@@ -4236,12 +4836,27 @@ class Application:
                 "workbench_overrides": self._workbench_override_service.snapshot(),
                 "workbench_pair_relations": self._workbench_pair_relation_service.snapshot(),
                 "workbench_read_models": self._workbench_read_model_service.snapshot(),
+                "cost_statistics_read_models": cost_statistics_snapshot,
+                "tax_offset_read_models": tax_offset_snapshot,
             }
         )
 
-    def _persist_state_with_workbench_invalidation(self) -> None:
+    def _persist_state_with_workbench_invalidation(
+        self,
+        *,
+        cost_statistics_scope_keys: list[str] | None = None,
+        invalidate_cost_statistics: bool = True,
+    ) -> None:
         self._search_service.clear_cache()
-        self._invalidate_workbench_read_models()
+        self._invalidate_workbench_read_models(invalidate_cost_statistics=False)
+        if invalidate_cost_statistics:
+            if cost_statistics_scope_keys is None:
+                self._invalidate_cost_statistics_read_models()
+            else:
+                self._invalidate_cost_statistics_read_model_scopes(
+                    cost_statistics_scope_keys,
+                    reason="import_state_changed",
+                )
         self._persist_state()
 
     def _persist_workbench_pair_relations(
@@ -5116,10 +5731,12 @@ class Application:
         payload["handled_exception"] = False
         return payload
 
-    def _invalidate_workbench_read_models(self) -> None:
+    def _invalidate_workbench_read_models(self, *, invalidate_cost_statistics: bool = True) -> None:
         snapshot = self._workbench_read_model_service.snapshot()
         for scope_key in list(snapshot.get("read_models", {}).keys()):
             self._workbench_read_model_service.delete_read_model(str(scope_key))
+        if invalidate_cost_statistics:
+            self._invalidate_cost_statistics_read_models()
 
     def _invalidate_workbench_read_model_scopes(self, scope_keys: list[str]) -> list[str]:
         normalized_scope_keys = {
@@ -5130,7 +5747,407 @@ class Application:
         expanded_scope_keys = self._expand_workbench_read_model_scope_keys_for_base_scopes(list(normalized_scope_keys))
         for scope_key in expanded_scope_keys:
             self._workbench_read_model_service.delete_read_model(scope_key)
+        self._invalidate_cost_statistics_read_model_scopes(
+            list(normalized_scope_keys),
+            reason="workbench_scope_invalidated",
+        )
         return expanded_scope_keys
+
+    def _invalidate_cost_statistics_read_models(self) -> list[str]:
+        read_model_service = self._cost_statistics_read_model_service
+        if read_model_service is None:
+            return []
+        deleted_scope_keys = read_model_service.clear()
+        self._persist_cost_statistics_read_models_best_effort(
+            snapshot=read_model_service.snapshot(),
+            changed_scope_keys=deleted_scope_keys,
+            operation="invalidate_cost_statistics_read_models",
+        )
+        if not deleted_scope_keys:
+            return deleted_scope_keys
+        warmup_months = self._cost_statistics_warmup_months_from_read_model_scope_keys(deleted_scope_keys)
+        if not warmup_months:
+            warmup_months = ["all"]
+        self._schedule_cost_statistics_cache_warmup(warmup_months, reason="cost_statistics_read_model_invalidated")
+        return deleted_scope_keys
+
+    def _invalidate_cost_statistics_read_model_scopes(
+        self,
+        scope_keys: list[str],
+        *,
+        reason: str = "",
+    ) -> list[str]:
+        read_model_service = self._cost_statistics_read_model_service
+        if read_model_service is None:
+            return []
+        months = self._cost_statistics_months_from_workbench_scope_keys(scope_keys)
+        if not months:
+            return []
+        specific_months = sorted(month for month in months if month != "all")
+        if specific_months:
+            deleted_scope_keys = read_model_service.invalidate_months(
+                specific_months,
+                project_scopes=["active", "all"],
+                include_all=True,
+            )
+            warmup_months = [*specific_months, "all"]
+        else:
+            deleted_scope_keys = read_model_service.invalidate_months(
+                [],
+                project_scopes=["active", "all"],
+                include_all=True,
+            )
+            warmup_months = ["all"]
+        self._persist_cost_statistics_read_models_best_effort(
+            snapshot=read_model_service.snapshot(),
+            changed_scope_keys=deleted_scope_keys,
+            operation=reason or "invalidate_cost_statistics_read_model_scopes",
+        )
+        self._schedule_cost_statistics_cache_warmup(
+            warmup_months,
+            reason=reason or "cost_statistics_scope_invalidated",
+        )
+        return deleted_scope_keys
+
+    @staticmethod
+    def _cost_statistics_months_from_workbench_scope_keys(scope_keys: list[str]) -> set[str]:
+        months: set[str] = set()
+        for raw_scope_key in list(scope_keys or []):
+            scope_key = str(raw_scope_key).strip()
+            if not scope_key:
+                continue
+            for part in reversed(scope_key.split(":")):
+                normalized_part = str(part).strip()
+                if normalized_part == "all" or SEARCH_MONTH_RE.match(normalized_part):
+                    months.add(normalized_part)
+                    break
+        return months
+
+    def _cost_statistics_warmup_months_from_read_model_scope_keys(self, scope_keys: list[str]) -> list[str]:
+        months = self._cost_statistics_months_from_workbench_scope_keys(scope_keys)
+        specific_months = sorted(month for month in months if month != "all")
+        if specific_months:
+            return [*specific_months, "all"]
+        if "all" in months:
+            return ["all"]
+        return []
+
+    def _cost_statistics_read_model_scope_key(
+        self,
+        month: str,
+        project_scope: str,
+        *,
+        read_model: dict[str, object] | None = None,
+    ) -> str:
+        if isinstance(read_model, dict):
+            scope_key = str(read_model.get("scope_key", "")).strip()
+            if scope_key:
+                return scope_key
+        return str(self._cost_statistics_read_model_service.scope_key(month, project_scope))
+
+    def _schedule_cost_statistics_cache_warmup(self, months: list[str], reason: str) -> None:
+        read_model_service = self._cost_statistics_read_model_service
+        if read_model_service is None:
+            return
+        normalized_months = {
+            str(month).strip()
+            for month in list(months or [])
+            if str(month).strip()
+        }
+        if not normalized_months:
+            return
+        ordered_months = sorted((month for month in normalized_months if month != "all"), reverse=True)
+        if "all" in normalized_months or ordered_months:
+            ordered_months.append("all")
+        deduped_months = list(dict.fromkeys(ordered_months))
+        project_scopes = ["active", "all"]
+        affected_scope_keys = [
+            self._cost_statistics_read_model_scope_key(month, project_scope)
+            for month in deduped_months
+            for project_scope in project_scopes
+        ]
+        idempotency_key = f"cost_statistics_cache_warmup:{reason}:{','.join(deduped_months)}"
+        job, created = self._background_job_service.create_or_get_idempotent_job_with_created(
+            job_type="cost_statistics_cache_warmup",
+            label="预热成本统计缓存",
+            owner_user_id="system",
+            idempotency_key=idempotency_key,
+            visibility="system",
+            phase="queued",
+            current=0,
+            total=len(affected_scope_keys),
+            message="成本统计缓存预热任务已创建。",
+            result_summary={"warmed": 0, "failed": 0},
+            source={"reason": reason},
+            affected_scopes=affected_scope_keys,
+            affected_months=deduped_months,
+        )
+        if not created:
+            return
+        self._background_job_service.run_job(
+            job,
+            lambda running_job: self._run_cost_statistics_cache_warmup_job(
+                running_job,
+                months=deduped_months,
+                project_scopes=project_scopes,
+            ),
+        )
+
+    def _run_cost_statistics_cache_warmup_job(
+        self,
+        running_job,
+        *,
+        months: list[str],
+        project_scopes: list[str],
+    ) -> dict[str, object]:
+        read_model_service = self._cost_statistics_read_model_service
+        if read_model_service is None:
+            return {"warmed": 0, "failed": 0}
+        targets = [
+            (month, project_scope)
+            for month in list(months or [])
+            for project_scope in list(project_scopes or [])
+        ]
+        total = len(targets)
+        warmed_scope_keys: list[str] = []
+        failed_scope_keys: list[str] = []
+        for index, (month, project_scope) in enumerate(targets, start=1):
+            scope_key = self._cost_statistics_read_model_scope_key(month, project_scope)
+            self._background_job_service.update_progress(
+                running_job.job_id,
+                phase="build_cost_statistics_cache",
+                message=f"正在预热成本统计缓存 {index}/{max(total, 1)}。",
+                current=index - 1,
+                total=total,
+                result_summary={"warmed": len(warmed_scope_keys), "failed": len(failed_scope_keys)},
+            )
+            try:
+                payload = self._cost_statistics_service.get_explorer(
+                    month,
+                    project_scope=project_scope,
+                )
+            except Exception:
+                failed_scope_keys.append(scope_key)
+                continue
+            read_model = read_model_service.upsert_read_model(
+                month,
+                project_scope,
+                payload,
+                generated_at=datetime.now().isoformat(),
+                source_scope_keys=[month],
+                cache_status="ready",
+            )
+            warmed_scope_key = self._cost_statistics_read_model_scope_key(
+                month,
+                project_scope,
+                read_model=read_model,
+            )
+            warmed_scope_keys.append(warmed_scope_key)
+            self._persist_cost_statistics_read_models_best_effort(
+                snapshot=read_model_service.snapshot_scope_keys([warmed_scope_key]),
+                changed_scope_keys=[warmed_scope_key],
+                operation="cost_statistics_cache_warmup",
+            )
+
+        result_summary = {
+            "warmed": len(warmed_scope_keys),
+            "failed": len(failed_scope_keys),
+        }
+        message = "成本统计缓存预热完成。" if not failed_scope_keys else "成本统计缓存预热部分完成。"
+        self._background_job_service.succeed_job(
+            running_job.job_id,
+            message,
+            result_summary=result_summary,
+            status="partial_success" if failed_scope_keys else "succeeded",
+        )
+        return result_summary
+
+    def _invalidate_tax_offset_read_models(self) -> list[str]:
+        self._tax_offset_service.clear_month_cache()
+        read_model_service = self._tax_offset_read_model_service
+        if read_model_service is None:
+            return []
+        deleted_scope_keys = read_model_service.clear()
+        self._persist_tax_offset_read_models_best_effort(
+            snapshot=read_model_service.snapshot(),
+            changed_scope_keys=deleted_scope_keys,
+            operation="invalidate_tax_offset_read_models",
+        )
+        warmup_months = self._tax_offset_warmup_months_from_scope_keys(deleted_scope_keys)
+        if not warmup_months:
+            warmup_months = self._default_tax_offset_warmup_months()
+        self._schedule_tax_offset_cache_warmup(warmup_months, reason="tax_offset_read_model_invalidated")
+        return deleted_scope_keys
+
+    def _invalidate_tax_offset_read_model_scopes(
+        self,
+        scope_keys: list[str],
+        *,
+        reason: str = "",
+    ) -> list[str]:
+        months = self._tax_offset_months_from_scope_keys(scope_keys)
+        if not months:
+            return []
+        ordered_months = sorted(months)
+        self._tax_offset_service.clear_month_cache(ordered_months)
+        read_model_service = self._tax_offset_read_model_service
+        deleted_scope_keys: list[str] = []
+        if read_model_service is not None:
+            deleted_scope_keys = read_model_service.invalidate_months(ordered_months)
+            self._persist_tax_offset_read_models_best_effort(
+                snapshot=read_model_service.snapshot(),
+                changed_scope_keys=deleted_scope_keys,
+                operation=reason or "invalidate_tax_offset_read_model_scopes",
+            )
+        self._schedule_tax_offset_cache_warmup(
+            ordered_months,
+            reason=reason or "tax_offset_scope_invalidated",
+        )
+        return deleted_scope_keys
+
+    @staticmethod
+    def _tax_offset_months_from_scope_keys(scope_keys: list[str]) -> set[str]:
+        months: set[str] = set()
+        for raw_scope_key in list(scope_keys or []):
+            scope_key = str(raw_scope_key).strip()
+            if SEARCH_MONTH_RE.match(scope_key):
+                months.add(scope_key)
+        return months
+
+    @staticmethod
+    def _tax_offset_warmup_months_from_scope_keys(scope_keys: list[str]) -> list[str]:
+        return sorted(
+            {
+                str(scope_key).strip()
+                for scope_key in list(scope_keys or [])
+                if SEARCH_MONTH_RE.match(str(scope_key).strip())
+            }
+        )
+
+    @staticmethod
+    def _default_tax_offset_warmup_months() -> list[str]:
+        current_month = datetime.now().strftime("%Y-%m")
+        current_year = int(current_month[:4])
+        current_month_number = int(current_month[5:7])
+        if current_month_number == 1:
+            previous_month = f"{current_year - 1}-12"
+        else:
+            previous_month = f"{current_year}-{current_month_number - 1:02d}"
+        return [previous_month, current_month]
+
+    def _tax_offset_read_model_scope_key(
+        self,
+        month: str,
+        *,
+        read_model: dict[str, object] | None = None,
+    ) -> str:
+        if isinstance(read_model, dict):
+            scope_key = str(read_model.get("scope_key", "")).strip()
+            if scope_key:
+                return scope_key
+        return str(self._tax_offset_read_model_service.scope_key(month))
+
+    def _schedule_tax_offset_cache_warmup(self, months: list[str], reason: str) -> None:
+        read_model_service = self._tax_offset_read_model_service
+        if read_model_service is None:
+            return
+        if not self._tax_offset_cache_warmup_enabled():
+            return
+        deduped_months = sorted(
+            {
+                str(month).strip()
+                for month in list(months or [])
+                if SEARCH_MONTH_RE.match(str(month).strip())
+            },
+            reverse=True,
+        )
+        if not deduped_months:
+            return
+        affected_scope_keys = [self._tax_offset_read_model_scope_key(month) for month in deduped_months]
+        idempotency_key = f"tax_offset_cache_warmup:{reason}:{','.join(deduped_months)}"
+        job, created = self._background_job_service.create_or_get_idempotent_job_with_created(
+            job_type="tax_offset_cache_warmup",
+            label="预热税金抵扣缓存",
+            owner_user_id="system",
+            idempotency_key=idempotency_key,
+            visibility="system",
+            phase="queued",
+            current=0,
+            total=len(affected_scope_keys),
+            message="税金抵扣缓存预热任务已创建。",
+            result_summary={"warmed": 0, "failed": 0},
+            source={"reason": reason},
+            affected_scopes=affected_scope_keys,
+            affected_months=deduped_months,
+        )
+        if not created:
+            return
+        self._background_job_service.run_job(
+            job,
+            lambda running_job: self._run_tax_offset_cache_warmup_job(
+                running_job,
+                months=deduped_months,
+            ),
+        )
+
+    def _run_tax_offset_cache_warmup_job(
+        self,
+        running_job,
+        *,
+        months: list[str],
+    ) -> dict[str, object]:
+        read_model_service = self._tax_offset_read_model_service
+        if read_model_service is None:
+            return {"warmed": 0, "failed": 0}
+        warmed_scope_keys: list[str] = []
+        failed_scope_keys: list[str] = []
+        total = len(list(months or []))
+        for index, month in enumerate(list(months or []), start=1):
+            scope_key = self._tax_offset_read_model_scope_key(month)
+            self._background_job_service.update_progress(
+                running_job.job_id,
+                phase="build_tax_offset_cache",
+                message=f"正在预热税金抵扣缓存 {index}/{max(total, 1)}。",
+                current=index - 1,
+                total=total,
+                result_summary={"warmed": len(warmed_scope_keys), "failed": len(failed_scope_keys)},
+            )
+            try:
+                payload = self._tax_api_routes.get_tax_offset(month)
+            except Exception:
+                failed_scope_keys.append(scope_key)
+                continue
+            read_model = read_model_service.upsert_read_model(
+                month,
+                payload,
+                generated_at=datetime.now().isoformat(),
+                source_scope_keys=[month],
+                cache_status="ready",
+            )
+            warmed_scope_key = self._tax_offset_read_model_scope_key(month, read_model=read_model)
+            warmed_scope_keys.append(warmed_scope_key)
+            self._persist_tax_offset_read_models_best_effort(
+                snapshot=read_model_service.snapshot_scope_keys([warmed_scope_key]),
+                changed_scope_keys=[warmed_scope_key],
+                operation="tax_offset_cache_warmup",
+            )
+
+        result_summary = {
+            "warmed": len(warmed_scope_keys),
+            "failed": len(failed_scope_keys),
+        }
+        message = "税金抵扣缓存预热完成。" if not failed_scope_keys else "税金抵扣缓存预热部分完成。"
+        self._background_job_service.succeed_job(
+            running_job.job_id,
+            message,
+            result_summary=result_summary,
+            status="partial_success" if failed_scope_keys else "succeeded",
+        )
+        return result_summary
+
+    @staticmethod
+    def _tax_offset_cache_warmup_enabled() -> bool:
+        return os.getenv("FIN_OPS_TAX_OFFSET_CACHE_WARMUP_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
 
     def _scope_keys_for_row_ids(
         self,

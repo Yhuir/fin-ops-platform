@@ -1,15 +1,18 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
+  clearCostStatisticsExplorerCache,
   exportCostStatisticsView,
   fetchCostStatisticsExplorer,
   fetchCostStatisticsExportPreview,
+  getCachedCostStatisticsExplorer,
 } from "../features/cost-statistics/api";
 
 const originalFetch = global.fetch;
 
 afterEach(() => {
   global.fetch = originalFetch;
+  clearCostStatisticsExplorerCache();
   vi.restoreAllMocks();
 });
 
@@ -97,5 +100,27 @@ describe("Cost statistics export API", () => {
       "/api/cost-statistics/export?month=all&view=time&project_scope=all",
       expect.any(Object),
     );
+  });
+
+  test("caches explorer payloads by month and project scope for fast page re-entry", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        month: "2026-03",
+        summary: {
+          row_count: 0,
+          transaction_count: 0,
+          total_amount: "0.00",
+        },
+        time_rows: [],
+        project_rows: [],
+        expense_type_rows: [],
+      }), { status: 200 }),
+    ) as typeof fetch;
+
+    expect(getCachedCostStatisticsExplorer("2026-03", "active")).toBeNull();
+    const payload = await fetchCostStatisticsExplorer("2026-03", undefined, "active");
+
+    expect(getCachedCostStatisticsExplorer("2026-03", "active")).toEqual(payload);
+    expect(getCachedCostStatisticsExplorer("2026-03", "all")).toBeNull();
   });
 });

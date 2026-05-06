@@ -22,6 +22,7 @@ import { Link as RouterLink } from "react-router-dom";
 import PageScaffold from "../common/PageScaffold";
 import {
   confirmImportFiles,
+  fetchImportSession,
   previewImportFiles,
   resolveImportApiErrorMessage,
 } from "../../features/imports/api";
@@ -35,23 +36,15 @@ import type {
 } from "../../features/imports/types";
 import type { EtcImportItem, EtcImportPreviewResult } from "../../features/etc/types";
 import type { BankAccountMapping } from "../../features/workbench/types";
+import { useImportWorkflowDraft } from "../../contexts/ImportWorkflowDraftContext";
+import type { FileSelectionState } from "../../contexts/ImportWorkflowDraftContext";
 import { useImportProgress } from "../../contexts/ImportProgressContext";
+import { useAppHealthStatus } from "../../contexts/AppHealthStatusContext";
 import type { ImportWorkflowMode } from "../../features/imports/importRoutes";
 
 type ImportWorkflowPageProps = {
   mode: ImportWorkflowMode;
 };
-
-type FileSelectionState = Record<
-  string,
-  {
-    bankMappingId: string;
-    bankName: string;
-    bankShortName: string;
-    last4: string;
-    invoiceBatchType: ImportBatchType | "";
-  }
->;
 
 type ImportFilePreviewRow = ImportFilePreview & {
   accountLabel: string;
@@ -174,8 +167,19 @@ const importGridSx = {
     color: "#f8fafc",
     borderBottom: "1px solid #d5dde8",
   },
+  "& .MuiDataGrid-columnHeader": {
+    backgroundColor: "#14263f",
+    color: "#f8fafc",
+  },
   "& .MuiDataGrid-columnHeaderTitle": {
+    color: "#f8fafc",
     fontWeight: 800,
+  },
+  "& .MuiDataGrid-sortIcon, & .MuiDataGrid-menuIconButton, & .MuiDataGrid-iconButtonContainer": {
+    color: "#f8fafc",
+  },
+  "& .MuiDataGrid-columnSeparator": {
+    color: "rgba(248, 250, 252, 0.38)",
   },
   "& .MuiDataGrid-cell": {
     alignItems: "center",
@@ -189,19 +193,39 @@ const importGridSx = {
 export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   const inputId = useId();
   const { setProgress, clearProgress } = useImportProgress();
+  const {
+    draft,
+    updateDraft,
+    resetDraft,
+    clearPersistedSession,
+    readPersistedSessionId,
+    persistSessionId,
+    setSelectedFiles,
+    setFileSelections,
+    setPreviewPayload,
+    setEtcPreviewPayload,
+    setEtcImported,
+    setFeedbackMessage,
+    setErrorMessage,
+    setIsPreviewing,
+    setIsConfirming,
+  } = useImportWorkflowDraft(mode);
+  const healthStatus = useAppHealthStatus();
+  const {
+    selectedFiles,
+    fileSelections,
+    previewPayload,
+    etcPreviewPayload,
+    etcImported,
+    feedbackMessage,
+    errorMessage,
+    isPreviewing,
+    isConfirming,
+  } = draft;
   const [bankOptions, setBankOptions] = useState<BankAccountMapping[]>([]);
   const [settingsLoading, setSettingsLoading] = useState(mode === "bank_transaction");
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [fileSelections, setFileSelections] = useState<FileSelectionState>({});
-  const [previewPayload, setPreviewPayload] = useState<ImportSessionPayload | null>(null);
-  const [etcPreviewPayload, setEtcPreviewPayload] = useState<EtcImportPreviewResult | null>(null);
-  const [etcImported, setEtcImported] = useState(false);
   const [conflictDialogOpen, setConflictDialogOpen] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
-  const [isPreviewing, setIsPreviewing] = useState(false);
-  const [isConfirming, setIsConfirming] = useState(false);
-  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const title = TITLES[mode];
   const uploadLabel = UPLOAD_LABELS[mode];
@@ -237,6 +261,53 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     return () => controller.abort();
   }, [mode]);
 
+  useEffect(() => {
+    if (mode === "etc_invoice" || selectedFiles.length > 0 || previewPayload) {
+      return undefined;
+    }
+    const sessionId = readPersistedSessionId();
+    if (!sessionId) {
+      return undefined;
+    }
+
+    let active = true;
+    setIsPreviewing(true);
+    setErrorMessage(null);
+    fetchImportSession(sessionId)
+      .then((payload) => {
+        if (!active) {
+          return;
+        }
+        setIsPreviewing(false);
+        setPreviewPayload(payload);
+        setFeedbackMessage(`已恢复上次 ${payload.files.length} 个文件的预览识别。`);
+      })
+      .catch(() => {
+        if (!active) {
+          return;
+        }
+        setIsPreviewing(false);
+        clearPersistedSession();
+        resetDraft();
+        setErrorMessage("上次预览会话已失效，请重新选择文件。");
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    clearPersistedSession,
+    mode,
+    previewPayload,
+    readPersistedSessionId,
+    resetDraft,
+    selectedFiles.length,
+    setErrorMessage,
+    setFeedbackMessage,
+    setIsPreviewing,
+    setPreviewPayload,
+  ]);
+
   const bankOptionMap = useMemo(
     () => new Map(bankOptions.map((item) => [item.id, item])),
     [bankOptions],
@@ -257,6 +328,12 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   );
   const canConfirm = confirmableFileIds.length > 0 && !isPreviewing && !isConfirming;
   const canConfirmEtc = Boolean(etcPreviewPayload?.sessionId) && !etcImported && !isPreviewing && !isConfirming;
+  const hasDraftContent = selectedFiles.length > 0
+    || Boolean(previewPayload)
+    || Boolean(etcPreviewPayload)
+    || Object.keys(fileSelections).length > 0
+    || Boolean(feedbackMessage)
+    || Boolean(errorMessage);
   const conflictingPreviewFiles = useMemo(
     () => previewPayload?.files.filter((file) => canConfirmFile(file) && file.bankSelectionConflict) ?? [],
     [previewPayload],
@@ -309,6 +386,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     setConflictDialogOpen(false);
     setFeedbackMessage(null);
     setErrorMessage(null);
+    clearPersistedSession();
   }
 
   function updateFiles(nextFiles: File[]) {
@@ -435,10 +513,14 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       setFeedbackMessage(null);
       try {
         const payload = await previewEtcZipFiles(selectedFiles);
-        setEtcPreviewPayload(payload);
-        setEtcImported(false);
-        setPreviewPayload(null);
-        setFeedbackMessage(`已完成 ${selectedFiles.length} 个 ETC zip 文件预览。`);
+        updateDraft((current) => ({
+          ...current,
+          etcPreviewPayload: payload,
+          etcImported: false,
+          previewPayload: null,
+          feedbackMessage: `已完成 ${selectedFiles.length} 个 ETC zip 文件预览。`,
+          errorMessage: null,
+        }));
       } catch (error) {
         setErrorMessage(resolveImportApiErrorMessage(error, "ETC zip 预览失败，请稍后重试。"));
       } finally {
@@ -461,8 +543,13 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     setConflictDialogOpen(false);
     try {
       const payload = await previewImportFiles(selectedFiles, "web_finance_user", buildPreviewOverrides());
-      setPreviewPayload(payload);
-      setFeedbackMessage(`已完成 ${payload.files.length} 个文件的预览识别。`);
+      persistSessionId(payload.session.id);
+      updateDraft((current) => ({
+        ...current,
+        previewPayload: payload,
+        feedbackMessage: `已完成 ${payload.files.length} 个文件的预览识别。`,
+        errorMessage: null,
+      }));
     } catch (error) {
       setErrorMessage(resolveImportApiErrorMessage(error, "文件预览失败，请稍后重试。"));
     } finally {
@@ -482,6 +569,10 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   }
 
   async function submitConfirm() {
+    if (healthStatus.blocksMutations) {
+      setErrorMessage("登录已失效或系统不可用，请返回 OA 系统重新进入。");
+      return;
+    }
     if (mode === "etc_invoice") {
       if (!etcPreviewPayload?.sessionId) {
         setErrorMessage("请先预览 ETC zip 文件。");
@@ -510,9 +601,11 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     try {
       const payload = await confirmImportFiles(previewPayload.session.id, confirmableFileIds);
       if (payload.job) {
+        resetDraft();
         setFeedbackMessage("已开始后台导入");
         return;
       }
+      resetDraft();
       setFeedbackMessage("已确认导入");
       void refreshWorkbenchStatus(payload);
     } catch (error) {
@@ -539,13 +632,18 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
             <Button component={RouterLink} to="/" variant="outlined" startIcon={<ArrowBackOutlinedIcon />}>
               返回关联台
             </Button>
-            <Button type="button" variant="outlined" onClick={handleClearFiles} disabled={selectedFiles.length === 0 || isPreviewing || isConfirming}>
+            <Button type="button" variant="outlined" onClick={handleClearFiles} disabled={!hasDraftContent || isPreviewing || isConfirming}>
               清空
             </Button>
             <Button type="button" variant="outlined" onClick={handlePreview} disabled={!canPreview}>
               {isPreviewing ? "预览中..." : "开始预览"}
             </Button>
-            <Button type="button" variant="contained" onClick={handleConfirm} disabled={mode === "etc_invoice" ? !canConfirmEtc : !canConfirm}>
+            <Button
+              type="button"
+              variant="contained"
+              onClick={handleConfirm}
+              disabled={healthStatus.blocksMutations || (mode === "etc_invoice" ? !canConfirmEtc : !canConfirm)}
+            >
               {isConfirming ? "确认中..." : "确认导入"}
             </Button>
           </Stack>
@@ -777,7 +875,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
         </DialogContent>
         <DialogActions>
           <Button type="button" onClick={() => setConflictDialogOpen(false)} disabled={isConfirming}>取消</Button>
-          <Button type="button" variant="contained" onClick={() => { void submitConfirm(); }} disabled={isConfirming}>
+          <Button type="button" variant="contained" onClick={() => { void submitConfirm(); }} disabled={isConfirming || healthStatus.blocksMutations}>
             {isConfirming ? "确认中..." : conflictConfirmLabel}
           </Button>
         </DialogActions>

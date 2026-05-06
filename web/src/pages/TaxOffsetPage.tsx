@@ -13,8 +13,9 @@ import MonthPicker from "../components/MonthPicker";
 import TaxResultPanel from "../components/tax/TaxResultPanel";
 import TaxSummaryCards from "../components/tax/TaxSummaryCards";
 import TaxTable from "../components/tax/TaxTable";
-import { type WorkbenchHeaderIntent, useAppChrome } from "../contexts/AppChromeContext";
+import { useAppChrome } from "../contexts/AppChromeContext";
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
+import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import { calculateTaxOffset, fetchTaxOffsetMonth } from "../features/tax/api";
 import { importWorkflowPath } from "../features/imports/importRoutes";
@@ -42,15 +43,49 @@ function hasSameIds(left: string[], right: string[]) {
   return left.every((id, index) => id === right[index]);
 }
 
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
 export default function TaxOffsetPage() {
   const navigate = useNavigate();
   const { setWorkbenchHeaderActions } = useAppChrome();
   const { canMutateData } = useSessionPermissions();
-  const [currentMonth, setCurrentMonth] = useState(DEFAULT_MONTH);
+  const currentMonthSession = usePageSessionState({
+    pageKey: "tax-offset",
+    stateKey: "currentMonth",
+    version: 1,
+    initialValue: DEFAULT_MONTH,
+    ttlMs: 24 * 60 * 60 * 1000,
+    storage: "session",
+    validate: (value): value is string => typeof value === "string" && /^\d{4}-\d{2}$/.test(value),
+  });
+  const selectedInputIdsSession = usePageSessionState({
+    pageKey: "tax-offset",
+    stateKey: "selectedInputIds",
+    version: 1,
+    initialValue: [] as string[],
+    ttlMs: 30 * 60 * 1000,
+    storage: "session",
+    validate: isStringArray,
+  });
+  const certifiedDrawerSession = usePageSessionState({
+    pageKey: "tax-offset",
+    stateKey: "certifiedDrawerCollapsed",
+    version: 1,
+    initialValue: false,
+    ttlMs: 24 * 60 * 60 * 1000,
+    storage: "session",
+    validate: (value): value is boolean => typeof value === "boolean",
+  });
+  const currentMonth = currentMonthSession.value;
+  const setCurrentMonth = currentMonthSession.setValue;
   const [monthData, setMonthData] = useState<TaxMonthData | null>(null);
   const [summary, setSummary] = useState<TaxSummary | null>(null);
-  const [selectedInputIds, setSelectedInputIds] = useState<string[]>([]);
-  const [isCertifiedDrawerCollapsed, setIsCertifiedDrawerCollapsed] = useState(false);
+  const selectedInputIds = selectedInputIdsSession.value;
+  const setSelectedInputIds = selectedInputIdsSession.setValue;
+  const isCertifiedDrawerCollapsed = certifiedDrawerSession.value;
+  const setIsCertifiedDrawerCollapsed = certifiedDrawerSession.setValue;
   const [isCertifiedImportModalOpen, setIsCertifiedImportModalOpen] = useState(false);
   const [highlightedPlanInputId, setHighlightedPlanInputId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -63,29 +98,43 @@ export default function TaxOffsetPage() {
   const taxLayoutScrollbarRef = useRef<HTMLDivElement | null>(null);
   const taxLayoutScrollbarInnerRef = useRef<HTMLDivElement | null>(null);
   const isSyncingTaxLayoutScrollRef = useRef(false);
+  const isMountedRef = useRef(false);
+  const resetLoadRequestIdRef = useRef(0);
+  const refreshLoadRequestIdRef = useRef(0);
 
-  const handleRouteToWorkbenchIntent = useCallback((intent: WorkbenchHeaderIntent) => {
-    navigate("/", {
-      state: {
-        workbenchHeaderIntent: intent,
-      },
-    });
-  }, [navigate]);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   useLayoutEffect(() => {
     setWorkbenchHeaderActions({
       canMutateData,
       onOpenImport: (mode) => navigate(importWorkflowPath(mode)),
-      onOpenSearch: () => handleRouteToWorkbenchIntent({ type: "open_search" }),
       onOpenSettings: () => navigate("/settings"),
     });
     return () => {
       setWorkbenchHeaderActions(null);
     };
-  }, [canMutateData, handleRouteToWorkbenchIntent, navigate, setWorkbenchHeaderActions]);
+  }, [canMutateData, navigate, setWorkbenchHeaderActions]);
 
   const loadMonthData = useCallback(
     async (mode: "reset" | "refresh", signal?: AbortSignal) => {
+      const requestId = mode === "reset"
+        ? resetLoadRequestIdRef.current + 1
+        : refreshLoadRequestIdRef.current + 1;
+      if (mode === "reset") {
+        resetLoadRequestIdRef.current = requestId;
+      } else {
+        refreshLoadRequestIdRef.current = requestId;
+      }
+      const isCurrentRequest = () => (
+        mode === "reset"
+          ? requestId === resetLoadRequestIdRef.current
+          : requestId === refreshLoadRequestIdRef.current
+      );
       if (mode === "reset") {
         setIsLoading(true);
       } else {
@@ -94,30 +143,31 @@ export default function TaxOffsetPage() {
       setLoadError(null);
       try {
         const payload = await fetchTaxOffsetMonth(currentMonth, signal);
+        if (!isMountedRef.current || !isCurrentRequest()) {
+          return;
+        }
         setMonthData(payload);
         setSummary(payload.summary);
         setHighlightedPlanInputId((currentId) =>
           currentId && payload.inputPlanInvoices.some((row) => row.id === currentId) ? currentId : null,
         );
         setSelectedInputIds((currentIds) => {
-          if (mode === "refresh") {
-            const selectableIds = new Set(
-              payload.inputPlanInvoices
-                .filter((row) => row.isSelectable !== false)
-                .map((row) => row.id),
-            );
-            return currentIds.filter((id) => selectableIds.has(id));
-          }
-          return payload.defaultSelectedInputIds;
+          const selectableIds = new Set(
+            payload.inputPlanInvoices
+              .filter((row) => row.isSelectable !== false && !row.isLocked)
+              .map((row) => row.id),
+          );
+          const filteredIds = currentIds.filter((id) => selectableIds.has(id));
+          return mode === "refresh" || filteredIds.length > 0 ? filteredIds : payload.defaultSelectedInputIds;
         });
       } catch {
-        if (!signal?.aborted) {
+        if (!signal?.aborted && isMountedRef.current && isCurrentRequest()) {
           setMonthData(null);
           setSummary(null);
           setLoadError("税金抵扣数据加载失败，请稍后重试。");
         }
       } finally {
-        if (!signal?.aborted) {
+        if (isMountedRef.current && isCurrentRequest()) {
           setIsLoading(false);
           setIsRefreshing(false);
         }

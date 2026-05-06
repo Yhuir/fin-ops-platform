@@ -231,7 +231,7 @@ describe("Workbench pane display model", () => {
 
     expect(within(openZone).queryByTestId("candidate-group-open-row:oa-o-202603-002")).not.toBeInTheDocument();
     expect(within(openZone).getAllByText((content) => content.includes("智能工厂设备商")).length).toBeGreaterThan(1);
-    expect(oaSearchInput).toHaveClass("pane-search-input", "active");
+    expect(oaSearchInput.closest(".pane-search-field")).not.toBeNull();
     expect(within(openOaPane).getByRole("button", { name: "收起搜索 OA" })).toHaveClass("pane-search-toggle-btn", "fixed");
     expect(within(openOaPane).getByRole("button", { name: "清空搜索 OA" })).toBeInTheDocument();
 
@@ -248,7 +248,7 @@ describe("Workbench pane display model", () => {
     expect(within(openOaPane).queryByRole("searchbox", { name: "搜索 OA" })).not.toBeInTheDocument();
     expect(within(openOaPane).getByRole("button", { name: "搜索 OA，当前关键词 陈涛" })).toHaveTextContent("陈涛");
 
-    fireEvent.click(within(openBankPane).getByRole("button", { name: "搜索 银行流水，当前关键词 陈涛" }));
+    fireEvent.click(within(openBankPane).getByRole("button", { name: "搜索 银行流水" }));
     expect(within(openBankPane).getByRole("searchbox", { name: "搜索 银行流水" })).toBeInTheDocument();
     expect(within(openOaPane).getByRole("button", { name: "搜索 OA，当前关键词 陈涛" })).toHaveTextContent("陈涛");
 

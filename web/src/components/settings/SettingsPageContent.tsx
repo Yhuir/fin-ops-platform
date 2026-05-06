@@ -13,6 +13,7 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { ThemeProvider } from "@mui/material/styles";
 
+import { usePageSessionState } from "../../contexts/PageSessionStateContext";
 import { useSession } from "../../contexts/SessionContext";
 import type {
   BankAccountMapping,
@@ -78,12 +79,40 @@ type SettingsPageContentProps = {
   onDeleteProject: (projectId: string) => Promise<WorkbenchSettings>;
 };
 
+type SettingsDraftSession = {
+  activeSectionId: SettingsSectionId;
+  bankNameDraft: string;
+  bankShortNameDraft: string;
+  last4Draft: string;
+  projectCodeDraft: string;
+  projectNameDraft: string;
+  accessUsernameDraft: string;
+  accessRoleDraft: WorkbenchAccessRole;
+};
+
 type DataResetDialogState =
   | { step: "confirm"; action: WorkbenchSettingsDataResetAction }
   | { step: "password"; action: WorkbenchSettingsDataResetAction }
   | null;
 
 const OA_INVOICE_OFFSET_SETTINGS_VISIBLE_USERNAMES = new Set(["YNSYLP005", "YNSYKJ001"]);
+
+function isSettingsDraftSession(value: unknown): value is SettingsDraftSession {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const session = value as Record<string, unknown>;
+  return (
+    typeof session.activeSectionId === "string"
+    && typeof session.bankNameDraft === "string"
+    && typeof session.bankShortNameDraft === "string"
+    && typeof session.last4Draft === "string"
+    && typeof session.projectCodeDraft === "string"
+    && typeof session.projectNameDraft === "string"
+    && typeof session.accessUsernameDraft === "string"
+    && typeof session.accessRoleDraft === "string"
+  );
+}
 
 const DATA_RESET_ACTIONS: DataResetActionConfig[] = [
   {
@@ -198,6 +227,30 @@ export default function SettingsPageContent({
   onSyncProjects,
 }: SettingsPageContentProps) {
   const session = useSession();
+  const draftSession = usePageSessionState<SettingsDraftSession>({
+    pageKey: "settings",
+    stateKey: "safeDraft",
+    version: 1,
+    initialValue: {
+      activeSectionId: "projects",
+      bankNameDraft: "",
+      bankShortNameDraft: "",
+      last4Draft: "",
+      projectCodeDraft: "",
+      projectNameDraft: "",
+      accessUsernameDraft: "",
+      accessRoleDraft: "full_access",
+    },
+    ttlMs: 2 * 60 * 60 * 1000,
+    storage: "session",
+    validate: isSettingsDraftSession,
+  });
+  const setDraftField = <Key extends keyof SettingsDraftSession>(
+    key: Key,
+    value: SettingsDraftSession[Key],
+  ) => {
+    draftSession.setValue((current) => ({ ...current, [key]: value }));
+  };
   const [completedProjectIds, setCompletedProjectIds] = useState<string[]>(settings.projects.completedProjectIds);
   const [mappings, setMappings] = useState<BankAccountMapping[]>(settings.bankAccountMappings);
   const [managedAccessAccounts, setManagedAccessAccounts] = useState<ManagedAccessAccount[]>(
@@ -209,16 +262,24 @@ export default function SettingsPageContent({
   const [oaInvoiceOffsetApplicantsText, setOaInvoiceOffsetApplicantsText] = useState(
     settings.oaInvoiceOffset.applicantNames.join("、"),
   );
-  const [bankNameDraft, setBankNameDraft] = useState("");
-  const [bankShortNameDraft, setBankShortNameDraft] = useState("");
-  const [last4Draft, setLast4Draft] = useState("");
-  const [projectCodeDraft, setProjectCodeDraft] = useState("");
-  const [projectNameDraft, setProjectNameDraft] = useState("");
+  const bankNameDraft = draftSession.value.bankNameDraft;
+  const setBankNameDraft = (value: string) => setDraftField("bankNameDraft", value);
+  const bankShortNameDraft = draftSession.value.bankShortNameDraft;
+  const setBankShortNameDraft = (value: string) => setDraftField("bankShortNameDraft", value);
+  const last4Draft = draftSession.value.last4Draft;
+  const setLast4Draft = (value: string) => setDraftField("last4Draft", value);
+  const projectCodeDraft = draftSession.value.projectCodeDraft;
+  const setProjectCodeDraft = (value: string) => setDraftField("projectCodeDraft", value);
+  const projectNameDraft = draftSession.value.projectNameDraft;
+  const setProjectNameDraft = (value: string) => setDraftField("projectNameDraft", value);
   const [projectActionStatus, setProjectActionStatus] = useState<ProjectActionStatus | null>(null);
   const [isProjectActionBusy, setIsProjectActionBusy] = useState(false);
-  const [accessUsernameDraft, setAccessUsernameDraft] = useState("");
-  const [accessRoleDraft, setAccessRoleDraft] = useState<WorkbenchAccessRole>("full_access");
-  const [activeSectionId, setActiveSectionId] = useState<SettingsSectionId>("projects");
+  const accessUsernameDraft = draftSession.value.accessUsernameDraft;
+  const setAccessUsernameDraft = (value: string) => setDraftField("accessUsernameDraft", value);
+  const accessRoleDraft = draftSession.value.accessRoleDraft;
+  const setAccessRoleDraft = (value: WorkbenchAccessRole) => setDraftField("accessRoleDraft", value);
+  const activeSectionId = draftSession.value.activeSectionId;
+  const setActiveSectionId = (value: SettingsSectionId) => setDraftField("activeSectionId", value);
   const [dataResetDialog, setDataResetDialog] = useState<DataResetDialogState>(null);
   const [dataResetPassword, setDataResetPassword] = useState("");
   const [dataResetStatus, setDataResetStatus] = useState<DataResetStatus | null>(null);

@@ -9,8 +9,11 @@ import AppSidebar from "../components/shell/AppSidebar";
 import { collapsedSidebarWidth, expandedSidebarWidth } from "../components/shell/AppSidebar";
 import AppTopBar from "../components/shell/AppTopBar";
 import { AppChromeProvider, useAppChrome } from "../contexts/AppChromeContext";
+import { AppHealthStatusProvider, useAppHealthStatus } from "../contexts/AppHealthStatusContext";
+import { ImportWorkflowDraftProvider } from "../contexts/ImportWorkflowDraftContext";
 import { ImportProgressProvider, useImportProgress } from "../contexts/ImportProgressContext";
 import { MonthProvider } from "../contexts/MonthContext";
+import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionProvider } from "../contexts/SessionContext";
 import { BackgroundJobProgressProvider, useBackgroundJobProgress } from "../features/backgroundJobs/BackgroundJobProgressProvider";
 import MuiProviders from "./MuiProviders";
@@ -46,6 +49,7 @@ function persistSidebarState(storageKey: string, expanded: boolean) {
 
 function AppShell() {
   const { workbenchStatus } = useAppChrome();
+  const healthStatus = useAppHealthStatus();
   const { progress } = useImportProgress();
   const { primaryJob, extraCount, connectionFailed, acknowledgeJob } = useBackgroundJobProgress();
   const theme = useTheme();
@@ -83,6 +87,7 @@ function AppShell() {
         isCompact={isCompact}
         mobileOpen={mobileOpen}
         expanded={sidebarExpanded}
+        healthStatus={healthStatus}
         workbenchStatus={workbenchStatus}
         onCloseMobile={() => setMobileOpen(false)}
         onToggleExpanded={toggleSidebarExpanded}
@@ -101,7 +106,9 @@ function AppShell() {
           }}
         />
         <main className={`page-body${embedded ? " embedded" : ""}`}>
-          <AppRouter />
+          <SessionGate>
+            <AppRouter />
+          </SessionGate>
         </main>
       </Box>
     </Box>
@@ -118,13 +125,17 @@ export default function App() {
         <MonthProvider>
           <ImportProgressProvider>
             <SessionProvider>
-              <AppChromeProvider initialShellHeaderMounted>
-                <SessionGate>
-                  <BackgroundJobProgressProvider>
-                    <AppShell />
-                  </BackgroundJobProgressProvider>
-                </SessionGate>
-              </AppChromeProvider>
+              <PageSessionStateProvider>
+                <ImportWorkflowDraftProvider>
+                  <AppChromeProvider initialShellHeaderMounted>
+                    <BackgroundJobProgressProvider>
+                      <AppHealthStatusProvider>
+                        <AppShell />
+                      </AppHealthStatusProvider>
+                    </BackgroundJobProgressProvider>
+                  </AppChromeProvider>
+                </ImportWorkflowDraftProvider>
+              </PageSessionStateProvider>
             </SessionProvider>
           </ImportProgressProvider>
         </MonthProvider>

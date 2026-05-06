@@ -1,5 +1,4 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
 
 import ActionStatusModal from "../components/workbench/ActionStatusModal";
 import CancelProcessedExceptionModal from "../components/workbench/CancelProcessedExceptionModal";
@@ -8,10 +7,11 @@ import IgnoredItemsModal from "../components/workbench/IgnoredItemsModal";
 import OaBankExceptionModal from "../components/workbench/OaBankExceptionModal";
 import ProcessedExceptionsModal from "../components/workbench/ProcessedExceptionsModal";
 import RelationPreviewTriPane from "../components/workbench/RelationPreviewTriPane";
-import WorkbenchSearchModal from "../components/workbench/WorkbenchSearchModal";
 import WorkbenchZone from "../components/workbench/WorkbenchZone";
 import type { WorkbenchPane } from "../components/workbench/ResizableTriPane";
-import { type WorkbenchRouteState, useAppChrome } from "../contexts/AppChromeContext";
+import { useAppChrome } from "../contexts/AppChromeContext";
+import { useAppHealthStatus, useCanMutateWithHealth } from "../contexts/AppHealthStatusContext";
+import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import {
   cancelWorkbenchException,
@@ -49,14 +49,6 @@ import type {
   WorkbenchRelationPreview,
   WorkbenchSettings,
 } from "../features/workbench/types";
-import { createEmptySearchResponse, fetchWorkbenchSearch } from "../features/search/api";
-import type {
-  WorkbenchSearchJumpTarget,
-  WorkbenchSearchResponse,
-  WorkbenchSearchResult,
-  WorkbenchSearchScope,
-  WorkbenchSearchStatus,
-} from "../features/search/types";
 import { useMonth } from "../contexts/MonthContext";
 import useWorkbenchSelection from "../hooks/useWorkbenchSelection";
 import type { WorkbenchInlineAction } from "../components/workbench/RowActions";
@@ -81,14 +73,6 @@ type CancelProcessedExceptionDialogState = {
   group: WorkbenchCandidateGroup;
 };
 
-type SubmittedSearchState = {
-  query: string;
-  scope: WorkbenchSearchScope;
-  month: string;
-  projectName: string;
-  status: WorkbenchSearchStatus;
-};
-
 type WorkbenchLoadProgressState = {
   label: string;
   loadedBytes: number;
@@ -96,6 +80,20 @@ type WorkbenchLoadProgressState = {
   percent: number | null;
   indeterminate: boolean;
 };
+
+function isWorkbenchZoneDisplayState(value: unknown): value is WorkbenchZoneDisplayState {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const state = value as Record<string, unknown>;
+  return (
+    Object.prototype.hasOwnProperty.call(state, "activePaneId")
+    && Object.prototype.hasOwnProperty.call(state, "searchQueryByPane")
+    && Object.prototype.hasOwnProperty.call(state, "filtersByPaneAndColumn")
+    && Object.prototype.hasOwnProperty.call(state, "sortByPane")
+    && Object.prototype.hasOwnProperty.call(state, "timeFilterByPane")
+  );
+}
 
 function actionErrorMessage(error: unknown) {
   if (error instanceof Error) {
@@ -121,21 +119,23 @@ function actionErrorMessage(error: unknown) {
   return "操作失败，请稍后重试。";
 }
 
-function normalizeSearchKeyword(value: string) {
-  return value.replace(/\s+/g, "").trim();
-}
-
 const READONLY_ACTION_MESSAGE = "当前账号仅支持查看和导出，不能执行写操作。";
 const WORKBENCH_VIEW_MONTH = "all";
 const OA_SYNC_POLL_INTERVAL_MS = 3_000;
 const OA_SYNC_REFRESH_DEBOUNCE_MS = 120;
 
 export default function ReconciliationWorkbenchPage() {
-  const navigate = useNavigate();
-  const location = useLocation();
   const { currentMonth } = useMonth();
   const { setWorkbenchStatus } = useAppChrome();
+  const healthStatus = useAppHealthStatus();
+  const canMutateWithHealth = useCanMutateWithHealth();
   const { canMutateData } = useSessionPermissions();
+  const isWorkbenchFreshnessBlocked =
+    healthStatus.sources.oaSync === "dirty"
+    || healthStatus.sources.oaSync === "refreshing"
+    || healthStatus.sources.workbench === "stale"
+    || healthStatus.sources.workbench === "loading";
+  const canWriteWorkbench = canMutateData && canMutateWithHealth && !isWorkbenchFreshnessBlocked;
   const {
     detailRow,
     getRowState,
@@ -170,31 +170,39 @@ export default function ReconciliationWorkbenchPage() {
   const [relationPreviewDialog, setRelationPreviewDialog] = useState<RelationPreviewDialogState | null>(null);
   const [ignoredData, setIgnoredData] = useState<IgnoredWorkbenchData>({ month: WORKBENCH_VIEW_MONTH, rows: [] });
   const [workbenchSettings, setWorkbenchSettings] = useState<WorkbenchSettings | null>(null);
-  const [searchModalOpen, setSearchModalOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchScope, setSearchScope] = useState<WorkbenchSearchScope>("all");
-  const [searchMonthFilter, setSearchMonthFilter] = useState<"all" | "month">("all");
-  const [searchMonthValue, setSearchMonthValue] = useState(currentMonth);
-  const [searchProjectFilter, setSearchProjectFilter] = useState("");
-  const [searchStatusFilter, setSearchStatusFilter] = useState<WorkbenchSearchStatus>("all");
-  const [submittedSearch, setSubmittedSearch] = useState<SubmittedSearchState | null>(null);
-  const [searchResults, setSearchResults] = useState<WorkbenchSearchResponse>(createEmptySearchResponse());
-  const [isSearchLoading, setIsSearchLoading] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
-  const [pendingSearchJump, setPendingSearchJump] = useState<WorkbenchSearchJumpTarget | null>(null);
-  const [highlightedRowId, setHighlightedRowId] = useState<string | null>(null);
   const [ignoredModalOpen, setIgnoredModalOpen] = useState(false);
   const [processedExceptionsModalOpen, setProcessedExceptionsModalOpen] = useState(false);
   const [oaBankExceptionDialog, setOaBankExceptionDialog] = useState<OaBankExceptionDialogState | null>(null);
   const [cancelProcessedExceptionDialog, setCancelProcessedExceptionDialog] = useState<CancelProcessedExceptionDialogState | null>(null);
-  const [pairedDisplayState, setPairedDisplayState] = useState(createEmptyWorkbenchZoneDisplayState);
-  const [openDisplayState, setOpenDisplayState] = useState(createEmptyWorkbenchZoneDisplayState);
+  const pairedDisplaySession = usePageSessionState<WorkbenchZoneDisplayState>({
+    pageKey: "reconciliation-workbench",
+    stateKey: "pairedDisplayState",
+    version: 1,
+    initialValue: createEmptyWorkbenchZoneDisplayState(),
+    ttlMs: 24 * 60 * 60 * 1000,
+    storage: "session",
+    validate: isWorkbenchZoneDisplayState,
+    debounceMs: 100,
+  });
+  const openDisplaySession = usePageSessionState<WorkbenchZoneDisplayState>({
+    pageKey: "reconciliation-workbench",
+    stateKey: "openDisplayState",
+    version: 1,
+    initialValue: createEmptyWorkbenchZoneDisplayState(),
+    ttlMs: 24 * 60 * 60 * 1000,
+    storage: "session",
+    validate: isWorkbenchZoneDisplayState,
+    debounceMs: 100,
+  });
+  const pairedDisplayState = pairedDisplaySession.value;
+  const setPairedDisplayState = pairedDisplaySession.setValue;
+  const openDisplayState = openDisplaySession.value;
+  const setOpenDisplayState = openDisplaySession.setValue;
   const columnLayoutSaveRequestIdRef = useRef(0);
   const oaSyncRefreshTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const previousOaSyncStatusRef = useRef<WorkbenchOaSyncStatus | null>(null);
   const deferredPairedDisplayState = useDeferredValue(pairedDisplayState);
   const deferredOpenDisplayState = useDeferredValue(openDisplayState);
-  const routeState = location.state as WorkbenchRouteState;
   const [oaSyncShellStatus, setOaSyncShellStatus] = useState<{ level: "ok" | "pending" | "error"; reason: string } | null>(null);
 
   const updateZoneDisplayState = useCallback((
@@ -215,9 +223,8 @@ export default function ReconciliationWorkbenchPage() {
         ...current,
         openSearchPaneId: isOpen ? null : paneId,
         draftSearchQueryByPane: {
-          oa: isOpen ? current.draftSearchQueryByPane.oa : current.unifiedSearchQuery,
-          bank: isOpen ? current.draftSearchQueryByPane.bank : current.unifiedSearchQuery,
-          invoice: isOpen ? current.draftSearchQueryByPane.invoice : current.unifiedSearchQuery,
+          ...current.draftSearchQueryByPane,
+          [paneId]: isOpen ? current.draftSearchQueryByPane[paneId] : current.searchQueryByPane[paneId],
         },
       };
       return {
@@ -237,7 +244,7 @@ export default function ReconciliationWorkbenchPage() {
         openSearchPaneId: null,
         draftSearchQueryByPane: {
           ...current.draftSearchQueryByPane,
-          [paneId]: current.unifiedSearchQuery,
+          [paneId]: current.searchQueryByPane[paneId],
         },
       };
       return {
@@ -252,14 +259,12 @@ export default function ReconciliationWorkbenchPage() {
       const nextState: WorkbenchZoneDisplayState = {
         ...current,
         draftSearchQueryByPane: {
-          oa: "",
-          bank: "",
-          invoice: "",
+          ...current.draftSearchQueryByPane,
+          [paneId]: "",
         },
         searchQueryByPane: {
-          oa: "",
-          bank: "",
-          invoice: "",
+          ...current.searchQueryByPane,
+          [paneId]: "",
         },
         unifiedSearchQuery: "",
       };
@@ -275,17 +280,15 @@ export default function ReconciliationWorkbenchPage() {
       updateZoneDisplayState(zoneId, (current) => {
         const nextState: WorkbenchZoneDisplayState = {
           ...current,
-        draftSearchQueryByPane: {
-            oa: query,
-            bank: query,
-            invoice: query,
+          draftSearchQueryByPane: {
+            ...current.draftSearchQueryByPane,
+            [paneId]: query,
           },
           searchQueryByPane: {
-            oa: query,
-            bank: query,
-            invoice: query,
+            ...current.searchQueryByPane,
+            [paneId]: query,
           },
-          unifiedSearchQuery: query,
+          unifiedSearchQuery: "",
         };
         return {
           ...nextState,
@@ -658,96 +661,6 @@ export default function ReconciliationWorkbenchPage() {
 
   useEffect(() => () => setWorkbenchStatus(null), [setWorkbenchStatus]);
 
-  const searchNarrowingHint = useMemo(() => {
-    if (!searchModalOpen) {
-      return null;
-    }
-    const normalizedKeyword = normalizeSearchKeyword(searchQuery);
-    if (!normalizedKeyword) {
-      return null;
-    }
-    if (searchMonthFilter === "all" && normalizedKeyword.length < 2) {
-      return "全时间搜索请至少输入 2 个字，或切换到具体月份。";
-    }
-    return null;
-  }, [searchModalOpen, searchMonthFilter, searchQuery]);
-
-  const currentSearchState = useMemo<SubmittedSearchState>(
-    () => ({
-      query: searchQuery.trim(),
-      scope: searchScope,
-      month: searchMonthFilter === "month" ? searchMonthValue : "all",
-      projectName: searchProjectFilter,
-      status: searchStatusFilter,
-    }),
-    [searchMonthFilter, searchMonthValue, searchProjectFilter, searchQuery, searchScope, searchStatusFilter],
-  );
-
-  const searchNeedsSubmit = useMemo(() => {
-    if (!currentSearchState.query) {
-      return false;
-    }
-    if (!submittedSearch) {
-      return true;
-    }
-    return JSON.stringify(currentSearchState) !== JSON.stringify(submittedSearch);
-  }, [currentSearchState, submittedSearch]);
-
-  useEffect(() => {
-    if (!searchModalOpen) {
-      return;
-    }
-
-    if (!submittedSearch || searchNarrowingHint) {
-      setSearchResults(createEmptySearchResponse());
-      setSearchError(null);
-      setIsSearchLoading(false);
-      return;
-    }
-
-    const controller = new AbortController();
-    setIsSearchLoading(true);
-    setSearchError(null);
-
-    void fetchWorkbenchSearch({
-      q: submittedSearch.query,
-      scope: submittedSearch.scope,
-      month: submittedSearch.month,
-      projectName: submittedSearch.projectName || undefined,
-      status: submittedSearch.status,
-      signal: controller.signal,
-    })
-      .then((payload) => {
-        setSearchResults(payload);
-      })
-      .catch((error) => {
-        if (controller.signal.aborted) {
-          return;
-        }
-        setSearchResults(createEmptySearchResponse(submittedSearch.query));
-        setSearchError(actionErrorMessage(error));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setIsSearchLoading(false);
-        }
-      });
-
-    return () => controller.abort();
-  }, [searchModalOpen, searchNarrowingHint, submittedSearch]);
-
-  useEffect(() => {
-    if (!highlightedRowId) {
-      return undefined;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setHighlightedRowId(null);
-    }, 2400);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [highlightedRowId]);
-
   const processedExceptionRows = useMemo(
     () => flattenGroups(collectProcessedExceptionGroups(workbenchData?.open.groups ?? [])),
     [workbenchData],
@@ -772,71 +685,6 @@ export default function ReconciliationWorkbenchPage() {
     () => buildWorkbenchDisplayGroups(visibleOpenGroups, deferredOpenDisplayState),
     [deferredOpenDisplayState, visibleOpenGroups],
   );
-
-  const searchProjectOptions = useMemo(() => {
-    const candidates = new Set<string>();
-
-    if (workbenchSettings) {
-      [...workbenchSettings.projects.active, ...workbenchSettings.projects.completed].forEach((project) => {
-        const normalizedProjectName = project.projectName.trim();
-        if (normalizedProjectName) {
-          candidates.add(normalizedProjectName);
-        }
-      });
-    }
-
-    [
-      ...(workbenchData ? flattenGroups(workbenchData.paired.groups) : []),
-      ...(workbenchData ? flattenGroups(workbenchData.open.groups) : []),
-      ...ignoredData.rows,
-    ].forEach((row) => {
-      const projectName = resolveRecordProjectName(row);
-      if (projectName) {
-        candidates.add(projectName);
-      }
-    });
-
-    return Array.from(candidates).sort((left, right) => left.localeCompare(right, "zh-CN"));
-  }, [ignoredData.rows, workbenchData, workbenchSettings]);
-
-  useEffect(() => {
-    if (!pendingSearchJump) {
-      return;
-    }
-
-    if (isLoading) {
-      return;
-    }
-
-    if (pendingSearchJump.zoneHint === "ignored") {
-      if (!ignoredModalOpen) {
-        setIgnoredModalOpen(true);
-        return;
-      }
-    } else if (pendingSearchJump.zoneHint === "processed_exception") {
-      if (!processedExceptionsModalOpen) {
-        setProcessedExceptionsModalOpen(true);
-        return;
-      }
-    }
-
-    const targetElement = findSearchTargetElement(pendingSearchJump.rowId);
-    if (!targetElement) {
-      return;
-    }
-
-    targetElement.scrollIntoView?.({ behavior: "smooth", block: "center" });
-    setHighlightedRowId(pendingSearchJump.rowId);
-    setPendingSearchJump(null);
-  }, [
-    ignoredModalOpen,
-    ignoredData.rows,
-    isLoading,
-    pendingSearchJump,
-    processedExceptionGroups,
-    processedExceptionsModalOpen,
-    workbenchData,
-  ]);
 
   const allRows = useMemo(() => {
     if (!workbenchData) {
@@ -953,35 +801,6 @@ export default function ReconciliationWorkbenchPage() {
     setActionDialog((current) => (current?.phase === "result" ? null : current));
   };
 
-  const handleOpenSearchModal = useCallback(() => {
-    setSearchMonthValue(currentMonth);
-    setSearchModalOpen(true);
-  }, [currentMonth]);
-
-  const handleCloseSearchModal = useCallback(() => {
-    setSearchModalOpen(false);
-  }, []);
-
-  const handleSubmitSearch = () => {
-    if (!currentSearchState.query) {
-      setSubmittedSearch(null);
-      setSearchResults(createEmptySearchResponse());
-      setSearchError(null);
-      setIsSearchLoading(false);
-      return;
-    }
-
-    if (searchNarrowingHint) {
-      setSubmittedSearch(null);
-      setSearchResults(createEmptySearchResponse(currentSearchState.query));
-      setSearchError(null);
-      setIsSearchLoading(false);
-      return;
-    }
-
-    setSubmittedSearch(currentSearchState);
-  };
-
   const handleOpenIgnoredModal = () => {
     setIgnoredModalOpen(true);
   };
@@ -998,46 +817,6 @@ export default function ReconciliationWorkbenchPage() {
     setProcessedExceptionsModalOpen(false);
   };
 
-  useEffect(() => {
-    const intent = routeState?.workbenchHeaderIntent;
-    if (!intent) {
-      return;
-    }
-    if (intent.type === "open_search") {
-      handleOpenSearchModal();
-    }
-    navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
-  }, [handleOpenSearchModal, location.pathname, location.search, navigate, routeState]);
-
-  const handleJumpToSearchResult = (jumpTarget: WorkbenchSearchJumpTarget) => {
-    handleCloseDetail();
-    setSearchModalOpen(false);
-    setSearchError(null);
-    setHighlightedRowId(null);
-    setPendingSearchJump(jumpTarget);
-    setExpandedZoneId(jumpTarget.zoneHint === "paired" ? "paired" : "open");
-    if (jumpTarget.zoneHint !== "ignored") {
-      setIgnoredModalOpen(false);
-    }
-    if (jumpTarget.zoneHint !== "processed_exception") {
-      setProcessedExceptionsModalOpen(false);
-    }
-  };
-
-  const handleOpenSearchResultDetail = async (result: WorkbenchSearchResult) => {
-    setDetailError(null);
-    setIsDetailLoading(true);
-    openDetail(buildSearchResultDetailPlaceholder(result));
-    try {
-      const detailedRow = await fetchWorkbenchRowDetail(result.rowId);
-      replaceDetailRow(detailedRow);
-    } catch {
-      setDetailError("详情加载失败，请稍后重试。");
-    } finally {
-      setIsDetailLoading(false);
-    }
-  };
-
   const openActionResultDialog = useCallback((message: string, title = "操作提示") => {
     setActionDialog({
       phase: "result",
@@ -1045,6 +824,22 @@ export default function ReconciliationWorkbenchPage() {
       message,
     });
   }, []);
+
+  const ensureCanWriteWorkbench = useCallback(() => {
+    if (!canMutateData) {
+      openActionResultDialog(READONLY_ACTION_MESSAGE);
+      return false;
+    }
+    if (healthStatus.blocksMutations) {
+      openActionResultDialog("登录已失效或系统不可用，请返回 OA 系统重新进入。");
+      return false;
+    }
+    if (isWorkbenchFreshnessBlocked) {
+      openActionResultDialog("关联台正在同步，请刷新完成后再操作。");
+      return false;
+    }
+    return true;
+  }, [canMutateData, healthStatus.blocksMutations, isWorkbenchFreshnessBlocked, openActionResultDialog]);
 
   const openCancelProcessedExceptionDialog = useCallback((row: WorkbenchRecord) => {
     const group = processedExceptionGroups.find((candidateGroup) =>
@@ -1065,8 +860,7 @@ export default function ReconciliationWorkbenchPage() {
   };
 
   const openOaBankExceptionDialog = useCallback((rows: WorkbenchRecord[]) => {
-    if (!canMutateData) {
-      openActionResultDialog(READONLY_ACTION_MESSAGE);
+    if (!ensureCanWriteWorkbench()) {
       return;
     }
     const summary = summarizeOaBankRows(rows);
@@ -1085,7 +879,7 @@ export default function ReconciliationWorkbenchPage() {
     }
     handleCloseDetail();
     setOaBankExceptionDialog({ rows });
-  }, [canMutateData, handleCloseDetail, openActionResultDialog]);
+  }, [ensureCanWriteWorkbench, handleCloseDetail, openActionResultDialog]);
 
   const handleCloseOaBankExceptionDialog = () => {
     setOaBankExceptionDialog(null);
@@ -1134,8 +928,7 @@ export default function ReconciliationWorkbenchPage() {
     exceptionLabel: string;
     comment: string;
   }) => {
-    if (!canMutateData) {
-      openActionResultDialog(READONLY_ACTION_MESSAGE);
+    if (!ensureCanWriteWorkbench()) {
       return;
     }
     setOaBankExceptionDialog(null);
@@ -1161,8 +954,7 @@ export default function ReconciliationWorkbenchPage() {
   };
 
   const handleConfirmFromOaBankException = async (rows: WorkbenchRecord[]) => {
-    if (!canMutateData) {
-      openActionResultDialog(READONLY_ACTION_MESSAGE);
+    if (!ensureCanWriteWorkbench()) {
       return;
     }
     setOaBankExceptionDialog(null);
@@ -1175,8 +967,7 @@ export default function ReconciliationWorkbenchPage() {
       return;
     }
 
-    if (!canMutateData) {
-      openActionResultDialog(READONLY_ACTION_MESSAGE);
+    if (!ensureCanWriteWorkbench()) {
       return;
     }
 
@@ -1241,9 +1032,9 @@ export default function ReconciliationWorkbenchPage() {
       openCancelProcessedExceptionDialog(row);
     }
   }, [
-    canMutateData,
     clearOpenSelection,
     collectCaseRowIds,
+    ensureCanWriteWorkbench,
     openActionResultDialog,
     openCancelProcessedExceptionDialog,
     openOaBankExceptionDialog,
@@ -1294,6 +1085,9 @@ export default function ReconciliationWorkbenchPage() {
     if (!relationPreviewDialog) {
       return;
     }
+    if (!ensureCanWriteWorkbench()) {
+      return;
+    }
     const { preview, rowIds, caseId } = relationPreviewDialog;
     setRelationPreviewDialog(null);
     if (preview.operation === "confirm_link") {
@@ -1331,8 +1125,7 @@ export default function ReconciliationWorkbenchPage() {
   };
 
   const handleConfirmOpenSelection = async () => {
-    if (!canMutateData) {
-      openActionResultDialog(READONLY_ACTION_MESSAGE);
+    if (!ensureCanWriteWorkbench()) {
       return;
     }
     if (openSelectionSummary.total === 0) {
@@ -1347,8 +1140,7 @@ export default function ReconciliationWorkbenchPage() {
   };
 
   const handleWithdrawOpenSelection = async () => {
-    if (!canMutateData) {
-      openActionResultDialog(READONLY_ACTION_MESSAGE);
+    if (!ensureCanWriteWorkbench()) {
       return;
     }
     if (!canWithdrawOpenSelection) {
@@ -1375,8 +1167,7 @@ export default function ReconciliationWorkbenchPage() {
   };
 
   const handleOpenSelectionException = async () => {
-    if (!canMutateData) {
-      openActionResultDialog(READONLY_ACTION_MESSAGE);
+    if (!ensureCanWriteWorkbench()) {
       return;
     }
     if (!canHandleOpenSelectionException) {
@@ -1422,8 +1213,7 @@ export default function ReconciliationWorkbenchPage() {
   };
 
   const handleCancelPairedSelection = async () => {
-    if (!canMutateData) {
-      openActionResultDialog(READONLY_ACTION_MESSAGE);
+    if (!ensureCanWriteWorkbench()) {
       return;
     }
     if (pairedSelectionSummary.total === 0) {
@@ -1446,8 +1236,7 @@ export default function ReconciliationWorkbenchPage() {
   };
 
   const handleUnignoreRow = async (row: WorkbenchRecord) => {
-    if (!canMutateData) {
-      openActionResultDialog(READONLY_ACTION_MESSAGE);
+    if (!ensureCanWriteWorkbench()) {
       return;
     }
     setIgnoredModalOpen(false);
@@ -1466,8 +1255,7 @@ export default function ReconciliationWorkbenchPage() {
   };
 
   const handleConfirmCancelProcessedException = async () => {
-    if (!canMutateData) {
-      openActionResultDialog(READONLY_ACTION_MESSAGE);
+    if (!ensureCanWriteWorkbench()) {
       return;
     }
     if (!cancelProcessedExceptionDialog) {
@@ -1550,14 +1338,14 @@ export default function ReconciliationWorkbenchPage() {
 
   const pairedZoneElement = (
     <WorkbenchZone
-      canMutateData={canMutateData}
+      canMutateData={canWriteWorkbench}
       getRowState={getRowState}
       isExpanded={expandedZoneId === "paired"}
       isVisible={isPairedVisible}
       onClearSelection={handleClearPairedSelection}
       onOpenDetail={handleOpenDetail}
       onPrimarySelectionAction={handleCancelPairedSelection}
-      primarySelectionActionDisabled={isPairedCancelSelectionDisabled || !canMutateData}
+      primarySelectionActionDisabled={isPairedCancelSelectionDisabled || !canWriteWorkbench}
       onRowAction={handleRowAction}
       onClearPaneSearch={handleClearPaneSearch}
       onClosePaneSearch={handleClosePaneSearch}
@@ -1573,7 +1361,7 @@ export default function ReconciliationWorkbenchPage() {
       columnLayouts={workbenchSettings?.workbenchColumnLayouts}
       groups={displayPairedGroups}
       sourceGroups={workbenchData?.paired.groups ?? []}
-      highlightedRowId={highlightedRowId}
+      highlightedRowId={null}
       panes={pairedPanes}
       primarySelectionActionLabel="撤回关联"
       selectionSummary={pairedSelectionSummary}
@@ -1586,22 +1374,22 @@ export default function ReconciliationWorkbenchPage() {
   const openZoneElement = (
     <WorkbenchZone
       auxiliaryHeaderActions={openAuxiliaryHeaderActions}
-      canMutateData={canMutateData}
+      canMutateData={canWriteWorkbench}
       getRowState={getRowState}
       isExpanded={expandedZoneId === "open"}
       isVisible={isOpenVisible}
       onClearSelection={handleClearOpenSelection}
       onOpenDetail={handleOpenDetail}
       onPrimarySelectionAction={handleConfirmOpenSelection}
-      primarySelectionActionDisabled={isOpenConfirmSelectionDisabled || !canMutateData}
+      primarySelectionActionDisabled={isOpenConfirmSelectionDisabled || !canWriteWorkbench}
       onRowAction={handleRowAction}
       onClearPaneSearch={handleClearPaneSearch}
       onClosePaneSearch={handleClosePaneSearch}
       onSelectRow={handleSelectRow}
       onSecondarySelectionAction={handleOpenSelectionException}
-      secondarySelectionActionDisabled={isOpenExceptionSelectionDisabled || !canMutateData}
+      secondarySelectionActionDisabled={isOpenExceptionSelectionDisabled || !canWriteWorkbench}
       onTertiarySelectionAction={handleWithdrawOpenSelection}
-      tertiarySelectionActionDisabled={!canWithdrawOpenSelection || !canMutateData}
+      tertiarySelectionActionDisabled={!canWithdrawOpenSelection || !canWriteWorkbench}
       onToggleExpand={toggleOpenExpand}
       displayState={openDisplayState}
       onColumnFilterChange={handleColumnFilterChange}
@@ -1613,7 +1401,7 @@ export default function ReconciliationWorkbenchPage() {
       columnLayouts={workbenchSettings?.workbenchColumnLayouts}
       groups={displayOpenGroups}
       sourceGroups={visibleOpenGroups}
-      highlightedRowId={highlightedRowId}
+      highlightedRowId={null}
       panes={openPanes}
       primarySelectionActionLabel="确认关联"
       secondarySelectionActionLabel="异常处理"
@@ -1671,8 +1459,8 @@ export default function ReconciliationWorkbenchPage() {
       ) : null}
       {ignoredModalOpen ? (
         <IgnoredItemsModal
-          canMutateData={canMutateData}
-          highlightedRowId={highlightedRowId}
+          canMutateData={canWriteWorkbench}
+          highlightedRowId={null}
           rows={ignoredData.rows}
           onClose={handleCloseIgnoredModal}
           onUnignore={handleUnignoreRow}
@@ -1680,9 +1468,9 @@ export default function ReconciliationWorkbenchPage() {
       ) : null}
       {processedExceptionsModalOpen ? (
         <ProcessedExceptionsModal
-          canMutateData={canMutateData}
+          canMutateData={canWriteWorkbench}
           groups={processedExceptionGroups}
-          highlightedRowId={highlightedRowId}
+          highlightedRowId={null}
           panes={[
             { id: "oa", title: "OA", rows: processedExceptionGroups.flatMap((group) => group.rows.oa) },
             { id: "bank", title: "银行流水", rows: processedExceptionGroups.flatMap((group) => group.rows.bank) },
@@ -1715,32 +1503,6 @@ export default function ReconciliationWorkbenchPage() {
               exceptionLabel,
               comment,
             })}
-        />
-      ) : null}
-      {searchModalOpen ? (
-        <WorkbenchSearchModal
-          error={searchError}
-          hint={searchNarrowingHint}
-          isLoading={isSearchLoading}
-          isStale={searchNeedsSubmit}
-          monthValue={searchMonthValue}
-          monthMode={searchMonthFilter}
-          projectName={searchProjectFilter}
-          projectOptions={searchProjectOptions}
-          query={searchQuery}
-          results={searchResults}
-          scope={searchScope}
-          status={searchStatusFilter}
-          onClose={handleCloseSearchModal}
-          onDetail={handleOpenSearchResultDetail}
-          onJump={(result) => handleJumpToSearchResult(result.jumpTarget)}
-          onMonthModeChange={setSearchMonthFilter}
-          onMonthValueChange={setSearchMonthValue}
-          onProjectNameChange={setSearchProjectFilter}
-          onQueryChange={setSearchQuery}
-          onScopeChange={setSearchScope}
-          onStatusChange={setSearchStatusFilter}
-          onSubmitSearch={handleSubmitSearch}
         />
       ) : null}
     </div>
@@ -1830,38 +1592,6 @@ function summarizeOaBankRows(rows: WorkbenchRecord[]) {
   );
 }
 
-function resolveRecordProjectName(row: WorkbenchRecord) {
-  const summaryProjectName = row.tableValues.projectName?.trim();
-  if (summaryProjectName && summaryProjectName !== "--" && summaryProjectName !== "—") {
-    return summaryProjectName;
-  }
-
-  const detailProjectName = row.detailFields.find((field) => field.label === "项目名称")?.value.trim();
-  if (detailProjectName && detailProjectName !== "--" && detailProjectName !== "—") {
-    return detailProjectName;
-  }
-
-  return null;
-}
-
-function buildSearchResultDetailPlaceholder(result: WorkbenchSearchResult): WorkbenchRecord {
-  return {
-    id: result.rowId,
-    recordType: result.recordType,
-    label: result.recordType === "oa" ? "OA" : result.recordType === "bank" ? "银行流水" : "发票",
-    status: result.statusLabel,
-    statusCode: "search_preview",
-    statusTone: "neutral",
-    exceptionHandled: result.zoneHint === "processed_exception",
-    amount: "--",
-    counterparty: "--",
-    tableValues: {},
-    detailFields: [],
-    actionVariant: "detail-only",
-    availableActions: [],
-  };
-}
-
 function isProcessedExceptionRow(row: WorkbenchRecord) {
   if (row.statusCode === "manual_review" || row.status === "待人工核查") {
     return false;
@@ -1907,12 +1637,6 @@ function removeProcessedExceptionRows(groups: WorkbenchCandidateGroup[]) {
 
 function flattenGroups(groups: WorkbenchCandidateGroup[]) {
   return groups.flatMap((group) => [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice]);
-}
-
-function findSearchTargetElement(rowId: string) {
-  return Array.from(document.querySelectorAll<HTMLElement>("[data-row-id]")).find(
-    (element) => element.dataset.rowId === rowId,
-  ) ?? null;
 }
 
 function updateWorkbenchAfterConfirmLink(data: WorkbenchData, rowIds: string[], caseId?: string) {

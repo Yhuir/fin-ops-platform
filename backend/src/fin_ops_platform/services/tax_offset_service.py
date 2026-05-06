@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from decimal import Decimal, InvalidOperation
 from typing import Callable
 from typing import Any
@@ -23,8 +24,16 @@ class TaxOffsetService:
     ) -> None:
         self._import_service = import_service
         self._month_data = month_data or {}
+        self._month_data_cache: dict[str, dict[str, Any] | None] = {}
         self._certified_records_loader = certified_records_loader or (lambda month: [])
         self._oa_attachment_invoice_rows_loader = oa_attachment_invoice_rows_loader or (lambda month: [])
+
+    def clear_month_cache(self, months: list[str] | None = None) -> None:
+        if months is None:
+            self._month_data_cache.clear()
+            return
+        for month in months:
+            self._month_data_cache.pop(month, None)
 
     def get_month_payload(self, month: str) -> dict[str, object]:
         month_snapshot = self._build_month_snapshot(month)
@@ -164,16 +173,22 @@ class TaxOffsetService:
         }
 
     def _resolve_month_data(self, month: str) -> dict[str, Any]:
-        real_month_data = self._build_month_data_from_imported_invoices(month)
-        if real_month_data is not None:
-            return real_month_data
-        return self._month_data.get(
+        if month not in self._month_data_cache:
+            real_month_data = self._build_month_data_from_imported_invoices(month)
+            self._month_data_cache[month] = deepcopy(real_month_data) if real_month_data is not None else None
+
+        cached_month_data = self._month_data_cache[month]
+        if cached_month_data is not None:
+            return deepcopy(cached_month_data)
+
+        fallback_month_data = self._month_data.get(
             month,
             {
                 "output_items": [],
                 "input_plan_items": [],
             },
         )
+        return deepcopy(fallback_month_data)
 
     def _build_month_data_from_imported_invoices(self, month: str) -> dict[str, Any] | None:
         output_items: list[dict[str, Any]] = []

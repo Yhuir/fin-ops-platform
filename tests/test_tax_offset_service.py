@@ -2,12 +2,139 @@ import unittest
 from decimal import Decimal
 
 from fin_ops_platform.domain.enums import BatchType
+from fin_ops_platform.domain.models import Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedInvoiceRecord
 from fin_ops_platform.services.tax_offset_service import TaxOffsetService
 
 
+class CountingImportNormalizationService(ImportNormalizationService):
+    def __init__(self) -> None:
+        super().__init__()
+        self.list_invoices_call_count = 0
+
+    def list_invoices(self) -> list[Invoice]:
+        self.list_invoices_call_count += 1
+        return super().list_invoices()
+
+
 class TaxOffsetServiceTests(unittest.TestCase):
+    def _import_input_invoice(
+        self,
+        import_service: ImportNormalizationService,
+        *,
+        invoice_date: str,
+        invoice_no: str,
+        tax_amount: str,
+    ) -> None:
+        preview = import_service.preview_import(
+            batch_type=BatchType.INPUT_INVOICE,
+            source_name=f"input-{invoice_no}.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "invoice_code": "255020000001",
+                    "digital_invoice_no": f"255020000001{invoice_no}",
+                    "invoice_no": invoice_no,
+                    "counterparty_name": f"供应商{invoice_no}",
+                    "seller_tax_no": f"91530000{invoice_no}",
+                    "seller_name": f"供应商{invoice_no}",
+                    "buyer_tax_no": "915300007194052520",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "invoice_date": invoice_date,
+                    "amount": "1000.00",
+                    "tax_amount": tax_amount,
+                    "total_with_tax": str(Decimal("1000.00") + Decimal(tax_amount)),
+                    "tax_rate": "13%",
+                    "invoice_kind": "进项专票",
+                    "risk_level": "低",
+                    "invoice_status_from_source": "正常",
+                }
+            ],
+        )
+        import_service.confirm_import(preview.id)
+
+    def test_month_payload_reuses_imported_invoice_month_cache(self) -> None:
+        import_service = CountingImportNormalizationService()
+        self._import_input_invoice(
+            import_service,
+            invoice_date="2026-01-02",
+            invoice_no="12000001",
+            tax_amount="130.00",
+        )
+        service = TaxOffsetService(
+            import_service=import_service,
+            certified_records_loader=lambda month: [],
+        )
+
+        first_payload = service.get_month_payload("2026-01")
+        second_payload = service.get_month_payload("2026-01")
+
+        self.assertEqual(import_service.list_invoices_call_count, 1)
+        self.assertEqual(first_payload, second_payload)
+
+    def test_clear_month_cache_invalidates_only_selected_month(self) -> None:
+        import_service = CountingImportNormalizationService()
+        self._import_input_invoice(
+            import_service,
+            invoice_date="2026-01-02",
+            invoice_no="12000001",
+            tax_amount="130.00",
+        )
+        self._import_input_invoice(
+            import_service,
+            invoice_date="2026-02-02",
+            invoice_no="22000001",
+            tax_amount="260.00",
+        )
+        service = TaxOffsetService(
+            import_service=import_service,
+            certified_records_loader=lambda month: [],
+        )
+
+        january_payload = service.get_month_payload("2026-01")
+        february_payload = service.get_month_payload("2026-02")
+        self.assertEqual(import_service.list_invoices_call_count, 2)
+
+        service.clear_month_cache(["2026-01"])
+        rebuilt_january_payload = service.get_month_payload("2026-01")
+        cached_february_payload = service.get_month_payload("2026-02")
+
+        self.assertEqual(import_service.list_invoices_call_count, 3)
+        self.assertEqual(january_payload, rebuilt_january_payload)
+        self.assertEqual(february_payload, cached_february_payload)
+
+    def test_clear_month_cache_without_months_clears_all(self) -> None:
+        import_service = CountingImportNormalizationService()
+        self._import_input_invoice(
+            import_service,
+            invoice_date="2026-01-02",
+            invoice_no="12000001",
+            tax_amount="130.00",
+        )
+        self._import_input_invoice(
+            import_service,
+            invoice_date="2026-02-02",
+            invoice_no="22000001",
+            tax_amount="260.00",
+        )
+        service = TaxOffsetService(
+            import_service=import_service,
+            certified_records_loader=lambda month: [],
+        )
+
+        january_payload = service.get_month_payload("2026-01")
+        february_payload = service.get_month_payload("2026-02")
+        self.assertEqual(import_service.list_invoices_call_count, 2)
+
+        service.clear_month_cache()
+        rebuilt_january_payload = service.get_month_payload("2026-01")
+        rebuilt_february_payload = service.get_month_payload("2026-02")
+
+        self.assertEqual(import_service.list_invoices_call_count, 4)
+        self.assertEqual(january_payload, rebuilt_january_payload)
+        self.assertEqual(february_payload, rebuilt_february_payload)
+
     def test_month_payload_is_empty_without_real_imports_or_explicit_month_data(self) -> None:
         service = TaxOffsetService(
             import_service=ImportNormalizationService(),

@@ -9,6 +9,7 @@ import { renderAppAt, renderWorkbenchPage } from "./renderHelpers";
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  window.sessionStorage.clear();
 });
 
 async function openWorkbenchSettingsPage(user: ReturnType<typeof userEvent.setup>) {
@@ -499,13 +500,15 @@ describe("Workbench row selection and detail modal", () => {
     expectRelationPreviewTriPane(after);
   });
 
-  test("unified pane search filters candidate groups across all panes and highlights matches", async () => {
+  test("pane search filters only the active pane while keeping aligned rows visible", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     renderWorkbenchPage();
 
     const openZone = await screen.findByTestId("zone-open");
     const openOaPane = within(openZone).getByTestId("pane-oa");
+    const openBankPane = within(openZone).getByTestId("pane-bank");
+    const openInvoicePane = within(openZone).getByTestId("pane-invoice");
 
     await user.click(within(openOaPane).getByRole("button", { name: "搜索 OA" }));
     await user.type(within(openOaPane).getByLabelText("搜索 OA"), "智能工厂");
@@ -516,10 +519,23 @@ describe("Workbench row selection and detail modal", () => {
     expect(within(openZone).queryByText("杭州张三广告有限公司")).not.toBeInTheDocument();
     expect(within(openZone).getAllByText("智能工厂").length).toBeGreaterThan(0);
     expect(within(openZone).getAllByText("智能工厂").some((node) => node.classList.contains("search-hit"))).toBe(true);
+    expect(within(openBankPane).getByRole("button", { name: "搜索 银行流水" })).toBeInTheDocument();
+    expect(within(openInvoicePane).getByRole("button", { name: "搜索 进销项发票" })).toBeInTheDocument();
 
     await user.click(within(openOaPane).getByRole("button", { name: "清空搜索 OA" }));
 
     expect(within(openZone).getAllByText("杭州张三广告有限公司").length).toBeGreaterThan(0);
+
+    await user.click(within(openInvoicePane).getByRole("button", { name: "搜索 进销项发票" }));
+    await user.type(within(openInvoicePane).getByLabelText("搜索 进销项发票"), "91330108");
+
+    expect(within(openZone).getByRole("row", { name: /陈涛.*智能工厂设备商/ })).toBeInTheDocument();
+    expect(within(openZone).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeInTheDocument();
+    expect(within(openZone).getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toBeInTheDocument();
+    expect(within(openOaPane).getByRole("button", { name: "搜索 OA" })).toBeInTheDocument();
+    expect(within(openBankPane).getByRole("button", { name: "搜索 银行流水" })).toBeInTheDocument();
+    expect(within(openInvoicePane).getByRole("searchbox", { name: "搜索 进销项发票" })).toHaveValue("91330108");
+    expect(within(openInvoicePane).getByRole("button", { name: "清空搜索 进销项发票" })).toBeInTheDocument();
   });
 
   test("open zone header actions stay disabled until enough rows are selected", async () => {
@@ -1219,11 +1235,6 @@ describe("Workbench row selection and detail modal", () => {
     await user.click(within(invoiceRow).getByRole("button", { name: "详情" }));
     expect(await screen.findByRole("dialog", { name: "详情弹窗" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭详情" }));
-
-    await user.click(screen.getByRole("link", { name: "关联台搜索" }));
-    expect(await screen.findByRole("dialog", { name: "关联台搜索" })).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "关闭搜索" }));
 
     const settingsPage = await openWorkbenchSettingsPage(user);
     expect(within(settingsPage).getByRole("button", { name: "保存设置" })).toBeDisabled();

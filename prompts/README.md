@@ -64,6 +64,8 @@
 58. `58-settings-page-route-and-state-foundation.md`
 59. `59-settings-page-sections-and-tree-ui.md`
 60. `60-settings-page-integration-and-cleanup.md`
+61. `61-cost-statistics-materialized-cache-backend.md`
+62. `62-tax-offset-materialized-cache-backend.md`
 
 使用方式建议：
 
@@ -214,3 +216,25 @@ OA “访问账户管理 / 只读导出 / 管理员独占权限”这一组 prom
   - 设置相关加载、保存、项目同步、数据重置迁移到页面容器
   - 后续按 section 拆成独立组件
   - 所有实现明确禁止改动 `form_data_db`
+
+成本统计“后端物化缓存 / 异步预热”这一组 prompt 对应的需求与文档：
+
+- 需求源：成本统计页面首次打开与 `month=all` explorer 加载过慢
+- 执行 Prompt：[61-cost-statistics-materialized-cache-backend.md](/Users/yu/Desktop/fin-ops-platform/prompts/61-cost-statistics-materialized-cache-backend.md)
+- 当前目标：
+  - 为成本统计建立独立 read model/materialized cache
+  - `month + project_scope` 粒度缓存 explorer payload
+  - 关联台、导入、项目状态变化后精确失效相关月份
+  - `month=all` 通过后台任务预热，避免每次打开页面实时全量计算
+  - 增加耗时、cache hit/miss、entry count 等结构化指标
+
+税金抵扣“后端月度缓存 / 指标 / 预热”这一组 prompt 对应的需求与文档：
+
+- 需求源：税金抵扣页面月度 payload 随发票与认证结果增长后的加载稳定性
+- 执行 Prompt：[62-tax-offset-materialized-cache-backend.md](/Users/yu/Desktop/fin-ops-platform/prompts/62-tax-offset-materialized-cache-backend.md)
+- 当前目标：
+  - 为税金抵扣建立按 month 的 read model/materialized cache
+  - 避免每次单月请求扫描全部已导入发票
+  - 认证导入、发票导入、OA 附件发票变化后精确失效相关月份
+  - 复用后台任务预热受影响月份
+  - 增加税金抵扣接口耗时、cache hit/miss 和行数指标

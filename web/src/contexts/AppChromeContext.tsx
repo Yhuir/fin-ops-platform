@@ -2,16 +2,9 @@ import { createContext, useContext, useMemo, useState, type ReactNode } from "re
 
 import type { ImportWorkflowMode } from "../features/imports/importRoutes";
 
-export type WorkbenchHeaderIntent = { type: "open_search" };
-
-export type WorkbenchRouteState = {
-  workbenchHeaderIntent?: WorkbenchHeaderIntent;
-} | null;
-
 export type WorkbenchHeaderActions = {
   canMutateData: boolean;
   onOpenImport: (mode: ImportWorkflowMode) => void;
-  onOpenSearch: () => void;
   onOpenSettings: () => void;
 };
 

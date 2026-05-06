@@ -1,5 +1,7 @@
 from io import BytesIO
 import json
+from types import SimpleNamespace
+from unittest.mock import patch
 from urllib.parse import quote
 import unittest
 
@@ -68,9 +70,93 @@ class _FallbackCostStatsOAAdapter:
         ]
 
 
+class _MemoryCostStatisticsReadModelService:
+    def __init__(self) -> None:
+        self.read_models: dict[str, dict[str, object]] = {}
+
+    @classmethod
+    def from_snapshot(cls, snapshot: dict[str, object] | None):
+        service = cls()
+        if isinstance(snapshot, dict):
+            read_models = snapshot.get("read_models")
+            if isinstance(read_models, dict):
+                service.read_models = {str(key): dict(value) for key, value in read_models.items()}
+        return service
+
+    def snapshot(self) -> dict[str, object]:
+        return {"read_models": {key: dict(value) for key, value in self.read_models.items()}}
+
+    def snapshot_scope_keys(self, scope_keys: list[str]) -> dict[str, object]:
+        return {"read_models": {key: dict(self.read_models[key]) for key in scope_keys if key in self.read_models}}
+
+    def scope_key(self, month: str, project_scope: str) -> str:
+        return f"{project_scope}:{month}"
+
+    def get_read_model(self, month: str, project_scope: str) -> dict[str, object] | None:
+        return self.read_models.get(self.scope_key(month, project_scope))
+
+    def upsert_read_model(
+        self,
+        month: str,
+        project_scope: str,
+        payload: dict[str, object],
+        generated_at: str | None = None,
+        source_scope_keys: list[str] | None = None,
+        cache_status: str = "ready",
+    ) -> dict[str, object]:
+        scope_key = self.scope_key(month, project_scope)
+        read_model = {
+            "scope_key": scope_key,
+            "month": month,
+            "project_scope": project_scope,
+            "payload": payload,
+            "generated_at": generated_at,
+            "source_scope_keys": list(source_scope_keys or []),
+            "cache_status": cache_status,
+        }
+        self.read_models[scope_key] = read_model
+        return read_model
+
+    def invalidate_months(
+        self,
+        months: list[str],
+        project_scopes: list[str] | None = None,
+        include_all: bool = True,
+    ) -> list[str]:
+        scopes = list(project_scopes or ["active", "all"])
+        targets = set()
+        for month in months:
+            for scope in scopes:
+                targets.add(self.scope_key(str(month), str(scope)))
+        if include_all:
+            for scope in scopes:
+                targets.add(self.scope_key("all", str(scope)))
+        deleted = []
+        for scope_key in sorted(targets):
+            if scope_key in self.read_models:
+                deleted.append(scope_key)
+                del self.read_models[scope_key]
+        return deleted
+
+    def clear(self) -> list[str]:
+        deleted = sorted(self.read_models)
+        self.read_models.clear()
+        return deleted
+
+    def list_scope_keys(self) -> list[str]:
+        return sorted(self.read_models)
+
+    def list_read_model_metadata(self) -> list[dict[str, object]]:
+        return [
+            {key: value for key, value in read_model.items() if key != "payload"}
+            for read_model in self.read_models.values()
+        ]
+
+
 class CostStatisticsApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.app = build_application()
+        self.app._cost_statistics_read_model_service = _MemoryCostStatisticsReadModelService()
         self.app._workbench_query_service = self.app._workbench_query_service.__class__(oa_adapter=_CostStatsOAAdapter())
         self.app._workbench_api_routes = WorkbenchApiRoutes(
             self.app._workbench_query_service,
@@ -84,6 +170,204 @@ class CostStatisticsApiTests(unittest.TestCase):
             row_detail_loader=self.app._get_api_workbench_row_detail_payload,
             project_active_checker=self.app._app_settings_service.is_project_active,
         )
+
+    def test_cost_statistics_explorer_cache_hit_does_not_rebuild(self) -> None:
+        cached_payload = {
+            "month": "2026-03",
+            "summary": {"row_count": 1, "transaction_count": 1, "total_amount": "88.00"},
+            "time_rows": [{"transaction_id": "cached-sentinel"}],
+            "project_rows": [],
+            "expense_type_rows": [],
+        }
+        self.app._cost_statistics_read_model_service.upsert_read_model("2026-03", "active", cached_payload)
+
+        with patch.object(
+            self.app._cost_statistics_service,
+            "get_explorer",
+            side_effect=AssertionError("should not rebuild cached explorer"),
+        ):
+            response = self.app.handle_request("GET", "/api/cost-statistics/explorer?month=2026-03")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["time_rows"][0]["transaction_id"], "cached-sentinel")
+
+    def test_cost_statistics_explorer_miss_writes_cache_and_logs_hit_metrics(self) -> None:
+        calls: list[tuple[str, str]] = []
+
+        def build_explorer(month: str, *, project_scope: str) -> dict[str, object]:
+            calls.append((month, project_scope))
+            return {
+                "month": month,
+                "summary": {"row_count": 2, "transaction_count": 2, "total_amount": "120.00"},
+                "time_rows": [{"transaction_id": "txn-1"}, {"transaction_id": "txn-2"}],
+                "project_rows": [],
+                "expense_type_rows": [],
+            }
+
+        self.app._cost_statistics_service = SimpleNamespace(get_explorer=build_explorer)
+
+        with patch("builtins.print") as print_mock:
+            first_response = self.app.handle_request("GET", "/api/cost-statistics/explorer?month=2026-03")
+            second_response = self.app.handle_request("GET", "/api/cost-statistics/explorer?month=2026-03")
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(calls, [("2026-03", "active")])
+        self.assertEqual(
+            json.loads(second_response.body)["time_rows"],
+            [{"transaction_id": "txn-1"}, {"transaction_id": "txn-2"}],
+        )
+        metric_payloads = [
+            json.loads(call.args[0])
+            for call in print_mock.call_args_list
+            if call.args and json.loads(call.args[0]).get("kind") == "cost_statistics_explorer_metric"
+        ]
+        self.assertEqual([payload["cache_hit"] for payload in metric_payloads], [False, True])
+        self.assertEqual([payload["entry_count"] for payload in metric_payloads], [2, 2])
+
+    def test_cost_statistics_all_month_cache_miss_returns_empty_payload_and_schedules_warmup(self) -> None:
+        self.app._cost_statistics_service = SimpleNamespace(
+            get_explorer=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("all should warm asynchronously")),
+        )
+        job = SimpleNamespace(job_id="warmup-job-1", owner_user_id="system")
+
+        with (
+            patch.object(
+                self.app._background_job_service,
+                "create_or_get_idempotent_job_with_created",
+                return_value=(job, True),
+            ) as create_job,
+            patch.object(self.app._background_job_service, "run_job") as run_job,
+        ):
+            response = self.app.handle_request("GET", "/api/cost-statistics/explorer?month=all&project_scope=active")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["month"], "all")
+        self.assertEqual(payload["summary"], {"row_count": 0, "transaction_count": 0, "total_amount": "0.00"})
+        self.assertEqual(payload["time_rows"], [])
+        self.assertEqual(payload["project_rows"], [])
+        self.assertEqual(payload["expense_type_rows"], [])
+        create_job.assert_called_once()
+        self.assertEqual(create_job.call_args.kwargs["job_type"], "cost_statistics_cache_warmup")
+        self.assertIn("all", create_job.call_args.kwargs["idempotency_key"])
+        run_job.assert_called_once()
+
+    def test_workbench_scope_invalidation_deletes_cost_statistics_month_and_all_models_and_schedules_warmup(self) -> None:
+        service = self.app._cost_statistics_read_model_service
+        for month in ("2026-03", "all"):
+            for project_scope in ("active", "all"):
+                service.upsert_read_model(
+                    month,
+                    project_scope,
+                    {
+                        "month": month,
+                        "summary": {"row_count": 1, "transaction_count": 1, "total_amount": "1.00"},
+                        "time_rows": [{"transaction_id": f"{project_scope}-{month}"}],
+                        "project_rows": [],
+                        "expense_type_rows": [],
+                    },
+                )
+
+        with patch.object(self.app, "_schedule_cost_statistics_cache_warmup") as schedule_warmup:
+            deleted_workbench_scopes = self.app._invalidate_workbench_read_model_scopes(["2026-03"])
+
+        self.assertEqual(deleted_workbench_scopes, ["2026-03"])
+        self.assertIsNone(service.get_read_model("2026-03", "active"))
+        self.assertIsNone(service.get_read_model("2026-03", "all"))
+        self.assertIsNone(service.get_read_model("all", "active"))
+        self.assertIsNone(service.get_read_model("all", "all"))
+        schedule_warmup.assert_called_once()
+        self.assertCountEqual(schedule_warmup.call_args.args[0], ["2026-03", "all"])
+
+        for project_scope in ("active", "all"):
+            service.upsert_read_model(
+                "all",
+                project_scope,
+                {
+                    "month": "all",
+                    "summary": {"row_count": 1, "transaction_count": 1, "total_amount": "1.00"},
+                    "time_rows": [{"transaction_id": f"{project_scope}-all-rebuilt"}],
+                    "project_rows": [],
+                    "expense_type_rows": [],
+                },
+            )
+
+        with patch.object(self.app, "_schedule_cost_statistics_cache_warmup") as schedule_warmup:
+            self.app._invalidate_workbench_read_model_scopes(["all"])
+
+        self.assertIsNone(service.get_read_model("all", "active"))
+        self.assertIsNone(service.get_read_model("all", "all"))
+        schedule_warmup.assert_called_once()
+        self.assertEqual(schedule_warmup.call_args.args[0], ["all"])
+
+    def test_import_preview_does_not_invalidate_cost_statistics_cache(self) -> None:
+        with (
+            patch.object(self.app, "_invalidate_cost_statistics_read_models") as invalidate_all,
+            patch.object(self.app, "_invalidate_cost_statistics_read_model_scopes") as invalidate_scopes,
+        ):
+            response = self.app.handle_request(
+                "POST",
+                "/imports/preview",
+                json.dumps(
+                    {
+                        "batch_type": "bank_transaction",
+                        "source_name": "cost-preview.json",
+                        "imported_by": "user_finance_01",
+                        "rows": [
+                            {
+                                "account_no": "62228888",
+                                "txn_date": "2026-03-10",
+                                "trade_time": "2026-03-10 21:27:55",
+                                "counterparty_name": "昆明设备供应商",
+                                "debit_amount": "1250.00",
+                                "credit_amount": "",
+                                "bank_serial_no": "COST-PREVIEW-001",
+                            }
+                        ],
+                    }
+                ),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        invalidate_all.assert_not_called()
+        invalidate_scopes.assert_not_called()
+
+    def test_import_confirm_invalidates_cost_statistics_cache_for_imported_month(self) -> None:
+        preview_response = self.app.handle_request(
+            "POST",
+            "/imports/preview",
+            json.dumps(
+                {
+                    "batch_type": "bank_transaction",
+                    "source_name": "cost-confirm.json",
+                    "imported_by": "user_finance_01",
+                    "rows": [
+                        {
+                            "account_no": "62228888",
+                            "txn_date": "2026-03-10",
+                            "trade_time": "2026-03-10 21:27:55",
+                            "counterparty_name": "昆明设备供应商",
+                            "debit_amount": "1250.00",
+                            "credit_amount": "",
+                            "bank_serial_no": "COST-CONFIRM-001",
+                        }
+                    ],
+                }
+            ),
+        )
+        batch_id = json.loads(preview_response.body)["batch"]["id"]
+
+        with (
+            patch.object(self.app, "_invalidate_cost_statistics_read_models") as invalidate_all,
+            patch.object(self.app, "_invalidate_cost_statistics_read_model_scopes") as invalidate_scopes,
+        ):
+            response = self.app.handle_request("POST", "/imports/confirm", json.dumps({"batch_id": batch_id}))
+
+        self.assertEqual(response.status_code, 200)
+        invalidate_all.assert_not_called()
+        invalidate_scopes.assert_called_once_with(["2026-03"], reason="import_state_changed")
 
     def test_get_cost_statistics_routes_return_expected_shapes(self) -> None:
         from fin_ops_platform.domain.enums import BatchType

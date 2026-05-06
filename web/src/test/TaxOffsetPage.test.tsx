@@ -17,6 +17,61 @@ function getStatCard(label: string) {
 }
 
 describe("Tax offset workbench", () => {
+  test("clears the initial loading state when the active tax month request is aborted", async () => {
+    window.history.pushState({}, "", "/tax-offset");
+    const abortControllers: AbortController[] = [];
+    const NativeAbortController = globalThis.AbortController;
+
+    class RecordingAbortController extends NativeAbortController {
+      constructor() {
+        super();
+        abortControllers.push(this);
+      }
+    }
+
+    vi.stubGlobal("AbortController", RecordingAbortController);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url === "/api/session/me") {
+        return new Response(
+          JSON.stringify({
+            user: {
+              user_id: "101",
+              username: "liuji",
+              nickname: "刘际涛",
+              display_name: "刘际涛",
+            },
+            roles: ["finance"],
+            permissions: ["finops:app:view"],
+            allowed: true,
+            access_tier: "full_access",
+            can_access_app: true,
+            can_mutate_data: true,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url === "/api/tax-offset?month=2026-03") {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("signal is aborted without reason", "AbortError")));
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByText("正在加载 2026-03 的税金抵扣计划与已认证结果...")).toBeInTheDocument();
+    act(() => {
+      abortControllers.forEach((controller) => controller.abort());
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText("正在加载 2026-03 的税金抵扣计划与已认证结果...")).not.toBeInTheDocument();
+    });
+  });
+
   test("renders read-only output invoices, editable input plan, and certified drawer", async () => {
     window.history.pushState({}, "", "/tax-offset");
     const user = userEvent.setup();

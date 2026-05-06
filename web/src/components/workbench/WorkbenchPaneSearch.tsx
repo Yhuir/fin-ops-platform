@@ -1,4 +1,10 @@
 import { memo, useEffect, useRef } from "react";
+import ClearIcon from "@mui/icons-material/Clear";
+import SearchIcon from "@mui/icons-material/Search";
+import Grow from "@mui/material/Grow";
+import IconButton from "@mui/material/IconButton";
+import InputAdornment from "@mui/material/InputAdornment";
+import TextField from "@mui/material/TextField";
 
 type WorkbenchPaneSearchProps = {
   paneTitle: string;
@@ -62,37 +68,47 @@ function WorkbenchPaneSearch({
   return (
     <div ref={rootRef} className={`pane-search${open ? " open" : ""}${hasAppliedValue ? " has-applied" : ""}`}>
       {open ? (
-        <div className={`pane-search-popover${hasAppliedValue ? " active" : ""}`}>
-          <div className={`pane-search-input-shell${hasAppliedValue ? " active" : ""}`}>
-            <input
-              ref={inputRef}
-              aria-label={`搜索 ${paneTitle}`}
-              className={`pane-search-input${hasAppliedValue ? " active" : ""}`}
+        <Grow in timeout={140} style={{ transformOrigin: "right top" }}>
+          <div className={`pane-search-popover${hasAppliedValue ? " active" : ""}`}>
+            <TextField
+              inputRef={inputRef}
+              className="pane-search-field"
+              hiddenLabel
               placeholder={`搜索${paneTitle}`}
+              size="small"
               type="search"
               value={draftValue}
+              variant="outlined"
               onChange={(event) => onChange(event.target.value)}
+              slotProps={{
+                htmlInput: {
+                  "aria-label": `搜索 ${paneTitle}`,
+                  autoComplete: "off",
+                },
+                input: {
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon fontSize="small" />
+                    </InputAdornment>
+                  ),
+                  endAdornment: draftValue ? (
+                    <InputAdornment position="end">
+                      <IconButton
+                        aria-label={`清空搜索 ${paneTitle}`}
+                        edge="end"
+                        size="small"
+                        onClick={onClear}
+                        onMouseDown={(event) => event.preventDefault()}
+                      >
+                        <ClearIcon fontSize="small" />
+                      </IconButton>
+                    </InputAdornment>
+                  ) : null,
+                },
+              }}
             />
-            {draftValue ? (
-              <button
-                aria-label={`清空搜索 ${paneTitle}`}
-                className="pane-search-clear-btn"
-                type="button"
-                onClick={onClear}
-              >
-                <svg aria-hidden="true" className="pane-tool-icon" viewBox="0 0 20 20">
-                  <path
-                    d="M6 6 14 14M14 6 6 14"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeLinecap="round"
-                    strokeWidth="1.8"
-                  />
-                </svg>
-              </button>
-            ) : null}
           </div>
-        </div>
+        </Grow>
       ) : null}
       <button
         aria-label={buttonAriaLabel}

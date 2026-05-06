@@ -156,6 +156,11 @@ class MutatingRecordDict(dict):
 
 
 class WorkbenchV2ApiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        cost_warmup_patcher = patch.object(Application, "_schedule_cost_statistics_cache_warmup")
+        self.addCleanup(cost_warmup_patcher.stop)
+        cost_warmup_patcher.start()
+
     def test_get_api_workbench_prefers_cached_read_model_when_available(self) -> None:
         app = build_application()
         cached_payload = {
@@ -1553,17 +1558,18 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         bank_row = flatten_groups(initial_payload["open"]["groups"], "bank")[0]
         invoice_row = flatten_groups(initial_payload["open"]["groups"], "invoice")[0]
 
-        confirm_response = app.handle_request(
-            "POST",
-            "/api/workbench/actions/confirm-link",
-            json.dumps(
-                {
-                    "month": "2026-03",
-                    "row_ids": [oa_row["id"], bank_row["id"], invoice_row["id"]],
-                    "case_id": "CASE-HOT-READMODEL-001",
-                }
-            ),
-        )
+        with patch.object(app, "_schedule_workbench_read_model_persist"):
+            confirm_response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/confirm-link",
+                json.dumps(
+                    {
+                        "month": "2026-03",
+                        "row_ids": [oa_row["id"], bank_row["id"], invoice_row["id"]],
+                        "case_id": "CASE-HOT-READMODEL-001",
+                    }
+                ),
+            )
         self.assertEqual(confirm_response.status_code, 200)
         self.assertIsNone(app._workbench_read_model_service.get_read_model("2026-03"))
         confirmed_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
@@ -1573,11 +1579,12 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             [row["id"] for row in flatten_groups(confirmed_payload["paired"]["groups"], "oa")],
         )
 
-        cancel_response = app.handle_request(
-            "POST",
-            "/api/workbench/actions/cancel-link",
-            json.dumps({"month": "2026-03", "row_id": bank_row["id"], "comment": "reopen"}),
-        )
+        with patch.object(app, "_schedule_workbench_read_model_persist"):
+            cancel_response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/cancel-link",
+                json.dumps({"month": "2026-03", "row_id": bank_row["id"], "comment": "reopen"}),
+            )
         self.assertEqual(cancel_response.status_code, 200)
         self.assertIsNone(app._workbench_read_model_service.get_read_model("2026-03"))
         cancelled_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
@@ -2957,18 +2964,19 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(rejected_response.status_code, 400)
         self.assertEqual(json.loads(rejected_response.body)["error"], "workbench_pair_relation_note_required")
 
-        confirmed_response = app.handle_request(
-            "POST",
-            "/api/workbench/actions/confirm-link",
-            json.dumps(
-                {
-                    "month": "2026-05",
-                    "row_ids": row_ids,
-                    "case_id": "CASE-AMOUNT-MISMATCH",
-                    "note": "发票尾差待复核",
-                }
-            ),
-        )
+        with patch.object(app, "_schedule_workbench_read_model_persist"):
+            confirmed_response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/confirm-link",
+                json.dumps(
+                    {
+                        "month": "2026-05",
+                        "row_ids": row_ids,
+                        "case_id": "CASE-AMOUNT-MISMATCH",
+                        "note": "发票尾差待复核",
+                    }
+                ),
+            )
 
         self.assertEqual(confirmed_response.status_code, 200)
         relation = app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-AMOUNT-MISMATCH")
@@ -3228,18 +3236,19 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             app.handle_request("GET", "/api/workbench?month=2026-06")
 
         row_ids = ["oa-etc-202606-001", "bk-etc-202606-001"]
-        confirmed_response = app.handle_request(
-            "POST",
-            "/api/workbench/actions/confirm-link",
-            json.dumps(
-                {
-                    "month": "2026-06",
-                    "row_ids": row_ids,
-                    "case_id": "CASE-ETC-MISMATCH",
-                    "note": "ETC批量提交与流水金额不一致，待复核",
-                }
-            ),
-        )
+        with patch.object(app, "_schedule_workbench_read_model_persist"):
+            confirmed_response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/confirm-link",
+                json.dumps(
+                    {
+                        "month": "2026-06",
+                        "row_ids": row_ids,
+                        "case_id": "CASE-ETC-MISMATCH",
+                        "note": "ETC批量提交与流水金额不一致，待复核",
+                    }
+                ),
+            )
 
         self.assertEqual(confirmed_response.status_code, 200)
         relation = app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-ETC-MISMATCH")

@@ -5,8 +5,10 @@ import { vi } from "vitest";
 
 import MuiProviders from "../app/MuiProviders";
 import { AppChromeProvider } from "../contexts/AppChromeContext";
+import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 import type { SessionPayload } from "../features/session/api";
+import { clearCostStatisticsExplorerCache } from "../features/cost-statistics/api";
 import CostStatisticsPage from "../pages/CostStatisticsPage";
 import { installMockApiFetch } from "./apiMock";
 
@@ -15,9 +17,15 @@ const originalRevokeObjectURL = URL.revokeObjectURL;
 const PAGE_RENDER_TIMEOUT = 3000;
 const defaultSession: SessionPayload = {
   allowed: true,
-  userId: 1,
-  username: "TESTFULL001",
-  nickName: "测试全权限",
+  user: {
+    userId: "1",
+    username: "TESTFULL001",
+    nickname: "测试全权限",
+    displayName: "测试全权限",
+    deptId: null,
+    deptName: null,
+    avatar: null,
+  },
   roles: ["fin_ops_user"],
   permissions: ["finops:app:view"],
   accessTier: "full_access",
@@ -44,6 +52,7 @@ beforeAll(() => {
 });
 
 afterEach(() => {
+  clearCostStatisticsExplorerCache();
   vi.mocked(URL.createObjectURL).mockClear();
   vi.mocked(URL.revokeObjectURL).mockClear();
 });
@@ -80,7 +89,9 @@ function renderCostStatisticsPage() {
       <MuiProviders>
         <AppChromeProvider>
           <SessionContext.Provider value={staticSession}>
-            <CostStatisticsPage />
+            <PageSessionStateProvider>
+              <CostStatisticsPage />
+            </PageSessionStateProvider>
           </SessionContext.Provider>
         </AppChromeProvider>
       </MuiProviders>

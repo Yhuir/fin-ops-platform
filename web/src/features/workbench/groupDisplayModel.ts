@@ -58,7 +58,7 @@ export function buildWorkbenchDisplayGroups(
     return groups;
   }
 
-  const normalizedQuery = normalizeWorkbenchSearchText(state.unifiedSearchQuery || state.searchQueryByPane[activePaneId] || "");
+  const normalizedQuery = normalizeWorkbenchSearchText(state.searchQueryByPane[activePaneId] || "");
   const activeFilters = state.filtersByPaneAndColumn[activePaneId] ?? {};
   const hasActiveFilters = Object.values(activeFilters).some((values) => values.length > 0);
   const sortDirection = state.sortByPane[activePaneId];
@@ -69,9 +69,7 @@ export function buildWorkbenchDisplayGroups(
     ? groups
     : groups.flatMap((group) => {
       if (normalizedQuery) {
-        const groupMatches = (["oa", "bank", "invoice"] as const).some((paneId) =>
-          group.rows[paneId].some((row) => matchesWorkbenchRowText(row, normalizedQuery)),
-        );
+        const groupMatches = group.rows[activePaneId].some((row) => matchesWorkbenchRowText(row, normalizedQuery));
         if (!groupMatches) {
           return [];
         }
@@ -248,7 +246,7 @@ function matchesWorkbenchRowText(row: WorkbenchRecord, normalizedQuery: string) 
 }
 
 function paneHasWorkbenchCriteria(state: WorkbenchZoneDisplayState, paneId: WorkbenchRecordType) {
-  const normalizedQuery = normalizeWorkbenchSearchText(state.unifiedSearchQuery || state.searchQueryByPane[paneId] || "");
+  const normalizedQuery = normalizeWorkbenchSearchText(state.searchQueryByPane[paneId] || "");
   if (normalizedQuery) {
     return true;
   }

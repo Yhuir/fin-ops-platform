@@ -13,6 +13,8 @@ from pymongo.errors import AutoReconnect
 
 from fin_ops_platform.services.import_file_service import FileImportPreviewItem
 from fin_ops_platform.services.state_store import (
+    APP_HEALTH_ALERTS_COLLECTION,
+    COST_STATISTICS_READ_MODELS_COLLECTION,
     DEFAULT_APP_MONGO_DATABASE,
     ApplicationStateStore,
     FILE_METADATA_COLLECTION,
@@ -20,6 +22,7 @@ from fin_ops_platform.services.state_store import (
     META_COLLECTION,
     OA_ATTACHMENT_INVOICE_CACHE_COLLECTION,
     STATE_COLLECTIONS,
+    TAX_OFFSET_READ_MODELS_COLLECTION,
     WORKBENCH_READ_MODELS_COLLECTION,
     WORKBENCH_PAIR_RELATIONS_COLLECTION,
     default_data_dir,
@@ -726,6 +729,230 @@ class StateStoreTests(unittest.TestCase):
             self.assertEqual(db["workbench_read_models"].delete_many_calls, 0)
             self.assertEqual(db["workbench_read_models"].replace_one_calls, 1)
 
+    def test_save_cost_statistics_read_models_persists_locally_across_store_instances(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            snapshot = {
+                "read_models": {
+                    "active:2026-05": {
+                        "scope_key": "active:2026-05",
+                        "scope_type": "month",
+                        "schema_version": "2026-05-cost-statistics-explorer-v1",
+                        "month": "2026-05",
+                        "project_scope": "active",
+                        "generated_at": "2026-05-04T12:00:00+00:00",
+                        "cache_status": "ready",
+                        "entry_count": 3,
+                        "payload": {"summary": {"transaction_count": 3}},
+                        "source_scope_keys": ["workbench:2026-05"],
+                    }
+                }
+            }
+            store = ApplicationStateStore(data_dir)
+            store.save_cost_statistics_read_models(snapshot)
+
+            reloaded = ApplicationStateStore(data_dir)
+            loaded = reloaded.load_cost_statistics_read_models()
+
+        self.assertEqual(loaded, snapshot)
+
+    def test_save_cost_statistics_read_models_can_incrementally_update_changed_scope_only(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "app_mongo_config.json").write_text(
+                json.dumps({"host": "127.0.0.1", "database": "fin_ops_platform_app"}),
+                encoding="utf-8",
+            )
+            fake_client = FakeMongoClient()
+
+            with patch("fin_ops_platform.services.state_store.MongoClient", return_value=fake_client):
+                with patch(
+                    "fin_ops_platform.services.state_store.GridFSBucket",
+                    side_effect=lambda db, bucket_name: FakeGridFSBucket(db, bucket_name),
+                ):
+                    store = ApplicationStateStore(data_dir)
+                    db = fake_client["fin_ops_platform_app"]
+                    db["cost_statistics_read_models"].documents["active:2026-04"] = {
+                        "_id": "active:2026-04",
+                        "payload": Binary(
+                            pickle.dumps(
+                                {
+                                    "scope_key": "active:2026-04",
+                                    "payload": {"summary": {"transaction_count": 1}},
+                                }
+                            )
+                        ),
+                    }
+                    db["cost_statistics_read_models"].documents["active:2026-05"] = {
+                        "_id": "active:2026-05",
+                        "payload": Binary(
+                            pickle.dumps(
+                                {
+                                    "scope_key": "active:2026-05",
+                                    "payload": {"summary": {"transaction_count": 2}},
+                                }
+                            )
+                        ),
+                    }
+
+                    store.save_cost_statistics_read_models(
+                        {
+                            "read_models": {
+                                "active:2026-04": {
+                                    "scope_key": "active:2026-04",
+                                    "payload": {"summary": {"transaction_count": 1}},
+                                },
+                                "active:2026-05": {
+                                    "scope_key": "active:2026-05",
+                                    "scope_type": "month",
+                                    "schema_version": "2026-05-cost-statistics-explorer-v1",
+                                    "month": "2026-05",
+                                    "project_scope": "active",
+                                    "generated_at": "2026-05-04T12:00:00+00:00",
+                                    "cache_status": "ready",
+                                    "entry_count": 9,
+                                    "payload": {"summary": {"transaction_count": 9}},
+                                },
+                            }
+                        },
+                        changed_scope_keys=["active:2026-05"],
+                    )
+                    loaded = store.load_cost_statistics_read_models()
+
+            db = fake_client["fin_ops_platform_app"]
+            unchanged = pickle.loads(  # noqa: S301
+                bytes(db["cost_statistics_read_models"].documents["active:2026-04"]["payload"])
+            )
+            changed = pickle.loads(  # noqa: S301
+                bytes(db["cost_statistics_read_models"].documents["active:2026-05"]["payload"])
+            )
+            self.assertEqual(unchanged["payload"]["summary"]["transaction_count"], 1)
+            self.assertEqual(changed["payload"]["summary"]["transaction_count"], 9)
+            self.assertEqual(db["cost_statistics_read_models"].delete_many_calls, 0)
+            self.assertEqual(db["cost_statistics_read_models"].replace_one_calls, 1)
+            self.assertIn("active:2026-05", db[COST_STATISTICS_READ_MODELS_COLLECTION].documents)
+            self.assertEqual(loaded["read_models"]["active:2026-05"]["entry_count"], 9)
+
+    def test_save_tax_offset_read_models_persists_locally_across_store_instances(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            snapshot = {
+                "read_models": {
+                    "2026-05": {
+                        "scope_key": "2026-05",
+                        "scope_type": "month",
+                        "schema_version": "2026-05-tax-offset-month-v1",
+                        "month": "2026-05",
+                        "generated_at": "2026-05-04T12:00:00+00:00",
+                        "cache_status": "ready",
+                        "output_count": 2,
+                        "input_plan_count": 1,
+                        "certified_count": 3,
+                        "payload": {
+                            "output_items": [{"id": "output-1"}, {"id": "output-2"}],
+                            "input_plan_items": [{"id": "input-1"}],
+                            "certified_items": [{"id": "cert-1"}, {"id": "cert-2"}, {"id": "cert-3"}],
+                        },
+                        "source_scope_keys": ["tax-offset:source:2026-05"],
+                    }
+                }
+            }
+            store = ApplicationStateStore(data_dir)
+            store.save_tax_offset_read_models(snapshot)
+
+            reloaded = ApplicationStateStore(data_dir)
+            loaded = reloaded.load_tax_offset_read_models()
+
+        self.assertEqual(loaded, snapshot)
+
+    def test_save_tax_offset_read_models_can_incrementally_update_and_delete_changed_scopes(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "app_mongo_config.json").write_text(
+                json.dumps({"host": "127.0.0.1", "database": "fin_ops_platform_app"}),
+                encoding="utf-8",
+            )
+            fake_client = FakeMongoClient()
+
+            with patch("fin_ops_platform.services.state_store.MongoClient", return_value=fake_client):
+                with patch(
+                    "fin_ops_platform.services.state_store.GridFSBucket",
+                    side_effect=lambda db, bucket_name: FakeGridFSBucket(db, bucket_name),
+                ):
+                    store = ApplicationStateStore(data_dir)
+                    db = fake_client["fin_ops_platform_app"]
+                    db["tax_offset_read_models"].documents["2026-04"] = {
+                        "_id": "2026-04",
+                        "payload": Binary(
+                            pickle.dumps(
+                                {
+                                    "scope_key": "2026-04",
+                                    "payload": {
+                                        "output_items": [{"id": "old-output"}],
+                                        "input_plan_items": [],
+                                        "certified_items": [],
+                                    },
+                                }
+                            )
+                        ),
+                    }
+                    db["tax_offset_read_models"].documents["2026-05"] = {
+                        "_id": "2026-05",
+                        "payload": Binary(
+                            pickle.dumps(
+                                {
+                                    "scope_key": "2026-05",
+                                    "payload": {
+                                        "output_items": [{"id": "old-output"}],
+                                        "input_plan_items": [],
+                                        "certified_items": [],
+                                    },
+                                }
+                            )
+                        ),
+                    }
+
+                    store.save_tax_offset_read_models(
+                        {
+                            "read_models": {
+                                "2026-05": {
+                                    "scope_key": "2026-05",
+                                    "scope_type": "month",
+                                    "schema_version": "2026-05-tax-offset-month-v1",
+                                    "month": "2026-05",
+                                    "generated_at": "2026-05-04T12:00:00+00:00",
+                                    "cache_status": "ready",
+                                    "output_count": 2,
+                                    "input_plan_count": 1,
+                                    "certified_count": 3,
+                                    "payload": {
+                                        "output_items": [{"id": "output-1"}, {"id": "output-2"}],
+                                        "input_plan_items": [{"id": "input-1"}],
+                                        "certified_items": [
+                                            {"id": "cert-1"},
+                                            {"id": "cert-2"},
+                                            {"id": "cert-3"},
+                                        ],
+                                    },
+                                    "source_scope_keys": ["tax-offset:source:2026-05"],
+                                }
+                            }
+                        },
+                        changed_scope_keys=["2026-05", "2026-04"],
+                    )
+                    loaded = store.load_tax_offset_read_models()
+
+            db = fake_client["fin_ops_platform_app"]
+            changed = pickle.loads(  # noqa: S301
+                bytes(db["tax_offset_read_models"].documents["2026-05"]["payload"])
+            )
+            self.assertNotIn("2026-04", db[TAX_OFFSET_READ_MODELS_COLLECTION].documents)
+            self.assertEqual(changed["output_count"], 2)
+            self.assertEqual(changed["payload"]["certified_items"][2]["id"], "cert-3")
+            self.assertEqual(db["tax_offset_read_models"].delete_many_calls, 1)
+            self.assertEqual(db["tax_offset_read_models"].replace_one_calls, 1)
+            self.assertEqual(loaded["read_models"]["2026-05"]["certified_count"], 3)
+
     def test_migrates_legacy_single_collection_snapshot_into_split_collections(self) -> None:
         with TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)
@@ -873,6 +1100,49 @@ class StateStoreTests(unittest.TestCase):
             state = reloaded_store.load_oa_sync_state()
 
         self.assertEqual(state["poll_fingerprints"], {"2026-03": "fingerprint-001", "all": "fingerprint-all"})
+
+    def test_app_health_alerts_persist_locally_across_store_instances(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            store = ApplicationStateStore(data_dir)
+            snapshot = {
+                "records": {
+                    "alert_1": {
+                        "alert_id": "alert_1",
+                        "kind": "dependency_unavailable",
+                        "severity": "critical",
+                        "status": "active",
+                    }
+                }
+            }
+
+            store.save_app_health_alerts(snapshot)
+            reloaded_store = ApplicationStateStore(data_dir)
+
+            self.assertEqual(reloaded_store.load_app_health_alerts(), snapshot)
+
+    def test_mongo_app_health_alerts_save_and_load_snapshot(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "app_mongo_config.json").write_text(
+                json.dumps({"host": "127.0.0.1", "database": "fin_ops_platform_app"}),
+                encoding="utf-8",
+            )
+            fake_client = FakeMongoClient()
+            snapshot = {"records": {"alert_1": {"alert_id": "alert_1", "status": "active"}}}
+
+            with patch("fin_ops_platform.services.state_store.MongoClient", return_value=fake_client):
+                with patch(
+                    "fin_ops_platform.services.state_store.GridFSBucket",
+                    side_effect=lambda db, bucket_name: FakeGridFSBucket(db, bucket_name),
+                ):
+                    store = ApplicationStateStore(data_dir)
+                    store.save_app_health_alerts(snapshot)
+                    loaded = store.load_app_health_alerts()
+
+            collection = fake_client["fin_ops_platform_app"][APP_HEALTH_ALERTS_COLLECTION]
+            self.assertIn("current_state", collection.documents)
+            self.assertEqual(loaded, snapshot)
 
     def test_mongo_oa_attachment_invoice_cache_save_retries_transient_autoreconnect(self) -> None:
         with TemporaryDirectory() as temp_dir:

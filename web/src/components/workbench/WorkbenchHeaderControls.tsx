@@ -2,13 +2,11 @@ import { useRef, useState, type FocusEvent } from "react";
 import { Link as RouterLink } from "react-router-dom";
 
 import { importWorkflowPath, type ImportWorkflowMode } from "../../features/imports/importRoutes";
-import WorkbenchSearchBox from "./WorkbenchSearchBox";
 
 type WorkbenchHeaderControlsProps = {
   canMutateData: boolean;
   className?: string;
   onOpenImport: (mode: ImportWorkflowMode) => void;
-  onOpenSearch: () => void;
   onOpenSettings: () => void;
 };
 
@@ -22,7 +20,6 @@ export default function WorkbenchHeaderControls({
   canMutateData,
   className,
   onOpenImport,
-  onOpenSearch,
   onOpenSettings,
 }: WorkbenchHeaderControlsProps) {
   const [importMenuHovered, setImportMenuHovered] = useState(false);
@@ -41,7 +38,6 @@ export default function WorkbenchHeaderControls({
 
   return (
     <div className={`workbench-header-controls${className ? ` ${className}` : ""}`}>
-      <WorkbenchSearchBox onOpen={onOpenSearch} />
       <button className="workbench-settings-entry" type="button" onClick={onOpenSettings}>
         设置
       </button>

@@ -1,8 +1,15 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { afterEach } from "vitest";
 
 import { installMockApiFetch } from "./apiMock";
 import { renderAppAt } from "./renderHelpers";
+
+const INVOICE_DRAFT_STORAGE_KEY = "finops:pageSession:v1:101:imports.invoice:previewSession";
+
+afterEach(() => {
+  window.sessionStorage.clear();
+});
 
 function getUploadInput(...labels: string[]) {
   for (const label of labels) {
@@ -121,6 +128,127 @@ describe("Import pages", () => {
     ]);
   });
 
+  test("invoice import keeps selected files and preview when navigating away and back", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+
+    renderAppAt("/imports/invoices");
+
+    expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
+    await user.upload(getUploadInput("上传发票文件", "上传文件"), [
+      new File(["invoice-output"], "一月发票.xlsx", {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        lastModified: 1,
+      }),
+    ]);
+    await user.selectOptions(screen.getByLabelText("票据方向 一月发票.xlsx"), "output_invoice");
+    await user.click(screen.getByRole("button", { name: "开始预览" }));
+
+    expect(await screen.findByText("已完成 1 个文件的预览识别。")).toBeInTheDocument();
+    expect(screen.getAllByText("一月发票.xlsx").length).toBeGreaterThan(0);
+    expect(screen.getByText("14")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("link", { name: "设置" }));
+    expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("link", { name: "发票导入" }));
+    expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
+    expect(screen.getByText("已完成 1 个文件的预览识别。")).toBeInTheDocument();
+    expect(screen.getAllByText("一月发票.xlsx").length).toBeGreaterThan(0);
+    expect(screen.getByText("14")).toBeInTheDocument();
+  });
+
+  test("invoice import restores preview from sessionStorage after remount", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    const { unmount } = renderAppAt("/imports/invoices");
+
+    expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
+    await user.upload(getUploadInput("上传发票文件", "上传文件"), [
+      new File(["invoice-output"], "一月发票.xlsx", {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        lastModified: 1,
+      }),
+    ]);
+    await user.selectOptions(screen.getByLabelText("票据方向 一月发票.xlsx"), "output_invoice");
+    await user.click(screen.getByRole("button", { name: "开始预览" }));
+
+    expect(await screen.findByText("已完成 1 个文件的预览识别。")).toBeInTheDocument();
+    expect(window.sessionStorage.getItem(INVOICE_DRAFT_STORAGE_KEY)).toContain("import_session_0001");
+
+    unmount();
+    renderAppAt("/imports/invoices");
+
+    expect(await screen.findByText("一月发票.xlsx")).toBeInTheDocument();
+    expect(screen.getByText("14")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/imports/files/sessions/import_session_0001")).toBe(true);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "清空" })).toBeEnabled();
+    });
+    await user.click(screen.getByRole("button", { name: "清空" }));
+    expect(window.sessionStorage.getItem(INVOICE_DRAFT_STORAGE_KEY)).toBeNull();
+    expect(screen.queryByText("一月发票.xlsx")).not.toBeInTheDocument();
+  });
+
+  test("invoice import clears persisted preview when files are cleared", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const { unmount } = renderAppAt("/imports/invoices");
+
+    expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
+    await user.upload(getUploadInput("上传发票文件", "上传文件"), [
+      new File(["invoice-output"], "一月发票.xlsx", {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        lastModified: 1,
+      }),
+    ]);
+    await user.selectOptions(screen.getByLabelText("票据方向 一月发票.xlsx"), "output_invoice");
+    await user.click(screen.getByRole("button", { name: "开始预览" }));
+
+    expect(await screen.findByText("已完成 1 个文件的预览识别。")).toBeInTheDocument();
+    expect(window.sessionStorage.getItem(INVOICE_DRAFT_STORAGE_KEY)).toContain("import_session_0001");
+
+    await user.click(screen.getByRole("button", { name: "清空" }));
+    expect(window.sessionStorage.getItem(INVOICE_DRAFT_STORAGE_KEY)).toBeNull();
+    expect(screen.queryByText("一月发票.xlsx")).not.toBeInTheDocument();
+
+    unmount();
+    renderAppAt("/imports/invoices");
+
+    expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
+    expect(screen.queryByText("一月发票.xlsx")).not.toBeInTheDocument();
+  });
+
+  test("invoice import keeps preview result when navigating away before preview finishes", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({ importPreviewDelayMs: 80 });
+
+    renderAppAt("/imports/invoices");
+
+    expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
+    await user.upload(getUploadInput("上传发票文件", "上传文件"), [
+      new File(["invoice-output"], "一月发票.xlsx", {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        lastModified: 1,
+      }),
+    ]);
+    await user.selectOptions(screen.getByLabelText("票据方向 一月发票.xlsx"), "output_invoice");
+    await user.click(screen.getByRole("button", { name: "开始预览" }));
+    await user.click(screen.getByRole("link", { name: "设置" }));
+
+    expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(window.sessionStorage.getItem(INVOICE_DRAFT_STORAGE_KEY)).toContain("import_session_0001");
+    });
+
+    await user.click(screen.getByRole("link", { name: "发票导入" }));
+    expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
+    expect(await screen.findByText("已完成 1 个文件的预览识别。")).toBeInTheDocument();
+    expect(screen.getAllByText("一月发票.xlsx").length).toBeGreaterThan(0);
+    expect(screen.getByText("14")).toBeInTheDocument();
+  });
+
   test("ETC invoice import rejects non-zip files on the standalone route", async () => {
     const user = userEvent.setup({ applyAccept: false });
     installMockApiFetch();
@@ -194,5 +322,30 @@ describe("Import pages", () => {
       sessionId: "etc_import_session_0001",
     });
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/imports/files/preview")).toBe(false);
+  });
+
+  test("ETC invoice import keeps preview result when navigating away before preview finishes", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({ etcImportPreviewDelayMs: 80 });
+
+    renderAppAt("/imports/etc-invoices");
+
+    expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
+    await user.upload(getUploadInput("上传ETC zip", "上传文件"), [
+      new File(["zip-a"], "etc-2026-03.zip", { type: "application/zip" }),
+    ]);
+    await user.click(screen.getByRole("button", { name: "开始预览" }));
+    await user.click(screen.getByRole("link", { name: "设置" }));
+
+    expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "ETC导入预览" })).not.toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("link", { name: "ETC发票导入" }));
+    expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "ETC导入预览" })).toBeInTheDocument();
+    expect(screen.getByText("etc_import_session_0001")).toBeInTheDocument();
+    expect(screen.getByText("ETC-2026-005")).toBeInTheDocument();
   });
 });

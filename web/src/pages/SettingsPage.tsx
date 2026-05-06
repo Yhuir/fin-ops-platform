@@ -6,7 +6,8 @@ import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 
 import SettingsPageContent from "../components/settings/SettingsPageContent";
-import { type WorkbenchHeaderIntent, useAppChrome } from "../contexts/AppChromeContext";
+import { useAppChrome } from "../contexts/AppChromeContext";
+import { useAppHealthStatus, useCanMutateWithHealth } from "../contexts/AppHealthStatusContext";
 import { useSession, useSessionPermissions } from "../contexts/SessionContext";
 import { importWorkflowPath } from "../features/imports/importRoutes";
 import {
@@ -53,6 +54,8 @@ function normalizeSettingsError(error: unknown, fallback: string) {
 export default function SettingsPage() {
   const navigate = useNavigate();
   const session = useSession();
+  const healthStatus = useAppHealthStatus();
+  const canMutateWithHealth = useCanMutateWithHealth();
   const { canMutateData, canAdminAccess } = useSessionPermissions();
   const { setWorkbenchHeaderActions, setWorkbenchStatus } = useAppChrome();
   const [settings, setSettings] = useState<WorkbenchSettings | null>(null);
@@ -173,6 +176,10 @@ export default function SettingsPage() {
       setPageFeedback({ tone: "error", message: READONLY_ACTION_MESSAGE });
       return;
     }
+    if (healthStatus.blocksMutations) {
+      setPageFeedback({ tone: "error", message: "登录已失效或系统不可用，不能保存设置。" });
+      return;
+    }
     setIsSaving(true);
     setPageFeedback(null);
     try {
@@ -194,6 +201,9 @@ export default function SettingsPage() {
     if (!canAdminAccess) {
       throw new Error("当前账号没有管理员权限，不能执行数据重置。");
     }
+    if (healthStatus.blocksMutations) {
+      throw new Error("登录已失效或系统不可用，不能执行数据清理。");
+    }
     const result = await resetWorkbenchSettingsData({
       ...payload,
       onProgress: (job) => {
@@ -211,6 +221,9 @@ export default function SettingsPage() {
     if (!canMutateData) {
       throw new Error(READONLY_ACTION_MESSAGE);
     }
+    if (healthStatus.blocksMutations) {
+      throw new Error("登录已失效或系统不可用，不能保存设置。");
+    }
     const saved = await syncWorkbenchSettingsProjects(settingsActorId(session));
     setSettings(saved);
     setPageFeedback({ tone: "success", message: "已从 OA 拉取项目。" });
@@ -223,6 +236,9 @@ export default function SettingsPage() {
   }): Promise<WorkbenchSettings> => {
     if (!canMutateData) {
       throw new Error(READONLY_ACTION_MESSAGE);
+    }
+    if (healthStatus.blocksMutations) {
+      throw new Error("登录已失效或系统不可用，不能保存设置。");
     }
     const saved = await createWorkbenchSettingsProject({
       actorId: settingsActorId(session),
@@ -238,19 +254,14 @@ export default function SettingsPage() {
     if (!canMutateData) {
       throw new Error(READONLY_ACTION_MESSAGE);
     }
+    if (healthStatus.blocksMutations) {
+      throw new Error("登录已失效或系统不可用，不能保存设置。");
+    }
     const saved = await deleteWorkbenchSettingsProject(projectId);
     setSettings(saved);
     setPageFeedback({ tone: "success", message: "已删除本地项目或状态覆盖。" });
     return saved;
   };
-
-  const handleRouteToWorkbenchIntent = useCallback((intent: WorkbenchHeaderIntent) => {
-    navigate("/", {
-      state: {
-        workbenchHeaderIntent: intent,
-      },
-    });
-  }, [navigate]);
 
   const handleStayOnSettings = useCallback(() => {
     navigate("/settings");
@@ -258,15 +269,14 @@ export default function SettingsPage() {
 
   useLayoutEffect(() => {
     setWorkbenchHeaderActions({
-      canMutateData,
+      canMutateData: canMutateData && canMutateWithHealth,
       onOpenImport: (mode) => navigate(importWorkflowPath(mode)),
-      onOpenSearch: () => handleRouteToWorkbenchIntent({ type: "open_search" }),
       onOpenSettings: handleStayOnSettings,
     });
     return () => {
       setWorkbenchHeaderActions(null);
     };
-  }, [canMutateData, handleRouteToWorkbenchIntent, handleStayOnSettings, setWorkbenchHeaderActions]);
+  }, [canMutateData, canMutateWithHealth, handleStayOnSettings, navigate, setWorkbenchHeaderActions]);
 
   return (
     <Box data-testid="settings-page" sx={{ display: "flex", flexDirection: "column", flex: 1, height: "100%" }}>
@@ -280,7 +290,7 @@ export default function SettingsPage() {
       {!isLoading && !loadError && settings ? (
         <SettingsPageContent
           canManageAccessControl={canAdminAccess}
-          canSave={canMutateData}
+          canSave={canMutateData && canMutateWithHealth}
           isSaving={isSaving}
           settings={settings}
           activeDataResetJob={activeDataResetJob}

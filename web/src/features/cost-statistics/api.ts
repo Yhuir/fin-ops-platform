@@ -115,6 +115,14 @@ type ApiCostStatisticsExportPreview = {
   rows: string[][];
 };
 
+type ExplorerCacheEntry = {
+  payload: CostStatisticsExplorer;
+  cachedAt: number;
+};
+
+const COST_EXPLORER_CACHE_TTL_MS = 5 * 60 * 1000;
+const costExplorerCache = new Map<string, ExplorerCacheEntry>();
+
 function mapSummary(summary: ApiCostSummary) {
   return {
     rowCount: summary.row_count,
@@ -140,6 +148,29 @@ function buildScopedUrl(path: string, params: Record<string, string | undefined>
     }
   }
   return `${path}?${query.toString()}`;
+}
+
+function buildExplorerCacheKey(month: string, projectScope: CostProjectScope) {
+  return `${projectScope}:${month}`;
+}
+
+export function getCachedCostStatisticsExplorer(
+  month: string,
+  projectScope: CostProjectScope = "active",
+): CostStatisticsExplorer | null {
+  const entry = costExplorerCache.get(buildExplorerCacheKey(month, projectScope));
+  if (!entry) {
+    return null;
+  }
+  if (Date.now() - entry.cachedAt > COST_EXPLORER_CACHE_TTL_MS) {
+    costExplorerCache.delete(buildExplorerCacheKey(month, projectScope));
+    return null;
+  }
+  return entry.payload;
+}
+
+export function clearCostStatisticsExplorerCache() {
+  costExplorerCache.clear();
 }
 
 export async function fetchCostStatisticsMonth(
@@ -185,7 +216,7 @@ export async function fetchCostStatisticsExplorer(
     },
   );
 
-  return {
+  const mappedPayload = {
     month: payload.month,
     summary: mapSummary(payload.summary),
     timeRows: payload.time_rows.map<CostTimeRow>((row) => ({
@@ -213,6 +244,11 @@ export async function fetchCostStatisticsExplorer(
       projectCount: row.project_count,
     })),
   };
+  costExplorerCache.set(buildExplorerCacheKey(month, projectScope), {
+    payload: mappedPayload,
+    cachedAt: Date.now(),
+  });
+  return mappedPayload;
 }
 
 export async function fetchProjectCostStatistics(

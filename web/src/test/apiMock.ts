@@ -28,6 +28,8 @@ type MockApiOptions = {
   workbenchPrimaryDelayMs?: number;
   workbenchIgnoredDelayMs?: number;
   workbenchSettingsDelayMs?: number;
+  importPreviewDelayMs?: number;
+  etcImportPreviewDelayMs?: number;
   workbenchColumnLayouts?: {
     oa?: string[];
     bank?: string[];
@@ -44,6 +46,9 @@ type MockApiOptions = {
   dataResetPasswordShouldFail?: boolean;
   dataResetJobPollsBeforeComplete?: number;
   backgroundJobs?: Array<Record<string, unknown>>;
+  appHealth?: Record<string, unknown>;
+  appHealthErrorStatus?: number;
+  appHealthErrorBody?: Record<string, unknown>;
 };
 
 const templateRegistry = [
@@ -3064,6 +3069,42 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       };
     },
+    "/api/app-health": () => {
+      if (options.appHealthErrorStatus) {
+        return {
+          status: options.appHealthErrorStatus,
+          body: options.appHealthErrorBody ?? { message: "app health failed" },
+        };
+      }
+      const queued = backgroundJobs.filter((job) => String(job.status) === "queued").length;
+      const running = backgroundJobs.filter((job) => String(job.status) === "running").length;
+      const attention = backgroundJobs.filter((job) => String(job.status) === "failed" || String(job.status) === "partial_success").length;
+      return {
+        body: options.appHealth ?? {
+          status: "ok",
+          generated_at: "2026-05-06T00:00:00+08:00",
+          session: { status: "authenticated" },
+          oa_sync: {
+            status: "synced",
+            message: "OA 已同步",
+            dirty_scopes: [],
+          },
+          workbench_read_model: {
+            status: "ready",
+            dirty_scopes: [],
+            stale_scopes: [],
+            rebuilding_scopes: [],
+          },
+          background_jobs: {
+            active: backgroundJobs.length,
+            queued,
+            running,
+            attention,
+          },
+          dependencies: {},
+        },
+      };
+    },
     "/api/background-jobs/active": () => ({
       body: {
         jobs: cloneJson(backgroundJobs),
@@ -4083,6 +4124,12 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     }
     if (options.searchDelayMs && url.pathname === "/api/search") {
       await new Promise((resolve) => window.setTimeout(resolve, options.searchDelayMs));
+    }
+    const importPreviewDelay =
+      (url.pathname === "/imports/files/preview" ? options.importPreviewDelayMs : undefined)
+      ?? (url.pathname === "/api/etc/import/preview" ? options.etcImportPreviewDelayMs : undefined);
+    if (importPreviewDelay) {
+      await new Promise((resolve) => window.setTimeout(resolve, importPreviewDelay));
     }
     if (isBinaryLikeResponse(response)) {
       if (options.actionDelayMs && url.pathname.startsWith("/api/workbench/actions/")) {

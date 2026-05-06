@@ -19,6 +19,7 @@ import dayjs from "dayjs";
 
 import PageScaffold from "../components/common/PageScaffold";
 import StatePanel from "../components/common/StatePanel";
+import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { fetchBankDetailAccounts, fetchBankDetailTransactions } from "../features/bankDetails/api";
 import type { BankDateFilter, BankDetailAccount, BankDetailTransaction } from "../features/bankDetails/types";
 
@@ -101,6 +102,18 @@ function isAbortLikeError(caught: unknown) {
   return false;
 }
 
+function isBankDateFilter(value: unknown): value is BankDateFilter {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const filter = value as Record<string, unknown>;
+  return (
+    typeof filter.preset === "string"
+    && typeof filter.dateFrom === "string"
+    && typeof filter.dateTo === "string"
+  );
+}
+
 function EmptyTransactionOverlay() {
   return (
     <Stack alignItems="center" justifyContent="center" sx={{ height: "100%", px: 2, textAlign: "center" }}>
@@ -167,14 +180,44 @@ const transactionColumns: GridColDef<BankDetailTransaction>[] = [
 ];
 
 export default function BankDetailsPage() {
+  const selectedAccountSession = usePageSessionState<string | null>({
+    pageKey: "bank-details",
+    stateKey: "selectedAccountKey",
+    version: 1,
+    initialValue: null,
+    ttlMs: 24 * 60 * 60 * 1000,
+    storage: "session",
+    validate: (value): value is string | null => value === null || typeof value === "string",
+  });
+  const dateFilterSession = usePageSessionState<BankDateFilter>({
+    pageKey: "bank-details",
+    stateKey: "dateFilter",
+    version: 1,
+    initialValue: createDateFilter("current_month"),
+    ttlMs: 24 * 60 * 60 * 1000,
+    storage: "session",
+    validate: isBankDateFilter,
+  });
+  const monthValueSession = usePageSessionState<string>({
+    pageKey: "bank-details",
+    stateKey: "monthValue",
+    version: 1,
+    initialValue: "2026-05",
+    ttlMs: 24 * 60 * 60 * 1000,
+    storage: "session",
+    validate: (value): value is string => typeof value === "string" && /^\d{4}-\d{2}$/.test(value),
+  });
   const [accountsData, setAccountsData] = useState<{
     accounts: BankDetailAccount[];
     totalBalance: string | null;
     missingBalanceAccountCount: number;
   }>({ accounts: [], totalBalance: null, missingBalanceAccountCount: 0 });
-  const [selectedAccountKey, setSelectedAccountKey] = useState<string | null>(null);
-  const [dateFilter, setDateFilter] = useState<BankDateFilter>(() => createDateFilter("current_month"));
-  const [monthValue, setMonthValue] = useState("2026-05");
+  const selectedAccountKey = selectedAccountSession.value;
+  const setSelectedAccountKey = selectedAccountSession.setValue;
+  const dateFilter = dateFilterSession.value;
+  const setDateFilter = dateFilterSession.setValue;
+  const monthValue = monthValueSession.value;
+  const setMonthValue = monthValueSession.setValue;
   const [rows, setRows] = useState<BankDetailTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [rowLoading, setRowLoading] = useState(false);
@@ -191,7 +234,11 @@ export default function BankDetailsPage() {
           totalBalance: payload.totalBalance,
           missingBalanceAccountCount: payload.missingBalanceAccountCount,
         });
-        setSelectedAccountKey((current) => current ?? payload.accounts[0]?.accountKey ?? null);
+        setSelectedAccountKey((current) => (
+          current && payload.accounts.some((account) => account.accountKey === current)
+            ? current
+            : payload.accounts[0]?.accountKey ?? null
+        ));
       })
       .catch((caught) => {
         if (!isAbortLikeError(caught)) {

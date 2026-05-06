@@ -298,7 +298,7 @@ function CandidateGroupGrid({
                   columns={columnsByPane[pane.id as WorkbenchRecordType]}
                   getRowState={getRowState}
                   highlightedRowId={highlightedRowId}
-                  searchQuery={displayState.unifiedSearchQuery}
+                  searchQuery={displayState.searchQueryByPane[pane.id as WorkbenchRecordType]}
                   onOpenDetail={onOpenDetail}
                   onRowAction={onRowAction}
                   onSelectRow={onSelectRow}

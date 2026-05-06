@@ -4,6 +4,7 @@ import ReconciliationWorkbenchPage from "../pages/ReconciliationWorkbenchPage";
 import TaxOffsetPage from "../pages/TaxOffsetPage";
 import CostStatisticsPage from "../pages/CostStatisticsPage";
 import SettingsPage from "../pages/SettingsPage";
+import AppHealthOperationsPage from "../pages/AppHealthOperationsPage";
 import BankDetailsPage from "../pages/BankDetailsPage";
 import EtcTicketManagementPage from "../pages/EtcTicketManagementPage";
 import ImportBankTransactionsPage from "../pages/imports/ImportBankTransactionsPage";
@@ -22,6 +23,7 @@ export default function AppRouter() {
       <Route path="/bank-details" element={<BankDetailsPage />} />
       <Route path="/etc-tickets" element={<EtcTicketManagementPage />} />
       <Route path="/settings" element={<SettingsPage />} />
+      <Route path="/operations/app-health" element={<AppHealthOperationsPage />} />
       <Route path="*" element={<Navigate replace to="/" />} />
     </Routes>
   );

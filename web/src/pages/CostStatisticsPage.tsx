@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { useNavigate } from "react-router-dom";
 
 import MonthPicker, { formatMonthLabel } from "../components/MonthPicker";
@@ -12,14 +12,16 @@ import CostStatisticsTable, {
   type CostStatisticsTableColumn,
 } from "../components/cost-statistics/CostStatisticsTable";
 import CostTransactionDetailModal from "../components/cost-statistics/CostTransactionDetailModal";
-import { type WorkbenchHeaderIntent, useAppChrome } from "../contexts/AppChromeContext";
+import { useAppChrome } from "../contexts/AppChromeContext";
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
+import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import {
   exportCostStatisticsView,
   fetchCostStatisticsExplorer,
   fetchCostStatisticsExportPreview,
   fetchCostTransactionDetail,
+  getCachedCostStatisticsExplorer,
   type CostExportParams,
   type PreviewCostExportParams,
 } from "../features/cost-statistics/api";
@@ -38,6 +40,31 @@ type CostViewMode = "time" | "project" | "bank" | "expenseType";
 type RangeScopeMode = "all" | "year" | "month";
 type ExplorerScopeMode = RangeScopeMode | "custom";
 type ScopePickerPanel = Exclude<ExplorerScopeMode, "all">;
+
+type CostStatisticsPageSession = {
+  viewMode: CostViewMode;
+  costProjectScope: CostProjectScope;
+  timeScopeMode: ExplorerScopeMode;
+  timeScopeYear: string;
+  timeScopeMonth: string;
+  timeScopeStartDate: string;
+  timeScopeEndDate: string;
+  projectScopeMode: ExplorerScopeMode;
+  projectScopeYear: string;
+  projectScopeMonth: string;
+  projectScopeStartDate: string;
+  projectScopeEndDate: string;
+  bankScopeMode: ExplorerScopeMode;
+  bankScopeYear: string;
+  bankScopeMonth: string;
+  bankScopeStartDate: string;
+  bankScopeEndDate: string;
+  expenseTypeScopeMode: ExplorerScopeMode;
+  expenseTypeScopeYear: string;
+  expenseTypeScopeMonth: string;
+  expenseTypeScopeStartDate: string;
+  expenseTypeScopeEndDate: string;
+};
 
 type ProjectExpenseTypeRow = {
   expenseType: string;
@@ -288,23 +315,108 @@ function ScopeYearPicker({ ariaLabel, years, value, onChange }: ScopeYearPickerP
   );
 }
 
+function isCostStatisticsPageSession(value: unknown): value is CostStatisticsPageSession {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const session = value as Record<string, unknown>;
+  return [
+    "viewMode",
+    "costProjectScope",
+    "timeScopeMode",
+    "timeScopeYear",
+    "timeScopeMonth",
+    "timeScopeStartDate",
+    "timeScopeEndDate",
+    "projectScopeMode",
+    "projectScopeYear",
+    "projectScopeMonth",
+    "projectScopeStartDate",
+    "projectScopeEndDate",
+    "bankScopeMode",
+    "bankScopeYear",
+    "bankScopeMonth",
+    "bankScopeStartDate",
+    "bankScopeEndDate",
+    "expenseTypeScopeMode",
+    "expenseTypeScopeYear",
+    "expenseTypeScopeMonth",
+    "expenseTypeScopeStartDate",
+    "expenseTypeScopeEndDate",
+  ].every((key) => typeof session[key] === "string");
+}
+
 export default function CostStatisticsPage() {
   const navigate = useNavigate();
   const { setWorkbenchHeaderActions } = useAppChrome();
   const { canMutateData } = useSessionPermissions();
-  const [viewMode, setViewMode] = useState<CostViewMode>("time");
-  const [costProjectScope, setCostProjectScope] = useState<CostProjectScope>("active");
-  const [timeScopeMode, setTimeScopeMode] = useState<ExplorerScopeMode>("month");
-  const [timeScopePanel, setTimeScopePanel] = useState<ScopePickerPanel | null>("month");
-  const [timeScopeYear, setTimeScopeYear] = useState(DEFAULT_MONTH.slice(0, 4));
-  const [timeScopeMonth, setTimeScopeMonth] = useState(DEFAULT_MONTH);
   const defaultMonthBounds = buildMonthDateBounds(DEFAULT_MONTH);
-  const [timeScopeStartDate, setTimeScopeStartDate] = useState(defaultMonthBounds.startDate);
-  const [timeScopeEndDate, setTimeScopeEndDate] = useState(defaultMonthBounds.endDate);
+  const costPageSession = usePageSessionState<CostStatisticsPageSession>({
+    pageKey: "cost-statistics",
+    stateKey: "explorerState",
+    version: 1,
+    initialValue: {
+      viewMode: "time",
+      costProjectScope: "active",
+      timeScopeMode: "month",
+      timeScopeYear: DEFAULT_MONTH.slice(0, 4),
+      timeScopeMonth: DEFAULT_MONTH,
+      timeScopeStartDate: defaultMonthBounds.startDate,
+      timeScopeEndDate: defaultMonthBounds.endDate,
+      projectScopeMode: "all",
+      projectScopeYear: DEFAULT_MONTH.slice(0, 4),
+      projectScopeMonth: DEFAULT_MONTH,
+      projectScopeStartDate: defaultMonthBounds.startDate,
+      projectScopeEndDate: defaultMonthBounds.endDate,
+      bankScopeMode: "all",
+      bankScopeYear: DEFAULT_MONTH.slice(0, 4),
+      bankScopeMonth: DEFAULT_MONTH,
+      bankScopeStartDate: defaultMonthBounds.startDate,
+      bankScopeEndDate: defaultMonthBounds.endDate,
+      expenseTypeScopeMode: "month",
+      expenseTypeScopeYear: DEFAULT_MONTH.slice(0, 4),
+      expenseTypeScopeMonth: DEFAULT_MONTH,
+      expenseTypeScopeStartDate: defaultMonthBounds.startDate,
+      expenseTypeScopeEndDate: defaultMonthBounds.endDate,
+    },
+    ttlMs: 24 * 60 * 60 * 1000,
+    storage: "session",
+    validate: isCostStatisticsPageSession,
+  });
+  const setCostSessionField = useCallback(<Key extends keyof CostStatisticsPageSession>(
+    key: Key,
+    value: SetStateAction<CostStatisticsPageSession[Key]>,
+  ) => {
+    costPageSession.setValue((current) => ({
+      ...current,
+      [key]: typeof value === "function"
+        ? (value as (currentValue: CostStatisticsPageSession[Key]) => CostStatisticsPageSession[Key])(current[key])
+        : value,
+    }));
+  }, [costPageSession]);
+  const { value: costSession } = costPageSession;
+  const viewMode = costSession.viewMode;
+  const setViewMode = (value: SetStateAction<CostViewMode>) => setCostSessionField("viewMode", value);
+  const costProjectScope = costSession.costProjectScope;
+  const setCostProjectScope = (value: SetStateAction<CostProjectScope>) => setCostSessionField("costProjectScope", value);
+  const timeScopeMode = costSession.timeScopeMode;
+  const setTimeScopeMode = (value: SetStateAction<ExplorerScopeMode>) => setCostSessionField("timeScopeMode", value);
+  const [timeScopePanel, setTimeScopePanel] = useState<ScopePickerPanel | null>("month");
+  const timeScopeYear = costSession.timeScopeYear;
+  const setTimeScopeYear = (value: SetStateAction<string>) => setCostSessionField("timeScopeYear", value);
+  const timeScopeMonth = costSession.timeScopeMonth;
+  const setTimeScopeMonth = (value: SetStateAction<string>) => setCostSessionField("timeScopeMonth", value);
+  const timeScopeStartDate = costSession.timeScopeStartDate;
+  const setTimeScopeStartDate = (value: SetStateAction<string>) => setCostSessionField("timeScopeStartDate", value);
+  const timeScopeEndDate = costSession.timeScopeEndDate;
+  const setTimeScopeEndDate = (value: SetStateAction<string>) => setCostSessionField("timeScopeEndDate", value);
 
-  const [explorerData, setExplorerData] = useState<CostStatisticsExplorer | null>(null);
-  const explorerCacheRef = useRef<Map<string, CostStatisticsExplorer>>(new Map());
-  const [exportReferenceData, setExportReferenceData] = useState<CostStatisticsExplorer | null>(null);
+  const [explorerData, setExplorerData] = useState<CostStatisticsExplorer | null>(() =>
+    getCachedCostStatisticsExplorer(DEFAULT_MONTH, "active"),
+  );
+  const [exportReferenceData, setExportReferenceData] = useState<CostStatisticsExplorer | null>(() =>
+    getCachedCostStatisticsExplorer("all", "active"),
+  );
   const [transactionDetail, setTransactionDetail] = useState<CostTransactionDetail | null>(null);
   const [isExplorerLoading, setIsExplorerLoading] = useState(true);
   const [isExplorerRefreshing, setIsExplorerRefreshing] = useState(false);
@@ -325,29 +437,44 @@ export default function CostStatisticsPage() {
   const [projectExportNames, setProjectExportNames] = useState<string[]>([]);
   const [projectAggregateBy, setProjectAggregateBy] = useState<"month" | "year">("month");
   const [projectExpenseTypes, setProjectExpenseTypes] = useState<string[]>([]);
-  const [projectScopeMode, setProjectScopeMode] = useState<ExplorerScopeMode>("all");
+  const projectScopeMode = costSession.projectScopeMode;
+  const setProjectScopeMode = (value: SetStateAction<ExplorerScopeMode>) => setCostSessionField("projectScopeMode", value);
   const [projectScopePanel, setProjectScopePanel] = useState<ScopePickerPanel | null>(null);
-  const [projectScopeYear, setProjectScopeYear] = useState(DEFAULT_MONTH.slice(0, 4));
-  const [projectScopeMonth, setProjectScopeMonth] = useState(DEFAULT_MONTH);
-  const [projectScopeStartDate, setProjectScopeStartDate] = useState(defaultMonthBounds.startDate);
-  const [projectScopeEndDate, setProjectScopeEndDate] = useState(defaultMonthBounds.endDate);
-  const [bankScopeMode, setBankScopeMode] = useState<ExplorerScopeMode>("all");
+  const projectScopeYear = costSession.projectScopeYear;
+  const setProjectScopeYear = (value: SetStateAction<string>) => setCostSessionField("projectScopeYear", value);
+  const projectScopeMonth = costSession.projectScopeMonth;
+  const setProjectScopeMonth = (value: SetStateAction<string>) => setCostSessionField("projectScopeMonth", value);
+  const projectScopeStartDate = costSession.projectScopeStartDate;
+  const setProjectScopeStartDate = (value: SetStateAction<string>) => setCostSessionField("projectScopeStartDate", value);
+  const projectScopeEndDate = costSession.projectScopeEndDate;
+  const setProjectScopeEndDate = (value: SetStateAction<string>) => setCostSessionField("projectScopeEndDate", value);
+  const bankScopeMode = costSession.bankScopeMode;
+  const setBankScopeMode = (value: SetStateAction<ExplorerScopeMode>) => setCostSessionField("bankScopeMode", value);
   const [bankScopePanel, setBankScopePanel] = useState<ScopePickerPanel | null>(null);
-  const [bankScopeYear, setBankScopeYear] = useState(DEFAULT_MONTH.slice(0, 4));
-  const [bankScopeMonth, setBankScopeMonth] = useState(DEFAULT_MONTH);
-  const [bankScopeStartDate, setBankScopeStartDate] = useState(defaultMonthBounds.startDate);
-  const [bankScopeEndDate, setBankScopeEndDate] = useState(defaultMonthBounds.endDate);
+  const bankScopeYear = costSession.bankScopeYear;
+  const setBankScopeYear = (value: SetStateAction<string>) => setCostSessionField("bankScopeYear", value);
+  const bankScopeMonth = costSession.bankScopeMonth;
+  const setBankScopeMonth = (value: SetStateAction<string>) => setCostSessionField("bankScopeMonth", value);
+  const bankScopeStartDate = costSession.bankScopeStartDate;
+  const setBankScopeStartDate = (value: SetStateAction<string>) => setCostSessionField("bankScopeStartDate", value);
+  const bankScopeEndDate = costSession.bankScopeEndDate;
+  const setBankScopeEndDate = (value: SetStateAction<string>) => setCostSessionField("bankScopeEndDate", value);
 
-  const [expenseTypeScopeMode, setExpenseTypeScopeMode] = useState<ExplorerScopeMode>("month");
+  const expenseTypeScopeMode = costSession.expenseTypeScopeMode;
+  const setExpenseTypeScopeMode = (value: SetStateAction<ExplorerScopeMode>) => setCostSessionField("expenseTypeScopeMode", value);
   const [expenseTypeScopePanel, setExpenseTypeScopePanel] = useState<ScopePickerPanel | null>("month");
-  const [expenseTypeScopeYear, setExpenseTypeScopeYear] = useState(DEFAULT_MONTH.slice(0, 4));
-  const [expenseTypeScopeMonth, setExpenseTypeScopeMonth] = useState(DEFAULT_MONTH);
+  const expenseTypeScopeYear = costSession.expenseTypeScopeYear;
+  const setExpenseTypeScopeYear = (value: SetStateAction<string>) => setCostSessionField("expenseTypeScopeYear", value);
+  const expenseTypeScopeMonth = costSession.expenseTypeScopeMonth;
+  const setExpenseTypeScopeMonth = (value: SetStateAction<string>) => setCostSessionField("expenseTypeScopeMonth", value);
   const [expenseTypeRangeMode, setExpenseTypeRangeMode] = useState<ExportRangeMode>("month");
   const [expenseTypeMonth, setExpenseTypeMonth] = useState(DEFAULT_MONTH);
   const [expenseTypeStartDate, setExpenseTypeStartDate] = useState(defaultMonthBounds.startDate);
   const [expenseTypeEndDate, setExpenseTypeEndDate] = useState(defaultMonthBounds.endDate);
-  const [expenseTypeScopeStartDate, setExpenseTypeScopeStartDate] = useState(defaultMonthBounds.startDate);
-  const [expenseTypeScopeEndDate, setExpenseTypeScopeEndDate] = useState(defaultMonthBounds.endDate);
+  const expenseTypeScopeStartDate = costSession.expenseTypeScopeStartDate;
+  const setExpenseTypeScopeStartDate = (value: SetStateAction<string>) => setCostSessionField("expenseTypeScopeStartDate", value);
+  const expenseTypeScopeEndDate = costSession.expenseTypeScopeEndDate;
+  const setExpenseTypeScopeEndDate = (value: SetStateAction<string>) => setCostSessionField("expenseTypeScopeEndDate", value);
   const [expenseTypeSelections, setExpenseTypeSelections] = useState<string[]>([]);
 
   const [selectedTimeTransactionId, setSelectedTimeTransactionId] = useState<string | null>(null);
@@ -361,25 +488,16 @@ export default function CostStatisticsPage() {
   const [selectedExpenseTransactionId, setSelectedExpenseTransactionId] = useState<string | null>(null);
   const scopeControlsRef = useRef<HTMLDivElement | null>(null);
 
-  const handleRouteToWorkbenchIntent = useCallback((intent: WorkbenchHeaderIntent) => {
-    navigate("/", {
-      state: {
-        workbenchHeaderIntent: intent,
-      },
-    });
-  }, [navigate]);
-
   useLayoutEffect(() => {
     setWorkbenchHeaderActions({
       canMutateData,
       onOpenImport: (mode) => navigate(importWorkflowPath(mode)),
-      onOpenSearch: () => handleRouteToWorkbenchIntent({ type: "open_search" }),
       onOpenSettings: () => navigate("/settings"),
     });
     return () => {
       setWorkbenchHeaderActions(null);
     };
-  }, [canMutateData, handleRouteToWorkbenchIntent, navigate, setWorkbenchHeaderActions]);
+  }, [canMutateData, navigate, setWorkbenchHeaderActions]);
 
   const explorerMonth =
     viewMode === "project" || viewMode === "bank"
@@ -391,8 +509,6 @@ export default function CostStatisticsPage() {
         : expenseTypeScopeMode === "month"
           ? expenseTypeScopeMonth
           : "all";
-  const explorerCacheKey = `${costProjectScope}:${explorerMonth}`;
-
   function resetDetailSelection() {
     setTransactionDetail(null);
     setSelectedTimeTransactionId(null);
@@ -405,7 +521,7 @@ export default function CostStatisticsPage() {
     const controller = new AbortController();
 
     async function loadExplorer() {
-      const cachedPayload = explorerCacheRef.current.get(explorerCacheKey) ?? null;
+      const cachedPayload = getCachedCostStatisticsExplorer(explorerMonth, costProjectScope);
       const hasVisibleData = Boolean(explorerData || cachedPayload);
 
       setLoadError(null);
@@ -430,7 +546,6 @@ export default function CostStatisticsPage() {
       try {
         const payload = await fetchCostStatisticsExplorer(explorerMonth, controller.signal, costProjectScope);
         if (!controller.signal.aborted) {
-          explorerCacheRef.current.set(explorerCacheKey, payload);
           setExplorerData(payload);
           if (explorerMonth === "all") {
             setExportReferenceData(payload);
@@ -450,16 +565,21 @@ export default function CostStatisticsPage() {
 
     void loadExplorer();
     return () => controller.abort();
-  }, [costProjectScope, explorerCacheKey, explorerMonth]);
+  }, [costProjectScope, explorerMonth]);
 
   useEffect(() => {
+    const cachedPayload = getCachedCostStatisticsExplorer("all", costProjectScope);
+    if (cachedPayload) {
+      setExportReferenceData(cachedPayload);
+      return undefined;
+    }
+
     const controller = new AbortController();
 
     async function loadExportReferenceData() {
       try {
         const payload = await fetchCostStatisticsExplorer("all", controller.signal, costProjectScope);
         if (!controller.signal.aborted) {
-          explorerCacheRef.current.set(`${costProjectScope}:all`, payload);
           setExportReferenceData(payload);
         }
       } catch {

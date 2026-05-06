@@ -1,19 +1,26 @@
 import { render } from "@testing-library/react";
-import { MemoryRouter, useNavigate } from "react-router-dom";
+import { MemoryRouter } from "react-router-dom";
 
 import App from "../app/App";
 import MuiProviders from "../app/MuiProviders";
 import { AppChromeProvider } from "../contexts/AppChromeContext";
 import { MonthProvider } from "../contexts/MonthContext";
+import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 import type { SessionPayload } from "../features/session/api";
 import ReconciliationWorkbenchPage from "../pages/ReconciliationWorkbenchPage";
 
 const defaultSession: SessionPayload = {
   allowed: true,
-  userId: 1,
-  username: "TESTFULL001",
-  nickName: "测试全权限",
+  user: {
+    userId: "1",
+    username: "TESTFULL001",
+    nickname: "测试全权限",
+    displayName: "测试全权限",
+    deptId: null,
+    deptName: null,
+    avatar: null,
+  },
   roles: ["fin_ops_user"],
   permissions: ["finops:app:view"],
   accessTier: "full_access",
@@ -34,19 +41,7 @@ export function renderAppAt(pathname: string) {
 }
 
 function WorkbenchPageHarness() {
-  const navigate = useNavigate();
-
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => navigate("/", { state: { workbenchHeaderIntent: { type: "open_search" } } })}
-      >
-        关联台搜索
-      </button>
-      <ReconciliationWorkbenchPage />
-    </>
-  );
+  return <ReconciliationWorkbenchPage />;
 }
 
 export function renderWorkbenchPage() {
@@ -56,7 +51,9 @@ export function renderWorkbenchPage() {
         <AppChromeProvider>
           <MonthProvider>
             <SessionContext.Provider value={staticWorkbenchSession}>
-              <WorkbenchPageHarness />
+              <PageSessionStateProvider>
+                <WorkbenchPageHarness />
+              </PageSessionStateProvider>
             </SessionContext.Provider>
           </MonthProvider>
         </AppChromeProvider>

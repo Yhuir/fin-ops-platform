@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
 
 import CandidateGroupCell from "../components/workbench/CandidateGroupCell";
 import WorkbenchRecordCard from "../components/workbench/WorkbenchRecordCard";
@@ -10,6 +11,7 @@ import { renderWorkbenchPage } from "./renderHelpers";
 describe("Workbench candidate grouping layout", () => {
   const invoiceColumns = getWorkbenchColumns("invoice");
   const invoiceGridStyle = getWorkbenchPaneGridStyle("invoice", undefined, true);
+  const appStyles = readFileSync("src/app/styles.css", "utf8");
 
   function createInvoiceRecord(id: string, invoiceNo: string): WorkbenchRecord {
     return {
@@ -48,6 +50,40 @@ describe("Workbench candidate grouping layout", () => {
       (element) => element.getAttribute("data-testid") ?? "",
     );
   }
+
+  function getCssRuleBody(selector: string) {
+    const selectorIndex = appStyles.indexOf(selector);
+    expect(selectorIndex).toBeGreaterThanOrEqual(0);
+    const openBraceIndex = appStyles.indexOf("{", selectorIndex);
+    const closeBraceIndex = appStyles.indexOf("}", openBraceIndex);
+    expect(openBraceIndex).toBeGreaterThan(selectorIndex);
+    expect(closeBraceIndex).toBeGreaterThan(openBraceIndex);
+    return appStyles.slice(openBraceIndex + 1, closeBraceIndex);
+  }
+
+  function getStandaloneCssRuleBody(selector: string, occurrence = 0) {
+    let selectorIndex = -1;
+    let searchFrom = 0;
+    for (let index = 0; index <= occurrence; index += 1) {
+      selectorIndex = appStyles.indexOf(`${selector} {`, searchFrom);
+      searchFrom = selectorIndex + 1;
+    }
+    expect(selectorIndex).toBeGreaterThanOrEqual(0);
+    const openBraceIndex = appStyles.indexOf("{", selectorIndex);
+    const closeBraceIndex = appStyles.indexOf("}", openBraceIndex);
+    expect(openBraceIndex).toBeGreaterThan(selectorIndex);
+    expect(closeBraceIndex).toBeGreaterThan(openBraceIndex);
+    return appStyles.slice(openBraceIndex + 1, closeBraceIndex);
+  }
+
+  test("allows invoice candidate rows to grow vertically while long text stays inside cells", () => {
+    expect(getCssRuleBody(".record-card-invoice.record-card-has-action")).not.toMatch(/\bheight\s*:/);
+    expect(getStandaloneCssRuleBody(".record-card-cell", 1)).toMatch(/overflow:\s*hidden/);
+    expect(getStandaloneCssRuleBody(".record-card-cell-content")).not.toMatch(/(?:^|\n)\s*height\s*:\s*100%/);
+    expect(getStandaloneCssRuleBody(".record-card-cell-content")).toMatch(/overflow:\s*hidden/);
+    expect(getStandaloneCssRuleBody(".record-card-cell.column-compact .cell-text-value-full")).toMatch(/overflow-wrap:\s*anywhere/);
+    expect(getStandaloneCssRuleBody(".record-card-cell.column-compact .cell-text-value-full")).toMatch(/word-break:\s*break-word/);
+  });
 
   test("renders OA, bank, and invoice candidates on the same horizontal group row", async () => {
     installMockApiFetch();

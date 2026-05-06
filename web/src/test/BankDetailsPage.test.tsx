@@ -3,13 +3,45 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 
 import MuiProviders from "../app/MuiProviders";
+import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
+import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
+import type { SessionPayload } from "../features/session/api";
 import BankDetailsPage from "../pages/BankDetailsPage";
 import { installMockApiFetch } from "./apiMock";
+
+const defaultSession: SessionPayload = {
+  allowed: true,
+  user: {
+    userId: "1",
+    username: "TESTFULL001",
+    nickname: "测试全权限",
+    displayName: "测试全权限",
+    deptId: null,
+    deptName: null,
+    avatar: null,
+  },
+  roles: ["fin_ops_user"],
+  permissions: ["finops:app:view"],
+  accessTier: "full_access",
+  canAccessApp: true,
+  canMutateData: true,
+  canAdminAccess: false,
+};
+
+const staticSession: SessionContextValue = {
+  status: "authenticated",
+  session: defaultSession,
+  refresh: () => undefined,
+};
 
 function renderBankDetailsPage() {
   return render(
     <MuiProviders>
-      <BankDetailsPage />
+      <SessionContext.Provider value={staticSession}>
+        <PageSessionStateProvider>
+          <BankDetailsPage />
+        </PageSessionStateProvider>
+      </SessionContext.Provider>
     </MuiProviders>,
   );
 }

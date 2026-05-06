@@ -34,6 +34,12 @@ export default function AppTopBar({
   onOpenMobileSidebar,
   onAcknowledgeJob,
 }: AppTopBarProps) {
+  const hasStatusContent = Boolean(primaryJob || connectionFailed || progress);
+
+  if (!isCompact && !hasStatusContent) {
+    return null;
+  }
+
   return (
     <AppBar
       className={`global-header${embedded ? " embedded-header" : ""}`}
