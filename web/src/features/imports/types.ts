@@ -23,6 +23,34 @@ export type ImportSessionSummary = {
   fileCount: number;
   status: string;
   createdAt: string;
+  audit?: ImportPreviewAuditCounts;
+};
+
+export type ImportPreviewAuditCounts = {
+  originalCount: number;
+  uniqueCount: number;
+  duplicateCount: number;
+  duplicateInFileCount: number;
+  duplicateAcrossFilesCount: number;
+  existingDuplicateCount: number;
+  importableCount: number;
+  updateCount: number;
+  mergeCount: number;
+  suspectedDuplicateCount: number;
+  errorCount: number;
+  confirmableCount: number;
+  skippedCount: number;
+};
+
+export type ImportPreviewDuplicateGroup = {
+  identityKey: string;
+  recordType: string;
+  duplicateType: string;
+  rows: Array<{
+    fileId: string;
+    fileName: string;
+    rowNo: number;
+  }>;
 };
 
 export type ImportRowResult = {
@@ -46,6 +74,7 @@ export type ImportFilePreview = {
   duplicateCount: number;
   suspectedDuplicateCount: number;
   updatedCount: number;
+  audit?: ImportPreviewAuditCounts;
   previewBatchId?: string | null;
   batchId?: string | null;
   storedFilePath?: string | null;
@@ -93,6 +122,7 @@ export type MatchingRunSummary = {
 export type ImportSessionPayload = {
   session: ImportSessionSummary;
   files: ImportFilePreview[];
+  duplicateGroups: ImportPreviewDuplicateGroup[];
   matchingRun?: MatchingRunSummary;
   job?: BackgroundJob;
 };

@@ -1,7 +1,7 @@
 import unittest
 
 from fin_ops_platform.services.workbench_candidate_match_service import WorkbenchCandidateMatchService
-from fin_ops_platform.services.workbench_matching_rules import WorkbenchMatchingRules
+from fin_ops_platform.services.workbench_matching_rules import MAX_SUM_MATCH_CANDIDATES, WorkbenchMatchingRules
 
 
 class WorkbenchMatchingRulesTests(unittest.TestCase):
@@ -73,6 +73,55 @@ class WorkbenchMatchingRulesTests(unittest.TestCase):
         candidate = find_candidate(candidates, "oa_multi_invoice_exact_sum")
         self.assertEqual(candidate["oa_row_ids"], ["oa-travel"])
         self.assertCountEqual(candidate["invoice_row_ids"], ["invoice-hotel", "invoice-flight"])
+
+    def test_oa_multi_invoice_exact_sum_is_bounded_for_many_compatible_rows(self) -> None:
+        invoice_rows = [
+            invoice_row(f"invoice-noise-{index:03d}", "1.00", seller_name=f"供应商{index:03d}")
+            for index in range(160)
+        ]
+
+        candidates = self.rules.generate_candidates(
+            "2026-05",
+            oa_rows=[oa_row("oa-large", "300.00", counterparty_name="")],
+            bank_rows=[],
+            invoice_rows=invoice_rows,
+        )
+
+        self.assertIsNone(find_optional_candidate(candidates, "oa_multi_invoice_exact_sum"))
+
+    def test_sum_match_candidate_cap_records_skipped_summary_without_candidates(self) -> None:
+        invoice_rows = [
+            invoice_row(f"invoice-cap-{index:03d}", "1.00", seller_name="供应商A")
+            for index in range(MAX_SUM_MATCH_CANDIDATES + 1)
+        ]
+
+        candidates = self.rules.generate_candidates(
+            "2026-05",
+            oa_rows=[oa_row("oa-cap", "3.00", counterparty_name="供应商A")],
+            bank_rows=[],
+            invoice_rows=invoice_rows,
+        )
+
+        self.assertIsNone(find_optional_candidate(candidates, "oa_multi_invoice_exact_sum"))
+        summary = self.rules.last_summary()
+        self.assertEqual(summary["skipped_rule_count"], 1)
+        self.assertEqual(summary["skipped_rules"][0]["rule_code"], "oa_multi_invoice_exact_sum")
+        self.assertEqual(summary["skipped_rules"][0]["reason"], "sum_match_candidate_cap_exceeded")
+
+    def test_oa_bank_multi_invoice_ambiguous_sum_does_not_auto_close(self) -> None:
+        candidates = self.rules.generate_candidates(
+            "2026-05",
+            oa_rows=[oa_row("oa-ambiguous", "300.00", counterparty_name="供应商A")],
+            bank_rows=[bank_row("bank-ambiguous", "300.00", counterparty_name="供应商A")],
+            invoice_rows=[
+                invoice_row("invoice-100", "100.00", seller_name="供应商A"),
+                invoice_row("invoice-200", "200.00", seller_name="供应商A"),
+                invoice_row("invoice-150-a", "150.00", seller_name="供应商A"),
+                invoice_row("invoice-150-b", "150.00", seller_name="供应商A"),
+            ],
+        )
+
+        self.assertIsNone(find_optional_candidate(candidates, "oa_bank_multi_invoice_exact_sum"))
 
     def test_oa_bank_multi_invoice_exact_sum_auto_closes_when_loop_matches(self) -> None:
         candidates = self.rules.generate_candidates(
@@ -263,6 +312,11 @@ def find_candidate(candidates: list[dict[str, object]], rule_code: str) -> dict[
     if not matches:
         raise AssertionError(f"missing candidate for rule {rule_code}; got {[item['rule_code'] for item in candidates]}")
     return matches[0]
+
+
+def find_optional_candidate(candidates: list[dict[str, object]], rule_code: str) -> dict[str, object] | None:
+    matches = [candidate for candidate in candidates if candidate["rule_code"] == rule_code]
+    return matches[0] if matches else None
 
 
 def oa_row(

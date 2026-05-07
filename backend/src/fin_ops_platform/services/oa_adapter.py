@@ -29,7 +29,7 @@ class OAApplicationRecord:
     relation_tone: str
     expense_type: str | None = None
     expense_content: str | None = None
-    detail_fields: dict[str, str] = field(default_factory=dict)
+    detail_fields: dict[str, Any] = field(default_factory=dict)
     attachment_invoices: list[dict[str, str]] = field(default_factory=list)
     attachment_file_count: int = 0
     expense_items: list[dict[str, str]] = field(default_factory=list)
@@ -38,6 +38,8 @@ class OAApplicationRecord:
     source: str | None = None
     etc_batch_id: str | None = None
     tags: list[str] = field(default_factory=list)
+    project_name_display: str | None = None
+    project_names: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

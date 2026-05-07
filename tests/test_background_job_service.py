@@ -81,6 +81,27 @@ class BackgroundJobServiceTests(unittest.TestCase):
         self.assertEqual(acknowledged.status, "acknowledged")
         self.assertEqual(after_ack, [])
 
+    def test_succeeded_job_is_not_active_after_recent_success_window(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ApplicationStateStore(Path(temp_dir))
+            service = BackgroundJobService(store, recent_success_seconds=8)
+            job = service.create_job(
+                job_type="file_import",
+                label="导入 银行流水",
+                owner_user_id="user-001",
+                total=2,
+            )
+            service.succeed_job(job.job_id, "银行流水导入完成。")
+            jobs = store.load_background_jobs()
+            old_time = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
+            jobs[job.job_id]["finished_at"] = old_time
+            jobs[job.job_id]["updated_at"] = old_time
+            store.save_background_jobs(jobs)
+
+            active_jobs = service.list_active_jobs("user-001")
+
+        self.assertEqual(active_jobs, [])
+
     def test_failed_job_remains_active_until_acknowledged(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = self._service(temp_dir)
@@ -101,6 +122,25 @@ class BackgroundJobServiceTests(unittest.TestCase):
         self.assertEqual(before_ack[0].job_id, job.job_id)
         self.assertEqual(before_ack[0].error, "boom")
         self.assertEqual(after_ack, [])
+
+    def test_acknowledge_job_is_idempotent_for_visible_acknowledged_job(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+            job = service.create_job(
+                job_type="file_import",
+                label="导入 银行流水",
+                owner_user_id="user-001",
+            )
+            service.fail_job(job.job_id, "银行流水导入失败。", "boom")
+
+            first_ack = service.acknowledge_job(job.job_id, "user-001")
+            second_ack = service.acknowledge_job(job.job_id, "user-001")
+            active_jobs = service.list_active_jobs("user-001")
+
+        self.assertEqual(first_ack.status, "acknowledged")
+        self.assertEqual(second_ack.status, "acknowledged")
+        self.assertEqual(second_ack.acknowledged_at, first_ack.acknowledged_at)
+        self.assertEqual(active_jobs, [])
 
     def test_idempotent_create_returns_existing_unfailed_job(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -242,6 +282,8 @@ class BackgroundJobServiceTests(unittest.TestCase):
             get_payload = json.loads(get_response.body)
             ack_response = app.handle_request("POST", f"/api/background-jobs/{job.job_id}/acknowledge", body="{}")
             ack_payload = json.loads(ack_response.body)
+            second_ack_response = app.handle_request("POST", f"/api/background-jobs/{job.job_id}/acknowledge", body="{}")
+            second_ack_payload = json.loads(second_ack_response.body)
             active_after_ack = json.loads(app.handle_request("GET", "/api/background-jobs/active").body)
 
         self.assertEqual(active_response.status_code, 200)
@@ -251,6 +293,9 @@ class BackgroundJobServiceTests(unittest.TestCase):
         self.assertEqual(get_payload["job"]["job_id"], job.job_id)
         self.assertEqual(ack_response.status_code, 200)
         self.assertEqual(ack_payload["job"]["status"], "acknowledged")
+        self.assertEqual(second_ack_response.status_code, 200)
+        self.assertEqual(second_ack_payload["job"]["status"], "acknowledged")
+        self.assertEqual(second_ack_payload["job"]["acknowledged_at"], ack_payload["job"]["acknowledged_at"])
         self.assertEqual(active_after_ack["jobs"], [])
 
 

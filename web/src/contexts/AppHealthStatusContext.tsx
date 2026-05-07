@@ -20,11 +20,14 @@ import {
 } from "../features/appHealth/broadcast";
 import { resolveAppHealthStatus } from "../features/appHealth/resolveAppHealthStatus";
 import type {
+  ApiAppHealthJobSummary,
   ApiAppHealthPayload,
   ApiOaSyncStatus,
   AppHealthBackgroundJobsSource,
+  AppHealthJobSummary,
   AppHealthImportProgressSource,
   AppHealthOaSyncSource,
+  AppHealthResolveDetails,
   AppHealthSessionSource,
   AppHealthSources,
   AppHealthStatus,
@@ -50,11 +53,26 @@ function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
-function hasAttentionJob(jobs: Array<{ status: string }>) {
+type LocalHealthJob = {
+  jobId?: string;
+  job_id?: string;
+  type?: string;
+  label?: string;
+  shortLabel?: string;
+  short_label?: string;
+  status: string;
+  message?: string;
+  retryable?: boolean;
+  acknowledgeable?: boolean;
+  affectedMonths?: string[];
+  affected_months?: string[];
+};
+
+function hasAttentionJob(jobs: LocalHealthJob[]) {
   return jobs.some((job) => job.status === "failed" || job.status === "partial_success");
 }
 
-function hasRunningJob(jobs: Array<{ status: string }>) {
+function hasRunningJob(jobs: LocalHealthJob[]) {
   return jobs.some((job) => job.status === "queued" || job.status === "running");
 }
 
@@ -83,7 +101,7 @@ function sessionSourceFromApi(payload: ApiAppHealthPayload | null): AppHealthSes
 }
 
 function backgroundSourceFromLocal(
-  jobs: Array<{ status: string }>,
+  jobs: LocalHealthJob[],
   connectionFailed: boolean,
   apiPayload: ApiAppHealthPayload | null,
 ): AppHealthBackgroundJobsSource {
@@ -131,6 +149,76 @@ function dirtyScopeCount(payload: ApiAppHealthPayload | null) {
   return scopes.length;
 }
 
+function cleanStringArray(values: unknown): string[] {
+  return Array.isArray(values)
+    ? values.map((value) => String(value ?? "").trim()).filter(Boolean)
+    : [];
+}
+
+function isMonthScope(value: string) {
+  return /^\d{4}-\d{2}$/.test(value);
+}
+
+function mapApiJobSummary(job: ApiAppHealthJobSummary | null | undefined): AppHealthJobSummary | null {
+  if (!job) {
+    return null;
+  }
+  return {
+    jobId: job.job_id ?? job.jobId ?? "",
+    type: job.type ?? "",
+    label: job.label ?? "",
+    shortLabel: job.short_label ?? job.shortLabel ?? "",
+    status: job.status ?? "",
+    message: job.message,
+    retryable: job.retryable,
+    acknowledgeable: job.acknowledgeable,
+    affectedMonths: job.affected_months ?? job.affectedMonths ?? [],
+  };
+}
+
+function mapLocalJobSummary(job: LocalHealthJob | undefined): AppHealthJobSummary | null {
+  if (!job) {
+    return null;
+  }
+  return {
+    jobId: job.jobId ?? job.job_id ?? "",
+    type: job.type ?? "",
+    label: job.label ?? "",
+    shortLabel: job.shortLabel ?? job.short_label ?? "",
+    status: job.status,
+    message: job.message,
+    retryable: job.retryable,
+    acknowledgeable: job.acknowledgeable,
+    affectedMonths: job.affectedMonths ?? job.affected_months ?? [],
+  };
+}
+
+function jobTime(job: LocalHealthJob) {
+  const updatedAt = "updatedAt" in job ? String((job as { updatedAt?: unknown }).updatedAt ?? "") : "";
+  const updated_at = "updated_at" in job ? String((job as { updated_at?: unknown }).updated_at ?? "") : "";
+  const createdAt = "createdAt" in job ? String((job as { createdAt?: unknown }).createdAt ?? "") : "";
+  const value = Date.parse(updatedAt || updated_at || createdAt || "");
+  return Number.isFinite(value) ? value : 0;
+}
+
+function chooseLocalRunningJob(jobs: LocalHealthJob[]) {
+  return [...jobs]
+    .filter((job) => job.status === "queued" || job.status === "running")
+    .sort((left, right) => jobTime(right) - jobTime(left))[0];
+}
+
+function chooseLocalAttentionJob(jobs: LocalHealthJob[]) {
+  return [...jobs]
+    .filter((job) => job.status === "failed" || job.status === "partial_success")
+    .sort((left, right) => {
+      const statusDelta = (left.status === "failed" ? 0 : 1) - (right.status === "failed" ? 0 : 1);
+      if (statusDelta !== 0) {
+        return statusDelta;
+      }
+      return jobTime(right) - jobTime(left);
+    })[0];
+}
+
 function oaSyncSourceFromPayload(
   apiPayload: ApiAppHealthPayload | null,
   fallbackOaSync: ApiOaSyncStatus | null,
@@ -149,20 +237,45 @@ function detailFromPayload(
   apiPayload: ApiAppHealthPayload | null,
   fallbackOaSync: ApiOaSyncStatus | null,
   shellReason: string | undefined,
-) {
+  jobs: LocalHealthJob[],
+): AppHealthResolveDetails {
   const dependencyMessage = Object.values(apiPayload?.dependencies ?? {}).find((dependency) => {
     if (!dependency || typeof dependency !== "object") {
       return false;
     }
     return typeof (dependency as { message?: unknown }).message === "string";
   }) as { message?: string } | undefined;
-  return (
+  const fallbackReason = (
     dependencyMessage?.message
     ?? apiPayload?.oa_sync?.message
     ?? fallbackOaSync?.message
     ?? shellReason
     ?? ""
   );
+  const backgroundJobs = apiPayload?.background_jobs;
+  const workbench = apiPayload?.workbench_read_model;
+  const matchingDirtyEntries = Array.isArray(workbench?.matching_dirty_scopes)
+    ? workbench?.matching_dirty_scopes ?? []
+    : [];
+  const matchingDirtyMonths = matchingDirtyEntries
+    .map((entry) => String(entry?.scope_month ?? "").trim())
+    .filter(Boolean);
+  return {
+    fallbackReason,
+    details: [
+      dependencyMessage?.message,
+      workbench?.last_matching_error ?? undefined,
+      shellReason,
+    ].filter(Boolean) as string[],
+    primaryRunning: mapApiJobSummary(backgroundJobs?.primary_running ?? backgroundJobs?.primaryRunning) ?? mapLocalJobSummary(chooseLocalRunningJob(jobs)),
+    primaryAttention: mapApiJobSummary(backgroundJobs?.primary_attention ?? backgroundJobs?.primaryAttention) ?? mapLocalJobSummary(chooseLocalAttentionJob(jobs)),
+    attentionCount: backgroundJobs?.attention ?? jobs.filter((job) => job.status === "failed" || job.status === "partial_success").length,
+    matchingRunningMonths: cleanStringArray(workbench?.matching_running_scopes),
+    matchingDirtyMonths: matchingDirtyMonths.length > 0
+      ? matchingDirtyMonths
+      : cleanStringArray(workbench?.dirty_scopes ?? []).filter(isMonthScope),
+    matchingError: workbench?.last_matching_error ?? null,
+  };
 }
 
 export function AppHealthStatusProvider({ children }: { children: ReactNode }) {
@@ -344,7 +457,7 @@ export function AppHealthStatusProvider({ children }: { children: ReactNode }) {
       oaSync: oaSyncSourceFromPayload(apiPayload, fallbackOaSync),
       workbench,
     };
-    const detailReason = detailFromPayload(apiPayload, fallbackOaSync, workbenchStatus?.reason);
+    const detailReason = detailFromPayload(apiPayload, fallbackOaSync, workbenchStatus?.reason, jobs);
     const resolved = resolveAppHealthStatus(sources, detailReason);
     return canMutateData ? resolved : { ...resolved, blocksMutations: true };
   }, [

@@ -325,6 +325,8 @@ class BackgroundJobService:
         def mutate(job: BackgroundJob) -> None:
             if not self._can_view(job, owner, include_system=True):
                 raise BackgroundJobAccessError(job.job_id)
+            if job.status == "acknowledged":
+                return
             now = self._now()
             job.status = "acknowledged"
             job.acknowledged_at = now

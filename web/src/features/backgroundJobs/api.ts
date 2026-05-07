@@ -17,6 +17,11 @@ export type ApiBackgroundJob = {
   message?: string;
   result_summary?: Record<string, unknown>;
   resultSummary?: Record<string, unknown>;
+  source?: Record<string, unknown>;
+  retryable?: boolean;
+  acknowledgeable?: boolean;
+  affected_months?: string[];
+  affectedMonths?: string[];
   error?: string | null;
   created_at?: string;
   createdAt?: string;
@@ -73,6 +78,12 @@ function toBackgroundJobStatus(value: unknown): BackgroundJobStatus {
   return "queued";
 }
 
+function toStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.map((item) => String(item ?? "").trim()).filter(Boolean)
+    : [];
+}
+
 export function mapBackgroundJob(job: ApiBackgroundJob): BackgroundJob {
   const jobId = job.job_id ?? job.jobId ?? "";
   return {
@@ -87,6 +98,10 @@ export function mapBackgroundJob(job: ApiBackgroundJob): BackgroundJob {
     percent: toNumber(job.percent),
     message: job.message ?? "",
     resultSummary: job.result_summary ?? job.resultSummary ?? {},
+    source: job.source ?? {},
+    retryable: job.retryable === true,
+    acknowledgeable: job.acknowledgeable !== false,
+    affectedMonths: toStringArray(job.affected_months ?? job.affectedMonths),
     error: job.error ?? null,
     createdAt: job.created_at ?? job.createdAt ?? "",
     updatedAt: job.updated_at ?? job.updatedAt ?? "",
@@ -110,4 +125,14 @@ export async function acknowledgeBackgroundJob(jobId: string, signal?: AbortSign
     signal,
   });
   return mapBackgroundJob(payload.job ?? { job_id: jobId, status: "acknowledged" });
+}
+
+export async function retryBackgroundJob(job: BackgroundJob, signal?: AbortSignal): Promise<void> {
+  if (!job.retryable) {
+    throw new Error("当前后台任务没有可用的重新执行入口");
+  }
+  await requestJson<unknown>(`/api/background-jobs/${encodeURIComponent(job.jobId)}/retry`, {
+    method: "POST",
+    signal,
+  });
 }

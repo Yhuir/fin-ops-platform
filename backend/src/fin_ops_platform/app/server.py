@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from contextlib import nullcontext
 from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
@@ -49,6 +50,7 @@ from fin_ops_platform.services.cost_statistics_service import CostStatisticsServ
 from fin_ops_platform.services.etc_service import (
     EtcBatchNotFoundError,
     EtcDraftRequestError,
+    EtcImportPreviewStaleError,
     EtcOAClientError,
     EtcInvoiceNotFoundError,
     EtcInvoiceRequestError,
@@ -60,6 +62,7 @@ from fin_ops_platform.services.etc_service import (
     UploadedEtcZipFile,
 )
 from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile
+from fin_ops_platform.services.import_preview_audit import ImportPreviewStaleError
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.integrations import IntegrationHubService
 from fin_ops_platform.services.ledgers import LedgerReminderService
@@ -104,7 +107,7 @@ from fin_ops_platform.services.seeds import build_demo_seed
 
 OA_INVOICE_OFFSET_AUTO_MATCH_MODE = "oa_invoice_offset_auto_match"
 OA_INVOICE_OFFSET_TAG = "冲"
-WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-06-oa-expense-multi-invoice-sum"
+WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-07-invoice-etc-unified-identity"
 SYSTEM_AUTO_PAIR_RELATION_MODES = {
     "salary_personal_auto_match",
     "internal_transfer_pair",
@@ -323,6 +326,7 @@ class Application:
         self._bank_details_service = BankDetailsService(self._import_service)
         self._tax_certified_import_service = TaxCertifiedImportService(state_store=self._state_store)
         self._etc_service = EtcService(state_store=self._state_store)
+        self._etc_service.set_canonical_invoice_key_exists(self._canonical_invoice_key_exists_for_etc_import)
         self._background_job_service = BackgroundJobService(self._state_store)
         self._app_health_service = AppHealthService()
         self._app_health_alert_service = AppHealthAlertService.from_snapshot(
@@ -455,6 +459,9 @@ class Application:
         if method == "POST" and route_path.startswith("/api/background-jobs/") and route_path.endswith("/acknowledge"):
             job_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._handle_api_background_job_acknowledge(job_id, headers)
+        if method == "POST" and route_path.startswith("/api/background-jobs/") and route_path.endswith("/retry"):
+            job_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_background_job_retry(job_id, headers)
         if method == "POST" and route_path == "/api/etc/import/preview":
             return self._handle_api_etc_import_preview(body, headers)
         if method == "POST" and route_path == "/api/etc/import/confirm":
@@ -1155,6 +1162,94 @@ class Application:
             )
         return self._json_response(HTTPStatus.OK, {"job": job.to_payload()})
 
+    def _handle_api_background_job_retry(self, job_id: str, headers: dict[str, str] | None) -> Response:
+        owner_user_id = self._resolve_background_job_owner(headers)
+        try:
+            job = self._background_job_service.get_job(job_id, owner_user_id)
+        except (BackgroundJobNotFoundError, BackgroundJobAccessError):
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "background_job_not_found", "message": "后台任务不存在或不可见。"},
+            )
+        if job.type == "file_import":
+            return self._retry_file_import_background_job(job, owner_user_id)
+        return self._json_response(
+            HTTPStatus.BAD_REQUEST,
+            {"error": "background_job_retry_not_supported", "message": "当前后台任务没有可用的重新执行入口。"},
+        )
+
+    def _retry_file_import_background_job(self, job, owner_user_id: str) -> Response:
+        source = job.source if isinstance(job.source, dict) else {}
+        session_id = str(source.get("session_id") or "").strip()
+        selected_file_ids = [
+            str(file_id).strip()
+            for file_id in list(source.get("selected_file_ids") or [])
+            if str(file_id).strip()
+        ]
+        if not session_id or not selected_file_ids:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "background_job_retry_not_supported", "message": "导入任务缺少重新执行所需的 session_id 或 selected_file_ids。"},
+            )
+        try:
+            session = self._file_import_service.get_session(session_id)
+        except KeyError:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "import_file_session_not_found", "message": "导入会话不存在。"},
+            )
+        selected = set(selected_file_ids)
+        selected_files = [file for file in list(getattr(session, "files", []) or []) if str(getattr(file, "id", "")) in selected]
+        if not selected_files:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "import_file_session_not_found", "message": "导入会话中没有可重试的文件。"},
+            )
+
+        confirmed_files = [file for file in selected_files if str(getattr(file, "status", "")) == "confirmed"]
+        if confirmed_files:
+            scope_months = self._workbench_matching_scope_months_for_import_file_session(session, selected_file_ids)
+            retry_job = self._enqueue_workbench_auto_matching_for_scopes(
+                scope_months,
+                reason="file_import_retry_after_confirm",
+                owner_user_id=owner_user_id,
+                source={
+                    "session_id": session_id,
+                    "selected_file_ids": selected_file_ids,
+                    "retry_of_job_id": job.job_id,
+                },
+                triggered_by=f"background_job_retry:{job.job_id}",
+            )
+            self._background_job_service.acknowledge_job(job.job_id, owner_user_id)
+            self._persist_state()
+            return self._json_response(
+                HTTPStatus.ACCEPTED,
+                {
+                    "job": retry_job.to_payload() if retry_job is not None else None,
+                    "retry_mode": "workbench_matching",
+                },
+            )
+
+        try:
+            session = self._file_import_service.retry_session_files(
+                session_id=session_id,
+                selected_file_ids=selected_file_ids,
+            )
+        except ValueError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_import_file_retry_request", "message": str(exc)},
+            )
+        self._background_job_service.acknowledge_job(job.job_id, owner_user_id)
+        self._persist_state()
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "session": self._serialize_file_session(session),
+                "retry_mode": "file_preview",
+            },
+        )
+
     def _resolve_background_job_owner(self, headers: dict[str, str] | None) -> str:
         try:
             session = resolve_oa_request_session(
@@ -1198,6 +1293,9 @@ class Application:
         normalized_session_id = session_id.strip()
         try:
             total = self._etc_service.get_import_session_item_total(normalized_session_id)
+            self._etc_service.validate_import_session_preview_fresh(normalized_session_id)
+        except EtcImportPreviewStaleError as error:
+            return self._json_response(HTTPStatus.CONFLICT, {"error": "preview_stale", "message": str(error)})
         except EtcServiceError as error:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_import_session_not_found", "message": str(error)})
 
@@ -1223,7 +1321,7 @@ class Application:
             message="ETC发票导入任务已创建。",
             result_summary=initial_summary,
             source={"session_id": normalized_session_id},
-            affected_scopes=["etc_invoices"],
+            affected_scopes=["etc_invoices", "imports", "workbench"],
             reuse_any_status=True,
         )
         if not created:
@@ -1245,6 +1343,8 @@ class Application:
                 normalized_session_id,
                 progress_callback=progress_callback,
             )
+            changed_months = self._sync_etc_import_result_to_canonical_invoices(result)
+            self._refresh_after_etc_invoice_sync(changed_months, reason="etc_invoice_import_confirm")
             summary = self._etc_import_job_summary(result, total)
             result_summary = {key: value for key, value in summary.items() if key != "total_current"}
             status = "partial_success" if result.failed > 0 else "succeeded"
@@ -1276,6 +1376,53 @@ class Application:
             "total": total,
             "total_current": total_current,
         }
+
+    def _sync_etc_import_result_to_canonical_invoices(self, result: object) -> list[str]:
+        invoice_numbers = [
+            str(getattr(item, "invoice_number", "") or "").strip()
+            for item in list(getattr(result, "items", []) or [])
+            if str(getattr(item, "invoice_number", "") or "").strip()
+        ]
+        return self._sync_etc_invoices_to_canonical_invoices(
+            self._etc_service.list_invoices_by_numbers(invoice_numbers),
+        )
+
+    def _canonical_invoice_key_exists_for_etc_import(self, canonical_key: str) -> bool:
+        normalized_key = str(canonical_key or "").strip()
+        if not normalized_key:
+            return False
+        for invoice in self._import_service.list_invoices():
+            if str(getattr(invoice, "source_unique_key", "") or "").strip() == normalized_key:
+                return True
+            if str(getattr(invoice, "digital_invoice_no", "") or "").strip() == normalized_key:
+                return True
+        return False
+
+    def _sync_etc_invoices_to_canonical_invoices(self, etc_invoices: list[object]) -> list[str]:
+        changed_months: set[str] = set()
+        for etc_invoice in etc_invoices:
+            invoice = self._import_service.upsert_etc_invoice(etc_invoice)
+            for date_value in (
+                getattr(invoice, "invoice_date", None),
+                getattr(etc_invoice, "issue_date", None),
+                getattr(etc_invoice, "passage_start_date", None),
+                getattr(etc_invoice, "passage_end_date", None),
+            ):
+                if isinstance(date_value, str) and SEARCH_MONTH_RE.match(date_value[:7]):
+                    changed_months.add(date_value[:7])
+        return sorted(changed_months)
+
+    def _refresh_after_etc_invoice_sync(self, changed_months: list[str], *, reason: str) -> None:
+        normalized_months = [
+            month
+            for month in sorted(dict.fromkeys(str(month).strip() for month in changed_months))
+            if SEARCH_MONTH_RE.match(month)
+        ]
+        if not normalized_months:
+            return
+        self._invalidate_tax_offset_read_model_scopes(normalized_months, reason=reason)
+        self._run_workbench_auto_matching_for_scopes(normalized_months, reason=reason)
+        self._persist_state_with_workbench_invalidation(cost_statistics_scope_keys=normalized_months)
 
     def _handle_api_etc_invoices(
         self,
@@ -1344,6 +1491,10 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_etc_invoice_request", "message": str(error)},
             )
+        changed_months = self._sync_etc_invoices_to_canonical_invoices(
+            self._etc_service.list_invoices_by_ids(invoice_ids),
+        )
+        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_invoice_revoke_submitted")
         return self._json_response(HTTPStatus.OK, result)
 
     def _handle_api_etc_batch_draft(self, body: str | bytes | None, headers: dict[str, str] | None = None) -> Response:
@@ -1370,6 +1521,10 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_etc_draft_request", "message": str(error)},
             )
+        changed_months = self._sync_etc_invoices_to_canonical_invoices(
+            self._etc_service.list_invoices_by_ids(invoice_ids),
+        )
+        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_oa_draft_created")
         return self._json_response(
             HTTPStatus.OK,
             {
@@ -1398,6 +1553,10 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_etc_batch_request", "message": str(error)},
             )
+        changed_months = self._sync_etc_invoices_to_canonical_invoices(
+            self._etc_service.list_invoices_by_ids(list(batch.invoice_ids)),
+        )
+        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_oa_submission_confirmed")
         return self._json_response(HTTPStatus.OK, {"batch": batch})
 
     def _handle_api_etc_batch_mark_not_submitted(self, batch_id: str) -> Response:
@@ -1405,6 +1564,10 @@ class Application:
             batch = self._etc_service.mark_not_submitted(batch_id)
         except EtcBatchNotFoundError as error:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_batch_not_found", "message": str(error)})
+        changed_months = self._sync_etc_invoices_to_canonical_invoices(
+            self._etc_service.list_invoices_by_ids(list(batch.invoice_ids)),
+        )
+        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_oa_submission_reopened")
         return self._json_response(HTTPStatus.OK, {"batch": batch})
 
     def _handle_api_session_me(self, headers: dict[str, str] | None) -> Response:
@@ -2609,6 +2772,11 @@ class Application:
         )
 
     def _get_api_workbench_row_detail_payload(self, row_id: str) -> dict[str, object]:
+        etc_summary_row = self._etc_invoice_summary_row_detail(row_id)
+        if etc_summary_row is not None:
+            payload = {"row": etc_summary_row}
+            payload["row"] = self._workbench_override_service.apply_to_row(payload["row"])
+            return payload
         try:
             payload = {"row": self._live_workbench_service.get_row_detail(row_id)}
         except KeyError:
@@ -4629,6 +4797,19 @@ class Application:
                 HTTPStatus.NOT_FOUND,
                 {"error": "import_file_session_not_found", "message": f"Unknown selected file ids: {', '.join(unknown_ids)}"},
             )
+        try:
+            if any(item.id in selected and item.status == "preview_ready" for item in session.files):
+                self._file_import_service.assert_session_preview_current(session_id=normalized_session_id)
+        except ImportPreviewStaleError as exc:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": "preview_stale",
+                    "message": "Preview audit is stale. Refresh the preview before confirming.",
+                    "preview_audit": exc.preview,
+                    "current_audit": exc.current,
+                },
+            )
         total = len(normalized_selected_file_ids)
         label = self._file_import_job_label(session, normalized_selected_file_ids)
         owner_user_id = self._resolve_background_job_owner(headers)
@@ -4668,16 +4849,25 @@ class Application:
                     selected_file_ids=normalized_selected_file_ids,
                     progress_callback=progress_callback,
                 )
-                matching_run = None
+                confirmed_count = sum(1 for file in confirmed_session.files if file.id in selected and file.status == "confirmed")
+                scope_months = self._workbench_matching_scope_months_for_import_file_session(
+                    confirmed_session,
+                    normalized_selected_file_ids,
+                )
+                matching_job_id = None
                 if any(file.status == "confirmed" for file in confirmed_session.files):
-                    matching_run = self._matching_service.run(triggered_by=f"import_session:{confirmed_session.id}")
-                    self._run_workbench_auto_matching_for_scopes(
-                        self._workbench_matching_scope_months_for_import_file_session(
-                            confirmed_session,
-                            normalized_selected_file_ids,
-                        ),
+                    matching_job = self._enqueue_workbench_auto_matching_for_scopes(
+                        scope_months,
                         reason="import_file_confirm",
+                        owner_user_id=running_job.owner_user_id,
+                        source={
+                            "session_id": confirmed_session.id,
+                            "selected_file_ids": normalized_selected_file_ids,
+                            "trigger_job_id": running_job.job_id,
+                        },
+                        triggered_by=f"import_session:{confirmed_session.id}",
                     )
+                    matching_job_id = matching_job.job_id if matching_job is not None else None
                 self._invalidate_tax_offset_read_model_scopes(
                     self._tax_offset_scope_keys_for_import_file_session(
                         confirmed_session,
@@ -4691,11 +4881,11 @@ class Application:
                         normalized_selected_file_ids,
                     ),
                 )
-                confirmed_count = sum(1 for file in confirmed_session.files if file.id in selected and file.status == "confirmed")
                 result_summary = {
                     "confirmed": confirmed_count,
                     "selected": total,
-                    "matching_results": matching_run.result_count if matching_run is not None else 0,
+                    "affected_months": scope_months,
+                    "enqueued_matching_job_id": matching_job_id,
                 }
                 self._background_job_service.succeed_job(
                     running_job.job_id,
@@ -4996,12 +5186,126 @@ class Application:
                     break
         return sorted(months) if months else ["all"]
 
+    def _enqueue_workbench_auto_matching_for_scopes(
+        self,
+        scope_months: list[str],
+        *,
+        reason: str,
+        owner_user_id: str,
+        source: dict[str, object] | None = None,
+        triggered_by: str | None = None,
+    ):
+        normalized_months = [
+            str(month).strip()
+            for month in list(scope_months or [])
+            if SEARCH_MONTH_RE.match(str(month).strip())
+        ]
+        normalized_months = sorted(dict.fromkeys(normalized_months))
+        if not normalized_months:
+            return None
+
+        label = "生成关联台候选"
+        job = self._background_job_service.create_job(
+            job_type="workbench_matching",
+            label=label,
+            owner_user_id=owner_user_id,
+            phase="queued",
+            current=0,
+            total=len(normalized_months),
+            message=f"{label}任务已创建。",
+            result_summary={
+                "processed_months": [],
+                "affected_months": normalized_months,
+                "candidate_count": 0,
+                "matching_results": 0,
+            },
+            source={
+                **(source or {}),
+                "reason": reason,
+                "scope_months": normalized_months,
+            },
+            affected_scopes=["workbench"],
+            affected_months=normalized_months,
+        )
+
+        def run_workbench_matching(running_job):
+            self._background_job_service.update_progress(
+                running_job.job_id,
+                phase="legacy_matching",
+                message="正在刷新基础发票流水匹配。",
+                current=0,
+                total=len(normalized_months),
+                result_summary={
+                    "processed_months": [],
+                    "affected_months": normalized_months,
+                    "candidate_count": 0,
+                    "matching_results": 0,
+                },
+            )
+            matching_run = self._matching_service.run(triggered_by=triggered_by or reason)
+            self._background_job_service.update_progress(
+                running_job.job_id,
+                phase="workbench_matching",
+                message=f"正在生成关联台候选：{', '.join(normalized_months)}。",
+                current=0,
+                total=len(normalized_months),
+                result_summary={
+                    "processed_months": [],
+                    "affected_months": normalized_months,
+                    "candidate_count": 0,
+                    "matching_results": matching_run.result_count,
+                },
+            )
+
+            def progress_callback(progress_summary: dict[str, object]) -> None:
+                processed_months = list(progress_summary.get("processed_months") or [])
+                current_month = str(progress_summary.get("current_month") or "").strip()
+                self._background_job_service.update_progress(
+                    running_job.job_id,
+                    phase="workbench_matching",
+                    message=f"正在生成关联台候选：{current_month or ', '.join(normalized_months)}。",
+                    current=len(processed_months),
+                    total=len(normalized_months),
+                    result_summary={
+                        **progress_summary,
+                        "affected_months": normalized_months,
+                        "matching_results": matching_run.result_count,
+                    },
+                )
+
+            summary = self._run_workbench_auto_matching_for_scopes(
+                normalized_months,
+                reason=reason,
+                request_id=f"workbench-match-job-{running_job.job_id}",
+                progress_callback=progress_callback,
+            ) or {}
+            result_summary = {
+                **summary,
+                "processed_months": normalized_months,
+                "affected_months": normalized_months,
+                "matching_results": matching_run.result_count,
+            }
+            self._background_job_service.update_progress(
+                running_job.job_id,
+                phase="workbench_matching",
+                message=f"关联台候选已生成：{', '.join(normalized_months)}。",
+                current=len(normalized_months),
+                total=len(normalized_months),
+                result_summary=result_summary,
+            )
+            self._persist_state()
+            return result_summary
+
+        self._background_job_service.run_job(job, run_workbench_matching)
+        return job
+
     def _run_workbench_auto_matching_for_scopes(
         self,
         scope_months: list[str],
         *,
         reason: str,
         request_id: str | None = None,
+        progress_callback=None,
     ) -> dict[str, object] | None:
         normalized_months = [
             str(month).strip()
@@ -5027,6 +5331,7 @@ class Application:
                 changed_scope_months=normalized_months,
                 reason=reason,
                 request_id=request_id or f"workbench-match-{uuid4().hex}",
+                progress_callback=progress_callback,
             )
         except Exception as exc:
             self._workbench_matching_dirty_scope_service.mark_dirty(
@@ -5365,8 +5670,10 @@ class Application:
                 "file_count": session.file_count,
                 "status": session.status,
                 "created_at": self._serialize_value(session.created_at),
+                "audit": self._serialize_value(getattr(session, "audit", None)),
             },
             "files": self._serialize_value(session.files),
+            "duplicate_groups": self._serialize_value(getattr(session, "duplicate_groups", [])),
         }
 
     def _serialize_matching_run(self, run: object) -> dict[str, object]:
@@ -5436,7 +5743,193 @@ class Application:
         read_model = self._get_or_build_workbench_read_model(month, visibility_key=visibility_key)
         payload = read_model.get("payload")
         retained = self._apply_oa_retention_to_grouped_payload(payload if isinstance(payload, dict) else {})
+        self._append_etc_invoice_summary_rows(retained)
         return self._derive_tags_for_grouped_payload(retained)
+
+    def _append_etc_invoice_summary_rows(self, payload: dict[str, object]) -> None:
+        summary_rows_by_external_batch_id = self._etc_invoice_summary_rows_by_external_batch_id()
+        if not summary_rows_by_external_batch_id:
+            return
+        inserted_count = 0
+        for section in ("paired", "open"):
+            section_payload = payload.get(section)
+            if not isinstance(section_payload, dict):
+                continue
+            for group in list(section_payload.get("groups") or []):
+                if not isinstance(group, dict):
+                    continue
+                invoice_rows = group.setdefault("invoice_rows", [])
+                if not isinstance(invoice_rows, list):
+                    continue
+                if any(str(row.get("source_kind", "")) == "etc_invoice_summary" for row in invoice_rows if isinstance(row, dict)):
+                    continue
+                external_batch_id = self._etc_external_batch_id_for_group(group)
+                if not external_batch_id:
+                    continue
+                summary_row = summary_rows_by_external_batch_id.get(external_batch_id)
+                if summary_row is None:
+                    continue
+                row = self._serialize_value(summary_row)
+                case_id = self._case_id_for_group(group)
+                if case_id:
+                    row["case_id"] = case_id
+                invoice_rows.append(row)
+                inserted_count += 1
+        if inserted_count:
+            summary = payload.get("summary")
+            if isinstance(summary, dict):
+                summary["invoice_count"] = int(summary.get("invoice_count", 0) or 0) + inserted_count
+
+    def _etc_invoice_summary_rows_by_external_batch_id(self) -> dict[str, dict[str, object]]:
+        batches_by_internal_id = {batch.id: batch for batch in self._etc_service.list_batches()}
+        batches_by_external_id = {batch.etc_batch_id: batch for batch in batches_by_internal_id.values()}
+        invoices_by_external_batch_id: dict[str, list[object]] = defaultdict(list)
+        for invoice in self._import_service.list_invoices():
+            if getattr(invoice, "workbench_visibility", "visible") != "hidden_after_etc_submission":
+                continue
+            submission_batch_id = str(getattr(invoice, "etc_submission_batch_id", "") or "").strip()
+            if not submission_batch_id:
+                continue
+            batch = batches_by_internal_id.get(submission_batch_id) or batches_by_external_id.get(submission_batch_id)
+            external_batch_id = batch.etc_batch_id if batch is not None else submission_batch_id
+            invoices_by_external_batch_id[external_batch_id].append(invoice)
+
+        return {
+            external_batch_id: self._build_etc_invoice_summary_row(external_batch_id, invoices)
+            for external_batch_id, invoices in invoices_by_external_batch_id.items()
+            if invoices
+        }
+
+    def _build_etc_invoice_summary_row(self, external_batch_id: str, invoices: list[object]) -> dict[str, object]:
+        sorted_invoices = sorted(
+            invoices,
+            key=lambda invoice: (
+                str(getattr(invoice, "invoice_date", "") or ""),
+                str(getattr(invoice, "digital_invoice_no", "") or getattr(invoice, "invoice_no", "") or ""),
+            ),
+        )
+        total_amount = sum(
+            (
+                self._decimal_from_value(getattr(invoice, "total_with_tax", None))
+                or self._decimal_from_value(getattr(invoice, "amount", None))
+                or Decimal("0.00")
+            )
+            for invoice in sorted_invoices
+        )
+        issue_dates = [
+            str(getattr(invoice, "invoice_date", "") or "").strip()
+            for invoice in sorted_invoices
+            if str(getattr(invoice, "invoice_date", "") or "").strip()
+        ]
+        seller_names = [
+            str(getattr(invoice, "seller_name", "") or getattr(getattr(invoice, "counterparty", None), "name", "") or "").strip()
+            for invoice in sorted_invoices
+        ]
+        seller_names = [name for name in seller_names if name]
+        first_seller_name = seller_names[0] if seller_names else "ETC发票"
+        count = len(sorted_invoices)
+        title = f"ETC发票 {count} 张"
+        issue_range = self._date_range_label(issue_dates)
+        invoice_lines = [
+            self._etc_invoice_summary_line(invoice)
+            for invoice in sorted_invoices
+        ]
+        return {
+            "id": self._etc_invoice_summary_row_id(external_batch_id),
+            "type": "invoice",
+            "case_id": None,
+            "source_kind": "etc_invoice_summary",
+            "seller_tax_no": "ETC批次",
+            "seller_name": title,
+            "buyer_tax_no": external_batch_id,
+            "buyer_name": first_seller_name,
+            "invoice_code": external_batch_id,
+            "invoice_no": title,
+            "digital_invoice_no": title,
+            "issue_date": issue_range or "—",
+            "amount": self._format_money(total_amount),
+            "tax_rate": "—",
+            "tax_amount": "—",
+            "total_with_tax": self._format_money(total_amount),
+            "invoice_type": "进项发票",
+            "invoice_bank_relation": {"code": "etc_invoice_summary", "label": "已关联ETC发票", "tone": "success"},
+            "tags": ["ETC", "已关联ETC发票"],
+            "etc_batch_id": external_batch_id,
+            "etc_invoice_count": count,
+            "available_actions": ["detail"],
+            "summary_fields": {
+                "ETC批次": external_batch_id,
+                "ETC发票数量": f"{count} 张",
+                "ETC发票合计": self._format_money(total_amount),
+                "开票日期范围": issue_range or "—",
+                "代表销方": first_seller_name,
+            },
+            "detail_fields": {
+                "ETC批次": external_batch_id,
+                "ETC发票数量": f"{count} 张",
+                "ETC发票合计": self._format_money(total_amount),
+                "开票日期范围": issue_range or "—",
+                "发票清单": "\n".join(invoice_lines) if invoice_lines else "—",
+            },
+        }
+
+    def _etc_invoice_summary_row_detail(self, row_id: str) -> dict[str, object] | None:
+        for row in self._etc_invoice_summary_rows_by_external_batch_id().values():
+            if str(row.get("id", "")) == row_id:
+                return row
+        return None
+
+    @staticmethod
+    def _etc_invoice_summary_row_id(external_batch_id: str) -> str:
+        safe_batch_id = re.sub(r"[^A-Za-z0-9_-]+", "-", external_batch_id).strip("-") or "unknown"
+        return f"etc-summary-{safe_batch_id}"
+
+    @staticmethod
+    def _etc_external_batch_id_for_group(group: dict[str, object]) -> str | None:
+        for row in list(group.get("oa_rows") or []):
+            if not isinstance(row, dict):
+                continue
+            external_batch_id = str(row.get("etc_batch_id") or row.get("etcBatchId") or "").strip()
+            if external_batch_id:
+                return external_batch_id
+        return None
+
+    @staticmethod
+    def _case_id_for_group(group: dict[str, object]) -> str | None:
+        for key in ("oa_rows", "bank_rows", "invoice_rows"):
+            for row in list(group.get(key) or []):
+                if isinstance(row, dict):
+                    case_id = str(row.get("case_id") or "").strip()
+                    if case_id:
+                        return case_id
+        group_id = str(group.get("group_id") or "").strip()
+        return group_id.removeprefix("case:") if group_id.startswith("case:") else None
+
+    @staticmethod
+    def _date_range_label(values: list[str]) -> str:
+        normalized = sorted(value[:10] for value in values if len(value) >= 10)
+        if not normalized:
+            return ""
+        if normalized[0] == normalized[-1]:
+            return normalized[0]
+        return f"{normalized[0]} 至 {normalized[-1]}"
+
+    def _etc_invoice_summary_line(self, invoice: object) -> str:
+        invoice_no = str(getattr(invoice, "digital_invoice_no", "") or getattr(invoice, "invoice_no", "") or "—")
+        issue_date = str(getattr(invoice, "invoice_date", "") or "—")
+        seller_name = str(getattr(invoice, "seller_name", "") or getattr(getattr(invoice, "counterparty", None), "name", "") or "—")
+        amount = (
+            self._decimal_from_value(getattr(invoice, "total_with_tax", None))
+            or self._decimal_from_value(getattr(invoice, "amount", None))
+            or Decimal("0.00")
+        )
+        return f"{issue_date} ｜ {invoice_no} ｜ {seller_name} ｜ {self._format_money(amount)}"
+
+    @staticmethod
+    def _format_money(value: Decimal | None) -> str:
+        if value is None:
+            return "—"
+        return f"{value.quantize(Decimal('0.01')):,.2f}"
 
     def _apply_workbench_runtime_metadata(self, payload: dict[str, object]) -> None:
         payload["workbench_read_model_schema_version"] = WORKBENCH_READ_MODEL_SCHEMA_VERSION
@@ -7050,8 +7543,12 @@ class Application:
             add("金额不一致")
 
         row_type = str(row.get("type", ""))
+        if row_type == "oa" and self._is_etc_batch_oa_row(row):
+            add("已关联ETC发票")
         if row_type == "invoice":
-            if str(row.get("source_kind", "")) == "oa_attachment_invoice":
+            if str(row.get("source_kind", "")) == "etc_invoice" or "ETC" in tags:
+                add("ETC")
+            elif str(row.get("source_kind", "")) == "oa_attachment_invoice":
                 add("OA附件")
             else:
                 add("人工导入")
@@ -7071,7 +7568,7 @@ class Application:
         if relation_mode == "salary_personal_auto_match":
             add("工资")
         for tag in tags:
-            if tag in {"ETC批量提交", "冲", "内部往来", "工资", "非税"}:
+            if tag in {"ETC", "ETC批量提交", "已关联ETC发票", "冲", "内部往来", "工资", "非税"}:
                 add(tag)
         if any(str(row.get(key, "")).find("非税") >= 0 for key in ("summary", "remark", "reason", "purpose")):
             add("非税")
@@ -7145,6 +7642,8 @@ class Application:
         ):
             return "bank"
         if lowered_row_id.startswith("iv-") or lowered_row_id.startswith("invoice-"):
+            return "invoice"
+        if lowered_row_id.startswith("etc-summary-"):
             return "invoice"
         return "unknown"
 

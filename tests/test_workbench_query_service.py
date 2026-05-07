@@ -129,6 +129,57 @@ class AggregatedAttachmentRecord:
         self.attachment_file_count = 2
 
 
+class MultiProjectDisplayRecord:
+    def __init__(self) -> None:
+        self.id = "oa-exp-display-001"
+        self.month = "2026-03"
+        self.section = "open"
+        self.case_id = None
+        self.applicant = "刘际涛"
+        self.project_name = "玉烟维护项目；云南溯源科技"
+        self.project_name_display = "多个项目"
+        self.project_names = ["玉烟维护项目", "云南溯源科技"]
+        self.apply_type = "日常报销"
+        self.amount = "1500.00"
+        self.counterparty_name = ""
+        self.reason = "设备材料；邮寄费用"
+        self.relation_code = "pending_match"
+        self.relation_label = "待找流水与发票"
+        self.relation_tone = "warn"
+        self.expense_type = "材料费；运费/邮费/杂费"
+        self.expense_content = "设备材料；邮寄费用"
+        self.detail_fields = {
+            "OA单号": "OA-DISPLAY-001",
+            "申请日期": "2026-03-28",
+            "项目名称汇总": "玉烟维护项目；云南溯源科技",
+        }
+        self.expense_items = [
+            {
+                "row_index": "0",
+                "project_name": "玉烟维护项目",
+                "amount": "1000.00",
+                "expense_type": "材料费",
+                "expense_content": "设备材料",
+                "reimbursement_date": "2026-03-27",
+            },
+            {
+                "row_index": "1",
+                "project_name": "云南溯源科技",
+                "amount": "500.00",
+                "expense_type": "运费/邮费/杂费",
+                "expense_content": "邮寄费用",
+                "reimbursement_date": "2026-03-28",
+            },
+        ]
+
+
+class MultiProjectDisplayOAAdapter:
+    def list_application_records(self, month: str) -> list[object]:
+        if month != "2026-03":
+            return []
+        return [MultiProjectDisplayRecord()]
+
+
 class AggregatedAttachmentOAAdapter:
     def list_application_records(self, month: str) -> list[object]:
         if month != "2026-03":
@@ -350,6 +401,19 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
         }
         self.assertEqual(row_numbers["40512344"], "0")
         self.assertEqual(row_numbers["40512345"], "整单")
+
+    def test_oa_row_uses_project_display_without_polluting_real_project_summary(self) -> None:
+        service = WorkbenchQueryService(oa_adapter=MultiProjectDisplayOAAdapter())
+
+        payload = service.get_workbench("2026-03")
+
+        oa_row = next(row for row in payload["open"]["oa"] if row["id"] == "oa-exp-display-001")
+        self.assertEqual(oa_row["project_name"], "玉烟维护项目；云南溯源科技")
+        self.assertEqual(oa_row["project_name_display"], "多个项目")
+        self.assertEqual(oa_row["project_names"], ["玉烟维护项目", "云南溯源科技"])
+        self.assertEqual(oa_row["summary_fields"]["项目名称"], "多个项目")
+        self.assertEqual(oa_row["detail_fields"]["项目名称汇总"], "玉烟维护项目；云南溯源科技")
+        self.assertEqual(oa_row["detail_fields"]["项目名称列表"], ["玉烟维护项目", "云南溯源科技"])
 
     def test_unparsed_attachment_oa_row_gets_unparsed_invoice_tag(self) -> None:
         service = WorkbenchQueryService(oa_adapter=UnparsedAttachmentOAAdapter())

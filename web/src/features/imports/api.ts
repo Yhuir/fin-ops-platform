@@ -1,6 +1,8 @@
 import type {
   ImportFilePreviewOverride,
   ImportBatchType,
+  ImportPreviewAuditCounts,
+  ImportPreviewDuplicateGroup,
   ImportSessionPayload,
   ImportTemplate,
   MatchingRunSummary,
@@ -22,6 +24,7 @@ type ApiImportFile = {
   duplicate_count: number;
   suspected_duplicate_count: number;
   updated_count: number;
+  audit?: ApiImportPreviewAuditCounts | null;
   preview_batch_id?: string | null;
   batch_id?: string | null;
   stored_file_path?: string | null;
@@ -44,6 +47,33 @@ type ApiImportFile = {
   }>;
 };
 
+type ApiImportPreviewAuditCounts = {
+  original_count?: number;
+  unique_count?: number;
+  duplicate_count?: number;
+  duplicate_in_file_count?: number;
+  duplicate_across_files_count?: number;
+  existing_duplicate_count?: number;
+  importable_count?: number;
+  update_count?: number;
+  merge_count?: number;
+  suspected_duplicate_count?: number;
+  error_count?: number;
+  confirmable_count?: number;
+  skipped_count?: number;
+};
+
+type ApiImportPreviewDuplicateGroup = {
+  identity_key?: string;
+  record_type?: string;
+  duplicate_type?: string;
+  rows?: Array<{
+    file_id?: string;
+    file_name?: string;
+    row_no?: number;
+  }>;
+};
+
 type ApiImportSessionPayload = {
   job?: ApiBackgroundJob;
   session: {
@@ -52,8 +82,10 @@ type ApiImportSessionPayload = {
     file_count: number;
     status: string;
     created_at: string;
+    audit?: ApiImportPreviewAuditCounts | null;
   };
   files: ApiImportFile[];
+  duplicate_groups?: ApiImportPreviewDuplicateGroup[];
   matching_run?: {
     id: string;
     triggered_by: string;
@@ -103,7 +135,10 @@ export function resolveImportApiErrorMessage(error: unknown, fallback: string): 
     return fallback;
   }
   try {
-    const payload = JSON.parse(raw) as { message?: unknown };
+    const payload = JSON.parse(raw) as { error?: unknown; code?: unknown; message?: unknown };
+    if (payload?.error === "preview_stale" || payload?.code === "preview_stale") {
+      return "预览后数据已变化，请重新预览后再确认。";
+    }
     if (typeof payload?.message === "string" && payload.message.trim()) {
       return payload.message.trim();
     }
@@ -111,6 +146,44 @@ export function resolveImportApiErrorMessage(error: unknown, fallback: string): 
     // Fall back to the raw Error message when the payload is not JSON.
   }
   return raw;
+}
+
+function numberOrZero(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function mapAuditCounts(payload?: ApiImportPreviewAuditCounts | null): ImportPreviewAuditCounts | undefined {
+  if (!payload) {
+    return undefined;
+  }
+  return {
+    originalCount: numberOrZero(payload.original_count),
+    uniqueCount: numberOrZero(payload.unique_count),
+    duplicateCount: numberOrZero(payload.duplicate_count),
+    duplicateInFileCount: numberOrZero(payload.duplicate_in_file_count),
+    duplicateAcrossFilesCount: numberOrZero(payload.duplicate_across_files_count),
+    existingDuplicateCount: numberOrZero(payload.existing_duplicate_count),
+    importableCount: numberOrZero(payload.importable_count),
+    updateCount: numberOrZero(payload.update_count),
+    mergeCount: numberOrZero(payload.merge_count),
+    suspectedDuplicateCount: numberOrZero(payload.suspected_duplicate_count),
+    errorCount: numberOrZero(payload.error_count),
+    confirmableCount: numberOrZero(payload.confirmable_count),
+    skippedCount: numberOrZero(payload.skipped_count),
+  };
+}
+
+function mapDuplicateGroups(groups?: ApiImportPreviewDuplicateGroup[]): ImportPreviewDuplicateGroup[] {
+  return (groups ?? []).map((group) => ({
+    identityKey: group.identity_key ?? "",
+    recordType: group.record_type ?? "",
+    duplicateType: group.duplicate_type ?? "",
+    rows: (group.rows ?? []).map((row) => ({
+      fileId: row.file_id ?? "",
+      fileName: row.file_name ?? "",
+      rowNo: numberOrZero(row.row_no),
+    })),
+  }));
 }
 
 function mapMatchingRun(payload?: ApiImportSessionPayload["matching_run"]): MatchingRunSummary | undefined {
@@ -128,6 +201,7 @@ function mapMatchingRun(payload?: ApiImportSessionPayload["matching_run"]): Matc
 }
 
 function mapImportPayload(payload: ApiImportSessionPayload): ImportSessionPayload {
+  const sessionAudit = mapAuditCounts(payload.session.audit);
   return {
     session: {
       id: payload.session.id,
@@ -135,41 +209,47 @@ function mapImportPayload(payload: ApiImportSessionPayload): ImportSessionPayloa
       fileCount: payload.session.file_count,
       status: payload.session.status,
       createdAt: payload.session.created_at,
+      ...(sessionAudit ? { audit: sessionAudit } : {}),
     },
-    files: payload.files.map((file) => ({
-      id: file.id,
-      fileName: file.file_name,
-      templateCode: file.template_code,
-      batchType: file.batch_type,
-      status: file.status as ImportSessionPayload["files"][number]["status"],
-      message: file.message,
-      rowCount: file.row_count,
-      successCount: file.success_count,
-      errorCount: file.error_count,
-      duplicateCount: file.duplicate_count,
-      suspectedDuplicateCount: file.suspected_duplicate_count,
-      updatedCount: file.updated_count,
-      previewBatchId: file.preview_batch_id,
-      batchId: file.batch_id,
-      storedFilePath: file.stored_file_path,
-      overrideTemplateCode: file.override_template_code,
-      overrideBatchType: file.override_batch_type,
-      selectedBankMappingId: file.selected_bank_mapping_id,
-      selectedBankName: file.selected_bank_name,
-      selectedBankShortName: file.selected_bank_short_name,
-      selectedBankLast4: file.selected_bank_last4,
-      detectedBankName: file.detected_bank_name,
-      detectedLast4: file.detected_last4,
-      bankSelectionConflict: file.bank_selection_conflict ?? false,
-      conflictMessage: file.conflict_message,
-      rowResults: (file.row_results ?? []).map((row) => ({
-        id: row.id,
-        rowNo: row.row_no,
-        sourceRecordType: row.source_record_type,
-        decision: row.decision,
-        decisionReason: row.decision_reason,
-      })),
-    })),
+    files: payload.files.map((file) => {
+      const audit = mapAuditCounts(file.audit);
+      return {
+        id: file.id,
+        fileName: file.file_name,
+        templateCode: file.template_code,
+        batchType: file.batch_type,
+        status: file.status as ImportSessionPayload["files"][number]["status"],
+        message: file.message,
+        rowCount: file.row_count,
+        successCount: file.success_count,
+        errorCount: file.error_count,
+        duplicateCount: file.duplicate_count,
+        suspectedDuplicateCount: file.suspected_duplicate_count,
+        updatedCount: file.updated_count,
+        ...(audit ? { audit } : {}),
+        previewBatchId: file.preview_batch_id,
+        batchId: file.batch_id,
+        storedFilePath: file.stored_file_path,
+        overrideTemplateCode: file.override_template_code,
+        overrideBatchType: file.override_batch_type,
+        selectedBankMappingId: file.selected_bank_mapping_id,
+        selectedBankName: file.selected_bank_name,
+        selectedBankShortName: file.selected_bank_short_name,
+        selectedBankLast4: file.selected_bank_last4,
+        detectedBankName: file.detected_bank_name,
+        detectedLast4: file.detected_last4,
+        bankSelectionConflict: file.bank_selection_conflict ?? false,
+        conflictMessage: file.conflict_message,
+        rowResults: (file.row_results ?? []).map((row) => ({
+          id: row.id,
+          rowNo: row.row_no,
+          sourceRecordType: row.source_record_type,
+          decision: row.decision,
+          decisionReason: row.decision_reason,
+        })),
+      };
+    }),
+    duplicateGroups: mapDuplicateGroups(payload.duplicate_groups),
     matchingRun: mapMatchingRun(payload.matching_run),
     ...(payload.job ? { job: mapBackgroundJob(payload.job) } : {}),
   };

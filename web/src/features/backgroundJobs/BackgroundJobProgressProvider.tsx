@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { acknowledgeBackgroundJob, fetchActiveBackgroundJobs } from "./api";
+import { acknowledgeBackgroundJob, fetchActiveBackgroundJobs, retryBackgroundJob } from "./api";
 import type { BackgroundJob } from "./types";
 
 const RUNNING_POLL_MS = 1000;
@@ -24,6 +24,7 @@ type BackgroundJobProgressContextValue = {
   extraCount: number;
   connectionFailed: boolean;
   acknowledgeJob: (jobId: string) => Promise<void>;
+  retryJob: (jobId: string) => Promise<void>;
   refresh: () => Promise<void>;
 };
 
@@ -125,6 +126,18 @@ export function BackgroundJobProgressProvider({ children }: { children: ReactNod
     [refresh],
   );
 
+  const retryJob = useCallback(
+    async (jobId: string) => {
+      const job = jobsRef.current.find((item) => item.jobId === jobId);
+      if (!job) {
+        throw new Error("后台任务不存在，无法重新执行。");
+      }
+      await retryBackgroundJob(job);
+      await refresh();
+    },
+    [refresh],
+  );
+
   useEffect(() => {
     let mounted = true;
 
@@ -185,9 +198,10 @@ export function BackgroundJobProgressProvider({ children }: { children: ReactNod
       extraCount: Math.max(0, jobs.length - 1),
       connectionFailed: !primaryJob && failureCount >= MAX_FAILURES_BEFORE_WARNING,
       acknowledgeJob,
+      retryJob,
       refresh,
     }),
-    [acknowledgeJob, failureCount, jobs, primaryJob, refresh],
+    [acknowledgeJob, failureCount, jobs, primaryJob, refresh, retryJob],
   );
 
   return (

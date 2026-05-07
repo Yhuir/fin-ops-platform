@@ -121,7 +121,7 @@ describe("global background job progress block", () => {
     renderAppAt("/");
 
     const block = await screen.findByTestId("background-progress-block");
-    await user.click(screen.getByRole("button", { name: "关闭后台任务提示" }));
+    await user.click(screen.getByRole("button", { name: "确认已知" }));
 
     await waitFor(() => {
       expect(screen.queryByTestId("background-progress-block")).not.toBeInTheDocument();
@@ -131,5 +131,57 @@ describe("global background job progress block", () => {
       expect.objectContaining({ method: "POST" }),
     );
     expect(block).toHaveClass("failed");
+  });
+
+  test("shows retry action for retryable failed file import jobs", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      backgroundJobs: [
+        {
+          ...runningEtcJob,
+          job_id: "job_failed_retryable",
+          type: "file_import",
+          status: "failed",
+          short_label: "发票导入失败",
+          retryable: true,
+          acknowledgeable: true,
+          source: {
+            session_id: "import_session_0001",
+            selected_file_ids: ["import_file_0001"],
+          },
+        },
+      ],
+    });
+    renderAppAt("/");
+
+    const block = await screen.findByTestId("background-progress-block");
+    expect(block).toHaveTextContent("发票导入失败");
+    await user.click(screen.getByRole("button", { name: "重新执行" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/background-jobs/job_failed_retryable/retry",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+  });
+
+  test("does not show fake retry action for non retryable failed jobs", async () => {
+    installMockApiFetch({
+      backgroundJobs: [
+        {
+          ...runningEtcJob,
+          job_id: "job_failed_no_retry",
+          status: "failed",
+          short_label: "后台任务失败",
+          retryable: false,
+          acknowledgeable: true,
+        },
+      ],
+    });
+    renderAppAt("/");
+
+    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("后台任务失败");
+    expect(screen.queryByRole("button", { name: "重新执行" })).not.toBeInTheDocument();
   });
 });

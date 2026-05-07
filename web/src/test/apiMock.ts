@@ -30,6 +30,8 @@ type MockApiOptions = {
   workbenchSettingsDelayMs?: number;
   importPreviewDelayMs?: number;
   etcImportPreviewDelayMs?: number;
+  importConfirmPreviewStale?: boolean;
+  etcImportConfirmPreviewStale?: boolean;
   workbenchColumnLayouts?: {
     oa?: string[];
     bank?: string[];
@@ -218,6 +220,21 @@ function createEtcInvoiceStore() {
         duplicatesSkipped: 1,
         attachmentsCompleted: 1,
         failed: 1,
+        audit: {
+          original_count: 4,
+          unique_count: 3,
+          duplicate_count: 1,
+          duplicate_in_file_count: 1,
+          duplicate_across_files_count: 0,
+          existing_duplicate_count: 1,
+          importable_count: 1,
+          update_count: 0,
+          merge_count: 1,
+          suspected_duplicate_count: 0,
+          error_count: 1,
+          confirmable_count: 2,
+          skipped_count: 2,
+        },
         items: [
           {
             invoiceNumber: "ETC-2026-005",
@@ -340,6 +357,22 @@ function buildImportPreviewPayload(
   fileNames: string[],
   overrides: Array<Record<string, string | null | undefined>> = [],
 ) {
+  const knownFileNames = fileNames.filter((fileName) => fileName !== "README.md");
+  const sessionAudit = {
+    original_count: knownFileNames.reduce((total, fileName) => total + (fileName.includes("发票") ? 14 : 9), 0),
+    unique_count: knownFileNames.reduce((total, fileName) => total + (fileName.includes("发票") ? 12 : 8), 0),
+    duplicate_count: knownFileNames.length,
+    duplicate_in_file_count: knownFileNames.length,
+    duplicate_across_files_count: Math.max(0, knownFileNames.length - 1),
+    existing_duplicate_count: 2,
+    importable_count: knownFileNames.reduce((total, fileName) => total + (fileName.includes("发票") ? 11 : 7), 0),
+    update_count: 0,
+    merge_count: 0,
+    suspected_duplicate_count: knownFileNames.some((fileName) => fileName.includes("发票")) ? 1 : 0,
+    error_count: knownFileNames.some((fileName) => fileName.includes("发票")) ? 1 : 0,
+    confirmable_count: knownFileNames.reduce((total, fileName) => total + (fileName.includes("发票") ? 11 : 7), 0),
+    skipped_count: knownFileNames.length + 2,
+  };
   return {
     session: {
       id: "import_session_0001",
@@ -347,6 +380,7 @@ function buildImportPreviewPayload(
       file_count: fileNames.length,
       status: fileNames.includes("README.md") ? "preview_ready_with_errors" : "preview_ready",
       created_at: "2026-03-26T23:00:00+08:00",
+      audit: sessionAudit,
     },
     files: fileNames.map((fileName, index) => {
       if (fileName === "README.md") {
@@ -410,6 +444,21 @@ function buildImportPreviewPayload(
         duplicate_count: 0,
         suspected_duplicate_count: isInvoice ? 1 : 0,
         updated_count: 0,
+        audit: {
+          original_count: isInvoice ? 14 : 9,
+          unique_count: isInvoice ? 12 : 8,
+          duplicate_count: 1,
+          duplicate_in_file_count: 1,
+          duplicate_across_files_count: index > 0 ? 1 : 0,
+          existing_duplicate_count: index === 0 ? 2 : 0,
+          importable_count: isInvoice ? 11 : 7,
+          update_count: 0,
+          merge_count: 0,
+          suspected_duplicate_count: isInvoice ? 1 : 0,
+          error_count: isInvoice ? 1 : 0,
+          confirmable_count: isInvoice ? 11 : 7,
+          skipped_count: index === 0 ? 3 : 1,
+        },
         preview_batch_id: `batch_import_${String(4444 + index)}`,
         batch_id: null,
         stored_file_path: `/tmp/import_session_0001/import_file_${String(index + 1).padStart(4, "0")}_${fileName}`,
@@ -434,6 +483,20 @@ function buildImportPreviewPayload(
         ],
       };
     }),
+    duplicate_groups: [
+      {
+        identity_key: "mock:duplicate:001",
+        record_type: "invoice",
+        duplicate_type: "duplicate_in_file",
+        rows: [
+          {
+            file_id: "import_file_0001",
+            file_name: fileNames[0] ?? "一月发票.xlsx",
+            row_no: 2,
+          },
+        ],
+      },
+    ],
   };
 }
 
@@ -3494,6 +3557,14 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     },
     "/api/etc/import/confirm": ({ jsonBody }) => {
       const sessionId = String(jsonBody?.sessionId ?? jsonBody?.session_id ?? "");
+      if (options.etcImportConfirmPreviewStale) {
+        return {
+          status: 409,
+          body: {
+            error: "preview_stale",
+          },
+        };
+      }
       if (sessionId !== latestEtcImportPreview.sessionId) {
         return {
           status: 404,
@@ -3850,6 +3921,14 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       return { body: latestImportSession };
     },
     "/imports/files/confirm": ({ jsonBody }) => {
+      if (options.importConfirmPreviewStale) {
+        return {
+          status: 409,
+          body: {
+            error: "preview_stale",
+          },
+        };
+      }
       const selectedIds = Array.isArray(jsonBody?.selected_file_ids)
         ? (jsonBody?.selected_file_ids as string[])
         : [];
@@ -4085,6 +4164,24 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           job: {
             job_id: jobId,
             status: "acknowledged",
+          },
+        },
+      });
+    }
+    if (
+      (init?.method ?? "GET").toUpperCase() === "POST"
+      && url.pathname.startsWith("/api/background-jobs/")
+      && url.pathname.endsWith("/retry")
+    ) {
+      const jobId = decodeURIComponent(url.pathname.split("/")[3] ?? "");
+      backgroundJobs = backgroundJobs.filter((job) => String(job.job_id ?? job.jobId ?? "") !== jobId);
+      return jsonResponse({
+        body: {
+          job: {
+            job_id: `retry_${jobId}`,
+            type: "workbench_matching",
+            status: "queued",
+            label: "生成关联台候选",
           },
         },
       });

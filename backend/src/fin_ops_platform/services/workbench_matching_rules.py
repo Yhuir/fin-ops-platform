@@ -4,7 +4,6 @@ from collections import defaultdict
 from copy import deepcopy
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from itertools import combinations
 from typing import Any
 
 from fin_ops_platform.services.import_file_service import is_company_identity
@@ -15,10 +14,16 @@ from fin_ops_platform.services.workbench_candidate_match_service import Workbenc
 
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
-MAX_SUM_COMBINATION_SIZE = 6
+MAX_SUM_MATCH_CANDIDATES = 150
+MAX_SUM_MATCH_SIZE = 6
+MAX_SUM_MATCH_STATE_COUNT = 20000
+MAX_SUM_COMBINATION_SIZE = MAX_SUM_MATCH_SIZE
 
 
 class WorkbenchMatchingRules:
+    def __init__(self) -> None:
+        self._skipped_rules: list[dict[str, Any]] = []
+
     def generate_candidates(
         self,
         scope_month: str,
@@ -29,6 +34,7 @@ class WorkbenchMatchingRules:
         settings: dict[str, Any] | None = None,
         source_versions: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
+        self._skipped_rules = []
         resolved_settings = settings if isinstance(settings, dict) else {}
         resolved_versions = deepcopy(source_versions if isinstance(source_versions, dict) else {})
         oa = [self._with_type(row, "oa") for row in oa_rows]
@@ -48,6 +54,13 @@ class WorkbenchMatchingRules:
         )
         candidates.extend(self._matching_engine_compatibility(scope_month, bank, invoices, resolved_versions))
         return self._mark_conflicts(self._dedupe_candidates(candidates))
+
+    def last_summary(self) -> dict[str, Any]:
+        skipped_rules = deepcopy(self._skipped_rules)
+        return {
+            "skipped_rule_count": len(skipped_rules),
+            "skipped_rules": skipped_rules,
+        }
 
     def _oa_bank_exact_amount(
         self,
@@ -93,7 +106,12 @@ class WorkbenchMatchingRules:
             if target is None or target <= ZERO:
                 continue
             invoices = self._compatible_invoices_for_oa(oa_row, invoice_rows)
-            match = self._find_unique_sum_match(invoices, target)
+            match = self._find_unique_sum_match(
+                invoices,
+                target,
+                scope_month=scope_month,
+                rule_code="oa_multi_invoice_exact_sum",
+            )
             if not match:
                 continue
             candidates.append(
@@ -135,7 +153,12 @@ class WorkbenchMatchingRules:
                     for row in self._compatible_invoices_for_oa(oa_row, invoice_rows)
                     if self._direction(row) == self._direction(bank_row)
                 ]
-                match = self._find_unique_sum_match(invoices, target)
+                match = self._find_unique_sum_match(
+                    invoices,
+                    target,
+                    scope_month=scope_month,
+                    rule_code="oa_bank_multi_invoice_exact_sum",
+                )
                 if not match:
                     continue
                 candidates.append(
@@ -383,7 +406,12 @@ class WorkbenchMatchingRules:
                 and self._direction(invoice) == self._direction(bank_row)
                 and self._counterparties_compatible(bank_row, invoice, require_known=True)
             ]
-            match = self._find_unique_sum_match(invoices, bank_amount)
+            match = self._find_unique_sum_match(
+                invoices,
+                bank_amount,
+                scope_month=scope_month,
+                rule_code="same_counterparty_many_invoices_one_transaction",
+            )
             if not match:
                 continue
             candidate = self._candidate(
@@ -414,7 +442,12 @@ class WorkbenchMatchingRules:
                 and self._direction(bank) == self._direction(invoice_row)
                 and self._counterparties_compatible(bank, invoice_row, require_known=True)
             ]
-            match = self._find_unique_sum_match(banks, invoice_amount)
+            match = self._find_unique_sum_match(
+                banks,
+                invoice_amount,
+                scope_month=scope_month,
+                rule_code="same_counterparty_one_invoice_many_transactions",
+            )
             if not match:
                 continue
             candidate = self._candidate(
@@ -614,25 +647,110 @@ class WorkbenchMatchingRules:
         self,
         rows: list[dict[str, Any]],
         target: Decimal,
+        *,
+        scope_month: str,
+        rule_code: str,
     ) -> list[dict[str, Any]] | None:
+        target_cents = self._amount_to_cents(target)
+        if target_cents is None or target_cents <= 0:
+            return None
         candidates = [
             (row, amount)
             for row in sorted(rows, key=self._row_id)
-            if (amount := self._amount(row)) is not None and amount > ZERO
+            if (amount := self._amount(row)) is not None and amount > ZERO and amount <= target
         ]
         if len(candidates) < 2:
             return None
+        if len(candidates) > MAX_SUM_MATCH_CANDIDATES:
+            self._record_skipped_rule(
+                scope_month=scope_month,
+                rule_code=rule_code,
+                reason="sum_match_candidate_cap_exceeded",
+                compatible_count=len(candidates),
+                target_cents=target_cents,
+            )
+            return None
 
-        matches: list[list[dict[str, Any]]] = []
-        max_size = min(MAX_SUM_COMBINATION_SIZE, len(candidates))
+        max_size = min(MAX_SUM_MATCH_SIZE, len(candidates))
+        amounts_in_cents: list[int] = []
+        rows_by_index: list[dict[str, Any]] = []
+        for row, amount in candidates:
+            amount_cents = self._amount_to_cents(amount)
+            if amount_cents is None or amount_cents <= 0 or amount_cents > target_cents:
+                continue
+            rows_by_index.append(row)
+            amounts_in_cents.append(amount_cents)
+        if len(rows_by_index) < 2:
+            return None
+
+        # Store at most one combination per (size, sum). None means the state is
+        # ambiguous, so exact-sum auto matching should not claim a unique group.
+        states: list[dict[int, tuple[int, ...] | None]] = [dict() for _ in range(max_size + 1)]
+        states[0][0] = ()
+        for index, amount_cents in enumerate(amounts_in_cents):
+            upper_size = min(max_size - 1, index)
+            for size in range(upper_size, -1, -1):
+                for current_sum, combo in list(states[size].items()):
+                    next_sum = current_sum + amount_cents
+                    if next_sum > target_cents:
+                        continue
+                    next_combo = None if combo is None else (*combo, index)
+                    existing = states[size + 1].get(next_sum)
+                    if next_sum not in states[size + 1]:
+                        states[size + 1][next_sum] = next_combo
+                    elif existing is not None:
+                        states[size + 1][next_sum] = None
+            if sum(len(state) for state in states) > MAX_SUM_MATCH_STATE_COUNT:
+                self._record_skipped_rule(
+                    scope_month=scope_month,
+                    rule_code=rule_code,
+                    reason="sum_match_state_cap_exceeded",
+                    compatible_count=len(candidates),
+                    target_cents=target_cents,
+                )
+                return None
+
+        matches: list[tuple[int, ...]] = []
         for size in range(2, max_size + 1):
-            for combo in combinations(candidates, size):
-                total = sum((amount for _, amount in combo), ZERO).quantize(CENT)
-                if total == target:
-                    matches.append([row for row, _ in combo])
-                    if len(matches) > 1:
-                        return None
-        return matches[0] if len(matches) == 1 else None
+            combo = states[size].get(target_cents)
+            if combo is None and target_cents in states[size]:
+                return None
+            if combo:
+                matches.append(combo)
+                if len(matches) > 1:
+                    return None
+        if len(matches) != 1:
+            return None
+        return [rows_by_index[index] for index in matches[0]]
+
+    def _record_skipped_rule(
+        self,
+        *,
+        scope_month: str,
+        rule_code: str,
+        reason: str,
+        compatible_count: int,
+        target_cents: int,
+    ) -> None:
+        self._skipped_rules.append(
+            {
+                "scope_month": scope_month,
+                "rule_code": rule_code,
+                "reason": reason,
+                "compatible_count": compatible_count,
+                "target_cents": target_cents,
+                "max_sum_match_candidates": MAX_SUM_MATCH_CANDIDATES,
+                "max_sum_match_size": MAX_SUM_MATCH_SIZE,
+                "max_sum_match_state_count": MAX_SUM_MATCH_STATE_COUNT,
+            }
+        )
+
+    @staticmethod
+    def _amount_to_cents(amount: Decimal) -> int | None:
+        try:
+            return int((amount.quantize(CENT) * 100).to_integral_value())
+        except (InvalidOperation, ValueError):
+            return None
 
     def _counterparties_compatible(
         self,

@@ -38,6 +38,10 @@ class EtcServiceError(RuntimeError):
     pass
 
 
+class EtcImportPreviewStaleError(EtcServiceError):
+    pass
+
+
 class EtcInvoiceRequestError(EtcServiceError):
     pass
 
@@ -250,6 +254,8 @@ class EtcInvoice:
     pdf_file_path: str | None
     pdf_file_hash: str | None
     status: EtcInvoiceStatus = EtcInvoiceStatus.UNSUBMITTED
+    import_batch_id: str | None = None
+    import_session_id: str | None = None
     current_batch_id: str | None = None
     last_batch_id: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -271,6 +277,23 @@ class EtcBatch:
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     confirmed_at: datetime | None = None
     error_message: str | None = None
+
+
+@dataclass(slots=True)
+class EtcImportBatch:
+    id: str
+    source_names: list[str]
+    invoice_ids: list[str] = field(default_factory=list)
+    invoice_count: int = 0
+    total_amount: Decimal = Decimal("0.00")
+    issue_date_start: str | None = None
+    issue_date_end: str | None = None
+    passage_date_start: str | None = None
+    passage_date_end: str | None = None
+    source_session_id: str | None = None
+    submission_batch_id: str | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass(slots=True)
@@ -316,11 +339,74 @@ class EtcImportResult:
 
 
 @dataclass(slots=True)
+class EtcImportPreviewAudit:
+    original_count: int = 0
+    unique_count: int = 0
+    duplicate_count: int = 0
+    duplicate_in_file_count: int = 0
+    duplicate_across_files_count: int = 0
+    existing_duplicate_count: int = 0
+    importable_count: int = 0
+    update_count: int = 0
+    merge_count: int = 0
+    suspected_duplicate_count: int = 0
+    error_count: int = 0
+    confirmable_count: int = 0
+    skipped_count: int = 0
+
+    def finalize(self) -> "EtcImportPreviewAudit":
+        self.duplicate_count = self.duplicate_in_file_count + self.duplicate_across_files_count
+        self.confirmable_count = self.importable_count + self.update_count + self.merge_count
+        self.skipped_count = (
+            self.duplicate_count
+            + self.existing_duplicate_count
+            + self.suspected_duplicate_count
+            + self.error_count
+        )
+        return self
+
+    def to_payload(self) -> dict[str, int]:
+        self.finalize()
+        return {
+            "original_count": self.original_count,
+            "unique_count": self.unique_count,
+            "duplicate_count": self.duplicate_count,
+            "duplicate_in_file_count": self.duplicate_in_file_count,
+            "duplicate_across_files_count": self.duplicate_across_files_count,
+            "existing_duplicate_count": self.existing_duplicate_count,
+            "importable_count": self.importable_count,
+            "update_count": self.update_count,
+            "merge_count": self.merge_count,
+            "suspected_duplicate_count": self.suspected_duplicate_count,
+            "error_count": self.error_count,
+            "confirmable_count": self.confirmable_count,
+            "skipped_count": self.skipped_count,
+        }
+
+    def stale_key_payload(self) -> dict[str, int]:
+        payload = self.to_payload()
+        return {key: payload[key] for key in ETC_IMPORT_STALE_AUDIT_KEYS}
+
+
+ETC_IMPORT_STALE_AUDIT_KEYS = (
+    "importable_count",
+    "update_count",
+    "merge_count",
+    "existing_duplicate_count",
+    "duplicate_count",
+    "suspected_duplicate_count",
+    "error_count",
+)
+
+
+@dataclass(slots=True)
 class EtcImportSession:
     session_id: str
     uploads: list[UploadedEtcZipFile]
     created_at: datetime
     preview_result: EtcImportResult
+    preview_audit: EtcImportPreviewAudit
+    preview_files: list[dict[str, object]] = field(default_factory=list)
     confirmed_result: EtcImportResult | None = None
     confirmed_at: datetime | None = None
 
@@ -433,26 +519,35 @@ class EtcService:
         self._form_mapping = form_mapping or EtcOAFormFieldMapping.from_environment()
         self._invoice_counter = 0
         self._batch_counter = 0
+        self._import_batch_counter = 0
         self._batch_day_counters: dict[str, int] = {}
         self._invoices: dict[str, EtcInvoice] = {}
         self._invoice_numbers: dict[str, str] = {}
         self._batches: dict[str, EtcBatch] = {}
+        self._import_batches: dict[str, EtcImportBatch] = {}
         self._import_sessions: dict[str, EtcImportSession] = {}
+        self._canonical_invoice_key_exists: Callable[[str], bool] | None = None
         self._hydrate(self._load_snapshot())
+
+    def set_canonical_invoice_key_exists(self, callback: Callable[[str], bool] | None) -> None:
+        self._canonical_invoice_key_exists = callback
 
     def import_zips(self, uploads: list[UploadedEtcZipFile]) -> EtcImportResult:
         return self._process_import_zips(uploads, persist=True)
 
     def preview_import_zips(self, uploads: list[UploadedEtcZipFile]) -> dict[str, object]:
         result = self._process_import_zips(uploads, persist=False)
+        audit, file_audits = self._calculate_import_preview_audit(uploads)
         session_id = uuid4().hex
         self._import_sessions[session_id] = EtcImportSession(
             session_id=session_id,
             uploads=[UploadedEtcZipFile(upload.file_name, bytes(upload.content)) for upload in uploads],
             created_at=datetime.now(UTC),
             preview_result=result,
+            preview_audit=audit,
+            preview_files=file_audits,
         )
-        return self._import_session_payload(session_id, result)
+        return self._import_session_payload(session_id, result, audit=audit, files=file_audits)
 
     def confirm_import_session(self, session_id: str) -> EtcImportResult:
         session = self._import_sessions.get(session_id)
@@ -460,7 +555,8 @@ class EtcService:
             raise EtcServiceError("ETC import session not found.")
         if session.confirmed_result is not None:
             return session.confirmed_result
-        result = self._process_import_zips(session.uploads, persist=True)
+        self._assert_import_preview_fresh(session)
+        result = self._process_import_zips(session.uploads, persist=True, import_session_id=session.session_id)
         session.confirmed_result = result
         session.confirmed_at = datetime.now(UTC)
         return result
@@ -470,6 +566,14 @@ class EtcService:
         if session is None:
             raise EtcServiceError("ETC import session not found.")
         return len(session.preview_result.items)
+
+    def validate_import_session_preview_fresh(self, session_id: str) -> None:
+        session = self._import_sessions.get(session_id)
+        if session is None:
+            raise EtcServiceError("ETC import session not found.")
+        if session.confirmed_result is not None:
+            return
+        self._assert_import_preview_fresh(session)
 
     def confirm_import_session_with_progress(
         self,
@@ -483,7 +587,13 @@ class EtcService:
             if progress_callback is not None:
                 progress_callback(session.confirmed_result)
             return session.confirmed_result
-        result = self._process_import_zips(session.uploads, persist=True, progress_callback=progress_callback)
+        self._assert_import_preview_fresh(session)
+        result = self._process_import_zips(
+            session.uploads,
+            persist=True,
+            import_session_id=session.session_id,
+            progress_callback=progress_callback,
+        )
         session.confirmed_result = result
         session.confirmed_at = datetime.now(UTC)
         return result
@@ -495,11 +605,136 @@ class EtcService:
             "items": [item.to_payload() for item in result.items],
         }
 
-    def _import_session_payload(self, session_id: str, result: EtcImportResult) -> dict[str, object]:
+    def _import_session_payload(
+        self,
+        session_id: str,
+        result: EtcImportResult,
+        *,
+        audit: EtcImportPreviewAudit | None = None,
+        files: list[dict[str, object]] | None = None,
+    ) -> dict[str, object]:
         payload = self.import_result_payload(result)
-        return {
+        response = {
             "sessionId": session_id,
             **payload,
+        }
+        if audit is not None:
+            response["audit"] = audit.to_payload()
+        if files is not None:
+            response["files"] = files
+        return response
+
+    def _assert_import_preview_fresh(self, session: EtcImportSession) -> None:
+        current_audit, _files = self._calculate_import_preview_audit(session.uploads)
+        if current_audit.stale_key_payload() != session.preview_audit.stale_key_payload():
+            raise EtcImportPreviewStaleError("ETC import preview is stale; refresh preview before confirming.")
+
+    def _calculate_import_preview_audit(
+        self,
+        uploads: list[UploadedEtcZipFile],
+    ) -> tuple[EtcImportPreviewAudit, list[dict[str, object]]]:
+        session_audit = EtcImportPreviewAudit()
+        file_payloads: list[dict[str, object]] = []
+        seen_invoice_numbers: dict[str, str] = {}
+        preview_state: dict[str, tuple[bool, bool]] = {
+            invoice.invoice_number: (
+                self._stored_invoice_file_exists(invoice.xml_file_path),
+                self._stored_invoice_file_exists(invoice.pdf_file_path),
+            )
+            for invoice in self._invoices.values()
+        }
+
+        for file_index, upload in enumerate(uploads, start=1):
+            file_id = f"file_{file_index:04d}"
+            file_audit = EtcImportPreviewAudit()
+            try:
+                entries = self._extract_archive_entries(upload.file_name, upload.content)
+            except BadZipFile:
+                self._record_audit_error(session_audit, file_audit)
+                file_payloads.append(self._etc_import_file_audit_payload(file_id, upload.file_name, file_audit))
+                continue
+
+            xml_entries = [entry for entry in entries if self._is_xml_entry(entry.path)]
+            if not xml_entries:
+                self._record_audit_error(session_audit, file_audit)
+                file_payloads.append(self._etc_import_file_audit_payload(file_id, upload.file_name, file_audit))
+                continue
+
+            pdf_entries = [entry for entry in entries if self._is_pdf_entry(entry.path)]
+            for xml_entry in xml_entries:
+                session_audit.original_count += 1
+                file_audit.original_count += 1
+                try:
+                    parsed = parse_etc_xml(xml_entry.content)
+                except Exception:
+                    session_audit.error_count += 1
+                    file_audit.error_count += 1
+                    continue
+
+                invoice_number = parsed.invoice_number.strip()
+                first_file_id = seen_invoice_numbers.get(invoice_number)
+                if first_file_id is not None:
+                    if first_file_id == file_id:
+                        session_audit.duplicate_in_file_count += 1
+                        file_audit.duplicate_in_file_count += 1
+                    else:
+                        session_audit.duplicate_across_files_count += 1
+                        file_audit.duplicate_across_files_count += 1
+                    continue
+
+                seen_invoice_numbers[invoice_number] = file_id
+                session_audit.unique_count += 1
+                file_audit.unique_count += 1
+                pdf_entry = self._match_pdf_entry(invoice_number, xml_entry.path, pdf_entries)
+                status = self._preview_invoice_import_status(parsed, pdf_entry, preview_state)
+                self._record_unique_audit_classification(session_audit, status, parsed)
+                self._record_unique_audit_classification(file_audit, status, parsed)
+
+            file_payloads.append(self._etc_import_file_audit_payload(file_id, upload.file_name, file_audit))
+
+        return session_audit.finalize(), file_payloads
+
+    @staticmethod
+    def _record_audit_error(session_audit: EtcImportPreviewAudit, file_audit: EtcImportPreviewAudit) -> None:
+        session_audit.original_count += 1
+        session_audit.error_count += 1
+        file_audit.original_count += 1
+        file_audit.error_count += 1
+
+    def _record_unique_audit_classification(
+        self,
+        audit: EtcImportPreviewAudit,
+        status: str,
+        parsed: ParsedEtcXml,
+    ) -> None:
+        if status == "attachment_completed":
+            audit.update_count += 1
+            return
+        if status == "duplicate_skipped":
+            audit.existing_duplicate_count += 1
+            return
+        if self._canonical_invoice_exists_for_etc(parsed):
+            audit.merge_count += 1
+            return
+        audit.importable_count += 1
+
+    def _canonical_invoice_exists_for_etc(self, parsed: ParsedEtcXml) -> bool:
+        invoice_number = parsed.invoice_number.strip()
+        if not invoice_number or self._canonical_invoice_key_exists is None:
+            return False
+        return self._canonical_invoice_key_exists(invoice_number)
+
+    @staticmethod
+    def _etc_import_file_audit_payload(
+        file_id: str,
+        file_name: str,
+        audit: EtcImportPreviewAudit,
+    ) -> dict[str, object]:
+        return {
+            "id": file_id,
+            "fileName": file_name,
+            "file_name": file_name,
+            "audit": audit.to_payload(),
         }
 
     def _process_import_zips(
@@ -507,9 +742,11 @@ class EtcService:
         uploads: list[UploadedEtcZipFile],
         *,
         persist: bool,
+        import_session_id: str | None = None,
         progress_callback: Callable[[EtcImportResult], None] | None = None,
     ) -> EtcImportResult:
         result = EtcImportResult()
+        import_batch = self._create_import_batch(uploads, import_session_id=import_session_id) if persist else None
         preview_state: dict[str, tuple[bool, bool]] = {
             invoice.invoice_number: (
                 self._stored_invoice_file_exists(invoice.xml_file_path),
@@ -539,7 +776,16 @@ class EtcService:
                     parsed = parse_etc_xml(xml_entry.content)
                     pdf_entry = self._match_pdf_entry(parsed.invoice_number, xml_entry.path, pdf_entries)
                     if persist:
-                        status = self._upsert_invoice_from_import(upload.file_name, parsed, xml_entry, pdf_entry)
+                        assert import_batch is not None
+                        status, invoice_id = self._upsert_invoice_from_import(
+                            upload.file_name,
+                            parsed,
+                            xml_entry,
+                            pdf_entry,
+                            import_batch=import_batch,
+                        )
+                        if invoice_id is not None:
+                            self._add_invoice_to_import_batch(import_batch, invoice_id)
                     else:
                         status = self._preview_invoice_import_status(parsed, pdf_entry, preview_state)
                 except Exception as exc:
@@ -556,6 +802,8 @@ class EtcService:
                 if progress_callback is not None:
                     progress_callback(result)
         if persist:
+            if import_batch is not None:
+                self._refresh_import_batch_summary(import_batch)
             self._persist()
         return result
 
@@ -640,6 +888,9 @@ class EtcService:
             invoice.current_batch_id = batch.id
             invoice.last_batch_id = batch.id
             invoice.updated_at = now
+        for import_batch in self._import_batches_for_invoices(invoices):
+            import_batch.submission_batch_id = batch.id
+            import_batch.updated_at = now
         self._persist()
         return EtcDraftResult(
             batch_id=batch.id,
@@ -686,26 +937,50 @@ class EtcService:
     def list_batches(self) -> list[EtcBatch]:
         return sorted(self._batches.values(), key=lambda batch: batch.created_at)
 
+    def list_import_batches(self) -> list[EtcImportBatch]:
+        return sorted(self._import_batches.values(), key=lambda batch: batch.created_at)
+
+    def list_invoices_by_ids(self, invoice_ids: list[str]) -> list[EtcInvoice]:
+        return [replace(self._get_invoice(invoice_id)) for invoice_id in invoice_ids]
+
+    def list_invoices_by_numbers(self, invoice_numbers: list[str]) -> list[EtcInvoice]:
+        normalized_numbers = [str(number).strip() for number in invoice_numbers if str(number).strip()]
+        invoices: list[EtcInvoice] = []
+        for invoice_number in normalized_numbers:
+            invoice_id = self._invoice_numbers.get(invoice_number)
+            if invoice_id is None:
+                continue
+            invoices.append(replace(self._get_invoice(invoice_id)))
+        return invoices
+
     def snapshot(self) -> dict[str, object]:
         return {
             "invoice_counter": self._invoice_counter,
             "batch_counter": self._batch_counter,
+            "import_batch_counter": self._import_batch_counter,
             "batch_day_counters": self._batch_day_counters,
             "invoices": self._invoices,
             "invoice_numbers": self._invoice_numbers,
             "batches": self._batches,
+            "import_batches": self._import_batches,
         }
 
     def _hydrate(self, snapshot: dict[str, object]) -> None:
         self._invoice_counter = int(snapshot.get("invoice_counter", 0) or 0)
         self._batch_counter = int(snapshot.get("batch_counter", 0) or 0)
+        self._import_batch_counter = int(snapshot.get("import_batch_counter", 0) or 0)
         self._batch_day_counters = dict(snapshot.get("batch_day_counters") or {})
         self._invoices = dict(snapshot.get("invoices") or {})
         self._invoice_numbers = dict(snapshot.get("invoice_numbers") or {})
         self._batches = dict(snapshot.get("batches") or {})
+        self._import_batches = dict(snapshot.get("import_batches") or {})
         for invoice in self._invoices.values():
             if isinstance(invoice.status, str):
                 invoice.status = _coerce_invoice_status(invoice.status)
+            if not hasattr(invoice, "import_batch_id"):
+                invoice.import_batch_id = None
+            if not hasattr(invoice, "import_session_id"):
+                invoice.import_session_id = None
 
     def _load_snapshot(self) -> dict[str, object]:
         if self._state_store is not None and hasattr(self._state_store, "load_etc_state"):
@@ -795,13 +1070,15 @@ class EtcService:
         parsed: ParsedEtcXml,
         xml_entry: _ArchiveEntry,
         pdf_entry: _ArchiveEntry | None,
-    ) -> str:
+        *,
+        import_batch: EtcImportBatch,
+    ) -> tuple[str, str | None]:
         existing_id = self._invoice_numbers.get(parsed.invoice_number)
         existing = self._invoices.get(existing_id) if existing_id else None
         existing_has_xml = existing is not None and self._stored_invoice_file_exists(existing.xml_file_path)
         existing_has_pdf = existing is not None and self._stored_invoice_file_exists(existing.pdf_file_path)
         if existing is not None and existing_has_xml and existing_has_pdf:
-            return "duplicate_skipped"
+            return "duplicate_skipped", None
 
         xml_path, xml_hash = (None, None)
         pdf_path, pdf_hash = (None, None)
@@ -833,12 +1110,14 @@ class EtcService:
                 xml_file_hash=xml_hash,
                 pdf_file_path=pdf_path,
                 pdf_file_hash=pdf_hash,
+                import_batch_id=import_batch.id,
+                import_session_id=import_batch.source_session_id,
                 created_at=now,
                 updated_at=now,
             )
             self._invoices[invoice.id] = invoice
             self._invoice_numbers[invoice.invoice_number] = invoice.id
-            return "imported"
+            return "imported", invoice.id
 
         completed = False
         if not existing_has_xml and xml_path:
@@ -849,8 +1128,49 @@ class EtcService:
             existing.pdf_file_path = pdf_path
             existing.pdf_file_hash = pdf_hash
             completed = True
+        if existing.import_batch_id is None:
+            existing.import_batch_id = import_batch.id
+        if existing.import_session_id is None:
+            existing.import_session_id = import_batch.source_session_id
         existing.updated_at = now
-        return "attachment_completed" if completed else "duplicate_skipped"
+        return ("attachment_completed" if completed else "duplicate_skipped"), existing.id if completed else None
+
+    def _create_import_batch(
+        self,
+        uploads: list[UploadedEtcZipFile],
+        *,
+        import_session_id: str | None,
+    ) -> EtcImportBatch:
+        self._import_batch_counter += 1
+        batch = EtcImportBatch(
+            id=f"etc_import_batch_{self._import_batch_counter:04d}",
+            source_names=[upload.file_name for upload in uploads],
+            source_session_id=import_session_id,
+        )
+        self._import_batches[batch.id] = batch
+        return batch
+
+    @staticmethod
+    def _add_invoice_to_import_batch(import_batch: EtcImportBatch, invoice_id: str) -> None:
+        if invoice_id not in import_batch.invoice_ids:
+            import_batch.invoice_ids.append(invoice_id)
+
+    def _refresh_import_batch_summary(self, import_batch: EtcImportBatch) -> None:
+        invoices = [self._invoices[invoice_id] for invoice_id in import_batch.invoice_ids if invoice_id in self._invoices]
+        import_batch.invoice_count = len(invoices)
+        import_batch.total_amount = sum((invoice.total_amount for invoice in invoices), Decimal("0.00")).quantize(Decimal("0.01"))
+        issue_dates = sorted(invoice.issue_date for invoice in invoices if invoice.issue_date)
+        passage_dates = sorted(
+            date_value
+            for invoice in invoices
+            for date_value in (invoice.passage_start_date, invoice.passage_end_date)
+            if date_value
+        )
+        import_batch.issue_date_start = issue_dates[0] if issue_dates else None
+        import_batch.issue_date_end = issue_dates[-1] if issue_dates else None
+        import_batch.passage_date_start = passage_dates[0] if passage_dates else None
+        import_batch.passage_date_end = passage_dates[-1] if passage_dates else None
+        import_batch.updated_at = datetime.now(UTC)
 
     @staticmethod
     def _stored_invoice_file_exists(path: str | None) -> bool:
@@ -880,6 +1200,7 @@ class EtcService:
         if not invoice_ids:
             raise EtcDraftRequestError("invoiceIds must not be empty.")
         invoices = [self._get_invoice(invoice_id) for invoice_id in invoice_ids]
+        self._validate_complete_import_batches(invoices)
         for invoice in invoices:
             if invoice.status != EtcInvoiceStatus.UNSUBMITTED:
                 raise EtcDraftRequestError(f"ETC invoice {invoice.invoice_number} is already submitted.")
@@ -888,6 +1209,31 @@ class EtcService:
             if not Path(invoice.xml_file_path).exists() or not Path(invoice.pdf_file_path).exists():
                 raise EtcDraftRequestError(f"ETC invoice {invoice.invoice_number} attachment file is missing.")
         return invoices
+
+    def _validate_complete_import_batches(self, invoices: list[EtcInvoice]) -> None:
+        selected_ids = {invoice.id for invoice in invoices}
+        for invoice in invoices:
+            if not invoice.import_batch_id:
+                continue
+            expected_ids = {
+                candidate.id
+                for candidate in self._invoices.values()
+                if candidate.import_batch_id == invoice.import_batch_id and candidate.status == EtcInvoiceStatus.UNSUBMITTED
+            }
+            if not expected_ids.issubset(selected_ids):
+                missing_numbers = sorted(
+                    candidate.invoice_number
+                    for candidate in self._invoices.values()
+                    if candidate.id in expected_ids - selected_ids
+                )
+                missing_text = "、".join(missing_numbers)
+                raise EtcDraftRequestError(
+                    f"ETC OA 草稿必须覆盖完整未提交 ETC 导入批次 {invoice.import_batch_id}；缺少发票: {missing_text}."
+                )
+
+    def _import_batches_for_invoices(self, invoices: list[EtcInvoice]) -> list[EtcImportBatch]:
+        import_batch_ids = {invoice.import_batch_id for invoice in invoices if invoice.import_batch_id}
+        return [batch for batch_id in sorted(import_batch_ids) if (batch := self._import_batches.get(batch_id)) is not None]
 
     def _create_batch(self, invoices: list[EtcInvoice]) -> EtcBatch:
         self._batch_counter += 1

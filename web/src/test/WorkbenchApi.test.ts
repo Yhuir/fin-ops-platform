@@ -248,6 +248,70 @@ describe("workbench api bank amount mapping", () => {
     ]);
   });
 
+  test("uses OA project display label without losing real project search values", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "2026-03",
+          summary: {
+            oa_count: 1,
+            bank_count: 0,
+            invoice_count: 0,
+            paired_count: 0,
+            open_count: 1,
+            exception_count: 0,
+          },
+          paired: { groups: [] },
+          open: {
+            groups: [
+              {
+                group_id: "CASE-202603-OA-MULTI-PROJECT",
+                group_type: "candidate",
+                match_confidence: "medium",
+                reason: "多项目 OA 待确认",
+                oa_rows: [
+                  {
+                    id: "oa-exp-multi-project",
+                    type: "oa",
+                    applicant: "刘树刚",
+                    project_name: "云南溯源科技；玉烟维护项目",
+                    project_name_display: "多个项目",
+                    project_names: ["云南溯源科技", "玉烟维护项目"],
+                    apply_type: "日常报销",
+                    amount: "1,549.00",
+                    counterparty_name: "刘树刚",
+                    reason: "多项目报销单",
+                    oa_bank_relation: { code: "pending_match", label: "待找流水与发票", tone: "warn" },
+                    detail_fields: {
+                      项目名称汇总: "云南溯源科技；玉烟维护项目",
+                      明细数量: "4",
+                    },
+                    available_actions: ["detail"],
+                  },
+                ],
+                bank_rows: [],
+                invoice_rows: [],
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const payload = await fetchWorkbench("2026-03");
+    const oaRow = payload.open.groups[0].rows.oa[0];
+    expect(oaRow.tableValues.projectName).toBe("多个项目");
+
+    const state = createEmptyWorkbenchZoneDisplayState();
+    state.activePaneId = "oa";
+    state.searchQueryByPane.oa = "玉烟维护项目";
+
+    expect(buildWorkbenchDisplayGroups(payload.open.groups, state).map((group) => group.id)).toEqual([
+      "CASE-202603-OA-MULTI-PROJECT",
+    ]);
+  });
+
   test.each(workbenchPanes)(
     "keeps row context and supplements same-keyword matches when searching the %s pane",
     (activePaneId) => {

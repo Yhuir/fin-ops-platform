@@ -6,6 +6,7 @@ type BackgroundProgressBlockProps =
       job: BackgroundJob;
       extraCount: number;
       onAcknowledge: (jobId: string) => void;
+      onRetry: (jobId: string) => void;
     }
   | {
       kind: "connection_error";
@@ -31,6 +32,15 @@ function canAcknowledge(status: BackgroundJobStatus) {
   return status === "failed" || status === "partial_success" || status === "succeeded";
 }
 
+function canRetry(job: BackgroundJob) {
+  const hasImportRetrySource =
+    job.type === "file_import"
+    && typeof job.source.session_id === "string"
+    && Array.isArray(job.source.selected_file_ids)
+    && job.source.selected_file_ids.length > 0;
+  return job.retryable && hasImportRetrySource && (job.status === "failed" || job.status === "partial_success");
+}
+
 export default function BackgroundProgressBlock(props: BackgroundProgressBlockProps) {
   if (props.kind === "connection_error") {
     return (
@@ -47,7 +57,7 @@ export default function BackgroundProgressBlock(props: BackgroundProgressBlockPr
     );
   }
 
-  const { job, extraCount, onAcknowledge } = props;
+  const { job, extraCount, onAcknowledge, onRetry } = props;
   const tone = statusTone(job.status);
   const label = job.shortLabel || job.message || job.label || "后台任务处理中";
 
@@ -62,14 +72,24 @@ export default function BackgroundProgressBlock(props: BackgroundProgressBlockPr
       <span className="background-progress-dot" aria-hidden="true" />
       <strong>{label}</strong>
       {extraCount > 0 ? <span className="background-progress-extra">+{extraCount}</span> : null}
-      {canAcknowledge(job.status) ? (
+      {canRetry(job) ? (
         <button
-          aria-label="关闭后台任务提示"
+          aria-label="重新执行"
+          className="background-progress-action"
+          type="button"
+          onClick={() => onRetry(job.jobId)}
+        >
+          重新执行
+        </button>
+      ) : null}
+      {job.acknowledgeable !== false && canAcknowledge(job.status) ? (
+        <button
+          aria-label="确认已知"
           className="background-progress-close"
           type="button"
           onClick={() => onAcknowledge(job.jobId)}
         >
-          x
+          确认已知
         </button>
       ) : null}
     </div>

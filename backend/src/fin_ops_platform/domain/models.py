@@ -80,6 +80,13 @@ class Invoice:
     department_id: str | None = None
     source_batch_id: str | None = None
     oa_form_id: str | None = None
+    tags: list[str] = field(default_factory=list)
+    source_links: list[dict[str, str]] = field(default_factory=list)
+    etc_invoice_id: str | None = None
+    etc_import_batch_id: str | None = None
+    etc_submission_batch_id: str | None = None
+    etc_submission_status: str | None = None
+    workbench_visibility: str = "visible"
     status: InvoiceStatus = InvoiceStatus.PENDING
 
     @property

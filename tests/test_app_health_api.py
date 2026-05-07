@@ -5,6 +5,7 @@ import os
 import tempfile
 import unittest
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fin_ops_platform.app.server import build_application
@@ -92,6 +93,8 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["status"], "busy")
         self.assertEqual(payload["background_jobs"]["running"], 1)
         self.assertEqual(payload["background_jobs"]["active"], 1)
+        self.assertEqual(payload["background_jobs"]["primary_running"]["job_id"], job.job_id)
+        self.assertEqual(payload["background_jobs"]["primary_running"]["status"], "running")
 
     def test_app_health_reports_workbench_rebuild_job_as_rebuilding(self) -> None:
         app = build_application()
@@ -110,6 +113,122 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["status"], "busy")
         self.assertEqual(payload["workbench_read_model"]["status"], "rebuilding")
         self.assertEqual(payload["workbench_read_model"]["rebuild_job_ids"], [job.job_id])
+
+    def test_app_health_reports_unacknowledged_failed_and_partial_success_jobs_as_attention(self) -> None:
+        app = build_application()
+        failed_job = app._background_job_service.create_job(
+            job_type="file_import",
+            label="导入 银行流水",
+            owner_user_id="test_finops_user",
+            source={"session_id": "session-001", "selected_file_ids": ["file-001"]},
+        )
+        partial_job = app._background_job_service.create_job(
+            job_type="workbench_matching",
+            label="生成关联台候选",
+            owner_user_id="test_finops_user",
+            affected_months=["2026-05"],
+        )
+        app._background_job_service.fail_job(failed_job.job_id, "银行流水导入失败。", "boom")
+        app._background_job_service.succeed_job(
+            partial_job.job_id,
+            "关联台候选部分完成。",
+            status="partial_success",
+        )
+
+        response = app.handle_request("GET", "/api/app-health")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["status"], "busy")
+        self.assertEqual(payload["background_jobs"]["attention"], 2)
+        self.assertEqual(payload["background_jobs"]["active"], 2)
+        self.assertEqual(payload["background_jobs"]["primary_attention"]["job_id"], failed_job.job_id)
+        self.assertEqual(payload["background_jobs"]["primary_attention"]["type"], "file_import")
+        self.assertEqual(payload["background_jobs"]["primary_attention"]["message"], "银行流水导入失败。")
+        self.assertEqual(payload["background_jobs"]["primary_attention"]["error"], "boom")
+        self.assertTrue(payload["background_jobs"]["primary_attention"]["acknowledgeable"])
+        self.assertTrue(payload["background_jobs"]["primary_attention"]["retryable"])
+        self.assertIsNone(payload["background_jobs"]["primary_running"])
+
+    def test_app_health_excludes_acknowledged_failed_job_from_active_and_attention(self) -> None:
+        app = build_application()
+        job = app._background_job_service.create_job(
+            job_type="file_import",
+            label="导入 银行流水",
+            owner_user_id="test_finops_user",
+            source={"session_id": "session-001", "selected_file_ids": ["file-001"]},
+        )
+        app._background_job_service.fail_job(job.job_id, "银行流水导入失败。", "boom")
+        app._background_job_service.acknowledge_job(job.job_id, "test_finops_user")
+
+        response = app.handle_request("GET", "/api/app-health")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["background_jobs"]["active"], 0)
+        self.assertEqual(payload["background_jobs"]["attention"], 0)
+        self.assertIsNone(payload["background_jobs"]["primary_attention"])
+
+    def test_app_health_marks_workbench_matching_attention_retryable_when_months_exist(self) -> None:
+        app = build_application()
+        job = app._background_job_service.create_job(
+            job_type="workbench_matching",
+            label="生成关联台候选",
+            owner_user_id="test_finops_user",
+            affected_months=["2026-05"],
+        )
+        app._background_job_service.succeed_job(job.job_id, "关联台候选部分完成。", status="partial_success")
+
+        response = app.handle_request("GET", "/api/app-health")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["background_jobs"]["primary_attention"]["job_id"], job.job_id)
+        self.assertEqual(payload["background_jobs"]["primary_attention"]["status"], "partial_success")
+        self.assertTrue(payload["background_jobs"]["primary_attention"]["acknowledgeable"])
+        self.assertTrue(payload["background_jobs"]["primary_attention"]["retryable"])
+
+    def test_app_health_marks_interrupted_job_without_source_not_retryable_but_acknowledgeable(self) -> None:
+        app = build_application()
+        job = app._background_job_service.create_job(
+            job_type="settings_data_reset",
+            label="重置 OA 数据",
+            owner_user_id="test_finops_user",
+        )
+        app._background_job_service.fail_job(job.job_id, "服务重启，任务已中断，请重新执行。", "interrupted_by_restart")
+
+        response = app.handle_request("GET", "/api/app-health")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["background_jobs"]["primary_attention"]["job_id"], job.job_id)
+        self.assertTrue(payload["background_jobs"]["primary_attention"]["acknowledgeable"])
+        self.assertFalse(payload["background_jobs"]["primary_attention"]["retryable"])
+
+    def test_app_health_excludes_succeeded_job_after_recent_success_window(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            job = app._background_job_service.create_job(
+                job_type="file_import",
+                label="导入 银行流水",
+                owner_user_id="test_finops_user",
+                source={"session_id": "session-001", "selected_file_ids": ["file-001"]},
+            )
+            app._background_job_service.succeed_job(job.job_id, "银行流水导入完成。")
+            jobs = app._state_store.load_background_jobs()
+            old_time = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
+            jobs[job.job_id]["finished_at"] = old_time
+            jobs[job.job_id]["updated_at"] = old_time
+            app._state_store.save_background_jobs(jobs)
+
+            response = app.handle_request("GET", "/api/app-health")
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["background_jobs"]["active"], 0)
+        self.assertEqual(payload["background_jobs"]["jobs"], [])
 
     def test_app_health_reports_dependency_error_as_blocked(self) -> None:
         app = build_application()

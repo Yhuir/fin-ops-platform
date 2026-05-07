@@ -22,6 +22,7 @@ type AppTopBarProps = {
   progress: ShellImportProgress | null;
   onOpenMobileSidebar: () => void;
   onAcknowledgeJob: (jobId: string) => void;
+  onRetryJob: (jobId: string) => void;
 };
 
 export default function AppTopBar({
@@ -33,6 +34,7 @@ export default function AppTopBar({
   progress,
   onOpenMobileSidebar,
   onAcknowledgeJob,
+  onRetryJob,
 }: AppTopBarProps) {
   const hasStatusContent = Boolean(primaryJob || connectionFailed || progress);
 
@@ -65,6 +67,7 @@ export default function AppTopBar({
               job={primaryJob}
               extraCount={extraCount}
               onAcknowledge={onAcknowledgeJob}
+              onRetry={onRetryJob}
             />
           ) : connectionFailed ? (
             <BackgroundProgressBlock kind="connection_error" />

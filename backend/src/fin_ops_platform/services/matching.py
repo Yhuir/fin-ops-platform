@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import replace
 from decimal import Decimal
-from itertools import combinations
 
 from fin_ops_platform.domain.enums import MatchingConfidence, MatchingResultType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Invoice, MatchingResult, MatchingRun
@@ -11,6 +10,8 @@ from fin_ops_platform.services.imports import ImportNormalizationService, normal
 
 
 ZERO = Decimal("0.00")
+MAX_EXACT_SUM_MATCH_SIZE = 3
+MAX_EXACT_SUM_MATCH_STATE_COUNT = 20000
 
 
 class MatchingEngineService:
@@ -45,7 +46,12 @@ class MatchingEngineService:
         }
 
     def run(self, *, triggered_by: str) -> MatchingRun:
-        invoices = [invoice for invoice in self._import_service.list_invoices() if invoice.outstanding_amount > ZERO]
+        invoices = [
+            invoice
+            for invoice in self._import_service.list_invoices()
+            if invoice.outstanding_amount > ZERO
+            and getattr(invoice, "workbench_visibility", "visible") != "hidden_after_etc_submission"
+        ]
         transactions = [txn for txn in self._import_service.list_transactions() if txn.outstanding_amount > ZERO]
         available_invoice_ids = {invoice.id for invoice in invoices}
         available_transaction_ids = {txn.id for txn in transactions}
@@ -362,9 +368,45 @@ def expected_direction_for_invoice(invoice: Invoice) -> TransactionDirection:
 
 def find_exact_sum_match(items: list[Invoice] | list[BankTransaction], target_amount: Decimal) -> list[Invoice] | list[BankTransaction] | None:
     ordered_items = sorted(items, key=lambda item: item.id)
-    for size in range(2, min(4, len(ordered_items) + 1)):
-        for combo in combinations(ordered_items, size):
-            combo_total = sum((item.outstanding_amount for item in combo), start=ZERO)
-            if combo_total == target_amount:
-                return list(combo)
+    target_cents = _amount_to_cents(target_amount)
+    if target_cents is None:
+        return None
+
+    # Map (size, sum_cents) to one unique combination. None means ambiguous.
+    states: dict[tuple[int, int], tuple[Invoice | BankTransaction, ...] | None] = {(0, 0): ()}
+    for item in ordered_items:
+        item_cents = _amount_to_cents(item.outstanding_amount)
+        if item_cents is None:
+            continue
+        next_states = dict(states)
+        for (size, total_cents), combo in list(states.items()):
+            if combo is None or size >= MAX_EXACT_SUM_MATCH_SIZE:
+                continue
+            next_key = (size + 1, total_cents + item_cents)
+            if next_key[0] < 2 or next_key[1] <= target_cents:
+                next_combo = (*combo, item)
+                previous = next_states.get(next_key)
+                if previous is None and next_key in next_states:
+                    continue
+                next_states[next_key] = next_combo if previous is None else None
+        if len(next_states) > MAX_EXACT_SUM_MATCH_STATE_COUNT:
+            return None
+        states = next_states
+
+    matches = [
+        combo
+        for (size, total_cents), combo in states.items()
+        if 2 <= size <= MAX_EXACT_SUM_MATCH_SIZE and total_cents == target_cents
+    ]
+    unique_matches = [combo for combo in matches if combo is not None]
+    if len(unique_matches) != 1:
+        return None
+    return list(unique_matches[0])
     return None
+
+
+def _amount_to_cents(value: Decimal) -> int | None:
+    try:
+        return int((value * Decimal("100")).quantize(Decimal("1")))
+    except Exception:
+        return None

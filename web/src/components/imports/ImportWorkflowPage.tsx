@@ -32,6 +32,7 @@ import type {
   ImportBatchType,
   ImportFilePreview,
   ImportFilePreviewOverride,
+  ImportPreviewAuditCounts,
   ImportSessionPayload,
 } from "../../features/imports/types";
 import type { EtcImportItem, EtcImportPreviewResult } from "../../features/etc/types";
@@ -49,6 +50,13 @@ type ImportWorkflowPageProps = {
 type ImportFilePreviewRow = ImportFilePreview & {
   accountLabel: string;
   batchTypeLabel: string;
+  auditOriginalCount: number;
+  auditUniqueCount: number;
+  auditDuplicateInFileCount: number;
+  auditDuplicateAcrossFilesCount: number;
+  auditExistingDuplicateCount: number;
+  auditImportableCount: number;
+  auditErrorCount: number;
 };
 
 type EtcPreviewRow = EtcImportItem & {
@@ -156,6 +164,152 @@ function buildBankAccountOptionLabel(bankOption: BankAccountMapping) {
 
 function formatSelectedBankAccountLabel(file: Pick<ImportFilePreview, "selectedBankName" | "selectedBankLast4">) {
   return `${file.selectedBankName ?? ""} ${file.selectedBankLast4 ?? ""}`.trim();
+}
+
+function emptyAuditCounts(): ImportPreviewAuditCounts {
+  return {
+    originalCount: 0,
+    uniqueCount: 0,
+    duplicateCount: 0,
+    duplicateInFileCount: 0,
+    duplicateAcrossFilesCount: 0,
+    existingDuplicateCount: 0,
+    importableCount: 0,
+    updateCount: 0,
+    mergeCount: 0,
+    suspectedDuplicateCount: 0,
+    errorCount: 0,
+    confirmableCount: 0,
+    skippedCount: 0,
+  };
+}
+
+function addAuditCounts(left: ImportPreviewAuditCounts, right: ImportPreviewAuditCounts): ImportPreviewAuditCounts {
+  return {
+    originalCount: left.originalCount + right.originalCount,
+    uniqueCount: left.uniqueCount + right.uniqueCount,
+    duplicateCount: left.duplicateCount + right.duplicateCount,
+    duplicateInFileCount: left.duplicateInFileCount + right.duplicateInFileCount,
+    duplicateAcrossFilesCount: left.duplicateAcrossFilesCount + right.duplicateAcrossFilesCount,
+    existingDuplicateCount: left.existingDuplicateCount + right.existingDuplicateCount,
+    importableCount: left.importableCount + right.importableCount,
+    updateCount: left.updateCount + right.updateCount,
+    mergeCount: left.mergeCount + right.mergeCount,
+    suspectedDuplicateCount: left.suspectedDuplicateCount + right.suspectedDuplicateCount,
+    errorCount: left.errorCount + right.errorCount,
+    confirmableCount: left.confirmableCount + right.confirmableCount,
+    skippedCount: left.skippedCount + right.skippedCount,
+  };
+}
+
+function legacyFileAudit(file: ImportFilePreview): ImportPreviewAuditCounts {
+  const duplicateCount = file.duplicateCount ?? 0;
+  const importableCount = file.successCount ?? 0;
+  const updateCount = file.updatedCount ?? 0;
+  const suspectedDuplicateCount = file.suspectedDuplicateCount ?? 0;
+  const errorCount = file.errorCount ?? 0;
+  return {
+    originalCount: file.rowCount ?? 0,
+    uniqueCount: Math.max(0, (file.rowCount ?? 0) - duplicateCount),
+    duplicateCount,
+    duplicateInFileCount: duplicateCount,
+    duplicateAcrossFilesCount: 0,
+    existingDuplicateCount: 0,
+    importableCount,
+    updateCount,
+    mergeCount: 0,
+    suspectedDuplicateCount,
+    errorCount,
+    confirmableCount: importableCount + updateCount,
+    skippedCount: duplicateCount + suspectedDuplicateCount + errorCount,
+  };
+}
+
+function fileAudit(file: ImportFilePreview): ImportPreviewAuditCounts {
+  return file.audit ?? legacyFileAudit(file);
+}
+
+function importSessionAudit(payload: ImportSessionPayload | null): ImportPreviewAuditCounts | null {
+  if (!payload) {
+    return null;
+  }
+  if (payload.session.audit) {
+    return payload.session.audit;
+  }
+  return payload.files.reduce((total, file) => addAuditCounts(total, fileAudit(file)), emptyAuditCounts());
+}
+
+function etcAudit(payload: EtcImportPreviewResult | null): ImportPreviewAuditCounts | null {
+  if (!payload) {
+    return null;
+  }
+  if (payload.audit) {
+    return payload.audit;
+  }
+  const duplicateCount = payload.duplicatesSkipped ?? 0;
+  const importableCount = payload.imported ?? 0;
+  const mergeCount = payload.attachmentsCompleted ?? 0;
+  const errorCount = payload.failed ?? 0;
+  return {
+    originalCount: importableCount + duplicateCount + mergeCount + errorCount,
+    uniqueCount: importableCount + duplicateCount + mergeCount,
+    duplicateCount,
+    duplicateInFileCount: duplicateCount,
+    duplicateAcrossFilesCount: 0,
+    existingDuplicateCount: duplicateCount,
+    importableCount,
+    updateCount: 0,
+    mergeCount,
+    suspectedDuplicateCount: 0,
+    errorCount,
+    confirmableCount: importableCount + mergeCount,
+    skippedCount: duplicateCount + errorCount,
+  };
+}
+
+function formatConfirmAuditMessage(audit: ImportPreviewAuditCounts | null) {
+  if (!audit) {
+    return null;
+  }
+  const skippedDuplicateCount = audit.duplicateCount + audit.existingDuplicateCount;
+  const reviewCount = audit.suspectedDuplicateCount + audit.errorCount;
+  return `将导入 ${audit.importableCount} 条唯一记录，跳过 ${skippedDuplicateCount} 条重复${reviewCount > 0 ? `，${reviewCount} 条需复核` : ""}。`;
+}
+
+function AuditSummaryCards({ audit }: { audit: ImportPreviewAuditCounts | null }) {
+  if (!audit) {
+    return null;
+  }
+  const items = [
+    ["原始", audit.originalCount],
+    ["唯一", audit.uniqueCount],
+    ["重复", audit.duplicateCount],
+    ["已存在", audit.existingDuplicateCount],
+    ["可导入", audit.importableCount],
+    ["异常", audit.errorCount],
+  ] as const;
+  return (
+    <Box
+      aria-label="导入预览审计汇总"
+      sx={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(88px, 1fr))",
+        gap: 1,
+      }}
+    >
+      {items.map(([label, value]) => (
+        <Paper
+          key={label}
+          variant="outlined"
+          aria-label={`审计汇总 ${label} ${value}`}
+          sx={{ p: 1, borderColor: "#d5dde8", bgcolor: "#f8fafc" }}
+        >
+          <Typography variant="caption" color="text.secondary">{label}</Typography>
+          <Typography variant="h6" fontWeight={900}>{value}</Typography>
+        </Paper>
+      ))}
+    </Box>
+  );
 }
 
 const importGridSx = {
@@ -344,13 +498,29 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       ? `仍按所选账户 ${selectedAccountLabel} 导入`
       : "仍按所选账户导入";
   }, [conflictingPreviewFiles]);
+  const previewAudit = useMemo(() => importSessionAudit(previewPayload), [previewPayload]);
+  const etcPreviewAudit = useMemo(() => etcAudit(etcPreviewPayload), [etcPreviewPayload]);
+  const confirmAuditMessage = useMemo(
+    () => formatConfirmAuditMessage(mode === "etc_invoice" ? etcPreviewAudit : previewAudit),
+    [etcPreviewAudit, mode, previewAudit],
+  );
 
   const previewRows = useMemo<ImportFilePreviewRow[]>(() => (
-    previewPayload?.files.map((file) => ({
-      ...file,
-      accountLabel: formatSelectedBankAccountLabel(file) || "--",
-      batchTypeLabel: batchTypeLabel(file.batchType),
-    })) ?? []
+    previewPayload?.files.map((file) => {
+      const audit = fileAudit(file);
+      return {
+        ...file,
+        accountLabel: formatSelectedBankAccountLabel(file) || "--",
+        batchTypeLabel: batchTypeLabel(file.batchType),
+        auditOriginalCount: audit.originalCount,
+        auditUniqueCount: audit.uniqueCount,
+        auditDuplicateInFileCount: audit.duplicateInFileCount,
+        auditDuplicateAcrossFilesCount: audit.duplicateAcrossFilesCount,
+        auditExistingDuplicateCount: audit.existingDuplicateCount,
+        auditImportableCount: audit.importableCount,
+        auditErrorCount: audit.errorCount,
+      };
+    }) ?? []
   ), [previewPayload]);
 
   const etcRows = useMemo<EtcPreviewRow[]>(() => (
@@ -366,9 +536,15 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     { field: "status", headerName: "状态", width: 110, valueFormatter: (value) => statusLabel(String(value)) },
     { field: "batchTypeLabel", headerName: "类型", width: 120 },
     { field: "accountLabel", headerName: "账户", width: 160 },
+    { field: "auditOriginalCount", headerName: "原始", type: "number", width: 90 },
+    { field: "auditUniqueCount", headerName: "唯一", type: "number", width: 90 },
+    { field: "auditDuplicateInFileCount", headerName: "文件内重复", type: "number", width: 120 },
+    { field: "auditDuplicateAcrossFilesCount", headerName: "跨文件重复", type: "number", width: 120 },
+    { field: "auditExistingDuplicateCount", headerName: "已存在", type: "number", width: 100 },
+    { field: "auditImportableCount", headerName: "可导入", type: "number", width: 100 },
+    { field: "auditErrorCount", headerName: "异常", type: "number", width: 90 },
     { field: "rowCount", headerName: "行数", type: "number", width: 90 },
     { field: "successCount", headerName: "新增", type: "number", width: 90 },
-    { field: "errorCount", headerName: "异常", type: "number", width: 90 },
     { field: "message", headerName: "消息", flex: 1.6, minWidth: 240 },
   ], []);
 
@@ -652,6 +828,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
         <Stack spacing={2.5}>
           {feedbackMessage ? <Alert severity="success">{feedbackMessage}</Alert> : null}
           {errorMessage ? <Alert severity="error">{errorMessage}</Alert> : null}
+          {confirmAuditMessage ? <Alert severity="info">{confirmAuditMessage}</Alert> : null}
           {settingsLoading ? <Alert severity="info">正在加载银行账户映射...</Alert> : null}
           {!settingsLoading && !canUseBankImport ? <Alert severity="warning">设置里还没有银行账户映射，请先在设置中维护银行。</Alert> : null}
 
@@ -816,6 +993,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                         <Chip size="small" label={etcPreviewPayload.sessionId} />
                       </Stack>
                     ) : null}
+                    <AuditSummaryCards audit={etcPreviewAudit} />
                     {etcPreviewPayload ? (
                       <Stack direction="row" flexWrap="wrap" gap={1}>
                         <Chip color="success" label={`新增 ${etcPreviewPayload.imported}`} />
@@ -838,18 +1016,21 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                     </Box>
                   </Stack>
                 ) : (
-                  <Box sx={{ height: 480, width: "100%" }}>
-                    <DataGrid
-                      aria-label="导入预览结果"
-                      columns={previewColumns}
-                      rows={previewRows}
-                      loading={isPreviewing}
-                      disableRowSelectionOnClick
-                      hideFooter
-                      showToolbar
-                      sx={importGridSx}
-                    />
-                  </Box>
+                  <Stack spacing={1.5}>
+                    <AuditSummaryCards audit={previewAudit} />
+                    <Box sx={{ height: 480, width: "100%" }}>
+                      <DataGrid
+                        aria-label="导入预览结果"
+                        columns={previewColumns}
+                        rows={previewRows}
+                        loading={isPreviewing}
+                        disableRowSelectionOnClick
+                        hideFooter
+                        showToolbar
+                        sx={importGridSx}
+                      />
+                    </Box>
+                  </Stack>
                 )}
               </Stack>
             </Paper>

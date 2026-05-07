@@ -14,11 +14,13 @@ from fin_ops_platform.domain.models import (
     ImportedBatchRowResult,
     Invoice,
 )
+from fin_ops_platform.services.invoice_identity_service import InvoiceIdentityService
 
 
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
 WHITESPACE_RE = re.compile(r"\s+")
+PLACEHOLDER_EMPTY_VALUES = {"", "--", "—", "-", "——", "nan", "NaN", "None"}
 
 
 @dataclass(slots=True)
@@ -70,6 +72,7 @@ class ImportNormalizationService:
         self._txn_counter = len(existing_transactions or [])
         self._counterparty_counter = 0
         self._id_registry = id_registry
+        self._invoice_identity_service = InvoiceIdentityService()
 
         self._batches: dict[str, ImportPreview] = {}
         self._invoices_by_id: dict[str, Invoice] = {}
@@ -177,6 +180,8 @@ class ImportNormalizationService:
                 self._persist_created_row(preview.batch.batch_type, row_result, normalized)
             elif row_result.decision == ImportDecision.STATUS_UPDATED:
                 self._persist_updated_row(preview.batch.batch_type, row_result, normalized)
+            elif row_result.decision == ImportDecision.DUPLICATE_SKIPPED:
+                self._persist_duplicate_row(preview.batch.batch_type, row_result, normalized)
 
         preview.batch.success_count = self._count_decisions(preview.row_results, ImportDecision.CREATED, ImportDecision.STATUS_UPDATED)
         preview.batch.duplicate_count = self._count_decisions(preview.row_results, ImportDecision.DUPLICATE_SKIPPED)
@@ -223,7 +228,7 @@ class ImportNormalizationService:
                 row_result.decision_reason = "Unique business key matched an existing invoice during confirm."
             return
 
-        if data_fingerprint and data_fingerprint in self._invoice_fingerprint_index:
+        if not source_unique_key and data_fingerprint and data_fingerprint in self._invoice_fingerprint_index:
             linked_invoice_id = self._invoice_fingerprint_index[data_fingerprint]
             row_result.linked_object_type = "invoice"
             row_result.linked_object_id = linked_invoice_id
@@ -263,8 +268,51 @@ class ImportNormalizationService:
     def get_transaction(self, transaction_id: str) -> BankTransaction:
         return self._transactions_by_id[transaction_id]
 
+    def current_import_decision_for_normalized_row(
+        self,
+        *,
+        batch_type: BatchType,
+        normalized: dict[str, Any],
+    ) -> tuple[ImportDecision | None, str | None, str | None]:
+        source_unique_key = normalized.get("source_unique_key")
+        data_fingerprint = normalized.get("data_fingerprint")
+        if batch_type in (BatchType.OUTPUT_INVOICE, BatchType.INPUT_INVOICE):
+            if source_unique_key and source_unique_key in self._invoice_unique_index:
+                linked_invoice_id = self._invoice_unique_index[source_unique_key]
+                existing = self._invoices_by_id[linked_invoice_id]
+                incoming_status = normalized.get("invoice_status_from_source")
+                if incoming_status and incoming_status != existing.invoice_status_from_source:
+                    return ImportDecision.STATUS_UPDATED, "invoice", linked_invoice_id
+                return ImportDecision.DUPLICATE_SKIPPED, "invoice", linked_invoice_id
+            if not source_unique_key and data_fingerprint and data_fingerprint in self._invoice_fingerprint_index:
+                return ImportDecision.SUSPECTED_DUPLICATE, "invoice", self._invoice_fingerprint_index[data_fingerprint]
+            return ImportDecision.CREATED, None, None
+
+        if source_unique_key and source_unique_key in self._transaction_unique_index:
+            return ImportDecision.DUPLICATE_SKIPPED, "bank_transaction", self._transaction_unique_index[source_unique_key]
+        if not source_unique_key and data_fingerprint and data_fingerprint in self._transaction_fingerprint_index:
+            return ImportDecision.SUSPECTED_DUPLICATE, "bank_transaction", self._transaction_fingerprint_index[data_fingerprint]
+        return ImportDecision.CREATED, None, None
+
     def has_imported_records(self) -> bool:
         return bool(self._invoices_by_id or self._transactions_by_id)
+
+    def upsert_etc_invoice(self, etc_invoice: Any) -> Invoice:
+        normalized = self._normalize_etc_invoice(etc_invoice)
+        source_unique_key = normalized.get("source_unique_key")
+        data_fingerprint = normalized.get("data_fingerprint")
+        linked_invoice_id = self._invoice_unique_index.get(source_unique_key) if source_unique_key else None
+        if linked_invoice_id is None and not source_unique_key and data_fingerprint:
+            linked_invoice_id = self._invoice_fingerprint_index.get(data_fingerprint)
+
+        if linked_invoice_id is not None:
+            invoice = self._invoices_by_id[linked_invoice_id]
+            self._merge_invoice_from_etc_normalized(invoice, normalized)
+            return invoice
+
+        invoice = self._build_etc_invoice_from_normalized(normalized)
+        self._register_invoice(invoice)
+        return invoice
 
     def revert_import(self, batch_id: str) -> ImportedBatch:
         preview = self._batches[batch_id]
@@ -320,6 +368,7 @@ class ImportNormalizationService:
             "remark": self._string_or_none(raw_row.get("remark")),
             "project_id": self._string_or_none(raw_row.get("project_id")),
             "oa_form_id": self._string_or_none(raw_row.get("oa_form_id")),
+            "tags": self._normalize_tags(raw_row.get("tags")),
         }
         errors: list[str] = []
 
@@ -344,13 +393,16 @@ class ImportNormalizationService:
             if parsed_value is not None:
                 normalized[source_key] = self._format_decimal(parsed_value)
 
-        source_unique_key = self._build_invoice_unique_key(normalized)
-        data_fingerprint = None
+        identity = self._invoice_identity_service.identity_for_mapping(normalized)
+        source_unique_key = identity.canonical_key
+        data_fingerprint = identity.suspected_key
         if normalized_name and invoice_date and amount is not None:
-            data_fingerprint = self._build_invoice_fingerprint(normalized_name, invoice_date, amount)
+            data_fingerprint = data_fingerprint or self._build_invoice_fingerprint(normalized_name, invoice_date, amount)
         normalized["source_unique_key"] = source_unique_key
         normalized["data_fingerprint"] = data_fingerprint
         normalized["invoice_type"] = InvoiceType.OUTPUT.value if batch_type == BatchType.OUTPUT_INVOICE else InvoiceType.INPUT.value
+        if self._row_indicates_etc(normalized):
+            self._append_unique_tag(normalized["tags"], "ETC")
 
         if errors:
             return normalized, ImportedBatchRowResult(
@@ -381,7 +433,7 @@ class ImportNormalizationService:
             else:
                 decision = ImportDecision.DUPLICATE_SKIPPED
                 reason = "Unique business key matched an existing invoice with no source status change."
-        elif data_fingerprint and data_fingerprint in self._invoice_fingerprint_index:
+        elif not source_unique_key and data_fingerprint and data_fingerprint in self._invoice_fingerprint_index:
             linked_invoice_id = self._invoice_fingerprint_index[data_fingerprint]
             decision = ImportDecision.SUSPECTED_DUPLICATE
             reason = "Fingerprint matched an existing invoice without a stable official unique key."
@@ -547,6 +599,20 @@ class ImportNormalizationService:
         invoice = self._invoices_by_id[row_result.linked_object_id or ""]
         invoice.invoice_status_from_source = normalized.get("invoice_status_from_source")
         invoice.source_batch_id = row_result.batch_id
+        self._merge_invoice_from_normalized(invoice, row_result.batch_id, normalized)
+
+    def _persist_duplicate_row(
+        self,
+        batch_type: BatchType,
+        row_result: ImportedBatchRowResult,
+        normalized: dict[str, Any],
+    ) -> None:
+        if batch_type not in (BatchType.OUTPUT_INVOICE, BatchType.INPUT_INVOICE):
+            return
+        if row_result.linked_object_type != "invoice" or not row_result.linked_object_id:
+            return
+        invoice = self._invoices_by_id[row_result.linked_object_id]
+        self._merge_invoice_from_normalized(invoice, row_result.batch_id, normalized)
 
     def _build_invoice_from_normalized(
         self,
@@ -594,6 +660,8 @@ class ImportNormalizationService:
             data_fingerprint=normalized.get("data_fingerprint"),
             source_batch_id=batch_id,
             oa_form_id=normalized.get("oa_form_id"),
+            tags=list(normalized.get("tags") or []),
+            source_links=[self._build_invoice_source_link(batch_id, normalized)],
         )
 
     def _build_transaction_from_normalized(self, batch_id: str, normalized: dict[str, Any]) -> BankTransaction:
@@ -632,6 +700,9 @@ class ImportNormalizationService:
         )
 
     def _register_invoice(self, invoice: Invoice) -> None:
+        self._ensure_invoice_metadata_fields(invoice)
+        if not invoice.source_unique_key:
+            invoice.source_unique_key = self._invoice_identity_service.canonical_key_for_invoice(invoice)
         self._invoices_by_id[invoice.id] = invoice
         self._get_or_create_counterparty(invoice.counterparty.name, existing=invoice.counterparty)
         if invoice.source_unique_key:
@@ -640,6 +711,16 @@ class ImportNormalizationService:
             self._invoice_fingerprint_index[invoice.data_fingerprint] = invoice.id
 
     def _register_transaction(self, transaction: BankTransaction) -> None:
+        canonical_key = self._build_transaction_unique_key(
+            {
+                "account_no": transaction.account_no,
+                "bank_serial_no": transaction.bank_serial_no,
+                "enterprise_serial_no": transaction.enterprise_serial_no,
+                "voucher_no": transaction.voucher_no,
+            }
+        )
+        if canonical_key:
+            transaction.source_unique_key = canonical_key
         self._transactions_by_id[transaction.id] = transaction
         if transaction.source_unique_key:
             self._transaction_unique_index[transaction.source_unique_key] = transaction.id
@@ -683,24 +764,249 @@ class ImportNormalizationService:
         return counterparty
 
     def _build_invoice_unique_key(self, normalized: dict[str, Any]) -> str | None:
-        digital_invoice_no = normalized.get("digital_invoice_no")
-        if digital_invoice_no and digital_invoice_no.isdigit() and len(digital_invoice_no) == 20:
-            return digital_invoice_no
-        invoice_code = normalized.get("invoice_code")
-        invoice_no = normalized.get("invoice_no")
-        if invoice_code and invoice_no:
-            return f"{invoice_code}:{invoice_no}"
-        return None
+        return self._invoice_identity_service.canonical_key_for_mapping(normalized)
+
+    def _normalize_etc_invoice(self, etc_invoice: Any) -> dict[str, Any]:
+        invoice_number = self._string_or_none(getattr(etc_invoice, "invoice_number", None))
+        seller_name = self._string_or_none(getattr(etc_invoice, "seller_name", None))
+        buyer_name = self._string_or_none(getattr(etc_invoice, "buyer_name", None))
+        amount = self._parse_decimal(getattr(etc_invoice, "total_amount", None)) or ZERO
+        normalized: dict[str, Any] = {
+            "counterparty_name": seller_name or invoice_number or "ETC发票",
+            "normalized_counterparty_name": normalize_name(seller_name or invoice_number or "ETC发票"),
+            "invoice_no": invoice_number,
+            "digital_invoice_no": invoice_number,
+            "invoice_date": self._string_or_none(getattr(etc_invoice, "issue_date", None)),
+            "amount": self._format_decimal(amount),
+            "signed_amount": self._format_decimal(amount),
+            "seller_tax_no": self._string_or_none(getattr(etc_invoice, "seller_tax_no", None)),
+            "seller_name": seller_name,
+            "buyer_tax_no": self._string_or_none(getattr(etc_invoice, "buyer_tax_no", None)),
+            "buyer_name": buyer_name,
+            "tax_amount": self._format_decimal(self._parse_decimal(getattr(etc_invoice, "tax_amount", None)) or ZERO),
+            "total_with_tax": self._format_decimal(amount),
+            "tax_rate": self._string_or_none(getattr(etc_invoice, "tax_rate", None)),
+            "invoice_source": "ETC导入",
+            "invoice_kind": "ETC发票",
+            "tags": ["ETC"],
+            "invoice_type": InvoiceType.INPUT.value,
+            "etc_invoice_id": self._string_or_none(getattr(etc_invoice, "id", None)),
+            "etc_import_batch_id": self._string_or_none(getattr(etc_invoice, "import_batch_id", None)),
+            "etc_submission_batch_id": self._string_or_none(getattr(etc_invoice, "current_batch_id", None) or getattr(etc_invoice, "last_batch_id", None)),
+            "etc_submission_status": self._string_or_none(getattr(getattr(etc_invoice, "status", None), "value", None) or getattr(etc_invoice, "status", None)),
+            "source_batch_id": self._string_or_none(getattr(etc_invoice, "import_batch_id", None)),
+            "source_unique_key": None,
+            "data_fingerprint": None,
+        }
+        identity = self._invoice_identity_service.identity_for_mapping(normalized)
+        normalized["source_unique_key"] = identity.canonical_key
+        normalized["data_fingerprint"] = identity.suspected_key
+        if normalized["normalized_counterparty_name"] and normalized.get("invoice_date") and amount is not None:
+            normalized["data_fingerprint"] = normalized["data_fingerprint"] or self._build_invoice_fingerprint(
+                normalized["normalized_counterparty_name"],
+                str(normalized["invoice_date"]),
+                amount,
+            )
+        normalized["workbench_visibility"] = (
+            "hidden_after_etc_submission"
+            if normalized.get("etc_submission_status") == "submitted"
+            else "visible"
+        )
+        return normalized
+
+    def _build_etc_invoice_from_normalized(self, normalized: dict[str, Any]) -> Invoice:
+        counterparty = self._get_or_create_counterparty(normalized["counterparty_name"])
+        invoice_id = self._next_invoice_id()
+        amount = Decimal(normalized["amount"])
+        return Invoice(
+            id=invoice_id,
+            invoice_type=InvoiceType.INPUT,
+            invoice_no=normalized.get("digital_invoice_no") or normalized.get("invoice_no") or f"generated-{invoice_id.rsplit('_', 1)[-1]}",
+            digital_invoice_no=normalized.get("digital_invoice_no"),
+            counterparty=counterparty,
+            amount=amount,
+            signed_amount=Decimal(normalized["signed_amount"]),
+            invoice_date=normalized.get("invoice_date"),
+            seller_tax_no=normalized.get("seller_tax_no"),
+            seller_name=normalized.get("seller_name"),
+            buyer_tax_no=normalized.get("buyer_tax_no"),
+            buyer_name=normalized.get("buyer_name"),
+            tax_rate=normalized.get("tax_rate"),
+            tax_amount=Decimal(normalized["tax_amount"]) if normalized.get("tax_amount") else None,
+            total_with_tax=Decimal(normalized["total_with_tax"]) if normalized.get("total_with_tax") else None,
+            invoice_source=normalized.get("invoice_source"),
+            invoice_kind=normalized.get("invoice_kind"),
+            source_unique_key=normalized.get("source_unique_key"),
+            data_fingerprint=normalized.get("data_fingerprint"),
+            source_batch_id=normalized.get("source_batch_id"),
+            tags=list(normalized.get("tags") or []),
+            source_links=[self._build_etc_invoice_source_link(normalized)],
+            etc_invoice_id=normalized.get("etc_invoice_id"),
+            etc_import_batch_id=normalized.get("etc_import_batch_id"),
+            etc_submission_batch_id=normalized.get("etc_submission_batch_id"),
+            etc_submission_status=normalized.get("etc_submission_status"),
+            workbench_visibility=normalized.get("workbench_visibility") or "visible",
+        )
+
+    def _merge_invoice_from_etc_normalized(self, invoice: Invoice, normalized: dict[str, Any]) -> None:
+        self._ensure_invoice_metadata_fields(invoice)
+        for tag in normalized.get("tags") or []:
+            self._append_unique_tag(invoice.tags, str(tag))
+        self._append_invoice_source_link(invoice, self._build_etc_invoice_source_link(normalized))
+        invoice.etc_invoice_id = normalized.get("etc_invoice_id") or invoice.etc_invoice_id
+        invoice.etc_import_batch_id = normalized.get("etc_import_batch_id") or invoice.etc_import_batch_id
+        invoice.etc_submission_batch_id = normalized.get("etc_submission_batch_id") or invoice.etc_submission_batch_id
+        invoice.etc_submission_status = normalized.get("etc_submission_status") or invoice.etc_submission_status
+        invoice.workbench_visibility = normalized.get("workbench_visibility") or invoice.workbench_visibility or "visible"
+        invoice.source_batch_id = normalized.get("source_batch_id") or invoice.source_batch_id
+        for field_name in (
+            "digital_invoice_no",
+            "invoice_date",
+            "seller_tax_no",
+            "seller_name",
+            "buyer_tax_no",
+            "buyer_name",
+            "tax_rate",
+            "invoice_source",
+            "invoice_kind",
+        ):
+            incoming = normalized.get(field_name)
+            if incoming and not getattr(invoice, field_name):
+                setattr(invoice, field_name, incoming)
+        for field_name in ("tax_amount", "total_with_tax"):
+            incoming = normalized.get(field_name)
+            if incoming and getattr(invoice, field_name) is None:
+                setattr(invoice, field_name, Decimal(incoming))
+        if not invoice.source_unique_key:
+            invoice.source_unique_key = normalized.get("source_unique_key")
+            if invoice.source_unique_key:
+                self._invoice_unique_index[invoice.source_unique_key] = invoice.id
+
+    def _build_etc_invoice_source_link(self, normalized: dict[str, Any]) -> dict[str, str]:
+        return {
+            "source_type": "etc_invoice_import",
+            "source_id": normalized.get("etc_invoice_id") or normalized.get("source_unique_key") or "",
+            "batch_id": normalized.get("etc_import_batch_id") or "",
+            "created_at": datetime.now(UTC).isoformat(),
+        }
+
+    @staticmethod
+    def _ensure_invoice_metadata_fields(invoice: Invoice) -> None:
+        if not hasattr(invoice, "tags"):
+            invoice.tags = []
+        if not hasattr(invoice, "source_links"):
+            invoice.source_links = []
+        for field_name in (
+            "etc_invoice_id",
+            "etc_import_batch_id",
+            "etc_submission_batch_id",
+            "etc_submission_status",
+        ):
+            if not hasattr(invoice, field_name):
+                setattr(invoice, field_name, None)
+        if not hasattr(invoice, "workbench_visibility"):
+            invoice.workbench_visibility = "visible"
+
+    def _merge_invoice_from_normalized(self, invoice: Invoice, batch_id: str, normalized: dict[str, Any]) -> None:
+        self._ensure_invoice_metadata_fields(invoice)
+        for tag in normalized.get("tags") or []:
+            self._append_unique_tag(invoice.tags, str(tag))
+        self._append_invoice_source_link(invoice, self._build_invoice_source_link(batch_id, normalized))
+        invoice.source_batch_id = batch_id
+        if normalized.get("invoice_status_from_source"):
+            invoice.invoice_status_from_source = normalized.get("invoice_status_from_source")
+        for field_name in (
+            "invoice_code",
+            "digital_invoice_no",
+            "invoice_date",
+            "seller_tax_no",
+            "seller_name",
+            "buyer_tax_no",
+            "buyer_name",
+            "tax_rate",
+            "tax_classification_code",
+            "specific_business_type",
+            "taxable_item_name",
+            "specification_model",
+            "unit",
+            "invoice_source",
+            "invoice_kind",
+            "is_positive_invoice",
+            "risk_level",
+            "issuer",
+            "remark",
+            "project_id",
+            "oa_form_id",
+        ):
+            incoming = normalized.get(field_name)
+            if incoming and not getattr(invoice, field_name):
+                setattr(invoice, field_name, incoming)
+        for field_name in ("tax_amount", "total_with_tax", "quantity", "unit_price"):
+            incoming = normalized.get(field_name)
+            if incoming and getattr(invoice, field_name) is None:
+                setattr(invoice, field_name, Decimal(incoming))
+        if not invoice.source_unique_key:
+            invoice.source_unique_key = normalized.get("source_unique_key")
+            if invoice.source_unique_key:
+                self._invoice_unique_index[invoice.source_unique_key] = invoice.id
+
+    def _build_invoice_source_link(self, batch_id: str, normalized: dict[str, Any]) -> dict[str, str]:
+        return {
+            "source_type": "manual_invoice_import",
+            "source_id": normalized.get("source_unique_key") or normalized.get("data_fingerprint") or "",
+            "batch_id": batch_id,
+            "created_at": datetime.now(UTC).isoformat(),
+        }
+
+    @staticmethod
+    def _append_invoice_source_link(invoice: Invoice, source_link: dict[str, str]) -> None:
+        for existing in invoice.source_links:
+            if (
+                existing.get("source_type") == source_link.get("source_type")
+                and existing.get("source_id") == source_link.get("source_id")
+                and existing.get("batch_id") == source_link.get("batch_id")
+            ):
+                return
+        invoice.source_links.append(source_link)
+
+    @staticmethod
+    def _append_unique_tag(tags: list[str], tag: str) -> None:
+        clean_tag = tag.strip()
+        if clean_tag and clean_tag not in tags:
+            tags.append(clean_tag)
+
+    @classmethod
+    def _normalize_tags(cls, value: Any) -> list[str]:
+        if value in (None, ""):
+            return []
+        if isinstance(value, list):
+            tags = [str(item).strip() for item in value if str(item).strip()]
+        else:
+            tags = [part.strip() for part in re.split(r"[,，;；、\s]+", str(value)) if part.strip()]
+        normalized: list[str] = []
+        for tag in tags:
+            cls._append_unique_tag(normalized, tag)
+        return normalized
+
+    @staticmethod
+    def _row_indicates_etc(normalized: dict[str, Any]) -> bool:
+        tags = {str(tag).strip().upper() for tag in normalized.get("tags") or []}
+        invoice_source = str(normalized.get("invoice_source") or "").upper()
+        invoice_kind = str(normalized.get("invoice_kind") or "").upper()
+        return "ETC" in tags or "ETC" in invoice_source or "ETC" in invoice_kind
 
     @staticmethod
     def _build_invoice_fingerprint(normalized_name: str, invoice_date: str, amount: Decimal) -> str:
         return f"invoice:{normalized_name}:{invoice_date}:{amount.quantize(CENT)}"
 
     def _build_transaction_unique_key(self, normalized: dict[str, Any]) -> str | None:
-        for key in ("bank_serial_no", "voucher_no", "enterprise_serial_no"):
+        account_no = normalized.get("account_no")
+        if not account_no:
+            return None
+        for key in ("bank_serial_no", "enterprise_serial_no", "voucher_no"):
             value = normalized.get(key)
             if value:
-                return value
+                return f"bank:{account_no}:{key}:{value}"
         return None
 
     @staticmethod
@@ -751,9 +1057,11 @@ class ImportNormalizationService:
 
     @staticmethod
     def _parse_date(value: Any) -> str | None:
-        if value in (None, ""):
+        if value is None:
             return None
         text = clean_string(value)
+        if text in PLACEHOLDER_EMPTY_VALUES:
+            return None
         for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
             try:
                 return datetime.strptime(text, fmt).date().isoformat()
@@ -763,10 +1071,13 @@ class ImportNormalizationService:
 
     @staticmethod
     def _parse_decimal(value: Any) -> Decimal | None:
-        if value in (None, ""):
+        if value is None:
+            return None
+        text = str(value).strip()
+        if text in PLACEHOLDER_EMPTY_VALUES:
             return None
         try:
-            return Decimal(str(value).replace(",", "")).quantize(CENT)
+            return Decimal(text.replace(",", "")).quantize(CENT)
         except (InvalidOperation, ValueError):
             return None
 
@@ -776,9 +1087,12 @@ class ImportNormalizationService:
 
     @staticmethod
     def _string_or_none(value: Any) -> str | None:
-        if value in (None, ""):
+        if value is None:
             return None
-        return clean_string(value)
+        text = clean_string(value)
+        if text in PLACEHOLDER_EMPTY_VALUES:
+            return None
+        return text
 
 
 def clean_string(value: Any) -> str:

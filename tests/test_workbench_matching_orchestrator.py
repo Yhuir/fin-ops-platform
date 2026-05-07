@@ -104,7 +104,28 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         self.assertEqual(summary["candidate_count"], 3)
         self.assertEqual(summary["auto_closed_count"], 1)
         self.assertEqual(summary["conflict_count"], 1)
+        self.assertEqual(summary["skipped_rule_count"], 0)
         self.assertIsInstance(summary["duration_ms"], int)
+
+    def test_summary_accumulates_rule_skips_and_reports_month_progress(self) -> None:
+        progress_updates: list[dict[str, object]] = []
+
+        summary = self._orchestrator(
+            row_provider=FakeRowProvider(),
+            rules=SkippingRules(),
+        ).run(
+            changed_scope_months=["2026-05", "2026-06"],
+            reason="unit-test",
+            request_id="req-005b",
+            progress_callback=progress_updates.append,
+        )
+
+        self.assertEqual(summary["processed_months"], ["2026-05", "2026-06"])
+        self.assertEqual(summary["current_month"], "2026-06")
+        self.assertEqual(summary["skipped_rule_count"], 4)
+        self.assertEqual(len(summary["skipped_rules"]), 4)
+        self.assertEqual([update["current_month"] for update in progress_updates], ["2026-05", "2026-06"])
+        self.assertEqual(progress_updates[-1]["processed_months"], ["2026-05", "2026-06"])
 
     def test_failure_logs_failed_and_re_raises(self) -> None:
         with self.assertLogs("fin_ops_platform.services.workbench_matching_orchestrator", level="INFO") as logs:
@@ -226,6 +247,42 @@ class FailingRules:
         source_versions: dict[str, object] | None = None,
     ) -> list[dict[str, object]]:
         raise RuntimeError("rules failed")
+
+
+class SkippingRules:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def generate_candidates(
+        self,
+        scope_month: str,
+        oa_rows: list[dict[str, object]],
+        bank_rows: list[dict[str, object]],
+        invoice_rows: list[dict[str, object]],
+        *,
+        settings: dict[str, object] | None = None,
+        source_versions: dict[str, object] | None = None,
+    ) -> list[dict[str, object]]:
+        self.calls.append(scope_month)
+        return []
+
+    def last_summary(self) -> dict[str, object]:
+        scope_month = self.calls[-1]
+        return {
+            "skipped_rule_count": 2,
+            "skipped_rules": [
+                {
+                    "scope_month": scope_month,
+                    "rule_code": "oa_multi_invoice_exact_sum",
+                    "reason": "sum_match_candidate_cap_exceeded",
+                },
+                {
+                    "scope_month": scope_month,
+                    "rule_code": "oa_bank_multi_invoice_exact_sum",
+                    "reason": "sum_match_state_cap_exceeded",
+                },
+            ],
+        }
 
 
 def row(row_id: str) -> dict[str, object]:

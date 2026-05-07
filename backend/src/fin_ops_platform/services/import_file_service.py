@@ -10,8 +10,20 @@ import warnings
 from openpyxl import load_workbook
 import xlrd
 
-from fin_ops_platform.domain.enums import BatchType
+from fin_ops_platform.domain.enums import BatchType, ImportDecision
 from fin_ops_platform.domain.models import ImportedBatchRowResult
+from fin_ops_platform.services.import_preview_audit import (
+    BankTransactionIdentityStrategy,
+    ImportRecordIdentity,
+    ImportPreviewAuditCounts,
+    ImportPreviewFileAudit,
+    ImportPreviewAuditRow,
+    ImportPreviewDuplicateGroup,
+    ImportPreviewSessionAudit,
+    ImportPreviewStaleError,
+    InvoiceIdentityStrategy,
+    build_import_preview_session_audit,
+)
 from fin_ops_platform.services.imports import ImportNormalizationService
 
 
@@ -123,6 +135,7 @@ class FileImportPreviewItem:
     conflict_message: str | None = None
     row_results: list[ImportedBatchRowResult] = field(default_factory=list)
     normalized_rows: list[dict[str, Any]] = field(default_factory=list)
+    audit: ImportPreviewAuditCounts = field(default_factory=ImportPreviewAuditCounts)
 
 
 @dataclass(slots=True)
@@ -133,6 +146,8 @@ class FileImportSession:
     status: str
     files: list[FileImportPreviewItem]
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    audit: ImportPreviewAuditCounts = field(default_factory=ImportPreviewAuditCounts)
+    duplicate_groups: list[ImportPreviewDuplicateGroup] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -205,6 +220,7 @@ class FileImportService:
         if any(file.status == "unrecognized_template" for file in session.files):
             session.status = "preview_ready_with_errors"
 
+        self._refresh_session_audit(session)
         self._sessions[session.id] = session
         return session
 
@@ -227,6 +243,8 @@ class FileImportService:
 
         confirmed_any = False
         selected_items = [item for item in session.files if item.id in selected]
+        if any(item.status == "preview_ready" for item in selected_items):
+            self.assert_session_preview_current(session_id=session_id)
         progress_total = len(selected_items)
         progress_current = 0
         for item in session.files:
@@ -255,6 +273,12 @@ class FileImportService:
         session.status = "confirmed" if confirmed_any else "skipped"
         self._sessions[session.id] = session
         return session
+
+    def assert_session_preview_current(self, *, session_id: str) -> None:
+        session = self._sessions[session_id]
+        current_audit = self._build_session_audit(session, refresh_existing=True)
+        if current_audit.audit.stale_projection() != session.audit.stale_projection():
+            raise ImportPreviewStaleError(preview=session.audit, current=current_audit.audit)
 
     def retry_session_files(
         self,
@@ -323,6 +347,7 @@ class FileImportService:
         session.status = "preview_ready_with_errors" if any(
             file.status == "unrecognized_template" for file in session.files
         ) else "preview_ready"
+        self._refresh_session_audit(session)
         self._sessions[session.id] = session
         return session
 
@@ -450,6 +475,63 @@ class FileImportService:
             row_results=preview.row_results,
             normalized_rows=preview.normalized_rows,
         )
+
+    def _refresh_session_audit(self, session: FileImportSession) -> None:
+        audit = self._build_session_audit(session, refresh_existing=False)
+        session.audit = audit.audit
+        session.duplicate_groups = audit.duplicate_groups
+        file_audits = {file_audit.file_id: file_audit.audit for file_audit in audit.files}
+        for item in session.files:
+            item.audit = file_audits.get(item.id, ImportPreviewAuditCounts())
+
+    def _build_session_audit(self, session: FileImportSession, *, refresh_existing: bool) -> ImportPreviewSessionAudit:
+        rows: list[ImportPreviewAuditRow] = []
+        for item in session.files:
+            if item.batch_type is None:
+                continue
+            for row_result, normalized in zip(item.row_results, item.normalized_rows, strict=True):
+                decision = row_result.decision
+                linked_object_type = row_result.linked_object_type
+                linked_object_id = row_result.linked_object_id
+                if refresh_existing and row_result.decision != ImportDecision.ERROR:
+                    decision, linked_object_type, linked_object_id = self._import_service.current_import_decision_for_normalized_row(
+                        batch_type=item.batch_type,
+                        normalized=normalized,
+                    )
+                identity = self._identity_for_row(row_result.source_record_type, normalized)
+                rows.append(
+                    ImportPreviewAuditRow(
+                        file_id=item.id,
+                        file_name=item.file_name,
+                        row_no=row_result.row_no,
+                        record_type=row_result.source_record_type,
+                        identity_key=identity.identity_key,
+                        identity_kind=identity.identity_kind,
+                        decision=decision,
+                        linked_object_type=linked_object_type,
+                        linked_object_id=linked_object_id,
+                    )
+                )
+        audit = build_import_preview_session_audit(rows)
+        existing_file_ids = {file_audit.file_id for file_audit in audit.files}
+        for item in session.files:
+            if item.id not in existing_file_ids:
+                audit.files.append(self._empty_file_audit(item))
+        return audit
+
+    @staticmethod
+    def _empty_file_audit(item: FileImportPreviewItem) -> ImportPreviewFileAudit:
+        return ImportPreviewFileAudit(
+            file_id=item.id,
+            file_name=item.file_name,
+            audit=ImportPreviewAuditCounts(error_count=item.error_count),
+        )
+
+    @staticmethod
+    def _identity_for_row(record_type: str, normalized: dict[str, Any]) -> ImportRecordIdentity:
+        if record_type == "bank_transaction":
+            return BankTransactionIdentityStrategy().identify(normalized)
+        return InvoiceIdentityStrategy().identify(normalized)
 
     @staticmethod
     def _build_preview_error_item(

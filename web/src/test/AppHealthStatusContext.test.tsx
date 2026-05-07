@@ -19,7 +19,7 @@ const mocked = vi.hoisted(() => ({
     canAdminAccess: false,
     accessTier: "full_access",
   } as any,
-  jobs: [] as Array<{ status: string }>,
+  jobs: [] as Array<Record<string, unknown> & { status: string }>,
   connectionFailed: false,
   progress: null as { tone: string } | null,
   workbenchStatus: null as { level: "ok" | "pending" | "error"; reason: string } | null,
@@ -185,12 +185,83 @@ describe("AppHealthStatusProvider", () => {
   });
 
   it("reports yellow while background jobs are running", async () => {
-    mocked.jobs = [{ status: "running" }];
+    mocked.jobs = [{
+      jobId: "job-running",
+      type: "file_import",
+      label: "导入发票",
+      shortLabel: "导入 发票 2/5",
+      status: "running",
+    }];
     renderProbe();
     await waitFor(() => {
       const status = screen.getByLabelText("health");
       expect(status).toHaveAttribute("data-level", "busy");
-      expect(status).toHaveAttribute("data-reason", "后台任务处理中");
+      expect(status).toHaveAttribute("data-reason", "正在执行后台任务：导入 发票 2/5");
+    });
+  });
+
+  it("reports failed import attention without being overwritten by OA synced", async () => {
+    mocked.appHealth = {
+      status: "busy",
+      session: { status: "authenticated" },
+      oa_sync: { status: "synced", message: "OA 已同步", dirty_scopes: [] },
+      workbench_read_model: { status: "ready", dirty_scopes: [], stale_scopes: [], rebuilding_scopes: [] },
+      background_jobs: {
+        active: 1,
+        queued: 0,
+        running: 0,
+        attention: 1,
+        primary_attention: {
+          job_id: "job-failed",
+          type: "file_import",
+          label: "导入发票",
+          short_label: "导入发票失败",
+          status: "failed",
+          acknowledgeable: true,
+          retryable: true,
+        },
+      },
+    };
+    renderProbe();
+    await waitFor(() => {
+      expect(screen.getByLabelText("health")).toHaveAttribute("data-level", "busy");
+      expect(screen.getByLabelText("health")).toHaveAttribute("data-reason", "有 1 个失败导入任务需要确认");
+    });
+  });
+
+  it("reports workbench matching running months without being overwritten by OA synced", async () => {
+    mocked.appHealth = {
+      status: "busy",
+      session: { status: "authenticated" },
+      oa_sync: { status: "synced", message: "OA 已同步", dirty_scopes: [] },
+      workbench_read_model: {
+        status: "rebuilding",
+        dirty_scopes: [],
+        stale_scopes: [],
+        rebuilding_scopes: [],
+        matching_running_scopes: ["2026-03"],
+      },
+      background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
+    };
+    renderProbe();
+    await waitFor(() => {
+      expect(screen.getByLabelText("health")).toHaveAttribute("data-level", "busy");
+      expect(screen.getByLabelText("health")).toHaveAttribute("data-reason", "正在生成关联台候选：2026-03");
+    });
+  });
+
+  it("does not treat succeeded jobs as running AppHealth work", async () => {
+    mocked.jobs = [{
+      jobId: "job-succeeded",
+      type: "file_import",
+      label: "导入发票",
+      shortLabel: "导入发票完成",
+      status: "succeeded",
+    }];
+    renderProbe();
+    await waitFor(() => {
+      expect(screen.getByLabelText("health")).toHaveAttribute("data-level", "ok");
+      expect(screen.getByLabelText("health")).toHaveAttribute("data-reason", "系统状态正常");
     });
   });
 

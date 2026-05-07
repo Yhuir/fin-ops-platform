@@ -563,24 +563,28 @@ body.workbench-focus-mode .global-header {
   font-size: 11px;
 }
 
+.background-progress-action,
 .background-progress-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  min-width: 0;
+  height: 22px;
   flex: 0 0 auto;
-  padding: 0;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
+  padding: 0 7px;
+  border: 1px solid rgba(72, 101, 129, 0.25);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.72);
   color: #486581;
-  font-size: 12px;
-  font-weight: 900;
+  font-size: 11px;
+  font-weight: 800;
   line-height: 1;
   cursor: pointer;
+  white-space: nowrap;
 }
 
+.background-progress-action:hover,
+.background-progress-action:focus-visible,
 .background-progress-close:hover,
 .background-progress-close:focus-visible {
   background: rgba(15, 23, 42, 0.08);

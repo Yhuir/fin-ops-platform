@@ -38,8 +38,12 @@ class LiveWorkbenchService:
 
     def has_rows_for_month(self, month: str) -> bool:
         if month == "all":
-            return bool(self._import_service.list_invoices() or self._import_service.list_transactions())
-        return any(invoice.invoice_date and invoice.invoice_date.startswith(month) for invoice in self._import_service.list_invoices()) or any(
+            return bool([invoice for invoice in self._import_service.list_invoices() if self._invoice_is_workbench_visible(invoice)] or self._import_service.list_transactions())
+        return any(
+            invoice.invoice_date and invoice.invoice_date.startswith(month)
+            for invoice in self._import_service.list_invoices()
+            if self._invoice_is_workbench_visible(invoice)
+        ) or any(
             transaction.txn_date and transaction.txn_date.startswith(month) for transaction in self._import_service.list_transactions()
         )
 
@@ -120,6 +124,8 @@ class LiveWorkbenchService:
         except KeyError:
             invoice = None
         if invoice is not None:
+            if not self._invoice_is_workbench_visible(invoice):
+                return None
             return self._build_invoice_row(invoice, result_by_object_id.get(row_id))
 
         try:
@@ -233,6 +239,12 @@ class LiveWorkbenchService:
             "total_with_tax": format_decimal(invoice.total_with_tax) if invoice.total_with_tax is not None else "—",
             "invoice_type": "销项发票" if invoice.invoice_type.value == "output" else "进项发票",
             "invoice_bank_relation": relation,
+            "source_kind": "etc_invoice" if "ETC" in list(getattr(invoice, "tags", []) or []) else "manual_invoice",
+            "tags": list(getattr(invoice, "tags", []) or []),
+            "etc_invoice_id": getattr(invoice, "etc_invoice_id", None),
+            "etc_import_batch_id": getattr(invoice, "etc_import_batch_id", None),
+            "etc_submission_batch_id": getattr(invoice, "etc_submission_batch_id", None),
+            "etc_submission_status": getattr(invoice, "etc_submission_status", None),
             "available_actions": self._available_actions("invoice", section),
             "_month": invoice.invoice_date[:7] if invoice.invoice_date else "",
             "_section": section,
@@ -267,6 +279,9 @@ class LiveWorkbenchService:
                 "发票风险等级": invoice.risk_level or "—",
                 "开票人": invoice.issuer or "—",
                 "备注": invoice.remark or "—",
+                "标签": "、".join(list(getattr(invoice, "tags", []) or [])) or "—",
+                "ETC导入批次": getattr(invoice, "etc_import_batch_id", None) or "—",
+                "ETC提交批次": getattr(invoice, "etc_submission_batch_id", None) or "—",
             },
         }
 
@@ -276,6 +291,8 @@ class LiveWorkbenchService:
         result_by_object_id = self._existing_results_by_object_id()
         self._detail_rows_by_id = {}
         for invoice in self._import_service.list_invoices():
+            if not self._invoice_is_workbench_visible(invoice):
+                continue
             self._detail_rows_by_id[invoice.id] = self._build_invoice_row(invoice, result_by_object_id.get(invoice.id))
         for transaction in self._import_service.list_transactions():
             if transaction.source_batch_id in excluded_transaction_batch_ids:
@@ -550,6 +567,10 @@ class LiveWorkbenchService:
         if row_type == "invoice" and section == "open":
             return ["detail", "confirm_link", "mark_exception", "ignore"]
         return ["detail"]
+
+    @staticmethod
+    def _invoice_is_workbench_visible(invoice: Invoice) -> bool:
+        return getattr(invoice, "workbench_visibility", "visible") != "hidden_after_etc_submission"
 
 
 def relation_from_result(result: MatchingResult | None) -> dict[str, str]:

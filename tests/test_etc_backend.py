@@ -12,6 +12,7 @@ import unittest
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from fin_ops_platform.app.server import build_application
+from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.etc_service import (
     EtcDraftRequestError,
     EtcOAHttpClientSettings,
@@ -254,6 +255,65 @@ class EtcServiceTests(unittest.TestCase):
         self.assertEqual(total, 0)
         self.assertEqual(invoices, [])
 
+    def test_preview_audit_reports_duplicate_xml_inside_zip(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir))
+
+            preview = service.preview_import_zips(
+                [
+                    UploadedEtcZipFile(
+                        "duplicate-inside.zip",
+                        zip_bytes(
+                            {
+                                "xml/ETC001.xml": etc_xml("ETC001"),
+                                "xml/copy-ETC001.xml": etc_xml("ETC001"),
+                                "pdf/ETC001.pdf": fake_pdf("ETC001"),
+                            }
+                        ),
+                    )
+                ]
+            )
+
+        self.assertEqual(preview["summary"], {"imported": 1, "duplicatesSkipped": 1, "attachmentsCompleted": 0, "failed": 0})
+        self.assertEqual(
+            preview["audit"],
+            {
+                "original_count": 2,
+                "unique_count": 1,
+                "duplicate_count": 1,
+                "duplicate_in_file_count": 1,
+                "duplicate_across_files_count": 0,
+                "existing_duplicate_count": 0,
+                "importable_count": 1,
+                "update_count": 0,
+                "merge_count": 0,
+                "suspected_duplicate_count": 0,
+                "error_count": 0,
+                "confirmable_count": 1,
+                "skipped_count": 1,
+            },
+        )
+
+    def test_preview_audit_reports_duplicate_xml_across_zips(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir))
+
+            preview = service.preview_import_zips(
+                [
+                    UploadedEtcZipFile("first.zip", etc_zip(["ETC001"])),
+                    UploadedEtcZipFile("second.zip", etc_zip(["ETC001"])),
+                ]
+            )
+
+        self.assertEqual(preview["summary"], {"imported": 1, "duplicatesSkipped": 1, "attachmentsCompleted": 0, "failed": 0})
+        self.assertEqual(preview["audit"]["original_count"], 2)
+        self.assertEqual(preview["audit"]["unique_count"], 1)
+        self.assertEqual(preview["audit"]["duplicate_count"], 1)
+        self.assertEqual(preview["audit"]["duplicate_in_file_count"], 0)
+        self.assertEqual(preview["audit"]["duplicate_across_files_count"], 1)
+        self.assertEqual(preview["audit"]["importable_count"], 1)
+        self.assertEqual(preview["audit"]["skipped_count"], 1)
+
     def test_confirm_import_session_persists_records_and_is_idempotent(self) -> None:
         with TemporaryDirectory() as temp_dir:
             service = EtcService(data_dir=Path(temp_dir))
@@ -262,11 +322,49 @@ class EtcServiceTests(unittest.TestCase):
             confirmed = service.confirm_import_session(str(preview["sessionId"]))
             repeated = service.confirm_import_session(str(preview["sessionId"]))
             invoices, total, _counts = service.list_invoices(page=1, page_size=20)
+            import_batch = service.list_import_batches()[0]
 
         self.assertEqual(confirmed.imported, 2)
         self.assertEqual(repeated.imported, 2)
         self.assertEqual(total, 2)
         self.assertEqual({invoice.invoice_number for invoice in invoices}, {"ETC001", "ETC002"})
+        self.assertEqual(import_batch.source_session_id, preview["sessionId"])
+        self.assertEqual({invoice.import_session_id for invoice in invoices}, {preview["sessionId"]})
+
+    def test_import_batch_tracks_invoice_ids_and_date_ranges(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir))
+
+            service.import_zips(
+                [
+                    UploadedEtcZipFile(
+                        "jan-feb.zip",
+                        zip_bytes(
+                            {
+                                "xml/ETC001.xml": etc_xml("ETC001", issue_date="2026-01-15", total_amount="10.00"),
+                                "pdf/ETC001.pdf": fake_pdf("ETC001"),
+                                "xml/ETC002.xml": etc_xml("ETC002", issue_date="2026-02-14", total_amount="20.00"),
+                                "pdf/ETC002.pdf": fake_pdf("ETC002"),
+                            }
+                        ),
+                    )
+                ]
+            )
+            invoices, total, _counts = service.list_invoices(page=1, page_size=20)
+            import_batches = service.list_import_batches()
+
+        self.assertEqual(total, 2)
+        self.assertEqual(len(import_batches), 1)
+        import_batch = import_batches[0]
+        self.assertEqual(import_batch.id, "etc_import_batch_0001")
+        self.assertEqual(import_batch.invoice_ids, ["etc_invoice_0001", "etc_invoice_0002"])
+        self.assertEqual(import_batch.invoice_count, 2)
+        self.assertEqual(import_batch.total_amount, Decimal("30.00"))
+        self.assertEqual(import_batch.issue_date_start, "2026-01-15")
+        self.assertEqual(import_batch.issue_date_end, "2026-02-14")
+        self.assertEqual(import_batch.passage_date_start, "2026-01-15")
+        self.assertEqual(import_batch.passage_date_end, "2026-02-14")
+        self.assertEqual({invoice.import_batch_id for invoice in invoices}, {"etc_import_batch_0001"})
 
     def test_import_zip_parses_nested_xml_stores_files_deduplicates_and_completes_pdf(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -312,6 +410,13 @@ class EtcServiceTests(unittest.TestCase):
             invoices, total, _counts = service.list_invoices(page=1, page_size=20)
 
         self.assertEqual(preview["summary"], {"imported": 1, "duplicatesSkipped": 1, "attachmentsCompleted": 1, "failed": 0})
+        self.assertEqual(preview["audit"]["original_count"], 3)
+        self.assertEqual(preview["audit"]["unique_count"], 3)
+        self.assertEqual(preview["audit"]["existing_duplicate_count"], 1)
+        self.assertEqual(preview["audit"]["importable_count"], 1)
+        self.assertEqual(preview["audit"]["update_count"], 1)
+        self.assertEqual(preview["audit"]["confirmable_count"], 2)
+        self.assertEqual(preview["audit"]["skipped_count"], 1)
         self.assertEqual(confirmed.imported, 1)
         self.assertEqual(confirmed.duplicates_skipped, 1)
         self.assertEqual(confirmed.attachments_completed, 1)
@@ -428,6 +533,34 @@ class EtcServiceTests(unittest.TestCase):
         self.assertEqual(revoked["updated"], 2)
         self.assertEqual(not_submitted.status, "not_submitted")
 
+    def test_draft_creation_rejects_partial_import_batch_submission(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            fake_oa = FakeEtcOAClient()
+            service = EtcService(data_dir=Path(temp_dir), oa_client=fake_oa)
+            service.import_zips([UploadedEtcZipFile("invoices.zip", etc_zip(["ETC001", "ETC002"]))])
+
+            with self.assertRaisesRegex(EtcDraftRequestError, "完整未提交 ETC 导入批次"):
+                service.create_oa_draft(["etc_invoice_0001"])
+
+        self.assertEqual(fake_oa.uploads, [])
+        self.assertEqual(fake_oa.draft_payloads, [])
+
+    def test_draft_creation_accepts_complete_import_batch_submission(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            fake_oa = FakeEtcOAClient()
+            service = EtcService(data_dir=Path(temp_dir), oa_client=fake_oa)
+            service.import_zips([UploadedEtcZipFile("invoices.zip", etc_zip(["ETC001", "ETC002"]))])
+
+            draft = service.create_oa_draft(["etc_invoice_0001", "etc_invoice_0002"])
+            invoices, _total, _counts = service.list_invoices(page=1, page_size=20)
+            import_batch = service.list_import_batches()[0]
+
+        self.assertEqual(draft.oa_draft_id, "oa-draft-001")
+        self.assertEqual(import_batch.submission_batch_id, draft.batch_id)
+        self.assertEqual({invoice.current_batch_id for invoice in invoices}, {draft.batch_id})
+        self.assertEqual({invoice.import_batch_id for invoice in invoices}, {import_batch.id})
+        self.assertEqual(len(fake_oa.uploads), 2)
+
     def test_draft_creation_failure_marks_batch_failed_and_keeps_invoice_unsubmitted(self) -> None:
         with TemporaryDirectory() as temp_dir:
             service = EtcService(data_dir=Path(temp_dir), oa_client=FakeEtcOAClient(fail_draft=True))
@@ -504,6 +637,220 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(completed_job["result_summary"]["total"], 2)
         self.assertEqual(json.loads(query_response.body)["total"], 2)
 
+    def test_etc_import_syncs_to_canonical_invoices_and_dedupes_manual_invoice(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            manual_preview = app._import_service.preview_import(
+                batch_type=BatchType.INPUT_INVOICE,
+                source_name="input-invoices.xlsx",
+                imported_by="finance",
+                rows=[
+                    {
+                        "digital_invoice_no": "ETC001",
+                        "counterparty_name": "云南高速公路联网收费管理有限公司",
+                        "seller_name": "云南高速公路联网收费管理有限公司",
+                        "seller_tax_no": "915300007194052520",
+                        "buyer_name": "云南溯源科技有限公司",
+                        "buyer_tax_no": "915300007194052521",
+                        "amount": "13.07",
+                        "total_with_tax": "13.07",
+                        "tax_amount": "0.39",
+                        "invoice_date": "2026-02-27",
+                    }
+                ],
+            )
+            app._import_service.confirm_import(manual_preview.id)
+            body, headers = multipart({"outer.zip": etc_zip(["ETC001"], nested=True)})
+
+            preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+            preview_payload = json.loads(preview_response.body)
+            session_id = preview_payload["sessionId"]
+            confirm_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id}))
+            job = json.loads(confirm_response.body)["job"]
+            self._wait_for_job(app, job["job_id"])
+            invoices = app._import_service.list_invoices()
+
+        self.assertEqual(preview_payload["audit"]["importable_count"], 0)
+        self.assertEqual(preview_payload["audit"]["merge_count"], 1)
+        self.assertEqual(preview_payload["audit"]["confirmable_count"], 1)
+        self.assertEqual(len(invoices), 1)
+        self.assertIn("ETC", invoices[0].tags)
+        self.assertEqual(invoices[0].etc_invoice_id, "etc_invoice_0001")
+        source_types = {source_link["source_type"] for source_link in invoices[0].source_links}
+        self.assertEqual(source_types, {"manual_invoice_import", "etc_invoice_import"})
+
+    def test_etc_import_keeps_distinct_invoice_numbers_with_same_amount_as_separate_canonical_invoices(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            body, headers = multipart({"outer.zip": etc_zip(["ETC001", "ETC002"], nested=True)})
+
+            preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+            session_id = json.loads(preview_response.body)["sessionId"]
+            confirm_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id}))
+            job = json.loads(confirm_response.body)["job"]
+            self._wait_for_job(app, job["job_id"])
+            invoices = app._import_service.list_invoices()
+
+        self.assertEqual(len(invoices), 2)
+        self.assertCountEqual([invoice.digital_invoice_no for invoice in invoices], ["ETC001", "ETC002"])
+        self.assertEqual({invoice.source_unique_key for invoice in invoices}, {"ETC001", "ETC002"})
+
+    def test_etc_import_confirm_returns_preview_stale_when_canonical_invoice_changes_after_preview(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            body, headers = multipart({"outer.zip": etc_zip(["ETC001"], nested=True)})
+
+            preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+            preview_payload = json.loads(preview_response.body)
+            manual_preview = app._import_service.preview_import(
+                batch_type=BatchType.INPUT_INVOICE,
+                source_name="input-invoices.xlsx",
+                imported_by="finance",
+                rows=[
+                    {
+                        "digital_invoice_no": "ETC001",
+                        "counterparty_name": "云南高速公路联网收费管理有限公司",
+                        "seller_name": "云南高速公路联网收费管理有限公司",
+                        "seller_tax_no": "915300007194052520",
+                        "buyer_name": "云南溯源科技有限公司",
+                        "buyer_tax_no": "915300007194052521",
+                        "amount": "13.07",
+                        "total_with_tax": "13.07",
+                        "tax_amount": "0.39",
+                        "invoice_date": "2026-02-27",
+                    }
+                ],
+            )
+            app._import_service.confirm_import(manual_preview.id)
+
+            confirm_response = app.handle_request(
+                "POST",
+                "/api/etc/import/confirm",
+                json.dumps({"sessionId": preview_payload["sessionId"]}),
+            )
+            query_response = app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20")
+
+        self.assertEqual(preview_payload["audit"]["importable_count"], 1)
+        self.assertEqual(preview_payload["audit"]["merge_count"], 0)
+        self.assertEqual(confirm_response.status_code, 409)
+        self.assertEqual(json.loads(confirm_response.body)["error"], "preview_stale")
+        self.assertEqual(json.loads(query_response.body)["total"], 0)
+
+    def test_confirmed_etc_submission_hides_scatter_invoice_from_workbench(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._etc_service.oa_client = FakeEtcOAClient()
+            body, headers = multipart({"outer.zip": etc_zip(["ETC001"], nested=True)})
+
+            preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+            session_id = json.loads(preview_response.body)["sessionId"]
+            confirm_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id}))
+            job = json.loads(confirm_response.body)["job"]
+            self._wait_for_job(app, job["job_id"])
+            before_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
+            draft_response = app.handle_request(
+                "POST",
+                "/api/etc/batches/draft",
+                json.dumps({"invoiceIds": ["etc_invoice_0001"]}),
+            )
+            draft_payload = json.loads(draft_response.body)
+            app.handle_request("POST", f"/api/etc/batches/{draft_payload['batchId']}/confirm-submitted")
+            after_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
+            canonical_invoice = app._import_service.list_invoices()[0]
+
+        before_invoice_rows = [
+            row
+            for group in before_payload["open"]["groups"]
+            for row in group["invoice_rows"]
+        ]
+        after_invoice_rows = [
+            row
+            for group in after_payload["open"]["groups"]
+            for row in group["invoice_rows"]
+        ]
+        self.assertEqual(len(before_invoice_rows), 1)
+        self.assertEqual(before_invoice_rows[0]["source_kind"], "etc_invoice")
+        self.assertIn("ETC", before_invoice_rows[0]["tags"])
+        self.assertEqual(after_invoice_rows, [])
+        self.assertEqual(canonical_invoice.workbench_visibility, "hidden_after_etc_submission")
+
+    def test_confirmed_etc_submission_renders_folded_invoice_summary_for_matching_oa(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._etc_service.oa_client = FakeEtcOAClient()
+            body, headers = multipart({"outer.zip": etc_zip(["ETC001", "ETC002"], nested=True)})
+
+            preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+            session_id = json.loads(preview_response.body)["sessionId"]
+            confirm_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id}))
+            job = json.loads(confirm_response.body)["job"]
+            self._wait_for_job(app, job["job_id"])
+            draft_response = app.handle_request(
+                "POST",
+                "/api/etc/batches/draft",
+                json.dumps({"invoiceIds": ["etc_invoice_0001", "etc_invoice_0002"]}),
+            )
+            draft_payload = json.loads(draft_response.body)
+            app.handle_request("POST", f"/api/etc/batches/{draft_payload['batchId']}/confirm-submitted")
+            raw_payload = {
+                "month": "2026-02",
+                "oa_status": {"code": "ready", "message": "OA 已同步"},
+                "summary": {
+                    "oa_count": 1,
+                    "bank_count": 0,
+                    "invoice_count": 0,
+                    "paired_count": 0,
+                    "open_count": 1,
+                    "exception_count": 0,
+                },
+                "paired": {"oa": [], "bank": [], "invoice": []},
+                "open": {
+                    "oa": [
+                        {
+                            "id": "oa-etc-202602-001",
+                            "type": "oa",
+                            "source": "etc_batch",
+                            "etc_batch_id": draft_payload["etcBatchId"],
+                            "etcBatchId": draft_payload["etcBatchId"],
+                            "tags": ["ETC批量提交"],
+                            "case_id": "",
+                            "applicant": "张三",
+                            "apply_type": "支付申请",
+                            "amount": "26.14",
+                            "counterparty_name": "云南高速通行费",
+                            "reason": f"ETC批量提交\netc_batch_id={draft_payload['etcBatchId']}",
+                            "oa_bank_relation": {"code": "pending_match", "label": "待找流水", "tone": "warn"},
+                            "available_actions": ["detail"],
+                        }
+                    ],
+                    "bank": [],
+                    "invoice": [],
+                },
+            }
+            with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+                payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
+            invoice_rows = [
+                row
+                for group in payload["open"]["groups"]
+                for row in group["invoice_rows"]
+            ]
+            detail_response = app.handle_request("GET", f"/api/workbench/rows/{invoice_rows[0]['id']}")
+            detail_payload = json.loads(detail_response.body)
+
+        self.assertEqual(len(invoice_rows), 1)
+        summary_row = invoice_rows[0]
+        self.assertEqual(summary_row["source_kind"], "etc_invoice_summary")
+        self.assertEqual(summary_row["seller_name"], "ETC发票 2 张")
+        self.assertEqual(summary_row["etc_invoice_count"], 2)
+        self.assertEqual(summary_row["total_with_tax"], "26.14")
+        self.assertEqual(summary_row["etc_batch_id"], draft_payload["etcBatchId"])
+        self.assertIn("ETC", summary_row["tags"])
+        self.assertIn("已关联ETC发票", summary_row["tags"])
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(detail_payload["row"]["id"], summary_row["id"])
+        self.assertIn("ETC001", detail_payload["row"]["detail_fields"]["发票清单"])
+        self.assertIn("ETC002", detail_payload["row"]["detail_fields"]["发票清单"])
+
     def test_etc_invoice_api_reports_attachment_existence_flags(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -556,13 +903,18 @@ class EtcApiTests(unittest.TestCase):
             )
 
             preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
-            session_id = json.loads(preview_response.body)["sessionId"]
+            preview_payload = json.loads(preview_response.body)
+            session_id = preview_payload["sessionId"]
             confirm_response = app.handle_request("POST", "/api/etc/import/confirm", json.dumps({"sessionId": session_id}))
             job = json.loads(confirm_response.body)["job"]
             completed_job = self._wait_for_job(app, job["job_id"])
             query_response = app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20")
 
         self.assertEqual(confirm_response.status_code, 202)
+        self.assertEqual(preview_payload["audit"]["original_count"], 2)
+        self.assertEqual(preview_payload["audit"]["importable_count"], 1)
+        self.assertEqual(preview_payload["audit"]["error_count"], 1)
+        self.assertEqual(preview_payload["audit"]["skipped_count"], 1)
         self.assertEqual(job["total"], 2)
         self.assertEqual(completed_job["status"], "partial_success")
         self.assertEqual(completed_job["current"], 2)

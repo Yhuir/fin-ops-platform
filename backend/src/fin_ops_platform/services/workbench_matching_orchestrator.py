@@ -57,15 +57,20 @@ class WorkbenchMatchingOrchestrator:
         changed_scope_months: list[str],
         reason: str,
         request_id: str,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         started_at = perf_counter()
         summary: dict[str, Any] = {
             "request_id": str(request_id or "").strip(),
             "reason": str(reason or "").strip(),
             "scope_months": [],
+            "processed_months": [],
+            "current_month": None,
             "candidate_count": 0,
             "auto_closed_count": 0,
             "conflict_count": 0,
+            "skipped_rule_count": 0,
+            "skipped_rules": [],
             "duration_ms": 0,
         }
 
@@ -77,13 +82,16 @@ class WorkbenchMatchingOrchestrator:
             self._log("workbench_matching.run.started", summary)
 
             for scope_month in scope_months:
+                summary["current_month"] = scope_month
                 self._candidate_match_service.delete_month(scope_month)
                 held_row_ids = self._manual_confirmed_row_ids(scope_month)
                 oa_rows = self._exclude_held_rows(self._rows_for_month("oa", scope_month), held_row_ids)
                 bank_rows = self._exclude_held_rows(self._rows_for_month("bank", scope_month), held_row_ids)
                 invoice_rows = self._exclude_held_rows(self._rows_for_month("invoice", scope_month), held_row_ids)
 
-                for candidate in self._generate_candidates(scope_month, oa_rows, bank_rows, invoice_rows):
+                candidates = self._generate_candidates(scope_month, oa_rows, bank_rows, invoice_rows)
+                self._accumulate_rule_summary(summary)
+                for candidate in candidates:
                     upserted = self._candidate_match_service.upsert_candidate(candidate)
                     summary["candidate_count"] += 1
                     if upserted.get("status") == "auto_closed":
@@ -92,6 +100,9 @@ class WorkbenchMatchingOrchestrator:
                         summary["conflict_count"] += 1
 
                 self._invalidate_read_models(scope_month)
+                summary["processed_months"].append(scope_month)
+                summary["duration_ms"] = self._duration_ms(started_at)
+                self._emit_progress(progress_callback, summary)
 
             summary["duration_ms"] = self._duration_ms(started_at)
             self._log("workbench_matching.run.finished", summary)
@@ -122,6 +133,36 @@ class WorkbenchMatchingOrchestrator:
         if not isinstance(candidates, list):
             raise ValueError("rules.generate_candidates(...) must return a list.")
         return candidates
+
+    def _accumulate_rule_summary(self, summary: dict[str, Any]) -> None:
+        last_summary = getattr(self._rules, "last_summary", None)
+        if not callable(last_summary):
+            return
+        payload = last_summary()
+        if not isinstance(payload, dict):
+            raise ValueError("rules.last_summary() must return a dict.")
+        skipped_rules = payload.get("skipped_rules") or []
+        if not isinstance(skipped_rules, list):
+            raise ValueError("rules.last_summary().skipped_rules must be a list.")
+        skipped_rule_count = payload.get("skipped_rule_count")
+        if skipped_rule_count is None:
+            skipped_rule_count = len(skipped_rules)
+        if not isinstance(skipped_rule_count, int):
+            raise ValueError("rules.last_summary().skipped_rule_count must be an int.")
+        summary["skipped_rule_count"] += skipped_rule_count
+        for skipped_rule in skipped_rules:
+            if not isinstance(skipped_rule, dict):
+                raise ValueError("rules.last_summary().skipped_rules values must be dicts.")
+            summary["skipped_rules"].append(deepcopy(skipped_rule))
+
+    def _emit_progress(
+        self,
+        progress_callback: Callable[[dict[str, Any]], None] | None,
+        summary: dict[str, Any],
+    ) -> None:
+        if progress_callback is None:
+            return
+        progress_callback(deepcopy(summary))
 
     def _settings(self) -> dict[str, Any]:
         if self._settings_provider is None:
@@ -218,13 +259,14 @@ class WorkbenchMatchingOrchestrator:
             "candidate_count": summary["candidate_count"],
             "auto_closed_count": summary["auto_closed_count"],
             "conflict_count": summary["conflict_count"],
+            "skipped_rule_count": summary.get("skipped_rule_count", 0),
             "reason": summary["reason"],
         }
         message = (
             f"{event} request_id={payload['request_id']} scope_months={payload['scope_months']} "
             f"duration_ms={payload['duration_ms']} candidate_count={payload['candidate_count']} "
             f"auto_closed_count={payload['auto_closed_count']} conflict_count={payload['conflict_count']} "
-            f"reason={payload['reason']}"
+            f"skipped_rule_count={payload['skipped_rule_count']} reason={payload['reason']}"
         )
         if failed:
             self._logger.exception(message, extra={"workbench_matching": payload})

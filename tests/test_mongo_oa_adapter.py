@@ -288,6 +288,8 @@ class MongoOAAdapterTests(unittest.TestCase):
 
         reimbursement = next(record for record in records if record.id == "oa-exp-exp-001")
         self.assertEqual(reimbursement.project_name, "云南溯源科技；玉烟维护项目")
+        self.assertEqual(reimbursement.project_name_display, "多个项目")
+        self.assertEqual(reimbursement.project_names, ["云南溯源科技", "玉烟维护项目"])
         self.assertEqual(reimbursement.apply_type, "日常报销")
         self.assertEqual(reimbursement.amount, "139")
         self.assertEqual(reimbursement.amount_source, "detail_sum")
@@ -298,6 +300,7 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual(reimbursement.detail_fields["明细金额合计"], "139")
         self.assertEqual(reimbursement.detail_fields["金额来源"], "明细合计")
         self.assertEqual(reimbursement.detail_fields["项目名称汇总"], "云南溯源科技；玉烟维护项目")
+        self.assertEqual(reimbursement.detail_fields["项目名称列表"], ["云南溯源科技", "玉烟维护项目"])
         self.assertEqual(reimbursement.detail_fields["费用类型汇总"], "其他；运费/邮费/杂费")
         self.assertEqual(reimbursement.detail_fields["费用内容摘要"], "角磨机（刘晓宇申请）；工控机改标签邮寄费用")
         self.assertEqual(reimbursement.detail_fields["报销日期范围"], "2026-01-06 至 2026-03-11")
@@ -322,6 +325,54 @@ class MongoOAAdapterTests(unittest.TestCase):
                 },
             ],
         )
+
+    def test_expense_claim_single_project_display_keeps_real_project_and_dedupes_project_names(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-single-project",
+                        "form_id": "32",
+                        "modifiedTime": "2026-03-27T11:00:00",
+                        "data": {
+                            "ApplicationDate": "2026-03-27",
+                            "Reimbursement Personnel": "刘际涛",
+                            "titleName": "日常报销",
+                            "processId": "exp-single-project",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailProjectName": "oa-project-001",
+                                    "detailReimbursementAmount": "100",
+                                    "feeContent": "耗材采购",
+                                    "detailReimbursementDate": "2026-03-11",
+                                },
+                                {
+                                    "row_index": 1,
+                                    "detailProjectName": "oa-project-001",
+                                    "detailReimbursementAmount": "25",
+                                    "feeContent": "快递费",
+                                    "detailReimbursementDate": "2026-03-12",
+                                },
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[
+                {"_id": "oa-project-001", "data": {"name": "玉烟维护项目", "code": "YYWH"}},
+            ],
+        )
+
+        records = adapter.list_application_records("2026-03")
+
+        reimbursement = records[0]
+        self.assertEqual(reimbursement.project_name, "玉烟维护项目")
+        self.assertEqual(reimbursement.project_name_display, "玉烟维护项目")
+        self.assertEqual(reimbursement.project_names, ["玉烟维护项目"])
+        self.assertEqual(reimbursement.detail_fields["项目名称汇总"], "玉烟维护项目")
+        self.assertEqual(reimbursement.detail_fields["项目名称列表"], ["玉烟维护项目"])
 
     def test_payment_request_marks_etc_batch_from_oa_text_marker(self) -> None:
         adapter = StubMongoOAAdapter(

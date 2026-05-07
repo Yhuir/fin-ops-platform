@@ -1,4 +1,5 @@
 import type { BackgroundJob } from "../backgroundJobs/types";
+import type { ImportPreviewAuditCounts } from "../imports/types";
 
 export type EtcInvoiceStatus = "unsubmitted" | "submitted";
 
@@ -71,6 +72,7 @@ export type EtcImportPreviewResult = {
   duplicatesSkipped: number;
   attachmentsCompleted: number;
   failed: number;
+  audit?: ImportPreviewAuditCounts;
   items: EtcImportItem[];
 };
 

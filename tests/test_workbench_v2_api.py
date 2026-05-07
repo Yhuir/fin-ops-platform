@@ -19,6 +19,7 @@ from fin_ops_platform.services.workbench_candidate_match_service import (
     WorkbenchCandidateMatchService,
 )
 from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
+from tests.mock_import_files import INVOICE_JAN
 
 
 class FailingMongoWorkbenchOAAdapter(MongoOAAdapter):
@@ -214,6 +215,48 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             app = Application(data_dir=data_dir)
 
         self.assertEqual(app._workbench_candidate_match_service.snapshot(), {"candidates": {}})
+
+    def test_import_file_confirm_returns_preview_stale_when_existing_records_change(self) -> None:
+        app = build_application()
+        boundary = "----finops-import-stale-boundary"
+        preview_body = (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="imported_by"\r\n\r\n'
+            "user_finance_01\r\n"
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="files"; filename="{INVOICE_JAN.name}"\r\n'
+            f"Content-Type: {INVOICE_JAN.content_type}\r\n\r\n"
+        ).encode("utf-8") + INVOICE_JAN.content + f"\r\n--{boundary}--\r\n".encode("utf-8")
+        preview_response = app.handle_request(
+            "POST",
+            "/imports/files/preview",
+            body=preview_body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+        self.assertEqual(preview_response.status_code, 200)
+        preview_payload = json.loads(preview_response.body)
+        session = app._file_import_service.get_session(preview_payload["session"]["id"])
+        competing_preview = app._import_service.preview_import(
+            batch_type=session.files[0].batch_type,
+            source_name="competing.json",
+            imported_by="user_finance_02",
+            rows=[session.files[0].row_results[0].raw_payload],
+        )
+        app._import_service.confirm_import(competing_preview.id)
+
+        confirm_response = app.handle_request(
+            "POST",
+            "/imports/files/confirm",
+            json.dumps(
+                {
+                    "session_id": preview_payload["session"]["id"],
+                    "selected_file_ids": [preview_payload["files"][0]["id"]],
+                }
+            ),
+        )
+
+        self.assertEqual(confirm_response.status_code, 409)
+        self.assertEqual(json.loads(confirm_response.body)["error"], "preview_stale")
 
     def test_get_api_workbench_uses_auto_closed_candidate_matches_in_paired_section(self) -> None:
         app = build_application()
@@ -1455,6 +1498,54 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             relation["row_ids"],
             ["oa-offset-202602-001", "oa-att-inv-oa-offset-202602-001-01"],
         )
+
+    def test_get_api_workbench_exposes_multi_project_display_and_real_project_names(self) -> None:
+        app = build_application()
+        target_oa_record = OAApplicationRecord(
+            id="oa-exp-multi-project-001",
+            month="2026-03",
+            section="open",
+            case_id=None,
+            applicant="刘际涛",
+            project_name="玉烟维护项目；云南溯源科技",
+            project_name_display="多个项目",
+            project_names=["玉烟维护项目", "云南溯源科技"],
+            apply_type="日常报销",
+            amount="1500.00",
+            counterparty_name="",
+            reason="设备材料；邮寄费用",
+            relation_code="pending_match",
+            relation_label="待找流水与发票",
+            relation_tone="warn",
+            expense_type="材料费；运费/邮费/杂费",
+            expense_content="设备材料；邮寄费用",
+            detail_fields={"OA单号": "OA-MULTI-001", "申请日期": "2026-03-28"},
+        )
+        query_service = WorkbenchQueryService(
+            oa_adapter=InMemoryOAAdapter({"2026-03": [target_oa_record]})
+        )
+        action_service = WorkbenchActionService(query_service)
+        app._workbench_query_service = query_service
+        app._workbench_action_service = action_service
+        app._workbench_api_routes = WorkbenchApiRoutes(query_service, action_service)
+
+        with patch.object(app._live_workbench_service, "has_rows_for_month", return_value=False):
+            response = app.handle_request("GET", "/api/workbench?month=2026-03")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        oa_row = next(
+            row
+            for row in flatten_groups(payload["open"]["groups"], "oa")
+            if row["id"] == "oa-exp-multi-project-001"
+        )
+        self.assertEqual(oa_row["project_name"], "玉烟维护项目；云南溯源科技")
+        self.assertEqual(oa_row["project_name_display"], "多个项目")
+        self.assertEqual(oa_row["project_names"], ["玉烟维护项目", "云南溯源科技"])
+        self.assertEqual(oa_row["summary_fields"]["项目名称"], "多个项目")
+        self.assertIn("玉烟维护项目", oa_row["project_name"])
+        self.assertIn("云南溯源科技", oa_row["detail_fields"]["项目名称汇总"])
+        self.assertEqual(oa_row["detail_fields"]["项目名称列表"], ["玉烟维护项目", "云南溯源科技"])
 
     def test_oa_invoice_offset_sync_does_not_cancel_relations_outside_current_payload(self) -> None:
         app = build_application()
@@ -3608,6 +3699,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         oa_row = flatten_groups(payload["open"]["groups"], "oa")[0]
         self.assertIn("ETC批量提交", oa_row["tags"])
+        self.assertIn("已关联ETC发票", oa_row["tags"])
         self.assertIn("待找流水", oa_row["tags"])
         self.assertNotIn("待找发票", oa_row["tags"])
         self.assertNotIn("待找流水与发票", oa_row["tags"])
@@ -3645,6 +3737,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             row for row in flatten_groups(updated_payload["paired"]["groups"], "oa") if row["id"] == "oa-etc-202606-001"
         )
         self.assertIn("ETC批量提交", paired_oa["tags"])
+        self.assertIn("已关联ETC发票", paired_oa["tags"])
         self.assertIn("金额不一致", paired_oa["tags"])
         self.assertNotIn("待找发票", paired_oa["tags"])
         self.assertEqual(paired_oa["oa_bank_relation"]["label"], "已关联流水")

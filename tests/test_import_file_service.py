@@ -7,7 +7,7 @@ from openpyxl import Workbook
 
 from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile, is_company_identity
 from fin_ops_platform.services.imports import ImportNormalizationService
-from tests.mock_import_files import BOCOM_JAN, CEB_JAN, INVOICE_JAN, PINGAN_JAN, icbc_history_file
+from tests.mock_import_files import BOCOM_JAN, CEB_JAN, INVOICE_JAN, PINGAN_JAN, icbc_history_file, invoice_export_file
 
 
 class FakeImportIdStore:
@@ -231,6 +231,49 @@ class ImportFileServiceTests(unittest.TestCase):
         self.assertIsNone(preview_file.detected_last4)
         self.assertEqual(preview_file.normalized_rows[0]["account_no"], "bank_mapping_icbc_6386")
         self.assertEqual(preview_file.normalized_rows[0]["imported_bank_last4"], "6386")
+
+    def test_preview_files_audit_counts_cross_file_invoice_duplicates(self) -> None:
+        import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
+        service = FileImportService(import_service)
+        jan_upload = invoice_export_file("jan.xlsx")
+        feb_upload = invoice_export_file("feb.xlsx")
+
+        session = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[
+                UploadedImportFile(file_name=jan_upload.name, content=jan_upload.content),
+                UploadedImportFile(file_name=feb_upload.name, content=feb_upload.content),
+            ],
+        )
+
+        self.assertEqual(session.audit.original_count, 2)
+        self.assertEqual(session.audit.unique_count, 1)
+        self.assertEqual(session.audit.duplicate_across_files_count, 1)
+        self.assertEqual(session.audit.duplicate_count, 1)
+        self.assertEqual(session.audit.importable_count, 1)
+        self.assertEqual(len(session.duplicate_groups), 1)
+        self.assertEqual(session.duplicate_groups[0].duplicate_type, "duplicate_across_files")
+        self.assertEqual(session.files[0].audit.importable_count, 1)
+        self.assertEqual(session.files[1].audit.duplicate_across_files_count, 1)
+
+    def test_confirm_session_rejects_stale_preview_when_existing_records_change(self) -> None:
+        import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
+        service = FileImportService(import_service)
+        upload = invoice_export_file("jan.xlsx")
+        session = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[UploadedImportFile(file_name=upload.name, content=upload.content)],
+        )
+        competing_preview = import_service.preview_import(
+            batch_type=session.files[0].batch_type,
+            source_name="competing.json",
+            imported_by="user_finance_02",
+            rows=[session.files[0].row_results[0].raw_payload],
+        )
+        import_service.confirm_import(competing_preview.id)
+
+        with self.assertRaisesRegex(ValueError, "preview_stale"):
+            service.confirm_session(session_id=session.id, selected_file_ids=[session.files[0].id])
 
     def test_preview_detects_icbc_last4_from_explicit_file_account(self) -> None:
         import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())

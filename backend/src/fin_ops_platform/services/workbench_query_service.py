@@ -321,6 +321,11 @@ class WorkbenchQueryService:
         attachment_file_count = self._attachment_file_count(record)
         detail_fields = deepcopy(record.detail_fields)
         self._enrich_aggregated_oa_detail_fields(record, detail_fields)
+        project_name = str(getattr(record, "project_name", "") or "--")
+        project_names = self._record_project_names(record, project_name)
+        project_name_display = self._record_project_name_display(record, project_names, project_name)
+        detail_fields.setdefault("项目名称汇总", project_name)
+        detail_fields.setdefault("项目名称列表", list(project_names))
         detail_fields.update(
             build_attachment_invoice_detail_fields(
                 attachment_invoices,
@@ -340,7 +345,9 @@ class WorkbenchQueryService:
             "type": "oa",
             "case_id": case_id,
             "applicant": record.applicant,
-            "project_name": record.project_name,
+            "project_name": project_name,
+            "project_name_display": project_name_display,
+            "project_names": list(project_names),
             "expense_type": record.expense_type,
             "expense_content": record.expense_content,
             "apply_type": record.apply_type,
@@ -357,7 +364,7 @@ class WorkbenchQueryService:
             "_section": record.section,
             "_summary_fields": {
                 "申请人": record.applicant,
-                "项目名称": record.project_name,
+                "项目名称": project_name_display,
                 "申请类型": record.apply_type,
                 "金额": record.amount,
                 "对方户名": record.counterparty_name,
@@ -366,6 +373,31 @@ class WorkbenchQueryService:
             },
             "_detail_fields": detail_fields,
         }
+
+    @classmethod
+    def _record_project_name_display(
+        cls,
+        record: OAApplicationRecord | object,
+        project_names: list[str],
+        project_name: str,
+    ) -> str:
+        display = str(getattr(record, "project_name_display", "") or "").strip()
+        if display:
+            return display
+        if len(project_names) > 1:
+            return "多个项目"
+        if len(project_names) == 1:
+            return project_names[0]
+        return project_name or "--"
+
+    @classmethod
+    def _record_project_names(cls, record: OAApplicationRecord | object, project_name: str) -> list[str]:
+        raw_project_names = getattr(record, "project_names", None)
+        if isinstance(raw_project_names, list):
+            project_names = cls._unique_detail_values(raw_project_names)
+            if project_names:
+                return project_names
+        return cls._unique_detail_values(str(project_name or "").split("；"))
 
     @staticmethod
     def _oa_source_metadata(record: OAApplicationRecord | object) -> dict[str, Any]:

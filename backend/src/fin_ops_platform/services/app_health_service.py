@@ -34,6 +34,8 @@ class AppHealthService:
             for job in active_jobs
             if getattr(job, "status", None) in {"failed", "partial_success"}
         ]
+        primary_running = self.primary_running_job([*queued_jobs, *running_jobs])
+        primary_attention = self.primary_attention_job(attention_jobs)
         rebuild_jobs = [
             job
             for job in active_jobs
@@ -80,7 +82,7 @@ class AppHealthService:
         )
         if session_blocked or dependency_unavailable:
             status = "blocked"
-        elif dirty_scopes or rebuilding or running_jobs or queued_jobs:
+        elif dirty_scopes or rebuilding or running_jobs or queued_jobs or attention_jobs:
             status = "busy"
         else:
             status = "ok"
@@ -122,6 +124,8 @@ class AppHealthService:
                 "queued": len(queued_jobs),
                 "running": len(running_jobs),
                 "attention": len(attention_jobs),
+                "primary_running": self._primary_job_payload(primary_running),
+                "primary_attention": self._primary_job_payload(primary_attention),
                 "jobs": [self._job_payload(job) for job in active_jobs],
             },
             "dependencies": dependencies,
@@ -176,6 +180,25 @@ class AppHealthService:
         job_type = str(getattr(job, "type", "") or "").strip().lower()
         return job_type in REBUILD_JOB_TYPES or ("workbench" in job_type and "rebuild" in job_type)
 
+    @classmethod
+    def primary_running_job(cls, jobs: list[object]) -> object | None:
+        if not jobs:
+            return None
+        return max(jobs, key=cls._job_sort_time)
+
+    @classmethod
+    def primary_attention_job(cls, jobs: list[object]) -> object | None:
+        if not jobs:
+            return None
+        status_priority = {"failed": 1, "partial_success": 0}
+        return max(
+            jobs,
+            key=lambda job: (
+                status_priority.get(str(getattr(job, "status", "") or ""), -1),
+                cls._job_sort_time(job),
+            ),
+        )
+
     @staticmethod
     def serialize_sse_event(event: str, payload: dict[str, Any]) -> str:
         return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
@@ -228,6 +251,66 @@ class AppHealthService:
             "started_at": getattr(job, "started_at", None),
             "updated_at": getattr(job, "updated_at", None),
         }
+
+    @classmethod
+    def _primary_job_payload(cls, job: object | None) -> dict[str, Any] | None:
+        if job is None:
+            return None
+        return {
+            "job_id": getattr(job, "job_id", None),
+            "type": getattr(job, "type", None),
+            "label": getattr(job, "label", None),
+            "short_label": getattr(job, "short_label", None),
+            "status": getattr(job, "status", None),
+            "message": getattr(job, "message", None),
+            "error": getattr(job, "error", None),
+            "retryable": cls._is_retryable_job(job),
+            "acknowledgeable": cls._is_acknowledgeable_job(job),
+            "affected_months": list(getattr(job, "affected_months", []) or []),
+            "updated_at": getattr(job, "updated_at", None),
+        }
+
+    @classmethod
+    def _is_retryable_job(cls, job: object) -> bool:
+        job_type = str(getattr(job, "type", "") or "").strip().lower()
+        source = getattr(job, "source", {})
+        if not isinstance(source, dict):
+            source = {}
+        if job_type == "file_import":
+            return bool(source.get("session_id")) and cls._has_values(source.get("selected_file_ids"))
+        if job_type == "workbench_matching":
+            return any(
+                cls._has_values(value)
+                for value in (
+                    getattr(job, "affected_months", []),
+                    source.get("affected_months"),
+                    source.get("months"),
+                    source.get("scope_months"),
+                    source.get("scope_month"),
+                )
+            )
+        return False
+
+    @staticmethod
+    def _is_acknowledgeable_job(job: object) -> bool:
+        return str(getattr(job, "status", "") or "") in {"failed", "partial_success"}
+
+    @staticmethod
+    def _has_values(value: object) -> bool:
+        if isinstance(value, (list, tuple, set)):
+            return any(str(item).strip() for item in value)
+        return bool(str(value or "").strip())
+
+    @classmethod
+    def _job_sort_time(cls, job: object) -> datetime:
+        value = str(getattr(job, "updated_at", None) or getattr(job, "created_at", None) or "")
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            return datetime.min.replace(tzinfo=UTC)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC)
 
     @staticmethod
     def _as_float(value: object) -> float:

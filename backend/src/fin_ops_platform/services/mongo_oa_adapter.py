@@ -712,6 +712,7 @@ class MongoOAAdapter(OAAdapter):
             return None
         project_id = self._first_text(data, "projectName")
         project_name = project_names.get(project_id, project_id or "--")
+        real_project_names = self._unique_real_project_names([project_name])
         external_id = self._payment_external_id(data, document)
         expense_type = self._resolve_expense_type(data, reason)
         expense_content = reason
@@ -735,6 +736,8 @@ class MongoOAAdapter(OAAdapter):
             source=etc_metadata.get("source"),
             etc_batch_id=etc_metadata.get("etc_batch_id"),
             tags=list(etc_metadata.get("tags") or []),
+            project_name_display=project_name,
+            project_names=real_project_names,
             detail_fields={
                 "OA单号": self._payment_form_no(data, document),
                 "表单ID": self._settings.payment_request_form_id,
@@ -829,7 +832,14 @@ class MongoOAAdapter(OAAdapter):
             self._parse_attachment_invoices(attachment_files, month=record_month)
         )
         etc_metadata = detect_etc_batch_metadata(*etc_sources)
-        project_name_summary = "；".join(project_names_summary) or project_names.get(self._first_text(data, "projectName"), self._first_text(data, "projectName")) or "--"
+        real_project_names = self._unique_real_project_names(project_names_summary)
+        if not real_project_names:
+            header_project_id = self._first_text(data, "projectName")
+            real_project_names = self._unique_real_project_names(
+                [project_names.get(header_project_id, header_project_id or "")]
+            )
+        project_name_summary = "；".join(real_project_names) or "--"
+        project_name_display = self._project_name_display(real_project_names)
         expense_type_summary = "；".join(expense_types_summary) or "—"
         expense_content_summary = "；".join(expense_contents_summary) or self._first_text(data, "notes") or "—"
         reimbursement_date_range = self._date_range_text(reimbursement_dates)
@@ -843,6 +853,7 @@ class MongoOAAdapter(OAAdapter):
             "明细金额合计": self._format_decimal(detail_sum) or "—",
             "金额来源": "主表总金额" if amount_source == "header" else "明细合计",
             "项目名称汇总": project_name_summary,
+            "项目名称列表": list(real_project_names),
             "费用类型": expense_type_summary,
             "费用类型汇总": expense_type_summary,
             "费用内容": expense_content_summary,
@@ -887,8 +898,29 @@ class MongoOAAdapter(OAAdapter):
                 source=etc_metadata.get("source"),
                 etc_batch_id=etc_metadata.get("etc_batch_id"),
                 tags=list(etc_metadata.get("tags") or []),
+                project_name_display=project_name_display,
+                project_names=list(real_project_names),
             )
         ]
+
+    @classmethod
+    def _project_name_display(cls, project_names: list[str]) -> str:
+        real_project_names = cls._unique_real_project_names(project_names)
+        if len(real_project_names) > 1:
+            return "多个项目"
+        if len(real_project_names) == 1:
+            return real_project_names[0]
+        return "--"
+
+    @staticmethod
+    def _unique_real_project_names(project_names: list[str]) -> list[str]:
+        result: list[str] = []
+        for project_name in project_names:
+            text = clean_string(project_name)
+            if not text or text in {"--", "—"} or text in result:
+                continue
+            result.append(text)
+        return result
 
     @staticmethod
     def _attachment_files(item: dict[str, Any]) -> list[dict[str, object]]:

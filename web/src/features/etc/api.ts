@@ -1,6 +1,7 @@
 import { readOATokenCookie } from "../session/api";
 import { mapBackgroundJob, type ApiBackgroundJob } from "../backgroundJobs/api";
 import { apiUrl } from "../../app/runtime";
+import type { ImportPreviewAuditCounts } from "../imports/types";
 import type {
   EtcImportConfirmResult,
   EtcImportItem,
@@ -60,7 +61,24 @@ type ApiEtcImportSummary = {
   attachmentsCompleted?: number;
   attachments_completed?: number;
   failed?: number;
+  audit?: ApiEtcImportAuditCounts | null;
   items?: ApiEtcImportItem[];
+};
+
+type ApiEtcImportAuditCounts = {
+  original_count?: number;
+  unique_count?: number;
+  duplicate_count?: number;
+  duplicate_in_file_count?: number;
+  duplicate_across_files_count?: number;
+  existing_duplicate_count?: number;
+  importable_count?: number;
+  update_count?: number;
+  merge_count?: number;
+  suspected_duplicate_count?: number;
+  error_count?: number;
+  confirmable_count?: number;
+  skipped_count?: number;
 };
 
 type ApiEtcImportItem = {
@@ -142,6 +160,9 @@ async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
     }
     if (!response.ok) {
       const errorPayload = payload as { message?: unknown; error?: unknown };
+      if (errorPayload.error === "preview_stale") {
+        throw new Error("预览后数据已变化，请重新预览后再确认。");
+      }
       const message = typeof errorPayload.message === "string" ? errorPayload.message : "";
       throw new Error(message || trimmedText || "ETC API request failed");
     }
@@ -151,6 +172,31 @@ async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
     throw lastHtmlError;
   }
   throw new Error("ETC API request failed");
+}
+
+function numberOrZero(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function mapAuditCounts(payload?: ApiEtcImportAuditCounts | null): ImportPreviewAuditCounts | undefined {
+  if (!payload) {
+    return undefined;
+  }
+  return {
+    originalCount: numberOrZero(payload.original_count),
+    uniqueCount: numberOrZero(payload.unique_count),
+    duplicateCount: numberOrZero(payload.duplicate_count),
+    duplicateInFileCount: numberOrZero(payload.duplicate_in_file_count),
+    duplicateAcrossFilesCount: numberOrZero(payload.duplicate_across_files_count),
+    existingDuplicateCount: numberOrZero(payload.existing_duplicate_count),
+    importableCount: numberOrZero(payload.importable_count),
+    updateCount: numberOrZero(payload.update_count),
+    mergeCount: numberOrZero(payload.merge_count),
+    suspectedDuplicateCount: numberOrZero(payload.suspected_duplicate_count),
+    errorCount: numberOrZero(payload.error_count),
+    confirmableCount: numberOrZero(payload.confirmable_count),
+    skippedCount: numberOrZero(payload.skipped_count),
+  };
 }
 
 function normalizeMoney(value: string | number | null | undefined) {
@@ -190,6 +236,7 @@ function mapEtcImportItem(item: ApiEtcImportItem): EtcImportItem {
 
 function mapEtcImportResult(payload: ApiEtcImportSummary): EtcImportPreviewResult {
   const summary = payload.summary ?? {};
+  const audit = mapAuditCounts(payload.audit);
   return {
     sessionId: payload.sessionId ?? payload.session_id ?? "",
     imported: payload.imported ?? summary.imported ?? 0,
@@ -201,6 +248,7 @@ function mapEtcImportResult(payload: ApiEtcImportSummary): EtcImportPreviewResul
       ?? summary.attachments_completed
       ?? 0,
     failed: payload.failed ?? summary.failed ?? 0,
+    ...(audit ? { audit } : {}),
     items: (payload.items ?? []).map(mapEtcImportItem),
   };
 }

@@ -21,6 +21,18 @@ type GridRow = {
   label: string;
   updatedAt: string;
   message: string;
+  retryable: string;
+  acknowledgeable: string;
+};
+
+type JobSummary = {
+  id: string;
+  status: string;
+  type: string;
+  label: string;
+  message: string;
+  retryable: boolean;
+  acknowledgeable: boolean;
 };
 
 type AlertRow = {
@@ -119,6 +131,16 @@ function readRecordArray(source: Record<string, unknown>, keys: string[]) {
   return [];
 }
 
+function readRecord(source: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = source[key];
+    if (isRecord(value)) {
+      return value;
+    }
+  }
+  return {};
+}
+
 function statusReason(status: string) {
   if (status === "blocked") {
     return "系统阻断写操作或依赖不可用";
@@ -194,6 +216,30 @@ function ChipList({ values }: { values: string[] }) {
   );
 }
 
+function JobSummaryFields({ job }: { job: JobSummary | null }) {
+  if (!job) {
+    return <Typography component="span">{EMPTY_VALUE}</Typography>;
+  }
+  return (
+    <Stack spacing={0.75} sx={{ minWidth: 0 }}>
+      <Stack direction="row" spacing={1} useFlexGap sx={{ minWidth: 0, flexWrap: "wrap", alignItems: "center" }}>
+        <StatusChip value={job.status} />
+        <Chip label={job.type} size="small" variant="outlined" />
+        <Chip label={`Retryable ${job.retryable ? "是" : "否"}`} size="small" color={job.retryable ? "warning" : "default"} variant="outlined" />
+        <Chip label={`Acknowledgeable ${job.acknowledgeable ? "是" : "否"}`} size="small" color={job.acknowledgeable ? "warning" : "default"} variant="outlined" />
+      </Stack>
+      <Typography sx={{ color: settingsTokens.textPrimary, fontSize: 13, lineHeight: 1.5, overflowWrap: "anywhere" }}>
+        {job.id} / {job.label}
+      </Typography>
+      {job.message !== EMPTY_VALUE ? (
+        <Typography sx={{ color: settingsTokens.textSecondary, fontSize: 12, lineHeight: 1.5, overflowWrap: "anywhere" }}>
+          {job.message}
+        </Typography>
+      ) : null}
+    </Stack>
+  );
+}
+
 function normalizeJobs(backgroundJobs: Record<string, unknown>): GridRow[] {
   return readRecordArray(backgroundJobs, ["jobs", "recent_jobs", "recentJobs", "recent"]).map((job, index) => {
     const id = readString(job, ["job_id", "jobId", "id"], `job-${index + 1}`);
@@ -204,8 +250,25 @@ function normalizeJobs(backgroundJobs: Record<string, unknown>): GridRow[] {
       label: readString(job, ["label", "name"]),
       updatedAt: readString(job, ["updated_at", "updatedAt", "finished_at", "finishedAt", "started_at", "startedAt", "created_at", "createdAt"]),
       message: readString(job, ["message", "error", "detail", "details"]),
+      retryable: readBoolean(job, ["retryable"]) ? "是" : "否",
+      acknowledgeable: readBoolean(job, ["acknowledgeable"]) ? "是" : "否",
     };
   });
+}
+
+function normalizeJobSummary(job: Record<string, unknown>): JobSummary | null {
+  if (Object.keys(job).length === 0) {
+    return null;
+  }
+  return {
+    id: readString(job, ["job_id", "jobId", "id"]),
+    status: readString(job, ["status"]),
+    type: readString(job, ["type", "job_type", "jobType"]),
+    label: readString(job, ["label", "short_label", "shortLabel", "name"]),
+    message: readString(job, ["message", "error", "detail", "details"]),
+    retryable: readBoolean(job, ["retryable"]),
+    acknowledgeable: readBoolean(job, ["acknowledgeable"]),
+  };
 }
 
 function normalizeAlerts(payload: OperationsPayload): AlertRow[] {
@@ -241,6 +304,8 @@ const jobColumns: GridColDef<GridRow>[] = [
   { field: "label", headerName: "Label", minWidth: 160, flex: 1 },
   { field: "updatedAt", headerName: "Updated", minWidth: 180, flex: 1 },
   { field: "message", headerName: "Message", minWidth: 180, flex: 1.2 },
+  { field: "retryable", headerName: "Retryable", minWidth: 104, flex: 0.5 },
+  { field: "acknowledgeable", headerName: "Acknowledgeable", minWidth: 136, flex: 0.6 },
 ];
 
 const alertColumns: GridColDef<AlertRow>[] = [
@@ -349,6 +414,11 @@ export default function AppHealthOperationsPage() {
         dirtyScopes: readStringArray(workbench, ["dirty_scopes", "dirtyScopes"]),
         staleScopes: readStringArray(workbench, ["stale_scopes", "staleScopes"]),
         rebuildingScopes: readStringArray(workbench, ["rebuilding_scopes", "rebuildingScopes", "rebuild_job_ids", "rebuildJobIds"]),
+        matchingRunningScopes: readStringArray(workbench, ["matching_running_scopes", "matchingRunningScopes"]),
+        matchingDirtyScopes: readRecordArray(workbench, ["matching_dirty_scopes", "matchingDirtyScopes"])
+          .map((entry) => readString(entry, ["scope_month", "scopeMonth", "month"], ""))
+          .filter(Boolean),
+        matchingError: readString(workbench, ["last_matching_error", "lastMatchingError"]),
         lastRebuiltAt: readString(workbench, ["last_rebuilt_at", "lastRebuiltAt", "last_built_at", "lastBuiltAt", "generated_at", "generatedAt"]),
       },
       backgroundJobs: {
@@ -356,6 +426,8 @@ export default function AppHealthOperationsPage() {
         queued: readNumber(backgroundJobs, ["queued"]),
         running: readNumber(backgroundJobs, ["running"]),
         attention: readNumber(backgroundJobs, ["attention"]),
+        primaryRunning: normalizeJobSummary(readRecord(backgroundJobs, ["primary_running", "primaryRunning"])),
+        primaryAttention: normalizeJobSummary(readRecord(backgroundJobs, ["primary_attention", "primaryAttention"])),
         rows: normalizeJobs(backgroundJobs),
       },
       dependencies,
@@ -455,6 +527,9 @@ export default function AppHealthOperationsPage() {
               <Field label="Stale scopes" value={<ChipList values={normalized.workbench.staleScopes} />} />
               <Field label="Dirty scopes" value={<ChipList values={normalized.workbench.dirtyScopes} />} />
               <Field label="Rebuilding" value={<ChipList values={normalized.workbench.rebuildingScopes} />} />
+              <Field label="Matching running" value={<ChipList values={normalized.workbench.matchingRunningScopes} />} />
+              <Field label="Matching dirty" value={<ChipList values={normalized.workbench.matchingDirtyScopes} />} />
+              <Field label="Matching error" value={normalized.workbench.matchingError} />
               <Field label="Last rebuilt" value={normalized.workbench.lastRebuiltAt} />
             </Stack>
           </Section>
@@ -468,6 +543,10 @@ export default function AppHealthOperationsPage() {
               <Chip label={`Running ${normalized.backgroundJobs.running}`} size="small" color={normalized.backgroundJobs.running > 0 ? "warning" : "default"} variant="outlined" />
               <Chip label={`Attention ${normalized.backgroundJobs.attention}`} size="small" color={normalized.backgroundJobs.attention > 0 ? "error" : "default"} variant="outlined" />
             </Stack>
+            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(2, minmax(0, 1fr))" }, gap: 1.5, minWidth: 0 }}>
+              <Field label="Primary running" value={<JobSummaryFields job={normalized.backgroundJobs.primaryRunning} />} />
+              <Field label="Primary attention" value={<JobSummaryFields job={normalized.backgroundJobs.primaryAttention} />} />
+            </Box>
             <OperationsGrid ariaLabel="最近后台任务" rows={normalized.backgroundJobs.rows} columns={jobColumns} height={300} />
           </Stack>
         </Section>

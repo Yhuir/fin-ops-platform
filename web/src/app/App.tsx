@@ -51,7 +51,7 @@ function AppShell() {
   const { workbenchStatus } = useAppChrome();
   const healthStatus = useAppHealthStatus();
   const { progress } = useImportProgress();
-  const { primaryJob, extraCount, connectionFailed, acknowledgeJob } = useBackgroundJobProgress();
+  const { primaryJob, extraCount, connectionFailed, acknowledgeJob, retryJob } = useBackgroundJobProgress();
   const theme = useTheme();
   const embedded = isOaEmbeddedMode();
   const isCompact = useMediaQuery(theme.breakpoints.down("md"), { noSsr: true });
@@ -103,6 +103,9 @@ function AppShell() {
           onOpenMobileSidebar={() => setMobileOpen(true)}
           onAcknowledgeJob={(jobId) => {
             void acknowledgeJob(jobId);
+          }}
+          onRetryJob={(jobId) => {
+            void retryJob(jobId);
           }}
         />
         <main className={`page-body${embedded ? " embedded" : ""}`}>

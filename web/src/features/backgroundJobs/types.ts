@@ -12,6 +12,7 @@ export type BackgroundJobType =
   | "file_import"
   | "settings_data_reset"
   | "oa_attachment_invoice_parse"
+  | "workbench_matching"
   | "workbench_rebuild"
   | "tax_certified_import"
   | "etc_oa_draft";
@@ -28,6 +29,10 @@ export type BackgroundJob = {
   percent: number;
   message: string;
   resultSummary: Record<string, unknown>;
+  source: Record<string, unknown>;
+  retryable: boolean;
+  acknowledgeable: boolean;
+  affectedMonths: string[];
   error: string | null;
   createdAt: string;
   updatedAt: string;

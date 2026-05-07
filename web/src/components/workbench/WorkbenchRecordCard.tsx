@@ -657,5 +657,11 @@ function resolveInvoiceFlowLabel(invoiceType: string) {
 }
 
 function resolveInvoiceSourceLabel(sourceKind: string | undefined) {
+  if (sourceKind === "etc_invoice_summary") {
+    return "ETC批次";
+  }
+  if (sourceKind === "etc_invoice") {
+    return "ETC";
+  }
   return sourceKind === "oa_attachment_invoice" ? "OA附件" : "人工导入";
 }

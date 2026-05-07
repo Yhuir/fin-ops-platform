@@ -43,6 +43,8 @@ type ApiWorkbenchRow = {
   handled_exception?: boolean | null;
   applicant?: string | null;
   project_name?: string | null;
+  project_name_display?: string | null;
+  project_names?: string[] | null;
   apply_type?: string | null;
   amount?: string | null;
   counterparty_name?: string | null;
@@ -436,6 +438,12 @@ function rowLabel(row: ApiWorkbenchRow) {
   if (row.type === "bank") {
     return row.debit_amount ? "支取" : "收入";
   }
+  if (row.source_kind === "etc_invoice_summary") {
+    return "ETC批次";
+  }
+  if (row.source_kind === "etc_invoice" || row.tags?.includes("ETC")) {
+    return "ETC票";
+  }
   return row.invoice_type?.includes("销") ? "销项票" : "进项票";
 }
 
@@ -463,7 +471,7 @@ function mapTableValues(row: ApiWorkbenchRow): Record<string, string> {
       applicationTime: toDisplayValue(
         detailFields["审批完成时间"] ?? detailFields["申请日期"] ?? detailFields["创建时间"],
       ),
-      projectName: toDisplayValue(row.project_name),
+      projectName: toDisplayValue(row.project_name_display ?? row.project_name),
       applicationType: toDisplayValue(row.apply_type),
       amount: toDisplayValue(row.amount),
       counterparty: toDisplayValue(row.counterparty_name),

@@ -38,7 +38,9 @@
   "type": "oa",
   "case_id": "MKT-001",
   "applicant": "刘晨",
-  "project_name": "品牌广告投放",
+  "project_name": "品牌广告投放；市场活动项目",
+  "project_name_display": "多个项目",
+  "project_names": ["品牌广告投放", "市场活动项目"],
   "apply_type": "市场费用",
   "amount": 6000,
   "counterparty_name": "杭州张三广告有限公司",
@@ -54,11 +56,19 @@
     "明细数量": "4",
     "明细金额合计": "1549.00",
     "金额来源": "主表总金额",
+    "项目名称汇总": "品牌广告投放；市场活动项目",
+    "项目名称列表": ["品牌广告投放", "市场活动项目"],
     "费用内容摘要": "ETC通行费；停车费",
     "附件发票摘要": "25532000000191043884（1月ETC.pdf）"
   }
 }
 ```
+
+`project_name` 始终是真实项目名称汇总，用于匹配、搜索和统计，不能写入显示占位值。
+`project_names` 是从日常报销 `schedule` 明细解析出的去重真实项目名列表。`project_name_display`
+只用于列表展示：真实项目名数量大于 1 时为 `多个项目`，只有一个真实项目时为该项目名，没有真实项目时为 `--`。
+`summary_fields["项目名称"]` 使用 `project_name_display`；`detail_fields` 保留
+`项目名称汇总` 和结构化 `项目名称列表`，确保详情和搜索仍能命中真实项目名。
 
 OA 附件发票仍展开为独立 invoice rows，row id 为 `oa-att-inv-{oa_row_id}-{index}`，
 用于和整单 OA、银行流水共同配对。
@@ -267,7 +277,7 @@ OA 附件发票仍展开为独立 invoice rows，row id 为 `oa-att-inv-{oa_row_
   "conflict_candidate_keys": [],
   "generated_at": "2026-05-07T10:00:00+00:00",
   "source_versions": {
-    "workbench_read_model_schema_version": "2026-05-06-oa-expense-multi-invoice-sum"
+    "workbench_read_model_schema_version": "2026-05-07-invoice-etc-unified-identity"
   }
 }
 ```
@@ -303,6 +313,47 @@ OA 附件发票仍展开为独立 invoice rows，row id 为 `oa-att-inv-{oa_row_
 ## 11. 三栏上下文搜索
 
 关联台三栏搜索是前端 display model 行为，不改变后端 `GET /api/workbench` payload、候选 read model 或人工 pair relation。
+
+## 12. 进项发票与 ETC 统一身份
+
+ETC 发票也是进项发票。普通进项发票导入和 ETC zip 导入必须写入同一套 canonical `Invoice` 身份，避免关联台、税金抵扣、成本统计重复计算。
+
+`Invoice` 额外字段：
+
+- `tags`: 来源和业务标签，例如 `["ETC"]`。
+- `source_links`: 多来源追踪，`source_type` 可为 `manual_invoice_import`、`etc_invoice_import`、`oa_attachment`。
+- `etc_invoice_id`: 对应 ETC service 内部发票 ID。
+- `etc_import_batch_id`: 对应 ETC 导入批次 ID。
+- `etc_submission_batch_id`: 对应 ETC OA 提交批次 ID。
+- `etc_submission_status`: ETC 提交状态。
+- `workbench_visibility`: `visible` 或 `hidden_after_etc_submission`。
+
+关联台 invoice row 额外字段：
+
+```json
+{
+  "source_kind": "etc_invoice",
+  "tags": ["ETC", "进"],
+  "etc_invoice_id": "etc_invoice_0001",
+  "etc_import_batch_id": "etc_import_batch_0001",
+  "etc_submission_batch_id": "etc_batch_0001",
+  "etc_submission_status": "submitted"
+}
+```
+
+显示规则：
+
+- ETC 未提交 OA：作为普通发票行进入关联台发票栏，带 `ETC` tag，参与自动配对。
+- ETC 已确认提交 OA：canonical invoice 保留，但 `workbench_visibility=hidden_after_etc_submission`，关联台发票栏默认隐藏散票。
+- ETC 导入批次只能整批提交 OA；部分提交必须返回业务错误。
+
+导入预览审计：
+
+- 普通进项 / 销项发票导入和 ETC zip 导入必须使用同一套 canonical invoice 身份口径。
+- 预览 payload 返回 session/file 级 `audit`，至少包含 `original_count`、`unique_count`、`duplicate_count`、`existing_duplicate_count`、`importable_count`、`update_count`、`merge_count`、`suspected_duplicate_count`、`error_count`。
+- ETC zip 命中已存在普通进项发票时归为 `merge_count`，确认后补 `ETC` tag、ETC 来源、批次关系，不新增发票。
+- 普通进项发票导入命中已存在 ETC 发票时同样归为 `merge_count`，只合并来源和标签。
+- 确认导入前后端必须重算 audit；关键计数变化时返回 `409 preview_stale`，要求用户重新预览。
 
 搜索口径：
 

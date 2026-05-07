@@ -132,28 +132,58 @@ describe("AppHealthOperationsPage", () => {
           dirty_scopes: ["all"],
           stale_scopes: ["2026-05"],
           rebuilding_scopes: ["all"],
+          matching_running_scopes: ["2026-05"],
+          matching_dirty_scopes: [
+            { scope_month: "2026-04", state: "dirty", last_error: "候选生成失败" },
+          ],
+          last_matching_error: "候选生成失败",
           last_rebuilt_at: "2026-05-06T08:40:00+08:00",
         },
         background_jobs: {
           queued: 2,
           running: 1,
           attention: 1,
+          primary_running: {
+            job_id: "job-running",
+            type: "workbench_matching",
+            label: "生成关联台候选",
+            status: "running",
+            updated_at: "2026-05-06T09:04:00+08:00",
+            message: "正在生成关联台候选：2026-05",
+            affected_months: ["2026-05"],
+            retryable: true,
+            acknowledgeable: false,
+          },
+          primary_attention: {
+            job_id: "job-failed",
+            type: "file_import",
+            label: "导入发票",
+            status: "failed",
+            updated_at: "2026-05-06T09:03:00+08:00",
+            message: "发票导入失败",
+            retryable: true,
+            acknowledgeable: true,
+          },
           jobs: [
             {
               job_id: "job-running",
-              type: "workbench_rebuild",
-              label: "重建关联台",
+              type: "workbench_matching",
+              label: "生成关联台候选",
               status: "running",
               updated_at: "2026-05-06T09:04:00+08:00",
               message: "处理中",
+              retryable: true,
+              acknowledgeable: false,
             },
             {
               job_id: "job-failed",
-              type: "oa_sync",
-              label: "OA 同步",
+              type: "file_import",
+              label: "导入发票",
               status: "failed",
               updated_at: "2026-05-06T09:03:00+08:00",
-              message: "OA 同步失败",
+              message: "发票导入失败",
+              retryable: true,
+              acknowledgeable: true,
             },
           ],
         },
@@ -191,9 +221,19 @@ describe("AppHealthOperationsPage", () => {
     expect(screen.getByTestId("app-health-oa-sync")).toHaveTextContent("all");
     expect(screen.getByTestId("app-health-oa-sync")).toHaveTextContent("2026-05");
     expect(screen.getByTestId("app-health-workbench")).toHaveTextContent("rebuilding");
+    expect(screen.getByTestId("app-health-workbench")).toHaveTextContent("Matching running");
+    expect(screen.getByTestId("app-health-workbench")).toHaveTextContent("2026-05");
+    expect(screen.getByTestId("app-health-workbench")).toHaveTextContent("Matching dirty");
+    expect(screen.getByTestId("app-health-workbench")).toHaveTextContent("2026-04");
+    expect(screen.getByTestId("app-health-workbench")).toHaveTextContent("候选生成失败");
     expect(screen.getByTestId("app-health-background-jobs")).toHaveTextContent("Queued");
     expect(screen.getByTestId("app-health-background-jobs")).toHaveTextContent("2");
-    expect(screen.getByTestId("app-health-background-jobs")).toHaveTextContent("job-failed");
+    expect(screen.getByTestId("app-health-background-jobs")).toHaveTextContent("Primary running");
+    expect(screen.getByTestId("app-health-background-jobs")).toHaveTextContent("生成关联台候选");
+    expect(screen.getByTestId("app-health-background-jobs")).toHaveTextContent("Primary attention");
+    expect(screen.getByTestId("app-health-background-jobs")).toHaveTextContent("Retryable");
+    expect(screen.getByTestId("app-health-background-jobs")).toHaveTextContent("Acknowledgeable");
+    expect(await within(screen.getByTestId("app-health-background-jobs")).findByText("job-failed")).toBeInTheDocument();
     expect(screen.getByTestId("app-health-dependencies")).toHaveTextContent("unavailable");
 
     const alerts = screen.getByTestId("app-health-alerts");
