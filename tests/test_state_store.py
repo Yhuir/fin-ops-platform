@@ -23,6 +23,7 @@ from fin_ops_platform.services.state_store import (
     OA_ATTACHMENT_INVOICE_CACHE_COLLECTION,
     STATE_COLLECTIONS,
     TAX_OFFSET_READ_MODELS_COLLECTION,
+    WORKBENCH_CANDIDATE_MATCHES_COLLECTION,
     WORKBENCH_READ_MODELS_COLLECTION,
     WORKBENCH_PAIR_RELATIONS_COLLECTION,
     default_data_dir,
@@ -646,6 +647,69 @@ class StateStoreTests(unittest.TestCase):
             self.assertEqual(loaded, snapshot)
             db = fake_client["fin_ops_platform_app"]
             self.assertIn("all", db[WORKBENCH_READ_MODELS_COLLECTION].documents)
+
+    def test_local_snapshot_persists_and_loads_workbench_candidate_matches(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            snapshot = {
+                "imports": {},
+                "file_imports": {},
+                "matching": {},
+                "workbench_candidate_matches": {
+                    "candidates": {
+                        "candidate:001": {
+                            "candidate_key": "candidate:001",
+                            "scope_month": "2026-05",
+                            "status": "needs_review",
+                        }
+                    }
+                },
+            }
+
+            store = ApplicationStateStore(data_dir)
+            store.save(snapshot)
+
+            reloaded = ApplicationStateStore(data_dir)
+            loaded = reloaded.load()
+
+        self.assertEqual(loaded["workbench_candidate_matches"], snapshot["workbench_candidate_matches"])
+
+    def test_save_workbench_candidate_matches_persists_and_loads_mongo_snapshot(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "app_mongo_config.json").write_text(
+                json.dumps({"host": "127.0.0.1", "database": "fin_ops_platform_app"}),
+                encoding="utf-8",
+            )
+            fake_client = FakeMongoClient()
+            snapshot = {
+                "candidates": {
+                    "candidate:001": {
+                        "candidate_id": "candidate:001",
+                        "candidate_key": "candidate:001",
+                        "scope_month": "2026-05",
+                        "candidate_type": "oa_bank_invoice",
+                        "status": "needs_review",
+                        "confidence": "medium",
+                        "rule_code": "same_amount",
+                        "row_ids": ["oa-001", "bank-001"],
+                        "generated_at": "2026-05-06T10:00:00+00:00",
+                    }
+                }
+            }
+
+            with patch("fin_ops_platform.services.state_store.MongoClient", return_value=fake_client):
+                with patch(
+                    "fin_ops_platform.services.state_store.GridFSBucket",
+                    side_effect=lambda db, bucket_name: FakeGridFSBucket(db, bucket_name),
+                ):
+                    store = ApplicationStateStore(data_dir)
+                    store.save_workbench_candidate_matches(snapshot)
+                    loaded = store.load_workbench_candidate_matches()
+
+            self.assertEqual(loaded, snapshot)
+            db = fake_client["fin_ops_platform_app"]
+            self.assertIn("candidate:001", db[WORKBENCH_CANDIDATE_MATCHES_COLLECTION].documents)
 
     def test_save_workbench_read_models_does_not_rewrite_unrelated_detailed_collections(self) -> None:
         with TemporaryDirectory() as temp_dir:

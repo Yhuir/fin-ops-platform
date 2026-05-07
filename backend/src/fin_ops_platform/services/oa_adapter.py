@@ -32,6 +32,9 @@ class OAApplicationRecord:
     detail_fields: dict[str, str] = field(default_factory=dict)
     attachment_invoices: list[dict[str, str]] = field(default_factory=list)
     attachment_file_count: int = 0
+    expense_items: list[dict[str, str]] = field(default_factory=list)
+    amount_source: str | None = None
+    amount_mismatch: dict[str, str] | None = None
     source: str | None = None
     etc_batch_id: str | None = None
     tags: list[str] = field(default_factory=list)

@@ -6,7 +6,7 @@ import unittest
 from contextlib import contextmanager
 from pathlib import Path
 from threading import Event
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import BatchType
@@ -607,20 +607,83 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 "workbench_row_overrides",
                 "workbench_pair_relations",
                 "workbench_read_models",
+                "workbench_candidate_matches",
             ],
         )
         self.assertNotIn("oa_attachment_invoice_cache", payload["deleted_counts"])
         self.assertEqual(payload["deleted_counts"]["workbench_read_models"], 1)
+        self.assertIn("workbench_candidate_matches", payload["deleted_counts"])
         self.assertEqual(payload["deleted_counts"]["workbench_pair_relations"], 1)
         self.assertEqual(payload["deleted_counts"]["workbench_row_overrides"], 1)
         self.assertIsNotNone(retained_attachment_cache_entry)
         self.assertEqual(retained_attachment_cache_entry["invoice_no"], "INV-OLD")
         self.assertEqual(app._workbench_pair_relation_service.snapshot()["pair_relations"], {})
         self.assertEqual(app._workbench_override_service.snapshot()["row_overrides"], {})
-        raw_builder.assert_called_once_with("all")
+        self.assertIn(call("all"), raw_builder.call_args_list)
         rebuilt_oa_ids = _flatten_group_rows(rebuilt_payload, "oa")
         self.assertNotIn("oa-before-cutoff", rebuilt_oa_ids)
         self.assertIn("oa-after-cutoff", rebuilt_oa_ids)
+
+    def test_reset_oa_and_rebuild_preserves_pure_bank_invoice_pair_relation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._workbench_pair_relation_service.create_active_relation(
+                case_id="CASE-MANUAL-BANK-INVOICE",
+                row_ids=["txn-imported-1994", "inv-imported-1994"],
+                row_types=["bank", "invoice"],
+                relation_mode="manual_confirmed",
+                created_by="tester",
+            )
+            app._workbench_read_model_service.upsert_read_model(scope_key="all", payload={"month": "all"})
+            app._state_store.save_workbench_pair_relations(app._workbench_pair_relation_service.snapshot())
+            app._state_store.save_workbench_read_models(app._workbench_read_model_service.snapshot())
+
+            result = app._settings_data_reset_service.execute(RESET_OA_AND_REBUILD_ACTION)
+            persisted = app._state_store.load()
+
+        self.assertEqual(result.deleted_counts["workbench_oa_pair_relations"], 0)
+        self.assertEqual(result.deleted_counts["workbench_preserved_non_oa_pair_relations"], 1)
+        self.assertEqual(result.deleted_counts["workbench_read_models"], 1)
+        self.assertIn("CASE-MANUAL-BANK-INVOICE", persisted["workbench_pair_relations"]["pair_relations"])
+        self.assertEqual(persisted["workbench_read_models"], {})
+
+    def test_reset_oa_and_rebuild_removes_pair_relation_containing_expense_row(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._workbench_pair_relation_service.create_active_relation(
+                case_id="CASE-OA-EXPENSE",
+                row_ids=["txn-imported-1994", "oa-exp-1994"],
+                row_types=["bank", "oa"],
+                relation_mode="manual_confirmed",
+                created_by="tester",
+            )
+            app._state_store.save_workbench_pair_relations(app._workbench_pair_relation_service.snapshot())
+
+            result = app._settings_data_reset_service.execute(RESET_OA_AND_REBUILD_ACTION)
+            persisted = app._state_store.load()
+
+        self.assertEqual(result.deleted_counts["workbench_oa_pair_relations"], 1)
+        self.assertEqual(result.deleted_counts["workbench_preserved_non_oa_pair_relations"], 0)
+        self.assertNotIn("CASE-OA-EXPENSE", persisted["workbench_pair_relations"]["pair_relations"])
+
+    def test_reset_oa_and_rebuild_removes_pair_relation_containing_attachment_invoice_row(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._workbench_pair_relation_service.create_active_relation(
+                case_id="CASE-OA-ATTACHMENT-INVOICE",
+                row_ids=["txn-imported-1994", "oa-att-inv-oa-exp-1994-01"],
+                row_types=["bank", "invoice"],
+                relation_mode="manual_confirmed",
+                created_by="tester",
+            )
+            app._state_store.save_workbench_pair_relations(app._workbench_pair_relation_service.snapshot())
+
+            result = app._settings_data_reset_service.execute(RESET_OA_AND_REBUILD_ACTION)
+            persisted = app._state_store.load()
+
+        self.assertEqual(result.deleted_counts["workbench_oa_pair_relations"], 1)
+        self.assertEqual(result.deleted_counts["workbench_preserved_non_oa_pair_relations"], 0)
+        self.assertNotIn("CASE-OA-ATTACHMENT-INVOICE", persisted["workbench_pair_relations"]["pair_relations"])
 
     def test_reset_oa_and_rebuild_imports_only_configured_oa_form_types_and_statuses(self) -> None:
         with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
@@ -921,7 +984,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
         self.assertEqual(payload["rebuild_status"], "completed")
         parse_files.assert_not_called()
         rebuilt_invoice_ids = _flatten_group_rows(rebuilt_payload, "invoice")
-        self.assertEqual(rebuilt_invoice_ids, ["oa-att-inv-oa-exp-exp-attach-001-0-01"])
+        self.assertEqual(rebuilt_invoice_ids, ["oa-att-inv-oa-exp-exp-attach-001-01"])
         invoice_rows = _flatten_group_payload_rows(rebuilt_payload, "invoice")
         self.assertEqual(invoice_rows[0]["source_kind"], "oa_attachment_invoice")
         self.assertEqual(invoice_rows[0]["detail_fields"]["发票号码"], "40512344")

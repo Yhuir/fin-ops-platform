@@ -108,6 +108,8 @@ class SettingsDataResetService:
                 "workbench_overrides": {},
                 "workbench_pair_relations": {},
                 "workbench_read_models": {},
+                "workbench_candidate_matches": {},
+                "workbench_matching_dirty_scopes": {},
             }
         )
         self._emit_progress(progress_callback, "delete_import_files", "正在删除银行流水导入文件。", 3, 4)
@@ -120,6 +122,8 @@ class SettingsDataResetService:
             "workbench_row_overrides": len(self._row_overrides()),
             "workbench_pair_relations": len(self._pair_relations()),
             "workbench_read_models": len(self._read_models()),
+            "workbench_candidate_matches": len(self._candidate_matches()),
+            "workbench_matching_dirty_scopes": len(self._matching_dirty_scopes()),
             "stored_import_files": deleted_blob_count,
         }
         return SettingsDataResetResult(
@@ -132,6 +136,8 @@ class SettingsDataResetService:
                 "workbench_row_overrides",
                 "workbench_pair_relations",
                 "workbench_read_models",
+                "workbench_candidate_matches",
+                "workbench_matching_dirty_scopes",
                 "import_batches(bank_transaction)",
                 "file_import_sessions(bank_transaction)",
                 "file_import_files(bank_transaction)",
@@ -168,6 +174,8 @@ class SettingsDataResetService:
                 "workbench_overrides": {},
                 "workbench_pair_relations": {},
                 "workbench_read_models": {},
+                "workbench_candidate_matches": {},
+                "workbench_matching_dirty_scopes": {},
             }
         )
         self._state_store.save_tax_certified_imports({})
@@ -181,6 +189,8 @@ class SettingsDataResetService:
             "workbench_row_overrides": len(self._row_overrides()),
             "workbench_pair_relations": len(self._pair_relations()),
             "workbench_read_models": len(self._read_models()),
+            "workbench_candidate_matches": len(self._candidate_matches()),
+            "workbench_matching_dirty_scopes": len(self._matching_dirty_scopes()),
             "tax_certified_import_sessions": tax_deleted_counts["sessions"],
             "tax_certified_import_batches": tax_deleted_counts["batches"],
             "tax_certified_import_records": tax_deleted_counts["records"],
@@ -196,6 +206,8 @@ class SettingsDataResetService:
                 "workbench_row_overrides",
                 "workbench_pair_relations",
                 "workbench_read_models",
+                "workbench_candidate_matches",
+                "workbench_matching_dirty_scopes",
                 "tax_certified_import_sessions",
                 "tax_certified_import_batches",
                 "tax_certified_import_records",
@@ -216,15 +228,46 @@ class SettingsDataResetService:
         progress_callback: SettingsDataResetProgressCallback | None,
     ) -> SettingsDataResetResult:
         self._emit_progress(progress_callback, "clear_oa_state", "正在清空 OA 工作台人工状态。", 0, 2)
+        row_overrides = self._row_overrides()
+        pair_relations = self._pair_relations()
+        read_models = self._read_models()
+        kept_row_overrides = {
+            row_id: override
+            for row_id, override in row_overrides.items()
+            if not self._is_oa_workbench_row_override(row_id, override)
+        }
+        kept_pair_relations = {
+            case_id: relation
+            for case_id, relation in pair_relations.items()
+            if not self._is_oa_pair_relation(relation)
+        }
+        removed_oa_override_count = len(row_overrides) - len(kept_row_overrides)
+        removed_oa_pair_relation_count = len(pair_relations) - len(kept_pair_relations)
+        preserved_non_oa_pair_relation_count = len(kept_pair_relations)
         deleted_counts = {
-            "workbench_row_overrides": len(self._row_overrides()),
-            "workbench_pair_relations": len(self._pair_relations()),
-            "workbench_read_models": len(self._read_models()),
+            "workbench_row_overrides": removed_oa_override_count,
+            "workbench_oa_row_overrides": removed_oa_override_count,
+            "workbench_pair_relations": removed_oa_pair_relation_count,
+            "workbench_oa_pair_relations": removed_oa_pair_relation_count,
+            "workbench_preserved_non_oa_pair_relations": preserved_non_oa_pair_relation_count,
+            "workbench_read_models": len(read_models),
+            "workbench_candidate_matches": len(self._candidate_matches()),
         }
         self._emit_progress(progress_callback, "persist_state", "正在写入 OA 重置结果。", 1, 2)
-        self._state_store.save_workbench_overrides({})
-        self._state_store.save_workbench_pair_relations({})
+        self._state_store.save_workbench_overrides(
+            {
+                **self._workbench_override_service.snapshot(),
+                "row_overrides": kept_row_overrides,
+            }
+        )
+        self._state_store.save_workbench_pair_relations(
+            {
+                **self._workbench_pair_relation_service.snapshot(),
+                "pair_relations": kept_pair_relations,
+            }
+        )
         self._state_store.save_workbench_read_models({})
+        self._state_store.save_workbench_candidate_matches({})
         return SettingsDataResetResult(
             action=RESET_OA_AND_REBUILD_ACTION,
             status="completed",
@@ -232,11 +275,12 @@ class SettingsDataResetService:
                 "workbench_row_overrides",
                 "workbench_pair_relations",
                 "workbench_read_models",
+                "workbench_candidate_matches",
             ],
             deleted_counts=deleted_counts,
             protected_targets=self.protected_targets(),
             rebuild_status="pending",
-            message="已清空 OA 工作台人工状态与读模型，后续需要重新拉取 OA 并重建关联台。",
+            message="已清空 OA 相关工作台人工状态与读模型，后续需要重新拉取 OA 并重建关联台。",
         )
 
     @staticmethod
@@ -356,6 +400,75 @@ class SettingsDataResetService:
         snapshot = self._workbench_read_model_service.snapshot()
         read_models = snapshot.get("read_models")
         return read_models if isinstance(read_models, dict) else {}
+
+    def _candidate_matches(self) -> dict[str, Any]:
+        snapshot = self._state_store.load_workbench_candidate_matches()
+        candidates = snapshot.get("candidates") if isinstance(snapshot, dict) else {}
+        return candidates if isinstance(candidates, dict) else {}
+
+    def _matching_dirty_scopes(self) -> dict[str, Any]:
+        snapshot = self._state_store.load().get("workbench_matching_dirty_scopes", {})
+        dirty_scopes = snapshot.get("dirty_scopes") if isinstance(snapshot, dict) else {}
+        return dirty_scopes if isinstance(dirty_scopes, dict) else {}
+
+    @classmethod
+    def _is_oa_workbench_row_override(cls, row_id: str, override: Any) -> bool:
+        if cls._is_oa_derived_row_id(row_id):
+            return True
+        if not isinstance(override, dict):
+            return False
+        if str(override.get("type") or "").strip().lower() == "oa":
+            return True
+        return cls._payload_references_oa_derived_row(override)
+
+    @classmethod
+    def _is_oa_pair_relation(cls, relation: Any) -> bool:
+        if not isinstance(relation, dict):
+            return False
+        row_ids = relation.get("row_ids")
+        if not isinstance(row_ids, list):
+            return False
+        return any(cls._is_oa_derived_row_id(row_id) for row_id in row_ids)
+
+    @staticmethod
+    def _is_oa_derived_row_id(row_id: Any) -> bool:
+        normalized_row_id = str(row_id or "").strip()
+        return normalized_row_id.startswith("oa-") or normalized_row_id.startswith("oa-att-inv-")
+
+    @classmethod
+    def _payload_references_oa_derived_row(cls, value: Any, *, id_context: bool = False) -> bool:
+        if isinstance(value, dict):
+            if str(value.get("type") or "").strip().lower() == "oa":
+                return True
+            for key, nested_value in value.items():
+                if cls._payload_references_oa_derived_row(
+                    nested_value,
+                    id_context=id_context or cls._is_row_id_reference_key(key),
+                ):
+                    return True
+            return False
+        if isinstance(value, list):
+            return any(cls._payload_references_oa_derived_row(item, id_context=id_context) for item in value)
+        if isinstance(value, tuple):
+            return any(cls._payload_references_oa_derived_row(item, id_context=id_context) for item in value)
+        if id_context:
+            return cls._is_oa_derived_row_id(value)
+        return False
+
+    @staticmethod
+    def _is_row_id_reference_key(key: Any) -> bool:
+        normalized_key = str(key or "").strip().lower()
+        return normalized_key in {
+            "id",
+            "row_id",
+            "row_ids",
+            "source_row_id",
+            "source_row_ids",
+            "linked_row_id",
+            "linked_row_ids",
+            "affected_row_id",
+            "affected_row_ids",
+        }
 
     @staticmethod
     def _preview_batch_type(preview: Any) -> str:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from dataclasses import asdict, is_dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
 import json
@@ -91,6 +91,10 @@ from fin_ops_platform.services.tax_offset_service import TaxOffsetService
 from fin_ops_platform.services.workbench_candidate_grouping import WorkbenchCandidateGroupingService
 from fin_ops_platform.services.workbench_action_service import WorkbenchActionService
 from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
+from fin_ops_platform.services.workbench_candidate_match_service import WorkbenchCandidateMatchService
+from fin_ops_platform.services.workbench_matching_dirty_scope_service import WorkbenchMatchingDirtyScopeService
+from fin_ops_platform.services.workbench_matching_orchestrator import WorkbenchMatchingOrchestrator
+from fin_ops_platform.services.workbench_matching_rules import WorkbenchMatchingRules
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
@@ -100,7 +104,7 @@ from fin_ops_platform.services.seeds import build_demo_seed
 
 OA_INVOICE_OFFSET_AUTO_MATCH_MODE = "oa_invoice_offset_auto_match"
 OA_INVOICE_OFFSET_TAG = "冲"
-WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-04-30-oa-attachment-tags"
+WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-06-oa-expense-multi-invoice-sum"
 SYSTEM_AUTO_PAIR_RELATION_MODES = {
     "salary_personal_auto_match",
     "internal_transfer_pair",
@@ -203,6 +207,10 @@ class Application:
         self._oa_sync_rebuild_scheduled = False
         self._oa_sync_polling_lock = Lock()
         self._oa_sync_polling_started = False
+        self._workbench_matching_dirty_worker_lock = Lock()
+        self._workbench_matching_dirty_worker_started = False
+        self._workbench_matching_run_lock = Lock()
+        self._workbench_matching_running_scope_months: set[str] = set()
         self._seed_payload = build_demo_seed()
         self._initialize_runtime_services(self._load_persisted_state())
 
@@ -232,6 +240,12 @@ class Application:
         self._workbench_amount_check_service = WorkbenchAmountCheckService()
         self._workbench_read_model_service = WorkbenchReadModelService.from_snapshot(
             persisted_state.get("workbench_read_models"),
+        )
+        self._workbench_candidate_match_service = WorkbenchCandidateMatchService.from_snapshot(
+            persisted_state.get("workbench_candidate_matches"),
+        )
+        self._workbench_matching_dirty_scope_service = WorkbenchMatchingDirtyScopeService.from_snapshot(
+            persisted_state.get("workbench_matching_dirty_scopes"),
         )
         self._cost_statistics_read_model_service = CostStatisticsReadModelService.from_snapshot(
             persisted_state.get("cost_statistics_read_models"),
@@ -290,6 +304,16 @@ class Application:
         bank_account_resolver = BankAccountResolver(self._app_settings_service.get_bank_account_mapping_dict)
         self._candidate_grouping_service = WorkbenchCandidateGroupingService()
         self._workbench_query_service = WorkbenchQueryService(oa_adapter=oa_adapter)
+        self._workbench_matching_rules = WorkbenchMatchingRules()
+        self._workbench_matching_orchestrator = WorkbenchMatchingOrchestrator(
+            row_provider=self._workbench_matching_rows_for_scope,
+            pair_relation_service=self._workbench_pair_relation_service,
+            candidate_match_service=self._workbench_candidate_match_service,
+            read_model_service=self._workbench_read_model_service,
+            rules=self._workbench_matching_rules,
+            settings_provider=self._workbench_matching_settings,
+            source_versions_provider=self._workbench_matching_source_versions,
+        )
         self._workbench_action_service = WorkbenchActionService(self._workbench_query_service)
         self._live_workbench_service = LiveWorkbenchService(
             self._import_service,
@@ -943,7 +967,7 @@ class Application:
     def _build_app_health_snapshot(self, session: OARequestSession, *, started_at: float) -> dict[str, object]:
         owner_user_id = session.identity.username or session.identity.user_id or "web_finance_user"
         active_jobs = self._background_job_service.list_active_jobs(owner_user_id, include_system=True)
-        oa_sync_payload = self._oa_sync_service.status_payload()
+        oa_sync_payload = self._app_health_oa_sync_payload()
         state_store_info = {
             "storage_mode": self._state_store.storage_mode if self._state_store is not None else "memory",
             "backend": self._state_store.storage_backend if self._state_store is not None else "memory",
@@ -984,6 +1008,42 @@ class Application:
             "active_alert_count": metrics.get("active_alert_count"),
         }
         print(json.dumps(log_payload, ensure_ascii=False))
+
+    def _app_health_oa_sync_payload(self) -> dict[str, object]:
+        payload = self._serialize_value(self._oa_sync_service.status_payload())
+        if not isinstance(payload, dict):
+            payload = {}
+        matching_dirty_scopes = self._workbench_matching_dirty_scope_service.list_dirty_scopes()
+        with self._workbench_matching_run_lock:
+            matching_running_scopes = sorted(self._workbench_matching_running_scope_months)
+        if matching_running_scopes:
+            payload["workbench_matching_running_scopes"] = matching_running_scopes
+        if not matching_dirty_scopes:
+            return payload
+        payload["workbench_matching_dirty_scopes"] = matching_dirty_scopes
+        raw_dirty_scopes = [
+            str(scope).strip()
+            for scope in list(payload.get("dirty_scopes") or [])
+            if str(scope).strip()
+        ]
+        matching_scope_months = [
+            str(entry.get("scope_month") or "").strip()
+            for entry in matching_dirty_scopes
+            if str(entry.get("scope_month") or "").strip()
+        ]
+        payload["dirty_scopes"] = sorted(dict.fromkeys([*raw_dirty_scopes, *matching_scope_months]))
+        age_payload = payload.get("dirty_scope_age_seconds")
+        dirty_scope_ages = dict(age_payload) if isinstance(age_payload, dict) else {}
+        now = datetime.now(UTC)
+        for entry in matching_dirty_scopes:
+            scope_month = str(entry.get("scope_month") or "").strip()
+            if not scope_month:
+                continue
+            dirty_scope_ages[scope_month] = AppHealthService.seconds_since(entry.get("updated_at"), now)
+        payload["dirty_scope_age_seconds"] = dirty_scope_ages
+        if not payload.get("message"):
+            payload["message"] = "关联台自动配对存在待重算月份。"
+        return payload
 
     def _is_oa_sync_rebuild_scheduled(self) -> bool:
         with self._oa_sync_rebuild_lock:
@@ -1643,6 +1703,40 @@ class Application:
         ).start()
         return True
 
+    def start_workbench_matching_dirty_scope_worker(self, *, interval_seconds: float | None = None) -> bool:
+        resolved_interval = interval_seconds
+        if resolved_interval is None:
+            try:
+                resolved_interval = float(os.getenv("FIN_OPS_WORKBENCH_MATCHING_DIRTY_INTERVAL_SECONDS", "900"))
+            except ValueError:
+                resolved_interval = 900
+        if float(resolved_interval) <= 0:
+            return False
+        with self._workbench_matching_dirty_worker_lock:
+            if self._workbench_matching_dirty_worker_started:
+                return True
+            self._workbench_matching_dirty_worker_started = True
+        Thread(
+            target=self._run_workbench_matching_dirty_scope_worker,
+            kwargs={"interval_seconds": max(60.0, float(resolved_interval))},
+            daemon=True,
+        ).start()
+        return True
+
+    def _run_workbench_matching_dirty_scope_worker(self, *, interval_seconds: float) -> None:
+        while True:
+            self._rebuild_workbench_matching_dirty_scopes_once()
+            sleep(interval_seconds)
+
+    def _rebuild_workbench_matching_dirty_scopes_once(self) -> dict[str, object] | None:
+        scope_months = self._workbench_matching_dirty_scope_service.take_dirty_scopes()
+        if not scope_months:
+            return None
+        return self._run_workbench_auto_matching_for_scopes(
+            scope_months,
+            reason="dirty_scope_retry",
+        )
+
     def _run_oa_sync_polling_worker(self, *, interval_seconds: float) -> None:
         while True:
             self._poll_oa_source_once()
@@ -1746,6 +1840,10 @@ class Application:
         if not normalized_scope_keys:
             return
         read_model_scope_keys = self._expand_workbench_read_model_scope_keys_for_base_scopes(normalized_scope_keys)
+        self._run_workbench_auto_matching_for_scopes(
+            normalized_scope_keys,
+            reason="oa_sync_hot_rebuild",
+        )
         self._search_service.clear_cache()
         invalidate_records_cache = getattr(self._workbench_query_service._oa_adapter, "invalidate_records_cache", None)
         if callable(invalidate_records_cache):
@@ -1753,9 +1851,10 @@ class Application:
         for scope_key in read_model_scope_keys:
             base_scope_key = self._workbench_read_model_base_scope_key(scope_key)
             raw_payload = self._build_raw_workbench_payload(base_scope_key)
-            grouped_payload = self._group_row_payload(raw_payload)
+            candidate_payload = self._apply_candidate_matches_to_payload(raw_payload, base_scope_key)
+            grouped_payload = self._group_row_payload(candidate_payload)
             self._apply_workbench_runtime_metadata(grouped_payload)
-            ignored_rows = self._extract_ignored_rows(raw_payload)
+            ignored_rows = self._extract_ignored_rows(candidate_payload)
             if not self._can_persist_workbench_payload(grouped_payload):
                 raise RuntimeError(str(grouped_payload.get("oa_status", {}).get("message") or "OA read model is not ready"))
             self._workbench_read_model_service.upsert_read_model(
@@ -2212,12 +2311,18 @@ class Application:
             reload_percent = 15 if action == RESET_OA_AND_REBUILD_ACTION else 90
             progress("reload", "正在重新载入运行时服务。", reload_percent)
         self._reload_runtime_services()
+        if action == RESET_OA_AND_REBUILD_ACTION:
+            self._workbench_matching_dirty_scope_service = WorkbenchMatchingDirtyScopeService()
         self._search_service.clear_cache()
         self._invalidate_tax_offset_read_models()
         if action == RESET_OA_AND_REBUILD_ACTION:
             try:
                 if progress is not None:
                     progress("rebuild", "正在按 OA 导入设置重新拉取 OA 并重建关联台缓存。", 95)
+                self._run_workbench_auto_matching_for_scopes(
+                    self._expand_workbench_matching_months(self._workbench_query_service.list_available_months()),
+                    reason="oa_reset_rebuild",
+                )
                 self._build_api_workbench_payload("all")
                 result.rebuild_status = "completed"
                 result.message = "已按 OA 导入设置重新拉取 OA 并重建关联台，已保留 OA 附件发票解析结果。"
@@ -4133,6 +4238,10 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_oa_sync_request", "message": str(exc)},
             )
+        self._run_workbench_auto_matching_for_scopes(
+            self._expand_workbench_matching_months(self._workbench_query_service.list_available_months()),
+            reason="oa_integration_sync",
+        )
         return self._json_response(
             HTTPStatus.OK,
             {"run": self._serialize_sync_run(run), "dashboard": self._integration_service.build_dashboard()},
@@ -4376,6 +4485,10 @@ class Application:
             self._tax_offset_scope_keys_for_import_preview(preview),
             reason="invoice_import_confirm",
         )
+        self._run_workbench_auto_matching_for_scopes(
+            self._workbench_matching_scope_months_for_import_preview(preview),
+            reason="import_confirm",
+        )
         self._persist_state_with_workbench_invalidation(
             cost_statistics_scope_keys=self._cost_statistics_scope_keys_for_import_preview(preview),
         )
@@ -4558,6 +4671,13 @@ class Application:
                 matching_run = None
                 if any(file.status == "confirmed" for file in confirmed_session.files):
                     matching_run = self._matching_service.run(triggered_by=f"import_session:{confirmed_session.id}")
+                    self._run_workbench_auto_matching_for_scopes(
+                        self._workbench_matching_scope_months_for_import_file_session(
+                            confirmed_session,
+                            normalized_selected_file_ids,
+                        ),
+                        reason="import_file_confirm",
+                    )
                 self._invalidate_tax_offset_read_model_scopes(
                     self._tax_offset_scope_keys_for_import_file_session(
                         confirmed_session,
@@ -4752,6 +4872,68 @@ class Application:
             normalized_rows.extend(list(getattr(item, "normalized_rows", []) or []))
         return self._cost_statistics_scope_keys_for_import_rows(normalized_rows)
 
+    def _workbench_matching_scope_months_for_import_preview(self, preview: object) -> list[str]:
+        return self._workbench_matching_scope_months_for_import_rows(getattr(preview, "normalized_rows", []))
+
+    def _workbench_matching_scope_months_for_import_file_session(
+        self,
+        session: object,
+        selected_file_ids: list[str],
+    ) -> list[str]:
+        selected = {str(file_id) for file_id in list(selected_file_ids or []) if str(file_id)}
+        normalized_rows: list[object] = []
+        for item in list(getattr(session, "files", []) or []):
+            if str(getattr(item, "id", "")) not in selected:
+                continue
+            if str(getattr(item, "status", "")) != "confirmed":
+                continue
+            normalized_rows.extend(list(getattr(item, "normalized_rows", []) or []))
+        return self._workbench_matching_scope_months_for_import_rows(normalized_rows)
+
+    @classmethod
+    def _workbench_matching_scope_months_for_import_rows(cls, rows: object) -> list[str]:
+        months: set[str] = set()
+        date_fields = (
+            "txn_date",
+            "invoice_date",
+            "issue_date",
+            "trade_time",
+            "pay_receive_time",
+            "date",
+        )
+        for row in list(rows or []):
+            if not isinstance(row, dict):
+                continue
+            for field in date_fields:
+                raw_value = str(row.get(field) or "").strip()
+                if len(raw_value) < 7:
+                    continue
+                month = raw_value[:7]
+                if SEARCH_MONTH_RE.match(month):
+                    months.add(month)
+                    break
+        return cls._expand_workbench_matching_months(months)
+
+    @classmethod
+    def _expand_workbench_matching_months(cls, months: Iterable[str]) -> list[str]:
+        expanded: set[str] = set()
+        for month in months:
+            normalized_month = str(month or "").strip()
+            if not SEARCH_MONTH_RE.match(normalized_month):
+                continue
+            expanded.add(normalized_month)
+            expanded.add(cls._shift_month(normalized_month, -1))
+            expanded.add(cls._shift_month(normalized_month, 1))
+        return sorted(expanded)
+
+    @staticmethod
+    def _shift_month(month: str, delta: int) -> str:
+        current = datetime.strptime(f"{month}-01", "%Y-%m-%d")
+        month_index = current.year * 12 + current.month - 1 + delta
+        year = month_index // 12
+        resolved_month = month_index % 12 + 1
+        return f"{year:04d}-{resolved_month:02d}"
+
     def _tax_offset_scope_keys_for_import_preview(self, preview: object) -> list[str]:
         batch = getattr(preview, "batch", None)
         if getattr(batch, "batch_type", None) not in (BatchType.OUTPUT_INVOICE, BatchType.INPUT_INVOICE):
@@ -4814,6 +4996,129 @@ class Application:
                     break
         return sorted(months) if months else ["all"]
 
+    def _run_workbench_auto_matching_for_scopes(
+        self,
+        scope_months: list[str],
+        *,
+        reason: str,
+        request_id: str | None = None,
+    ) -> dict[str, object] | None:
+        normalized_months = [
+            str(month).strip()
+            for month in list(scope_months or [])
+            if SEARCH_MONTH_RE.match(str(month).strip())
+        ]
+        normalized_months = sorted(dict.fromkeys(normalized_months))
+        if not normalized_months:
+            return None
+        with self._workbench_matching_run_lock:
+            running_overlap = sorted(set(normalized_months).intersection(self._workbench_matching_running_scope_months))
+            if running_overlap:
+                self._workbench_matching_dirty_scope_service.mark_dirty(
+                    normalized_months,
+                    reason=f"{reason}_coalesced",
+                )
+                if self._state_store is not None:
+                    self._persist_state()
+                return None
+            self._workbench_matching_running_scope_months.update(normalized_months)
+        try:
+            summary = self._workbench_matching_orchestrator.run(
+                changed_scope_months=normalized_months,
+                reason=reason,
+                request_id=request_id or f"workbench-match-{uuid4().hex}",
+            )
+        except Exception as exc:
+            self._workbench_matching_dirty_scope_service.mark_dirty(
+                normalized_months,
+                reason=reason,
+                error=str(exc),
+            )
+            if self._state_store is not None:
+                self._persist_state()
+            self._emit_workbench_persistence_warning(
+                operation=f"{reason}_auto_matching",
+                detail=f"queued dirty scopes after matching failure: {exc}",
+            )
+            return None
+        finally:
+            with self._workbench_matching_run_lock:
+                for month in normalized_months:
+                    self._workbench_matching_running_scope_months.discard(month)
+        read_model_scope_keys = self._expand_workbench_read_model_scope_keys_for_base_scopes(normalized_months)
+        for scope_key in read_model_scope_keys:
+            self._workbench_read_model_service.delete_read_model(scope_key)
+        if self._state_store is not None:
+            self._persist_workbench_candidate_matches_best_effort(operation=f"{reason}_candidate_matches")
+            self._persist_workbench_read_models_best_effort(
+                snapshot=self._workbench_read_model_service.snapshot(),
+                changed_scope_keys=read_model_scope_keys,
+                operation=f"{reason}_invalidate_read_models",
+            )
+        self._search_service.clear_cache()
+        return summary
+
+    def _workbench_matching_rows_for_scope(self, scope_month: str) -> dict[str, list[dict[str, object]]]:
+        payload = self._build_raw_workbench_payload(scope_month)
+        return {
+            "oa_rows": self._workbench_matching_rows_from_payload(payload, "oa"),
+            "bank_rows": self._workbench_matching_rows_from_payload(payload, "bank"),
+            "invoice_rows": self._workbench_matching_rows_from_payload(payload, "invoice"),
+        }
+
+    @staticmethod
+    def _workbench_matching_rows_from_payload(
+        payload: dict[str, object],
+        row_type: str,
+    ) -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
+        for section_name in ("paired", "open"):
+            section = payload.get(section_name)
+            if isinstance(section, dict):
+                section_rows = section.get(row_type)
+                if isinstance(section_rows, list):
+                    rows.extend(row for row in section_rows if isinstance(row, dict))
+                groups = section.get("groups")
+                if isinstance(groups, list):
+                    for group in groups:
+                        if not isinstance(group, dict):
+                            continue
+                        group_rows = group.get(f"{row_type}_rows")
+                        if isinstance(group_rows, list):
+                            rows.extend(row for row in group_rows if isinstance(row, dict))
+        seen: set[str] = set()
+        deduped: list[dict[str, object]] = []
+        for row in rows:
+            row_id = str(row.get("id") or row.get("row_id") or "").strip()
+            if row_id and row_id not in seen:
+                seen.add(row_id)
+                deduped.append(row)
+        return deduped
+
+    def _workbench_matching_settings(self) -> dict[str, object]:
+        return {
+            "offset_applicant_names": self._app_settings_service.get_oa_invoice_offset_applicant_names(),
+        }
+
+    def _workbench_matching_source_versions(self) -> dict[str, object]:
+        parser_version = self._current_oa_attachment_invoice_parser_version()
+        payload: dict[str, object] = {
+            "workbench_read_model_schema_version": WORKBENCH_READ_MODEL_SCHEMA_VERSION,
+        }
+        if parser_version:
+            payload["oa_attachment_invoice_parser_version"] = parser_version
+        return payload
+
+    def _persist_workbench_candidate_matches_best_effort(self, *, operation: str) -> None:
+        if self._state_store is None:
+            return
+        try:
+            self._state_store.save_workbench_candidate_matches(
+                self._workbench_candidate_match_service.snapshot()
+            )
+        except Exception as exc:
+            self._emit_workbench_persistence_warning(operation=operation, detail=str(exc))
+
     def _persist_state(self) -> None:
         self._search_service.clear_cache()
         if self._state_store is None:
@@ -4836,6 +5141,8 @@ class Application:
                 "workbench_overrides": self._workbench_override_service.snapshot(),
                 "workbench_pair_relations": self._workbench_pair_relation_service.snapshot(),
                 "workbench_read_models": self._workbench_read_model_service.snapshot(),
+                "workbench_candidate_matches": self._workbench_candidate_match_service.snapshot(),
+                "workbench_matching_dirty_scopes": self._workbench_matching_dirty_scope_service.snapshot(),
                 "cost_statistics_read_models": cost_statistics_snapshot,
                 "tax_offset_read_models": tax_offset_snapshot,
             }
@@ -4979,9 +5286,10 @@ class Application:
             scope_started_at = monotonic()
             base_scope_key = self._workbench_read_model_base_scope_key(scope_key)
             raw_payload = self._build_raw_workbench_payload(base_scope_key)
-            grouped_payload = self._group_row_payload(raw_payload)
+            candidate_payload = self._apply_candidate_matches_to_payload(raw_payload, base_scope_key)
+            grouped_payload = self._group_row_payload(candidate_payload)
             self._apply_workbench_runtime_metadata(grouped_payload)
-            ignored_rows = self._extract_ignored_rows(raw_payload)
+            ignored_rows = self._extract_ignored_rows(candidate_payload)
             self._workbench_read_model_service.upsert_read_model(
                 scope_key=scope_key,
                 payload=grouped_payload,
@@ -5096,9 +5404,10 @@ class Application:
 
         raw_payload = self._build_raw_workbench_payload(month)
         relation_payload = self._apply_pair_relations_to_payload(raw_payload)
-        grouped_payload = self._group_row_payload(relation_payload)
+        candidate_payload = self._apply_candidate_matches_to_payload(relation_payload, month)
+        grouped_payload = self._group_row_payload(candidate_payload)
         self._apply_workbench_runtime_metadata(grouped_payload)
-        ignored_rows = self._extract_ignored_rows(relation_payload)
+        ignored_rows = self._extract_ignored_rows(candidate_payload)
         if not self._can_persist_workbench_payload(grouped_payload):
             if fallback_read_model is not None:
                 return fallback_read_model
@@ -5568,6 +5877,120 @@ class Application:
             paired_section[row_type] = patched_paired_rows
             open_section[row_type] = patched_open_rows
         return result
+
+    def _apply_candidate_matches_to_payload(self, payload: dict[str, object], month: str) -> dict[str, object]:
+        result = self._serialize_value(payload)
+        candidates = self._candidate_matches_for_scope(month)
+        if not candidates:
+            return result
+
+        rows_by_id: dict[str, dict[str, object]] = {}
+        for section_name in ("paired", "open"):
+            section = result.get(section_name)
+            if not isinstance(section, dict):
+                continue
+            for row_type in ("oa", "bank", "invoice"):
+                for row in list(section.get(row_type) or []):
+                    if isinstance(row, dict):
+                        row_id = str(row.get("id") or row.get("row_id") or "").strip()
+                        if row_id:
+                            rows_by_id[row_id] = row
+
+        claimed_row_ids: set[str] = set()
+        for candidate in sorted(candidates, key=self._candidate_display_sort_key):
+            if not isinstance(candidate, dict):
+                continue
+            row_ids = [
+                str(row_id).strip()
+                for row_id in list(candidate.get("row_ids") or [])
+                if str(row_id).strip()
+            ]
+            if not row_ids:
+                continue
+            if any(self._row_has_manual_relation(rows_by_id.get(row_id)) for row_id in row_ids):
+                continue
+            if any(row_id in claimed_row_ids for row_id in row_ids):
+                continue
+
+            relation = self._candidate_relation_payload(candidate)
+            case_id = str(candidate.get("candidate_key") or candidate.get("candidate_id") or "").strip()
+            if not case_id:
+                continue
+            for row_id in row_ids:
+                row = rows_by_id.get(row_id)
+                if not isinstance(row, dict):
+                    continue
+                row["case_id"] = case_id
+                relation_field = self._workbench_query_service.relation_field_name(str(row.get("type") or ""))
+                row[relation_field] = self._serialize_value(relation)
+                if str(candidate.get("rule_code") or "") == OA_INVOICE_OFFSET_AUTO_MATCH_MODE:
+                    tags = [
+                        str(tag).strip()
+                        for tag in list(row.get("tags") or [])
+                        if str(tag).strip()
+                    ]
+                    if OA_INVOICE_OFFSET_TAG not in tags:
+                        tags.append(OA_INVOICE_OFFSET_TAG)
+                    row["tags"] = tags
+                    row["cost_excluded"] = True
+            claimed_row_ids.update(row_ids)
+        return result
+
+    def _candidate_matches_for_scope(self, month: str) -> list[dict[str, object]]:
+        normalized_month = str(month or "").strip()
+        if SEARCH_MONTH_RE.match(normalized_month):
+            return self._workbench_candidate_match_service.list_candidates_by_month(normalized_month)
+        snapshot = self._workbench_candidate_match_service.snapshot()
+        candidates = snapshot.get("candidates")
+        if not isinstance(candidates, dict):
+            return []
+        return [
+            self._serialize_value(candidate)
+            for candidate in candidates.values()
+            if isinstance(candidate, dict)
+        ]
+
+    @staticmethod
+    def _candidate_display_sort_key(candidate: dict[str, object]) -> tuple[int, str, str]:
+        status_priority = {
+            "auto_closed": 0,
+            "conflict": 1,
+            "needs_review": 2,
+            "incomplete": 3,
+        }
+        return (
+            status_priority.get(str(candidate.get("status") or ""), 9),
+            str(candidate.get("rule_code") or ""),
+            str(candidate.get("candidate_key") or candidate.get("candidate_id") or ""),
+        )
+
+    def _candidate_relation_payload(self, candidate: dict[str, object]) -> dict[str, str]:
+        status = str(candidate.get("status") or "").strip()
+        rule_code = str(candidate.get("rule_code") or "").strip()
+        if status == "auto_closed":
+            if rule_code == "salary_personal_auto_match":
+                return {"code": rule_code, "label": "已匹配：工资", "tone": "success"}
+            if rule_code == "internal_transfer_pair":
+                return {"code": rule_code, "label": "已匹配：内部往来款", "tone": "success"}
+            if rule_code == OA_INVOICE_OFFSET_AUTO_MATCH_MODE:
+                return {"code": rule_code, "label": "冲", "tone": "success"}
+            return {"code": "automatic_match", "label": "自动匹配", "tone": "success"}
+        if status == "conflict":
+            return {"code": "candidate_conflict", "label": "候选冲突", "tone": "danger"}
+        if status == "incomplete":
+            return {"code": "candidate_incomplete", "label": "候选未闭环", "tone": "warn"}
+        return {"code": "suggested_match", "label": "待人工确认", "tone": "warn"}
+
+    def _row_has_manual_relation(self, row: dict[str, object] | None) -> bool:
+        if not isinstance(row, dict):
+            return False
+        row_type = str(row.get("type") or "")
+        try:
+            relation_field = self._workbench_query_service.relation_field_name(row_type)
+        except KeyError:
+            return False
+        relation = row.get(relation_field)
+        return isinstance(relation, dict) and str(relation.get("code") or "") == "fully_linked"
 
     def _sync_oa_invoice_offset_auto_pair_relations(self, payload: dict[str, object]) -> None:
         desired_relations = self._oa_invoice_offset_desired_relations(payload)
@@ -7185,6 +7608,8 @@ def run_http_server(host: str, port: int, app: Application | None = None) -> Non
     application = app or build_application()
     if os.getenv("FIN_OPS_OA_POLLING_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}:
         application.start_oa_sync_polling_worker()
+    if os.getenv("FIN_OPS_WORKBENCH_MATCHING_DIRTY_WORKER_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}:
+        application.start_workbench_matching_dirty_scope_worker()
     handler_factory = _build_handler_factory(application)
     server = ThreadingHTTPServer((host, port), handler_factory)
     print(f"Serving fin-ops-platform foundation API on http://{host}:{port}")

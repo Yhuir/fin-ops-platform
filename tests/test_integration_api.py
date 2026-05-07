@@ -1,5 +1,6 @@
 import json
 import unittest
+from unittest.mock import patch
 
 from fin_ops_platform.app.server import build_application
 
@@ -22,11 +23,14 @@ class OAIntegrationApiTests(unittest.TestCase):
             ],
         )
 
-        sync_response = app.handle_request(
-            "POST",
-            "/integrations/oa/sync",
-            json.dumps({"actor_id": "user_finance_01", "scope": "all"}),
-        )
+        with patch.object(app, "_run_workbench_auto_matching_for_scopes", return_value=None) as auto_match:
+            sync_response = app.handle_request(
+                "POST",
+                "/integrations/oa/sync",
+                json.dumps({"actor_id": "user_finance_01", "scope": "all"}),
+            )
+        auto_match.assert_called_once()
+        self.assertEqual(auto_match.call_args.kwargs["reason"], "oa_integration_sync")
         self.assertEqual(sync_response.status_code, 200)
         sync_payload = json.loads(sync_response.body)
         run_id = sync_payload["run"]["id"]

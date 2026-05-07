@@ -316,6 +316,16 @@ function CandidateGroupGrid({
           ))}
         </div>
       ))}
+      {groups.length > 0 ? (
+        <div className="candidate-grid-body-filler" aria-hidden="true" style={{ gridTemplateColumns: rowTemplateColumns }}>
+          {panes.map((pane, paneIndex) => (
+            <Fragment key={`body-filler-${pane.id}`}>
+              <div className="candidate-group-pane-slot candidate-group-pane-slot-filler" />
+              {paneIndex < panes.length - 1 ? <div className="candidate-pane-grid-divider candidate-pane-grid-divider-filler" /> : null}
+            </Fragment>
+          ))}
+        </div>
+      ) : null}
     </div>
   ), [
     actionMode,

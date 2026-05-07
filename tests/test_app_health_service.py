@@ -85,6 +85,55 @@ class AppHealthServiceTests(unittest.TestCase):
         self.assertEqual(snapshot["workbench_read_model"]["status"], "stale")
         self.assertEqual(snapshot["metrics"]["dirty_scope_age_seconds"], {"all": 321.0})
 
+    def test_workbench_matching_dirty_scope_marks_busy_and_exposes_last_error(self) -> None:
+        service = AppHealthService()
+
+        snapshot = service.build_snapshot(
+            session=FakeSession(identity=FakeIdentity()),
+            active_jobs=[],
+            oa_sync_payload={
+                "status": "synced",
+                "dirty_scopes": [],
+                "workbench_matching_dirty_scopes": [
+                    {
+                        "scope_month": "2026-05",
+                        "reasons": ["import_confirm"],
+                        "last_error": "matching unavailable",
+                        "updated_at": datetime.now(UTC).isoformat(),
+                    }
+                ],
+            },
+            state_store_info={},
+            rebuild_scheduled=False,
+            duration_ms=1,
+        )
+
+        self.assertEqual(snapshot["status"], "busy")
+        self.assertEqual(snapshot["workbench_read_model"]["status"], "stale")
+        self.assertEqual(snapshot["workbench_read_model"]["dirty_scopes"], ["2026-05"])
+        self.assertEqual(snapshot["workbench_read_model"]["last_matching_error"], "matching unavailable")
+        self.assertEqual(snapshot["metrics"]["workbench_matching_dirty_scope_count"], 1)
+
+    def test_workbench_matching_running_scope_marks_rebuilding(self) -> None:
+        service = AppHealthService()
+
+        snapshot = service.build_snapshot(
+            session=FakeSession(identity=FakeIdentity()),
+            active_jobs=[],
+            oa_sync_payload={
+                "status": "synced",
+                "dirty_scopes": [],
+                "workbench_matching_running_scopes": ["2026-05"],
+            },
+            state_store_info={},
+            rebuild_scheduled=False,
+            duration_ms=1,
+        )
+
+        self.assertEqual(snapshot["status"], "busy")
+        self.assertEqual(snapshot["workbench_read_model"]["status"], "rebuilding")
+        self.assertEqual(snapshot["workbench_read_model"]["matching_running_scopes"], ["2026-05"])
+
     def test_rebuild_job_marks_read_model_rebuilding(self) -> None:
         service = AppHealthService()
         now = datetime.now(UTC)

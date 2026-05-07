@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from decimal import Decimal, InvalidOperation
 from threading import RLock
 from typing import Any
 
@@ -319,6 +320,7 @@ class WorkbenchQueryService:
         attachment_invoices = self._attachment_invoices(record)
         attachment_file_count = self._attachment_file_count(record)
         detail_fields = deepcopy(record.detail_fields)
+        self._enrich_aggregated_oa_detail_fields(record, detail_fields)
         detail_fields.update(
             build_attachment_invoice_detail_fields(
                 attachment_invoices,
@@ -330,6 +332,8 @@ class WorkbenchQueryService:
             existing_tags=list(source_metadata.get("tags") or []),
             attachment_invoice_count=len(attachment_invoices),
             attachment_file_count=attachment_file_count,
+            has_multiple_expense_items=len(self._expense_items(record)) > 1,
+            has_amount_mismatch=self._amount_mismatch(record) is not None,
         )
         return {
             "id": record.id,
@@ -399,6 +403,8 @@ class WorkbenchQueryService:
         existing_tags: object,
         attachment_invoice_count: int,
         attachment_file_count: int,
+        has_multiple_expense_items: bool = False,
+        has_amount_mismatch: bool = False,
     ) -> list[str]:
         tags = [
             str(tag).strip()
@@ -407,7 +413,79 @@ class WorkbenchQueryService:
         ] if isinstance(existing_tags, list) else []
         if attachment_file_count > 0 and attachment_invoice_count == 0 and "未解析发票" not in tags:
             tags.append("未解析发票")
+        if has_multiple_expense_items and "多明细" not in tags:
+            tags.append("多明细")
+        if has_amount_mismatch and "金额差异" not in tags:
+            tags.append("金额差异")
         return tags
+
+    @staticmethod
+    def _expense_items(record: OAApplicationRecord | object) -> list[dict[str, str]]:
+        expense_items = getattr(record, "expense_items", [])
+        if not isinstance(expense_items, list):
+            return []
+        return [dict(item) for item in expense_items if isinstance(item, dict)]
+
+    @staticmethod
+    def _amount_mismatch(record: OAApplicationRecord | object) -> dict[str, str] | None:
+        mismatch = getattr(record, "amount_mismatch", None)
+        return dict(mismatch) if isinstance(mismatch, dict) else None
+
+    @classmethod
+    def _enrich_aggregated_oa_detail_fields(
+        cls,
+        record: OAApplicationRecord | object,
+        detail_fields: dict[str, Any],
+    ) -> None:
+        amount_source = str(getattr(record, "amount_source", "") or "").strip()
+        if amount_source and "金额来源" not in detail_fields:
+            detail_fields["金额来源"] = "主表总金额" if amount_source == "header" else "明细合计"
+
+        expense_items = cls._expense_items(record)
+        if expense_items:
+            detail_fields.setdefault("明细数量", str(len(expense_items)))
+            detail_amounts = [
+                str(item.get("amount") or "").strip()
+                for item in expense_items
+                if str(item.get("amount") or "").strip() not in {"", "—", "--"}
+            ]
+            contents = cls._unique_detail_values(item.get("expense_content") for item in expense_items)
+            if contents:
+                detail_fields.setdefault("费用内容摘要", "；".join(contents))
+            if detail_amounts:
+                detail_fields.setdefault("明细金额合计", cls._sum_amount_texts(detail_amounts))
+
+        mismatch = cls._amount_mismatch(record)
+        if mismatch is not None and "金额差异" not in detail_fields:
+            detail_fields["金额差异"] = (
+                f"主表总金额 {mismatch.get('header_amount') or '—'}；"
+                f"明细合计 {mismatch.get('detail_sum') or '—'}；"
+                f"差异 {mismatch.get('difference') or '—'}"
+            )
+
+    @staticmethod
+    def _unique_detail_values(values: Any) -> list[str]:
+        result: list[str] = []
+        for value in values:
+            text = str(value or "").strip()
+            if text and text not in {"—", "--"} and text not in result:
+                result.append(text)
+        return result
+
+    @staticmethod
+    def _sum_amount_texts(values: list[str]) -> str:
+        total = Decimal("0")
+        decimal_places = 0
+        for value in values:
+            normalized = value.replace(",", "").replace("，", "")
+            if "." in normalized:
+                decimal_places = max(decimal_places, len(normalized.rsplit(".", 1)[1]))
+            try:
+                total += Decimal(normalized)
+            except (InvalidOperation, ValueError):
+                return "；".join(values)
+        quantizer = Decimal("1").scaleb(-decimal_places)
+        return f"{total.quantize(quantizer):f}"
 
     def _merge_existing_attachment_invoice_row(
         self,
@@ -479,7 +557,11 @@ class WorkbenchQueryService:
                 "开票人": str(attachment_invoice.get("issuer") or "—"),
                 "备注": str(attachment_invoice.get("remark") or "—"),
                 "来源OA单号": str(source_detail_fields.get("OA单号") or "—"),
-                "来源OA明细行号": str(source_detail_fields.get("明细行号") or "—"),
+                "来源OA明细行号": str(
+                    attachment_invoice.get("source_expense_row_index")
+                    or source_detail_fields.get("明细行号")
+                    or "整单"
+                ),
                 "附件文件名": str(attachment_invoice.get("attachment_name") or "—"),
                 "不含税金额": str(attachment_invoice.get("net_amount") or attachment_invoice.get("amount") or "—"),
             }

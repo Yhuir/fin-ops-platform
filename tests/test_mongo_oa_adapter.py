@@ -277,7 +277,7 @@ class MongoOAAdapterTests(unittest.TestCase):
 
         records = adapter.list_application_records("2026-03")
 
-        self.assertEqual(len(records), 3)
+        self.assertEqual(len(records), 2)
         payment = next(record for record in records if record.id == "oa-pay-2047")
         self.assertEqual(payment.applicant, "刘际涛")
         self.assertEqual(payment.project_name, "云南溯源科技")
@@ -286,16 +286,42 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual(payment.reason, "托收电话费及宽带")
         self.assertEqual(payment.detail_fields["收款账号"], "2502013009022108588")
 
-        reimbursement = next(record for record in records if record.id == "oa-exp-exp-001-1")
-        self.assertEqual(reimbursement.project_name, "玉烟维护项目")
+        reimbursement = next(record for record in records if record.id == "oa-exp-exp-001")
+        self.assertEqual(reimbursement.project_name, "云南溯源科技；玉烟维护项目")
         self.assertEqual(reimbursement.apply_type, "日常报销")
-        self.assertEqual(reimbursement.amount, "12")
-        self.assertEqual(reimbursement.reason, "工控机改标签邮寄费用")
-        self.assertEqual(reimbursement.expense_type, "运费/邮费/杂费")
-        self.assertEqual(reimbursement.expense_content, "工控机改标签邮寄费用")
-        self.assertEqual(reimbursement.detail_fields["票据类型"], "Special_invoice")
-        self.assertEqual(reimbursement.detail_fields["费用类型"], "运费/邮费/杂费")
-        self.assertEqual(reimbursement.detail_fields["费用内容"], "工控机改标签邮寄费用")
+        self.assertEqual(reimbursement.amount, "139")
+        self.assertEqual(reimbursement.amount_source, "detail_sum")
+        self.assertEqual(reimbursement.reason, "角磨机（刘晓宇申请）；工控机改标签邮寄费用")
+        self.assertEqual(reimbursement.expense_type, "其他；运费/邮费/杂费")
+        self.assertEqual(reimbursement.expense_content, "角磨机（刘晓宇申请）；工控机改标签邮寄费用")
+        self.assertEqual(reimbursement.detail_fields["明细数量"], "2")
+        self.assertEqual(reimbursement.detail_fields["明细金额合计"], "139")
+        self.assertEqual(reimbursement.detail_fields["金额来源"], "明细合计")
+        self.assertEqual(reimbursement.detail_fields["项目名称汇总"], "云南溯源科技；玉烟维护项目")
+        self.assertEqual(reimbursement.detail_fields["费用类型汇总"], "其他；运费/邮费/杂费")
+        self.assertEqual(reimbursement.detail_fields["费用内容摘要"], "角磨机（刘晓宇申请）；工控机改标签邮寄费用")
+        self.assertEqual(reimbursement.detail_fields["报销日期范围"], "2026-01-06 至 2026-03-11")
+        self.assertEqual(
+            reimbursement.expense_items,
+            [
+                {
+                    "row_index": "0",
+                    "project_name": "云南溯源科技",
+                    "amount": "127",
+                    "expense_type": "其他",
+                    "expense_content": "角磨机（刘晓宇申请）",
+                    "reimbursement_date": "2026-01-06",
+                },
+                {
+                    "row_index": "1",
+                    "project_name": "玉烟维护项目",
+                    "amount": "12",
+                    "expense_type": "运费/邮费/杂费",
+                    "expense_content": "工控机改标签邮寄费用",
+                    "reimbursement_date": "2026-03-11",
+                },
+            ],
+        )
 
     def test_payment_request_marks_etc_batch_from_oa_text_marker(self) -> None:
         adapter = StubMongoOAAdapter(
@@ -556,7 +582,7 @@ class MongoOAAdapterTests(unittest.TestCase):
 
         records = adapter.list_application_records_by_row_ids(["oa-exp-exp-001-1", "oa-pay-2047"])
 
-        self.assertEqual([record.id for record in records], ["oa-exp-exp-001-1", "oa-pay-2047"])
+        self.assertEqual([record.id for record in records], ["oa-exp-exp-001", "oa-pay-2047"])
         self.assertEqual(records[0].month, "2025-12")
         self.assertEqual(records[1].month, "2026-03")
         self.assertEqual(adapter.get_read_status().code, "ready")
@@ -712,6 +738,247 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual(reimbursement.detail_fields["附件发票识别情况"], "已解析 2 / 2")
         self.assertIn("40512344", reimbursement.detail_fields["附件发票摘要"])
         self.assertIn("40512345", reimbursement.detail_fields["附件发票摘要"])
+
+    def test_expense_claim_uses_header_amount_before_detail_sum(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-header-amount",
+                        "form_id": "32",
+                        "modifiedTime": "2026-03-28T11:00:00",
+                        "data": {
+                            "ApplicationDate": "2026-03-28",
+                            "Reimbursement Personnel": "刘际涛",
+                            "titleName": "日常报销",
+                            "processId": "exp-header-001",
+                            "amount": "1549.00",
+                            "schedule": [
+                                {"row_index": 0, "detailReimbursementAmount": "1000", "feeContent": "设备材料"},
+                                {"row_index": 1, "detailReimbursementAmount": "549.00", "feeContent": "邮寄费用"},
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[],
+        )
+
+        records = adapter.list_application_records("2026-03")
+
+        self.assertEqual(len(records), 1)
+        reimbursement = records[0]
+        self.assertEqual(reimbursement.id, "oa-exp-exp-header-001")
+        self.assertEqual(reimbursement.amount, "1549.00")
+        self.assertEqual(reimbursement.amount_source, "header")
+        self.assertIsNone(reimbursement.amount_mismatch)
+        self.assertEqual(reimbursement.detail_fields["金额来源"], "主表总金额")
+        self.assertEqual(reimbursement.detail_fields["明细金额合计"], "1549")
+
+    def test_expense_claim_falls_back_to_detail_sum_when_header_amount_is_invalid(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-detail-sum",
+                        "form_id": "32",
+                        "modifiedTime": "2026-03-28T11:00:00",
+                        "data": {
+                            "ApplicationDate": "2026-03-28",
+                            "Reimbursement Personnel": "刘际涛",
+                            "titleName": "日常报销",
+                            "processId": "exp-detail-sum-001",
+                            "amount": "not-a-number",
+                            "schedule": [
+                                {"row_index": 0, "detailReimbursementAmount": "19.50", "feeContent": "停车费"},
+                                {"row_index": 1, "detailReimbursementAmount": "80.50", "feeContent": "汽油费"},
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[],
+        )
+
+        records = adapter.list_application_records("2026-03")
+
+        self.assertEqual(len(records), 1)
+        reimbursement = records[0]
+        self.assertEqual(reimbursement.amount, "100")
+        self.assertEqual(reimbursement.amount_source, "detail_sum")
+        self.assertEqual(reimbursement.detail_fields["金额来源"], "明细合计")
+        self.assertEqual(reimbursement.detail_fields["明细金额合计"], "100")
+
+    def test_expense_claim_records_amount_mismatch_when_header_and_detail_sum_differ(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-mismatch",
+                        "form_id": "32",
+                        "modifiedTime": "2026-03-28T11:00:00",
+                        "data": {
+                            "ApplicationDate": "2026-03-28",
+                            "Reimbursement Personnel": "刘际涛",
+                            "titleName": "日常报销",
+                            "processId": "exp-mismatch-001",
+                            "amount": "1549.00",
+                            "schedule": [
+                                {"row_index": 0, "detailReimbursementAmount": "1000", "feeContent": "设备材料"},
+                                {"row_index": 1, "detailReimbursementAmount": "500", "feeContent": "邮寄费用"},
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[],
+        )
+
+        records = adapter.list_application_records("2026-03")
+
+        self.assertEqual(len(records), 1)
+        reimbursement = records[0]
+        self.assertEqual(reimbursement.amount, "1549.00")
+        self.assertEqual(
+            reimbursement.amount_mismatch,
+            {"header_amount": "1549.00", "detail_sum": "1500", "difference": "49.00"},
+        )
+        self.assertEqual(reimbursement.detail_fields["金额差异"], "主表总金额 1549.00；明细合计 1500；差异 49.00")
+
+    def test_expense_claim_aggregates_and_dedupes_attachment_invoices_across_schedule_items(self) -> None:
+        adapter = AttachmentStubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-attach-dedupe",
+                        "form_id": "32",
+                        "modifiedTime": "2026-03-28T11:00:00",
+                        "data": {
+                            "ApplicationDate": "2026-03-28",
+                            "Reimbursement Personnel": "刘际涛",
+                            "titleName": "日常报销",
+                            "processId": "exp-attach-dedupe-001",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailReimbursementAmount": "12",
+                                    "feeContent": "顺丰邮寄发票",
+                                    "detailReimbursementAttachment": {
+                                        "files": [{"fileName": "invoice-a.pdf", "filePath": "/invoice-a.pdf", "suffix": "pdf"}]
+                                    },
+                                },
+                                {
+                                    "row_index": 1,
+                                    "detailReimbursementAmount": "21.20",
+                                    "feeContent": "顺丰补寄发票",
+                                    "detailReimbursementAttachment": {
+                                        "files": [{"fileName": "invoice-b.pdf", "filePath": "/invoice-b.pdf", "suffix": "pdf"}]
+                                    },
+                                },
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[],
+            attachment_invoice_rows=[
+                {"invoice_no": "40512344", "attachment_name": "invoice-a.pdf", "amount": "12.00"},
+                {"invoice_no": "40512344", "attachment_name": "invoice-a-copy.pdf", "amount": "12.00"},
+                {"digital_invoice_no": "25532000000191043884", "attachment_name": "invoice-b.pdf", "amount": "21.20"},
+                {"attachment_name": "invoice-b.pdf", "amount": "21.20"},
+            ],
+        )
+
+        records = adapter.list_application_records("2026-03")
+
+        self.assertEqual(len(records), 1)
+        reimbursement = records[0]
+        self.assertEqual(reimbursement.attachment_file_count, 2)
+        self.assertEqual(
+            reimbursement.attachment_invoices,
+            [
+                {"invoice_no": "40512344", "attachment_name": "invoice-a.pdf", "amount": "12.00"},
+                {"digital_invoice_no": "25532000000191043884", "attachment_name": "invoice-b.pdf", "amount": "21.20"},
+            ],
+        )
+        self.assertEqual(reimbursement.detail_fields["附件发票数量"], "2")
+        self.assertEqual(reimbursement.detail_fields["附件发票识别情况"], "已解析 2 / 2")
+
+    def test_list_application_records_by_row_ids_dedupes_new_and_legacy_expense_ids(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-row-id-compat",
+                        "form_id": "32",
+                        "modifiedTime": "2026-03-28T11:00:00",
+                        "data": {
+                            "ApplicationDate": "2026-03-28",
+                            "Reimbursement Personnel": "刘际涛",
+                            "titleName": "日常报销",
+                            "processId": "exp-001",
+                            "schedule": [
+                                {"row_index": 0, "detailReimbursementAmount": "10", "feeContent": "停车费"},
+                                {"row_index": 1, "detailReimbursementAmount": "20", "feeContent": "汽油费"},
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[],
+        )
+
+        records = adapter.list_application_records_by_row_ids(["oa-exp-exp-001", "oa-exp-exp-001-1"])
+
+        self.assertEqual([record.id for record in records], ["oa-exp-exp-001"])
+
+    def test_list_application_records_by_row_ids_prefers_exact_new_id_over_legacy_prefix_candidate(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-prefix",
+                        "form_id": "32",
+                        "modifiedTime": "2026-03-28T11:00:00",
+                        "data": {
+                            "ApplicationDate": "2026-03-28",
+                            "Reimbursement Personnel": "刘际涛",
+                            "titleName": "日常报销",
+                            "processId": "exp",
+                            "schedule": [
+                                {"row_index": 0, "detailReimbursementAmount": "10", "feeContent": "停车费"},
+                            ],
+                        },
+                    },
+                    {
+                        "_id": "expense-doc-exact",
+                        "form_id": "32",
+                        "modifiedTime": "2026-03-28T11:00:00",
+                        "data": {
+                            "ApplicationDate": "2026-03-28",
+                            "Reimbursement Personnel": "周洁莹",
+                            "titleName": "日常报销",
+                            "processId": "exp-001",
+                            "schedule": [
+                                {"row_index": 0, "detailReimbursementAmount": "20", "feeContent": "汽油费"},
+                            ],
+                        },
+                    },
+                ],
+            },
+            project_documents=[],
+        )
+
+        records = adapter.list_application_records_by_row_ids(["oa-exp-exp-001"])
+
+        self.assertEqual([record.id for record in records], ["oa-exp-exp-001"])
+        self.assertEqual(records[0].applicant, "周洁莹")
 
     def test_expense_claim_attachment_list_shape_is_normalized_into_attachment_files(self) -> None:
         adapter = AttachmentStubMongoOAAdapter(
@@ -1192,7 +1459,7 @@ class MongoOAAdapterTests(unittest.TestCase):
         expense_documents = adapter.fetch_documents("expense_claims")
         months = adapter.list_available_months()
 
-        self.assertEqual([record.id for record in records], ["oa-exp-3001-0", "oa-exp-3002-0"])
+        self.assertEqual([record.id for record in records], ["oa-exp-3001", "oa-exp-3002"])
         self.assertEqual(payment_documents, [])
         self.assertEqual([document["external_id"] for document in expense_documents], ["3001", "3002"])
         self.assertEqual(months, ["2026-03"])

@@ -19,6 +19,8 @@ OA_INVOICE_AUTO_PAIRED_CODES = {"oa_invoice_offset_auto_match"}
 AUTO_PAIRED_CODES = {*SINGLE_BANK_AUTO_PAIRED_CODES, *MULTI_BANK_AUTO_PAIRED_CODES, *OA_INVOICE_AUTO_PAIRED_CODES}
 ETC_BATCH_SOURCE = "etc_batch"
 ETC_BATCH_TAG = "ETC批量提交"
+MAX_AGGREGATED_OA_INVOICE_CANDIDATES = 160
+MAX_INVOICE_SUBSET_SUM_STATES = 20000
 
 
 @dataclass(slots=True)
@@ -78,6 +80,7 @@ class WorkbenchCandidateGroupingService:
         target_groups_by_temp_key = self._index_target_groups([*valid_paired_groups, *open_case_groups.values()])
         remaining_rows = self._attach_unique_rows_to_existing_groups(unattached_open_rows, target_groups_by_temp_key)
 
+        aggregated_oa_invoice_groups, remaining_rows = self._build_aggregated_oa_invoice_sum_groups(remaining_rows)
         standalone_temp_groups = self._build_temp_groups(remaining_rows)
         merged_open_case_groups = self._merge_open_case_groups(list(open_case_groups.values()))
         promoted_open_case_groups, candidate_open_case_groups = self._split_promoted_and_candidate_groups(
@@ -85,7 +88,7 @@ class WorkbenchCandidateGroupingService:
         )
         promoted_groups, candidate_groups = self._split_promoted_and_candidate_groups(standalone_temp_groups)
 
-        open_groups = [*candidate_open_case_groups, *candidate_groups]
+        open_groups = [*candidate_open_case_groups, *aggregated_oa_invoice_groups, *candidate_groups]
         paired_output = [*valid_paired_groups, *promoted_open_case_groups, *promoted_groups]
 
         return {
@@ -232,6 +235,73 @@ class WorkbenchCandidateGroupingService:
                 )
             groups[group_key].append(row)
         return self._merge_candidate_groups(list(groups.values()))
+
+    def _build_aggregated_oa_invoice_sum_groups(
+        self,
+        rows: list[dict[str, Any]],
+    ) -> tuple[list[CandidateGroup], list[dict[str, Any]]]:
+        oa_rows = sorted(
+            (row for row in rows if self._is_open_oa_multi_invoice_candidate_row(row)),
+            key=lambda row: str(row.get("id", "")),
+        )
+        invoice_rows = [
+            row
+            for row in rows
+            if self._is_manual_imported_open_invoice_row(row)
+        ]
+
+        candidate_matches: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
+        for oa_row in oa_rows:
+            target_amount = self._amount(oa_row)
+            if target_amount is None or target_amount <= ZERO:
+                continue
+            candidate_invoices = [
+                row
+                for row in invoice_rows
+                if self._invoice_matches_aggregated_oa_candidate(row, oa_row)
+            ]
+            if len(candidate_invoices) > MAX_AGGREGATED_OA_INVOICE_CANDIDATES:
+                continue
+            matched_invoices = self._find_invoice_sum_match(candidate_invoices, target_amount)
+            if not matched_invoices:
+                continue
+            candidate_matches.append((oa_row, matched_invoices))
+
+        if not candidate_matches:
+            return [], rows
+
+        invoice_match_counts: dict[int, int] = defaultdict(int)
+        for _, matched_invoices in candidate_matches:
+            for invoice_row in matched_invoices:
+                invoice_match_counts[id(invoice_row)] += 1
+        conflicting_invoice_keys = {
+            invoice_key
+            for invoice_key, match_count in invoice_match_counts.items()
+            if match_count > 1
+        }
+
+        groups: list[CandidateGroup] = []
+        used_row_keys: set[int] = set()
+        for oa_row, matched_invoices in candidate_matches:
+            if any(id(invoice_row) in conflicting_invoice_keys for invoice_row in matched_invoices):
+                continue
+            group = CandidateGroup(
+                group_id=self._next_temp_group_id(),
+                group_type="candidate",
+                match_confidence="medium",
+                reason="aggregated_oa_multi_invoice_sum_candidate",
+                temp_key=None,
+            )
+            group.append(oa_row)
+            for invoice_row in matched_invoices:
+                group.append(invoice_row)
+            groups.append(group)
+            used_row_keys.add(id(oa_row))
+            used_row_keys.update(id(row) for row in matched_invoices)
+
+        if not used_row_keys:
+            return [], rows
+        return groups, [row for row in rows if id(row) not in used_row_keys]
 
     def _merge_candidate_groups(self, groups: list[CandidateGroup]) -> list[CandidateGroup]:
         merged = list(groups)
@@ -427,7 +497,7 @@ class WorkbenchCandidateGroupingService:
         row_type = str(row["type"])
         original_relation = self._relation_payload(row)
         original_code = str(original_relation.get("code", ""))
-        if original_code in OA_INVOICE_AUTO_PAIRED_CODES:
+        if original_code == "automatic_match" or original_code in OA_INVOICE_AUTO_PAIRED_CODES:
             return deepcopy(original_relation)
         if group_kind == "oa_bank_invoice":
             return {"code": "fully_linked", "label": "完全关联", "tone": "success"}
@@ -662,6 +732,59 @@ class WorkbenchCandidateGroupingService:
                 return total_with_tax
         return self._amount_from_value(row.get("amount"))
 
+    def _invoice_gross_amount(self, row: dict[str, Any]) -> Decimal | None:
+        total_with_tax = self._amount_from_value(row.get("total_with_tax"))
+        if total_with_tax is not None:
+            return total_with_tax
+        return self._amount(row)
+
+    def _find_invoice_sum_match(
+        self,
+        invoice_rows: list[dict[str, Any]],
+        target_amount: Decimal,
+    ) -> list[dict[str, Any]] | None:
+        candidates = [
+            (row, amount)
+            for row in sorted(invoice_rows, key=lambda item: (str(item.get("issue_date", "")), str(item.get("id", ""))))
+            if (amount := self._invoice_gross_amount(row)) is not None and amount > ZERO
+        ]
+        if not candidates:
+            return None
+        if len(candidates) > MAX_AGGREGATED_OA_INVOICE_CANDIDATES:
+            return None
+        candidate_total = sum((amount for _, amount in candidates), ZERO).quantize(CENT)
+        if candidate_total == target_amount:
+            return [row for row, _ in candidates] if len(candidates) > 1 else None
+
+        target_cents = self._to_cents(target_amount)
+        if target_cents is None:
+            return None
+        states: dict[int, tuple[dict[str, Any], ...]] = {0: ()}
+        ambiguous_sums: set[int] = set()
+        for row, amount in candidates:
+            amount_cents = self._to_cents(amount)
+            if amount_cents is None or amount_cents > target_cents:
+                continue
+            for current_total, current_rows in list(states.items()):
+                next_total = current_total + amount_cents
+                if next_total > target_cents:
+                    continue
+                next_rows = (*current_rows, row)
+                if next_total not in states:
+                    states[next_total] = next_rows
+                elif {str(item.get("id", "")) for item in states[next_total]} != {
+                    str(item.get("id", "")) for item in next_rows
+                }:
+                    ambiguous_sums.add(next_total)
+                if len(states) > MAX_INVOICE_SUBSET_SUM_STATES:
+                    return None
+        if target_cents in ambiguous_sums:
+            return None
+        matched_rows = states.get(target_cents)
+        if not matched_rows or len(matched_rows) <= 1:
+            return None
+        return list(matched_rows)
+
     def _attachment_invoice_reconciliation_amount(self, row: dict[str, Any]) -> Decimal | None:
         if self._is_oa_attachment_invoice_row(row):
             amount = self._amount_from_value(row.get("amount"))
@@ -691,6 +814,13 @@ class WorkbenchCandidateGroupingService:
             return None
 
     @staticmethod
+    def _to_cents(amount: Decimal) -> int | None:
+        try:
+            return int((amount.quantize(CENT) * 100).to_integral_exact())
+        except (InvalidOperation, ValueError):
+            return None
+
+    @staticmethod
     def _string_value(value: Any) -> str | None:
         if value in (None, "", "--", "—"):
             return None
@@ -712,6 +842,94 @@ class WorkbenchCandidateGroupingService:
             return True
         tags = [str(tag).strip() for tag in list(row.get("tags") or []) if str(tag).strip()]
         return ETC_BATCH_TAG in tags
+
+    def _is_open_oa_multi_invoice_candidate_row(self, row: dict[str, Any]) -> bool:
+        if row.get("type") != "oa" or self._case_id(row) or self._is_paired_row(row):
+            return False
+        amount = self._amount(row)
+        if amount is None or amount <= ZERO:
+            return False
+        return bool(self._aggregated_oa_invoice_month_candidates(row))
+
+    def _is_manual_imported_open_invoice_row(self, row: dict[str, Any]) -> bool:
+        if row.get("type") != "invoice":
+            return False
+        if self._case_id(row) or self._is_paired_row(row):
+            return False
+        return not self._is_oa_attachment_invoice_row(row)
+
+    def _invoice_matches_aggregated_oa_candidate(self, invoice_row: dict[str, Any], oa_row: dict[str, Any]) -> bool:
+        if self._direction(invoice_row) != self._direction(oa_row):
+            return False
+        oa_counterparty = self._counterparty(oa_row)
+        if oa_counterparty is not None and self._counterparty(invoice_row) != oa_counterparty:
+            return False
+        return self._invoice_month_matches_aggregated_oa(invoice_row, oa_row)
+
+    def _invoice_month_matches_aggregated_oa(self, invoice_row: dict[str, Any], oa_row: dict[str, Any]) -> bool:
+        invoice_month = self._month(invoice_row)
+        if invoice_month is None:
+            return False
+        oa_months = self._aggregated_oa_invoice_month_candidates(oa_row)
+        return bool(oa_months) and invoice_month in oa_months
+
+    def _aggregated_oa_invoice_month_candidates(self, row: dict[str, Any]) -> set[str]:
+        candidate_months: set[str] = set()
+        detail_fields = self._detail_fields(row)
+        for raw_value in (
+            row.get("pay_receive_time"),
+            row.get("apply_date"),
+            row.get("_month"),
+            detail_fields.get("申请日期"),
+        ):
+            month = self._month_from_value(raw_value)
+            if month is None:
+                continue
+            candidate_months.add(month)
+            previous_month = self._previous_month(month)
+            if previous_month is not None:
+                candidate_months.add(previous_month)
+        return candidate_months
+
+    @staticmethod
+    def _detail_fields(row: dict[str, Any]) -> dict[str, Any]:
+        detail_fields = row.get("_detail_fields")
+        if isinstance(detail_fields, dict):
+            return detail_fields
+        detail_fields = row.get("detail_fields")
+        if isinstance(detail_fields, dict):
+            return detail_fields
+        return {}
+
+    def _month_from_value(self, value: Any) -> str | None:
+        text = self._string_value(value)
+        if not text:
+            return None
+        normalized = text.replace("/", "-")
+        month = normalized[:7]
+        if len(month) != 7 or month[4] != "-":
+            return None
+        try:
+            year = int(month[:4])
+            month_number = int(month[5:7])
+        except ValueError:
+            return None
+        if year < 1 or not 1 <= month_number <= 12:
+            return None
+        return month
+
+    @staticmethod
+    def _previous_month(month: str) -> str | None:
+        try:
+            year = int(month[:4])
+            month_number = int(month[5:7])
+        except ValueError:
+            return None
+        if month_number == 1:
+            return f"{year - 1}-12"
+        if 2 <= month_number <= 12:
+            return f"{year}-{month_number - 1:02d}"
+        return None
 
     def _attachment_group_primary_row(self, group: CandidateGroup) -> dict[str, Any] | None:
         if len(group.oa_rows) != 1 or group.bank_rows:

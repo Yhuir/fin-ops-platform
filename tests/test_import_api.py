@@ -1,5 +1,6 @@
 import json
 import unittest
+from unittest.mock import patch
 
 from fin_ops_platform.app.server import build_application
 
@@ -43,14 +44,18 @@ class ImportApiTests(unittest.TestCase):
         self.assertEqual(preview_payload["batch"]["success_count"], 1)
         self.assertEqual(preview_payload["row_results"][1]["decision"], "error")
 
-        confirm_response = app.handle_request(
-            "POST",
-            "/imports/confirm",
-            json.dumps({"batch_id": preview_payload["batch"]["id"]}),
-        )
+        with patch.object(app, "_run_workbench_auto_matching_for_scopes", return_value=None) as auto_match:
+            confirm_response = app.handle_request(
+                "POST",
+                "/imports/confirm",
+                json.dumps({"batch_id": preview_payload["batch"]["id"]}),
+            )
         self.assertEqual(confirm_response.status_code, 200)
         confirm_payload = json.loads(confirm_response.body)
         self.assertEqual(confirm_payload["batch"]["status"], "completed_with_errors")
+        auto_match.assert_called_once()
+        self.assertEqual(auto_match.call_args.kwargs["reason"], "import_confirm")
+        self.assertEqual(auto_match.call_args.args[0], ["2026-02", "2026-03", "2026-04"])
 
         batch_response = app.handle_request(
             "GET",

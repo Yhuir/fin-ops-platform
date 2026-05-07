@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 import os
@@ -32,7 +33,7 @@ from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachment
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 KEY_NORMALIZE_RE = re.compile(r"[\s_\-:/\\()（）【】\[\]·,.，。]+")
 PAYMENT_ROW_ID_RE = re.compile(r"^oa-pay-(.+)$")
-EXPENSE_ROW_ID_RE = re.compile(r"^oa-exp-(.+)-([^-]+)$")
+EXPENSE_ROW_ID_RE = re.compile(r"^oa-exp-(.+)$")
 COMPLETED_PROCESS_VALUES = {"已完成", "2", 2}
 IN_PROGRESS_PROCESS_VALUES = {"进行中", "1", 1}
 COMPLETED_STATUS_VALUES = {"approved", "APPROVED", "Approved"}
@@ -474,6 +475,7 @@ class MongoOAAdapter(OAAdapter):
 
         payment_external_ids: set[str] = set()
         expense_external_ids: set[str] = set()
+        expense_row_aliases: dict[str, list[str]] = {}
         for row_id in normalized_row_ids:
             parsed = self._parse_oa_row_id(row_id)
             if parsed is None:
@@ -482,7 +484,9 @@ class MongoOAAdapter(OAAdapter):
             if record_kind == "payment" and self._should_include_form_type(OA_IMPORT_FORM_TYPE_PAYMENT):
                 payment_external_ids.add(external_id)
             elif record_kind == "expense" and self._should_include_form_type(OA_IMPORT_FORM_TYPE_EXPENSE):
-                expense_external_ids.add(external_id)
+                candidates = self._expense_external_id_candidates_from_row_id(row_id)
+                expense_external_ids.update(candidates)
+                expense_row_aliases[row_id] = candidates
 
         records_by_id: dict[str, OAApplicationRecord] = {}
         if payment_external_ids:
@@ -506,12 +510,31 @@ class MongoOAAdapter(OAAdapter):
             if self._mongo_temporarily_unavailable():
                 self._set_read_status("error", "OA 连接失败")
                 return [records_by_id[row_id] for row_id in normalized_row_ids if row_id in records_by_id]
+            records_by_expense_external_id: dict[str, OAApplicationRecord] = {}
             for document in expense_documents:
                 for record in self._build_expense_claim_records(document, project_names):
                     records_by_id[record.id] = record
+                    external_id = record.id.removeprefix("oa-exp-")
+                    records_by_expense_external_id[external_id] = record
+            for requested_row_id, candidates in expense_row_aliases.items():
+                if requested_row_id in records_by_id:
+                    continue
+                for candidate in candidates:
+                    record = records_by_expense_external_id.get(candidate)
+                    if record is not None:
+                        records_by_id[requested_row_id] = record
+                        break
 
         self._set_read_status("ready", "OA 已同步")
-        return [records_by_id[row_id] for row_id in normalized_row_ids if row_id in records_by_id]
+        requested_records: list[OAApplicationRecord] = []
+        seen_record_ids: set[str] = set()
+        for row_id in normalized_row_ids:
+            record = records_by_id.get(row_id)
+            if record is None or record.id in seen_record_ids:
+                continue
+            requested_records.append(record)
+            seen_record_ids.add(record.id)
+        return requested_records
 
     def list_available_months(self) -> list[str]:
         now = self._now()
@@ -741,67 +764,131 @@ class MongoOAAdapter(OAAdapter):
         if not isinstance(items, list) or not items:
             items = [data]
         external_id = self._expense_external_id(data, document)
-        records: list[OAApplicationRecord] = []
+        expense_items: list[dict[str, str]] = []
+        project_names_summary: list[str] = []
+        expense_types_summary: list[str] = []
+        expense_contents_summary: list[str] = []
+        reimbursement_dates: list[str] = []
+        detail_amounts: list[Decimal] = []
+        attachment_files: list[dict[str, object]] = []
+        etc_sources: list[Any] = [data]
         for index, item in enumerate(items):
             if not isinstance(item, dict):
                 continue
-            amount = self._first_text(item, "detailReimbursementAmount", "amount")
+            item_amount = self._first_text(item, "detailReimbursementAmount", "amount")
             reason = self._first_text(item, "feeContent", "detailCostStatement") or self._first_text(data, "notes")
-            expense_type = self._resolve_expense_type(item, data, reason)
+            expense_type = self._resolve_expense_type(item, reason)
             expense_content = reason
-            if not amount or not reason:
-                continue
             project_id = self._first_text(item, "detailProjectName") or self._first_text(data, "projectName")
             project_name = project_names.get(project_id, project_id or "--")
             row_index = clean_string(item.get("row_index", index))
-            attachment_files = self._attachment_files(item)
-            record_month = self._derive_month(data, document)
-            attachment_invoices = self._parse_attachment_invoices(attachment_files, month=record_month)
-            etc_metadata = detect_etc_batch_metadata(data, item)
-            detail_fields = {
-                "OA单号": self._expense_form_no(data, document),
-                "表单ID": self._settings.expense_claim_form_id,
-                "明细行号": row_index,
-                "申请日期": self._first_text(data, "ApplicationDate", "applicationDate"),
-                "报销日期": self._first_text(item, "detailReimbursementDate", "reimbursementDate"),
-                "付款方式": self._first_text(item, "detailPaymentMethod", "paymentMethod"),
-                "票据类型": self._first_text(item, "detailTypeOfInvoice", "paymentProof"),
-                "费用类型": expense_type or "—",
-                "费用内容": expense_content or "—",
-                "流程状态": self._form_status(data),
+            reimbursement_date = self._first_text(item, "detailReimbursementDate", "reimbursementDate")
+            item_amount_decimal = self._parse_amount(item_amount)
+            if item_amount_decimal is not None:
+                detail_amounts.append(item_amount_decimal)
+            if project_name:
+                self._append_unique(project_names_summary, project_name)
+            if expense_type:
+                self._append_unique(expense_types_summary, expense_type)
+            if expense_content:
+                self._append_unique(expense_contents_summary, expense_content)
+            if reimbursement_date:
+                reimbursement_dates.append(reimbursement_date)
+            attachment_files.extend(self._attachment_files(item))
+            etc_sources.append(item)
+            expense_items.append(
+                {
+                    "row_index": row_index,
+                    "project_name": project_name,
+                    "amount": item_amount,
+                    "expense_type": expense_type or "—",
+                    "expense_content": expense_content or "—",
+                    "reimbursement_date": reimbursement_date,
+                }
+            )
+
+        detail_sum = sum(detail_amounts, Decimal("0")) if detail_amounts else None
+        header_amount_text = self._first_text(data, "amount", "Amount", "totalAmount", "TotalAmount")
+        header_amount = self._parse_amount(header_amount_text)
+        amount_source = "header" if header_amount is not None else "detail_sum"
+        resolved_amount = header_amount_text if header_amount is not None else self._format_decimal(detail_sum)
+        if not resolved_amount:
+            return []
+
+        amount_mismatch: dict[str, str] | None = None
+        if header_amount is not None and detail_sum is not None and header_amount != detail_sum:
+            difference = header_amount - detail_sum
+            amount_mismatch = {
+                "header_amount": header_amount_text,
+                "detail_sum": self._format_decimal(detail_sum),
+                "difference": self._format_decimal(difference, decimal_places=self._decimal_places(header_amount_text)),
             }
-            detail_fields.update(
-                build_attachment_invoice_detail_fields(
-                    attachment_invoices,
-                    attachment_file_count=len(attachment_files),
-                )
+
+        record_month = self._derive_month(data, document)
+        attachment_invoices = self._dedupe_attachment_invoices(
+            self._parse_attachment_invoices(attachment_files, month=record_month)
+        )
+        etc_metadata = detect_etc_batch_metadata(*etc_sources)
+        project_name_summary = "；".join(project_names_summary) or project_names.get(self._first_text(data, "projectName"), self._first_text(data, "projectName")) or "--"
+        expense_type_summary = "；".join(expense_types_summary) or "—"
+        expense_content_summary = "；".join(expense_contents_summary) or self._first_text(data, "notes") or "—"
+        reimbursement_date_range = self._date_range_text(reimbursement_dates)
+
+        detail_fields = {
+            "OA单号": self._expense_form_no(data, document),
+            "表单ID": self._settings.expense_claim_form_id,
+            "申请日期": self._first_text(data, "ApplicationDate", "applicationDate"),
+            "流程状态": self._form_status(data),
+            "明细数量": str(len(expense_items)),
+            "明细金额合计": self._format_decimal(detail_sum) or "—",
+            "金额来源": "主表总金额" if amount_source == "header" else "明细合计",
+            "项目名称汇总": project_name_summary,
+            "费用类型": expense_type_summary,
+            "费用类型汇总": expense_type_summary,
+            "费用内容": expense_content_summary,
+            "费用内容摘要": expense_content_summary,
+            "报销日期范围": reimbursement_date_range or "—",
+        }
+        if amount_mismatch is not None:
+            detail_fields["金额差异"] = (
+                f"主表总金额 {amount_mismatch['header_amount']}；"
+                f"明细合计 {amount_mismatch['detail_sum']}；"
+                f"差异 {amount_mismatch['difference']}"
             )
-            records.append(
-                OAApplicationRecord(
-                    id=f"oa-exp-{external_id}-{row_index}",
-                    month=record_month,
-                    section="open",
-                    case_id=None,
-                    applicant=applicant,
-                    project_name=project_name,
-                    apply_type=self._canonical_apply_type(OA_IMPORT_FORM_TYPE_EXPENSE),
-                    amount=amount,
-                    counterparty_name="",
-                    reason=reason,
-                    relation_code="pending_match",
-                    relation_label="待找流水与发票",
-                    relation_tone="warn",
-                    expense_type=expense_type,
-                    expense_content=expense_content,
-                    detail_fields=detail_fields,
-                    attachment_invoices=attachment_invoices,
-                    attachment_file_count=len(attachment_files),
-                    source=etc_metadata.get("source"),
-                    etc_batch_id=etc_metadata.get("etc_batch_id"),
-                    tags=list(etc_metadata.get("tags") or []),
-                )
+        detail_fields.update(
+            build_attachment_invoice_detail_fields(
+                attachment_invoices,
+                attachment_file_count=len(attachment_files),
             )
-        return records
+        )
+        return [
+            OAApplicationRecord(
+                id=f"oa-exp-{external_id}",
+                month=record_month,
+                section="open",
+                case_id=None,
+                applicant=applicant,
+                project_name=project_name_summary,
+                apply_type=self._canonical_apply_type(OA_IMPORT_FORM_TYPE_EXPENSE),
+                amount=resolved_amount,
+                counterparty_name="",
+                reason=expense_content_summary,
+                relation_code="pending_match",
+                relation_label="待找流水与发票",
+                relation_tone="warn",
+                expense_type=expense_type_summary,
+                expense_content=expense_content_summary,
+                detail_fields=detail_fields,
+                attachment_invoices=attachment_invoices,
+                attachment_file_count=len(attachment_files),
+                expense_items=expense_items,
+                amount_source=amount_source,
+                amount_mismatch=amount_mismatch,
+                source=etc_metadata.get("source"),
+                etc_batch_id=etc_metadata.get("etc_batch_id"),
+                tags=list(etc_metadata.get("tags") or []),
+            )
+        ]
 
     @staticmethod
     def _attachment_files(item: dict[str, Any]) -> list[dict[str, object]]:
@@ -1249,8 +1336,21 @@ class MongoOAAdapter(OAAdapter):
             return ("payment", payment_match.group(1), None)
         expense_match = EXPENSE_ROW_ID_RE.match(normalized_row_id)
         if expense_match is not None:
-            return ("expense", expense_match.group(1), expense_match.group(2))
+            return ("expense", expense_match.group(1), None)
         return None
+
+    @staticmethod
+    def _expense_external_id_candidates_from_row_id(row_id: str) -> list[str]:
+        normalized_row_id = clean_string(row_id)
+        if not normalized_row_id.startswith("oa-exp-"):
+            return []
+        body = normalized_row_id.removeprefix("oa-exp-")
+        candidates = [body] if body else []
+        if "-" in body:
+            prefix, suffix = body.rsplit("-", 1)
+            if prefix and suffix.isdigit() and prefix not in candidates:
+                candidates.append(prefix)
+        return candidates
 
     def _matches_month(self, document: dict[str, Any], month: str) -> bool:
         data = self._document_data(document)
@@ -1343,6 +1443,87 @@ class MongoOAAdapter(OAAdapter):
     @staticmethod
     def _normalize_key(value: Any) -> str:
         return KEY_NORMALIZE_RE.sub("", clean_string(value)).lower()
+
+    @staticmethod
+    def _append_unique(items: list[str], value: Any) -> None:
+        normalized = clean_string(value)
+        if normalized and normalized not in items:
+            items.append(normalized)
+
+    @staticmethod
+    def _parse_amount(value: Any) -> Decimal | None:
+        text = clean_string(value)
+        if not text:
+            return None
+        normalized = (
+            text.replace(",", "")
+            .replace("，", "")
+            .replace("￥", "")
+            .replace("¥", "")
+            .strip()
+        )
+        if not normalized:
+            return None
+        try:
+            return Decimal(normalized)
+        except (InvalidOperation, ValueError):
+            return None
+
+    @staticmethod
+    def _format_decimal(value: Decimal | None, *, decimal_places: int | None = None) -> str:
+        if value is None:
+            return ""
+        if decimal_places is not None:
+            quantizer = Decimal("1").scaleb(-max(decimal_places, 0))
+            return f"{value.quantize(quantizer):f}"
+        normalized = value.normalize()
+        if normalized == normalized.to_integral():
+            return f"{normalized.quantize(Decimal('1')):f}"
+        return f"{normalized:f}"
+
+    @staticmethod
+    def _decimal_places(value: Any) -> int:
+        text = clean_string(value)
+        if "." not in text:
+            return 0
+        return len(text.rsplit(".", 1)[1])
+
+    @staticmethod
+    def _date_range_text(values: list[str]) -> str:
+        dates = sorted({clean_string(value)[:10] for value in values if clean_string(value)})
+        if not dates:
+            return ""
+        if len(dates) == 1:
+            return dates[0]
+        return f"{dates[0]} 至 {dates[-1]}"
+
+    @staticmethod
+    def _dedupe_attachment_invoices(invoices: list[dict[str, str]]) -> list[dict[str, str]]:
+        deduped: list[dict[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        seen_attachment_names: set[str] = set()
+        for invoice in invoices:
+            if not isinstance(invoice, dict):
+                continue
+            invoice_no = clean_string(
+                invoice.get("invoice_no")
+                or invoice.get("digital_invoice_no")
+                or invoice.get("invoice_code")
+                or ""
+            )
+            attachment_name = clean_string(invoice.get("attachment_name") or "")
+            if not invoice_no and attachment_name in seen_attachment_names:
+                continue
+            key = ("invoice", invoice_no) if invoice_no else ("attachment", attachment_name)
+            if not key[1]:
+                key = ("payload", json.dumps(invoice, ensure_ascii=False, sort_keys=True, default=str))
+            if key in seen:
+                continue
+            seen.add(key)
+            if attachment_name:
+                seen_attachment_names.add(attachment_name)
+            deduped.append(dict(invoice))
+        return deduped
 
     def _sync_import_settings_cache(self) -> None:
         settings = self._current_import_settings()

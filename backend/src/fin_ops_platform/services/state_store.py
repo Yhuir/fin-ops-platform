@@ -45,6 +45,10 @@ WORKBENCH_PAIR_RELATIONS_META_COLLECTION = "workbench_pair_relations_meta"
 WORKBENCH_PAIR_RELATIONS_COLLECTION = "workbench_pair_relations"
 WORKBENCH_READ_MODELS_META_COLLECTION = "workbench_read_models_meta"
 WORKBENCH_READ_MODELS_COLLECTION = "workbench_read_models"
+WORKBENCH_CANDIDATE_MATCHES_META_COLLECTION = "workbench_candidate_matches_meta"
+WORKBENCH_CANDIDATE_MATCHES_COLLECTION = "workbench_candidate_matches"
+WORKBENCH_MATCHING_DIRTY_SCOPES_META_COLLECTION = "workbench_matching_dirty_scopes_meta"
+WORKBENCH_MATCHING_DIRTY_SCOPES_COLLECTION = "workbench_matching_dirty_scopes"
 COST_STATISTICS_READ_MODELS_META_COLLECTION = "cost_statistics_read_models_meta"
 COST_STATISTICS_READ_MODELS_COLLECTION = "cost_statistics_read_models"
 TAX_OFFSET_READ_MODELS_META_COLLECTION = "tax_offset_read_models_meta"
@@ -214,6 +218,10 @@ class ApplicationStateStore:
                 "workbench_pair_relations": self._mongo_database[WORKBENCH_PAIR_RELATIONS_COLLECTION],
                 "workbench_read_models_meta": self._mongo_database[WORKBENCH_READ_MODELS_META_COLLECTION],
                 "workbench_read_models": self._mongo_database[WORKBENCH_READ_MODELS_COLLECTION],
+                "workbench_candidate_matches_meta": self._mongo_database[WORKBENCH_CANDIDATE_MATCHES_META_COLLECTION],
+                "workbench_candidate_matches": self._mongo_database[WORKBENCH_CANDIDATE_MATCHES_COLLECTION],
+                "workbench_matching_dirty_scopes_meta": self._mongo_database[WORKBENCH_MATCHING_DIRTY_SCOPES_META_COLLECTION],
+                "workbench_matching_dirty_scopes": self._mongo_database[WORKBENCH_MATCHING_DIRTY_SCOPES_COLLECTION],
                 "cost_statistics_read_models_meta": self._mongo_database[COST_STATISTICS_READ_MODELS_META_COLLECTION],
                 "cost_statistics_read_models": self._mongo_database[COST_STATISTICS_READ_MODELS_COLLECTION],
                 "tax_offset_read_models_meta": self._mongo_database[TAX_OFFSET_READ_MODELS_META_COLLECTION],
@@ -724,6 +732,34 @@ class ApplicationStateStore:
         with self._legacy_state_path.open("wb") as handle:
             pickle.dump(current_payload, handle)
 
+    def load_workbench_candidate_matches(self) -> dict[str, Any]:
+        if self._mongo_database is not None:
+            return self._load_workbench_candidate_matches_detailed_payload()
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        current_payload = self._load_local_pickle()
+        snapshot = current_payload.get("workbench_candidate_matches")
+        return snapshot if isinstance(snapshot, dict) else {}
+
+    def save_workbench_candidate_matches(self, snapshot: dict[str, Any]) -> None:
+        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
+        if self._mongo_database is not None:
+            self._run_mongo_operation(
+                lambda: self._save_workbench_candidate_matches_detailed(
+                    normalized_snapshot,
+                    datetime.now(UTC),
+                )
+            )
+            return
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        current_payload = self._load_local_pickle()
+        current_payload["workbench_candidate_matches"] = normalized_snapshot
+        with self._legacy_state_path.open("wb") as handle:
+            pickle.dump(current_payload, handle)
+
     def load_cost_statistics_read_models(self) -> dict[str, Any]:
         if self._mongo_database is not None:
             return self._load_cost_statistics_read_models_detailed_payload()
@@ -830,6 +866,13 @@ class ApplicationStateStore:
                 self._save_workbench_pair_relations_detailed(payload.get("workbench_pair_relations", {}), updated_at)
             if "workbench_read_models" in payload:
                 self._save_workbench_read_models_detailed(payload.get("workbench_read_models", {}), updated_at)
+            if "workbench_candidate_matches" in payload:
+                self._save_workbench_candidate_matches_detailed(payload.get("workbench_candidate_matches", {}), updated_at)
+            if "workbench_matching_dirty_scopes" in payload:
+                self._save_workbench_matching_dirty_scopes_detailed(
+                    payload.get("workbench_matching_dirty_scopes", {}),
+                    updated_at,
+                )
             if "cost_statistics_read_models" in payload:
                 self._save_cost_statistics_read_models_detailed(
                     payload.get("cost_statistics_read_models", {}),
@@ -1036,6 +1079,10 @@ class ApplicationStateStore:
                         "workbench_pair_relations": WORKBENCH_PAIR_RELATIONS_COLLECTION,
                         "workbench_read_models_meta": WORKBENCH_READ_MODELS_META_COLLECTION,
                         "workbench_read_models": WORKBENCH_READ_MODELS_COLLECTION,
+                        "workbench_candidate_matches_meta": WORKBENCH_CANDIDATE_MATCHES_META_COLLECTION,
+                        "workbench_candidate_matches": WORKBENCH_CANDIDATE_MATCHES_COLLECTION,
+                        "workbench_matching_dirty_scopes_meta": WORKBENCH_MATCHING_DIRTY_SCOPES_META_COLLECTION,
+                        "workbench_matching_dirty_scopes": WORKBENCH_MATCHING_DIRTY_SCOPES_COLLECTION,
                         "cost_statistics_read_models_meta": COST_STATISTICS_READ_MODELS_META_COLLECTION,
                         "cost_statistics_read_models": COST_STATISTICS_READ_MODELS_COLLECTION,
                         "tax_offset_read_models_meta": TAX_OFFSET_READ_MODELS_META_COLLECTION,
@@ -1068,6 +1115,8 @@ class ApplicationStateStore:
         workbench_overrides_payload = self._load_workbench_overrides_detailed_payload()
         workbench_pair_relations_payload = self._load_workbench_pair_relations_detailed_payload()
         workbench_read_models_payload = self._load_workbench_read_models_detailed_payload()
+        workbench_candidate_matches_payload = self._load_workbench_candidate_matches_detailed_payload()
+        workbench_matching_dirty_scopes_payload = self._load_workbench_matching_dirty_scopes_detailed_payload()
         cost_statistics_read_models_payload = self._load_cost_statistics_read_models_detailed_payload()
         tax_offset_read_models_payload = self._load_tax_offset_read_models_detailed_payload()
         app_health_alerts_payload = self._load_app_health_alerts_detailed_payload()
@@ -1080,6 +1129,8 @@ class ApplicationStateStore:
                 workbench_overrides_payload,
                 workbench_pair_relations_payload,
                 workbench_read_models_payload,
+                workbench_candidate_matches_payload,
+                workbench_matching_dirty_scopes_payload,
                 cost_statistics_read_models_payload,
                 tax_offset_read_models_payload,
                 app_health_alerts_payload,
@@ -1098,6 +1149,10 @@ class ApplicationStateStore:
             payload["workbench_pair_relations"] = workbench_pair_relations_payload
         if workbench_read_models_payload:
             payload["workbench_read_models"] = workbench_read_models_payload
+        if workbench_candidate_matches_payload:
+            payload["workbench_candidate_matches"] = workbench_candidate_matches_payload
+        if workbench_matching_dirty_scopes_payload:
+            payload["workbench_matching_dirty_scopes"] = workbench_matching_dirty_scopes_payload
         if cost_statistics_read_models_payload:
             payload["cost_statistics_read_models"] = cost_statistics_read_models_payload
         if tax_offset_read_models_payload:
@@ -1489,6 +1544,32 @@ class ApplicationStateStore:
         payload["read_models"] = read_models
         return payload
 
+    def _load_workbench_candidate_matches_detailed_payload(self) -> dict[str, Any]:
+        meta_document = self._mongo_detailed_collections["workbench_candidate_matches_meta"].find_one(
+            {"_id": STATE_DOCUMENT_ID}
+        )
+        meta_payload = self._load_binary_payload(meta_document)
+        candidates = self._load_entities_by_id(self._mongo_detailed_collections["workbench_candidate_matches"])
+        if not meta_payload and not candidates:
+            return {}
+
+        payload = meta_payload if isinstance(meta_payload, dict) else {}
+        payload["candidates"] = candidates
+        return payload
+
+    def _load_workbench_matching_dirty_scopes_detailed_payload(self) -> dict[str, Any]:
+        meta_document = self._mongo_detailed_collections["workbench_matching_dirty_scopes_meta"].find_one(
+            {"_id": STATE_DOCUMENT_ID}
+        )
+        meta_payload = self._load_binary_payload(meta_document)
+        dirty_scopes = self._load_entities_by_id(self._mongo_detailed_collections["workbench_matching_dirty_scopes"])
+        if not meta_payload and not dirty_scopes:
+            return {}
+
+        payload = meta_payload if isinstance(meta_payload, dict) else {}
+        payload["dirty_scopes"] = dirty_scopes
+        return payload
+
     def _load_cost_statistics_read_models_detailed_payload(self) -> dict[str, Any]:
         meta_document = self._mongo_detailed_collections["cost_statistics_read_models_meta"].find_one(
             {"_id": STATE_DOCUMENT_ID}
@@ -1756,6 +1837,91 @@ class ApplicationStateStore:
                 "$set": {
                     **meta_payload,
                     "read_model_count": len(read_models) if isinstance(read_models, dict) else 0,
+                    "payload": Binary(pickle.dumps(meta_payload)),
+                    "updated_at": updated_at,
+                }
+            },
+            upsert=True,
+        )
+
+    def _save_workbench_candidate_matches_detailed(self, snapshot: dict[str, Any], updated_at: datetime) -> None:
+        meta_payload = {
+            key: value
+            for key, value in snapshot.items()
+            if key not in {"candidates"}
+        }
+        candidates = snapshot.get("candidates", {})
+        candidate_documents = []
+        if isinstance(candidates, dict):
+            for candidate_key, candidate in candidates.items():
+                serialized_candidate = self._serialize_value(candidate)
+                candidate_documents.append(
+                    {
+                        "_id": str(candidate_key),
+                        "candidate_id": serialized_candidate.get("candidate_id"),
+                        "candidate_key": serialized_candidate.get("candidate_key"),
+                        "scope_month": serialized_candidate.get("scope_month"),
+                        "candidate_type": serialized_candidate.get("candidate_type"),
+                        "status": serialized_candidate.get("status"),
+                        "confidence": serialized_candidate.get("confidence"),
+                        "rule_code": serialized_candidate.get("rule_code"),
+                        "row_ids": serialized_candidate.get("row_ids"),
+                        "generated_at": serialized_candidate.get("generated_at"),
+                        "payload": Binary(pickle.dumps(candidate)),
+                        "updated_at": updated_at,
+                    }
+                )
+        self._replace_collection_documents(
+            self._mongo_detailed_collections["workbench_candidate_matches"],
+            candidate_documents,
+        )
+        self._mongo_detailed_collections["workbench_candidate_matches_meta"].update_one(
+            {"_id": STATE_DOCUMENT_ID},
+            {
+                "$set": {
+                    **meta_payload,
+                    "candidate_count": len(candidates) if isinstance(candidates, dict) else 0,
+                    "payload": Binary(pickle.dumps(meta_payload)),
+                    "updated_at": updated_at,
+                }
+            },
+            upsert=True,
+        )
+
+    def _save_workbench_matching_dirty_scopes_detailed(self, snapshot: dict[str, Any], updated_at: datetime) -> None:
+        meta_payload = {
+            key: value
+            for key, value in snapshot.items()
+            if key not in {"dirty_scopes"}
+        }
+        dirty_scopes = snapshot.get("dirty_scopes", {})
+        dirty_scope_documents = []
+        if isinstance(dirty_scopes, dict):
+            for scope_month, entry in dirty_scopes.items():
+                if not isinstance(entry, dict):
+                    continue
+                serialized_entry = self._serialize_value(entry)
+                dirty_scope_documents.append(
+                    {
+                        "_id": str(scope_month),
+                        "scope_month": serialized_entry.get("scope_month"),
+                        "reasons": serialized_entry.get("reasons"),
+                        "attempt_count": serialized_entry.get("attempt_count"),
+                        "last_error": serialized_entry.get("last_error"),
+                        "updated_at": updated_at,
+                        "payload": Binary(pickle.dumps(entry)),
+                    }
+                )
+        self._replace_collection_documents(
+            self._mongo_detailed_collections["workbench_matching_dirty_scopes"],
+            dirty_scope_documents,
+        )
+        self._mongo_detailed_collections["workbench_matching_dirty_scopes_meta"].update_one(
+            {"_id": STATE_DOCUMENT_ID},
+            {
+                "$set": {
+                    **meta_payload,
+                    "dirty_scope_count": len(dirty_scopes) if isinstance(dirty_scopes, dict) else 0,
                     "payload": Binary(pickle.dumps(meta_payload)),
                     "updated_at": updated_at,
                 }
@@ -2121,6 +2287,8 @@ class ApplicationStateStore:
                 "workbench_overrides",
                 "workbench_pair_relations",
                 "workbench_read_models",
+                "workbench_candidate_matches",
+                "workbench_matching_dirty_scopes",
                 "cost_statistics_read_models",
                 "tax_offset_read_models",
                 "app_health_alerts",

@@ -236,6 +236,25 @@ python -m pip install -r backend/requirements.txt
 - 关联台加载优先读取缓存好的快照
 - 前端动作成功后立即局部更新，后台再静默刷新兜底
 
+## OA / 流水 / 发票自动配对生产机制
+
+关联台自动配对已经从页面临时分组升级为后端候选 read model：
+
+- `WorkbenchMatchingRules` 统一生成 OA、银行流水、发票候选，覆盖整单 OA、一条流水、多张发票、OA 子付款项、工资、内部往来款、OA 发票冲抵和旧 `MatchingEngineService` 兼容规则。
+- `WorkbenchCandidateMatchService` 持久化候选，按 `scope_month` 查询、删除、幂等 upsert，并随 app state / Mongo detailed collections 保存。
+- `WorkbenchMatchingOrchestrator` 是唯一调度入口，负责按月清旧候选、运行规则、写候选、失效关联台 read model，并输出结构化日志。
+- 导入确认、文件导入确认、OA hot rebuild、OA reset、`/integrations/oa/sync` 都会按受影响月份触发重算，月份范围默认包含上一月、当前月、下一月。
+- 关联台读取时先应用人工 pair relation，再应用候选 read model；人工确认优先，`auto_closed` 进入已配对，`incomplete / needs_review / conflict` 留在未配对。
+- 自动配对同月有并发保护：同一月份已有任务运行时，新触发会合并为 dirty scope，等待后台兜底重试。
+- `WorkbenchMatchingDirtyScopeService` 保存失败或被合并的月份；启动后后台 worker 默认每 900 秒重试一次，可用 `FIN_OPS_WORKBENCH_MATCHING_DIRTY_INTERVAL_SECONDS` 调整。
+
+自动配对可观测性：
+
+- 结构化日志事件：`workbench_matching.run.started`、`workbench_matching.run.finished`、`workbench_matching.run.failed`。
+- 日志字段包含 `request_id`、`scope_months`、`duration_ms`、`candidate_count`、`auto_closed_count`、`conflict_count`。
+- `/api/app-health` 会把自动配对 running scope 和 dirty scope 合并进状态；运行中显示 busy，失败 dirty scope 会暴露 `last_matching_error`，用于左上角状态灯变黄或异常提示。
+- 设置里的“清除所有 OA 数据并重新写入”会清 OA 相关工作台状态、read model 和候选 read model，然后重建候选；纯银行流水和人工发票的人工确认关系继续保留。
+
 ## OA 权限模型后续升级方向
 
 当前仓库已经补了一版更细的权限重构方案，用于替换“只有单一 `finops:app:view`”的旧口径。目标模型是：
@@ -263,10 +282,11 @@ python -m pip install -r backend/requirements.txt
 - 未输入、输错密码或密码复核服务失败时，不执行清理、不失效缓存、不触发 OA 重建
 - OA 密码不得保存、写日志、写审计明文、回显到错误信息或出现在 API 响应中
 - `清 OA` 固定采用模式 B：
-  - 清 `oa_attachment_invoice_cache`
+  - 保留 `oa_attachment_invoice_cache`，避免重刷 OA 时重复 OCR 已解析附件发票
   - 清 `workbench_read_models`
-  - 清 `workbench_pair_relations`
-  - 清 `workbench_row_overrides`
+  - 只清包含 OA row / OA 附件发票 row 的 `workbench_pair_relations`
+  - 只清 OA 派生 `workbench_row_overrides`
+  - 保留纯银行流水-人工发票配对关系
   - 再按 `保OA` 日期重建
 
 当前自动化测试已覆盖：

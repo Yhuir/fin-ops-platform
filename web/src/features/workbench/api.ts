@@ -71,8 +71,8 @@ type ApiWorkbenchRow = {
   invoice_type?: string | null;
   invoice_bank_relation?: ApiRelation | null;
   available_actions?: string[];
-  summary_fields?: Record<string, string>;
-  detail_fields?: Record<string, string>;
+  summary_fields?: Record<string, unknown>;
+  detail_fields?: Record<string, unknown>;
   tags?: string[];
   cost_excluded?: boolean | null;
 };
@@ -363,11 +363,17 @@ type WorkbenchSettingsProjectCreatePayload = {
   projectName: string;
 };
 
-function toDisplayValue(value: string | null | undefined, fallback = "--") {
-  return value && value.trim().length > 0 ? value : fallback;
+function toDisplayValue(value: unknown, fallback = "--") {
+  if (typeof value === "string") {
+    return value.trim().length > 0 ? value : fallback;
+  }
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+  return String(value);
 }
 
-function firstNonPlaceholderDisplayValue(...values: Array<string | null | undefined>) {
+function firstNonPlaceholderDisplayValue(...values: unknown[]) {
   for (const value of values) {
     const displayValue = toDisplayValue(value, "");
     if (displayValue && displayValue !== "--" && displayValue !== "—") {
@@ -375,6 +381,29 @@ function firstNonPlaceholderDisplayValue(...values: Array<string | null | undefi
     }
   }
   return undefined;
+}
+
+function toDetailDisplayValue(value: unknown) {
+  if (typeof value === "string") {
+    return toDisplayValue(value, "—");
+  }
+  if (value === null || value === undefined) {
+    return "—";
+  }
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function mapOaDetailSearchValues(detailFields: Record<string, unknown>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(detailFields).map(([label, value]) => [`__detail:${label}`, toDetailDisplayValue(value)]),
+  );
 }
 
 function rowRelation(row: ApiWorkbenchRow) {
@@ -440,6 +469,7 @@ function mapTableValues(row: ApiWorkbenchRow): Record<string, string> {
       counterparty: toDisplayValue(row.counterparty_name),
       reason: toDisplayValue(row.reason),
       reconciliationStatus: relationLabel,
+      ...mapOaDetailSearchValues(detailFields),
     };
   }
 
@@ -483,7 +513,7 @@ function mapTableValues(row: ApiWorkbenchRow): Record<string, string> {
   };
 }
 
-function mapDetailFields(detailFields?: Record<string, string>): WorkbenchDetailField[] {
+function mapDetailFields(detailFields?: Record<string, unknown>): WorkbenchDetailField[] {
   if (!detailFields) {
     return [];
   }
@@ -492,7 +522,7 @@ function mapDetailFields(detailFields?: Record<string, string>): WorkbenchDetail
     .filter(([label]) => label !== "资金方向")
     .map(([label, value]) => ({
       label: label === "和发票关联情况" ? "和发票OA关联情况" : label,
-      value: toDisplayValue(value, "—"),
+      value: toDetailDisplayValue(value),
     }));
 }
 

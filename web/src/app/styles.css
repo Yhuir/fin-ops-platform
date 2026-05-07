@@ -1833,6 +1833,7 @@ body.column-layout-dragging {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  background: #fbfdff;
 }
 
 .column-filter-menu {
@@ -1928,6 +1929,7 @@ body.column-layout-dragging {
   gap: 0;
   align-items: end;
   padding-right: var(--tri-pane-scrollbar-gutter);
+  background: #fbfdff;
 }
 
 .candidate-pane-footer-slot {
@@ -1992,9 +1994,21 @@ body.column-layout-dragging {
   --candidate-group-divider: var(--ops-row-divider-b, #dbe3ef);
 }
 
+.candidate-grid-body-filler {
+  display: grid;
+  flex: 1 1 0;
+  min-height: 0;
+  margin-top: -6px;
+  background: #fbfdff;
+}
+
 .candidate-group-pane-slot {
   min-width: 0;
   background: transparent;
+}
+
+.candidate-group-pane-slot-filler {
+  background: #fbfdff;
 }
 
 .candidate-group-pane-slot + .candidate-group-pane-slot {
@@ -2186,12 +2200,12 @@ body.column-layout-dragging {
 }
 
 .record-card-sheet-row.record-card-sheet-selected {
-  background: #f3e8ff;
-  box-shadow: inset 4px 0 0 #7c3aed, inset 0 0 0 1px rgba(124, 58, 237, 0.34);
+  background: #b9dcff;
+  box-shadow: inset 4px 0 0 #1d4ed8, inset 0 0 0 1px rgba(29, 78, 216, 0.48);
 }
 
 .record-card-sheet-row.record-card-sheet-selected .record-card-action-cell-sheet {
-  background: #f3e8ff;
+  background: #b9dcff;
 }
 
 .record-card-sheet-row.record-card-sheet-related {
@@ -3052,16 +3066,16 @@ body.column-layout-dragging {
 }
 
 .workbench-row.row-state-selected {
-  background: #f3e8ff;
-  box-shadow: inset 4px 0 0 #7c3aed, inset 0 0 0 1px rgba(124, 58, 237, 0.34);
+  background: #b9dcff;
+  box-shadow: inset 4px 0 0 #1d4ed8, inset 0 0 0 1px rgba(29, 78, 216, 0.48);
 }
 
 .workbench-row.row-state-selected .action-cell {
-  background: #f3e8ff;
+  background: #b9dcff;
 }
 
 .workbench-row.row-state-selected .record-card-action-cell {
-  background: #f3e8ff;
+  background: #b9dcff;
 }
 
 .workbench-row.row-state-related {

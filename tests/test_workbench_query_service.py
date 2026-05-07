@@ -54,6 +54,88 @@ class AttachmentRecord:
         ]
 
 
+class AggregatedAttachmentRecord:
+    def __init__(self) -> None:
+        self.id = "oa-exp-exp-agg-001"
+        self.month = "2026-03"
+        self.section = "open"
+        self.case_id = None
+        self.applicant = "刘际涛"
+        self.project_name = "玉烟维护项目；云南溯源科技"
+        self.apply_type = "日常报销"
+        self.amount = "1549.00"
+        self.counterparty_name = ""
+        self.reason = "设备材料；邮寄费用"
+        self.relation_code = "pending_match"
+        self.relation_label = "待找流水与发票"
+        self.relation_tone = "warn"
+        self.expense_type = "材料费；运费/邮费/杂费"
+        self.expense_content = "设备材料；邮寄费用"
+        self.detail_fields = {
+            "OA单号": "OA-AGG-001",
+            "申请日期": "2026-03-28",
+        }
+        self.expense_items = [
+            {
+                "row_index": "0",
+                "project_name": "玉烟维护项目",
+                "amount": "1000.00",
+                "expense_type": "材料费",
+                "expense_content": "设备材料",
+                "reimbursement_date": "2026-03-27",
+            },
+            {
+                "row_index": "1",
+                "project_name": "云南溯源科技",
+                "amount": "500.00",
+                "expense_type": "运费/邮费/杂费",
+                "expense_content": "邮寄费用",
+                "reimbursement_date": "2026-03-28",
+            },
+        ]
+        self.amount_source = "header"
+        self.amount_mismatch = {
+            "header_amount": "1549.00",
+            "detail_sum": "1500.00",
+            "difference": "49.00",
+        }
+        self.attachment_invoices = [
+            {
+                "invoice_no": "40512344",
+                "seller_name": "智能工厂设备商",
+                "seller_tax_no": "91530100678728169X",
+                "buyer_name": "云南溯源科技有限公司",
+                "buyer_tax_no": "915300007194052520",
+                "issue_date": "2026-03-27",
+                "amount": "1000.00",
+                "total_with_tax": "1000.00",
+                "invoice_type": "进项发票",
+                "attachment_name": "设备发票.pdf",
+                "source_expense_row_index": "0",
+            },
+            {
+                "invoice_no": "40512345",
+                "seller_name": "顺丰速运有限公司",
+                "seller_tax_no": "9144030071526726XG",
+                "buyer_name": "云南溯源科技有限公司",
+                "buyer_tax_no": "915300007194052520",
+                "issue_date": "2026-03-28",
+                "amount": "500.00",
+                "total_with_tax": "500.00",
+                "invoice_type": "进项发票",
+                "attachment_name": "邮寄发票.pdf",
+            },
+        ]
+        self.attachment_file_count = 2
+
+
+class AggregatedAttachmentOAAdapter:
+    def list_application_records(self, month: str) -> list[object]:
+        if month != "2026-03":
+            return []
+        return [AggregatedAttachmentRecord()]
+
+
 class AttachmentAwareOAAdapter:
     def list_application_records(self, month: str) -> list[object]:
         if month != "2026-03":
@@ -235,6 +317,39 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
         self.assertIn("40512344", oa_detail["detail_fields"]["附件发票摘要"])
         self.assertEqual(invoice_detail["detail_fields"]["来源OA单号"], "OA-ATT-001")
         self.assertEqual(invoice_detail["detail_fields"]["发票号码"], "40512344")
+
+    def test_aggregated_expense_claim_row_exposes_detail_fields_tags_and_multiple_attachment_invoices(self) -> None:
+        service = WorkbenchQueryService(oa_adapter=AggregatedAttachmentOAAdapter())
+
+        payload = service.get_workbench("2026-03")
+
+        oa_rows = [row for row in payload["open"]["oa"] if row["id"] == "oa-exp-exp-agg-001"]
+        self.assertEqual(len(oa_rows), 1)
+        oa_row = oa_rows[0]
+        attachment_invoice_rows = [
+            row
+            for row in payload["open"]["invoice"]
+            if row.get("derived_from_oa_id") == oa_row["id"]
+        ]
+        self.assertEqual(len(attachment_invoice_rows), 2)
+        self.assertIsNotNone(oa_row["case_id"])
+        self.assertEqual({row["case_id"] for row in attachment_invoice_rows}, {oa_row["case_id"]})
+        self.assertIn("多明细", oa_row["tags"])
+        self.assertIn("金额差异", oa_row["tags"])
+
+        detail_fields = oa_row["detail_fields"]
+        self.assertEqual(detail_fields["金额来源"], "主表总金额")
+        self.assertEqual(detail_fields["明细数量"], "2")
+        self.assertEqual(detail_fields["明细金额合计"], "1500.00")
+        self.assertEqual(detail_fields["金额差异"], "主表总金额 1549.00；明细合计 1500.00；差异 49.00")
+        self.assertEqual(detail_fields["费用内容摘要"], "设备材料；邮寄费用")
+        self.assertIn("40512344", detail_fields["附件发票摘要"])
+        row_numbers = {
+            row["detail_fields"]["发票号码"]: row["detail_fields"]["来源OA明细行号"]
+            for row in attachment_invoice_rows
+        }
+        self.assertEqual(row_numbers["40512344"], "0")
+        self.assertEqual(row_numbers["40512345"], "整单")
 
     def test_unparsed_attachment_oa_row_gets_unparsed_invoice_tag(self) -> None:
         service = WorkbenchQueryService(oa_adapter=UnparsedAttachmentOAAdapter())

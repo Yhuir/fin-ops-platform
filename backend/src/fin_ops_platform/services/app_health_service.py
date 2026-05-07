@@ -40,10 +40,17 @@ class AppHealthService:
             if getattr(job, "status", None) in {"queued", "running"}
             and self.is_workbench_read_model_rebuild_job(job)
         ]
-        dirty_scopes = self.dirty_scopes(oa_sync_payload)
+        matching_dirty_scope_entries = self.matching_dirty_scope_entries(oa_sync_payload)
+        matching_dirty_scopes = [
+            str(entry.get("scope_month"))
+            for entry in matching_dirty_scope_entries
+            if str(entry.get("scope_month") or "").strip()
+        ]
+        matching_running_scopes = self.matching_running_scopes(oa_sync_payload)
+        dirty_scopes = sorted(dict.fromkeys([*self.dirty_scopes(oa_sync_payload), *matching_dirty_scopes]))
         oa_sync_status = str(oa_sync_payload.get("status") or "").strip()
         oa_sync_unavailable = oa_sync_status == "error"
-        rebuilding = bool(rebuild_jobs) or rebuild_scheduled
+        rebuilding = bool(rebuild_jobs) or rebuild_scheduled or bool(matching_running_scopes)
         if oa_sync_unavailable:
             workbench_read_model_status = "error"
         elif rebuilding:
@@ -87,6 +94,7 @@ class AppHealthService:
         metrics = {
             "app_health_duration_ms": round(float(duration_ms), 2),
             "dirty_scope_count": len(dirty_scopes),
+            "workbench_matching_dirty_scope_count": len(matching_dirty_scopes),
             "dirty_scope_age_seconds": dirty_scope_ages,
             "dirty_scope_age_seconds_max": max(dirty_scope_ages.values(), default=0),
             "workbench_rebuild_running_seconds_max": round(max(rebuild_running_seconds, default=0), 2),
@@ -104,6 +112,9 @@ class AppHealthService:
             "workbench_read_model": {
                 "status": workbench_read_model_status,
                 "dirty_scopes": dirty_scopes,
+                "matching_dirty_scopes": matching_dirty_scope_entries,
+                "matching_running_scopes": matching_running_scopes,
+                "last_matching_error": self.last_matching_error(matching_dirty_scope_entries),
                 "rebuild_job_ids": [str(getattr(job, "job_id", "")) for job in rebuild_jobs],
             },
             "background_jobs": {
@@ -125,6 +136,29 @@ class AppHealthService:
             for scope in list(oa_sync_payload.get("dirty_scopes", []) or [])
             if str(scope).strip()
         ]
+
+    @staticmethod
+    def matching_dirty_scope_entries(oa_sync_payload: dict[str, Any]) -> list[dict[str, Any]]:
+        entries = oa_sync_payload.get("workbench_matching_dirty_scopes")
+        if not isinstance(entries, list):
+            return []
+        return [entry for entry in entries if isinstance(entry, dict)]
+
+    @staticmethod
+    def matching_running_scopes(oa_sync_payload: dict[str, Any]) -> list[str]:
+        return [
+            str(scope).strip()
+            for scope in list(oa_sync_payload.get("workbench_matching_running_scopes") or [])
+            if str(scope).strip()
+        ]
+
+    @staticmethod
+    def last_matching_error(entries: list[dict[str, Any]]) -> str | None:
+        for entry in reversed(entries):
+            error = str(entry.get("last_error") or "").strip()
+            if error:
+                return error
+        return None
 
     @staticmethod
     def dirty_scope_ages(oa_sync_payload: dict[str, Any], dirty_scopes: list[str]) -> dict[str, float]:

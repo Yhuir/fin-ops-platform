@@ -28,9 +28,13 @@
 
 ## 2. OA 行 DTO
 
+日常报销 OA 行按 OA 流程整单建模，而不是按 `schedule` 明细行拆分。整单 row id 使用
+`oa-exp-{external_id}`；历史旧 id `oa-exp-{external_id}-{row_index}` 只作为查询兼容入口，
+会映射回同一条整单 OA 行。多明细、多附件发票通过 `detail_fields`、`tags` 和派生发票行表达。
+
 ```json
 {
-  "id": "oa-o-1",
+  "id": "oa-exp-1994",
   "type": "oa",
   "case_id": "MKT-001",
   "applicant": "刘晨",
@@ -44,9 +48,20 @@
     "label": "待找流水与发票",
     "tone": "warn"
   },
-  "available_actions": ["detail", "confirm_link", "mark_exception"]
+  "available_actions": ["detail", "confirm_link", "mark_exception"],
+  "tags": ["多明细"],
+  "detail_fields": {
+    "明细数量": "4",
+    "明细金额合计": "1549.00",
+    "金额来源": "主表总金额",
+    "费用内容摘要": "ETC通行费；停车费",
+    "附件发票摘要": "25532000000191043884（1月ETC.pdf）"
+  }
 }
 ```
+
+OA 附件发票仍展开为独立 invoice rows，row id 为 `oa-att-inv-{oa_row_id}-{index}`，
+用于和整单 OA、银行流水共同配对。
 
 ## 3. 银行行 DTO
 
@@ -226,3 +241,81 @@
 - `available_actions` 决定每行显示哪些按钮
 - 主表字段与详情字段必须分层返回，避免一个响应既大又难维护
 - 所有 V2 动作统一返回 `success / action / month / affected_row_ids / updated_rows / message`
+
+## 10. 自动配对候选 Read Model
+
+自动寻找 OA、银行流水、发票配对项时，后端先写候选 read model，再由关联台消费。前端不直接运行配对规则。
+
+候选结构：
+
+```json
+{
+  "candidate_id": "candidate:2026-03:oa_bank_multi_invoice_exact_sum:...",
+  "candidate_key": "candidate:2026-03:oa_bank_multi_invoice_exact_sum:...",
+  "scope_month": "2026-03",
+  "candidate_type": "oa_bank_invoice",
+  "status": "auto_closed",
+  "confidence": "high",
+  "rule_code": "oa_bank_multi_invoice_exact_sum",
+  "row_ids": ["oa-1", "bk-1", "iv-1", "iv-2"],
+  "oa_row_ids": ["oa-1"],
+  "bank_row_ids": ["bk-1"],
+  "invoice_row_ids": ["iv-1", "iv-2"],
+  "amount": "1549.00",
+  "amount_delta": "0.00",
+  "explanation": "OA、流水、发票金额闭环。",
+  "conflict_candidate_keys": [],
+  "generated_at": "2026-05-07T10:00:00+00:00",
+  "source_versions": {
+    "workbench_read_model_schema_version": "2026-05-06-oa-expense-multi-invoice-sum"
+  }
+}
+```
+
+状态契约：
+
+- `auto_closed`：系统安全闭环，进入已配对。
+- `incomplete`：缺 OA、流水或发票任一侧，留在未配对。
+- `needs_review`：可解释但需要人工确认，留在未配对。
+- `conflict`：同一 row 被多个候选占用或存在多个等价组合，留在未配对。
+
+消费顺序：
+
+1. 人工 `workbench_pair_relations` 优先。
+2. 再应用自动候选，把同一候选的 `row_ids` 写成同一 `case_id`。
+3. 候选组内 row 不再作为 standalone 行重复展示。
+4. `auto_closed` 组序列化时保留系统标签，例如“自动匹配”“已匹配：工资”“已匹配：内部往来款”“冲”。
+
+触发链路：
+
+- 发票导入确认：按发票日期提取月份，并扩展上一月、当前月、下一月。
+- 银行流水导入确认：按交易日期提取月份，并扩展上一月、当前月、下一月。
+- OA hot rebuild / OA reset / `/integrations/oa/sync`：按可用 OA 月份触发。
+- 同一月份已有自动配对任务运行时，新任务合并为 dirty scope，不并发删除和写入候选。
+
+可观测性：
+
+- 自动配对结构化日志事件为 `workbench_matching.run.started`、`workbench_matching.run.finished`、`workbench_matching.run.failed`。
+- 日志字段至少包含 `request_id`、`scope_months`、`duration_ms`、`candidate_count`、`auto_closed_count`、`conflict_count`。
+- `/api/app-health` 的 `workbench_read_model` 节点会返回 `matching_running_scopes`、`matching_dirty_scopes`、`last_matching_error`。
+- dirty scope 后台 worker 会定时重试；失败时保留月份、原因、错误和尝试次数。
+
+## 11. 三栏上下文搜索
+
+关联台三栏搜索是前端 display model 行为，不改变后端 `GET /api/workbench` payload、候选 read model 或人工 pair relation。
+
+搜索口径：
+
+- 每个栏的搜索框状态独立保存为 `searchQueryByPane.oa / bank / invoice`。
+- 在任意一栏输入关键词时，该栏搜索框显示该关键词，另外两栏搜索框不显示该值。
+- 搜索计算使用当前关键词扫描同一 zone 内所有 group 的三栏 rows。
+- 来源栏命中的 group 会完整显示，同行 OA / 银行流水 / 发票上下文 rows 保留。
+- 另外两栏自身命中同一关键词的 group 也会作为补充行显示，便于人工比对和处理异常。
+- 同一 group 被多栏命中时只显示一次，并保持原 group id 和 row id。
+- 已配对 zone 和未配对 zone 的搜索状态互不影响。
+
+筛选和排序：
+
+- column filter / time filter 仍按各自 pane 裁剪 rows。
+- 搜索上下文只影响 display groups，不生成临时业务 id。
+- 详情、确认关联、异常处理等动作继续使用原始 row id 和 group id。
