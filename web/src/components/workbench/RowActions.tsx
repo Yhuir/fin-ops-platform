@@ -10,7 +10,10 @@ export type WorkbenchInlineAction =
   | "confirm-match"
   | "flag-exception"
   | "ignore-row"
-  | "cancel-exception";
+  | "cancel-exception"
+  | "confirm-cash-pass-through"
+  | "confirm-cash-ticket-purchase"
+  | "cancel-cash-special";
 
 type RowActionsMode = "default" | "cancel-exception-only";
 
@@ -38,6 +41,9 @@ export default function RowActions({
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ top: number; right: number } | null>(null);
   const canIgnore = availableActions.includes("ignore");
+  const canConfirmCashPassThrough = availableActions.includes("confirm_cash_pass_through");
+  const canConfirmCashTicketPurchase = availableActions.includes("confirm_cash_ticket_purchase");
+  const canCancelCashSpecial = availableActions.includes("cancel_cash_special");
   const menuWrapRef = useRef<HTMLDivElement | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -165,6 +171,21 @@ export default function RowActions({
                   <button className="row-menu-item warning" role="menuitem" type="button" onClick={handleAction("handle-exception")}>
                     异常处理
                   </button>
+                  {canConfirmCashPassThrough ? (
+                    <button className="row-menu-item" role="menuitem" type="button" onClick={handleAction("confirm-cash-pass-through")}>
+                      确认为过账
+                    </button>
+                  ) : null}
+                  {canConfirmCashTicketPurchase ? (
+                    <button className="row-menu-item" role="menuitem" type="button" onClick={handleAction("confirm-cash-ticket-purchase")}>
+                      确认为买票
+                    </button>
+                  ) : null}
+                  {canCancelCashSpecial ? (
+                    <button className="row-menu-item warning" role="menuitem" type="button" onClick={handleAction("cancel-cash-special")}>
+                      取消现金处理
+                    </button>
+                  ) : null}
                 </div>,
                 document.body,
               )

@@ -15,6 +15,9 @@ import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import {
   cancelWorkbenchException,
+  cancelWorkbenchCashSpecial,
+  confirmWorkbenchCashPassThrough,
+  confirmWorkbenchCashTicketPurchase,
   confirmWorkbenchLink,
   fetchIgnoredWorkbenchRows,
   fetchWorkbenchOaSyncStatus,
@@ -69,6 +72,11 @@ type OaBankExceptionDialogState = {
   rows: WorkbenchRecord[];
 };
 
+type CashTicketPurchaseDialogState = {
+  rowIds: string[];
+  cashAmount: string;
+};
+
 type CancelProcessedExceptionDialogState = {
   group: WorkbenchCandidateGroup;
 };
@@ -117,6 +125,14 @@ function actionErrorMessage(error: unknown) {
     }
   }
   return "操作失败，请稍后重试。";
+}
+
+function normalizedAmountForInput(value: string) {
+  const normalized = value.replace(/,/g, "").trim();
+  if (!normalized || normalized === "--" || normalized === "—") {
+    return "";
+  }
+  return normalized;
 }
 
 const READONLY_ACTION_MESSAGE = "当前账号仅支持查看和导出，不能执行写操作。";
@@ -173,6 +189,7 @@ export default function ReconciliationWorkbenchPage() {
   const [ignoredModalOpen, setIgnoredModalOpen] = useState(false);
   const [processedExceptionsModalOpen, setProcessedExceptionsModalOpen] = useState(false);
   const [oaBankExceptionDialog, setOaBankExceptionDialog] = useState<OaBankExceptionDialogState | null>(null);
+  const [cashTicketPurchaseDialog, setCashTicketPurchaseDialog] = useState<CashTicketPurchaseDialogState | null>(null);
   const [cancelProcessedExceptionDialog, setCancelProcessedExceptionDialog] = useState<CancelProcessedExceptionDialogState | null>(null);
   const pairedDisplaySession = usePageSessionState<WorkbenchZoneDisplayState>({
     pageKey: "reconciliation-workbench",
@@ -1016,6 +1033,48 @@ export default function ReconciliationWorkbenchPage() {
       return;
     }
 
+    if (action === "confirm-cash-pass-through") {
+      const rowIds = collectCaseRowIds(row);
+      await runBlockingAction({
+        loadingMessage: "正在确认过账...",
+        action: async () => {
+          const result = await confirmWorkbenchCashPassThrough({
+            month: WORKBENCH_VIEW_MONTH,
+            rowIds,
+            note: "由关联台确认现金往来过账",
+          });
+          refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
+          return result.message || "已确认为过账。";
+        },
+      });
+      return;
+    }
+
+    if (action === "confirm-cash-ticket-purchase") {
+      setCashTicketPurchaseDialog({
+        rowIds: collectCaseRowIds(row),
+        cashAmount: normalizedAmountForInput(row.amount),
+      });
+      return;
+    }
+
+    if (action === "cancel-cash-special") {
+      const rowIds = collectCaseRowIds(row);
+      await runBlockingAction({
+        loadingMessage: "正在取消现金处理...",
+        action: async () => {
+          const result = await cancelWorkbenchCashSpecial({
+            month: WORKBENCH_VIEW_MONTH,
+            rowIds,
+            note: "由关联台取消现金往来特殊处理",
+          });
+          refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
+          return result.message || "已取消现金往来特殊处理。";
+        },
+      });
+      return;
+    }
+
     if (action === "unlink") {
       const rowIds = collectCaseRowIds(row);
       const rowsById = new Map(allRows.map((candidate) => [candidate.id, candidate]));
@@ -1047,6 +1106,49 @@ export default function ReconciliationWorkbenchPage() {
     runBlockingAction,
     allRows,
   ]);
+
+  const handleCloseCashTicketPurchaseDialog = useCallback(() => {
+    setCashTicketPurchaseDialog(null);
+  }, []);
+
+  const handleSubmitCashTicketPurchase = useCallback(async ({
+    cashAmount,
+    ticketCostAmount,
+    projectName,
+    expenseType,
+    expenseContent,
+    note,
+  }: {
+    cashAmount: string;
+    ticketCostAmount: string;
+    projectName: string;
+    expenseType: string;
+    expenseContent: string;
+    note: string;
+  }) => {
+    if (!cashTicketPurchaseDialog || !ensureCanWriteWorkbench()) {
+      return;
+    }
+    const { rowIds } = cashTicketPurchaseDialog;
+    setCashTicketPurchaseDialog(null);
+    await runBlockingAction({
+      loadingMessage: "正在确认买票成本...",
+      action: async () => {
+        const result = await confirmWorkbenchCashTicketPurchase({
+          month: WORKBENCH_VIEW_MONTH,
+          rowIds,
+          cashAmount,
+          ticketCostAmount,
+          projectName,
+          expenseType,
+          expenseContent,
+          note,
+        });
+        refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
+        return result.message || "已确认为买票情况。";
+      },
+    });
+  }, [cashTicketPurchaseDialog, ensureCanWriteWorkbench, refreshWorkbenchDataInBackground, runBlockingAction]);
 
   const handleSelectRow = useCallback((row: WorkbenchRecord, zoneId: "paired" | "open") => {
     if (zoneId === "open") {
@@ -1102,6 +1204,7 @@ export default function ReconciliationWorkbenchPage() {
           });
           clearOpenSelection();
           applyLocalConfirmLink(rowIds, caseId);
+          refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
           return result.message;
         },
       });
@@ -1361,6 +1464,7 @@ export default function ReconciliationWorkbenchPage() {
       columnLayouts={workbenchSettings?.workbenchColumnLayouts}
       groups={displayPairedGroups}
       sourceGroups={workbenchData?.paired.groups ?? []}
+      invoiceInventory={workbenchData?.invoiceInventory}
       highlightedRowId={null}
       panes={pairedPanes}
       primarySelectionActionLabel="撤回关联"
@@ -1401,6 +1505,7 @@ export default function ReconciliationWorkbenchPage() {
       columnLayouts={workbenchSettings?.workbenchColumnLayouts}
       groups={displayOpenGroups}
       sourceGroups={visibleOpenGroups}
+      invoiceInventory={workbenchData?.invoiceInventory}
       highlightedRowId={null}
       panes={openPanes}
       primarySelectionActionLabel="确认关联"
@@ -1505,6 +1610,103 @@ export default function ReconciliationWorkbenchPage() {
             })}
         />
       ) : null}
+      {cashTicketPurchaseDialog ? (
+        <CashTicketPurchaseModal
+          defaultCashAmount={cashTicketPurchaseDialog.cashAmount}
+          onClose={handleCloseCashTicketPurchaseDialog}
+          onSubmit={handleSubmitCashTicketPurchase}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function CashTicketPurchaseModal({
+  defaultCashAmount,
+  onClose,
+  onSubmit,
+}: {
+  defaultCashAmount: string;
+  onClose: () => void;
+  onSubmit: (payload: {
+    cashAmount: string;
+    ticketCostAmount: string;
+    projectName: string;
+    expenseType: string;
+    expenseContent: string;
+    note: string;
+  }) => void;
+}) {
+  const [cashAmount, setCashAmount] = useState(defaultCashAmount);
+  const [ticketCostAmount, setTicketCostAmount] = useState("");
+  const [projectName, setProjectName] = useState("");
+  const [expenseType, setExpenseType] = useState("现金往来");
+  const [expenseContent, setExpenseContent] = useState("买票成本");
+  const [note, setNote] = useState("");
+  const canSubmit = Number(normalizedAmountForInput(ticketCostAmount)) > 0 && projectName.trim().length > 0;
+
+  return (
+    <div className="detail-modal-backdrop">
+      <button aria-label="关闭买票确认" className="detail-modal-backdrop-foreground" type="button" onClick={onClose} />
+      <section aria-label="确认买票成本" aria-modal="true" className="detail-modal" role="dialog">
+        <header className="detail-modal-header">
+          <div>
+            <div className="modal-eyebrow">现金往来</div>
+            <h2>确认买票情况</h2>
+          </div>
+          <button aria-label="关闭买票确认" className="detail-close-btn" type="button" onClick={onClose}>
+            ×
+          </button>
+        </header>
+        <div className="relation-preview-message">
+          此操作只把买票成本计入成本统计，流水全额不会作为成本入账。
+        </div>
+        <label className="relation-preview-note">
+          <span>现金往来金额</span>
+          <input value={cashAmount} onChange={(event) => setCashAmount(event.target.value)} />
+        </label>
+        <label className="relation-preview-note">
+          <span>买票成本（必填）</span>
+          <input value={ticketCostAmount} onChange={(event) => setTicketCostAmount(event.target.value)} />
+        </label>
+        <label className="relation-preview-note">
+          <span>项目名称（必填）</span>
+          <input value={projectName} onChange={(event) => setProjectName(event.target.value)} />
+        </label>
+        <label className="relation-preview-note">
+          <span>费用类型</span>
+          <input value={expenseType} onChange={(event) => setExpenseType(event.target.value)} />
+        </label>
+        <label className="relation-preview-note">
+          <span>费用内容</span>
+          <input value={expenseContent} onChange={(event) => setExpenseContent(event.target.value)} />
+        </label>
+        <label className="relation-preview-note">
+          <span>备注</span>
+          <textarea aria-label="备注" value={note} onChange={(event) => setNote(event.target.value)} />
+        </label>
+        <footer className="detail-modal-actions">
+          <button className="secondary-btn" type="button" onClick={onClose}>
+            取消
+          </button>
+          <button
+            className="primary-action-btn"
+            disabled={!canSubmit}
+            type="button"
+            onClick={() =>
+              onSubmit({
+                cashAmount: normalizedAmountForInput(cashAmount),
+                ticketCostAmount: normalizedAmountForInput(ticketCostAmount),
+                projectName: projectName.trim(),
+                expenseType: expenseType.trim(),
+                expenseContent: expenseContent.trim(),
+                note: note.trim(),
+              })}
+          >
+            确认买票
+          </button>
+        </footer>
+      </section>
     </div>
   );
 }

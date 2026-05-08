@@ -4,6 +4,7 @@ import type { WorkbenchPaneTimeFilter, WorkbenchZoneDisplayState } from "../../f
 import type {
   WorkbenchCandidateGroup,
   WorkbenchColumnLayouts,
+  WorkbenchInvoiceInventory,
   WorkbenchRecord,
   WorkbenchRecordType,
 } from "../../features/workbench/types";
@@ -25,6 +26,7 @@ type ResizableTriPaneProps = {
   panes: WorkbenchPane[];
   groups?: WorkbenchCandidateGroup[];
   sourceGroups?: WorkbenchCandidateGroup[];
+  invoiceInventory?: WorkbenchInvoiceInventory;
   displayState: WorkbenchZoneDisplayState;
   columnLayouts?: WorkbenchColumnLayouts;
   widths: number[];
@@ -65,6 +67,7 @@ function ResizableTriPane({
   panes,
   groups,
   sourceGroups,
+  invoiceInventory,
   displayState,
   columnLayouts,
   widths,
@@ -142,6 +145,7 @@ function ResizableTriPane({
         getRowState={getRowState}
         groups={effectiveGroups}
         highlightedRowId={highlightedRowId}
+        invoiceInventory={invoiceInventory}
         onOpenDetail={onOpenDetail}
         onRowAction={onRowAction}
         onClearPaneSearch={onClearPaneSearch}

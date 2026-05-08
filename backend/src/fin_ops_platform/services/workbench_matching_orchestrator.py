@@ -10,6 +10,7 @@ from fin_ops_platform.services.workbench_candidate_match_service import Workbenc
 from fin_ops_platform.services.workbench_matching_rules import WorkbenchMatchingRules
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
+from fin_ops_platform.services.workbench_special_pair_rule_service import WorkbenchSpecialPairRuleService
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -38,6 +39,7 @@ class WorkbenchMatchingOrchestrator:
         candidate_match_service: WorkbenchCandidateMatchService,
         read_model_service: WorkbenchReadModelService,
         rules: WorkbenchMatchingRules,
+        special_rule_service: WorkbenchSpecialPairRuleService | None = None,
         settings_provider: Callable[[], dict[str, Any]] | None = None,
         source_versions_provider: Callable[[], dict[str, Any]] | None = None,
         logger: logging.Logger | None = None,
@@ -47,6 +49,7 @@ class WorkbenchMatchingOrchestrator:
         self._candidate_match_service = candidate_match_service
         self._read_model_service = read_model_service
         self._rules = rules
+        self._special_rule_service = special_rule_service or WorkbenchSpecialPairRuleService()
         self._settings_provider = settings_provider
         self._source_versions_provider = source_versions_provider
         self._logger = logger or LOGGER
@@ -122,17 +125,29 @@ class WorkbenchMatchingOrchestrator:
         generate_candidates = getattr(self._rules, "generate_candidates", None)
         if not callable(generate_candidates):
             raise ValueError("rules must provide generate_candidates(...).")
-        candidates = generate_candidates(
+        settings = self._settings()
+        source_versions = self._source_versions()
+        ordinary_candidates = generate_candidates(
             scope_month,
             oa_rows,
             bank_rows,
             invoice_rows,
-            settings=self._settings(),
-            source_versions=self._source_versions(),
+            settings=settings,
+            source_versions=source_versions,
         )
-        if not isinstance(candidates, list):
+        if not isinstance(ordinary_candidates, list):
             raise ValueError("rules.generate_candidates(...) must return a list.")
-        return candidates
+        special_candidates = self._special_rule_service.generate_candidates(
+            scope_month,
+            oa_rows,
+            bank_rows,
+            invoice_rows,
+            settings=settings,
+            source_versions=source_versions,
+        )
+        if not isinstance(special_candidates, list):
+            raise ValueError("special_rule_service.generate_candidates(...) must return a list.")
+        return self._dedupe_candidates([*ordinary_candidates, *special_candidates])
 
     def _accumulate_rule_summary(self, summary: dict[str, Any]) -> None:
         last_summary = getattr(self._rules, "last_summary", None)
@@ -154,6 +169,21 @@ class WorkbenchMatchingOrchestrator:
             if not isinstance(skipped_rule, dict):
                 raise ValueError("rules.last_summary().skipped_rules values must be dicts.")
             summary["skipped_rules"].append(deepcopy(skipped_rule))
+
+    @staticmethod
+    def _dedupe_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        deduped: dict[tuple[str, str, tuple[str, ...]], dict[str, Any]] = {}
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                raise ValueError("candidate values must be dicts.")
+            key = (
+                str(candidate.get("scope_month") or ""),
+                str(candidate.get("rule_code") or ""),
+                tuple(sorted(str(row_id) for row_id in list(candidate.get("row_ids") or []))),
+            )
+            if key not in deduped:
+                deduped[key] = candidate
+        return list(deduped.values())
 
     def _emit_progress(
         self,

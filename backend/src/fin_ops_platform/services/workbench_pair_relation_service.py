@@ -73,6 +73,7 @@ class WorkbenchPairRelationService:
         created_at: str | None = None,
         note: str | None = None,
         amount_check: dict[str, Any] | None = None,
+        special_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         resolved_case_id = str(case_id).strip()
         if not resolved_case_id:
@@ -92,6 +93,13 @@ class WorkbenchPairRelationService:
                 "created_by": created_by,
                 "note": str(note).strip() if note is not None else "",
                 "amount_check": deepcopy(amount_check) if isinstance(amount_check, dict) else {},
+                "special_metadata": (
+                    deepcopy(special_metadata)
+                    if isinstance(special_metadata, dict)
+                    else deepcopy(existing_relation.get("special_metadata"))
+                    if isinstance(existing_relation, dict) and isinstance(existing_relation.get("special_metadata"), dict)
+                    else {}
+                ),
                 "created_at": (
                     str(existing_relation.get("created_at"))
                     if isinstance(existing_relation, dict) and existing_relation.get("created_at")
@@ -126,6 +134,7 @@ class WorkbenchPairRelationService:
         month_scope: str = "all",
         note: str | None = None,
         amount_check: dict[str, Any] | None = None,
+        special_metadata: dict[str, Any] | None = None,
         created_at: str | None = None,
         before_relations: list[dict[str, Any]] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -148,6 +157,7 @@ class WorkbenchPairRelationService:
             created_at=timestamp,
             note=note,
             amount_check=amount_check,
+            special_metadata=special_metadata,
         )
         history = self.record_history(
             operation_type="confirm_link",
@@ -160,6 +170,82 @@ class WorkbenchPairRelationService:
             created_at=timestamp,
         )
         return after_relation, history
+
+    def update_special_metadata_for_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        special_metadata: dict[str, Any],
+        updated_by: str,
+        note: str | None = None,
+        updated_at: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        active_relation = self._active_relation_for_any_row_id(row_ids)
+        if not isinstance(active_relation, dict):
+            raise KeyError("workbench_pair_relation_not_found")
+        timestamp = updated_at or self._timestamp()
+        before_relation = deepcopy(active_relation)
+        merged_metadata = {
+            **deepcopy(active_relation.get("special_metadata") if isinstance(active_relation.get("special_metadata"), dict) else {}),
+            **deepcopy(special_metadata),
+            "updated_by": str(updated_by or ""),
+        }
+        if not merged_metadata.get("created_by"):
+            merged_metadata["created_by"] = str(updated_by or "")
+        normalized_relation = self._normalize_relation(
+            {
+                **deepcopy(active_relation),
+                "special_metadata": merged_metadata,
+                "updated_at": timestamp,
+            },
+            fallback_case_id=str(active_relation.get("case_id") or ""),
+        )
+        self._pair_relations[str(normalized_relation["case_id"])] = normalized_relation
+        history = self.record_history(
+            operation_type="update_special_relation",
+            before_relations=[before_relation],
+            after_relations=[normalized_relation],
+            affected_row_ids=list(normalized_relation.get("row_ids") or []),
+            created_by=updated_by,
+            note=note,
+            amount_check=dict(normalized_relation.get("amount_check") or {}),
+            created_at=timestamp,
+        )
+        return deepcopy(normalized_relation), history
+
+    def clear_special_metadata_for_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        updated_by: str,
+        note: str | None = None,
+        updated_at: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        active_relation = self._active_relation_for_any_row_id(row_ids)
+        if not isinstance(active_relation, dict):
+            raise KeyError("workbench_pair_relation_not_found")
+        timestamp = updated_at or self._timestamp()
+        before_relation = deepcopy(active_relation)
+        normalized_relation = self._normalize_relation(
+            {
+                **deepcopy(active_relation),
+                "special_metadata": {},
+                "updated_at": timestamp,
+            },
+            fallback_case_id=str(active_relation.get("case_id") or ""),
+        )
+        self._pair_relations[str(normalized_relation["case_id"])] = normalized_relation
+        history = self.record_history(
+            operation_type="clear_special_relation",
+            before_relations=[before_relation],
+            after_relations=[normalized_relation],
+            affected_row_ids=list(normalized_relation.get("row_ids") or []),
+            created_by=updated_by,
+            note=note,
+            amount_check=dict(normalized_relation.get("amount_check") or {}),
+            created_at=timestamp,
+        )
+        return deepcopy(normalized_relation), history
 
     def preview_withdraw_for_row_ids(self, row_ids: list[str]) -> dict[str, Any]:
         active_relation = self._active_relation_for_any_row_id(row_ids)
@@ -339,6 +425,8 @@ class WorkbenchPairRelationService:
         normalized["note"] = str(relation.get("note") or "")
         amount_check = relation.get("amount_check")
         normalized["amount_check"] = deepcopy(amount_check) if isinstance(amount_check, dict) else {}
+        special_metadata = relation.get("special_metadata")
+        normalized["special_metadata"] = deepcopy(special_metadata) if isinstance(special_metadata, dict) else {}
         normalized["created_at"] = str(relation.get("created_at") or cls._timestamp())
         normalized["updated_at"] = str(relation.get("updated_at") or normalized["created_at"])
         return normalized

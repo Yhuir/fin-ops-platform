@@ -1316,6 +1316,132 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(relation["relation_mode"], "internal_transfer_pair")
         self.assertCountEqual(relation["row_ids"], internal_transfer_row_ids)
 
+    def test_workbench_matching_rows_preserve_bank_identity_fields_for_internal_transfer_rules(self) -> None:
+        app = build_application()
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="internal-transfer-identity-fields.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "39610188000598826",
+                    "account_name": "云南溯源科技有限公司",
+                    "txn_date": "2026-02-13",
+                    "trade_time": "2026-02-13 17:15:37",
+                    "pay_receive_time": "2026-02-13 17:15:37",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "counterparty_account_no": "53001905038050548106",
+                    "debit_amount": "184597.41",
+                    "credit_amount": "",
+                    "summary": "工资及过节费",
+                },
+                {
+                    "account_no": "53001905038050548106",
+                    "account_name": "云南溯源科技有限公司",
+                    "txn_date": "2026-02-13",
+                    "trade_time": "2026-02-13 17:15:51",
+                    "pay_receive_time": "2026-02-13 17:15:51",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "counterparty_account_no": "39610188000598826",
+                    "debit_amount": "",
+                    "credit_amount": "184597.41",
+                    "summary": "电子汇入",
+                    "remark": "工资及过节费",
+                },
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+        imported_row_ids = {
+            transaction.id
+            for transaction in app._import_service.list_transactions()
+            if transaction.source_batch_id == preview.id
+        }
+
+        rows = app._workbench_matching_rows_for_scope("2026-02")["bank_rows"]
+        imported_rows = [row for row in rows if str(row.get("id")) in imported_row_ids]
+
+        self.assertEqual(len(imported_rows), 2)
+        self.assertCountEqual([row.get("account_no") for row in imported_rows], ["39610188000598826", "53001905038050548106"])
+        self.assertTrue(all(row.get("account_name") == "云南溯源科技有限公司" for row in imported_rows))
+
+    def test_stale_single_row_candidate_does_not_override_active_internal_transfer_relation(self) -> None:
+        app = build_application()
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="internal-transfer-stale-candidate.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "39610188000598826",
+                    "account_name": "云南溯源科技有限公司",
+                    "txn_date": "2026-02-13",
+                    "trade_time": "2026-02-13 17:15:37",
+                    "pay_receive_time": "2026-02-13 17:15:37",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "counterparty_account_no": "53001905038050548106",
+                    "debit_amount": "184597.41",
+                    "credit_amount": "",
+                    "summary": "工资及过节费",
+                },
+                {
+                    "account_no": "53001905038050548106",
+                    "account_name": "云南溯源科技有限公司",
+                    "txn_date": "2026-02-13",
+                    "trade_time": "2026-02-13 17:15:51",
+                    "pay_receive_time": "2026-02-13 17:15:51",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "counterparty_account_no": "39610188000598826",
+                    "debit_amount": "",
+                    "credit_amount": "184597.41",
+                    "summary": "电子汇入",
+                    "remark": "工资及过节费",
+                },
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+        bank_row_ids = [
+            transaction.id
+            for transaction in app._import_service.list_transactions()
+            if transaction.source_batch_id == preview.id
+        ]
+        app.handle_request("GET", "/api/workbench?month=2026-02")
+        for row_id in bank_row_ids:
+            app._workbench_candidate_match_service.upsert_candidate(
+                {
+                    "scope_month": "2026-02",
+                    "candidate_type": "bank",
+                    "status": "needs_review",
+                    "confidence": "low",
+                    "rule_code": "no_confident_match",
+                    "row_ids": [row_id],
+                    "bank_row_ids": [row_id],
+                    "amount": "184597.41",
+                    "amount_delta": "0.00",
+                    "explanation": "stale single-row candidate",
+                }
+            )
+        app._invalidate_workbench_read_models()
+
+        response = app.handle_request("GET", "/api/workbench?month=2026-02")
+        payload = json.loads(response.body)
+        paired_bank_rows = [
+            row
+            for group in payload["paired"]["groups"]
+            for row in group["bank_rows"]
+            if row["id"] in bank_row_ids
+        ]
+        open_bank_rows = [
+            row
+            for group in payload["open"]["groups"]
+            for row in group["bank_rows"]
+            if row["id"] in bank_row_ids
+        ]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertCountEqual([row["id"] for row in paired_bank_rows], bank_row_ids)
+        self.assertEqual(open_bank_rows, [])
+        self.assertTrue(all(row["invoice_relation"]["code"] == "internal_transfer_pair" for row in paired_bank_rows))
+
     def test_get_api_workbench_ignored_prefers_cached_read_model_when_available(self) -> None:
         app = build_application()
         app._workbench_read_model_service.upsert_read_model(

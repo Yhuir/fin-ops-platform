@@ -10,6 +10,7 @@ import {
 import type {
   WorkbenchCandidateGroup,
   WorkbenchColumnLayouts,
+  WorkbenchInvoiceInventory,
   WorkbenchRecord,
   WorkbenchRecordType,
 } from "../../features/workbench/types";
@@ -28,6 +29,7 @@ type CandidateGroupGridProps = {
   panes: WorkbenchPane[];
   groups: WorkbenchCandidateGroup[];
   sourceGroups?: WorkbenchCandidateGroup[];
+  invoiceInventory?: WorkbenchInvoiceInventory;
   displayState?: WorkbenchZoneDisplayState;
   columnLayouts?: WorkbenchColumnLayouts;
   rowTemplateColumns: string;
@@ -67,6 +69,7 @@ function CandidateGroupGrid({
   panes,
   groups,
   sourceGroups,
+  invoiceInventory = emptyInvoiceInventory,
   displayState = createEmptyWorkbenchZoneDisplayState(),
   columnLayouts,
   rowTemplateColumns,
@@ -187,11 +190,6 @@ function CandidateGroupGrid({
       invoice: collectWorkbenchTimeFilterYears(filterSourceGroups, "invoice"),
     } satisfies Record<WorkbenchRecordType, string[]>;
   }, [groups, sourceGroups]);
-
-  const invoiceAttachmentDiagnostics = useMemo(
-    () => buildInvoiceAttachmentDiagnostics(groups),
-    [groups],
-  );
 
   const handleToggleFilterMenu = useCallback((paneId: WorkbenchRecordType, columnKey: string) => {
     setOpenFilterMenu((current) => (
@@ -352,7 +350,7 @@ function CandidateGroupGrid({
               <div className="pane-header">
                 <div className="pane-header-main">
                   {pane.id === "invoice" ? (
-                    <InvoiceAttachmentDiagnosticsTrigger title={pane.title} diagnostics={invoiceAttachmentDiagnostics} />
+                    <InvoiceInventoryDiagnosticsTrigger title={pane.title} inventory={invoiceInventory} />
                   ) : (
                     <span>{pane.title}</span>
                   )}
@@ -510,22 +508,28 @@ function buildPaneSortVisualLabel(currentDirection: "asc" | "desc" | null) {
   return currentDirection === "desc" ? "时间↑" : "时间↓";
 }
 
-type InvoiceAttachmentDiagnostics = {
-  oaAttachmentCount: number;
-  parsedOaInvoiceCount: number;
-  importedInvoiceCount: number;
+const emptyInvoiceInventory: WorkbenchInvoiceInventory = {
+  systemTotal: 0,
+  manualImportTotal: 0,
+  workbenchVisibleTotal: 0,
+  hiddenSubmittedEtcTotal: 0,
+  extraEtcTotal: 0,
+  etcSummaryBatchCount: 0,
+  oaAttachmentTotal: 0,
 };
 
-function InvoiceAttachmentDiagnosticsTrigger({
+function InvoiceInventoryDiagnosticsTrigger({
   title,
-  diagnostics,
+  inventory,
 }: {
   title: string;
-  diagnostics: InvoiceAttachmentDiagnostics;
+  inventory: WorkbenchInvoiceInventory;
 }) {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [open, setOpen] = useState(false);
   const [popoverStyle, setPopoverStyle] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const rows = buildInvoiceInventoryRows(inventory);
+  const ariaLabel = `${title}库存统计：${rows.map((row) => `${row.label} ${row.value}`).join("，")}`;
 
   const syncPopoverPosition = useCallback(() => {
     const trigger = triggerRef.current;
@@ -564,7 +568,7 @@ function InvoiceAttachmentDiagnosticsTrigger({
     >
       <button
         ref={triggerRef}
-        aria-label={`${title}附件统计：OA附件 ${diagnostics.oaAttachmentCount}，已解析 ${diagnostics.parsedOaInvoiceCount}，已导入 ${diagnostics.importedInvoiceCount}`}
+        aria-label={ariaLabel}
         className="pane-title-hover-trigger"
         type="button"
         onFocus={() => {
@@ -580,70 +584,25 @@ function InvoiceAttachmentDiagnosticsTrigger({
         role="tooltip"
         style={{ top: `${popoverStyle.top}px`, left: `${popoverStyle.left}px` }}
       >
-        <div className="pane-title-hover-row">
-          <span>OA里的发票附件数量</span>
-          <strong>{diagnostics.oaAttachmentCount}</strong>
-        </div>
-        <div className="pane-title-hover-row">
-          <span>已解析的OA发票数量</span>
-          <strong>{diagnostics.parsedOaInvoiceCount}</strong>
-        </div>
-        <div className="pane-title-hover-row">
-          <span>已导入的发票数量</span>
-          <strong>{diagnostics.importedInvoiceCount}</strong>
-        </div>
+        {rows.map((row) => (
+          <div className="pane-title-hover-row" key={row.label}>
+            <span>{row.label}</span>
+            <strong>{row.value}</strong>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
-function buildInvoiceAttachmentDiagnostics(groups: WorkbenchCandidateGroup[]): InvoiceAttachmentDiagnostics {
-  const oaAttachmentRows = groups
-    .flatMap((group) => group.rows.oa)
-    .filter((row) => {
-      const recognition = parseAttachmentRecognitionStatus(detailFieldValue(row, "附件发票识别情况"));
-      if (recognition !== null) {
-        return recognition.total > 0;
-      }
-      const parsedCount = parseInteger(detailFieldValue(row, "附件发票数量"));
-      return parsedCount !== null && parsedCount > 0;
-    });
-  const parsedOaInvoiceCount = groups
-    .flatMap((group) => group.rows.invoice)
-    .filter((row) => row.sourceKind === "oa_attachment_invoice")
-    .length;
-  const importedInvoiceCount = groups
-    .flatMap((group) => group.rows.invoice)
-    .filter((row) => row.sourceKind !== "oa_attachment_invoice")
-    .length;
-  const oaAttachmentCount = oaAttachmentRows.length;
-
-  return {
-    oaAttachmentCount,
-    parsedOaInvoiceCount,
-    importedInvoiceCount,
-  };
-}
-
-function detailFieldValue(row: WorkbenchRecord, label: string) {
-  return row.detailFields.find((field) => field.label === label)?.value ?? "";
-}
-
-function parseAttachmentRecognitionStatus(value: string) {
-  const match = value.match(/(\d+)\s*\/\s*(\d+)/);
-  if (!match) {
-    return null;
-  }
-  return {
-    parsed: Number.parseInt(match[1], 10),
-    total: Number.parseInt(match[2], 10),
-  };
-}
-
-function parseInteger(value: string) {
-  const trimmedValue = value.trim();
-  if (!/^\d+$/.test(trimmedValue)) {
-    return null;
-  }
-  return Number.parseInt(trimmedValue, 10);
+function buildInvoiceInventoryRows(inventory: WorkbenchInvoiceInventory) {
+  return [
+    { label: "系统发票总数", value: inventory.systemTotal },
+    { label: "人工导入总数", value: inventory.manualImportTotal },
+    { label: "普通可见", value: inventory.workbenchVisibleTotal },
+    { label: "已提交 ETC 隐藏", value: inventory.hiddenSubmittedEtcTotal },
+    { label: "额外 ETC", value: inventory.extraEtcTotal },
+    { label: "ETC 折叠批次", value: inventory.etcSummaryBatchCount },
+    { label: "OA附件解析发票", value: inventory.oaAttachmentTotal },
+  ];
 }

@@ -2,14 +2,12 @@ from __future__ import annotations
 
 from collections import defaultdict
 from copy import deepcopy
-from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from fin_ops_platform.services.import_file_service import is_company_identity
 from fin_ops_platform.services.imports import normalize_name
-from fin_ops_platform.services.live_workbench_service import INTERNAL_TRANSFER_MATCH_WINDOW, clean_account_no
 from fin_ops_platform.services.workbench_candidate_match_service import WorkbenchCandidateMatchService
+from fin_ops_platform.services.workbench_special_pair_rule_service import WorkbenchSpecialPairRuleService
 
 
 ZERO = Decimal("0.00")
@@ -21,8 +19,10 @@ MAX_SUM_COMBINATION_SIZE = MAX_SUM_MATCH_SIZE
 
 
 class WorkbenchMatchingRules:
-    def __init__(self) -> None:
+    def __init__(self, *, include_special_rules: bool = True) -> None:
         self._skipped_rules: list[dict[str, Any]] = []
+        self._include_special_rules = include_special_rules
+        self._special_rule_service = WorkbenchSpecialPairRuleService()
 
     def generate_candidates(
         self,
@@ -47,11 +47,17 @@ class WorkbenchMatchingRules:
         candidates.extend(self._oa_bank_multi_invoice_exact_sum(scope_month, oa, bank, invoices, resolved_versions))
         candidates.extend(self._oa_item_invoice_exact_amount(scope_month, oa, invoices, resolved_versions))
         candidates.extend(self._bank_invoice_exact_amount(scope_month, bank, invoices, resolved_versions))
-        candidates.extend(self._salary_personal_auto_match(scope_month, bank, resolved_versions))
-        candidates.extend(self._internal_transfer_pair(scope_month, bank, resolved_versions))
-        candidates.extend(
-            self._oa_invoice_offset_auto_match(scope_month, oa, invoices, resolved_settings, resolved_versions)
-        )
+        if self._include_special_rules:
+            candidates.extend(
+                self._special_rule_service.generate_candidates(
+                    scope_month,
+                    oa,
+                    bank,
+                    invoices,
+                    settings=resolved_settings,
+                    source_versions=resolved_versions,
+                )
+            )
         candidates.extend(self._matching_engine_compatibility(scope_month, bank, invoices, resolved_versions))
         return self._mark_conflicts(self._dedupe_candidates(candidates))
 
@@ -243,133 +249,6 @@ class WorkbenchMatchingRules:
                         source_versions=source_versions,
                     )
                 )
-        return candidates
-
-    def _salary_personal_auto_match(
-        self,
-        scope_month: str,
-        bank_rows: list[dict[str, Any]],
-        source_versions: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        candidates: list[dict[str, Any]] = []
-        for bank_row in sorted(bank_rows, key=self._row_id):
-            if self._direction(bank_row) != "outflow":
-                continue
-            remark = " ".join(str(bank_row.get(field) or "").strip() for field in ("summary", "remark"))
-            counterparty = str(bank_row.get("counterparty_name") or "").strip()
-            if "工资" not in remark or not counterparty or is_company_identity(None, counterparty):
-                continue
-            amount = self._amount(bank_row)
-            if amount is None:
-                continue
-            candidates.append(
-                self._candidate(
-                    scope_month,
-                    rule_code="salary_personal_auto_match",
-                    rows=[bank_row],
-                    status="auto_closed",
-                    confidence="high",
-                    amount=amount,
-                    explanation="Detected salary payment to an individual counterparty from bank summary or remark.",
-                    source_versions=source_versions,
-                )
-            )
-        return candidates
-
-    def _internal_transfer_pair(
-        self,
-        scope_month: str,
-        bank_rows: list[dict[str, Any]],
-        source_versions: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        outflows = sorted((row for row in bank_rows if self._direction(row) == "outflow"), key=self._bank_time_sort_key)
-        inflows = sorted((row for row in bank_rows if self._direction(row) == "inflow"), key=self._bank_time_sort_key)
-        candidates: list[dict[str, Any]] = []
-        used_ids: set[str] = set()
-        for outflow in outflows:
-            if self._row_id(outflow) in used_ids or not self._is_company_bank_row(outflow):
-                continue
-            outflow_time = self._parse_row_time(outflow)
-            outflow_amount = self._amount(outflow)
-            if outflow_time is None or outflow_amount is None:
-                continue
-            best_match: tuple[timedelta, dict[str, Any]] | None = None
-            for inflow in inflows:
-                if self._row_id(inflow) in used_ids or not self._is_company_bank_row(inflow):
-                    continue
-                if outflow_amount != self._amount(inflow):
-                    continue
-                if not self._bank_accounts_distinct(outflow, inflow):
-                    continue
-                inflow_time = self._parse_row_time(inflow)
-                if inflow_time is None:
-                    continue
-                delta = abs(inflow_time - outflow_time)
-                if delta > INTERNAL_TRANSFER_MATCH_WINDOW:
-                    continue
-                if best_match is None or delta < best_match[0]:
-                    best_match = (delta, inflow)
-            if best_match is None:
-                continue
-            inflow = best_match[1]
-            used_ids.update({self._row_id(outflow), self._row_id(inflow)})
-            candidates.append(
-                self._candidate(
-                    scope_month,
-                    rule_code="internal_transfer_pair",
-                    rows=[outflow, inflow],
-                    status="auto_closed",
-                    confidence="high",
-                    amount=outflow_amount,
-                    explanation="Detected equal internal transfer between different company bank accounts within the time window.",
-                    source_versions=source_versions,
-                )
-            )
-        return candidates
-
-    def _oa_invoice_offset_auto_match(
-        self,
-        scope_month: str,
-        oa_rows: list[dict[str, Any]],
-        invoice_rows: list[dict[str, Any]],
-        settings: dict[str, Any],
-        source_versions: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        applicant_names = {
-            str(name).strip()
-            for name in list(settings.get("offset_applicant_names") or settings.get("offset_applicants") or [])
-            if str(name).strip()
-        }
-        if not applicant_names:
-            return []
-        candidates: list[dict[str, Any]] = []
-        oa_by_id = {self._row_id(row): row for row in oa_rows}
-        for invoice_row in sorted(invoice_rows, key=self._row_id):
-            if str(invoice_row.get("source_kind") or "") != "oa_attachment_invoice":
-                continue
-            linked_oa_id = self._linked_oa_id(invoice_row)
-            oa_row = oa_by_id.get(linked_oa_id or "")
-            if oa_row is None:
-                continue
-            applicant_name = self._oa_applicant_name(oa_row)
-            if applicant_name not in applicant_names:
-                continue
-            amount = self._amount(invoice_row) or self._amount(oa_row)
-            if amount is None:
-                continue
-            versions = {**source_versions, "offset_display_tag": "冲", "offset_relation_mode": "oa_attachment_invoice"}
-            candidates.append(
-                self._candidate(
-                    scope_month,
-                    rule_code="oa_invoice_offset_auto_match",
-                    rows=[oa_row, invoice_row],
-                    status="auto_closed",
-                    confidence="high",
-                    amount=amount,
-                    explanation="Configured applicant OA attachment invoice auto matched for 冲 display.",
-                    source_versions=versions,
-                )
-            )
         return candidates
 
     def _matching_engine_compatibility(
@@ -845,65 +724,3 @@ class WorkbenchMatchingRules:
     @staticmethod
     def _format_amount(value: Decimal) -> str:
         return f"{value.quantize(CENT):.2f}"
-
-    def _is_company_bank_row(self, row: dict[str, Any]) -> bool:
-        return is_company_identity(None, row.get("account_name")) and is_company_identity(
-            None, row.get("counterparty_name")
-        )
-
-    @staticmethod
-    def _bank_accounts_distinct(left: dict[str, Any], right: dict[str, Any]) -> bool:
-        left_account = clean_account_no(str(left.get("account_no") or ""))
-        right_account = clean_account_no(str(right.get("account_no") or ""))
-        return bool(left_account and right_account and left_account != right_account)
-
-    def _bank_time_sort_key(self, row: dict[str, Any]) -> tuple[datetime, str]:
-        parsed = self._parse_row_time(row) or datetime.min
-        return parsed, self._row_id(row)
-
-    def _parse_row_time(self, row: dict[str, Any]) -> datetime | None:
-        for field_name in ("pay_receive_time", "trade_time", "txn_date", "issue_date"):
-            parsed = self._parse_datetime(row.get(field_name))
-            if parsed is not None:
-                return parsed
-        return None
-
-    @staticmethod
-    def _parse_datetime(value: Any) -> datetime | None:
-        if not isinstance(value, str) or not value.strip():
-            return None
-        text = value.strip().replace("/", "-")
-        for pattern in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
-            try:
-                return datetime.strptime(text[:19] if "%S" in pattern else text[:16 if "%H" in pattern else 10], pattern)
-            except ValueError:
-                continue
-        return None
-
-    @staticmethod
-    def _linked_oa_id(invoice_row: dict[str, Any]) -> str | None:
-        for field_name in ("oa_row_id", "oa_id", "source_oa_row_id", "linked_oa_row_id", "parent_oa_row_id"):
-            value = str(invoice_row.get(field_name) or "").strip()
-            if value:
-                return value
-        metadata = invoice_row.get("metadata")
-        if isinstance(metadata, dict):
-            for field_name in ("oa_row_id", "oa_id", "source_oa_row_id"):
-                value = str(metadata.get(field_name) or "").strip()
-                if value:
-                    return value
-        return None
-
-    @staticmethod
-    def _oa_applicant_name(oa_row: dict[str, Any]) -> str:
-        for field_name in ("applicant_name", "applicant", "submitter_name", "created_by_name"):
-            value = str(oa_row.get(field_name) or "").strip()
-            if value:
-                return value
-        detail_fields = oa_row.get("_detail_fields") or oa_row.get("detail_fields")
-        if isinstance(detail_fields, dict):
-            for field_name in ("申请人", "报销人", "提交人"):
-                value = str(detail_fields.get(field_name) or "").strip()
-                if value:
-                    return value
-        return ""

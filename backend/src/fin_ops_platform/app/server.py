@@ -65,6 +65,7 @@ from fin_ops_platform.services.historical_etc_repair_service import HistoricalEt
 from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile
 from fin_ops_platform.services.import_preview_audit import ImportPreviewStaleError
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.invoice_inventory_stats_service import InvoiceInventoryStatsService
 from fin_ops_platform.services.integrations import IntegrationHubService
 from fin_ops_platform.services.ledgers import LedgerReminderService
 from fin_ops_platform.services.live_workbench_service import LiveWorkbenchService
@@ -103,12 +104,19 @@ from fin_ops_platform.services.workbench_override_service import WorkbenchOverri
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
+from fin_ops_platform.services.workbench_special_pair_rule_service import (
+    CASH_TURNOVER_DETECTED,
+    CASH_TURNOVER_TAG,
+    WorkbenchSpecialPairRuleService,
+)
 from fin_ops_platform.services.seeds import build_demo_seed
 
 
 OA_INVOICE_OFFSET_AUTO_MATCH_MODE = "oa_invoice_offset_auto_match"
 OA_INVOICE_OFFSET_TAG = "冲"
-WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-07-invoice-etc-unified-identity"
+CASH_PASS_THROUGH_MODE = "cash_pass_through"
+CASH_TICKET_PURCHASE_MODE = "cash_ticket_purchase"
+WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-08-active-relation-candidate-precedence"
 SYSTEM_AUTO_PAIR_RELATION_MODES = {
     "salary_personal_auto_match",
     "internal_transfer_pair",
@@ -313,13 +321,15 @@ class Application:
         bank_account_resolver = BankAccountResolver(self._app_settings_service.get_bank_account_mapping_dict)
         self._candidate_grouping_service = WorkbenchCandidateGroupingService()
         self._workbench_query_service = WorkbenchQueryService(oa_adapter=oa_adapter)
-        self._workbench_matching_rules = WorkbenchMatchingRules()
+        self._workbench_matching_rules = WorkbenchMatchingRules(include_special_rules=False)
+        self._workbench_special_pair_rule_service = WorkbenchSpecialPairRuleService()
         self._workbench_matching_orchestrator = WorkbenchMatchingOrchestrator(
             row_provider=self._workbench_matching_rows_for_scope,
             pair_relation_service=self._workbench_pair_relation_service,
             candidate_match_service=self._workbench_candidate_match_service,
             read_model_service=self._workbench_read_model_service,
             rules=self._workbench_matching_rules,
+            special_rule_service=self._workbench_special_pair_rule_service,
             settings_provider=self._workbench_matching_settings,
             source_versions_provider=self._workbench_matching_source_versions,
         )
@@ -632,6 +642,12 @@ class Application:
             return self._handle_api_workbench_withdraw_link_preview(body)
         if method == "POST" and route_path == "/api/workbench/actions/withdraw-link":
             return self._handle_api_workbench_withdraw_link(body, request_id=request_id)
+        if method == "POST" and route_path == "/api/workbench/actions/confirm-cash-pass-through":
+            return self._handle_api_workbench_confirm_cash_pass_through(body, request_id=request_id)
+        if method == "POST" and route_path == "/api/workbench/actions/confirm-cash-ticket-purchase":
+            return self._handle_api_workbench_confirm_cash_ticket_purchase(body, request_id=request_id)
+        if method == "POST" and route_path == "/api/workbench/actions/cancel-cash-special":
+            return self._handle_api_workbench_cancel_cash_special(body, request_id=request_id)
         if method == "POST" and route_path == "/api/workbench/actions/update-bank-exception":
             return self._handle_api_workbench_update_bank_exception(body)
         if method == "POST" and route_path == "/api/workbench/actions/oa-bank-exception":
@@ -3714,6 +3730,174 @@ class Application:
             return freshness_error
         return self._handle_live_workbench_withdraw_link(payload, request_id=request_id)
 
+    def _handle_api_workbench_confirm_cash_pass_through(
+        self,
+        body: str | None,
+        *,
+        request_id: str | None = None,
+    ) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        freshness_error = self._workbench_write_freshness_guard()
+        if freshness_error is not None:
+            return freshness_error
+        try:
+            month = str(payload["month"])
+            row_ids = self._cash_special_row_ids(payload)
+            note = str(payload.get("note") or payload.get("comment") or "").strip()
+            relation = self._active_relation_for_cash_special(row_ids)
+            self._validate_cash_pass_through_relation(relation)
+            cash_amount = self._cash_special_cash_amount(payload, relation)
+            special_metadata = {
+                "special_type": CASH_PASS_THROUGH_MODE,
+                "cash_amount": cash_amount,
+                "ticket_cost_amount": "0.00",
+                "cost_policy": "exclude_all",
+                "note": note,
+                "created_by": "system",
+                "updated_by": "system",
+            }
+            updated_relation, _history = self._workbench_pair_relation_service.update_special_metadata_for_row_ids(
+                row_ids,
+                special_metadata=special_metadata,
+                updated_by="system",
+                note=note,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_cash_pass_through_request", "message": str(exc)},
+            )
+        self._after_cash_special_relation_update(
+            month=month,
+            relation=updated_relation,
+            request_id=request_id,
+            action_name="confirm_cash_pass_through",
+        )
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "success": True,
+                "action": "confirm_cash_pass_through",
+                "month": month,
+                "case_id": str(updated_relation.get("case_id") or ""),
+                "affected_row_ids": list(updated_relation.get("row_ids") or []),
+                "special_metadata": dict(updated_relation.get("special_metadata") or {}),
+                "message": "已确认现金往来过账。",
+            },
+        )
+
+    def _handle_api_workbench_confirm_cash_ticket_purchase(
+        self,
+        body: str | None,
+        *,
+        request_id: str | None = None,
+    ) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        freshness_error = self._workbench_write_freshness_guard()
+        if freshness_error is not None:
+            return freshness_error
+        try:
+            month = str(payload["month"])
+            row_ids = self._cash_special_row_ids(payload)
+            note = str(payload.get("note") or payload.get("comment") or "").strip()
+            relation = self._active_relation_for_cash_special(row_ids)
+            self._validate_cash_ticket_purchase_relation(relation)
+            ticket_cost_amount = self._required_non_negative_amount(payload.get("ticket_cost_amount"), "ticket_cost_amount")
+            cash_amount = self._required_non_negative_amount(payload.get("cash_amount"), "cash_amount")
+            project_id = str(payload.get("project_id") or "").strip()
+            project_name = str(payload.get("project_name") or "").strip()
+            if Decimal(ticket_cost_amount) > Decimal("0.00") and not (project_id or project_name):
+                raise ValueError("project_id or project_name is required when ticket_cost_amount is greater than 0.")
+            special_metadata = {
+                "special_type": CASH_TICKET_PURCHASE_MODE,
+                "cash_amount": cash_amount,
+                "ticket_cost_amount": ticket_cost_amount,
+                "project_id": project_id,
+                "project_name": project_name,
+                "cost_policy": "include_ticket_cost_only",
+                "note": note,
+                "created_by": "system",
+                "updated_by": "system",
+            }
+            updated_relation, _history = self._workbench_pair_relation_service.update_special_metadata_for_row_ids(
+                row_ids,
+                special_metadata=special_metadata,
+                updated_by="system",
+                note=note,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_cash_ticket_purchase_request", "message": str(exc)},
+            )
+        self._after_cash_special_relation_update(
+            month=month,
+            relation=updated_relation,
+            request_id=request_id,
+            action_name="confirm_cash_ticket_purchase",
+        )
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "success": True,
+                "action": "confirm_cash_ticket_purchase",
+                "month": month,
+                "case_id": str(updated_relation.get("case_id") or ""),
+                "affected_row_ids": list(updated_relation.get("row_ids") or []),
+                "special_metadata": dict(updated_relation.get("special_metadata") or {}),
+                "message": "已确认现金往来买票情况。",
+            },
+        )
+
+    def _handle_api_workbench_cancel_cash_special(
+        self,
+        body: str | None,
+        *,
+        request_id: str | None = None,
+    ) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        freshness_error = self._workbench_write_freshness_guard()
+        if freshness_error is not None:
+            return freshness_error
+        try:
+            month = str(payload["month"])
+            row_ids = self._cash_special_row_ids(payload)
+            note = str(payload.get("note") or payload.get("comment") or "").strip()
+            updated_relation, _history = self._workbench_pair_relation_service.clear_special_metadata_for_row_ids(
+                row_ids,
+                updated_by="system",
+                note=note,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_cancel_cash_special_request", "message": str(exc)},
+            )
+        self._after_cash_special_relation_update(
+            month=month,
+            relation=updated_relation,
+            request_id=request_id,
+            action_name="cancel_cash_special",
+        )
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "success": True,
+                "action": "cancel_cash_special",
+                "month": month,
+                "case_id": str(updated_relation.get("case_id") or ""),
+                "affected_row_ids": list(updated_relation.get("row_ids") or []),
+                "special_metadata": dict(updated_relation.get("special_metadata") or {}),
+                "message": "已取消现金往来特殊处理。",
+            },
+        )
+
     def _handle_api_workbench_update_bank_exception(self, body: str | None) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
@@ -6257,13 +6441,38 @@ class Application:
         payload = read_model.get("payload")
         retained = self._apply_oa_retention_to_grouped_payload(payload if isinstance(payload, dict) else {})
         self._append_etc_invoice_summary_rows(retained)
+        retained["invoice_inventory"] = self._build_invoice_inventory_payload(retained)
         return self._derive_tags_for_grouped_payload(retained)
+
+    def _build_invoice_inventory_payload(self, grouped_payload: dict[str, object]) -> dict[str, int]:
+        stats = InvoiceInventoryStatsService().build_stats(
+            invoices=self._import_service.list_invoices(),
+            etc_summary_batch_count=len(self._etc_invoice_summary_rows_by_external_batch_id()),
+            oa_attachment_total=self._count_oa_attachment_invoice_rows(grouped_payload),
+        )
+        return stats.to_payload()
+
+    @staticmethod
+    def _count_oa_attachment_invoice_rows(grouped_payload: dict[str, object]) -> int:
+        count = 0
+        for section in ("paired", "open"):
+            section_payload = grouped_payload.get(section)
+            if not isinstance(section_payload, dict):
+                continue
+            for group in list(section_payload.get("groups") or []):
+                if not isinstance(group, dict):
+                    continue
+                for row in list(group.get("invoice_rows") or []):
+                    if not isinstance(row, dict):
+                        continue
+                    if str(row.get("source_kind", "")).strip() == "oa_attachment_invoice":
+                        count += 1
+        return count
 
     def _append_etc_invoice_summary_rows(self, payload: dict[str, object]) -> None:
         summary_rows_by_external_batch_id = self._etc_invoice_summary_rows_by_external_batch_id()
         if not summary_rows_by_external_batch_id:
             return
-        inserted_count = 0
         for section in ("paired", "open"):
             section_payload = payload.get(section)
             if not isinstance(section_payload, dict):
@@ -6287,11 +6496,6 @@ class Application:
                 if case_id:
                     row["case_id"] = case_id
                 invoice_rows.append(row)
-                inserted_count += 1
-        if inserted_count:
-            summary = payload.get("summary")
-            if isinstance(summary, dict):
-                summary["invoice_count"] = int(summary.get("invoice_count", 0) or 0) + inserted_count
 
     def _etc_invoice_summary_rows_by_external_batch_id(self) -> dict[str, dict[str, object]]:
         batches_by_internal_id = {batch.id: batch for batch in self._etc_service.list_batches()}
@@ -6923,7 +7127,10 @@ class Application:
             ]
             if not row_ids:
                 continue
-            if any(self._row_has_manual_relation(rows_by_id.get(row_id)) for row_id in row_ids):
+            if str(candidate.get("rule_code") or "") == CASH_TURNOVER_DETECTED:
+                self._apply_cash_turnover_candidate_metadata(candidate, rows_by_id)
+                continue
+            if any(self._row_has_active_pair_relation(rows_by_id.get(row_id)) for row_id in row_ids):
                 continue
             if any(row_id in claimed_row_ids for row_id in row_ids):
                 continue
@@ -6951,6 +7158,26 @@ class Application:
                     row["cost_excluded"] = True
             claimed_row_ids.update(row_ids)
         return result
+
+    @staticmethod
+    def _apply_cash_turnover_candidate_metadata(
+        candidate: dict[str, object],
+        rows_by_id: dict[str, dict[str, object]],
+    ) -> None:
+        special_metadata = candidate.get("special_metadata")
+        metadata = dict(special_metadata) if isinstance(special_metadata, dict) else {}
+        for row_id in list(candidate.get("bank_row_ids") or []):
+            row = rows_by_id.get(str(row_id))
+            if not isinstance(row, dict):
+                continue
+            tags = [str(tag).strip() for tag in list(row.get("tags") or []) if str(tag).strip()]
+            if CASH_TURNOVER_TAG not in tags:
+                tags.append(CASH_TURNOVER_TAG)
+            row["tags"] = tags
+            row["special_metadata"] = {
+                **dict(row.get("special_metadata") if isinstance(row.get("special_metadata"), dict) else {}),
+                CASH_TURNOVER_DETECTED: metadata,
+            }
 
     def _candidate_matches_for_scope(self, month: str) -> list[dict[str, object]]:
         normalized_month = str(month or "").strip()
@@ -6997,7 +7224,7 @@ class Application:
             return {"code": "candidate_incomplete", "label": "候选未闭环", "tone": "warn"}
         return {"code": "suggested_match", "label": "待人工确认", "tone": "warn"}
 
-    def _row_has_manual_relation(self, row: dict[str, object] | None) -> bool:
+    def _row_has_active_pair_relation(self, row: dict[str, object] | None) -> bool:
         if not isinstance(row, dict):
             return False
         row_type = str(row.get("type") or "")
@@ -7006,7 +7233,14 @@ class Application:
         except KeyError:
             return False
         relation = row.get(relation_field)
-        return isinstance(relation, dict) and str(relation.get("code") or "") == "fully_linked"
+        if not isinstance(relation, dict):
+            return False
+        relation_code = str(relation.get("code") or "").strip()
+        return relation_code in {
+            "fully_linked",
+            "automatic_match",
+            *SYSTEM_AUTO_PAIR_RELATION_MODES,
+        }
 
     def _sync_oa_invoice_offset_auto_pair_relations(self, payload: dict[str, object]) -> None:
         desired_relations = self._oa_invoice_offset_desired_relations(payload)
@@ -7166,7 +7400,9 @@ class Application:
             self._apply_oa_invoice_offset_pair_metadata(payload)
         if relation_mode == "internal_transfer_pair" and str(payload.get("type")) == "bank":
             self._apply_internal_transfer_pair_metadata(payload, relation)
+        self._apply_cash_special_pair_metadata(payload, relation)
         payload["available_actions"] = ["detail"]
+        self._apply_cash_special_available_actions(payload, relation)
         payload["handled_exception"] = False
         return payload
 
@@ -7729,6 +7965,90 @@ class Application:
         rows = self._resolve_rows_for_amount_check(row_ids, month=month, allow_direct=allow_direct)
         return self._amount_check_for_rows_by_type(self._rows_by_type(rows))
 
+    def _cash_special_row_ids(self, payload: dict[str, object]) -> list[str]:
+        raw_row_ids = payload.get("row_ids")
+        if raw_row_ids is None and payload.get("row_id") is not None:
+            raw_row_ids = [payload.get("row_id")]
+        return self._normalize_row_ids(list(raw_row_ids or []))
+
+    def _active_relation_for_cash_special(self, row_ids: list[str]) -> dict[str, object]:
+        if not row_ids:
+            raise ValueError("row_ids is required.")
+        relation = self._workbench_pair_relation_service.active_relations_for_row_ids(row_ids)
+        if not relation:
+            raise KeyError("workbench_pair_relation_not_found")
+        return relation[0]
+
+    @staticmethod
+    def _validate_cash_pass_through_relation(relation: dict[str, object]) -> None:
+        row_types = {str(row_type).strip() for row_type in list(relation.get("row_types") or []) if str(row_type).strip()}
+        if not {"oa", "bank"}.issubset(row_types):
+            raise ValueError("cash_pass_through requires a relation containing OA and bank rows.")
+        if "invoice" in row_types:
+            raise ValueError("cash_pass_through requires an OA and bank relation without invoice rows.")
+
+    @staticmethod
+    def _validate_cash_ticket_purchase_relation(relation: dict[str, object]) -> None:
+        row_types = {str(row_type).strip() for row_type in list(relation.get("row_types") or []) if str(row_type).strip()}
+        if not {"oa", "bank", "invoice"}.issubset(row_types):
+            raise ValueError("cash_ticket_purchase requires a relation containing OA, bank, and invoice rows.")
+
+    def _cash_special_cash_amount(self, payload: dict[str, object], relation: dict[str, object]) -> str:
+        if payload.get("cash_amount") is not None:
+            return self._required_non_negative_amount(payload.get("cash_amount"), "cash_amount")
+        bank_amounts: list[Decimal] = []
+        for row_id, row_type in zip(list(relation.get("row_ids") or []), list(relation.get("row_types") or [])):
+            if str(row_type) != "bank":
+                continue
+            try:
+                transaction = self._import_service.get_transaction(str(row_id))
+            except KeyError:
+                continue
+            bank_amounts.append(transaction.amount)
+        if len(bank_amounts) == 1:
+            return f"{bank_amounts[0].quantize(Decimal('0.01')):.2f}"
+        return "0.00"
+
+    @staticmethod
+    def _required_non_negative_amount(value: object, field_name: str) -> str:
+        if value is None:
+            raise ValueError(f"{field_name} is required.")
+        try:
+            amount = Decimal(str(value).replace(",", "")).quantize(Decimal("0.01"))
+        except Exception as exc:
+            raise ValueError(f"{field_name} must be a valid amount.") from exc
+        if amount < Decimal("0.00"):
+            raise ValueError(f"{field_name} must be greater than or equal to 0.")
+        return f"{amount:.2f}"
+
+    def _after_cash_special_relation_update(
+        self,
+        *,
+        month: str,
+        relation: dict[str, object],
+        request_id: str | None,
+        action_name: str,
+    ) -> None:
+        row_ids = self._normalize_row_ids(list(relation.get("row_ids") or []))
+        changed_scope_keys = list(
+            self._scope_keys_for_row_ids(
+                month=month,
+                row_ids=row_ids,
+                month_scope=str(relation.get("month_scope") or ""),
+            )
+        )
+        self._invalidate_workbench_read_model_scopes(changed_scope_keys)
+        self._schedule_workbench_pair_relation_persist(
+            changed_case_ids=[str(relation.get("case_id") or "")],
+            request_id=request_id,
+            action_name=action_name,
+        )
+        self._schedule_workbench_read_model_persist(
+            changed_scope_keys=changed_scope_keys,
+            request_id=request_id,
+            action_name=action_name,
+        )
+
     def _amount_check_for_rows_by_type(self, rows_by_type: dict[str, list[dict[str, object]]]) -> dict[str, object]:
         amount_check = self._workbench_amount_check_service.check(rows_by_type)
         if (
@@ -7799,6 +8119,7 @@ class Application:
                 "group_type": str(relation.get("relation_mode") or "manual_confirmed"),
                 "match_confidence": "high",
                 "reason": "relation_snapshot",
+                "special_metadata": self._serialize_value(relation.get("special_metadata") or {}),
                 "oa_rows": [],
                 "bank_rows": [],
                 "invoice_rows": [],
@@ -7810,6 +8131,8 @@ class Application:
                 row_type = row_types[index] if index < len(row_types) else self._row_type_for_row_id(row_id)
                 row = dict(rows_by_id.get(row_id) or {"id": row_id, "type": row_type})
                 row["case_id"] = str(relation.get("case_id") or "")
+                if isinstance(relation.get("special_metadata"), dict):
+                    row["special_metadata"] = self._serialize_value(relation.get("special_metadata") or {})
                 row["tags"] = self._derive_workbench_row_tags(row, group, relation)
                 if row_type == "oa":
                     group["oa_rows"].append(row)
@@ -8090,8 +8413,16 @@ class Application:
             add("内部往来")
         if relation_mode == "salary_personal_auto_match":
             add("工资")
+        special_metadata = relation.get("special_metadata") if isinstance(relation, dict) else None
+        special_type = str(special_metadata.get("special_type") or "") if isinstance(special_metadata, dict) else ""
+        if special_type == CASH_PASS_THROUGH_MODE:
+            add(CASH_TURNOVER_TAG)
+            add("过账")
+        if special_type == CASH_TICKET_PURCHASE_MODE:
+            add(CASH_TURNOVER_TAG)
+            add("买票")
         for tag in tags:
-            if tag in {"ETC", "ETC批量提交", "已关联ETC发票", "冲", "内部往来", "工资", "非税"}:
+            if tag in {"ETC", "ETC批量提交", "已关联ETC发票", "冲", "内部往来", "工资", "非税", CASH_TURNOVER_TAG, "过账", "买票"}:
                 add(tag)
         if any(str(row.get(key, "")).find("非税") >= 0 for key in ("summary", "remark", "reason", "purpose")):
             add("非税")
@@ -8438,6 +8769,55 @@ class Application:
             if isinstance(fields, dict):
                 fields["冲账标记"] = OA_INVOICE_OFFSET_TAG
                 fields["成本统计"] = "不计入"
+
+    @staticmethod
+    def _apply_cash_special_pair_metadata(payload: dict[str, object], relation: dict[str, object]) -> None:
+        special_metadata = relation.get("special_metadata")
+        if not isinstance(special_metadata, dict) or not special_metadata:
+            return
+        special_type = str(special_metadata.get("special_type") or "").strip()
+        if special_type not in {CASH_PASS_THROUGH_MODE, CASH_TICKET_PURCHASE_MODE}:
+            return
+        payload["special_metadata"] = dict(special_metadata)
+        tags = [str(tag).strip() for tag in list(payload.get("tags") or []) if str(tag).strip()]
+        for tag in (CASH_TURNOVER_TAG, "过账" if special_type == CASH_PASS_THROUGH_MODE else "买票"):
+            if tag not in tags:
+                tags.append(tag)
+        payload["tags"] = tags
+        cost_policy = str(special_metadata.get("cost_policy") or "").strip()
+        if cost_policy == "exclude_all":
+            payload["cost_excluded"] = True
+        for fields_key in ("summary_fields", "detail_fields"):
+            fields = payload.get(fields_key)
+            if isinstance(fields, dict):
+                fields["现金特殊处理"] = "过账" if special_type == CASH_PASS_THROUGH_MODE else "买票"
+                if cost_policy == "exclude_all":
+                    fields["成本统计"] = "不计入"
+                elif cost_policy == "include_ticket_cost_only":
+                    fields["成本统计"] = f"仅计入买票成本 {special_metadata.get('ticket_cost_amount') or '0.00'}"
+
+    @staticmethod
+    def _apply_cash_special_available_actions(payload: dict[str, object], relation: dict[str, object]) -> None:
+        if str(payload.get("type")) != "bank":
+            return
+        actions = [str(action).strip() for action in list(payload.get("available_actions") or []) if str(action).strip()]
+        if not actions:
+            actions = ["detail"]
+        row_types = {str(row_type).strip() for row_type in list(relation.get("row_types") or []) if str(row_type).strip()}
+        special_metadata = relation.get("special_metadata")
+        special_type = str(special_metadata.get("special_type") or "").strip() if isinstance(special_metadata, dict) else ""
+        tags = {str(tag).strip() for tag in list(payload.get("tags") or []) if str(tag).strip()}
+        if special_type in {CASH_PASS_THROUGH_MODE, CASH_TICKET_PURCHASE_MODE}:
+            if "cancel_cash_special" not in actions:
+                actions.append("cancel_cash_special")
+        elif CASH_TURNOVER_TAG in tags:
+            if {"oa", "bank", "invoice"}.issubset(row_types):
+                if "confirm_cash_ticket_purchase" not in actions:
+                    actions.append("confirm_cash_ticket_purchase")
+            elif {"oa", "bank"}.issubset(row_types) and "invoice" not in row_types:
+                if "confirm_cash_pass_through" not in actions:
+                    actions.append("confirm_cash_pass_through")
+        payload["available_actions"] = actions
 
     def _apply_internal_transfer_pair_metadata(self, payload: dict[str, object], relation: dict[str, object]) -> None:
         row_id = str(payload.get("id", ""))

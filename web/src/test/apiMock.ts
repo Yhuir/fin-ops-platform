@@ -1100,6 +1100,15 @@ function toGroupedWorkbenchPayload(payload: {
       open_count: openGroups.length,
       exception_count: openGroups.filter((group) => groupHasDanger(group)).length,
     },
+    invoice_inventory: {
+      system_total: 9,
+      manual_import_total: 7,
+      workbench_visible_total: 4,
+      hidden_submitted_etc_total: 2,
+      extra_etc_total: 1,
+      etc_summary_batch_count: 3,
+      oa_attachment_total: 5,
+    },
     paired: { groups: pairedGroups },
     open: { groups: openGroups },
   };

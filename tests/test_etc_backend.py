@@ -896,6 +896,26 @@ class EtcApiTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._etc_service.oa_client = FakeEtcOAClient()
+            manual_preview = app._import_service.preview_import(
+                batch_type=BatchType.INPUT_INVOICE,
+                source_name="input-invoices.xlsx",
+                imported_by="finance",
+                rows=[
+                    {
+                        "digital_invoice_no": "ETC001",
+                        "counterparty_name": "云南高速公路联网收费管理有限公司",
+                        "seller_name": "云南高速公路联网收费管理有限公司",
+                        "seller_tax_no": "915300007194052520",
+                        "buyer_name": "云南溯源科技有限公司",
+                        "buyer_tax_no": "915300007194052521",
+                        "amount": "13.07",
+                        "total_with_tax": "13.07",
+                        "tax_amount": "0.39",
+                        "invoice_date": "2026-02-27",
+                    }
+                ],
+            )
+            app._import_service.confirm_import(manual_preview.id)
             body, headers = multipart({"outer.zip": etc_zip(["ETC001", "ETC002"], nested=True)})
 
             preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
@@ -956,6 +976,19 @@ class EtcApiTests(unittest.TestCase):
             detail_payload = json.loads(detail_response.body)
 
         self.assertEqual(len(invoice_rows), 1)
+        self.assertEqual(payload["summary"]["invoice_count"], 0)
+        self.assertEqual(
+            payload["invoice_inventory"],
+            {
+                "system_total": 2,
+                "manual_import_total": 1,
+                "workbench_visible_total": 0,
+                "hidden_submitted_etc_total": 2,
+                "extra_etc_total": 1,
+                "etc_summary_batch_count": 1,
+                "oa_attachment_total": 0,
+            },
+        )
         summary_row = invoice_rows[0]
         self.assertEqual(summary_row["source_kind"], "etc_invoice_summary")
         self.assertEqual(summary_row["seller_name"], "ETC发票 2 张")

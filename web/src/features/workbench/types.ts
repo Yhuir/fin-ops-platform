@@ -24,6 +24,7 @@ export type WorkbenchRecord = {
   actionVariant: WorkbenchActionVariant;
   availableActions: string[];
   tags?: string[];
+  specialMetadata?: Record<string, unknown>;
 };
 
 export type WorkbenchProjectSetting = {
@@ -101,6 +102,7 @@ export type WorkbenchCandidateGroup = {
   reason: string;
   rows: WorkbenchPaneRows;
   canWithdraw?: boolean;
+  specialMetadata?: Record<string, unknown>;
 };
 
 export type WorkbenchAmountSummaryTotals = {
@@ -143,6 +145,16 @@ export type WorkbenchSummary = {
   totalCount: number;
 };
 
+export type WorkbenchInvoiceInventory = {
+  systemTotal: number;
+  manualImportTotal: number;
+  workbenchVisibleTotal: number;
+  hiddenSubmittedEtcTotal: number;
+  extraEtcTotal: number;
+  etcSummaryBatchCount: number;
+  oaAttachmentTotal: number;
+};
+
 export type WorkbenchOaStatus = {
   code: "idle" | "loading" | "ready" | "error";
   message: string;
@@ -164,6 +176,7 @@ export type WorkbenchData = {
   month: string;
   oaStatus: WorkbenchOaStatus;
   summary: WorkbenchSummary;
+  invoiceInventory: WorkbenchInvoiceInventory;
   paired: {
     groups: WorkbenchCandidateGroup[];
   };

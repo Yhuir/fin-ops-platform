@@ -19,6 +19,7 @@ import type {
   WorkbenchColumnLayouts,
   WorkbenchOaImportOption,
   WorkbenchOaSyncStatus,
+  WorkbenchInvoiceInventory,
 } from "./types";
 
 export type WorkbenchBootstrapProgress = {
@@ -77,6 +78,7 @@ type ApiWorkbenchRow = {
   detail_fields?: Record<string, unknown>;
   tags?: string[];
   cost_excluded?: boolean | null;
+  special_metadata?: Record<string, unknown> | null;
 };
 
 type ApiWorkbenchPayload = {
@@ -85,6 +87,7 @@ type ApiWorkbenchPayload = {
     code?: string;
     message?: string;
   };
+  invoice_inventory?: ApiWorkbenchInvoiceInventory;
   summary: {
     oa_count: number;
     bank_count: number;
@@ -99,6 +102,16 @@ type ApiWorkbenchPayload = {
   open: {
     groups: ApiWorkbenchGroup[];
   };
+};
+
+type ApiWorkbenchInvoiceInventory = {
+  system_total?: number | null;
+  manual_import_total?: number | null;
+  workbench_visible_total?: number | null;
+  hidden_submitted_etc_total?: number | null;
+  extra_etc_total?: number | null;
+  etc_summary_batch_count?: number | null;
+  oa_attachment_total?: number | null;
 };
 
 type ApiWorkbenchOaSyncStatus = {
@@ -196,6 +209,7 @@ type ApiWorkbenchGroup = {
   bank_rows: ApiWorkbenchRow[];
   invoice_rows: ApiWorkbenchRow[];
   can_withdraw?: boolean;
+  special_metadata?: Record<string, unknown> | null;
 };
 
 type ApiWorkbenchAmountSummary = {
@@ -295,6 +309,31 @@ type CancelExceptionPayload = {
   month: string;
   rowIds: string[];
   comment?: string;
+};
+
+type ConfirmCashPassThroughPayload = {
+  month: string;
+  rowIds: string[];
+  cashAmount?: string;
+  note?: string;
+};
+
+type ConfirmCashTicketPurchasePayload = {
+  month: string;
+  rowIds: string[];
+  cashAmount: string;
+  ticketCostAmount: string;
+  projectId?: string;
+  projectName?: string;
+  expenseType?: string;
+  expenseContent?: string;
+  note?: string;
+};
+
+type CancelCashSpecialPayload = {
+  month: string;
+  rowIds: string[];
+  note?: string;
 };
 
 type WorkbenchSettingsUpdatePayload = {
@@ -578,6 +617,7 @@ function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
     actionVariant: rowActionVariant(row),
     availableActions: row.available_actions ?? [],
     tags: Array.isArray(row.tags) ? row.tags.map((tag) => String(tag).trim()).filter(Boolean) : [],
+    specialMetadata: row.special_metadata && typeof row.special_metadata === "object" ? row.special_metadata : undefined,
   };
 }
 
@@ -600,6 +640,7 @@ function mapGroup(group: ApiWorkbenchGroup): WorkbenchCandidateGroup {
       bank: group.bank_rows.map(mapRow),
       invoice: group.invoice_rows.map(mapRow),
     },
+    specialMetadata: group.special_metadata && typeof group.special_metadata === "object" ? group.special_metadata : undefined,
     canWithdraw: Boolean(
       group.can_withdraw
       || [...group.oa_rows, ...group.bank_rows, ...group.invoice_rows].some((row) =>
@@ -653,6 +694,22 @@ function mapSummary(summary: ApiWorkbenchPayload["summary"]): WorkbenchSummary {
     openCount: summary.open_count,
     exceptionCount: summary.exception_count,
     totalCount: summary.oa_count + summary.bank_count + summary.invoice_count,
+  };
+}
+
+function mapInventoryCount(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function mapInvoiceInventory(inventory?: ApiWorkbenchInvoiceInventory): WorkbenchInvoiceInventory {
+  return {
+    systemTotal: mapInventoryCount(inventory?.system_total),
+    manualImportTotal: mapInventoryCount(inventory?.manual_import_total),
+    workbenchVisibleTotal: mapInventoryCount(inventory?.workbench_visible_total),
+    hiddenSubmittedEtcTotal: mapInventoryCount(inventory?.hidden_submitted_etc_total),
+    extraEtcTotal: mapInventoryCount(inventory?.extra_etc_total),
+    etcSummaryBatchCount: mapInventoryCount(inventory?.etc_summary_batch_count),
+    oaAttachmentTotal: mapInventoryCount(inventory?.oa_attachment_total),
   };
 }
 
@@ -973,6 +1030,7 @@ export async function fetchWorkbenchWithProgress(
     month: payload.month,
     oaStatus: mapOaStatus(payload.oa_status),
     summary: mapSummary(payload.summary),
+    invoiceInventory: mapInvoiceInventory(payload.invoice_inventory),
     paired: {
       groups: payload.paired.groups.map(mapGroup),
     },
@@ -1383,6 +1441,49 @@ export async function cancelWorkbenchException(payload: CancelExceptionPayload) 
       month: payload.month,
       row_ids: payload.rowIds,
       comment: payload.comment,
+    }),
+  });
+}
+
+export async function confirmWorkbenchCashPassThrough(payload: ConfirmCashPassThroughPayload) {
+  return requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/confirm-cash-pass-through", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      month: payload.month,
+      row_ids: payload.rowIds,
+      cash_amount: payload.cashAmount,
+      note: payload.note,
+    }),
+  });
+}
+
+export async function confirmWorkbenchCashTicketPurchase(payload: ConfirmCashTicketPurchasePayload) {
+  return requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/confirm-cash-ticket-purchase", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      month: payload.month,
+      row_ids: payload.rowIds,
+      cash_amount: payload.cashAmount,
+      ticket_cost_amount: payload.ticketCostAmount,
+      project_id: payload.projectId,
+      project_name: payload.projectName,
+      expense_type: payload.expenseType,
+      expense_content: payload.expenseContent,
+      note: payload.note,
+    }),
+  });
+}
+
+export async function cancelWorkbenchCashSpecial(payload: CancelCashSpecialPayload) {
+  return requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/cancel-cash-special", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      month: payload.month,
+      row_ids: payload.rowIds,
+      note: payload.note,
     }),
   });
 }

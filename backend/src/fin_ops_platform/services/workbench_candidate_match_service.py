@@ -171,6 +171,10 @@ class WorkbenchCandidateMatchService:
             "conflict_candidate_keys": cls._normalize_optional_ids(candidate.get("conflict_candidate_keys")),
             "generated_at": str(candidate.get("generated_at") or cls._timestamp()),
             "source_versions": deepcopy(source_versions if isinstance(source_versions, dict) else {}),
+            "tags": cls._normalize_optional_texts(candidate.get("tags")),
+            "special_metadata": deepcopy(
+                candidate.get("special_metadata") if isinstance(candidate.get("special_metadata"), dict) else {}
+            ),
         }
 
     @staticmethod
@@ -198,6 +202,17 @@ class WorkbenchCandidateMatchService:
             resolved_row_id = str(row_id or "").strip()
             if resolved_row_id and resolved_row_id not in normalized:
                 normalized.append(resolved_row_id)
+        return normalized
+
+    @staticmethod
+    def _normalize_optional_texts(values: Any) -> list[str]:
+        if not isinstance(values, list):
+            return []
+        normalized: list[str] = []
+        for value in values:
+            resolved_value = str(value or "").strip()
+            if resolved_value and resolved_value not in normalized:
+                normalized.append(resolved_value)
         return normalized
 
     @staticmethod

@@ -12,7 +12,12 @@ import Typography from "@mui/material/Typography";
 import ResizableTriPane, { type WorkbenchPane } from "./ResizableTriPane";
 import { useResizablePanes } from "../../hooks/useResizablePanes";
 import type { WorkbenchPaneTimeFilter, WorkbenchZoneDisplayState } from "../../features/workbench/groupDisplayModel";
-import type { WorkbenchCandidateGroup, WorkbenchColumnLayouts, WorkbenchRecord } from "../../features/workbench/types";
+import type {
+  WorkbenchCandidateGroup,
+  WorkbenchColumnLayouts,
+  WorkbenchInvoiceInventory,
+  WorkbenchRecord,
+} from "../../features/workbench/types";
 import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import type { WorkbenchInlineAction } from "./RowActions";
 import type { WorkbenchColumnDropPosition } from "../../features/workbench/columnLayout";
@@ -25,6 +30,7 @@ type WorkbenchZoneProps = {
   panes: WorkbenchPane[];
   groups?: WorkbenchCandidateGroup[];
   sourceGroups?: WorkbenchCandidateGroup[];
+  invoiceInventory?: WorkbenchInvoiceInventory;
   displayState: WorkbenchZoneDisplayState;
   columnLayouts?: WorkbenchColumnLayouts;
   isExpanded: boolean;
@@ -89,6 +95,7 @@ function WorkbenchZone({
   panes,
   groups,
   sourceGroups,
+  invoiceInventory,
   displayState,
   columnLayouts,
   isExpanded,
@@ -287,6 +294,7 @@ function WorkbenchZone({
         getRowState={getRowState}
         groups={groups}
         highlightedRowId={highlightedRowId}
+        invoiceInventory={invoiceInventory}
         onClearPaneSearch={onClearPaneSearch}
         onClosePaneSearch={onClosePaneSearch}
         onOpenDetail={onOpenDetail}

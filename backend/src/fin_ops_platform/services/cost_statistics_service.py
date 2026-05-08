@@ -17,6 +17,8 @@ ZERO = Decimal("0.00")
 EXCLUDED_COST_EXPENSE_TYPES = {"借款", "还款"}
 OA_INVOICE_OFFSET_AUTO_MATCH_CODE = "oa_invoice_offset_auto_match"
 OA_INVOICE_OFFSET_TAG = "冲"
+CASH_PASS_THROUGH_MODE = "cash_pass_through"
+CASH_TICKET_PURCHASE_MODE = "cash_ticket_purchase"
 PROJECT_SCOPE_ACTIVE = "active"
 PROJECT_SCOPE_ALL = "all"
 COST_LINKED_RELATION_CODES = {"fully_linked", "automatic_match"}
@@ -653,6 +655,15 @@ class CostStatisticsService:
                 bank_rows = list(group.get("bank_rows") or [])
                 if not oa_rows or not bank_rows:
                     continue
+                special_metadata = self._group_special_metadata(group)
+                special_policy = str(special_metadata.get("cost_policy") or "").strip()
+                if special_policy == "exclude_all":
+                    continue
+                if special_policy == "include_ticket_cost_only":
+                    ticket_entry = self._build_cash_ticket_cost_entry(group, oa_rows, bank_rows, special_metadata)
+                    if ticket_entry is not None:
+                        entries.append(ticket_entry)
+                    continue
                 context = self._resolve_group_cost_context(oa_rows)
                 if context is None:
                     continue
@@ -678,6 +689,69 @@ class CostStatisticsService:
                         }
                     )
         return self._filter_entries_by_project_scope(entries, normalized_project_scope)
+
+    @staticmethod
+    def _group_special_metadata(group: dict[str, Any]) -> dict[str, Any]:
+        metadata = group.get("special_metadata")
+        if isinstance(metadata, dict) and metadata:
+            return dict(metadata)
+        for row in [
+            *list(group.get("oa_rows") or []),
+            *list(group.get("bank_rows") or []),
+            *list(group.get("invoice_rows") or []),
+        ]:
+            row_metadata = row.get("special_metadata")
+            if isinstance(row_metadata, dict) and row_metadata:
+                return dict(row_metadata)
+        return {}
+
+    def _build_cash_ticket_cost_entry(
+        self,
+        group: dict[str, Any],
+        oa_rows: list[dict[str, Any]],
+        bank_rows: list[dict[str, Any]],
+        special_metadata: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        if str(special_metadata.get("special_type") or "").strip() != CASH_TICKET_PURCHASE_MODE:
+            return None
+        amount = self._parse_decimal(special_metadata.get("ticket_cost_amount"))
+        if amount in (None, ZERO):
+            return None
+        bank_row = next((row for row in bank_rows if self._extract_outflow_amount(row) is not None), None)
+        if bank_row is None:
+            return None
+        context = self._resolve_group_cost_context(oa_rows) or {}
+        project_name = self._clean_text(special_metadata.get("project_name")) or str(context.get("project_name") or "")
+        if not project_name:
+            return None
+        return {
+            "group_id": str(group.get("group_id", "")),
+            "transaction_id": str(bank_row["id"]),
+            "trade_time": str(bank_row.get("trade_time") or bank_row.get("pay_receive_time") or ""),
+            "counterparty_name": str(bank_row.get("counterparty_name") or ""),
+            "payment_account_label": str(bank_row.get("payment_account_label") or ""),
+            "direction": str(bank_row.get("direction") or "支出"),
+            "remark": str(bank_row.get("remark") or ""),
+            "project_name": project_name,
+            "project_id": self._clean_text(special_metadata.get("project_id")) or str(context.get("project_id") or ""),
+            "expense_type": self._clean_text(special_metadata.get("expense_type")) or str(context.get("expense_type") or "现金往来"),
+            "expense_content": self._clean_text(special_metadata.get("expense_content")) or "买票成本",
+            "oa_applicant": str(context.get("oa_applicant") or self._cash_special_applicant(oa_rows) or "—"),
+            "amount_decimal": amount,
+        }
+
+    @classmethod
+    def _cash_special_applicant(cls, oa_rows: list[dict[str, Any]]) -> str:
+        for row in oa_rows:
+            applicant = cls._clean_text(row.get("applicant"))
+            if applicant:
+                return applicant
+            detail_fields = row.get("detail_fields")
+            if isinstance(detail_fields, dict):
+                applicant = cls._clean_text(detail_fields.get("申请人"))
+                if applicant:
+                    return applicant
+        return ""
 
     @staticmethod
     def _is_linked_cost_open_group(group: dict[str, Any]) -> bool:

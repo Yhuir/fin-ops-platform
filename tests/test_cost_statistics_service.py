@@ -398,6 +398,121 @@ class CostStatisticsServiceTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["transaction_count"], 0)
         self.assertEqual(payload["summary"]["total_amount"], "0.00")
 
+    def test_cash_turnover_hint_only_group_keeps_normal_cost_statistics(self) -> None:
+        from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
+
+        payloads = {
+            "2026-03": {
+                "month": "2026-03",
+                "summary": {},
+                "paired": {
+                    "groups": [
+                        self._project_scope_group(
+                            group_id="group-cash-hint",
+                            bank_id="txn-cost-001",
+                            project_name="现金往来提示项目",
+                            amount="1000.00",
+                            special_metadata={
+                                "special_type": "cash_turnover_detected",
+                                "cost_policy": "hint_only",
+                                "cost_excluded": False,
+                            },
+                        )
+                    ]
+                },
+                "open": {"groups": []},
+            }
+        }
+        service = CostStatisticsService(
+            self.import_service,
+            grouped_workbench_loader=lambda month: payloads[month],
+            row_detail_loader=lambda row_id: self.row_details[row_id],
+        )
+
+        payload = service.get_explorer("2026-03", project_scope="all")
+
+        self.assertEqual(payload["summary"]["transaction_count"], 1)
+        self.assertEqual(payload["summary"]["total_amount"], "1,000.00")
+
+    def test_cash_pass_through_confirmed_group_is_excluded_from_cost_statistics(self) -> None:
+        from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
+
+        payloads = {
+            "2026-03": {
+                "month": "2026-03",
+                "summary": {},
+                "paired": {
+                    "groups": [
+                        self._project_scope_group(
+                            group_id="group-cash-pass-through",
+                            bank_id="txn-cost-001",
+                            project_name="过账项目",
+                            amount="1000.00",
+                            special_metadata={
+                                "special_type": "cash_pass_through",
+                                "cost_policy": "exclude_all",
+                                "cash_amount": "1000.00",
+                            },
+                        )
+                    ]
+                },
+                "open": {"groups": []},
+            }
+        }
+        service = CostStatisticsService(
+            self.import_service,
+            grouped_workbench_loader=lambda month: payloads[month],
+            row_detail_loader=lambda row_id: self.row_details[row_id],
+        )
+
+        payload = service.get_explorer("2026-03", project_scope="all")
+
+        self.assertEqual(payload["summary"]["transaction_count"], 0)
+        self.assertEqual(payload["summary"]["total_amount"], "0.00")
+
+    def test_cash_ticket_purchase_counts_only_confirmed_ticket_cost(self) -> None:
+        from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
+
+        payloads = {
+            "2026-03": {
+                "month": "2026-03",
+                "summary": {},
+                "paired": {
+                    "groups": [
+                        self._project_scope_group(
+                            group_id="group-cash-ticket",
+                            bank_id="txn-cost-001",
+                            project_name="原始项目",
+                            amount="1000.00",
+                            special_metadata={
+                                "special_type": "cash_ticket_purchase",
+                                "cost_policy": "include_ticket_cost_only",
+                                "cash_amount": "1000.00",
+                                "ticket_cost_amount": "120.00",
+                                "project_name": "买票项目",
+                                "expense_type": "现金往来",
+                                "expense_content": "买票成本",
+                            },
+                        )
+                    ]
+                },
+                "open": {"groups": []},
+            }
+        }
+        service = CostStatisticsService(
+            self.import_service,
+            grouped_workbench_loader=lambda month: payloads[month],
+            row_detail_loader=lambda row_id: self.row_details[row_id],
+        )
+
+        payload = service.get_explorer("2026-03", project_scope="all")
+
+        self.assertEqual(payload["summary"]["transaction_count"], 1)
+        self.assertEqual(payload["summary"]["total_amount"], "120.00")
+        self.assertEqual(payload["time_rows"][0]["project_name"], "买票项目")
+        self.assertEqual(payload["time_rows"][0]["expense_type"], "现金往来")
+        self.assertEqual(payload["time_rows"][0]["expense_content"], "买票成本")
+
     def test_project_scope_filters_completed_projects_by_name_and_keeps_unknown_projects_active(self) -> None:
         from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
 
@@ -532,12 +647,14 @@ class CostStatisticsServiceTests(unittest.TestCase):
         bank_id: str,
         project_name: str,
         amount: str,
+        special_metadata: dict[str, object] | None = None,
     ) -> dict[str, object]:
         return {
             "group_id": group_id,
             "group_type": "manual_confirmed",
             "match_confidence": "high",
             "reason": "confirmed",
+            "special_metadata": dict(special_metadata or {}),
             "oa_rows": [
                 {
                     "id": f"oa-{bank_id}",

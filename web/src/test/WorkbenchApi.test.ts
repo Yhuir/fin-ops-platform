@@ -61,6 +61,109 @@ describe("workbench api bank amount mapping", () => {
     vi.restoreAllMocks();
   });
 
+  test("maps invoice inventory stats from the workbench payload", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "2026-03",
+          summary: {
+            oa_count: 0,
+            bank_count: 0,
+            invoice_count: 1,
+            paired_count: 0,
+            open_count: 1,
+            exception_count: 0,
+          },
+          invoice_inventory: {
+            system_total: 8,
+            manual_import_total: 5,
+            workbench_visible_total: 3,
+            hidden_submitted_etc_total: 2,
+            extra_etc_total: 1,
+            etc_summary_batch_count: 4,
+            oa_attachment_total: 6,
+          },
+          paired: { groups: [] },
+          open: {
+            groups: [
+              {
+                group_id: "CASE-202603-INVENTORY",
+                group_type: "candidate",
+                match_confidence: "medium",
+                reason: "发票库存统计不依赖可见行",
+                oa_rows: [],
+                bank_rows: [],
+                invoice_rows: [
+                  {
+                    id: "iv-visible-001",
+                    type: "invoice",
+                    source_kind: "oa_attachment_invoice",
+                    seller_name: "可见 OA 附件票",
+                    buyer_name: "杭州溯源科技有限公司",
+                    issue_date: "2026-03-20",
+                    amount: "100.00",
+                    tax_rate: "6%",
+                    tax_amount: "6.00",
+                    total_with_tax: "106.00",
+                    invoice_type: "进项专票",
+                    invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
+                    available_actions: ["detail"],
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const payload = await fetchWorkbench("2026-03");
+
+    expect(payload.invoiceInventory).toEqual({
+      systemTotal: 8,
+      manualImportTotal: 5,
+      workbenchVisibleTotal: 3,
+      hiddenSubmittedEtcTotal: 2,
+      extraEtcTotal: 1,
+      etcSummaryBatchCount: 4,
+      oaAttachmentTotal: 6,
+    });
+  });
+
+  test("defaults invoice inventory stats when older workbench payloads omit them", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "2026-03",
+          summary: {
+            oa_count: 0,
+            bank_count: 0,
+            invoice_count: 0,
+            paired_count: 0,
+            open_count: 0,
+            exception_count: 0,
+          },
+          paired: { groups: [] },
+          open: { groups: [] },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const payload = await fetchWorkbench("2026-03");
+
+    expect(payload.invoiceInventory).toEqual({
+      systemTotal: 0,
+      manualImportTotal: 0,
+      workbenchVisibleTotal: 0,
+      hiddenSubmittedEtcTotal: 0,
+      extraEtcTotal: 0,
+      etcSummaryBatchCount: 0,
+      oaAttachmentTotal: 0,
+    });
+  });
+
   test("maps inflow bank rows into the unified amount column from credit_amount", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
