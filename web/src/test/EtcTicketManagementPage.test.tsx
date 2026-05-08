@@ -10,7 +10,7 @@ afterEach(() => {
 });
 
 describe("ETC ticket management page", () => {
-  test("refreshes invoice list when ETC import background job completes", async () => {
+  test("refreshes batch list when ETC import background job completes", async () => {
     const fetchMock = installMockApiFetch({
       backgroundJobs: [
         {
@@ -37,109 +37,78 @@ describe("ETC ticket management page", () => {
     await screen.findByTestId("etc-ticket-management-page");
 
     await waitFor(() => {
-      const invoiceListCalls = fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/etc/invoices"));
-      expect(invoiceListCalls.length).toBeGreaterThanOrEqual(2);
+      const batchListCalls = fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/etc/batches?"));
+      expect(batchListCalls.length).toBeGreaterThanOrEqual(2);
     });
   });
 
-  test("navigation opens ETC page and displays status and current list counts", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch();
-    renderAppAt("/");
-
-    await user.click(await screen.findByRole("link", { name: "ETC票据管理" }));
+  test("unsubmitted mode shows batch list and whole-batch OA submit action", async () => {
+    const fetchMock = installMockApiFetch();
+    renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     expect(within(page).getByRole("heading", { name: "ETC票据管理" })).toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "未提交 3" })).toBeInTheDocument();
+    expect(await within(page).findByRole("button", { name: "未提交 2" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "已提交 1" })).toBeInTheDocument();
-    expect(within(page).getByRole("heading", { name: "未提交发票 3 张" })).toBeInTheDocument();
-    expect(within(page).getByRole("heading", { name: "待提交 0 张" })).toBeInTheDocument();
-  });
-
-  test("adds unsubmitted invoices to basket once, totals amount, and moves selected items back", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch();
-    renderAppAt("/etc-tickets");
-
-    const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByRole("list", { name: "ETC发票列表" })).toBeInTheDocument();
-    await user.click(await within(page).findByLabelText("选择发票 ETC-2026-001"));
-    await user.click(within(page).getByRole("button", { name: "加入提交篮子" }));
-    await user.click(within(page).getByRole("button", { name: "加入提交篮子" }));
-
-    expect(within(page).getByRole("list", { name: "提交篮子发票列表" })).toBeInTheDocument();
-    expect(within(page).getByRole("heading", { name: "待提交 1 张" })).toBeInTheDocument();
-    expect(within(page).getByText("合计金额 13.07")).toBeInTheDocument();
-
-    await user.click(within(page).getByLabelText("从提交篮子选择发票 ETC-2026-001"));
-    await user.click(within(page).getByRole("button", { name: "移回未提交" }));
-
-    expect(within(page).getByRole("heading", { name: "待提交 0 张" })).toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "提交OA支付申请" })).toBeDisabled();
-  });
-
-  test("blocks OA draft creation when basket has missing PDF or XML attachment", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch();
-    renderAppAt("/etc-tickets");
-
-    const page = await screen.findByTestId("etc-ticket-management-page");
-    await user.click(await within(page).findByLabelText("选择发票 ETC-2026-003"));
-    await user.click(within(page).getByRole("button", { name: "加入提交篮子" }));
-
-    expect(within(page).getByText("提交篮子存在缺PDF或缺XML的发票，补齐附件后才能创建 OA 草稿。")).toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "提交OA支付申请" })).toBeDisabled();
-  });
-
-  test("submitted invoices are muted, cannot enter basket, and can be revoked after confirmation", async () => {
-    const user = userEvent.setup();
-    const fetchMock = installMockApiFetch();
-    renderAppAt("/etc-tickets");
-
-    const page = await screen.findByTestId("etc-ticket-management-page");
-    await user.click(within(page).getByRole("button", { name: "已提交 1" }));
-
-    expect(within(page).getByRole("heading", { name: "已提交发票 1 张" })).toBeInTheDocument();
-    expect(within(page).getByTestId("etc-invoice-row-etc-inv-004")).toHaveClass("submitted");
-    expect(within(page).queryByRole("button", { name: "加入提交篮子" })).not.toBeInTheDocument();
-
-    await user.click(within(page).getByLabelText("选择发票 ETC-2026-004"));
-    await user.click(within(page).getByRole("button", { name: "撤销提交状态" }));
-    expect(await screen.findByRole("dialog", { name: "撤销提交状态" })).toHaveTextContent("只修改 fin-ops 内部 ETC 发票状态");
-    await user.click(screen.getByRole("button", { name: "确认撤销" }));
+    expect(within(page).getByRole("list", { name: "ETC批次列表" })).toBeInTheDocument();
+    expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("ETC-2026-03-A");
+    expect(within(page).getByRole("button", { name: "提交OA支付申请" })).toBeEnabled();
+    expect(within(page).getAllByText("ETC-2026-03-A").length).toBeGreaterThanOrEqual(1);
+    expect(await within(page).findByText("ETC-2026-001")).toBeInTheDocument();
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/etc/invoices/revoke-submitted",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ invoiceIds: ["etc-inv-004"] }),
-      }),
+      "/api/etc/batches?status=unsubmitted&page=1&page_size=100",
+      expect.objectContaining({ method: "GET" }),
     );
-    expect(await within(page).findByRole("button", { name: "未提交 4" })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/etc/invoices?"))).toBe(false);
   });
 
-  test("links to the standalone ETC invoice import page instead of importing ETC zip files directly", async () => {
+  test("submitted mode hides submit action and shows OA information", async () => {
     const user = userEvent.setup();
-    const fetchMock = installMockApiFetch();
+    installMockApiFetch();
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(within(page).queryByLabelText("导入ETC zip")).not.toBeInTheDocument();
-    expect(within(page).queryByRole("button", { name: "导入zip" })).not.toBeInTheDocument();
-    expect(within(page).queryByRole("region", { name: "导入摘要" })).not.toBeInTheDocument();
+    await user.click(await within(page).findByRole("button", { name: "已提交 1" }));
 
-    await user.click(within(page).getByRole("link", { name: "导入 ETC 发票" }));
-
-    expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
-    expect(window.location.pathname).toBe("/imports/etc-invoices");
-    expect(fetchMock).not.toHaveBeenCalledWith(
-      "/api/etc/import",
-      expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
-    );
+    await waitFor(() => expect(within(page).getAllByText("ETC-HIST-2026-01").length).toBeGreaterThanOrEqual(1));
+    expect(within(page).queryByRole("button", { name: "提交OA支付申请" })).not.toBeInTheDocument();
+    expect(within(page).getAllByText(/刘树刚 \/ 2026-02-02 \/ OA 31.80/).length).toBeGreaterThanOrEqual(1);
+    expect(within(page).getByRole("button", { name: "撤销提交状态" })).toBeEnabled();
   });
 
-  test("creates OA draft, opens draft URL, and refreshes after result confirmation", async () => {
+  test("clicking a batch updates the detail grid", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    expect(await within(page).findByText("ETC-2026-001")).toBeInTheDocument();
+    expect(within(page).queryByText("ETC-2026-003")).not.toBeInTheDocument();
+
+    await user.click(within(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-02")).getByRole("button"));
+
+    await waitFor(() => expect(within(page).getAllByText("ETC-2026-03-B").length).toBeGreaterThanOrEqual(1));
+    await waitFor(() => {
+      expect(within(page).getByText("ETC-2026-003")).toBeInTheDocument();
+      expect(within(page).queryByText("ETC-2026-001")).not.toBeInTheDocument();
+    });
+  });
+
+  test("removes basket wording and old partial-selection actions", async () => {
+    installMockApiFetch();
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    await within(page).findByRole("list", { name: "ETC批次列表" });
+
+    expect(within(page).queryByText("提交篮子")).not.toBeInTheDocument();
+    expect(within(page).queryByText("加入提交篮子")).not.toBeInTheDocument();
+    expect(within(page).queryByText("移回未提交")).not.toBeInTheDocument();
+    expect(within(page).queryByRole("checkbox")).not.toBeInTheDocument();
+  });
+
+  test("creates OA draft through the selected batch endpoint and refreshes after confirmation", async () => {
     const user = userEvent.setup();
     const openedWindow = {
       closed: false,
@@ -153,59 +122,30 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    await user.click(await within(page).findByLabelText("选择发票 ETC-2026-001"));
-    await user.click(within(page).getByRole("button", { name: "加入提交篮子" }));
+    await waitFor(() => expect(within(page).getAllByText("ETC-2026-03-A").length).toBeGreaterThanOrEqual(1));
     await user.click(within(page).getByRole("button", { name: "提交OA支付申请" }));
 
     const dialog = await screen.findByRole("dialog", { name: "创建OA支付申请草稿" });
-    expect(dialog).toHaveTextContent("将创建 OA 支付申请草稿，并打开 OA 支付申请列表");
-    expect(dialog).toHaveTextContent("app 不会自动提交 OA");
-    expect(dialog).toHaveTextContent("需要在 OA 中检查当前 ETC 批次草稿并手动提交");
+    expect(dialog).toHaveTextContent("将为当前 ETC 批次创建 OA 支付申请草稿");
+    expect(dialog).toHaveTextContent("当前批次：ETC-2026-03-A");
     await user.click(within(dialog).getByRole("button", { name: "确认创建草稿" }));
 
     expect(openMock).toHaveBeenCalledWith("about:blank", "_blank");
     await waitFor(() => expect(openedWindow.location.href).toContain("https://oa.example.test/oa/#/normal/forms/form/2"));
-    expect(openedWindow.location.href).not.toContain("finOpsEtcAutoEdit");
-    expect(openedWindow.location.href).not.toContain("conditions");
-    expect(openedWindow.location.href).not.toContain("id=");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/etc/batches/etc-batch-unsubmitted-01/draft",
+      expect.objectContaining({ method: "POST" }),
+    );
+
     const resultDialog = await screen.findByRole("dialog", { name: "OA提交结果确认" });
-    expect(resultDialog).toHaveTextContent("OA 草稿已创建，并已打开支付申请列表");
-    expect(resultDialog).toHaveTextContent("批次号：etc_20260503_001");
-    expect(within(resultDialog).getByRole("button", { name: "确认已提交OA" })).toBeInTheDocument();
-    expect(within(resultDialog).getByRole("button", { name: "未提交OA" })).toBeInTheDocument();
-
+    expect(resultDialog).toHaveTextContent("批次号：ETC-2026-03-A");
     await user.click(within(resultDialog).getByRole("button", { name: "确认已提交OA" }));
+
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/etc/batches/etc_batch_001/confirm-submitted",
+      "/api/etc/batches/etc-batch-unsubmitted-01/confirm-submitted",
       expect.objectContaining({ method: "POST" }),
     );
-    expect(await within(page).findByRole("button", { name: "未提交 2" })).toBeInTheDocument();
+    expect(await within(page).findByRole("button", { name: "未提交 1" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "已提交 2" })).toBeInTheDocument();
-  });
-
-  test("marking the OA draft as not submitted keeps invoice unsubmitted", async () => {
-    const user = userEvent.setup();
-    vi.stubGlobal("open", vi.fn(() => ({
-      closed: false,
-      close: vi.fn(),
-      location: { href: "about:blank" },
-      opener: {},
-    })));
-    const fetchMock = installMockApiFetch();
-    renderAppAt("/etc-tickets");
-
-    const page = await screen.findByTestId("etc-ticket-management-page");
-    await user.click(await within(page).findByLabelText("选择发票 ETC-2026-002"));
-    await user.click(within(page).getByRole("button", { name: "加入提交篮子" }));
-    await user.click(within(page).getByRole("button", { name: "提交OA支付申请" }));
-    await user.click(within(await screen.findByRole("dialog", { name: "创建OA支付申请草稿" })).getByRole("button", { name: "确认创建草稿" }));
-    await user.click(within(await screen.findByRole("dialog", { name: "OA提交结果确认" })).getByRole("button", { name: "未提交OA" }));
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/etc/batches/etc_batch_001/mark-not-submitted",
-      expect.objectContaining({ method: "POST" }),
-    );
-    expect(await within(page).findByRole("button", { name: "未提交 3" })).toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "已提交 1" })).toBeInTheDocument();
   });
 });

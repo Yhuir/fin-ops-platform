@@ -269,6 +269,16 @@ class EtcBatch:
     invoice_ids: list[str]
     invoice_count: int
     total_amount: Decimal
+    source_type: str = "normal_oa_draft"
+    linked_oa_row_id: str | None = None
+    linked_oa_case_id: str | None = None
+    amount_delta: Decimal | None = None
+    note: str = ""
+    issue_start_date: str | None = None
+    issue_end_date: str | None = None
+    passage_start_date: str | None = None
+    passage_end_date: str | None = None
+    plate_summary: list[dict[str, object]] = field(default_factory=list)
     oa_form_id: int = 2
     oa_draft_id: str | None = None
     oa_draft_url: str | None = None
@@ -866,6 +876,184 @@ class EtcService:
         self._persist()
         return {"updated": updated}
 
+    def import_missing_invoices_from_zips(
+        self,
+        *,
+        invoice_numbers: list[str],
+        uploads: list[UploadedEtcZipFile],
+    ) -> EtcImportResult:
+        requested_numbers = {
+            str(invoice_number).strip()
+            for invoice_number in list(invoice_numbers or [])
+            if str(invoice_number).strip()
+        }
+        if not requested_numbers:
+            raise EtcInvoiceRequestError("invoice_numbers must not be empty.")
+        missing_numbers = {
+            invoice_number
+            for invoice_number in requested_numbers
+            if invoice_number not in self._invoice_numbers
+        }
+        if not missing_numbers:
+            return EtcImportResult()
+
+        filtered_uploads: list[UploadedEtcZipFile] = []
+        for upload in uploads:
+            try:
+                entries = self._extract_archive_entries(upload.file_name, upload.content)
+            except BadZipFile:
+                continue
+            xml_entries = [entry for entry in entries if self._is_xml_entry(entry.path)]
+            pdf_entries = [entry for entry in entries if self._is_pdf_entry(entry.path)]
+            selected_entries: dict[str, bytes] = {}
+            for xml_entry in xml_entries:
+                try:
+                    parsed = parse_etc_xml(xml_entry.content)
+                except Exception:
+                    continue
+                if parsed.invoice_number not in missing_numbers:
+                    continue
+                selected_entries[xml_entry.path] = xml_entry.content
+                pdf_entry = self._match_pdf_entry(parsed.invoice_number, xml_entry.path, pdf_entries)
+                if pdf_entry is not None:
+                    selected_entries[pdf_entry.path] = pdf_entry.content
+            if selected_entries:
+                buffer = BytesIO()
+                with ZipFile(buffer, "w") as archive:
+                    for path, content in selected_entries.items():
+                        archive.writestr(path, content)
+                filtered_uploads.append(UploadedEtcZipFile(upload.file_name, buffer.getvalue()))
+
+        if not filtered_uploads:
+            raise EtcInvoiceNotFoundError(f"ETC invoices not found in repair zips: {', '.join(sorted(missing_numbers))}")
+        result = self.import_zips(filtered_uploads)
+        still_missing = [
+            invoice_number
+            for invoice_number in sorted(missing_numbers)
+            if invoice_number not in self._invoice_numbers
+        ]
+        if still_missing:
+            raise EtcInvoiceNotFoundError(f"ETC invoices not found after repair import: {', '.join(still_missing)}")
+        return result
+
+    def import_historical_invoices_from_records(
+        self,
+        *,
+        records: list[dict[str, object]],
+        source_name: str,
+    ) -> EtcImportResult:
+        result = EtcImportResult()
+        if not records:
+            return result
+        import_batch = self._create_import_batch(
+            [UploadedEtcZipFile(str(source_name or "historical_etc_parsed_seed"), b"")],
+            import_session_id=None,
+        )
+        now = datetime.now(UTC)
+        for record in records:
+            invoice_number = str(record.get("invoice_number") or "").strip()
+            if not invoice_number:
+                result.failed += 1
+                result.items.append(EtcImportItem(str(source_name), None, "failed", "parsed seed invoice_number is missing."))
+                continue
+            if invoice_number in self._invoice_numbers:
+                result.duplicates_skipped += 1
+                result.items.append(EtcImportItem(str(source_name), invoice_number, "duplicate_skipped", "already imported"))
+                continue
+            invoice = EtcInvoice(
+                id=self._next_invoice_id(),
+                invoice_number=invoice_number,
+                issue_date=str(record.get("issue_date") or ""),
+                passage_start_date=str(record.get("passage_start_date") or "") or None,
+                passage_end_date=str(record.get("passage_end_date") or "") or None,
+                plate_number=str(record.get("plate_number") or "") or None,
+                vehicle_type=str(record.get("vehicle_type") or "") or None,
+                seller_name=str(record.get("seller_name") or "") or None,
+                seller_tax_no=str(record.get("seller_tax_no") or "") or None,
+                buyer_name=str(record.get("buyer_name") or "") or None,
+                buyer_tax_no=str(record.get("buyer_tax_no") or "") or None,
+                amount_without_tax=_decimal_from_amount(record.get("amount_without_tax") or "0"),
+                tax_amount=_decimal_from_amount(record.get("tax_amount") or "0"),
+                total_amount=_decimal_from_amount(record.get("total_amount") or "0"),
+                tax_rate=str(record.get("tax_rate") or "") or None,
+                zip_source_name=str(source_name or "historical_etc_parsed_seed"),
+                xml_file_path=None,
+                xml_file_hash=None,
+                pdf_file_path=None,
+                pdf_file_hash=None,
+                import_batch_id=import_batch.id,
+                import_session_id=None,
+                created_at=now,
+                updated_at=now,
+            )
+            self._invoices[invoice.id] = invoice
+            self._invoice_numbers[invoice.invoice_number] = invoice.id
+            self._add_invoice_to_import_batch(import_batch, invoice.id)
+            result.imported += 1
+            result.items.append(EtcImportItem(str(source_name), invoice_number, "imported"))
+        self._refresh_import_batch_summary(import_batch)
+        self._persist()
+        return result
+
+    def create_historical_submitted_batch(
+        self,
+        *,
+        case_id: str,
+        external_batch_id: str,
+        invoice_numbers: list[str],
+        linked_oa_row_id: str,
+        oa_amount: Decimal | str | int | float,
+        note: str | None = None,
+    ) -> EtcBatch:
+        resolved_case_id = str(case_id).strip()
+        resolved_external_batch_id = str(external_batch_id).strip()
+        resolved_oa_row_id = str(linked_oa_row_id).strip()
+        if not resolved_case_id:
+            raise EtcInvoiceRequestError("case_id is required.")
+        if not resolved_external_batch_id:
+            raise EtcInvoiceRequestError("external_batch_id is required.")
+        if not resolved_oa_row_id:
+            raise EtcInvoiceRequestError("linked_oa_row_id is required.")
+
+        existing_batch = self._historical_batch_by_case_or_external_id(
+            case_id=resolved_case_id,
+            external_batch_id=resolved_external_batch_id,
+        )
+        if existing_batch is not None:
+            return replace(existing_batch, invoice_ids=list(existing_batch.invoice_ids), plate_summary=list(existing_batch.plate_summary))
+
+        invoices = self._invoices_for_invoice_numbers(invoice_numbers)
+        self._batch_counter += 1
+        total_amount = sum((invoice.total_amount for invoice in invoices), Decimal("0.00")).quantize(Decimal("0.01"))
+        normalized_oa_amount = _decimal_from_amount(oa_amount).quantize(Decimal("0.01"))
+        now = datetime.now(UTC)
+        summary = self._batch_computed_summary(invoices)
+        batch = EtcBatch(
+            id=f"etc_batch_{self._batch_counter:04d}",
+            etc_batch_id=resolved_external_batch_id,
+            invoice_ids=[invoice.id for invoice in invoices],
+            invoice_count=len(invoices),
+            total_amount=total_amount,
+            source_type="historical_repair",
+            linked_oa_row_id=resolved_oa_row_id,
+            linked_oa_case_id=resolved_case_id,
+            amount_delta=(normalized_oa_amount - total_amount).quantize(Decimal("0.01")),
+            note=str(note or "").strip(),
+            issue_start_date=summary["issue_start_date"],
+            issue_end_date=summary["issue_end_date"],
+            passage_start_date=summary["passage_start_date"],
+            passage_end_date=summary["passage_end_date"],
+            plate_summary=summary["plate_summary"],
+            oa_marker=f"ETC历史补关联\netc_batch_id={resolved_external_batch_id}",
+            status=EtcBatchStatus.SUBMITTED_CONFIRMED.value,
+            created_at=now,
+            confirmed_at=now,
+        )
+        self._batches[batch.id] = batch
+        self._apply_submitted_batch_metadata(batch, invoices=invoices, updated_at=now)
+        self._persist()
+        return replace(batch, invoice_ids=list(batch.invoice_ids), plate_summary=list(batch.plate_summary))
+
     def create_oa_draft(self, invoice_ids: list[str], *, oa_client: EtcOAClient | None = None) -> EtcDraftResult:
         invoices = self._validate_draft_invoices(invoice_ids)
         batch = self._create_batch(invoices)
@@ -906,12 +1094,7 @@ class EtcService:
         batch.status = EtcBatchStatus.SUBMITTED_CONFIRMED.value
         batch.confirmed_at = batch.confirmed_at or datetime.now(UTC)
         now = datetime.now(UTC)
-        for invoice_id in batch.invoice_ids:
-            invoice = self._get_invoice(invoice_id)
-            invoice.status = EtcInvoiceStatus.SUBMITTED
-            invoice.current_batch_id = batch.id
-            invoice.last_batch_id = batch.id
-            invoice.updated_at = now
+        self._apply_submitted_batch_metadata(batch, updated_at=now)
         self._persist()
         return replace(batch, invoice_ids=list(batch.invoice_ids))
 
@@ -929,13 +1112,45 @@ class EtcService:
         return replace(batch, invoice_ids=list(batch.invoice_ids))
 
     def get_batch(self, batch_id: str) -> EtcBatch:
-        batch = self._batches.get(batch_id)
+        batch = self._batch_by_id_or_external_id(batch_id)
         if batch is None:
             raise EtcBatchNotFoundError(f"ETC batch not found: {batch_id}")
         return batch
 
-    def list_batches(self) -> list[EtcBatch]:
-        return sorted(self._batches.values(), key=lambda batch: batch.created_at)
+    def list_batches(
+        self,
+        *,
+        status: str | None = None,
+        month: str | None = None,
+        plate: str | None = None,
+        keyword: str | None = None,
+    ) -> list[EtcBatch]:
+        filtered = [
+            batch
+            for batch in self._batches.values()
+            if self._batch_matches_status(batch, status)
+            and self._batch_matches_month(batch, month)
+            and self._batch_matches_plate(batch, plate)
+            and self._batch_matches_keyword(batch, keyword)
+        ]
+        return sorted(filtered, key=lambda batch: batch.created_at)
+
+    def batch_counts(self) -> dict[str, int]:
+        batches = list(self._batches.values())
+        submitted = sum(1 for batch in batches if batch.status == EtcBatchStatus.SUBMITTED_CONFIRMED.value)
+        unsubmitted = len(batches) - submitted
+        return {"unsubmitted": unsubmitted, "submitted": submitted}
+
+    def get_batch_detail(self, batch_id: str) -> dict[str, object]:
+        batch = self.get_batch(batch_id)
+        invoices = [self._get_invoice(invoice_id) for invoice_id in batch.invoice_ids if invoice_id in self._invoices]
+        summary = self._batch_summary_payload(batch)
+        return {
+            "batch": replace(batch, invoice_ids=list(batch.invoice_ids), plate_summary=list(batch.plate_summary)),
+            "summary": summary,
+            "plate_summary": list(batch.plate_summary),
+            "invoice_items": [self._batch_invoice_item_payload(invoice) for invoice in invoices],
+        }
 
     def list_import_batches(self) -> list[EtcImportBatch]:
         return sorted(self._import_batches.values(), key=lambda batch: batch.created_at)
@@ -981,6 +1196,8 @@ class EtcService:
                 invoice.import_batch_id = None
             if not hasattr(invoice, "import_session_id"):
                 invoice.import_session_id = None
+        for batch in self._batches.values():
+            self._ensure_batch_metadata_fields(batch)
 
     def _load_snapshot(self) -> dict[str, object]:
         if self._state_store is not None and hasattr(self._state_store, "load_etc_state"):
@@ -1240,6 +1457,7 @@ class EtcService:
         batch_id = f"etc_batch_{self._batch_counter:04d}"
         etc_batch_id = self._next_etc_batch_id()
         total_amount = sum((invoice.total_amount for invoice in invoices), Decimal("0.00")).quantize(Decimal("0.01"))
+        summary = self._batch_computed_summary(invoices)
         marker = f"ETC批量提交\netc_batch_id={etc_batch_id}"
         batch = EtcBatch(
             id=batch_id,
@@ -1247,6 +1465,11 @@ class EtcService:
             invoice_ids=[invoice.id for invoice in invoices],
             invoice_count=len(invoices),
             total_amount=total_amount,
+            issue_start_date=summary["issue_start_date"],
+            issue_end_date=summary["issue_end_date"],
+            passage_start_date=summary["passage_start_date"],
+            passage_end_date=summary["passage_end_date"],
+            plate_summary=summary["plate_summary"],
             oa_marker=marker,
         )
         self._batches[batch.id] = batch
@@ -1334,6 +1557,211 @@ class EtcService:
             raise EtcInvoiceNotFoundError(f"ETC invoice not found: {invoice_id}")
         return invoice
 
+    def _invoices_for_invoice_numbers(self, invoice_numbers: list[str]) -> list[EtcInvoice]:
+        normalized_numbers = [
+            str(invoice_number).strip()
+            for invoice_number in list(invoice_numbers or [])
+            if str(invoice_number).strip()
+        ]
+        if not normalized_numbers:
+            raise EtcInvoiceRequestError("invoice_numbers must not be empty.")
+        seen_numbers: set[str] = set()
+        invoices: list[EtcInvoice] = []
+        missing_numbers: list[str] = []
+        for invoice_number in normalized_numbers:
+            if invoice_number in seen_numbers:
+                continue
+            seen_numbers.add(invoice_number)
+            invoice_id = self._invoice_numbers.get(invoice_number)
+            if invoice_id is None:
+                missing_numbers.append(invoice_number)
+                continue
+            invoices.append(self._get_invoice(invoice_id))
+        if missing_numbers:
+            raise EtcInvoiceNotFoundError(f"ETC invoices not found: {', '.join(missing_numbers)}")
+        return invoices
+
+    def _historical_batch_by_case_or_external_id(self, *, case_id: str, external_batch_id: str) -> EtcBatch | None:
+        for batch in self._batches.values():
+            if str(getattr(batch, "linked_oa_case_id", "") or "").strip() == case_id:
+                return batch
+            if str(batch.etc_batch_id).strip() == external_batch_id and getattr(batch, "source_type", "") == "historical_repair":
+                return batch
+        return None
+
+    def _batch_by_id_or_external_id(self, batch_id: str) -> EtcBatch | None:
+        resolved_batch_id = str(batch_id).strip()
+        if not resolved_batch_id:
+            return None
+        batch = self._batches.get(resolved_batch_id)
+        if batch is not None:
+            return batch
+        for candidate in self._batches.values():
+            if candidate.etc_batch_id == resolved_batch_id:
+                return candidate
+        return None
+
+    def _apply_submitted_batch_metadata(
+        self,
+        batch: EtcBatch,
+        *,
+        invoices: list[EtcInvoice] | None = None,
+        updated_at: datetime | None = None,
+    ) -> None:
+        resolved_invoices = invoices if invoices is not None else [self._get_invoice(invoice_id) for invoice_id in batch.invoice_ids]
+        now = updated_at or datetime.now(UTC)
+        for invoice in resolved_invoices:
+            invoice.status = EtcInvoiceStatus.SUBMITTED
+            invoice.current_batch_id = batch.id
+            invoice.last_batch_id = batch.id
+            invoice.updated_at = now
+        for import_batch in self._import_batches_for_invoices(resolved_invoices):
+            import_batch.submission_batch_id = batch.id
+            import_batch.updated_at = now
+
+    @staticmethod
+    def _batch_computed_summary(invoices: list[EtcInvoice]) -> dict[str, object]:
+        issue_dates = sorted(invoice.issue_date for invoice in invoices if invoice.issue_date)
+        passage_dates = sorted(
+            date_value
+            for invoice in invoices
+            for date_value in (invoice.passage_start_date, invoice.passage_end_date)
+            if date_value
+        )
+        plate_totals: dict[str, dict[str, object]] = {}
+        for invoice in invoices:
+            plate_number = (invoice.plate_number or "未识别车牌").strip() or "未识别车牌"
+            summary = plate_totals.setdefault(
+                plate_number,
+                {"plate_number": plate_number, "invoice_count": 0, "total_amount": Decimal("0.00")},
+            )
+            summary["invoice_count"] = int(summary["invoice_count"]) + 1
+            summary["total_amount"] = (summary["total_amount"] + invoice.total_amount).quantize(Decimal("0.01"))
+        plate_summary = list(plate_totals.values())
+        plate_summary.sort(key=lambda item: -int(item["invoice_count"]))
+        return {
+            "issue_start_date": issue_dates[0] if issue_dates else None,
+            "issue_end_date": issue_dates[-1] if issue_dates else None,
+            "passage_start_date": passage_dates[0] if passage_dates else None,
+            "passage_end_date": passage_dates[-1] if passage_dates else None,
+            "plate_summary": plate_summary,
+        }
+
+    def _batch_summary_payload(self, batch: EtcBatch) -> dict[str, object]:
+        return {
+            "id": batch.id,
+            "etc_batch_id": batch.etc_batch_id,
+            "source_type": getattr(batch, "source_type", "normal_oa_draft"),
+            "status": batch.status,
+            "invoice_count": batch.invoice_count,
+            "total_amount": batch.total_amount,
+            "issue_start_date": getattr(batch, "issue_start_date", None),
+            "issue_end_date": getattr(batch, "issue_end_date", None),
+            "passage_start_date": getattr(batch, "passage_start_date", None),
+            "passage_end_date": getattr(batch, "passage_end_date", None),
+            "linked_oa_row_id": getattr(batch, "linked_oa_row_id", None),
+            "linked_oa_case_id": getattr(batch, "linked_oa_case_id", None),
+            "amount_delta": getattr(batch, "amount_delta", None),
+            "note": getattr(batch, "note", ""),
+        }
+
+    def _batch_invoice_item_payload(self, invoice: EtcInvoice) -> dict[str, object]:
+        return {
+            "id": invoice.id,
+            "invoice_number": invoice.invoice_number,
+            "issue_date": invoice.issue_date,
+            "passage_start_date": invoice.passage_start_date,
+            "passage_end_date": invoice.passage_end_date,
+            "plate_number": invoice.plate_number,
+            "seller_name": invoice.seller_name,
+            "buyer_name": invoice.buyer_name,
+            "amount_without_tax": invoice.amount_without_tax,
+            "tax_amount": invoice.tax_amount,
+            "total_amount": invoice.total_amount,
+            "status": invoice.status,
+            "has_pdf": self._stored_invoice_file_exists(invoice.pdf_file_path),
+            "has_xml": self._stored_invoice_file_exists(invoice.xml_file_path),
+        }
+
+    def _batch_matches_status(self, batch: EtcBatch, status: str | None) -> bool:
+        normalized = str(status or "").strip().lower()
+        if not normalized:
+            return True
+        if normalized == "submitted":
+            return batch.status == EtcBatchStatus.SUBMITTED_CONFIRMED.value
+        if normalized == "unsubmitted":
+            return batch.status != EtcBatchStatus.SUBMITTED_CONFIRMED.value
+        return batch.status == normalized
+
+    def _batch_matches_month(self, batch: EtcBatch, month: str | None) -> bool:
+        normalized_month = str(month or "").strip()
+        if not normalized_month:
+            return True
+        dates = [
+            str(getattr(batch, "issue_start_date", "") or ""),
+            str(getattr(batch, "issue_end_date", "") or ""),
+            str(getattr(batch, "passage_start_date", "") or ""),
+            str(getattr(batch, "passage_end_date", "") or ""),
+        ]
+        if any(date_value.startswith(normalized_month) for date_value in dates):
+            return True
+        for invoice_id in batch.invoice_ids:
+            invoice = self._invoices.get(invoice_id)
+            if invoice is None:
+                continue
+            if any(
+                str(date_value or "").startswith(normalized_month)
+                for date_value in (invoice.issue_date, invoice.passage_start_date, invoice.passage_end_date)
+            ):
+                return True
+        return False
+
+    def _batch_matches_plate(self, batch: EtcBatch, plate: str | None) -> bool:
+        normalized_plate = str(plate or "").strip().lower()
+        if not normalized_plate:
+            return True
+        for item in list(getattr(batch, "plate_summary", []) or []):
+            if normalized_plate in str(item.get("plate_number", "")).lower():
+                return True
+        return False
+
+    def _batch_matches_keyword(self, batch: EtcBatch, keyword: str | None) -> bool:
+        normalized_keyword = str(keyword or "").strip().lower()
+        if not normalized_keyword:
+            return True
+        fields = [
+            batch.id,
+            batch.etc_batch_id,
+            getattr(batch, "linked_oa_row_id", "") or "",
+            getattr(batch, "linked_oa_case_id", "") or "",
+            getattr(batch, "note", "") or "",
+        ]
+        if any(normalized_keyword in str(field).lower() for field in fields):
+            return True
+        for invoice_id in batch.invoice_ids:
+            invoice = self._invoices.get(invoice_id)
+            if invoice is not None and self._invoice_matches_keyword(invoice, normalized_keyword):
+                return True
+        return False
+
+    @staticmethod
+    def _ensure_batch_metadata_fields(batch: EtcBatch) -> None:
+        defaults = {
+            "source_type": "normal_oa_draft",
+            "linked_oa_row_id": None,
+            "linked_oa_case_id": None,
+            "amount_delta": None,
+            "note": "",
+            "issue_start_date": None,
+            "issue_end_date": None,
+            "passage_start_date": None,
+            "passage_end_date": None,
+            "plate_summary": [],
+        }
+        for field_name, default_value in defaults.items():
+            if not hasattr(batch, field_name):
+                setattr(batch, field_name, list(default_value) if isinstance(default_value, list) else default_value)
+
     def _next_invoice_id(self) -> str:
         self._invoice_counter += 1
         return f"etc_invoice_{self._invoice_counter:04d}"
@@ -1403,6 +1831,15 @@ def _required_decimal(values: dict[str, str], field_name: str) -> Decimal:
         return Decimal(raw_value.replace(",", "")).quantize(Decimal("0.01"))
     except InvalidOperation as exc:
         raise ValueError(f"XML 金额字段无效: {field_name}") from exc
+
+
+def _decimal_from_amount(value: Decimal | str | int | float) -> Decimal:
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value).replace(",", ""))
+    except (InvalidOperation, ValueError) as exc:
+        raise EtcInvoiceRequestError("amount must be a valid decimal.") from exc
 
 
 def _normalize_date(value: str) -> str:

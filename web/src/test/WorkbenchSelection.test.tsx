@@ -1058,7 +1058,10 @@ describe("Workbench row selection and detail modal", () => {
 
     expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "ETC发票导入" })).not.toBeInTheDocument();
-    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("正在导入 ETC发票 3/31");
+    await waitFor(() => {
+      expect(screen.queryByTestId("background-progress-block")).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("status", { name: "正在执行后台任务：正在导入 ETC发票 3/31" })).toBeInTheDocument();
     const input =
       (screen.queryByLabelText("上传ETC zip") ?? screen.getByLabelText("上传文件")) as HTMLInputElement;
     const etcZip = new File(["etc-zip"], "ETC一月发票.zip", {
@@ -1076,7 +1079,7 @@ describe("Workbench row selection and detail modal", () => {
     await waitFor(() => {
       expect(screen.getAllByText("已开始后台导入").length).toBeGreaterThan(0);
     });
-    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("正在导入 ETC发票 3/31");
+    expect(screen.queryByTestId("background-progress-block")).not.toBeInTheDocument();
     const previewCall = fetchMock.mock.calls.find(([url]) => String(url) === "/api/etc/import/preview");
     expect(previewCall).toBeTruthy();
     const formData = (previewCall?.[1] as RequestInit).body as FormData;
@@ -1190,7 +1193,7 @@ describe("Workbench row selection and detail modal", () => {
     });
     renderAppAt("/");
 
-    await screen.findByRole("status", { name: "OA 已同步" });
+    await screen.findByRole("status", { name: "系统状态正常" });
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/oa-sync/events"))).toBe(false);
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/oa-sync/status"))).toBe(true);
 

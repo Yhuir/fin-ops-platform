@@ -11,11 +11,11 @@ import AppTopBar from "../components/shell/AppTopBar";
 import { AppChromeProvider, useAppChrome } from "../contexts/AppChromeContext";
 import { AppHealthStatusProvider, useAppHealthStatus } from "../contexts/AppHealthStatusContext";
 import { ImportWorkflowDraftProvider } from "../contexts/ImportWorkflowDraftContext";
-import { ImportProgressProvider, useImportProgress } from "../contexts/ImportProgressContext";
+import { ImportProgressProvider } from "../contexts/ImportProgressContext";
 import { MonthProvider } from "../contexts/MonthContext";
 import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionProvider } from "../contexts/SessionContext";
-import { BackgroundJobProgressProvider, useBackgroundJobProgress } from "../features/backgroundJobs/BackgroundJobProgressProvider";
+import { BackgroundJobProgressProvider } from "../features/backgroundJobs/BackgroundJobProgressProvider";
 import MuiProviders from "./MuiProviders";
 import AppRouter from "./router";
 import { APP_BASE_PATH, isOaEmbeddedMode } from "./runtime";
@@ -50,8 +50,6 @@ function persistSidebarState(storageKey: string, expanded: boolean) {
 function AppShell() {
   const { workbenchStatus } = useAppChrome();
   const healthStatus = useAppHealthStatus();
-  const { progress } = useImportProgress();
-  const { primaryJob, extraCount, connectionFailed, acknowledgeJob, retryJob } = useBackgroundJobProgress();
   const theme = useTheme();
   const embedded = isOaEmbeddedMode();
   const isCompact = useMediaQuery(theme.breakpoints.down("md"), { noSsr: true });
@@ -96,17 +94,7 @@ function AppShell() {
         <AppTopBar
           embedded={embedded}
           isCompact={isCompact}
-          primaryJob={primaryJob}
-          extraCount={extraCount}
-          connectionFailed={connectionFailed}
-          progress={progress}
           onOpenMobileSidebar={() => setMobileOpen(true)}
-          onAcknowledgeJob={(jobId) => {
-            void acknowledgeJob(jobId);
-          }}
-          onRetryJob={(jobId) => {
-            void retryJob(jobId);
-          }}
         />
         <main className={`page-body${embedded ? " embedded" : ""}`}>
           <SessionGate>

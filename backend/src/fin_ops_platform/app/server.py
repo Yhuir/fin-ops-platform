@@ -61,6 +61,7 @@ from fin_ops_platform.services.etc_service import (
     EtcServiceError,
     UploadedEtcZipFile,
 )
+from fin_ops_platform.services.historical_etc_repair_service import HistoricalEtcRepairService
 from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile
 from fin_ops_platform.services.import_preview_audit import ImportPreviewStaleError
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -216,6 +217,11 @@ class Application:
         self._workbench_matching_running_scope_months: set[str] = set()
         self._seed_payload = build_demo_seed()
         self._initialize_runtime_services(self._load_persisted_state())
+        if (
+            os.getenv("FIN_OPS_DISABLE_STARTUP_HISTORICAL_ETC_REPAIR", "").strip() not in {"1", "true", "yes"}
+            and self._historical_etc_repair_needs_startup_reconcile()
+        ):
+            self._maybe_reconcile_historical_etc_repair(reason="application_startup")
 
     def _load_persisted_state(self) -> dict[str, object]:
         return self._state_store.load() if self._state_store is not None else {}
@@ -327,6 +333,27 @@ class Application:
         self._tax_certified_import_service = TaxCertifiedImportService(state_store=self._state_store)
         self._etc_service = EtcService(state_store=self._state_store)
         self._etc_service.set_canonical_invoice_key_exists(self._canonical_invoice_key_exists_for_etc_import)
+        self._historical_etc_repair_service = (
+            HistoricalEtcRepairService(
+                state_store=self._state_store,
+                etc_service=self._etc_service,
+                pair_relation_service=self._workbench_pair_relation_service,
+                oa_row_exists=self._historical_etc_oa_row_exists,
+                sync_import_result_to_canonical_invoices=self._sync_etc_import_result_to_canonical_invoices,
+                sync_etc_invoices_to_canonical_invoices=self._sync_etc_invoices_to_canonical_invoices,
+                refresh_after_etc_invoice_sync=lambda months, reason: self._refresh_after_historical_etc_repair_sync(
+                    months,
+                    reason=reason,
+                ),
+                persist_pair_relations=lambda case_ids: self._persist_workbench_pair_relations(
+                    changed_case_ids=case_ids,
+                ),
+                invalidate_workbench_scopes=self._invalidate_workbench_read_model_scopes,
+                persist_etc_state=lambda: self._state_store.save_etc_state(self._etc_service.snapshot()),
+            )
+            if self._state_store is not None
+            else None
+        )
         self._background_job_service = BackgroundJobService(self._state_store)
         self._app_health_service = AppHealthService()
         self._app_health_alert_service = AppHealthAlertService.from_snapshot(
@@ -377,6 +404,53 @@ class Application:
 
     def _reload_runtime_services(self) -> None:
         self._initialize_runtime_services(self._load_persisted_state())
+
+    def _historical_etc_repair_seeded(self) -> bool:
+        if self._state_store is None:
+            return False
+        try:
+            return bool(self._state_store.load_historical_etc_repair_bundle_metadata())
+        except Exception:
+            return False
+
+    def _historical_etc_repair_needs_startup_reconcile(self) -> bool:
+        if self._state_store is None:
+            return False
+        try:
+            bundles = self._state_store.load_historical_etc_repair_bundle_metadata()
+            if not bundles:
+                return False
+            states = self._state_store.load_historical_etc_repair_states()
+        except Exception:
+            return False
+        for bundle_id in bundles:
+            state = states.get(str(bundle_id))
+            if not isinstance(state, dict):
+                return True
+            if str(state.get("status") or "").strip() not in {"ok"}:
+                return True
+        return False
+
+    def _maybe_reconcile_historical_etc_repair(self, *, reason: str) -> dict[str, object] | None:
+        if self._historical_etc_repair_service is None or not self._historical_etc_repair_seeded():
+            return None
+        result = self._historical_etc_repair_service.reconcile(reason=reason)
+        return self._serialize_value(result.to_payload())
+
+    def _historical_etc_oa_row_exists(self, row_id: str) -> bool:
+        normalized_row_id = str(row_id or "").strip()
+        if not normalized_row_id:
+            return False
+        try:
+            cached_rows = self._resolve_rows_from_cached_read_models([normalized_row_id])
+        except Exception:
+            cached_rows = {}
+        if normalized_row_id in cached_rows:
+            return True
+        # Avoid triggering a synchronous OA row fetch from health/reset repair.
+        # The repair relation is idempotent and will become visible when OA rows
+        # are rebuilt; a missing cached read model is not proof that OA is absent.
+        return normalized_row_id.startswith("oa-")
 
     def handle_request(
         self,
@@ -477,10 +551,25 @@ class Application:
                 page=query.get("page", [None])[0],
                 page_size=query.get("page_size", [None])[0],
             )
+        if method == "GET" and route_path == "/api/etc/batches":
+            return self._handle_api_etc_batches(
+                status=query.get("status", [None])[0],
+                month=query.get("month", [None])[0],
+                plate=query.get("plate", [None])[0],
+                keyword=query.get("keyword", [None])[0],
+                page=query.get("page", [None])[0],
+                page_size=query.get("page_size", [None])[0],
+            )
+        if method == "GET" and route_path.startswith("/api/etc/batches/"):
+            batch_id = unquote(route_path.rsplit("/", 1)[-1])
+            return self._handle_api_etc_batch_detail(batch_id)
         if method == "POST" and route_path == "/api/etc/invoices/revoke-submitted":
             return self._handle_api_etc_revoke_submitted(body)
         if method == "POST" and route_path == "/api/etc/batches/draft":
             return self._handle_api_etc_batch_draft(body, headers)
+        if method == "POST" and route_path.startswith("/api/etc/batches/") and route_path.endswith("/draft"):
+            batch_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_etc_batch_draft_for_batch(batch_id, headers)
         if method == "POST" and route_path.startswith("/api/etc/batches/") and route_path.endswith("/confirm-submitted"):
             batch_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._handle_api_etc_batch_confirm_submitted(batch_id)
@@ -1424,6 +1513,18 @@ class Application:
         self._run_workbench_auto_matching_for_scopes(normalized_months, reason=reason)
         self._persist_state_with_workbench_invalidation(cost_statistics_scope_keys=normalized_months)
 
+    def _refresh_after_historical_etc_repair_sync(self, changed_months: list[str], *, reason: str) -> None:
+        normalized_months = [
+            month
+            for month in sorted(dict.fromkeys(str(month).strip() for month in changed_months))
+            if SEARCH_MONTH_RE.match(month)
+        ]
+        if not normalized_months:
+            return
+        self._invalidate_tax_offset_read_model_scopes(normalized_months, reason=reason)
+        self._invalidate_workbench_read_model_scopes(["all", *normalized_months])
+        self._persist_state_with_workbench_invalidation(cost_statistics_scope_keys=normalized_months)
+
     def _handle_api_etc_invoices(
         self,
         *,
@@ -1472,6 +1573,352 @@ class Application:
         payload["has_xml"] = bool(isinstance(xml_path, str) and xml_path and Path(xml_path).exists())
         return payload
 
+    def _handle_api_etc_batches(
+        self,
+        *,
+        status: str | None,
+        month: str | None,
+        plate: str | None,
+        keyword: str | None,
+        page: str | None,
+        page_size: str | None,
+    ) -> Response:
+        try:
+            resolved_page = int(page) if page not in (None, "") else 1
+            resolved_page_size = int(page_size) if page_size not in (None, "") else 50
+        except ValueError:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_etc_batch_request", "message": "page and page_size must be integers."},
+            )
+
+        normalized_status = str(status or "").strip().lower()
+        batches = self._etc_batch_list_items(
+            status=normalized_status,
+            month=month,
+            plate=plate,
+            keyword=keyword,
+        )
+        counts = self._etc_batch_counts()
+        total = len(batches)
+        safe_page = max(resolved_page, 1)
+        safe_page_size = min(max(resolved_page_size, 1), 500)
+        start = (safe_page - 1) * safe_page_size
+        paged_items = batches[start:start + safe_page_size]
+        selected = paged_items[0] if paged_items else None
+        selected_for_payload = (
+            self._etc_batch_detail_filtered_for_query(selected, plate=plate, keyword=keyword)
+            if isinstance(selected, dict)
+            else None
+        )
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "items": [item["summary"] for item in paged_items],
+                "counts": {**counts, "current": total},
+                "pagination": {"page": safe_page, "page_size": safe_page_size, "total": total},
+                "selectedBatch": selected_for_payload,
+                "plateSummary": selected_for_payload.get("plateSummary", []) if isinstance(selected_for_payload, dict) else [],
+                "invoiceItems": selected_for_payload.get("invoiceItems", []) if isinstance(selected_for_payload, dict) else [],
+            },
+        )
+
+    def _handle_api_etc_batch_detail(self, batch_id: str) -> Response:
+        detail = self._etc_batch_detail_payload(batch_id)
+        if detail is None:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "etc_batch_not_found", "message": f"ETC batch not found: {batch_id}"},
+            )
+        return self._json_response(HTTPStatus.OK, detail)
+
+    def _etc_batch_counts(self) -> dict[str, int]:
+        import_batches = [
+            batch
+            for batch in self._etc_service.list_import_batches()
+            if not str(getattr(batch, "submission_batch_id", "") or "").strip()
+            and int(getattr(batch, "invoice_count", 0) or 0) > 0
+        ]
+        submitted_batches = self._etc_service.list_batches(status="submitted")
+        return {"unsubmitted": len(import_batches), "submitted": len(submitted_batches)}
+
+    def _etc_batch_list_items(
+        self,
+        *,
+        status: str,
+        month: str | None,
+        plate: str | None,
+        keyword: str | None,
+    ) -> list[dict[str, object]]:
+        include_submitted = status in {"", "submitted"}
+        include_unsubmitted = status in {"", "unsubmitted"}
+        items: list[dict[str, object]] = []
+        if include_submitted:
+            for batch in self._etc_service.list_batches(
+                status="submitted",
+                month=month,
+                plate=plate,
+                keyword=keyword,
+            ):
+                detail = self._etc_submission_batch_detail_payload(batch)
+                if detail is not None:
+                    items.append(detail)
+        if include_unsubmitted:
+            for import_batch in self._etc_service.list_import_batches():
+                if str(getattr(import_batch, "submission_batch_id", "") or "").strip():
+                    continue
+                if int(getattr(import_batch, "invoice_count", 0) or 0) <= 0:
+                    continue
+                detail = self._etc_import_batch_detail_payload(import_batch)
+                if detail is None:
+                    continue
+                if self._etc_batch_payload_matches_filters(detail, month=month, plate=plate, keyword=keyword):
+                    items.append(detail)
+        return sorted(
+            items,
+            key=lambda item: str(item.get("summary", {}).get("created_at", "") if isinstance(item.get("summary"), dict) else ""),
+            reverse=True,
+        )
+
+    def _etc_batch_detail_payload(self, batch_id: str) -> dict[str, object] | None:
+        try:
+            batch = self._etc_service.get_batch(batch_id)
+        except EtcBatchNotFoundError:
+            batch = None
+        if batch is not None:
+            return self._etc_submission_batch_detail_payload(batch)
+        for import_batch in self._etc_service.list_import_batches():
+            if str(import_batch.id) == str(batch_id):
+                return self._etc_import_batch_detail_payload(import_batch)
+        return None
+
+    def _etc_submission_batch_detail_payload(self, batch: object) -> dict[str, object] | None:
+        detail = self._etc_service.get_batch_detail(str(getattr(batch, "id", "")))
+        invoices = list(detail.get("invoice_items") or [])
+        summary = self._serialize_etc_batch_summary(
+            id_value=str(getattr(batch, "id", "")),
+            etc_batch_id=str(getattr(batch, "etc_batch_id", "")),
+            status="submitted" if str(getattr(batch, "status", "")) == "submitted_confirmed" else str(getattr(batch, "status", "")),
+            source_type=str(getattr(batch, "source_type", "normal_oa_draft") or "normal_oa_draft"),
+            invoice_count=int(getattr(batch, "invoice_count", 0) or 0),
+            total_amount=getattr(batch, "total_amount", Decimal("0.00")),
+            issue_start_date=getattr(batch, "issue_start_date", None),
+            issue_end_date=getattr(batch, "issue_end_date", None),
+            passage_start_date=getattr(batch, "passage_start_date", None),
+            passage_end_date=getattr(batch, "passage_end_date", None),
+            plate_summary=list(getattr(batch, "plate_summary", []) or []),
+            linked_oa_row_id=getattr(batch, "linked_oa_row_id", None),
+            linked_oa_case_id=getattr(batch, "linked_oa_case_id", None),
+            amount_delta=getattr(batch, "amount_delta", None),
+            note=getattr(batch, "note", ""),
+            created_at=getattr(batch, "created_at", None),
+        )
+        return {
+            "batch": self._serialize_value(batch),
+            "summary": summary,
+            "plateSummary": summary["plate_summary"],
+            "invoiceItems": invoices,
+        }
+
+    def _etc_import_batch_detail_payload(self, import_batch: object) -> dict[str, object] | None:
+        invoice_ids = list(getattr(import_batch, "invoice_ids", []) or [])
+        invoices = self._etc_service.list_invoices_by_ids([str(invoice_id) for invoice_id in invoice_ids])
+        invoice_items = [self._serialize_etc_invoice(invoice) for invoice in invoices]
+        plate_summary = self._etc_plate_summary_for_invoices(invoices)
+        summary = self._serialize_etc_batch_summary(
+            id_value=str(getattr(import_batch, "id", "")),
+            etc_batch_id=str(getattr(import_batch, "id", "")),
+            status="unsubmitted",
+            source_type="etc_import",
+            invoice_count=int(getattr(import_batch, "invoice_count", 0) or len(invoices)),
+            total_amount=getattr(import_batch, "total_amount", Decimal("0.00")),
+            issue_start_date=getattr(import_batch, "issue_date_start", None),
+            issue_end_date=getattr(import_batch, "issue_date_end", None),
+            passage_start_date=getattr(import_batch, "passage_date_start", None),
+            passage_end_date=getattr(import_batch, "passage_date_end", None),
+            plate_summary=plate_summary,
+            linked_oa_row_id=None,
+            linked_oa_case_id=None,
+            amount_delta=None,
+            note="",
+            created_at=getattr(import_batch, "created_at", None),
+        )
+        return {
+            "batch": self._serialize_value(import_batch),
+            "summary": summary,
+            "plateSummary": summary["plate_summary"],
+            "invoiceItems": invoice_items,
+        }
+
+    def _serialize_etc_batch_summary(
+        self,
+        *,
+        id_value: str,
+        etc_batch_id: str,
+        status: str,
+        source_type: str,
+        invoice_count: int,
+        total_amount: object,
+        issue_start_date: object,
+        issue_end_date: object,
+        passage_start_date: object,
+        passage_end_date: object,
+        plate_summary: list[dict[str, object]],
+        linked_oa_row_id: object,
+        linked_oa_case_id: object,
+        amount_delta: object,
+        note: object,
+        created_at: object,
+    ) -> dict[str, object]:
+        plate_items = [
+            {
+                "plate_number": str(item.get("plate_number", "") or ""),
+                "invoice_count": int(item.get("invoice_count", 0) or 0),
+                "total_amount": item.get("total_amount", "0.00"),
+            }
+            for item in plate_summary
+            if isinstance(item, dict)
+        ]
+        return {
+            "id": id_value,
+            "batch_id": id_value,
+            "etc_batch_id": etc_batch_id,
+            "external_batch_id": etc_batch_id,
+            "status": status,
+            "source_type": source_type,
+            "invoice_count": invoice_count,
+            "total_amount": total_amount,
+            "tax_amount": "0.00",
+            "issue_start_date": issue_start_date,
+            "issue_end_date": issue_end_date,
+            "passage_start_date": passage_start_date,
+            "passage_end_date": passage_end_date,
+            "plate_count": len(plate_items),
+            "plate_summary": plate_items,
+            "linked_oa_row_id": linked_oa_row_id,
+            "linked_oa_case_id": linked_oa_case_id,
+            "linked_oa_applicant": "",
+            "linked_oa_apply_date": "",
+            "linked_oa_amount": "",
+            "amount_delta": amount_delta,
+            "note": note,
+            "created_at": created_at,
+        }
+
+    @staticmethod
+    def _etc_plate_summary_for_invoices(invoices: list[object]) -> list[dict[str, object]]:
+        totals: dict[str, dict[str, object]] = {}
+        for invoice in invoices:
+            plate_number = str(getattr(invoice, "plate_number", "") or "未识别车牌").strip() or "未识别车牌"
+            item = totals.setdefault(
+                plate_number,
+                {"plate_number": plate_number, "invoice_count": 0, "total_amount": Decimal("0.00")},
+            )
+            item["invoice_count"] = int(item["invoice_count"]) + 1
+            item["total_amount"] = (Decimal(str(item["total_amount"])) + Decimal(str(getattr(invoice, "total_amount", "0")))).quantize(Decimal("0.01"))
+        summary = list(totals.values())
+        summary.sort(key=lambda item: -int(item["invoice_count"]))
+        return summary
+
+    @staticmethod
+    def _etc_batch_payload_matches_filters(
+        detail: dict[str, object],
+        *,
+        month: str | None,
+        plate: str | None,
+        keyword: str | None,
+    ) -> bool:
+        summary = detail.get("summary") if isinstance(detail.get("summary"), dict) else {}
+        invoice_items = list(detail.get("invoiceItems") or [])
+        normalized_month = str(month or "").strip()
+        if normalized_month:
+            date_values = [
+                str(summary.get("issue_start_date", "") or ""),
+                str(summary.get("issue_end_date", "") or ""),
+                str(summary.get("passage_start_date", "") or ""),
+                str(summary.get("passage_end_date", "") or ""),
+                *[str(item.get("issue_date", "") or "") for item in invoice_items if isinstance(item, dict)],
+                *[str(item.get("passage_start_date", "") or "") for item in invoice_items if isinstance(item, dict)],
+                *[str(item.get("passage_end_date", "") or "") for item in invoice_items if isinstance(item, dict)],
+            ]
+            if not any(value.startswith(normalized_month) for value in date_values):
+                return False
+        normalized_plate = str(plate or "").strip().lower()
+        if normalized_plate and not any(
+            normalized_plate in str(item.get("plate_number", "") or "").lower()
+            for item in invoice_items
+            if isinstance(item, dict)
+        ):
+            return False
+        normalized_keyword = str(keyword or "").strip().lower()
+        if normalized_keyword:
+            haystack = [
+                str(value or "").lower()
+                for value in (
+                    summary.get("id"),
+                    summary.get("etc_batch_id"),
+                    summary.get("note"),
+                    *[
+                        field
+                        for item in invoice_items
+                        if isinstance(item, dict)
+                        for field in (
+                            item.get("invoice_number"),
+                            item.get("seller_name"),
+                            item.get("buyer_name"),
+                            item.get("plate_number"),
+                        )
+                    ],
+                )
+            ]
+            if not any(normalized_keyword in value for value in haystack):
+                return False
+        return True
+
+    @staticmethod
+    def _etc_batch_detail_filtered_for_query(
+        detail: dict[str, object],
+        *,
+        plate: str | None,
+        keyword: str | None,
+    ) -> dict[str, object]:
+        normalized_plate = str(plate or "").strip().lower()
+        normalized_keyword = str(keyword or "").strip().lower()
+        if not normalized_plate and not normalized_keyword:
+            return detail
+        invoice_items = [
+            item
+            for item in list(detail.get("invoiceItems") or [])
+            if isinstance(item, dict)
+            and (
+                not normalized_plate
+                or normalized_plate in str(item.get("plate_number", "") or "").lower()
+            )
+            and (
+                not normalized_keyword
+                or any(
+                    normalized_keyword in str(item.get(field, "") or "").lower()
+                    for field in ("invoice_number", "seller_name", "buyer_name", "plate_number")
+                )
+            )
+        ]
+        plates = {
+            str(item.get("plate_number", "") or "").strip()
+            for item in invoice_items
+            if str(item.get("plate_number", "") or "").strip()
+        }
+        plate_summary = [
+            item
+            for item in list(detail.get("plateSummary") or [])
+            if isinstance(item, dict)
+            and (not plates or str(item.get("plate_number", "") or "").strip() in plates)
+        ]
+        return {
+            **detail,
+            "plateSummary": plate_summary,
+            "invoiceItems": list(detail.get("invoiceItems") or []),
+        }
+
     def _handle_api_etc_revoke_submitted(self, body: str | bytes | None) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
@@ -1507,6 +1954,56 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_etc_draft_request", "message": "invoiceIds must be a string array."},
             )
+        try:
+            result = self._etc_service.create_oa_draft(invoice_ids, oa_client=self._build_etc_oa_client(headers))
+        except EtcInvoiceNotFoundError as error:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_invoice_not_found", "message": str(error)})
+        except EtcOAClientError as error:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_etc_draft_request", "message": str(error)},
+            )
+        except EtcDraftRequestError as error:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_etc_draft_request", "message": str(error)},
+            )
+        changed_months = self._sync_etc_invoices_to_canonical_invoices(
+            self._etc_service.list_invoices_by_ids(invoice_ids),
+        )
+        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_oa_draft_created")
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "batchId": result.batch_id,
+                "etcBatchId": result.etc_batch_id,
+                "oaDraftId": result.oa_draft_id,
+                "oaDraftUrl": result.oa_draft_url,
+            },
+        )
+
+    def _handle_api_etc_batch_draft_for_batch(self, batch_id: str, headers: dict[str, str] | None = None) -> Response:
+        detail = self._etc_batch_detail_payload(batch_id)
+        if detail is None:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "etc_batch_not_found", "message": f"ETC batch not found: {batch_id}"},
+            )
+        summary = detail.get("summary") if isinstance(detail.get("summary"), dict) else {}
+        if str(summary.get("status") or "") != "unsubmitted":
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_etc_draft_request", "message": "Only unsubmitted ETC batches can create OA drafts."},
+            )
+        invoice_items = [item for item in list(detail.get("invoiceItems") or []) if isinstance(item, dict)]
+        invoice_ids = [str(item.get("id", "")).strip() for item in invoice_items if str(item.get("id", "")).strip()]
+        return self._create_etc_batch_draft_from_invoice_ids(invoice_ids, headers)
+
+    def _create_etc_batch_draft_from_invoice_ids(
+        self,
+        invoice_ids: list[str],
+        headers: dict[str, str] | None = None,
+    ) -> Response:
         try:
             result = self._etc_service.create_oa_draft(invoice_ids, oa_client=self._build_etc_oa_client(headers))
         except EtcInvoiceNotFoundError as error:
@@ -2493,6 +2990,22 @@ class Application:
                 result.status = "partial"
                 result.rebuild_status = "failed"
                 result.message = f"已清空 OA 工作台人工状态并保留 OA 附件发票解析结果，但 OA 重建失败：{exc}"
+        if action in {RESET_INVOICES_ACTION, RESET_OA_AND_REBUILD_ACTION}:
+            repair_payload = None
+            if progress is not None:
+                progress("historical_etc_repair", "正在检查历史 ETC 批次恢复状态。", 98)
+            try:
+                repair_payload = self._maybe_reconcile_historical_etc_repair(
+                    reason=f"settings_data_reset:{action}",
+                )
+            except Exception as exc:
+                result.status = "partial"
+                result.message = f"{result.message} 历史 ETC 自动恢复失败：{exc}"
+            if repair_payload is not None:
+                payload_status = str(repair_payload.get("status") or "")
+                if payload_status == "attention":
+                    result.status = "partial"
+                    result.message = f"{result.message} 历史 ETC 批次需要确认或等待前置数据。"
         if progress is not None:
             progress("complete", "数据重置已完成。", 100)
         return result.to_payload()
@@ -5884,14 +6397,24 @@ class Application:
         safe_batch_id = re.sub(r"[^A-Za-z0-9_-]+", "-", external_batch_id).strip("-") or "unknown"
         return f"etc-summary-{safe_batch_id}"
 
-    @staticmethod
-    def _etc_external_batch_id_for_group(group: dict[str, object]) -> str | None:
+    def _etc_external_batch_id_for_group(self, group: dict[str, object]) -> str | None:
         for row in list(group.get("oa_rows") or []):
             if not isinstance(row, dict):
                 continue
             external_batch_id = str(row.get("etc_batch_id") or row.get("etcBatchId") or "").strip()
             if external_batch_id:
                 return external_batch_id
+        relation = self._relation_for_group(group)
+        amount_check = relation.get("amount_check") if isinstance(relation, dict) else None
+        if isinstance(amount_check, dict):
+            for key in ("external_etc_batch_id", "etc_batch_id"):
+                external_batch_id = str(amount_check.get(key) or "").strip()
+                if external_batch_id:
+                    try:
+                        batch = self._etc_service.get_batch(external_batch_id)
+                    except EtcBatchNotFoundError:
+                        return external_batch_id
+                    return str(batch.etc_batch_id)
         return None
 
     @staticmethod
@@ -7524,10 +8047,11 @@ class Application:
             if tag and tag not in visible:
                 visible.append(tag)
 
+        relation_mode = str(relation.get("relation_mode")) if isinstance(relation, dict) else ""
         has_oa = bool(group.get("oa_rows"))
         has_bank = bool(group.get("bank_rows"))
         has_invoice = bool(group.get("invoice_rows"))
-        has_etc_batch_oa = self._group_has_etc_batch_oa(group)
+        has_etc_batch_oa = self._group_has_etc_batch_oa(group) or relation_mode == "etc_batch_invoice_link"
         if has_oa and has_invoice and not has_bank:
             add("待找流水")
         elif has_oa and has_bank and not has_invoice:
@@ -7543,7 +8067,7 @@ class Application:
             add("金额不一致")
 
         row_type = str(row.get("type", ""))
-        if row_type == "oa" and self._is_etc_batch_oa_row(row):
+        if row_type == "oa" and (self._is_etc_batch_oa_row(row) or relation_mode == "etc_batch_invoice_link"):
             add("已关联ETC发票")
         if row_type == "invoice":
             if str(row.get("source_kind", "")) == "etc_invoice" or "ETC" in tags:
@@ -7562,7 +8086,6 @@ class Application:
             elif debit is not None and debit > 0:
                 add("支")
 
-        relation_mode = str(relation.get("relation_mode")) if isinstance(relation, dict) else ""
         if relation_mode == "internal_transfer_pair":
             add("内部往来")
         if relation_mode == "salary_personal_auto_match":

@@ -3,6 +3,7 @@ import pickle
 import tempfile
 import unittest
 from unittest.mock import patch
+from decimal import Decimal
 from pathlib import Path
 
 from pymongo.errors import ServerSelectionTimeoutError
@@ -18,7 +19,9 @@ from fin_ops_platform.services.workbench_candidate_match_service import (
     CANDIDATE_MATCH_SCHEMA_VERSION,
     WorkbenchCandidateMatchService,
 )
+from fin_ops_platform.services.etc_service import UploadedEtcZipFile
 from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
+from tests.test_etc_backend import etc_zip
 from tests.mock_import_files import INVOICE_JAN
 
 
@@ -3741,6 +3744,78 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertIn("金额不一致", paired_oa["tags"])
         self.assertNotIn("待找发票", paired_oa["tags"])
         self.assertEqual(paired_oa["oa_bank_relation"]["label"], "已关联流水")
+
+    def test_historical_etc_relation_tags_oa_and_injects_summary_row(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._etc_service.import_zips([UploadedEtcZipFile("historical.zip", etc_zip(["ETC001", "ETC002"]))])
+            batch = app._etc_service.create_historical_submitted_batch(
+                case_id="etc-historical-2026-01",
+                external_batch_id="ETC-HIST-2026-01",
+                invoice_numbers=["ETC001", "ETC002"],
+                linked_oa_row_id="oa-exp-1994",
+                oa_amount=Decimal("26.14"),
+                note="历史补关联",
+            )
+            app._sync_etc_invoices_to_canonical_invoices(app._etc_service.list_invoices_by_ids(list(batch.invoice_ids)))
+            app._workbench_pair_relation_service.create_active_relation(
+                case_id="etc-historical-2026-01",
+                row_ids=["oa-exp-1994"],
+                row_types=["oa"],
+                relation_mode="etc_batch_invoice_link",
+                created_by="system",
+                amount_check={
+                    "status": "matched",
+                    "oa_amount": "26.14",
+                    "invoice_total": "26.14",
+                    "delta": "0.00",
+                    "etc_batch_id": batch.id,
+                    "external_etc_batch_id": batch.etc_batch_id,
+                    "source": "historical_repair",
+                },
+            )
+            raw_payload = {
+                "month": "2026-02",
+                "summary": {
+                    "oa_count": 1,
+                    "bank_count": 0,
+                    "invoice_count": 0,
+                    "paired_count": 0,
+                    "open_count": 1,
+                    "exception_count": 0,
+                },
+                "paired": {"oa": [], "bank": [], "invoice": []},
+                "open": {
+                    "oa": [
+                        {
+                            "id": "oa-exp-1994",
+                            "type": "oa",
+                            "case_id": "",
+                            "apply_type": "报销单",
+                            "amount": "26.14",
+                            "counterparty_name": "刘树刚",
+                            "oa_bank_relation": {"code": "pending_match", "label": "待找流水", "tone": "warn"},
+                            "available_actions": ["detail"],
+                        }
+                    ],
+                    "bank": [],
+                    "invoice": [],
+                },
+            }
+
+            with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+                payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
+
+        group = payload["open"]["groups"][0]
+        oa_row = group["oa_rows"][0]
+        invoice_rows = group["invoice_rows"]
+        self.assertIn("已关联ETC发票", oa_row["tags"])
+        self.assertNotIn("待找发票", oa_row["tags"])
+        self.assertEqual(len(invoice_rows), 1)
+        self.assertEqual(invoice_rows[0]["source_kind"], "etc_invoice_summary")
+        self.assertEqual(invoice_rows[0]["seller_name"], "ETC发票 2 张")
+        self.assertEqual(invoice_rows[0]["etc_batch_id"], "ETC-HIST-2026-01")
+        self.assertEqual(invoice_rows[0]["total_with_tax"], "26.14")
 
 
 if __name__ == "__main__":

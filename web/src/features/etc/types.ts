@@ -1,7 +1,9 @@
 import type { BackgroundJob } from "../backgroundJobs/types";
 import type { ImportPreviewAuditCounts } from "../imports/types";
 
-export type EtcInvoiceStatus = "unsubmitted" | "submitted";
+export type EtcBatchStatus = "unsubmitted" | "submitted";
+
+export type EtcInvoiceStatus = EtcBatchStatus;
 
 export type EtcInvoice = {
   id: string;
@@ -25,8 +27,47 @@ export type EtcInvoiceCounts = {
   submitted: number;
 };
 
-export type EtcInvoiceQuery = {
-  status?: EtcInvoiceStatus;
+export type EtcPlateSummary = {
+  plateNumber: string;
+  invoiceCount: number;
+  totalAmount: string;
+};
+
+export type EtcBatchSummary = {
+  id: string;
+  etcBatchId: string;
+  externalBatchId: string;
+  status: EtcBatchStatus;
+  sourceType: string;
+  invoiceCount: number;
+  totalAmount: string;
+  taxAmount: string;
+  issueStartDate: string | null;
+  issueEndDate: string | null;
+  passageStartDate: string | null;
+  passageEndDate: string | null;
+  plateCount: number;
+  plateSummary: EtcPlateSummary[];
+  linkedOaRowId: string;
+  linkedOaCaseId: string;
+  linkedOaApplicant: string;
+  linkedOaApplyDate: string;
+  linkedOaAmount: string;
+  amountDelta: string;
+  note: string;
+};
+
+export type EtcBatchDetail = EtcBatchSummary & {
+  invoiceItems: EtcInvoice[];
+};
+
+export type EtcBatchCounts = {
+  unsubmitted: number;
+  submitted: number;
+};
+
+export type EtcBatchQuery = {
+  status?: EtcBatchStatus;
   month?: string;
   plate?: string;
   keyword?: string;
@@ -35,9 +76,21 @@ export type EtcInvoiceQuery = {
   signal?: AbortSignal;
 };
 
+export type EtcInvoiceQuery = EtcBatchQuery;
+
 export type EtcInvoiceListPayload = {
   counts: EtcInvoiceCounts;
   items: EtcInvoice[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+  };
+};
+
+export type EtcBatchListPayload = {
+  counts: EtcBatchCounts;
+  items: EtcBatchSummary[];
   pagination: {
     page: number;
     pageSize: number;

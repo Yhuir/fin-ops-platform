@@ -203,6 +203,36 @@ class SettingsDataResetServiceTests(unittest.TestCase):
         self.assertEqual(len(persisted["imports"]["invoices"]), 0)
         self.assertEqual(tax_persisted, {})
 
+    def test_execute_data_reset_triggers_historical_etc_repair_for_invoice_and_oa_resets(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            with patch.object(
+                app,
+                "_maybe_reconcile_historical_etc_repair",
+                return_value={"status": "ok", "message": "ok", "batches": []},
+            ) as repair:
+                invoice_result = app._execute_settings_data_reset(RESET_INVOICES_ACTION)
+                with patch.object(app, "_run_workbench_auto_matching_for_scopes"), patch.object(
+                    app,
+                    "_build_api_workbench_payload",
+                    return_value={"summary": {}, "paired": {"groups": []}, "open": {"groups": []}},
+                ):
+                    oa_result = app._execute_settings_data_reset(RESET_OA_AND_REBUILD_ACTION)
+            reasons = [
+                call_item.kwargs["reason"]
+                for call_item in repair.call_args_list
+            ]
+
+        self.assertEqual(invoice_result["status"], "completed")
+        self.assertEqual(oa_result["status"], "completed")
+        self.assertEqual(
+            reasons,
+            [
+                "settings_data_reset:reset_invoices",
+                "settings_data_reset:reset_oa_and_rebuild",
+            ],
+        )
+
     def test_reset_api_requires_admin_access(self) -> None:
         with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

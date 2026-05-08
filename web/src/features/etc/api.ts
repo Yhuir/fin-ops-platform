@@ -3,6 +3,11 @@ import { mapBackgroundJob, type ApiBackgroundJob } from "../backgroundJobs/api";
 import { apiUrl } from "../../app/runtime";
 import type { ImportPreviewAuditCounts } from "../imports/types";
 import type {
+  EtcBatchDetail,
+  EtcBatchListPayload,
+  EtcBatchQuery,
+  EtcBatchStatus,
+  EtcBatchSummary,
   EtcImportConfirmResult,
   EtcImportItem,
   EtcImportPreviewResult,
@@ -15,19 +20,31 @@ import type {
 
 type ApiEtcInvoice = {
   id: string;
-  invoice_number: string;
-  issue_date: string;
+  invoice_number?: string;
+  invoiceNumber?: string;
+  issue_date?: string;
+  issueDate?: string;
   passage_start_date?: string | null;
+  passageStartDate?: string | null;
   passage_end_date?: string | null;
+  passageEndDate?: string | null;
   plate_number?: string | null;
+  plateNumber?: string | null;
   seller_name?: string | null;
+  sellerName?: string | null;
   buyer_name?: string | null;
+  buyerName?: string | null;
   amount_without_tax?: string | number | null;
+  amountWithoutTax?: string | number | null;
   tax_amount?: string | number | null;
+  taxAmount?: string | number | null;
   total_amount?: string | number | null;
-  status: "unsubmitted" | "submitted";
+  totalAmount?: string | number | null;
+  status: EtcBatchStatus;
   has_pdf?: boolean | null;
+  hasPdf?: boolean | null;
   has_xml?: boolean | null;
+  hasXml?: boolean | null;
 };
 
 type ApiEtcInvoicePayload = {
@@ -39,6 +56,77 @@ type ApiEtcInvoicePayload = {
   pagination?: {
     page?: number;
     page_size?: number;
+    total?: number;
+  };
+};
+
+type ApiEtcPlateSummary = {
+  plate_number?: string | null;
+  plateNumber?: string | null;
+  invoice_count?: number | null;
+  invoiceCount?: number | null;
+  total_amount?: string | number | null;
+  totalAmount?: string | number | null;
+};
+
+type ApiEtcBatch = {
+  id?: string;
+  batch_id?: string;
+  batchId?: string;
+  etc_batch_id?: string;
+  etcBatchId?: string;
+  external_batch_id?: string;
+  externalBatchId?: string;
+  status?: EtcBatchStatus;
+  source_type?: string | null;
+  sourceType?: string | null;
+  invoice_count?: number | null;
+  invoiceCount?: number | null;
+  total_amount?: string | number | null;
+  totalAmount?: string | number | null;
+  tax_amount?: string | number | null;
+  taxAmount?: string | number | null;
+  issue_start_date?: string | null;
+  issueStartDate?: string | null;
+  issue_end_date?: string | null;
+  issueEndDate?: string | null;
+  passage_start_date?: string | null;
+  passageStartDate?: string | null;
+  passage_end_date?: string | null;
+  passageEndDate?: string | null;
+  plate_count?: number | null;
+  plateCount?: number | null;
+  plate_summary?: ApiEtcPlateSummary[] | Record<string, unknown> | null;
+  plateSummary?: ApiEtcPlateSummary[] | Record<string, unknown> | null;
+  linked_oa_row_id?: string | null;
+  linkedOaRowId?: string | null;
+  linked_oa_case_id?: string | null;
+  linkedOaCaseId?: string | null;
+  linked_oa_applicant?: string | null;
+  linkedOaApplicant?: string | null;
+  linked_oa_apply_date?: string | null;
+  linkedOaApplyDate?: string | null;
+  linked_oa_amount?: string | number | null;
+  linkedOaAmount?: string | number | null;
+  amount_delta?: string | number | null;
+  amountDelta?: string | number | null;
+  note?: string | null;
+  invoice_items?: ApiEtcInvoice[];
+  invoiceItems?: ApiEtcInvoice[];
+  items?: ApiEtcInvoice[];
+};
+
+type ApiEtcBatchPayload = {
+  counts?: {
+    unsubmitted?: number;
+    submitted?: number;
+  };
+  items?: ApiEtcBatch[];
+  batches?: ApiEtcBatch[];
+  pagination?: {
+    page?: number;
+    page_size?: number;
+    pageSize?: number;
     total?: number;
   };
 };
@@ -209,19 +297,83 @@ function normalizeMoney(value: string | number | null | undefined) {
 function mapInvoice(invoice: ApiEtcInvoice): EtcInvoice {
   return {
     id: invoice.id,
-    invoiceNumber: invoice.invoice_number,
-    issueDate: invoice.issue_date,
-    passageStartDate: invoice.passage_start_date ?? null,
-    passageEndDate: invoice.passage_end_date ?? null,
-    plateNumber: invoice.plate_number ?? "",
-    sellerName: invoice.seller_name ?? "",
-    buyerName: invoice.buyer_name ?? "",
-    amountWithoutTax: normalizeMoney(invoice.amount_without_tax),
-    taxAmount: normalizeMoney(invoice.tax_amount),
-    totalAmount: normalizeMoney(invoice.total_amount),
+    invoiceNumber: invoice.invoiceNumber ?? invoice.invoice_number ?? "",
+    issueDate: invoice.issueDate ?? invoice.issue_date ?? "",
+    passageStartDate: invoice.passageStartDate ?? invoice.passage_start_date ?? null,
+    passageEndDate: invoice.passageEndDate ?? invoice.passage_end_date ?? null,
+    plateNumber: invoice.plateNumber ?? invoice.plate_number ?? "",
+    sellerName: invoice.sellerName ?? invoice.seller_name ?? "",
+    buyerName: invoice.buyerName ?? invoice.buyer_name ?? "",
+    amountWithoutTax: normalizeMoney(invoice.amountWithoutTax ?? invoice.amount_without_tax),
+    taxAmount: normalizeMoney(invoice.taxAmount ?? invoice.tax_amount),
+    totalAmount: normalizeMoney(invoice.totalAmount ?? invoice.total_amount),
     status: invoice.status,
-    hasPdf: Boolean(invoice.has_pdf),
-    hasXml: Boolean(invoice.has_xml),
+    hasPdf: Boolean(invoice.hasPdf ?? invoice.has_pdf),
+    hasXml: Boolean(invoice.hasXml ?? invoice.has_xml),
+  };
+}
+
+function mapPlateSummary(input: ApiEtcBatch["plate_summary"] | ApiEtcBatch["plateSummary"]) {
+  if (Array.isArray(input)) {
+    return input.map((item) => ({
+      plateNumber: item.plateNumber ?? item.plate_number ?? "",
+      invoiceCount: item.invoiceCount ?? item.invoice_count ?? 0,
+      totalAmount: normalizeMoney(item.totalAmount ?? item.total_amount),
+    }));
+  }
+  if (input && typeof input === "object") {
+    return Object.entries(input).map(([plateNumber, value]) => {
+      if (value && typeof value === "object") {
+        const item = value as ApiEtcPlateSummary;
+        return {
+          plateNumber,
+          invoiceCount: item.invoiceCount ?? item.invoice_count ?? 0,
+          totalAmount: normalizeMoney(item.totalAmount ?? item.total_amount),
+        };
+      }
+      return {
+        plateNumber,
+        invoiceCount: 0,
+        totalAmount: normalizeMoney(typeof value === "number" || typeof value === "string" ? value : undefined),
+      };
+    });
+  }
+  return [];
+}
+
+function mapBatchSummary(batch: ApiEtcBatch): EtcBatchSummary {
+  const id = batch.id ?? batch.batchId ?? batch.batch_id ?? "";
+  const etcBatchId = batch.etcBatchId ?? batch.etc_batch_id ?? batch.externalBatchId ?? batch.external_batch_id ?? id;
+  const plateSummary = mapPlateSummary(batch.plateSummary ?? batch.plate_summary);
+  return {
+    id,
+    etcBatchId,
+    externalBatchId: batch.externalBatchId ?? batch.external_batch_id ?? etcBatchId,
+    status: batch.status ?? "unsubmitted",
+    sourceType: batch.sourceType ?? batch.source_type ?? "",
+    invoiceCount: batch.invoiceCount ?? batch.invoice_count ?? 0,
+    totalAmount: normalizeMoney(batch.totalAmount ?? batch.total_amount),
+    taxAmount: normalizeMoney(batch.taxAmount ?? batch.tax_amount),
+    issueStartDate: batch.issueStartDate ?? batch.issue_start_date ?? null,
+    issueEndDate: batch.issueEndDate ?? batch.issue_end_date ?? null,
+    passageStartDate: batch.passageStartDate ?? batch.passage_start_date ?? null,
+    passageEndDate: batch.passageEndDate ?? batch.passage_end_date ?? null,
+    plateCount: batch.plateCount ?? batch.plate_count ?? plateSummary.length,
+    plateSummary,
+    linkedOaRowId: batch.linkedOaRowId ?? batch.linked_oa_row_id ?? "",
+    linkedOaCaseId: batch.linkedOaCaseId ?? batch.linked_oa_case_id ?? "",
+    linkedOaApplicant: batch.linkedOaApplicant ?? batch.linked_oa_applicant ?? "",
+    linkedOaApplyDate: batch.linkedOaApplyDate ?? batch.linked_oa_apply_date ?? "",
+    linkedOaAmount: normalizeMoney(batch.linkedOaAmount ?? batch.linked_oa_amount),
+    amountDelta: normalizeMoney(batch.amountDelta ?? batch.amount_delta),
+    note: batch.note ?? "",
+  };
+}
+
+function mapBatchDetail(batch: ApiEtcBatch): EtcBatchDetail {
+  return {
+    ...mapBatchSummary(batch),
+    invoiceItems: (batch.invoiceItems ?? batch.invoice_items ?? batch.items ?? []).map(mapInvoice),
   };
 }
 
@@ -296,6 +448,56 @@ export async function fetchEtcInvoices(query: EtcInvoiceQuery = {}): Promise<Etc
   };
 }
 
+export async function fetchEtcBatches(query: EtcBatchQuery = {}): Promise<EtcBatchListPayload> {
+  const params = new URLSearchParams();
+  if (query.status) {
+    params.set("status", query.status);
+  }
+  if (query.month) {
+    params.set("month", query.month);
+  }
+  if (query.plate) {
+    params.set("plate", query.plate);
+  }
+  if (query.keyword) {
+    params.set("keyword", query.keyword);
+  }
+  params.set("page", String(query.page ?? 1));
+  params.set("page_size", String(query.pageSize ?? 100));
+
+  const payload = await requestJson<ApiEtcBatchPayload>(`/api/etc/batches?${params.toString()}`, {
+    method: "GET",
+    signal: query.signal,
+  });
+  const items = (payload.items ?? payload.batches ?? []).map(mapBatchSummary);
+  return {
+    counts: {
+      unsubmitted: payload.counts?.unsubmitted ?? 0,
+      submitted: payload.counts?.submitted ?? 0,
+    },
+    items,
+    pagination: {
+      page: payload.pagination?.page ?? query.page ?? 1,
+      pageSize: payload.pagination?.pageSize ?? payload.pagination?.page_size ?? query.pageSize ?? 100,
+      total: payload.pagination?.total ?? items.length,
+    },
+  };
+}
+
+export async function fetchEtcBatchDetail(batchId: string, signal?: AbortSignal): Promise<EtcBatchDetail> {
+  const payload = await requestJson<ApiEtcBatch | { item?: ApiEtcBatch; detail?: ApiEtcBatch }>(
+    `/api/etc/batches/${encodeURIComponent(batchId)}`,
+    {
+      method: "GET",
+      signal,
+    },
+  );
+  const batch = "item" in payload || "detail" in payload
+    ? (payload.item ?? payload.detail ?? {})
+    : payload;
+  return mapBatchDetail(batch as ApiEtcBatch);
+}
+
 export async function importEtcZipFiles(files: File[]): Promise<EtcImportSummary> {
   return previewEtcZipFiles(files);
 }
@@ -331,6 +533,18 @@ export async function createEtcOaDraft(invoiceIds: string[]): Promise<EtcOaDraft
   });
   return {
     batchId: payload.batchId ?? payload.batch_id ?? "",
+    etcBatchId: payload.etcBatchId ?? payload.etc_batch_id ?? "",
+    oaDraftId: payload.oaDraftId ?? payload.oa_draft_id ?? "",
+    oaDraftUrl: payload.oaDraftUrl ?? payload.oa_draft_url ?? "",
+  };
+}
+
+export async function createEtcOaDraftForBatch(batchId: string): Promise<EtcOaDraftPayload> {
+  const payload = await requestJson<ApiEtcOaDraftPayload>(`/api/etc/batches/${encodeURIComponent(batchId)}/draft`, {
+    method: "POST",
+  });
+  return {
+    batchId: payload.batchId ?? payload.batch_id ?? batchId,
     etcBatchId: payload.etcBatchId ?? payload.etc_batch_id ?? "",
     oaDraftId: payload.oaDraftId ?? payload.oa_draft_id ?? "",
     oaDraftUrl: payload.oaDraftUrl ?? payload.oa_draft_url ?? "",

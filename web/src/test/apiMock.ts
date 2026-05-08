@@ -175,6 +175,113 @@ function createEtcInvoiceStore() {
       has_xml: true,
     },
   ];
+  let batches = [
+    {
+      id: "etc-batch-unsubmitted-01",
+      etc_batch_id: "ETC-2026-03-A",
+      external_batch_id: "ETC-2026-03-A",
+      status: "unsubmitted" as const,
+      source_type: "normal_oa_draft",
+      invoice_ids: ["etc-inv-001", "etc-inv-002"],
+      linked_oa_row_id: null,
+      linked_oa_case_id: null,
+      linked_oa_applicant: null,
+      linked_oa_apply_date: null,
+      linked_oa_amount: null,
+      amount_delta: null,
+      note: "",
+    },
+    {
+      id: "etc-batch-unsubmitted-02",
+      etcBatchId: "ETC-2026-03-B",
+      externalBatchId: "ETC-2026-03-B",
+      status: "unsubmitted" as const,
+      sourceType: "normal_oa_draft",
+      invoiceIds: ["etc-inv-003"],
+      linkedOaRowId: null,
+      linkedOaCaseId: null,
+      linkedOaApplicant: null,
+      linkedOaApplyDate: null,
+      linkedOaAmount: null,
+      amountDelta: null,
+      note: "",
+    },
+    {
+      id: "etc-batch-submitted-01",
+      etc_batch_id: "ETC-HIST-2026-01",
+      external_batch_id: "ETC-HIST-2026-01",
+      status: "submitted" as const,
+      source_type: "historical_repair",
+      invoice_ids: ["etc-inv-004"],
+      linked_oa_row_id: "oa-exp-1994",
+      linked_oa_case_id: "etc-historical-2026-01",
+      linked_oa_applicant: "刘树刚",
+      linked_oa_apply_date: "2026-02-02",
+      linked_oa_amount: "31.80",
+      amount_delta: "0.00",
+      note: "历史补关联",
+    },
+  ];
+
+  const getBatchInvoiceIds = (batch: (typeof batches)[number]) => (
+    "invoice_ids" in batch ? batch.invoice_ids : batch.invoiceIds
+  ) ?? [];
+
+  const invoicesForBatch = (batch: (typeof batches)[number]) => {
+    const invoiceIds = new Set(getBatchInvoiceIds(batch));
+    return invoices.filter((invoice) => invoiceIds.has(invoice.id));
+  };
+
+  const batchCounts = () => ({
+    unsubmitted: batches.filter((batch) => batch.status === "unsubmitted").length,
+    submitted: batches.filter((batch) => batch.status === "submitted").length,
+  });
+
+  const batchDateRange = (items: typeof invoices, startKey: "issue_date" | "passage_start_date", endKey: "issue_date" | "passage_end_date") => {
+    const starts = items.map((invoice) => invoice[startKey]).filter(Boolean).sort();
+    const ends = items.map((invoice) => invoice[endKey]).filter(Boolean).sort();
+    return {
+      start: starts[0] ?? null,
+      end: ends[ends.length - 1] ?? null,
+    };
+  };
+
+  const summarizePlates = (items: typeof invoices) => {
+    const byPlate = new Map<string, { invoice_count: number; total_amount: string }>();
+    items.forEach((invoice) => {
+      const current = byPlate.get(invoice.plate_number) ?? { invoice_count: 0, total_amount: "0.00" };
+      byPlate.set(invoice.plate_number, {
+        invoice_count: current.invoice_count + 1,
+        total_amount: (Number(current.total_amount) + Number(invoice.total_amount)).toFixed(2),
+      });
+    });
+    return Array.from(byPlate.entries()).map(([plate_number, summary]) => ({
+      plate_number,
+      ...summary,
+    }));
+  };
+
+  const hydrateBatch = (batch: (typeof batches)[number], includeInvoices = false) => {
+    const items = invoicesForBatch(batch);
+    const issueRange = batchDateRange(items, "issue_date", "issue_date");
+    const passageRange = batchDateRange(items, "passage_start_date", "passage_end_date");
+    const plateSummary = summarizePlates(items);
+    const totalAmount = items.reduce((sum, invoice) => sum + Number(invoice.total_amount), 0).toFixed(2);
+    const taxAmount = items.reduce((sum, invoice) => sum + Number(invoice.tax_amount), 0).toFixed(2);
+    return {
+      ...batch,
+      invoice_count: items.length,
+      total_amount: totalAmount,
+      tax_amount: taxAmount,
+      issue_start_date: issueRange.start,
+      issue_end_date: issueRange.end,
+      passage_start_date: passageRange.start,
+      passage_end_date: passageRange.end,
+      plate_count: plateSummary.length,
+      plate_summary: plateSummary,
+      ...(includeInvoices ? { invoice_items: cloneJson(items) } : {}),
+    };
+  };
 
   const counts = () => ({
     unsubmitted: invoices.filter((invoice) => invoice.status === "unsubmitted").length,
@@ -212,6 +319,50 @@ function createEtcInvoiceStore() {
           total: rows.length,
         },
       };
+    },
+    listBatches({ status, month, plate, keyword }: { status?: string | null; month?: string | null; plate?: string | null; keyword?: string | null }) {
+      const normalizedKeyword = String(keyword ?? "").trim();
+      const normalizedPlate = String(plate ?? "").trim();
+      const rows = batches
+        .filter((batch) => {
+          if (status && batch.status !== status) {
+            return false;
+          }
+          const items = invoicesForBatch(batch);
+          if (month && !items.some((invoice) => invoice.issue_date.startsWith(month))) {
+            return false;
+          }
+          if (normalizedPlate && !items.some((invoice) => invoice.plate_number.includes(normalizedPlate))) {
+            return false;
+          }
+          if (normalizedKeyword) {
+            const searchable = [
+              "etc_batch_id" in batch ? batch.etc_batch_id : batch.etcBatchId,
+              "external_batch_id" in batch ? batch.external_batch_id : batch.externalBatchId,
+              "linked_oa_row_id" in batch ? batch.linked_oa_row_id : batch.linkedOaRowId,
+              "linked_oa_applicant" in batch ? batch.linked_oa_applicant : batch.linkedOaApplicant,
+              ...items.map((invoice) => `${invoice.invoice_number} ${invoice.seller_name} ${invoice.plate_number}`),
+            ].join(" ");
+            if (!searchable.includes(normalizedKeyword)) {
+              return false;
+            }
+          }
+          return true;
+        })
+        .map((batch) => hydrateBatch(batch));
+      return {
+        counts: batchCounts(),
+        items: cloneJson(rows),
+        pagination: {
+          page: 1,
+          page_size: 100,
+          total: rows.length,
+        },
+      };
+    },
+    batchDetail(batchId: string) {
+      const batch = batches.find((item) => item.id === batchId);
+      return batch ? cloneJson(hydrateBatch(batch, true)) : null;
     },
     previewZip(fileNames: string[]) {
       return {
@@ -304,6 +455,40 @@ function createEtcInvoiceStore() {
         invoiceIds.includes(invoice.id)
           ? { ...invoice, status: "unsubmitted" as const }
           : invoice,
+      );
+    },
+    markBatchSubmitted(batchId: string) {
+      const batch = batches.find((item) => item.id === batchId);
+      if (!batch) {
+        return;
+      }
+      const invoiceIds = getBatchInvoiceIds(batch);
+      invoices = invoices.map((invoice) =>
+        invoiceIds.includes(invoice.id)
+          ? { ...invoice, status: "submitted" as const }
+          : invoice,
+      );
+      batches = batches.map((item) =>
+        item.id === batchId
+          ? { ...item, status: "submitted" as const }
+          : item,
+      );
+    },
+    markBatchUnsubmitted(batchId: string) {
+      const batch = batches.find((item) => item.id === batchId);
+      if (!batch) {
+        return;
+      }
+      const invoiceIds = getBatchInvoiceIds(batch);
+      invoices = invoices.map((invoice) =>
+        invoiceIds.includes(invoice.id)
+          ? { ...invoice, status: "unsubmitted" as const }
+          : invoice,
+      );
+      batches = batches.map((item) =>
+        item.id === batchId
+          ? { ...item, status: "unsubmitted" as const }
+          : item,
       );
     },
   };
@@ -2947,6 +3132,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   const etcInvoiceStore = createEtcInvoiceStore();
   let latestEtcImportPreview = etcInvoiceStore.previewZip([]);
   let latestEtcDraftInvoiceIds: string[] = [];
+  let latestEtcDraftBatchId = "";
   const workbenchStateStore = createWorkbenchStateStore();
   const ignoredRowStore = createIgnoredRowStore();
   const taxOffsetStateStore = createTaxOffsetStateStore();
@@ -3550,6 +3736,14 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         keyword: url.searchParams.get("keyword"),
       }),
     }),
+    "/api/etc/batches": ({ url }) => ({
+      body: etcInvoiceStore.listBatches({
+        status: url.searchParams.get("status"),
+        month: url.searchParams.get("month"),
+        plate: url.searchParams.get("plate"),
+        keyword: url.searchParams.get("keyword"),
+      }),
+    }),
     "/api/etc/import/preview": ({ formData }) => {
       const fileNames = (formData?.getAll("files") as File[] | undefined)?.map((file) => file.name) ?? [];
       latestEtcImportPreview = etcInvoiceStore.previewZip(fileNames);
@@ -4044,6 +4238,39 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     }
     if (url.pathname.startsWith("/imports/files/sessions/")) {
       return jsonResponse({ body: latestImportSession });
+    }
+    const etcBatchDetailMatch = url.pathname.match(/^\/api\/etc\/batches\/([^/]+)$/);
+    if (etcBatchDetailMatch) {
+      const batch = etcInvoiceStore.batchDetail(decodeURIComponent(etcBatchDetailMatch[1] ?? ""));
+      return batch
+        ? jsonResponse({ body: batch })
+        : jsonResponse({ status: 404, body: { message: "ETC批次不存在。" } });
+    }
+    const etcBatchDraftMatch = url.pathname.match(/^\/api\/etc\/batches\/([^/]+)\/draft$/);
+    if (etcBatchDraftMatch) {
+      latestEtcDraftBatchId = decodeURIComponent(etcBatchDraftMatch[1] ?? "");
+      const batch = etcInvoiceStore.batchDetail(latestEtcDraftBatchId);
+      return jsonResponse({
+        body: {
+          batch_id: latestEtcDraftBatchId,
+          etc_batch_id: batch?.external_batch_id ?? batch?.externalBatchId ?? "ETC-2026-03-A",
+          oa_draft_id: "oa_draft_001",
+          oa_draft_url: "https://oa.example.test/oa/#/normal/forms/form/2?formId=2&id=oa_draft_001",
+        },
+      });
+    }
+    const etcBatchConfirmMatch = url.pathname.match(/^\/api\/etc\/batches\/([^/]+)\/confirm-submitted$/);
+    if (etcBatchConfirmMatch) {
+      etcInvoiceStore.markBatchSubmitted(decodeURIComponent(etcBatchConfirmMatch[1] ?? ""));
+      return jsonResponse({ body: { ok: true } });
+    }
+    const etcBatchMarkNotSubmittedMatch = url.pathname.match(/^\/api\/etc\/batches\/([^/]+)\/mark-not-submitted$/);
+    if (etcBatchMarkNotSubmittedMatch) {
+      const batchId = decodeURIComponent(etcBatchMarkNotSubmittedMatch[1] ?? "");
+      if (batchId !== latestEtcDraftBatchId) {
+        etcInvoiceStore.markBatchUnsubmitted(batchId);
+      }
+      return jsonResponse({ body: { ok: true } });
     }
     if (url.pathname === "/api/etc/batches/etc_batch_001/confirm-submitted") {
       etcInvoiceStore.markSubmitted(latestEtcDraftInvoiceIds);

@@ -17,12 +17,17 @@ from fin_ops_platform.services.etc_service import (
     EtcDraftRequestError,
     EtcOAHttpClientSettings,
     EtcInvoiceStatus,
+    EtcInvoiceNotFoundError,
     HttpEtcOAClient,
     EtcOAClient,
     EtcOAClientError,
     EtcService,
     UploadedEtcZipFile,
     parse_etc_xml,
+)
+from fin_ops_platform.services.historical_etc_repair_service import (
+    HistoricalEtcRepairBatchSpec,
+    HistoricalEtcRepairService,
 )
 from unittest.mock import patch
 
@@ -495,6 +500,119 @@ class EtcServiceTests(unittest.TestCase):
         self.assertEqual(len(invoices), 1)
         self.assertEqual(invoices[0].invoice_number, "ETC003")
         self.assertEqual(counts, {"unsubmitted": 2, "submitted": 1, "current": 2})
+
+    def test_create_historical_submitted_batch_is_idempotent_and_summarized(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir))
+            service.import_zips(
+                [
+                    UploadedEtcZipFile(
+                        "historical.zip",
+                        zip_bytes(
+                            {
+                                "xml/ETC001.xml": etc_xml(
+                                    "ETC001",
+                                    issue_date="2026-01-15",
+                                    plate_number="云ADA0381",
+                                    total_amount="10.00",
+                                ),
+                                "pdf/ETC001.pdf": fake_pdf("ETC001"),
+                                "xml/ETC002.xml": etc_xml(
+                                    "ETC002",
+                                    issue_date="2026-01-20",
+                                    plate_number="云A361SY",
+                                    total_amount="20.00",
+                                ),
+                                "pdf/ETC002.pdf": fake_pdf("ETC002"),
+                                "xml/ETC003.xml": etc_xml(
+                                    "ETC003",
+                                    issue_date="2026-01-21",
+                                    plate_number="云ADA0381",
+                                    total_amount="30.00",
+                                ),
+                                "pdf/ETC003.pdf": fake_pdf("ETC003"),
+                            }
+                        ),
+                    )
+                ]
+            )
+
+            batch = service.create_historical_submitted_batch(
+                case_id="etc-historical-2026-01",
+                external_batch_id="ETC-HIST-2026-01",
+                invoice_numbers=["ETC001", "ETC002", "ETC003"],
+                linked_oa_row_id="oa-exp-1994",
+                oa_amount=Decimal("59.00"),
+                note="历史 OA 金额存在人工确认差额",
+            )
+            repeated = service.create_historical_submitted_batch(
+                case_id="etc-historical-2026-01",
+                external_batch_id="ETC-HIST-2026-01",
+                invoice_numbers=["ETC001", "ETC002", "ETC003"],
+                linked_oa_row_id="oa-exp-1994",
+                oa_amount=Decimal("59.00"),
+                note="历史 OA 金额存在人工确认差额",
+            )
+            submitted_batches = service.list_batches(status="submitted")
+            detail = service.get_batch_detail(batch.id)
+            invoices, _total, counts = service.list_invoices(page=1, page_size=20)
+
+        self.assertEqual(batch.id, repeated.id)
+        self.assertEqual(len(submitted_batches), 1)
+        self.assertEqual(batch.source_type, "historical_repair")
+        self.assertEqual(batch.status, "submitted_confirmed")
+        self.assertEqual(batch.linked_oa_row_id, "oa-exp-1994")
+        self.assertEqual(batch.linked_oa_case_id, "etc-historical-2026-01")
+        self.assertEqual(batch.amount_delta, Decimal("-1.00"))
+        self.assertEqual(batch.issue_start_date, "2026-01-15")
+        self.assertEqual(batch.issue_end_date, "2026-01-21")
+        self.assertEqual(batch.passage_start_date, "2026-01-15")
+        self.assertEqual(batch.passage_end_date, "2026-01-21")
+        self.assertEqual(
+            batch.plate_summary,
+            [
+                {"plate_number": "云ADA0381", "invoice_count": 2, "total_amount": Decimal("40.00")},
+                {"plate_number": "云A361SY", "invoice_count": 1, "total_amount": Decimal("20.00")},
+            ],
+        )
+        self.assertEqual(detail["summary"]["invoice_count"], 3)
+        self.assertEqual(detail["summary"]["total_amount"], Decimal("60.00"))
+        self.assertEqual(detail["plate_summary"], batch.plate_summary)
+        self.assertEqual([item["invoice_number"] for item in detail["invoice_items"]], ["ETC001", "ETC002", "ETC003"])
+        self.assertEqual(counts["submitted"], 3)
+        self.assertEqual({invoice.current_batch_id for invoice in invoices}, {batch.id})
+        self.assertEqual({invoice.last_batch_id for invoice in invoices}, {batch.id})
+
+    def test_historical_batch_can_use_invoice_repaired_from_zip_import(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir))
+            service.import_zips([UploadedEtcZipFile("initial.zip", etc_zip(["ETC001"]))])
+
+            with self.assertRaisesRegex(EtcInvoiceNotFoundError, "ETC002"):
+                service.create_historical_submitted_batch(
+                    case_id="etc-historical-2026-01",
+                    external_batch_id="ETC-HIST-2026-01",
+                    invoice_numbers=["ETC001", "ETC002"],
+                    linked_oa_row_id="oa-exp-1994",
+                    oa_amount=Decimal("30.00"),
+                    note="缺失票补导入前不能落批次",
+                )
+
+            service.import_missing_invoices_from_zips(
+                invoice_numbers=["ETC002"],
+                uploads=[UploadedEtcZipFile("repair.zip", etc_zip(["ETC002"]))],
+            )
+            batch = service.create_historical_submitted_batch(
+                case_id="etc-historical-2026-01",
+                external_batch_id="ETC-HIST-2026-01",
+                invoice_numbers=["ETC001", "ETC002"],
+                linked_oa_row_id="oa-exp-1994",
+                oa_amount=Decimal("26.14"),
+                note="缺失票补导入后进入历史批次",
+            )
+
+        self.assertEqual(batch.invoice_count, 2)
+        self.assertEqual(batch.total_amount, Decimal("26.14"))
 
     def test_batch_status_revoke_and_draft_creation_with_fake_oa_client(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -976,6 +1094,64 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(not_submitted_response.status_code, 200)
         self.assertEqual(json.loads(not_submitted_response.body)["batch"]["status"], "not_submitted")
 
+    def test_etc_batch_query_api_returns_counts_summary_plate_summary_and_items(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._etc_service.import_zips(
+                [
+                    UploadedEtcZipFile(
+                        "historical.zip",
+                        zip_bytes(
+                            {
+                                "xml/ETC001.xml": etc_xml(
+                                    "ETC001",
+                                    issue_date="2026-01-15",
+                                    plate_number="云ADA0381",
+                                    total_amount="10.00",
+                                ),
+                                "pdf/ETC001.pdf": fake_pdf("ETC001"),
+                                "xml/ETC002.xml": etc_xml(
+                                    "ETC002",
+                                    issue_date="2026-01-20",
+                                    plate_number="云A361SY",
+                                    total_amount="20.00",
+                                ),
+                                "pdf/ETC002.pdf": fake_pdf("ETC002"),
+                            }
+                        ),
+                    )
+                ]
+            )
+            batch = app._etc_service.create_historical_submitted_batch(
+                case_id="etc-historical-2026-01",
+                external_batch_id="ETC-HIST-2026-01",
+                invoice_numbers=["ETC001", "ETC002"],
+                linked_oa_row_id="oa-exp-1994",
+                oa_amount=Decimal("31.00"),
+                note="历史补关联",
+            )
+
+            list_response = app.handle_request("GET", "/api/etc/batches?status=submitted&month=2026-01&plate=ADA")
+            detail_response = app.handle_request("GET", f"/api/etc/batches/{batch.id}")
+
+        self.assertEqual(list_response.status_code, 200)
+        list_payload = json.loads(list_response.body)
+        self.assertEqual(list_payload["counts"]["submitted"], 1)
+        self.assertEqual(list_payload["counts"]["current"], 1)
+        self.assertEqual(list_payload["items"][0]["id"], batch.id)
+        self.assertEqual(list_payload["items"][0]["etc_batch_id"], "ETC-HIST-2026-01")
+        self.assertEqual(list_payload["items"][0]["invoice_count"], 2)
+        self.assertEqual(list_payload["selectedBatch"]["summary"]["amount_delta"], "1.00")
+        self.assertEqual(list_payload["plateSummary"][0]["plate_number"], "云ADA0381")
+        self.assertEqual([item["invoice_number"] for item in list_payload["invoiceItems"]], ["ETC001", "ETC002"])
+
+        self.assertEqual(detail_response.status_code, 200)
+        detail_payload = json.loads(detail_response.body)
+        self.assertEqual(detail_payload["batch"]["source_type"], "historical_repair")
+        self.assertEqual(detail_payload["summary"]["linked_oa_row_id"], "oa-exp-1994")
+        self.assertEqual(detail_payload["plateSummary"][1]["plate_number"], "云A361SY")
+        self.assertEqual(detail_payload["invoiceItems"][0]["has_pdf"], True)
+
     def test_preview_rejects_non_zip_upload(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -1011,6 +1187,73 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(json.loads(missing_batch.body)["error"], "etc_batch_not_found")
         self.assertEqual(bad_revoke.status_code, 400)
         self.assertEqual(json.loads(bad_revoke.body)["error"], "invalid_etc_invoice_request")
+
+    def test_historical_etc_repair_reconcile_is_idempotent_from_seed_bundle(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            spec = HistoricalEtcRepairBatchSpec(
+                label="测试历史批次",
+                bundle_id="ETC-HIST-TEST",
+                case_id="etc-historical-test",
+                external_batch_id="ETC-HIST-TEST",
+                oa_row_id="oa-exp-test",
+                oa_amount=Decimal("30.00"),
+            )
+            service = HistoricalEtcRepairService(
+                state_store=app._state_store,
+                etc_service=app._etc_service,
+                pair_relation_service=app._workbench_pair_relation_service,
+                specs=[spec],
+                oa_row_exists=lambda row_id: row_id == "oa-exp-test",
+                sync_import_result_to_canonical_invoices=app._sync_etc_import_result_to_canonical_invoices,
+                sync_etc_invoices_to_canonical_invoices=app._sync_etc_invoices_to_canonical_invoices,
+                refresh_after_etc_invoice_sync=lambda months, reason: None,
+                persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(
+                    changed_case_ids=case_ids,
+                ),
+                invalidate_workbench_scopes=app._invalidate_workbench_read_model_scopes,
+                persist_etc_state=lambda: app._state_store.save_etc_state(app._etc_service.snapshot()),
+            )
+            service.seed_bundle_from_upload(
+                spec,
+                UploadedEtcZipFile("historical-test.zip", etc_zip(["ETC001", "ETC002"])),
+            )
+            parsed_seed = app._state_store.load_historical_etc_repair_parsed_seed("ETC-HIST-TEST")
+            self.assertIsNotNone(parsed_seed)
+            assert parsed_seed is not None
+            self.assertEqual(parsed_seed["invoice_count"], 2)
+            self.assertEqual(parsed_seed["totals"]["invoice_count"], 2)
+            self.assertEqual(len(parsed_seed["selected_invoice_records"]), 2)
+
+            with patch.object(
+                app._state_store,
+                "read_historical_etc_repair_bundle",
+                side_effect=AssertionError("parsed seed should restore missing invoices without reading audit zip"),
+            ):
+                first_result = service.reconcile(reason="test")
+            service._sync_etc_invoices_to_canonical_invoices = (  # noqa: SLF001 - verifies parsed-seed fast path.
+                lambda _invoices: (_ for _ in ()).throw(
+                    AssertionError("existing historical repair should not resync canonical invoices")
+                )
+            )
+            with patch.object(
+                app._state_store,
+                "read_historical_etc_repair_bundle",
+                side_effect=AssertionError("parsed seed should avoid reading audit zip"),
+            ):
+                second_result = service.reconcile(reason="test-repeat")
+            persisted_state = app._state_store.load_historical_etc_repair_states()
+
+        self.assertEqual(first_result.status, "ok")
+        self.assertEqual(first_result.batches[0].imported_count, 2)
+        self.assertEqual(second_result.status, "ok")
+        self.assertEqual(len(app._etc_service.list_batches(status="submitted")), 1)
+        self.assertEqual(len(app._import_service.list_invoices()), 2)
+        relation = app._workbench_pair_relation_service.get_active_relation_by_case_id("etc-historical-test")
+        self.assertIsNotNone(relation)
+        assert relation is not None
+        self.assertEqual(relation["relation_mode"], "etc_batch_invoice_link")
+        self.assertEqual(persisted_state["ETC-HIST-TEST"]["status"], "ok")
 
     def test_etc_draft_returns_clear_error_when_oa_token_is_missing(self) -> None:
         with TemporaryDirectory() as temp_dir:

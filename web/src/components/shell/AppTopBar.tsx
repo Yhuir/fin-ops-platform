@@ -5,40 +5,18 @@ import Stack from "@mui/material/Stack";
 import Toolbar from "@mui/material/Toolbar";
 import Tooltip from "@mui/material/Tooltip";
 
-import BackgroundProgressBlock from "../common/BackgroundProgressBlock";
-import type { BackgroundJob } from "../../features/backgroundJobs/types";
-
-type ShellImportProgress = {
-  label: string;
-  tone: "info" | "loading" | "success" | "error";
-};
-
 type AppTopBarProps = {
   embedded: boolean;
   isCompact: boolean;
-  primaryJob: BackgroundJob | null;
-  extraCount: number;
-  connectionFailed: boolean;
-  progress: ShellImportProgress | null;
   onOpenMobileSidebar: () => void;
-  onAcknowledgeJob: (jobId: string) => void;
-  onRetryJob: (jobId: string) => void;
 };
 
 export default function AppTopBar({
   embedded,
   isCompact,
-  primaryJob,
-  extraCount,
-  connectionFailed,
-  progress,
   onOpenMobileSidebar,
-  onAcknowledgeJob,
-  onRetryJob,
 }: AppTopBarProps) {
-  const hasStatusContent = Boolean(primaryJob || connectionFailed || progress);
-
-  if (!isCompact && !hasStatusContent) {
+  if (!isCompact) {
     return null;
   }
 
@@ -60,24 +38,7 @@ export default function AppTopBar({
           ) : null}
         </Stack>
 
-        <Stack className="header-actions" direction="row" alignItems="center" spacing={1.5}>
-          {primaryJob ? (
-            <BackgroundProgressBlock
-              kind="job"
-              job={primaryJob}
-              extraCount={extraCount}
-              onAcknowledge={onAcknowledgeJob}
-              onRetry={onRetryJob}
-            />
-          ) : connectionFailed ? (
-            <BackgroundProgressBlock kind="connection_error" />
-          ) : progress ? (
-            <div className={`global-progress-chip ${progress.tone}`} aria-live="polite">
-              <span className="global-progress-label">进度</span>
-              <strong>{progress.label}</strong>
-            </div>
-          ) : null}
-        </Stack>
+        <Stack className="header-actions" direction="row" alignItems="center" spacing={1.5} />
       </Toolbar>
     </AppBar>
   );

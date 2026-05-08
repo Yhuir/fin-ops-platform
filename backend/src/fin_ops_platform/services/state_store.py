@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
+import hashlib
 from io import BytesIO
 import json
 import os
@@ -61,6 +62,9 @@ TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION = "tax_certified_import_sessions"
 TAX_CERTIFIED_IMPORT_BATCHES_COLLECTION = "tax_certified_import_batches"
 TAX_CERTIFIED_IMPORT_RECORDS_COLLECTION = "tax_certified_import_records"
 ETC_STATE_COLLECTION = "etc_state"
+HISTORICAL_ETC_REPAIR_BUNDLES_COLLECTION = "historical_etc_repair_bundles"
+HISTORICAL_ETC_REPAIR_PARSED_SEEDS_COLLECTION = "historical_etc_repair_parsed_seeds"
+HISTORICAL_ETC_REPAIR_STATES_COLLECTION = "historical_etc_repair_states"
 BACKGROUND_JOBS_COLLECTION = "background_jobs"
 APP_HEALTH_ALERTS_COLLECTION = "app_health_alerts"
 STATE_DOCUMENT_ID = "current_state"
@@ -68,6 +72,7 @@ META_DOCUMENT_ID = "_meta"
 APP_SETTINGS_DOCUMENT_ID = "settings"
 GRIDFS_BUCKET_NAME = "import_file_blobs"
 GRIDFS_REF_PREFIX = "gridfs://"
+HISTORICAL_ETC_REPAIR_GRIDFS_ID_PREFIX = "historical_etc_repair:"
 MONGO_ONLY_STORAGE_MODE = "mongo_only"
 T = TypeVar("T")
 
@@ -167,6 +172,10 @@ class ApplicationStateStore:
         self._oa_sync_state_path = root / "oa_sync_state.pkl"
         self._tax_certified_imports_path = root / "tax_certified_imports.pkl"
         self._etc_state_path = root / "etc" / "etc_state.pkl"
+        self._historical_etc_repair_root = root / "historical_etc_repair"
+        self._historical_etc_repair_bundles_path = self._historical_etc_repair_root / "bundles.json"
+        self._historical_etc_repair_parsed_seeds_path = self._historical_etc_repair_root / "parsed_seeds.json"
+        self._historical_etc_repair_states_path = self._historical_etc_repair_root / "states.json"
         self._background_jobs_path = root / "background_jobs.pkl"
         self._app_health_alerts_path = root / "app_health_alerts.pkl"
         self._data_dir.mkdir(parents=True, exist_ok=True)
@@ -234,6 +243,9 @@ class ApplicationStateStore:
                 "tax_certified_import_batches": self._mongo_database[TAX_CERTIFIED_IMPORT_BATCHES_COLLECTION],
                 "tax_certified_import_records": self._mongo_database[TAX_CERTIFIED_IMPORT_RECORDS_COLLECTION],
                 "etc_state": self._mongo_database[ETC_STATE_COLLECTION],
+                "historical_etc_repair_bundles": self._mongo_database[HISTORICAL_ETC_REPAIR_BUNDLES_COLLECTION],
+                "historical_etc_repair_parsed_seeds": self._mongo_database[HISTORICAL_ETC_REPAIR_PARSED_SEEDS_COLLECTION],
+                "historical_etc_repair_states": self._mongo_database[HISTORICAL_ETC_REPAIR_STATES_COLLECTION],
                 "background_jobs": self._mongo_database[BACKGROUND_JOBS_COLLECTION],
                 "app_health_alerts": self._mongo_database[APP_HEALTH_ALERTS_COLLECTION],
             }
@@ -532,6 +544,270 @@ class ApplicationStateStore:
         self._etc_state_path.parent.mkdir(parents=True, exist_ok=True)
         with self._etc_state_path.open("wb") as handle:
             pickle.dump(normalized_snapshot, handle)
+
+    def save_historical_etc_repair_bundle(
+        self,
+        *,
+        bundle_id: str,
+        file_name: str,
+        content: bytes,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        resolved_bundle_id = str(bundle_id or "").strip()
+        if not resolved_bundle_id:
+            raise ValueError("bundle_id is required.")
+        resolved_file_name = str(file_name or "").strip() or f"{resolved_bundle_id}.zip"
+        content_bytes = bytes(content or b"")
+        if not content_bytes:
+            raise ValueError("historical ETC repair bundle content must not be empty.")
+        content_sha256 = hashlib.sha256(content_bytes).hexdigest()
+        updated_at = datetime.now(UTC)
+        normalized_metadata = dict(metadata or {})
+        normalized_metadata.update(
+            {
+                "bundle_id": resolved_bundle_id,
+                "file_name": resolved_file_name,
+                "sha256": content_sha256,
+                "size": len(content_bytes),
+                "updated_at": updated_at.isoformat(),
+            }
+        )
+
+        if self._mongo_database is not None:
+            if self._mongo_file_bucket is None:
+                raise RuntimeError("Mongo GridFS is not configured for historical ETC repair bundles.")
+            gridfs_id = self._historical_etc_gridfs_id(resolved_bundle_id)
+            try:
+                self._mongo_file_bucket.delete(gridfs_id)
+            except Exception:
+                pass
+            sanitized_name = self._sanitize_name(resolved_file_name)
+            self._mongo_file_bucket.upload_from_stream_with_id(
+                gridfs_id,
+                sanitized_name,
+                BytesIO(content_bytes),
+                metadata={
+                    **normalized_metadata,
+                    "stored_at": updated_at,
+                    "purpose": "historical_etc_repair_seed",
+                },
+            )
+            document = {
+                "_id": resolved_bundle_id,
+                **normalized_metadata,
+                "gridfs_id": gridfs_id,
+                "stored_file_path": self._build_gridfs_ref(gridfs_id, sanitized_name),
+            }
+            self._run_mongo_operation(
+                lambda: self._mongo_detailed_collections["historical_etc_repair_bundles"].replace_one(
+                    {"_id": resolved_bundle_id},
+                    document,
+                    upsert=True,
+                )
+            )
+            return document
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo GridFS is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        self._historical_etc_repair_root.mkdir(parents=True, exist_ok=True)
+        target_path = self._historical_etc_repair_root / f"{resolved_bundle_id}_{self._sanitize_name(resolved_file_name)}"
+        target_path.write_bytes(content_bytes)
+        bundles = self.load_historical_etc_repair_bundle_metadata()
+        document = {
+            "_id": resolved_bundle_id,
+            **normalized_metadata,
+            "stored_file_path": str(target_path),
+        }
+        bundles[resolved_bundle_id] = document
+        self._historical_etc_repair_bundles_path.write_text(
+            json.dumps(bundles, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+        return document
+
+    def load_historical_etc_repair_bundle_metadata(self) -> dict[str, dict[str, Any]]:
+        if self._mongo_database is not None:
+            documents = self._run_mongo_operation(
+                lambda: list(self._mongo_detailed_collections["historical_etc_repair_bundles"].find({}))
+            )
+            return {
+                str(document.get("_id")): dict(document)
+                for document in documents
+                if str(document.get("_id") or "").strip()
+            }
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        if not self._historical_etc_repair_bundles_path.exists():
+            return {}
+        try:
+            payload = json.loads(self._historical_etc_repair_bundles_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+        return {
+            str(bundle_id): dict(document)
+            for bundle_id, document in (payload if isinstance(payload, dict) else {}).items()
+            if isinstance(document, dict)
+        }
+
+    def read_historical_etc_repair_bundle(self, bundle_id: str) -> dict[str, Any] | None:
+        resolved_bundle_id = str(bundle_id or "").strip()
+        if not resolved_bundle_id:
+            return None
+        metadata = self.load_historical_etc_repair_bundle_metadata().get(resolved_bundle_id)
+        if not isinstance(metadata, dict):
+            return None
+        stored_file_path = str(metadata.get("stored_file_path") or "").strip()
+        if not stored_file_path:
+            return None
+        if self._is_gridfs_ref(stored_file_path):
+            content = self.read_import_file(stored_file_path)
+        else:
+            if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+                raise RuntimeError("Local historical ETC repair bundles are disabled in FIN_OPS_STORAGE_MODE=mongo_only.")
+            content = Path(stored_file_path).read_bytes()
+        expected_sha256 = str(metadata.get("sha256") or "").strip()
+        actual_sha256 = hashlib.sha256(content).hexdigest()
+        if expected_sha256 and actual_sha256 != expected_sha256:
+            raise RuntimeError(f"Historical ETC repair bundle checksum mismatch: {resolved_bundle_id}")
+        return {
+            "bundle_id": resolved_bundle_id,
+            "file_name": str(metadata.get("file_name") or f"{resolved_bundle_id}.zip"),
+            "content": content,
+            "metadata": dict(metadata),
+        }
+
+    def save_historical_etc_repair_parsed_seed(
+        self,
+        *,
+        bundle_id: str,
+        parsed_seed: dict[str, Any],
+    ) -> dict[str, Any]:
+        resolved_bundle_id = str(bundle_id or "").strip()
+        if not resolved_bundle_id:
+            raise ValueError("bundle_id is required.")
+        if not isinstance(parsed_seed, dict):
+            raise ValueError("parsed_seed must be a dict.")
+        updated_at = datetime.now(UTC).isoformat()
+        document = {
+            **parsed_seed,
+            "bundle_id": resolved_bundle_id,
+            "updated_at": parsed_seed.get("updated_at") or updated_at,
+        }
+        if self._mongo_database is not None:
+            self._run_mongo_operation(
+                lambda: self._mongo_detailed_collections["historical_etc_repair_parsed_seeds"].replace_one(
+                    {"_id": resolved_bundle_id},
+                    {"_id": resolved_bundle_id, **document},
+                    upsert=True,
+                )
+            )
+            return document
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        self._historical_etc_repair_root.mkdir(parents=True, exist_ok=True)
+        seeds = self.load_historical_etc_repair_parsed_seeds()
+        seeds[resolved_bundle_id] = document
+        self._historical_etc_repair_parsed_seeds_path.write_text(
+            json.dumps(seeds, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+        return document
+
+    def load_historical_etc_repair_parsed_seeds(self) -> dict[str, dict[str, Any]]:
+        if self._mongo_database is not None:
+            documents = self._run_mongo_operation(
+                lambda: list(self._mongo_detailed_collections["historical_etc_repair_parsed_seeds"].find({}))
+            )
+            return {
+                str(document.get("_id")): {
+                    key: value
+                    for key, value in dict(document).items()
+                    if key != "_id"
+                }
+                for document in documents
+                if str(document.get("_id") or "").strip()
+            }
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        if not self._historical_etc_repair_parsed_seeds_path.exists():
+            return {}
+        try:
+            payload = json.loads(self._historical_etc_repair_parsed_seeds_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+        return {
+            str(bundle_id): dict(document)
+            for bundle_id, document in (payload if isinstance(payload, dict) else {}).items()
+            if isinstance(document, dict)
+        }
+
+    def load_historical_etc_repair_parsed_seed(self, bundle_id: str) -> dict[str, Any] | None:
+        resolved_bundle_id = str(bundle_id or "").strip()
+        if not resolved_bundle_id:
+            return None
+        seed = self.load_historical_etc_repair_parsed_seeds().get(resolved_bundle_id)
+        return dict(seed) if isinstance(seed, dict) else None
+
+    def load_historical_etc_repair_states(self) -> dict[str, dict[str, Any]]:
+        if self._mongo_database is not None:
+            documents = self._run_mongo_operation(
+                lambda: list(self._mongo_detailed_collections["historical_etc_repair_states"].find({}))
+            )
+            return {
+                str(document.get("_id")): {
+                    key: value
+                    for key, value in dict(document).items()
+                    if key != "_id"
+                }
+                for document in documents
+                if str(document.get("_id") or "").strip()
+            }
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        if not self._historical_etc_repair_states_path.exists():
+            return {}
+        try:
+            payload = json.loads(self._historical_etc_repair_states_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+        return {
+            str(bundle_id): dict(document)
+            for bundle_id, document in (payload if isinstance(payload, dict) else {}).items()
+            if isinstance(document, dict)
+        }
+
+    def save_historical_etc_repair_states(self, states: dict[str, dict[str, Any]]) -> None:
+        normalized_states = {
+            str(bundle_id): dict(state)
+            for bundle_id, state in (states if isinstance(states, dict) else {}).items()
+            if str(bundle_id).strip() and isinstance(state, dict)
+        }
+        if self._mongo_database is not None:
+            collection = self._mongo_detailed_collections["historical_etc_repair_states"]
+            self._run_mongo_operation(lambda: collection.delete_many({}))
+            updated_at = datetime.now(UTC)
+            for bundle_id, state in normalized_states.items():
+                self._run_mongo_operation(
+                    lambda bundle_id=bundle_id, state=state: collection.replace_one(
+                        {"_id": bundle_id},
+                        {"_id": bundle_id, **state, "updated_at": state.get("updated_at") or updated_at.isoformat()},
+                        upsert=True,
+                    )
+                )
+            return
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        self._historical_etc_repair_root.mkdir(parents=True, exist_ok=True)
+        self._historical_etc_repair_states_path.write_text(
+            json.dumps(normalized_states, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def _historical_etc_gridfs_id(bundle_id: str) -> str:
+        return f"{HISTORICAL_ETC_REPAIR_GRIDFS_ID_PREFIX}{bundle_id}"
 
     def load_background_jobs(self) -> dict[str, dict[str, Any]]:
         if self._mongo_database is not None:
@@ -1094,6 +1370,9 @@ class ApplicationStateStore:
                         "tax_certified_import_batches": TAX_CERTIFIED_IMPORT_BATCHES_COLLECTION,
                         "tax_certified_import_records": TAX_CERTIFIED_IMPORT_RECORDS_COLLECTION,
                         "etc_state": ETC_STATE_COLLECTION,
+                        "historical_etc_repair_bundles": HISTORICAL_ETC_REPAIR_BUNDLES_COLLECTION,
+                        "historical_etc_repair_parsed_seeds": HISTORICAL_ETC_REPAIR_PARSED_SEEDS_COLLECTION,
+                        "historical_etc_repair_states": HISTORICAL_ETC_REPAIR_STATES_COLLECTION,
                         "background_jobs": BACKGROUND_JOBS_COLLECTION,
                         "app_health_alerts": APP_HEALTH_ALERTS_COLLECTION,
                     },

@@ -7013,7 +7013,8 @@ body.column-layout-dragging {
 }
 
 .etc-filter-bar,
-.etc-panel-heading {
+.etc-panel-heading,
+.etc-detail-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -7030,64 +7031,43 @@ body.column-layout-dragging {
 
 .etc-layout {
   display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(360px, 2fr);
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
   gap: 14px;
   align-items: start;
 }
 
-.etc-left-layout {
-  display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(0, 2fr);
-  gap: 12px;
-}
-
-.etc-status-groups,
-.etc-invoice-panel,
-.etc-basket {
-  background: #ffffff;
-  border-radius: 8px;
-}
-
-.etc-status-groups {
-  display: grid;
-  align-content: start;
-  gap: 8px;
-  padding: 12px;
-}
-
-.etc-status-groups .MuiButton-root {
-  justify-content: flex-start;
-}
-
-.etc-invoice-panel,
-.etc-basket {
+.etc-batch-list-panel,
+.etc-batch-detail-panel {
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 12px;
+  background: #ffffff;
+  border-radius: 8px;
 }
 
-.etc-invoice-list,
-.etc-basket-list {
+.etc-batch-list-panel {
+  min-height: 560px;
+}
+
+.etc-batch-detail-panel {
+  min-width: 0;
+}
+
+.etc-batch-list {
   display: grid;
   gap: 8px;
 }
 
-.etc-ticket-row {
+.etc-batch-row {
   border: 1px solid #dbe3ef;
   border-radius: 8px;
   background: #ffffff;
   overflow: hidden;
 }
 
-.etc-ticket-row.submitted {
+.etc-batch-row.submitted {
   background: #f1f5f9;
-  color: #64748b;
-}
-
-.etc-ticket-row.in-basket {
-  border-color: #93c5fd;
-  background: #eff6ff;
 }
 
 .etc-row-title {
@@ -7097,35 +7077,69 @@ body.column-layout-dragging {
   gap: 8px;
 }
 
-.etc-row-fields {
+.etc-batch-fields {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 5px 12px;
   margin-top: 8px;
   color: #486581;
   font-size: 12px;
 }
 
-.etc-basket-row {
-  border: 1px solid #dbe3ef;
-  border-radius: 8px;
-  background: #f9fbfe;
-  overflow: hidden;
-}
-
-.etc-ticket-row .MuiListItemButton-root,
-.etc-basket-row .MuiListItemButton-root {
+.etc-batch-row .MuiListItemButton-root {
   align-items: flex-start;
   gap: 8px;
 }
 
+.etc-detail-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.etc-detail-metrics > div,
+.etc-plate-summary-item {
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  padding: 10px;
+  background: #f9fbfe;
+}
+
+.etc-plate-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.etc-plate-summary-item {
+  display: grid;
+  gap: 4px;
+}
+
+.etc-invoice-grid .MuiDataGrid-root {
+  color: #243b53;
+  background: #ffffff;
+}
+
+.etc-invoice-grid .MuiDataGrid-columnHeaders {
+  background: #f4f7fb;
+}
+
+.etc-invoice-grid .MuiDataGrid-columnHeaderTitle {
+  color: #243b53;
+  font-weight: 800;
+}
+
+.etc-invoice-grid .MuiDataGrid-cell {
+  border-color: #e2e8f0;
+}
+
 @media (max-width: 1100px) {
   .etc-layout,
-  .etc-left-layout {
+  .etc-detail-metrics {
     grid-template-columns: 1fr;
   }
 
-  .etc-row-fields {
-    grid-template-columns: 1fr;
+  .etc-batch-list-panel {
+    min-height: auto;
   }
 }
