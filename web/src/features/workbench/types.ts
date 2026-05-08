@@ -10,6 +10,7 @@ export type WorkbenchDetailField = {
 export type WorkbenchRecord = {
   id: string;
   caseId?: string;
+  exceptionCaseId?: string;
   recordType: WorkbenchRecordType;
   sourceKind?: string;
   label: string;

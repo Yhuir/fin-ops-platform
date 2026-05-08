@@ -2068,6 +2068,8 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         update_bank_payload = json.loads(update_bank_response.body)
         self.assertTrue(update_bank_payload["success"])
         self.assertEqual(update_bank_payload["action"], "update_bank_exception")
+        self.assertEqual(update_bank_payload["exception_case_ids"], [update_bank_payload["exception_case_id"]])
+        self.assertIn(update_bank_payload["exception_case_id"], app_for_bank_exception._workbench_exception_case_service.snapshot()["cases"])
 
         app_for_mark_exception = build_application()
         initial_open_for_mark = json.loads(app_for_mark_exception.handle_request("GET", "/api/workbench?month=2026-03").body)
@@ -2089,6 +2091,8 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertTrue(mark_payload["success"])
         self.assertEqual(mark_payload["action"], "mark_exception")
         self.assertEqual(mark_payload["updated_rows"][0]["id"], open_invoice_after_confirm["id"])
+        self.assertEqual(mark_payload["exception_case_ids"], [mark_payload["exception_case_id"]])
+        self.assertIn(mark_payload["exception_case_id"], app_for_mark_exception._workbench_exception_case_service.snapshot()["cases"])
 
     def test_cancel_link_uses_existing_case_members_without_rebuilding_workbench(self) -> None:
         app = build_application()
@@ -3228,6 +3232,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         ignore_payload = json.loads(ignore_response.body)
         self.assertTrue(ignore_payload["success"])
         self.assertEqual(ignore_payload["action"], "ignore_row")
+        self.assertEqual(ignore_payload["exception_case_ids"], [ignore_payload["exception_case_id"]])
+        ignored_case = app._workbench_exception_case_service.snapshot()["cases"][ignore_payload["exception_case_id"]]
+        self.assertEqual(ignored_case["status"], "ignored")
 
         updated_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
         self.assertNotIn(invoice_row["id"], [row["id"] for row in flatten_groups(updated_payload["open"]["groups"], "invoice")])
@@ -3251,6 +3258,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         unignore_payload = json.loads(unignore_response.body)
         self.assertTrue(unignore_payload["success"])
         self.assertEqual(unignore_payload["action"], "unignore_row")
+        self.assertEqual(unignore_payload["exception_case_ids"], [ignore_payload["exception_case_id"]])
+        unignored_case = app._workbench_exception_case_service.snapshot()["cases"][ignore_payload["exception_case_id"]]
+        self.assertEqual(unignored_case["status"], "cancelled")
 
         restored_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
         self.assertIn(invoice_row["id"], [row["id"] for row in flatten_groups(restored_payload["open"]["groups"], "invoice")])
@@ -3280,6 +3290,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertTrue(response_payload["success"])
         self.assertEqual(response_payload["action"], "oa_bank_exception")
         self.assertEqual(response_payload["affected_row_ids"], [oa_row["id"], bank_row["id"]])
+        self.assertEqual(response_payload["exception_case_ids"], [response_payload["exception_case_id"]])
+        exception_case = app._workbench_exception_case_service.snapshot()["cases"][response_payload["exception_case_id"]]
+        self.assertEqual(exception_case["status"], "confirmed")
+        self.assertEqual(exception_case["row_ids"], [oa_row["id"], bank_row["id"]])
 
         updated_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
         updated_oa_row = next(row for row in flatten_groups(updated_payload["open"]["groups"], "oa") if row["id"] == oa_row["id"])
@@ -3362,6 +3376,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         reloaded_oa = next(row for row in flatten_groups(reloaded_payload["open"]["groups"], "oa") if row["id"] == oa_row["id"])
         self.assertFalse(reloaded_oa.get("handled_exception", False))
         self.assertEqual(reloaded_oa["oa_bank_relation"]["tone"], "warn")
+        self.assertEqual(app._workbench_exception_case_service.snapshot()["cases"], {})
 
     def test_get_api_workbench_uses_in_memory_read_model_when_read_model_persist_fails(self) -> None:
         app = build_application()

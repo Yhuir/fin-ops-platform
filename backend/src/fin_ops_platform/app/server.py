@@ -100,6 +100,7 @@ from fin_ops_platform.services.workbench_candidate_match_service import Workbenc
 from fin_ops_platform.services.workbench_matching_dirty_scope_service import WorkbenchMatchingDirtyScopeService
 from fin_ops_platform.services.workbench_matching_orchestrator import WorkbenchMatchingOrchestrator
 from fin_ops_platform.services.workbench_matching_rules import WorkbenchMatchingRules
+from fin_ops_platform.services.workbench_exception_case_service import WorkbenchExceptionCaseService
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
@@ -250,6 +251,9 @@ class Application:
         )
         self._workbench_override_service = WorkbenchOverrideService.from_snapshot(
             persisted_state.get("workbench_overrides"),
+        )
+        self._workbench_exception_case_service = WorkbenchExceptionCaseService.from_snapshot(
+            persisted_state.get("workbench_exception_cases"),
         )
         self._workbench_pair_relation_service = WorkbenchPairRelationService.from_snapshot(
             persisted_state.get("workbench_pair_relations"),
@@ -2318,6 +2322,42 @@ class Application:
             )
         return result
 
+    def _persist_workbench_exception_and_override_change(
+        self,
+        *,
+        changed_row_ids: list[str],
+        mutation: Callable[[], object],
+        changed_scope_keys: list[str] | None = None,
+        request_id: str | None = None,
+        action_name: str | None = None,
+    ) -> object:
+        previous_exception_snapshot = self._workbench_exception_case_service.snapshot()
+        previous_override_snapshot = self._workbench_override_service.snapshot()
+        result = mutation()
+        try:
+            self._save_workbench_exception_cases_snapshot()
+            if changed_scope_keys is None:
+                self._persist_workbench_overrides(changed_row_ids=changed_row_ids)
+            else:
+                self._save_workbench_overrides_snapshot(changed_row_ids=changed_row_ids)
+        except Exception as exc:
+            if self._state_store is not None:
+                try:
+                    self._state_store.save_workbench_exception_cases(previous_exception_snapshot)
+                except Exception:
+                    pass
+            self._workbench_exception_case_service = WorkbenchExceptionCaseService.from_snapshot(previous_exception_snapshot)
+            self._workbench_override_service = WorkbenchOverrideService.from_snapshot(previous_override_snapshot)
+            raise StatePersistenceError("工作台状态暂时无法保存，请稍后重试。") from exc
+        if changed_scope_keys is not None:
+            self._invalidate_workbench_read_model_scopes(changed_scope_keys)
+            self._schedule_workbench_read_model_persist(
+                changed_scope_keys=changed_scope_keys,
+                request_id=request_id,
+                action_name=action_name,
+            )
+        return result
+
     def _workbench_persistence_unavailable_response(self, exc: StatePersistenceError) -> Response:
         return self._json_response(
             HTTPStatus.SERVICE_UNAVAILABLE,
@@ -3689,10 +3729,7 @@ class Application:
         freshness_error = self._workbench_write_freshness_guard()
         if freshness_error is not None:
             return freshness_error
-        month = str(payload.get("month", ""))
-        if self._live_workbench_service.has_rows_for_month(month):
-            return self._handle_live_workbench_mark_exception(payload)
-        return self._handle_api_workbench_action_payload(payload, self._workbench_api_routes.mark_exception, "invalid_mark_exception_request")
+        return self._handle_live_workbench_mark_exception(payload)
 
     def _handle_api_workbench_cancel_link(self, body: str | None, *, request_id: str | None = None) -> Response:
         payload, error = self._load_json_body(body)
@@ -3905,14 +3942,7 @@ class Application:
         freshness_error = self._workbench_write_freshness_guard()
         if freshness_error is not None:
             return freshness_error
-        month = str(payload.get("month", ""))
-        if self._live_workbench_service.has_rows_for_month(month):
-            return self._handle_live_workbench_update_bank_exception(payload)
-        return self._handle_api_workbench_action_payload(
-            payload,
-            self._workbench_api_routes.update_bank_exception,
-            "invalid_update_bank_exception_request",
-        )
+        return self._handle_live_workbench_update_bank_exception(payload)
 
     def _handle_api_workbench_oa_bank_exception(self, body: str | None) -> Response:
         payload, error = self._load_json_body(body)
@@ -4375,13 +4405,26 @@ class Application:
             )
         try:
             changed_scope_keys = self._scope_keys_for_rows(month=month, rows=[row])
-            updated_row = self._persist_workbench_override_change(
-                changed_row_ids=[row_id],
-                mutation=lambda: self._workbench_override_service.mark_exception(
+            def mutation() -> tuple[str, dict[str, object]]:
+                exception_case = self._workbench_exception_case_service.create_exception_case(
+                    rows=[row],
+                    exception_code=exception_code,
+                    exception_label=comment or exception_code,
+                    category=str(row.get("type") or "manual"),
+                    comment=comment,
+                    scope_months=[scope for scope in changed_scope_keys if SEARCH_MONTH_RE.match(scope)],
+                )
+                updated = self._workbench_override_service.mark_exception(
                     row=row,
                     exception_code=exception_code,
                     comment=comment,
-                ),
+                    exception_case_id=str(exception_case["id"]),
+                )
+                return str(exception_case["id"]), updated
+
+            exception_case_id, updated_row = self._persist_workbench_exception_and_override_change(
+                changed_row_ids=[row_id],
+                mutation=mutation,
                 changed_scope_keys=changed_scope_keys,
                 action_name="mark_exception",
             )
@@ -4395,6 +4438,8 @@ class Application:
                 "month": month,
                 "affected_row_ids": [updated_row["id"]],
                 "updated_rows": [updated_row],
+                "exception_case_id": exception_case_id,
+                "exception_case_ids": [exception_case_id],
                 "message": "已标记异常。",
             },
         )
@@ -4639,14 +4684,30 @@ class Application:
                 {"error": "invalid_update_bank_exception_request", "message": "update_bank_exception only supports bank rows."},
             )
         try:
-            updated_row = self._persist_workbench_override_change(
-                changed_row_ids=[row_id],
-                mutation=lambda: self._workbench_override_service.update_bank_exception(
+            changed_scope_keys = self._scope_keys_for_rows(month=month, rows=[row])
+            def mutation() -> tuple[str, dict[str, object]]:
+                exception_case = self._workbench_exception_case_service.create_exception_case(
+                    rows=[row],
+                    exception_code=relation_code,
+                    exception_label=relation_label,
+                    category="bank",
+                    comment=comment,
+                    scope_months=[scope for scope in changed_scope_keys if SEARCH_MONTH_RE.match(scope)],
+                )
+                updated = self._workbench_override_service.update_bank_exception(
                     row=row,
                     relation_code=relation_code,
                     relation_label=relation_label,
                     comment=comment,
-                ),
+                    exception_case_id=str(exception_case["id"]),
+                )
+                return str(exception_case["id"]), updated
+
+            exception_case_id, updated_row = self._persist_workbench_exception_and_override_change(
+                changed_row_ids=[row_id],
+                mutation=mutation,
+                changed_scope_keys=changed_scope_keys,
+                action_name="update_bank_exception",
             )
         except StatePersistenceError as exc:
             return self._workbench_persistence_unavailable_response(exc)
@@ -4658,6 +4719,8 @@ class Application:
                 "month": month,
                 "affected_row_ids": [updated_row["id"]],
                 "updated_rows": [updated_row],
+                "exception_case_id": exception_case_id,
+                "exception_case_ids": [exception_case_id],
                 "message": "已更新银行异常分类。",
             },
         )
@@ -4699,14 +4762,27 @@ class Application:
 
         try:
             changed_scope_keys = self._scope_keys_for_rows(month=month, rows=rows)
-            updated_rows = self._persist_workbench_override_change(
-                changed_row_ids=[str(row["id"]) for row in rows],
-                mutation=lambda: self._workbench_override_service.apply_oa_bank_exception(
+            def mutation() -> tuple[str, list[dict[str, object]]]:
+                exception_case = self._workbench_exception_case_service.create_exception_case(
                     rows=rows,
                     exception_code=exception_code,
                     exception_label=exception_label,
                     comment=comment,
-                ),
+                    category="oa_bank",
+                    scope_months=[scope for scope in changed_scope_keys if SEARCH_MONTH_RE.match(scope)],
+                )
+                updated = self._workbench_override_service.apply_oa_bank_exception(
+                    rows=rows,
+                    exception_code=exception_code,
+                    exception_label=exception_label,
+                    comment=comment,
+                    exception_case_id=str(exception_case["id"]),
+                )
+                return str(exception_case["id"]), updated
+
+            exception_case_id, updated_rows = self._persist_workbench_exception_and_override_change(
+                changed_row_ids=[str(row["id"]) for row in rows],
+                mutation=mutation,
                 changed_scope_keys=changed_scope_keys,
                 action_name="oa_bank_exception",
             )
@@ -4720,6 +4796,8 @@ class Application:
                 "month": month,
                 "affected_row_ids": [row["id"] for row in updated_rows],
                 "updated_rows": updated_rows,
+                "exception_case_id": exception_case_id,
+                "exception_case_ids": [exception_case_id],
                 "message": f"已对 {len(updated_rows)} 条记录执行 OA/流水异常处理。",
             },
         )
@@ -4751,9 +4829,17 @@ class Application:
 
         try:
             changed_scope_keys = self._scope_keys_for_rows(month=month, rows=rows)
-            updated_rows = self._persist_workbench_override_change(
+            def mutation() -> tuple[list[str], list[dict[str, object]]]:
+                cancelled_cases = self._workbench_exception_case_service.cancel_exception_cases(
+                    rows=rows,
+                    comment=comment,
+                )
+                updated = self._workbench_override_service.cancel_exception(rows=rows, comment=comment)
+                return [str(case["id"]) for case in cancelled_cases], updated
+
+            exception_case_ids, updated_rows = self._persist_workbench_exception_and_override_change(
                 changed_row_ids=row_ids,
-                mutation=lambda: self._workbench_override_service.cancel_exception(rows=rows, comment=comment),
+                mutation=mutation,
                 changed_scope_keys=changed_scope_keys,
                 action_name="cancel_exception",
             )
@@ -4767,6 +4853,7 @@ class Application:
                 "month": month,
                 "affected_row_ids": [row["id"] for row in updated_rows],
                 "updated_rows": updated_rows,
+                "exception_case_ids": exception_case_ids,
                 "message": f"已取消 {len(updated_rows)} 条记录的异常处理。",
             },
         )
@@ -4796,9 +4883,21 @@ class Application:
                 {"error": "invalid_ignore_row_request", "message": "ignore_row only supports invoice rows."},
             )
         try:
-            updated_row = self._persist_workbench_override_change(
+            changed_scope_keys = self._scope_keys_for_rows(month=month, rows=[row])
+            def mutation() -> tuple[str, dict[str, object]]:
+                exception_case = self._workbench_exception_case_service.ignore_row(row, comment=comment)
+                updated = self._workbench_override_service.ignore_row(
+                    row=row,
+                    comment=comment,
+                    exception_case_id=str(exception_case["id"]),
+                )
+                return str(exception_case["id"]), updated
+
+            exception_case_id, updated_row = self._persist_workbench_exception_and_override_change(
                 changed_row_ids=[row_id],
-                mutation=lambda: self._workbench_override_service.ignore_row(row=row, comment=comment),
+                mutation=mutation,
+                changed_scope_keys=changed_scope_keys,
+                action_name="ignore_row",
             )
         except StatePersistenceError as exc:
             return self._workbench_persistence_unavailable_response(exc)
@@ -4810,6 +4909,8 @@ class Application:
                 "month": month,
                 "affected_row_ids": [updated_row["id"]],
                 "updated_rows": [updated_row],
+                "exception_case_id": exception_case_id,
+                "exception_case_ids": [exception_case_id],
                 "message": "已忽略 1 条记录。",
             },
         )
@@ -4835,9 +4936,17 @@ class Application:
                 {"error": "workbench_row_not_found", "message": row_id},
             )
         try:
-            updated_row = self._persist_workbench_override_change(
+            changed_scope_keys = self._scope_keys_for_rows(month=month, rows=[row])
+            def mutation() -> tuple[list[str], dict[str, object]]:
+                unignored_case = self._workbench_exception_case_service.unignore_row(row)
+                updated = self._workbench_override_service.unignore_row(row=row)
+                return ([str(unignored_case["id"])] if isinstance(unignored_case, dict) else []), updated
+
+            exception_case_ids, updated_row = self._persist_workbench_exception_and_override_change(
                 changed_row_ids=[row_id],
-                mutation=lambda: self._workbench_override_service.unignore_row(row=row),
+                mutation=mutation,
+                changed_scope_keys=changed_scope_keys,
+                action_name="unignore_row",
             )
         except StatePersistenceError as exc:
             return self._workbench_persistence_unavailable_response(exc)
@@ -4849,6 +4958,7 @@ class Application:
                 "month": month,
                 "affected_row_ids": [updated_row["id"]],
                 "updated_rows": [updated_row],
+                "exception_case_ids": exception_case_ids,
                 "message": "已撤回忽略 1 条记录。",
             },
         )
@@ -6123,6 +6233,7 @@ class Application:
                 "file_imports": self._file_import_service.snapshot(),
                 "matching": self._matching_service.snapshot(),
                 "workbench_overrides": self._workbench_override_service.snapshot(),
+                "workbench_exception_cases": self._workbench_exception_case_service.snapshot(),
                 "workbench_pair_relations": self._workbench_pair_relation_service.snapshot(),
                 "workbench_read_models": self._workbench_read_model_service.snapshot(),
                 "workbench_candidate_matches": self._workbench_candidate_match_service.snapshot(),
@@ -6317,6 +6428,14 @@ class Application:
         self._state_store.save_workbench_overrides(
             self._workbench_override_service.snapshot(),
             changed_row_ids=changed_row_ids,
+        )
+
+    def _save_workbench_exception_cases_snapshot(self) -> None:
+        self._search_service.clear_cache()
+        if self._state_store is None:
+            return
+        self._state_store.save_workbench_exception_cases(
+            self._workbench_exception_case_service.snapshot(),
         )
 
     def _persist_workbench_overrides(self, *, changed_row_ids: list[str] | None = None) -> None:

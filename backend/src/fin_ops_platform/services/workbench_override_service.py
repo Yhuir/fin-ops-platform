@@ -78,6 +78,9 @@ class WorkbenchOverrideService:
         if "case_id" in override:
             payload["case_id"] = override.get("case_id")
 
+        if "exception_case_id" in override:
+            payload["exception_case_id"] = override.get("exception_case_id")
+
         relation = override.get("relation")
         if isinstance(relation, dict):
             relation_field = self.relation_field_name(str(payload["type"]))
@@ -133,9 +136,11 @@ class WorkbenchOverrideService:
         row: dict[str, Any],
         exception_code: str,
         comment: str | None = None,
+        exception_case_id: str | None = None,
     ) -> dict[str, Any]:
         self._row_overrides[str(row["id"])] = {
-            "case_id": None,
+            "case_id": exception_case_id,
+            "exception_case_id": exception_case_id,
             "relation": {
                 "code": exception_code,
                 "label": comment or "待人工处理",
@@ -154,9 +159,11 @@ class WorkbenchOverrideService:
         relation_code: str,
         relation_label: str,
         comment: str | None = None,
+        exception_case_id: str | None = None,
     ) -> dict[str, Any]:
         self._row_overrides[str(row["id"])] = {
-            "case_id": None,
+            "case_id": exception_case_id,
+            "exception_case_id": exception_case_id,
             "relation": {
                 "code": relation_code,
                 "label": relation_label,
@@ -175,6 +182,7 @@ class WorkbenchOverrideService:
         exception_code: str,
         exception_label: str,
         comment: str | None = None,
+        exception_case_id: str | None = None,
     ) -> list[dict[str, Any]]:
         updated_rows: list[dict[str, Any]] = []
         detail_note = comment or exception_label
@@ -183,7 +191,8 @@ class WorkbenchOverrideService:
             if row_type not in {"oa", "bank"}:
                 raise ValueError("oa_bank_exception only supports oa and bank rows.")
             self._row_overrides[str(row["id"])] = {
-                "case_id": None,
+                "case_id": exception_case_id,
+                "exception_case_id": exception_case_id,
                 "relation": {
                     "code": exception_code,
                     "label": exception_label,
@@ -196,9 +205,16 @@ class WorkbenchOverrideService:
             updated_rows.append(self.apply_to_row(row))
         return updated_rows
 
-    def ignore_row(self, *, row: dict[str, Any], comment: str | None = None) -> dict[str, Any]:
+    def ignore_row(
+        self,
+        *,
+        row: dict[str, Any],
+        comment: str | None = None,
+        exception_case_id: str | None = None,
+    ) -> dict[str, Any]:
         self._row_overrides[str(row["id"])] = {
-            "case_id": None,
+            "case_id": exception_case_id,
+            "exception_case_id": exception_case_id,
             "relation": self.pending_relation(str(row["type"])),
             "available_actions": ["detail"],
             "detail_note": comment or "已忽略",
@@ -210,6 +226,7 @@ class WorkbenchOverrideService:
     def unignore_row(self, *, row: dict[str, Any]) -> dict[str, Any]:
         self._row_overrides[str(row["id"])] = {
             "case_id": None,
+            "exception_case_id": None,
             "relation": self.pending_relation(str(row["type"])),
             "available_actions": self.available_actions(str(row["type"]), "open"),
             "detail_note": "已撤回忽略",
@@ -226,6 +243,7 @@ class WorkbenchOverrideService:
             row_type = str(row["type"])
             self._row_overrides[str(row["id"])] = {
                 "case_id": None,
+                "exception_case_id": None,
                 "relation": self.pending_relation(row_type),
                 "available_actions": self.available_actions(row_type, "open"),
                 "detail_note": detail_note,

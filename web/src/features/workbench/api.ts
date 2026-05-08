@@ -41,6 +41,7 @@ type ApiWorkbenchRow = {
   type: WorkbenchRecordType;
   source_kind?: string | null;
   case_id?: string | null;
+  exception_case_id?: string | null;
   handled_exception?: boolean | null;
   applicant?: string | null;
   project_name?: string | null;
@@ -248,6 +249,8 @@ type ApiWorkbenchActionResult = {
   month: string;
   affected_row_ids: string[];
   case_id?: string;
+  exception_case_id?: string;
+  exception_case_ids?: string[];
   updated_rows?: Array<{ id: string }>;
   message: string;
 };
@@ -603,6 +606,7 @@ function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
   return {
     id: row.id,
     caseId: row.case_id ?? undefined,
+    exceptionCaseId: row.exception_case_id ?? undefined,
     recordType: row.type,
     sourceKind: row.source_kind ?? undefined,
     label: rowLabel(row),

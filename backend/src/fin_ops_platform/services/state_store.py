@@ -42,6 +42,8 @@ MATCHING_RUNS_COLLECTION = "matching_runs"
 MATCHING_RESULTS_COLLECTION = "matching_results"
 WORKBENCH_OVERRIDES_META_COLLECTION = "workbench_overrides_meta"
 WORKBENCH_ROW_OVERRIDES_COLLECTION = "workbench_row_overrides"
+WORKBENCH_EXCEPTION_CASES_META_COLLECTION = "workbench_exception_cases_meta"
+WORKBENCH_EXCEPTION_CASES_COLLECTION = "workbench_exception_cases"
 WORKBENCH_PAIR_RELATIONS_META_COLLECTION = "workbench_pair_relations_meta"
 WORKBENCH_PAIR_RELATIONS_COLLECTION = "workbench_pair_relations"
 WORKBENCH_READ_MODELS_META_COLLECTION = "workbench_read_models_meta"
@@ -223,6 +225,8 @@ class ApplicationStateStore:
                 "matching_results": self._mongo_database[MATCHING_RESULTS_COLLECTION],
                 "workbench_overrides_meta": self._mongo_database[WORKBENCH_OVERRIDES_META_COLLECTION],
                 "workbench_row_overrides": self._mongo_database[WORKBENCH_ROW_OVERRIDES_COLLECTION],
+                "workbench_exception_cases_meta": self._mongo_database[WORKBENCH_EXCEPTION_CASES_META_COLLECTION],
+                "workbench_exception_cases": self._mongo_database[WORKBENCH_EXCEPTION_CASES_COLLECTION],
                 "workbench_pair_relations_meta": self._mongo_database[WORKBENCH_PAIR_RELATIONS_META_COLLECTION],
                 "workbench_pair_relations": self._mongo_database[WORKBENCH_PAIR_RELATIONS_COLLECTION],
                 "workbench_read_models_meta": self._mongo_database[WORKBENCH_READ_MODELS_META_COLLECTION],
@@ -1138,6 +1142,8 @@ class ApplicationStateStore:
             self._save_file_imports_detailed(payload.get("file_imports", {}), updated_at)
             self._save_matching_detailed(payload.get("matching", {}), updated_at)
             self._save_workbench_overrides_detailed(payload.get("workbench_overrides", {}), updated_at)
+            if "workbench_exception_cases" in payload:
+                self._save_workbench_exception_cases_detailed(payload.get("workbench_exception_cases", {}), updated_at)
             if "workbench_pair_relations" in payload:
                 self._save_workbench_pair_relations_detailed(payload.get("workbench_pair_relations", {}), updated_at)
             if "workbench_read_models" in payload:
@@ -1195,6 +1201,22 @@ class ApplicationStateStore:
 
         current_payload = self._load_local_pickle()
         current_payload["workbench_overrides"] = workbench_overrides_snapshot
+        with self._legacy_state_path.open("wb") as handle:
+            pickle.dump(current_payload, handle)
+
+    def save_workbench_exception_cases(self, snapshot: dict[str, Any]) -> None:
+        if self._mongo_database is not None:
+            updated_at = datetime.now(UTC)
+            self._run_mongo_operation(
+                lambda: self._save_workbench_exception_cases_detailed(snapshot, updated_at)
+            )
+            return
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+
+        current_payload = self._load_local_pickle()
+        current_payload["workbench_exception_cases"] = snapshot
         with self._legacy_state_path.open("wb") as handle:
             pickle.dump(current_payload, handle)
 
@@ -1392,6 +1414,7 @@ class ApplicationStateStore:
         file_imports_payload = self._load_file_imports_detailed_payload()
         matching_payload = self._load_matching_detailed_payload()
         workbench_overrides_payload = self._load_workbench_overrides_detailed_payload()
+        workbench_exception_cases_payload = self._load_workbench_exception_cases_detailed_payload()
         workbench_pair_relations_payload = self._load_workbench_pair_relations_detailed_payload()
         workbench_read_models_payload = self._load_workbench_read_models_detailed_payload()
         workbench_candidate_matches_payload = self._load_workbench_candidate_matches_detailed_payload()
@@ -1406,6 +1429,7 @@ class ApplicationStateStore:
                 file_imports_payload,
                 matching_payload,
                 workbench_overrides_payload,
+                workbench_exception_cases_payload,
                 workbench_pair_relations_payload,
                 workbench_read_models_payload,
                 workbench_candidate_matches_payload,
@@ -1424,6 +1448,8 @@ class ApplicationStateStore:
         }
         if workbench_overrides_payload:
             payload["workbench_overrides"] = workbench_overrides_payload
+        if workbench_exception_cases_payload:
+            payload["workbench_exception_cases"] = workbench_exception_cases_payload
         if workbench_pair_relations_payload:
             payload["workbench_pair_relations"] = workbench_pair_relations_payload
         if workbench_read_models_payload:
@@ -1799,6 +1825,19 @@ class ApplicationStateStore:
         payload["row_overrides"] = row_overrides
         return payload
 
+    def _load_workbench_exception_cases_detailed_payload(self) -> dict[str, Any]:
+        meta_document = self._mongo_detailed_collections["workbench_exception_cases_meta"].find_one({"_id": STATE_DOCUMENT_ID})
+        meta_payload = self._load_binary_payload(meta_document)
+        cases = self._load_entities_by_id(self._mongo_detailed_collections["workbench_exception_cases"])
+        if not meta_payload and not cases:
+            return {}
+
+        payload = meta_payload if isinstance(meta_payload, dict) else {}
+        payload["cases"] = cases
+        row_case_index = payload.get("row_case_index")
+        payload["row_case_index"] = dict(row_case_index) if isinstance(row_case_index, dict) else {}
+        return payload
+
     def _load_workbench_pair_relations_detailed_payload(self) -> dict[str, Any]:
         meta_document = self._mongo_detailed_collections["workbench_pair_relations_meta"].find_one(
             {"_id": STATE_DOCUMENT_ID}
@@ -1956,6 +1995,44 @@ class ApplicationStateStore:
                 )
             else:
                 collection.delete_many({"_id": row_id})
+
+    def _save_workbench_exception_cases_detailed(self, snapshot: Any, updated_at: datetime) -> None:
+        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
+        meta_payload = {
+            key: value
+            for key, value in normalized_snapshot.items()
+            if key not in {"cases"}
+        }
+        cases = normalized_snapshot.get("cases", {})
+        case_documents = []
+        if isinstance(cases, dict):
+            for case_id, case_payload in cases.items():
+                serialized_case = self._serialize_value(case_payload)
+                case_documents.append(
+                    {
+                        "_id": str(case_id),
+                        "status": serialized_case.get("status"),
+                        "exception_code": serialized_case.get("exception_code"),
+                        "category": serialized_case.get("category"),
+                        "row_ids": serialized_case.get("row_ids"),
+                        "scope_months": serialized_case.get("scope_months"),
+                        "payload": Binary(pickle.dumps(case_payload)),
+                        "updated_at": updated_at,
+                    }
+                )
+        self._replace_collection_documents(self._mongo_detailed_collections["workbench_exception_cases"], case_documents)
+        self._mongo_detailed_collections["workbench_exception_cases_meta"].update_one(
+            {"_id": STATE_DOCUMENT_ID},
+            {
+                "$set": {
+                    **meta_payload,
+                    "exception_case_count": len(cases) if isinstance(cases, dict) else 0,
+                    "payload": Binary(pickle.dumps(meta_payload)),
+                    "updated_at": updated_at,
+                }
+            },
+            upsert=True,
+        )
 
     def _save_workbench_pair_relations_detailed(
         self,
@@ -2564,6 +2641,7 @@ class ApplicationStateStore:
                 "file_imports",
                 "matching",
                 "workbench_overrides",
+                "workbench_exception_cases",
                 "workbench_pair_relations",
                 "workbench_read_models",
                 "workbench_candidate_matches",
