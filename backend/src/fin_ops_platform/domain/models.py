@@ -222,6 +222,12 @@ class ImportedBatchRowResult:
     linked_object_type: str | None = None
     linked_object_id: str | None = None
     raw_payload: dict[str, Any] = field(default_factory=dict)
+    identity_kind: str | None = None
+    account_no: str | None = None
+    trade_time: str | None = None
+    direction: str | None = None
+    amount: str | None = None
+    counterparty_name: str | None = None
 
 
 @dataclass(slots=True)

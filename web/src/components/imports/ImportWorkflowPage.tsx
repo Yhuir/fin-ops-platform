@@ -14,6 +14,8 @@ import InputLabel from "@mui/material/InputLabel";
 import Paper from "@mui/material/Paper";
 import Select from "@mui/material/Select";
 import Stack from "@mui/material/Stack";
+import Tab from "@mui/material/Tab";
+import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
 import { DataGrid, type GridColDef } from "@mui/x-data-grid";
 import { type DragEvent, useEffect, useId, useMemo, useState } from "react";
@@ -33,6 +35,9 @@ import type {
   ImportFilePreview,
   ImportFilePreviewOverride,
   ImportPreviewAuditCounts,
+  ImportPreviewDuplicateGroup,
+  ImportPreviewDetailRow,
+  ImportRowDecision,
   ImportSessionPayload,
 } from "../../features/imports/types";
 import type { EtcImportItem, EtcImportPreviewResult } from "../../features/etc/types";
@@ -57,6 +62,17 @@ type ImportFilePreviewRow = ImportFilePreview & {
   auditExistingDuplicateCount: number;
   auditImportableCount: number;
   auditErrorCount: number;
+  auditSuspectedDuplicateCount: number;
+  auditSkippedCount: number;
+};
+
+type ImportPreviewDetailGridRow = ImportPreviewDetailRow & {
+  id: string;
+  fileId: string;
+  fileName: string;
+  rowNo: number;
+  duplicateType?: string;
+  recordType?: string;
 };
 
 type EtcPreviewRow = EtcImportItem & {
@@ -87,6 +103,26 @@ const ETC_IMPORT_STATUS_LABELS: Record<string, string> = {
   duplicate_skipped: "重复跳过",
   attachment_completed: "附件补齐",
   failed: "异常",
+};
+
+const IMPORT_ROW_DECISION_LABELS: Record<string, string> = {
+  created: "可导入",
+  status_updated: "状态更新",
+  duplicate_skipped: "已存在",
+  suspected_duplicate: "需复核",
+  error: "异常",
+};
+
+const DUPLICATE_TYPE_LABELS: Record<string, string> = {
+  duplicate_in_file: "文件内重复",
+  duplicate_across_files: "跨文件重复",
+};
+
+const DIRECTION_LABELS: Record<string, string> = {
+  inflow: "收入",
+  outflow: "支出",
+  income: "收入",
+  expense: "支出",
 };
 
 const TITLES: Record<ImportWorkflowMode, string> = {
@@ -145,6 +181,34 @@ function batchTypeLabel(batchType?: ImportBatchType | null) {
 
 function etcStatusLabel(status: string) {
   return ETC_IMPORT_STATUS_LABELS[status] ?? status;
+}
+
+function importRowDecisionLabel(decision?: string | null) {
+  if (!decision) {
+    return "--";
+  }
+  return IMPORT_ROW_DECISION_LABELS[decision] ?? decision;
+}
+
+function duplicateTypeLabel(type?: string | null) {
+  if (!type) {
+    return "--";
+  }
+  return DUPLICATE_TYPE_LABELS[type] ?? type;
+}
+
+function directionLabel(direction?: string | null) {
+  if (!direction) {
+    return "--";
+  }
+  return DIRECTION_LABELS[direction] ?? direction;
+}
+
+function displayValue(value?: string | number | null) {
+  if (value === null || value === undefined || value === "") {
+    return "--";
+  }
+  return String(value);
 }
 
 function formatEtcRejectedMessage(count: number) {
@@ -276,6 +340,56 @@ function formatConfirmAuditMessage(audit: ImportPreviewAuditCounts | null) {
   return `将导入 ${audit.importableCount} 条唯一记录，跳过 ${skippedDuplicateCount} 条重复${reviewCount > 0 ? `，${reviewCount} 条需复核` : ""}。`;
 }
 
+function isUnimportedDecision(decision: ImportRowDecision | string | null | undefined) {
+  return decision === "duplicate_skipped" || decision === "suspected_duplicate" || decision === "error";
+}
+
+function buildDuplicateDetailRows(groups: ImportPreviewDuplicateGroup[]): ImportPreviewDetailGridRow[] {
+  return groups.flatMap((group, groupIndex) => group.rows.map((row, rowIndex) => ({
+    id: `${group.identityKey || groupIndex}-${row.fileId}-${row.rowNo}-${rowIndex}`,
+    fileId: row.fileId,
+    fileName: row.fileName,
+    rowNo: row.rowNo,
+    duplicateType: group.duplicateType,
+    recordType: group.recordType,
+    decision: row.decision,
+    decisionReason: row.decisionReason,
+    linkedObjectType: row.linkedObjectType,
+    linkedObjectId: row.linkedObjectId,
+    identityKind: row.identityKind,
+    accountNo: row.accountNo,
+    tradeTime: row.tradeTime,
+    direction: row.direction,
+    amount: row.amount,
+    counterpartyName: row.counterpartyName,
+  })));
+}
+
+function buildUnimportedDetailRows(payload: ImportSessionPayload | null): ImportPreviewDetailGridRow[] {
+  if (!payload) {
+    return [];
+  }
+  return payload.files.flatMap((file) => file.rowResults
+    .filter((row) => isUnimportedDecision(row.decision))
+    .map((row) => ({
+      id: `${file.id}-${row.id || row.rowNo}`,
+      fileId: file.id,
+      fileName: file.fileName,
+      rowNo: row.rowNo,
+      recordType: row.sourceRecordType,
+      decision: row.decision,
+      decisionReason: row.decisionReason,
+      linkedObjectType: row.linkedObjectType,
+      linkedObjectId: row.linkedObjectId,
+      identityKind: row.identityKind,
+      accountNo: row.accountNo,
+      tradeTime: row.tradeTime,
+      direction: row.direction,
+      amount: row.amount,
+      counterpartyName: row.counterpartyName,
+    })));
+}
+
 function AuditSummaryCards({ audit }: { audit: ImportPreviewAuditCounts | null }) {
   if (!audit) {
     return null;
@@ -287,6 +401,7 @@ function AuditSummaryCards({ audit }: { audit: ImportPreviewAuditCounts | null }
     ["已存在", audit.existingDuplicateCount],
     ["可导入", audit.importableCount],
     ["异常", audit.errorCount],
+    ["未导入", audit.skippedCount],
   ] as const;
   return (
     <Box
@@ -380,6 +495,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   const [settingsLoading, setSettingsLoading] = useState(mode === "bank_transaction");
   const [conflictDialogOpen, setConflictDialogOpen] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
+  const [previewDetailTab, setPreviewDetailTab] = useState<"duplicates" | "unimported">("duplicates");
 
   const title = TITLES[mode];
   const uploadLabel = UPLOAD_LABELS[mode];
@@ -519,9 +635,20 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
         auditExistingDuplicateCount: audit.existingDuplicateCount,
         auditImportableCount: audit.importableCount,
         auditErrorCount: audit.errorCount,
+        auditSuspectedDuplicateCount: audit.suspectedDuplicateCount,
+        auditSkippedCount: audit.skippedCount,
       };
     }) ?? []
   ), [previewPayload]);
+
+  const duplicateDetailRows = useMemo(
+    () => buildDuplicateDetailRows(previewPayload?.duplicateGroups ?? []),
+    [previewPayload],
+  );
+  const unimportedDetailRows = useMemo(
+    () => buildUnimportedDetailRows(previewPayload),
+    [previewPayload],
+  );
 
   const etcRows = useMemo<EtcPreviewRow[]>(() => (
     etcPreviewPayload?.items.map((item, index) => ({
@@ -542,10 +669,25 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     { field: "auditDuplicateAcrossFilesCount", headerName: "跨文件重复", type: "number", width: 120 },
     { field: "auditExistingDuplicateCount", headerName: "已存在", type: "number", width: 100 },
     { field: "auditImportableCount", headerName: "可导入", type: "number", width: 100 },
+    { field: "auditSuspectedDuplicateCount", headerName: "需复核", type: "number", width: 100 },
     { field: "auditErrorCount", headerName: "异常", type: "number", width: 90 },
+    { field: "auditSkippedCount", headerName: "未导入", type: "number", width: 100 },
     { field: "rowCount", headerName: "行数", type: "number", width: 90 },
     { field: "successCount", headerName: "新增", type: "number", width: 90 },
     { field: "message", headerName: "消息", flex: 1.6, minWidth: 240 },
+  ], []);
+
+  const detailColumns = useMemo<GridColDef<ImportPreviewDetailGridRow>[]>(() => [
+    { field: "fileName", headerName: "文件", flex: 1.1, minWidth: 180 },
+    { field: "rowNo", headerName: "行号", type: "number", width: 80 },
+    { field: "accountNo", headerName: "账户", minWidth: 140, valueFormatter: (value) => displayValue(value) },
+    { field: "tradeTime", headerName: "交易时间", minWidth: 170, valueFormatter: (value) => displayValue(value) },
+    { field: "direction", headerName: "方向", width: 90, valueFormatter: (value) => directionLabel(String(value ?? "")) },
+    { field: "amount", headerName: "金额", minWidth: 110, valueFormatter: (value) => displayValue(value) },
+    { field: "counterpartyName", headerName: "对方户名", flex: 1, minWidth: 180, valueFormatter: (value) => displayValue(value) },
+    { field: "duplicateType", headerName: "类型", minWidth: 120, valueFormatter: (value) => duplicateTypeLabel(String(value ?? "")) },
+    { field: "decision", headerName: "决策", minWidth: 110, valueFormatter: (value) => importRowDecisionLabel(String(value ?? "")) },
+    { field: "decisionReason", headerName: "原因", flex: 1.3, minWidth: 220, valueFormatter: (value) => displayValue(value) },
   ], []);
 
   const etcColumns = useMemo<GridColDef<EtcPreviewRow>[]>(() => [
@@ -1029,6 +1171,32 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                         showToolbar
                         sx={importGridSx}
                       />
+                    </Box>
+                    <Box sx={{ border: "1px solid #d5dde8", borderRadius: 1, overflow: "hidden" }}>
+                      <Tabs
+                        value={previewDetailTab}
+                        onChange={(_, value: "duplicates" | "unimported") => setPreviewDetailTab(value)}
+                        aria-label="导入预览明细"
+                        sx={{ minHeight: 42, px: 1, bgcolor: "#f8fafc", borderBottom: "1px solid #d5dde8" }}
+                      >
+                        <Tab value="duplicates" label={`重复项 ${duplicateDetailRows.length}`} sx={{ minHeight: 42 }} />
+                        <Tab value="unimported" label={`未导入项 ${unimportedDetailRows.length}`} sx={{ minHeight: 42 }} />
+                      </Tabs>
+                      <Box sx={{ height: 360, width: "100%" }}>
+                        <DataGrid
+                          aria-label={previewDetailTab === "duplicates" ? "重复项明细" : "未导入项明细"}
+                          columns={detailColumns}
+                          rows={previewDetailTab === "duplicates" ? duplicateDetailRows : unimportedDetailRows}
+                          loading={isPreviewing}
+                          disableRowSelectionOnClick
+                          hideFooter
+                          showToolbar
+                          sx={{
+                            ...importGridSx,
+                            border: 0,
+                          }}
+                        />
+                      </Box>
                     </Box>
                   </Stack>
                 )}

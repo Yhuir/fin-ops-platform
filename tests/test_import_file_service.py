@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 from io import BytesIO
+from pathlib import Path
+import sys
 import unittest
 
 from openpyxl import Workbook
 
 from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile, is_company_identity
 from fin_ops_platform.services.imports import ImportNormalizationService
-from tests.mock_import_files import BOCOM_JAN, CEB_JAN, INVOICE_JAN, PINGAN_JAN, icbc_history_file, invoice_export_file
+
+TESTS_DIR = Path(__file__).resolve().parent
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
+
+from mock_import_files import BOCOM_JAN, CEB_JAN, INVOICE_JAN, PINGAN_JAN, icbc_history_file, invoice_export_file
 
 
 class FakeImportIdStore:
@@ -253,6 +260,55 @@ class ImportFileServiceTests(unittest.TestCase):
         self.assertEqual(session.audit.importable_count, 1)
         self.assertEqual(len(session.duplicate_groups), 1)
         self.assertEqual(session.duplicate_groups[0].duplicate_type, "duplicate_across_files")
+        self.assertEqual(session.files[0].audit.importable_count, 1)
+        self.assertEqual(session.files[1].audit.duplicate_across_files_count, 1)
+
+    def test_preview_files_audit_counts_cross_file_bank_transaction_identity_duplicates(self) -> None:
+        import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
+        service = FileImportService(import_service)
+        jan_upload = icbc_history_file(name="historydetail-jan.xlsx")
+        feb_upload = icbc_history_file(name="historydetail-feb.xlsx")
+
+        session = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[
+                UploadedImportFile(
+                    file_name=jan_upload.name,
+                    content=jan_upload.content,
+                    selected_bank_mapping_id="bank_mapping_icbc_6386",
+                    selected_bank_name="工商银行",
+                    selected_bank_short_name="工行",
+                    selected_bank_last4="6386",
+                ),
+                UploadedImportFile(
+                    file_name=feb_upload.name,
+                    content=feb_upload.content,
+                    selected_bank_mapping_id="bank_mapping_icbc_6386",
+                    selected_bank_name="工商银行",
+                    selected_bank_short_name="工行",
+                    selected_bank_last4="6386",
+                ),
+            ],
+        )
+
+        self.assertEqual(session.audit.original_count, 2)
+        self.assertEqual(session.audit.unique_count, 1)
+        self.assertEqual(session.audit.duplicate_across_files_count, 1)
+        self.assertEqual(session.audit.duplicate_count, 1)
+        self.assertEqual(session.audit.importable_count, 1)
+        self.assertEqual(session.audit.skipped_count, 1)
+        self.assertEqual(len(session.duplicate_groups), 1)
+        self.assertEqual(session.duplicate_groups[0].record_type, "bank_transaction")
+        self.assertEqual(session.duplicate_groups[0].duplicate_type, "duplicate_across_files")
+        duplicate_row = session.duplicate_groups[0].rows[1]
+        self.assertEqual(duplicate_row["file_name"], "historydetail-feb.xlsx")
+        self.assertEqual(duplicate_row["identity_kind"], "stable")
+        self.assertEqual(duplicate_row["decision"], "created")
+        self.assertEqual(duplicate_row["account_no"], "bank_mapping_icbc_6386")
+        self.assertEqual(duplicate_row["trade_time"], "2026-01-03 09:12:00")
+        self.assertEqual(duplicate_row["direction"], "outflow")
+        self.assertEqual(duplicate_row["amount"], "6180.00")
+        self.assertEqual(duplicate_row["counterparty_name"], "重庆高新技术产业开发区国家税务局")
         self.assertEqual(session.files[0].audit.importable_count, 1)
         self.assertEqual(session.files[1].audit.duplicate_across_files_count, 1)
 

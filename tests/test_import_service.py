@@ -47,6 +47,7 @@ class ImportNormalizationServiceTests(unittest.TestCase):
             amount=Decimal("88.00"),
             signed_amount=Decimal("-88.00"),
             txn_date="2026-03-23",
+            trade_time="2026-03-23 09:15:01",
             source_unique_key="SERIAL-001",
             data_fingerprint="bank:62220001:acme supplies ltd.:2026-03-23:outflow:88.00",
             bank_serial_no="SERIAL-001",
@@ -148,7 +149,7 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertEqual(preview.suspected_duplicate_count, 1)
         self.assertEqual(preview.error_count, 1)
 
-    def test_preview_bank_transaction_normalizes_direction_and_marks_suspected_duplicates(self) -> None:
+    def test_preview_bank_transaction_normalizes_direction_and_skips_existing_identity(self) -> None:
         preview = self.service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
             source_name="bank-demo.json",
@@ -157,6 +158,7 @@ class ImportNormalizationServiceTests(unittest.TestCase):
                 {
                     "account_no": "62229999",
                     "txn_date": "2026-03-24",
+                    "trade_time": "2026-03-24 10:00:00",
                     "counterparty_name": "Vendor A",
                     "debit_amount": "50.00",
                     "credit_amount": "",
@@ -166,10 +168,11 @@ class ImportNormalizationServiceTests(unittest.TestCase):
                 {
                     "account_no": "62220001",
                     "txn_date": "2026-03-23",
+                    "trade_time": "2026-03-23 09:15:01",
                     "counterparty_name": "Acme Supplies Ltd.",
                     "debit_amount": "88.00",
                     "credit_amount": "",
-                    "bank_serial_no": "",
+                    "bank_serial_no": "DIFFERENT-SERIAL",
                     "voucher_no": "",
                     "enterprise_serial_no": "",
                     "summary": "same as old but no official id",
@@ -187,7 +190,13 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertEqual(preview.row_results[0].decision, ImportDecision.CREATED)
         self.assertEqual(preview.normalized_rows[0]["txn_direction"], TransactionDirection.OUTFLOW.value)
         self.assertEqual(preview.normalized_rows[0]["signed_amount"], "-50.00")
-        self.assertEqual(preview.row_results[1].decision, ImportDecision.SUSPECTED_DUPLICATE)
+        self.assertEqual(preview.row_results[0].identity_kind, "stable")
+        self.assertEqual(preview.row_results[0].account_no, "62229999")
+        self.assertEqual(preview.row_results[0].trade_time, "2026-03-24 10:00:00")
+        self.assertEqual(preview.row_results[0].direction, TransactionDirection.OUTFLOW.value)
+        self.assertEqual(preview.row_results[0].amount, "50.00")
+        self.assertEqual(preview.row_results[0].counterparty_name, "Vendor A")
+        self.assertEqual(preview.row_results[1].decision, ImportDecision.DUPLICATE_SKIPPED)
         self.assertEqual(preview.row_results[2].decision, ImportDecision.ERROR)
 
     def test_invoice_placeholder_digital_number_does_not_mask_stable_code_number_key(self) -> None:
@@ -221,6 +230,7 @@ class ImportNormalizationServiceTests(unittest.TestCase):
                 {
                     "account_no": "62229999",
                     "txn_date": "2026-03-24",
+                    "trade_time": "2026-03-24 10:00:00",
                     "counterparty_name": "Vendor A",
                     "debit_amount": "50.00",
                     "credit_amount": "",
@@ -230,7 +240,47 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(preview.row_results[0].decision, ImportDecision.CREATED)
-        self.assertEqual(preview.normalized_rows[0]["source_unique_key"], "bank:62229999:bank_serial_no:SERIAL-001")
+        self.assertEqual(preview.normalized_rows[0]["source_unique_key"], "bank:62229999:2026-03-24 10:00:00:outflow:50.00:vendor a")
+
+    def test_bank_transaction_same_serial_but_different_identity_is_not_duplicate(self) -> None:
+        preview = self.service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="bank-serial-not-key-demo.json",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220001",
+                    "txn_date": "2026-03-23",
+                    "trade_time": "2026-03-23 09:15:01",
+                    "counterparty_name": "Acme Supplies Ltd.",
+                    "debit_amount": "89.00",
+                    "credit_amount": "",
+                    "bank_serial_no": "SERIAL-001",
+                },
+            ],
+        )
+
+        self.assertEqual(preview.row_results[0].decision, ImportDecision.CREATED)
+
+    def test_bank_transaction_missing_second_level_time_is_error(self) -> None:
+        preview = self.service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="bank-missing-time-demo.json",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220001",
+                    "txn_date": "2026-03-23",
+                    "counterparty_name": "Acme Supplies Ltd.",
+                    "debit_amount": "88.00",
+                    "credit_amount": "",
+                    "bank_serial_no": "SERIAL-001",
+                },
+            ],
+        )
+
+        self.assertEqual(preview.row_results[0].decision, ImportDecision.ERROR)
+        self.assertIn("trade_time", preview.row_results[0].decision_reason)
 
     def test_confirm_import_persists_created_rows_and_updates_source_status(self) -> None:
         preview = self.service.preview_import(

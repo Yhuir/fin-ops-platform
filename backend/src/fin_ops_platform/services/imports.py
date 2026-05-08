@@ -14,6 +14,7 @@ from fin_ops_platform.domain.models import (
     ImportedBatchRowResult,
     Invoice,
 )
+from fin_ops_platform.services.bank_transaction_identity_service import BankTransactionIdentityService
 from fin_ops_platform.services.invoice_identity_service import InvoiceIdentityService
 
 
@@ -73,6 +74,7 @@ class ImportNormalizationService:
         self._counterparty_counter = 0
         self._id_registry = id_registry
         self._invoice_identity_service = InvoiceIdentityService()
+        self._bank_transaction_identity_service = BankTransactionIdentityService()
 
         self._batches: dict[str, ImportPreview] = {}
         self._invoices_by_id: dict[str, Invoice] = {}
@@ -203,6 +205,16 @@ class ImportNormalizationService:
             return
         if batch_type in (BatchType.OUTPUT_INVOICE, BatchType.INPUT_INVOICE):
             self._refresh_invoice_row_decision_before_confirm(row_result, normalized)
+        else:
+            decision, linked_object_type, linked_object_id = self.current_import_decision_for_normalized_row(
+                batch_type=batch_type,
+                normalized=normalized,
+            )
+            if decision == ImportDecision.DUPLICATE_SKIPPED:
+                row_result.decision = decision
+                row_result.linked_object_type = linked_object_type
+                row_result.linked_object_id = linked_object_id
+                row_result.decision_reason = "Bank transaction identity matched an existing transaction during confirm."
 
     def _refresh_invoice_row_decision_before_confirm(
         self,
@@ -275,8 +287,8 @@ class ImportNormalizationService:
         normalized: dict[str, Any],
     ) -> tuple[ImportDecision | None, str | None, str | None]:
         source_unique_key = normalized.get("source_unique_key")
-        data_fingerprint = normalized.get("data_fingerprint")
         if batch_type in (BatchType.OUTPUT_INVOICE, BatchType.INPUT_INVOICE):
+            data_fingerprint = normalized.get("data_fingerprint")
             if source_unique_key and source_unique_key in self._invoice_unique_index:
                 linked_invoice_id = self._invoice_unique_index[source_unique_key]
                 existing = self._invoices_by_id[linked_invoice_id]
@@ -290,8 +302,6 @@ class ImportNormalizationService:
 
         if source_unique_key and source_unique_key in self._transaction_unique_index:
             return ImportDecision.DUPLICATE_SKIPPED, "bank_transaction", self._transaction_unique_index[source_unique_key]
-        if not source_unique_key and data_fingerprint and data_fingerprint in self._transaction_fingerprint_index:
-            return ImportDecision.SUSPECTED_DUPLICATE, "bank_transaction", self._transaction_fingerprint_index[data_fingerprint]
         return ImportDecision.CREATED, None, None
 
     def has_imported_records(self) -> bool:
@@ -490,9 +500,7 @@ class ImportNormalizationService:
             errors.append("counterparty_name is required")
 
         txn_date = self._parse_date(raw_row.get("txn_date"))
-        if txn_date is None:
-            errors.append("txn_date is invalid")
-        else:
+        if txn_date is not None:
             normalized["txn_date"] = txn_date
 
         booked_date = self._parse_date(raw_row.get("booked_date"))
@@ -525,12 +533,17 @@ class ImportNormalizationService:
         if signed_amount is not None:
             normalized["signed_amount"] = self._format_decimal(signed_amount)
 
-        source_unique_key = self._build_transaction_unique_key(normalized)
+        identity = self._bank_transaction_identity_service.identity_for_mapping(normalized)
+        if not txn_date and identity.components.get("trade_time"):
+            normalized["txn_date"] = identity.components["trade_time"][:10]
+        source_unique_key = identity.identity_key
         data_fingerprint = None
-        if account_no and normalized_name and txn_date and direction and amount is not None:
-            data_fingerprint = self._build_transaction_fingerprint(account_no, normalized_name, txn_date, direction, amount)
         normalized["source_unique_key"] = source_unique_key
         normalized["data_fingerprint"] = data_fingerprint
+
+        if identity.missing_fields:
+            errors.append(f"stable bank transaction identity is missing fields: {', '.join(identity.missing_fields)}")
+        row_display_fields = self._transaction_row_result_display_fields(normalized, identity)
 
         if errors:
             return normalized, ImportedBatchRowResult(
@@ -543,6 +556,7 @@ class ImportNormalizationService:
                 decision=ImportDecision.ERROR,
                 decision_reason="; ".join(errors),
                 raw_payload=dict(raw_row),
+                **row_display_fields,
             )
 
         linked_txn_id = None
@@ -551,11 +565,7 @@ class ImportNormalizationService:
         if source_unique_key and source_unique_key in self._transaction_unique_index:
             linked_txn_id = self._transaction_unique_index[source_unique_key]
             decision = ImportDecision.DUPLICATE_SKIPPED
-            reason = "Official transaction serial already exists."
-        elif data_fingerprint and data_fingerprint in self._transaction_fingerprint_index:
-            linked_txn_id = self._transaction_fingerprint_index[data_fingerprint]
-            decision = ImportDecision.SUSPECTED_DUPLICATE
-            reason = "Fingerprint matched an existing transaction without an official unique key."
+            reason = "Bank transaction identity matched an existing transaction."
 
         return normalized, ImportedBatchRowResult(
             id=self._next_row_id(),
@@ -569,6 +579,7 @@ class ImportNormalizationService:
             linked_object_type="bank_transaction" if linked_txn_id else None,
             linked_object_id=linked_txn_id,
             raw_payload=dict(raw_row),
+            **row_display_fields,
         )
 
     def _persist_created_row(
@@ -711,14 +722,7 @@ class ImportNormalizationService:
             self._invoice_fingerprint_index[invoice.data_fingerprint] = invoice.id
 
     def _register_transaction(self, transaction: BankTransaction) -> None:
-        canonical_key = self._build_transaction_unique_key(
-            {
-                "account_no": transaction.account_no,
-                "bank_serial_no": transaction.bank_serial_no,
-                "enterprise_serial_no": transaction.enterprise_serial_no,
-                "voucher_no": transaction.voucher_no,
-            }
-        )
+        canonical_key = self._bank_transaction_identity_service.canonical_key_for_transaction(transaction)
         if canonical_key:
             transaction.source_unique_key = canonical_key
         self._transactions_by_id[transaction.id] = transaction
@@ -999,25 +1003,22 @@ class ImportNormalizationService:
     def _build_invoice_fingerprint(normalized_name: str, invoice_date: str, amount: Decimal) -> str:
         return f"invoice:{normalized_name}:{invoice_date}:{amount.quantize(CENT)}"
 
-    def _build_transaction_unique_key(self, normalized: dict[str, Any]) -> str | None:
-        account_no = normalized.get("account_no")
-        if not account_no:
-            return None
-        for key in ("bank_serial_no", "enterprise_serial_no", "voucher_no"):
-            value = normalized.get(key)
-            if value:
-                return f"bank:{account_no}:{key}:{value}"
-        return None
-
     @staticmethod
-    def _build_transaction_fingerprint(
-        account_no: str,
-        normalized_name: str,
-        txn_date: str,
-        direction: TransactionDirection,
-        amount: Decimal,
-    ) -> str:
-        return f"bank:{account_no}:{normalized_name}:{txn_date}:{direction.value}:{amount.quantize(CENT)}"
+    def _transaction_row_result_display_fields(normalized: dict[str, Any], identity: Any) -> dict[str, str | None]:
+        components = getattr(identity, "components", {}) or {}
+        return {
+            "identity_kind": "stable" if getattr(identity, "identity_key", None) else None,
+            "account_no": normalized.get("account_no"),
+            "trade_time": (
+                components.get("trade_time")
+                or normalized.get("trade_time")
+                or normalized.get("pay_receive_time")
+                or normalized.get("txn_date")
+            ),
+            "direction": normalized.get("txn_direction"),
+            "amount": normalized.get("amount"),
+            "counterparty_name": normalized.get("counterparty_name_raw"),
+        }
 
     @staticmethod
     def _count_decisions(row_results: list[ImportedBatchRowResult], *decisions: ImportDecision) -> int:

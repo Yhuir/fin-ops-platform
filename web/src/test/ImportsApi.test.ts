@@ -154,4 +154,128 @@ describe("imports api", () => {
       expect(headers.get("Authorization")).toBe("Bearer mock-cookie-token");
     });
   });
+
+  test("maps duplicate group and skipped row detail fields from preview response", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          session: {
+            id: "import_session_0001",
+            imported_by: "web_finance_user",
+            file_count: 1,
+            status: "preview_ready",
+            created_at: "2026-04-14T10:00:00Z",
+            audit: {
+              original_count: 2,
+              unique_count: 1,
+              duplicate_count: 1,
+              duplicate_in_file_count: 1,
+              duplicate_across_files_count: 0,
+              existing_duplicate_count: 0,
+              importable_count: 1,
+              error_count: 0,
+              confirmable_count: 1,
+              skipped_count: 1,
+            },
+          },
+          files: [
+            {
+              id: "import_file_0001",
+              file_name: "建行流水.xlsx",
+              template_code: "bank_ccb",
+              batch_type: "bank_transaction",
+              status: "preview_ready",
+              message: "预览成功",
+              row_count: 2,
+              success_count: 1,
+              error_count: 0,
+              duplicate_count: 1,
+              suspected_duplicate_count: 0,
+              updated_count: 0,
+              row_results: [
+                {
+                  id: "row_1",
+                  row_no: 2,
+                  source_record_type: "bank_transaction",
+                  decision: "duplicate_skipped",
+                  decision_reason: "文件内重复",
+                  account_no: "6222",
+                  trade_time: "2026-03-01 09:00:00",
+                  direction: "outflow",
+                  amount: "100.00",
+                  counterparty_name: "云南供应商",
+                  linked_object_type: "bank_transaction",
+                  linked_object_id: "bank_001",
+                  identity_kind: "stable",
+                },
+              ],
+            },
+          ],
+          duplicate_groups: [
+            {
+              identity_key: "bank:6222:2026-03-01 09:00:00:outflow:100.00:云南供应商",
+              record_type: "bank_transaction",
+              duplicate_type: "duplicate_in_file",
+              rows: [
+                {
+                  file_id: "import_file_0001",
+                  file_name: "建行流水.xlsx",
+                  row_no: 2,
+                  decision: "duplicate_skipped",
+                  decision_reason: "文件内重复",
+                  linked_object_type: "bank_transaction",
+                  linked_object_id: "bank_001",
+                  identity_kind: "stable",
+                  account_no: "6222",
+                  trade_time: "2026-03-01 09:00:00",
+                  direction: "outflow",
+                  amount: "100.00",
+                  counterparty_name: "云南供应商",
+                },
+              ],
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        },
+      ),
+    );
+    global.fetch = fetchMock as typeof fetch;
+
+    const payload = await previewImportFiles([
+      new File(["demo"], "建行流水.xlsx", {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+    ]);
+
+    expect(payload.session.audit?.skippedCount).toBe(1);
+    expect(payload.duplicateGroups[0].rows[0]).toMatchObject({
+      fileId: "import_file_0001",
+      fileName: "建行流水.xlsx",
+      rowNo: 2,
+      decision: "duplicate_skipped",
+      decisionReason: "文件内重复",
+      linkedObjectType: "bank_transaction",
+      linkedObjectId: "bank_001",
+      identityKind: "stable",
+      accountNo: "6222",
+      tradeTime: "2026-03-01 09:00:00",
+      direction: "outflow",
+      amount: "100.00",
+      counterpartyName: "云南供应商",
+    });
+    expect(payload.files[0].rowResults[0]).toMatchObject({
+      decision: "duplicate_skipped",
+      accountNo: "6222",
+      tradeTime: "2026-03-01 09:00:00",
+      direction: "outflow",
+      amount: "100.00",
+      counterpartyName: "云南供应商",
+      identityKind: "stable",
+    });
+  });
 });

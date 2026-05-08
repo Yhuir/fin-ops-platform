@@ -508,8 +508,10 @@ class FileImportService:
                         identity_key=identity.identity_key,
                         identity_kind=identity.identity_kind,
                         decision=decision,
+                        decision_reason=row_result.decision_reason,
                         linked_object_type=linked_object_type,
                         linked_object_id=linked_object_id,
+                        **self._audit_row_display_fields(row_result.source_record_type, normalized),
                     )
                 )
         audit = build_import_preview_session_audit(rows)
@@ -532,6 +534,18 @@ class FileImportService:
         if record_type == "bank_transaction":
             return BankTransactionIdentityStrategy().identify(normalized)
         return InvoiceIdentityStrategy().identify(normalized)
+
+    @staticmethod
+    def _audit_row_display_fields(record_type: str, normalized: dict[str, Any]) -> dict[str, str | None]:
+        if record_type != "bank_transaction":
+            return {}
+        return {
+            "account_no": normalized.get("account_no"),
+            "trade_time": normalized.get("trade_time") or normalized.get("pay_receive_time") or normalized.get("txn_date"),
+            "direction": normalized.get("txn_direction") or normalized.get("direction"),
+            "amount": normalized.get("amount"),
+            "counterparty_name": normalized.get("counterparty_name_raw") or normalized.get("counterparty_name"),
+        }
 
     @staticmethod
     def _build_preview_error_item(

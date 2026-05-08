@@ -44,6 +44,19 @@ type ApiImportFile = {
     source_record_type: string;
     decision: "created" | "status_updated" | "duplicate_skipped" | "suspected_duplicate" | "error";
     decision_reason: string;
+    linked_object_type?: string | null;
+    linked_object_id?: string | null;
+    identity_kind?: string | null;
+    account_no?: string | null;
+    account?: string | null;
+    trade_time?: string | null;
+    pay_receive_time?: string | null;
+    txn_date?: string | null;
+    direction?: string | null;
+    txn_direction?: string | null;
+    amount?: string | number | null;
+    counterparty_name?: string | null;
+    counterparty_name_raw?: string | null;
   }>;
 };
 
@@ -71,6 +84,21 @@ type ApiImportPreviewDuplicateGroup = {
     file_id?: string;
     file_name?: string;
     row_no?: number;
+    decision?: "created" | "status_updated" | "duplicate_skipped" | "suspected_duplicate" | "error" | string | null;
+    decision_reason?: string | null;
+    linked_object_type?: string | null;
+    linked_object_id?: string | null;
+    identity_kind?: string | null;
+    account_no?: string | null;
+    account?: string | null;
+    trade_time?: string | null;
+    pay_receive_time?: string | null;
+    txn_date?: string | null;
+    direction?: string | null;
+    txn_direction?: string | null;
+    amount?: string | number | null;
+    counterparty_name?: string | null;
+    counterparty_name_raw?: string | null;
   }>;
 };
 
@@ -152,6 +180,44 @@ function numberOrZero(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+function stringOrEmpty(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  return String(value);
+}
+
+function mapPreviewDetailFields(row: {
+  decision?: string | null;
+  decision_reason?: string | null;
+  linked_object_type?: string | null;
+  linked_object_id?: string | null;
+  identity_kind?: string | null;
+  account_no?: string | null;
+  account?: string | null;
+  trade_time?: string | null;
+  pay_receive_time?: string | null;
+  txn_date?: string | null;
+  direction?: string | null;
+  txn_direction?: string | null;
+  amount?: string | number | null;
+  counterparty_name?: string | null;
+  counterparty_name_raw?: string | null;
+}) {
+  return {
+    decision: row.decision ?? null,
+    decisionReason: row.decision_reason ?? null,
+    linkedObjectType: row.linked_object_type ?? null,
+    linkedObjectId: row.linked_object_id ?? null,
+    identityKind: row.identity_kind ?? null,
+    accountNo: row.account_no ?? row.account ?? null,
+    tradeTime: row.trade_time ?? row.pay_receive_time ?? row.txn_date ?? null,
+    direction: row.direction ?? row.txn_direction ?? null,
+    amount: row.amount === null || row.amount === undefined ? null : stringOrEmpty(row.amount),
+    counterpartyName: row.counterparty_name ?? row.counterparty_name_raw ?? null,
+  };
+}
+
 function mapAuditCounts(payload?: ApiImportPreviewAuditCounts | null): ImportPreviewAuditCounts | undefined {
   if (!payload) {
     return undefined;
@@ -182,6 +248,7 @@ function mapDuplicateGroups(groups?: ApiImportPreviewDuplicateGroup[]): ImportPr
       fileId: row.file_id ?? "",
       fileName: row.file_name ?? "",
       rowNo: numberOrZero(row.row_no),
+      ...mapPreviewDetailFields(row),
     })),
   }));
 }
@@ -241,6 +308,7 @@ function mapImportPayload(payload: ApiImportSessionPayload): ImportSessionPayloa
         bankSelectionConflict: file.bank_selection_conflict ?? false,
         conflictMessage: file.conflict_message,
         rowResults: (file.row_results ?? []).map((row) => ({
+          ...mapPreviewDetailFields(row),
           id: row.id,
           rowNo: row.row_no,
           sourceRecordType: row.source_record_type,

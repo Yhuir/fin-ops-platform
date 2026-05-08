@@ -42,18 +42,31 @@ export type ImportPreviewAuditCounts = {
   skippedCount: number;
 };
 
+export type ImportPreviewDetailRow = {
+  decision?: ImportRowDecision | string | null;
+  decisionReason?: string | null;
+  linkedObjectType?: string | null;
+  linkedObjectId?: string | null;
+  identityKind?: string | null;
+  accountNo?: string | null;
+  tradeTime?: string | null;
+  direction?: string | null;
+  amount?: string | null;
+  counterpartyName?: string | null;
+};
+
 export type ImportPreviewDuplicateGroup = {
   identityKey: string;
   recordType: string;
   duplicateType: string;
-  rows: Array<{
+  rows: Array<ImportPreviewDetailRow & {
     fileId: string;
     fileName: string;
     rowNo: number;
   }>;
 };
 
-export type ImportRowResult = {
+export type ImportRowResult = ImportPreviewDetailRow & {
   id: string;
   rowNo: number;
   sourceRecordType: string;

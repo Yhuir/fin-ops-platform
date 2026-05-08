@@ -7,6 +7,7 @@ import re
 from typing import Any, Protocol
 
 from fin_ops_platform.domain.enums import ImportDecision
+from fin_ops_platform.services.bank_transaction_identity_service import BankTransactionIdentityService
 from fin_ops_platform.services.invoice_identity_service import InvoiceIdentityService
 
 
@@ -63,8 +64,14 @@ class ImportPreviewAuditRow:
     identity_key: str | None
     identity_kind: str | None
     decision: ImportDecision | str | None = None
+    decision_reason: str | None = None
     linked_object_type: str | None = None
     linked_object_id: str | None = None
+    account_no: str | None = None
+    trade_time: str | None = None
+    direction: str | None = None
+    amount: str | None = None
+    counterparty_name: str | None = None
 
 
 @dataclass(slots=True)
@@ -123,29 +130,13 @@ class InvoiceIdentityStrategy:
 class BankTransactionIdentityStrategy:
     record_type = "bank_transaction"
 
+    def __init__(self, identity_service: BankTransactionIdentityService | None = None) -> None:
+        self._identity_service = identity_service or BankTransactionIdentityService()
+
     def identify(self, values: dict[str, Any]) -> ImportRecordIdentity:
-        account_no = clean_placeholder(values.get("account_no"))
-        if account_no:
-            for field_name in ("bank_serial_no", "enterprise_serial_no", "voucher_no"):
-                serial_value = clean_placeholder(values.get(field_name))
-                if serial_value:
-                    return ImportRecordIdentity(
-                        record_type=self.record_type,
-                        identity_key=f"bank:{account_no}:{field_name}:{serial_value}",
-                        identity_kind="stable",
-                    )
-        txn_date = clean_placeholder(values.get("txn_date"))
-        direction = clean_placeholder(values.get("txn_direction") or values.get("direction"))
-        amount = _format_amount(values.get("amount"))
-        counterparty_name = clean_placeholder(values.get("normalized_counterparty_name")) or normalize_name(
-            str(values.get("counterparty_name") or values.get("counterparty_name_raw") or "")
-        )
-        if account_no and txn_date and direction and amount and counterparty_name:
-            return ImportRecordIdentity(
-                record_type=self.record_type,
-                identity_key=f"bank:{account_no}:{txn_date}:{direction}:{amount}:{counterparty_name}",
-                identity_kind="suspected",
-            )
+        identity = self._identity_service.identity_for_mapping(values)
+        if identity.identity_key:
+            return ImportRecordIdentity(record_type=self.record_type, identity_key=identity.identity_key, identity_kind="stable")
         return ImportRecordIdentity(record_type=self.record_type, identity_key=None, identity_kind=None)
 
 
@@ -232,7 +223,21 @@ def build_import_preview_session_audit(rows: list[ImportPreviewAuditRow]) -> Imp
                     record_type=record_type,
                     duplicate_type=duplicate_type,
                     rows=[
-                        {"file_id": row.file_id, "file_name": row.file_name, "row_no": row.row_no}
+                        {
+                            "file_id": row.file_id,
+                            "file_name": row.file_name,
+                            "row_no": row.row_no,
+                            "decision": _decision_value(row.decision),
+                            "decision_reason": row.decision_reason,
+                            "linked_object_type": row.linked_object_type,
+                            "linked_object_id": row.linked_object_id,
+                            "identity_kind": row.identity_kind,
+                            "account_no": row.account_no,
+                            "trade_time": row.trade_time,
+                            "direction": row.direction,
+                            "amount": row.amount,
+                            "counterparty_name": row.counterparty_name,
+                        }
                         for row in sorted_rows
                     ],
                 )
