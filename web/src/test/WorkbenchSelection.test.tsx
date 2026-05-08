@@ -1413,8 +1413,10 @@ describe("Workbench row selection and detail modal", () => {
     const exceptionModal = await screen.findByRole("dialog", { name: "OA流水异常处理弹窗" });
     expect(within(exceptionModal).getByText("OA合计")).toBeInTheDocument();
     expect(within(exceptionModal).getAllByText("58,000.00")).toHaveLength(2);
-    expect(within(exceptionModal).getByText("流水合计")).toBeInTheDocument();
-    expect(within(exceptionModal).getByText("差额")).toBeInTheDocument();
+    expect(within(exceptionModal).getByText("流水支出")).toBeInTheDocument();
+    expect(within(exceptionModal).getByText("流水收入")).toBeInTheDocument();
+    expect(within(exceptionModal).getByText("流水净额")).toBeInTheDocument();
+    expect(within(exceptionModal).getByText("OA与支出差额")).toBeInTheDocument();
 
     await user.selectOptions(within(exceptionModal).getByLabelText("异常情况"), "oa_bank_amount_mismatch");
     await user.type(within(exceptionModal).getByLabelText("备注"), "金额核对后暂时继续异常");

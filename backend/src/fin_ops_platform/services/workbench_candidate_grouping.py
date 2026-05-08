@@ -16,7 +16,13 @@ CENT = Decimal("0.01")
 SINGLE_BANK_AUTO_PAIRED_CODES = {"salary_personal_auto_match"}
 MULTI_BANK_AUTO_PAIRED_CODES = {"internal_transfer_pair"}
 OA_INVOICE_AUTO_PAIRED_CODES = {"oa_invoice_offset_auto_match"}
-AUTO_PAIRED_CODES = {*SINGLE_BANK_AUTO_PAIRED_CODES, *MULTI_BANK_AUTO_PAIRED_CODES, *OA_INVOICE_AUTO_PAIRED_CODES}
+OA_BANK_SETTLEMENT_PAIRED_CODES = {"personal_advance_repayment_settlement"}
+AUTO_PAIRED_CODES = {
+    *SINGLE_BANK_AUTO_PAIRED_CODES,
+    *MULTI_BANK_AUTO_PAIRED_CODES,
+    *OA_INVOICE_AUTO_PAIRED_CODES,
+    *OA_BANK_SETTLEMENT_PAIRED_CODES,
+}
 ETC_BATCH_SOURCE = "etc_batch"
 ETC_BATCH_TAG = "ETC批量提交"
 MAX_AGGREGATED_OA_INVOICE_CANDIDATES = 160
@@ -497,7 +503,7 @@ class WorkbenchCandidateGroupingService:
         row_type = str(row["type"])
         original_relation = self._relation_payload(row)
         original_code = str(original_relation.get("code", ""))
-        if original_code == "automatic_match" or original_code in OA_INVOICE_AUTO_PAIRED_CODES:
+        if original_code == "automatic_match" or original_code in AUTO_PAIRED_CODES:
             return deepcopy(original_relation)
         if group_kind == "oa_bank_invoice":
             return {"code": "fully_linked", "label": "完全关联", "tone": "success"}
@@ -555,6 +561,12 @@ class WorkbenchCandidateGroupingService:
             if relation_codes and relation_codes.issubset(OA_INVOICE_AUTO_PAIRED_CODES):
                 return True
         if row_type_count == 2 and group.oa_rows and group.bank_rows and not group.invoice_rows:
+            relation_codes = {
+                self._relation_code(row)
+                for row in [*group.oa_rows, *group.bank_rows]
+            }
+            if relation_codes and relation_codes.issubset(OA_BANK_SETTLEMENT_PAIRED_CODES):
+                return True
             if any(self._is_etc_batch_oa_row(row) for row in group.oa_rows):
                 return True
         return row_type_count >= 3
@@ -622,6 +634,8 @@ class WorkbenchCandidateGroupingService:
         relation_codes = {self._relation_code(row) for row in rows}
         if "fully_linked" in relation_codes:
             return "manual_confirmed"
+        if relation_codes and relation_codes.issubset(OA_BANK_SETTLEMENT_PAIRED_CODES):
+            return next(iter(relation_codes))
         if relation_codes.intersection({"automatic_match", *AUTO_PAIRED_CODES}):
             return "auto_closed"
         return default_group_type

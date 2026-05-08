@@ -3,7 +3,7 @@ export type OaBankExceptionMode = "oa_only" | "bank_only" | "oa_bank" | "invalid
 export type OaBankExceptionOption = {
   code: string;
   label: string;
-  flow: "exception" | "split_merge";
+  flow: "exception" | "split_merge" | "settle_as_pair";
 };
 
 export const OA_BANK_EXCEPTION_OPTIONS = {
@@ -47,6 +47,11 @@ export const OA_BANK_EXCEPTION_OPTIONS = {
     label: "多个OA一笔流水",
     flow: "split_merge",
   },
+  personalAdvanceRepaymentSettlement: {
+    code: "personal_advance_repayment_settlement",
+    label: "还清个人暂借款",
+    flow: "settle_as_pair",
+  },
 } satisfies Record<string, OaBankExceptionOption>;
 
 export function buildOaBankExceptionOptions({
@@ -81,7 +86,10 @@ export function buildOaBankExceptionOptions({
     };
   }
 
-  const options: OaBankExceptionOption[] = [OA_BANK_EXCEPTION_OPTIONS.oaBankAmountMismatch];
+  const options: OaBankExceptionOption[] = [
+    OA_BANK_EXCEPTION_OPTIONS.oaBankAmountMismatch,
+    OA_BANK_EXCEPTION_OPTIONS.personalAdvanceRepaymentSettlement,
+  ];
   if (oaCount === 1 && bankCount > 1) {
     options.push(OA_BANK_EXCEPTION_OPTIONS.oaOneToManyBank);
   }

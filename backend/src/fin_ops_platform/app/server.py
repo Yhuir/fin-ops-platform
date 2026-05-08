@@ -117,6 +117,7 @@ OA_INVOICE_OFFSET_AUTO_MATCH_MODE = "oa_invoice_offset_auto_match"
 OA_INVOICE_OFFSET_TAG = "冲"
 CASH_PASS_THROUGH_MODE = "cash_pass_through"
 CASH_TICKET_PURCHASE_MODE = "cash_ticket_purchase"
+PERSONAL_ADVANCE_REPAYMENT_MODE = "personal_advance_repayment_settlement"
 WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-08-authoritative-candidate-pipeline"
 SYSTEM_AUTO_PAIR_RELATION_MODES = {
     "salary_personal_auto_match",
@@ -656,6 +657,8 @@ class Application:
             return self._handle_api_workbench_update_bank_exception(body)
         if method == "POST" and route_path == "/api/workbench/actions/oa-bank-exception":
             return self._handle_api_workbench_oa_bank_exception(body)
+        if method == "POST" and route_path == "/api/workbench/actions/confirm-personal-advance-repayment":
+            return self._handle_api_workbench_confirm_personal_advance_repayment(body, request_id=request_id)
         if method == "POST" and route_path == "/api/workbench/actions/cancel-exception":
             return self._handle_api_workbench_cancel_exception(body)
         if method == "POST" and route_path == "/api/workbench/actions/ignore-row":
@@ -890,6 +893,7 @@ class Application:
                 "/api/workbench/actions/cancel-link",
                 "/api/workbench/actions/update-bank-exception",
                 "/api/workbench/actions/oa-bank-exception",
+                "/api/workbench/actions/confirm-personal-advance-repayment",
                 "/api/workbench/actions/cancel-exception",
                 "/api/workbench/actions/ignore-row",
                 "/api/workbench/actions/unignore-row",
@@ -3956,6 +3960,20 @@ class Application:
             return self._handle_live_workbench_oa_bank_exception(payload)
         return self._handle_live_workbench_oa_bank_exception(payload)
 
+    def _handle_api_workbench_confirm_personal_advance_repayment(
+        self,
+        body: str | None,
+        *,
+        request_id: str | None = None,
+    ) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        freshness_error = self._workbench_write_freshness_guard()
+        if freshness_error is not None:
+            return freshness_error
+        return self._handle_live_workbench_confirm_personal_advance_repayment(payload, request_id=request_id)
+
     def _handle_api_workbench_cancel_exception(self, body: str | None) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
@@ -4799,6 +4817,125 @@ class Application:
                 "exception_case_id": exception_case_id,
                 "exception_case_ids": [exception_case_id],
                 "message": f"已对 {len(updated_rows)} 条记录执行 OA/流水异常处理。",
+            },
+        )
+
+    def _handle_live_workbench_confirm_personal_advance_repayment(
+        self,
+        payload: dict[str, object],
+        *,
+        request_id: str | None = None,
+    ) -> Response:
+        action_name = "confirm_personal_advance_repayment"
+        try:
+            month = str(payload["month"])
+            row_ids = self._normalize_row_ids(list(payload["row_ids"]))
+            note = str(payload.get("note") or payload.get("comment") or "").strip()
+        except (KeyError, TypeError, ValueError) as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_personal_advance_repayment_request", "message": str(exc)},
+            )
+
+        try:
+            rows = self._resolve_live_rows_direct(row_ids, month_hint=month)
+        except KeyError as exc:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "workbench_row_not_found", "message": str(exc)},
+            )
+
+        amount_summary = self._personal_advance_repayment_amount_summary(rows)
+        validation_message = self._personal_advance_repayment_validation_message(rows, amount_summary)
+        if validation_message:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "invalid_personal_advance_repayment_request",
+                    "message": validation_message,
+                    "amount_summary": amount_summary,
+                },
+            )
+
+        changed_scope_keys = self._scope_keys_for_rows(month=month, rows=rows)
+        before_relations = self._workbench_pair_relation_service.active_relations_for_row_ids(row_ids)
+        history_before_relations = self._merge_relation_snapshots(
+            before_relations,
+            self._synthetic_existing_case_relations(
+                rows,
+                existing_relations=before_relations,
+                month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
+            ),
+        )
+        previous_exception_snapshot = self._workbench_exception_case_service.snapshot()
+        previous_pair_snapshot = self._workbench_pair_relation_service.snapshot()
+        try:
+            exception_case = self._workbench_exception_case_service.create_settlement_case(
+                rows=rows,
+                exception_code=PERSONAL_ADVANCE_REPAYMENT_MODE,
+                exception_label="还清个人暂借款",
+                category="oa_bank_settlement",
+                comment=note or None,
+                scope_months=[scope for scope in changed_scope_keys if SEARCH_MONTH_RE.match(scope)],
+            )
+            case_id = f"CASE-{str(exception_case['id'])}"
+            amount_check = {
+                "status": "matched",
+                "direction": PERSONAL_ADVANCE_REPAYMENT_MODE,
+                **amount_summary,
+            }
+            relation, _history = self._workbench_pair_relation_service.replace_with_confirmed_relation(
+                case_id=case_id,
+                row_ids=row_ids,
+                row_types=[str(row.get("type") or "") for row in rows],
+                relation_mode=PERSONAL_ADVANCE_REPAYMENT_MODE,
+                created_by="system",
+                month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
+                note=note,
+                amount_check=amount_check,
+                special_metadata={
+                    "special_type": PERSONAL_ADVANCE_REPAYMENT_MODE,
+                    "cost_policy": "exclude_all",
+                    "note": note,
+                },
+                before_relations=history_before_relations,
+            )
+            self._save_workbench_exception_cases_snapshot()
+        except Exception as exc:
+            self._workbench_exception_case_service = WorkbenchExceptionCaseService.from_snapshot(previous_exception_snapshot)
+            self._workbench_pair_relation_service = WorkbenchPairRelationService.from_snapshot(previous_pair_snapshot)
+            if isinstance(exc, StatePersistenceError):
+                return self._workbench_persistence_unavailable_response(exc)
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_personal_advance_repayment_request", "message": str(exc)},
+            )
+
+        self._invalidate_workbench_read_model_scopes(changed_scope_keys)
+        self._schedule_workbench_pair_relation_persist(
+            changed_case_ids=[
+                *[str(before_relation.get("case_id") or "") for before_relation in before_relations],
+                str(relation.get("case_id") or ""),
+            ],
+            request_id=request_id,
+            action_name=action_name,
+        )
+        self._schedule_workbench_read_model_persist(
+            changed_scope_keys=changed_scope_keys,
+            request_id=request_id,
+            action_name=action_name,
+        )
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "success": True,
+                "action": action_name,
+                "month": month,
+                "case_id": str(relation.get("case_id") or ""),
+                "exception_case_id": str(exception_case["id"]),
+                "affected_row_ids": row_ids,
+                "amount_summary": amount_summary,
+                "message": "已确认还清个人暂借款。",
             },
         )
 
@@ -8196,6 +8333,78 @@ class Application:
             amount_check["requires_note"] = False
         return amount_check
 
+    def _personal_advance_repayment_amount_summary(self, rows: list[dict[str, object]]) -> dict[str, str]:
+        oa_total = Decimal("0.00")
+        bank_debit_total = Decimal("0.00")
+        bank_credit_total = Decimal("0.00")
+        for row in rows:
+            row_type = str(row.get("type") or "")
+            if row_type == "oa":
+                amount = (
+                    self._decimal_from_value(row.get("amount"))
+                    or self._decimal_from_value(row.get("reimbursement_amount"))
+                    or self._decimal_from_value(row.get("payment_amount"))
+                    or self._decimal_from_value(row.get("apply_amount"))
+                    or Decimal("0.00")
+                )
+                oa_total += amount
+            elif row_type == "bank":
+                debit_amount = self._decimal_from_value(row.get("debit_amount"))
+                credit_amount = self._decimal_from_value(row.get("credit_amount"))
+                if debit_amount is not None and debit_amount > 0:
+                    bank_debit_total += debit_amount
+                if credit_amount is not None and credit_amount > 0:
+                    bank_credit_total += credit_amount
+        return {
+            "oa_total": self._plain_money(oa_total),
+            "bank_debit_total": self._plain_money(bank_debit_total),
+            "bank_credit_total": self._plain_money(bank_credit_total),
+            "bank_net_total": self._plain_money(bank_credit_total - bank_debit_total),
+        }
+
+    def _personal_advance_repayment_validation_message(
+        self,
+        rows: list[dict[str, object]],
+        amount_summary: dict[str, str],
+    ) -> str | None:
+        rows_by_type = self._rows_by_type(rows)
+        unsupported_row_types = sorted(
+            {
+                str(row.get("type") or "")
+                for row in rows
+                if str(row.get("type") or "") not in {"oa", "bank", "invoice"}
+            }
+        )
+        if unsupported_row_types:
+            return f"personal advance repayment only supports OA and bank rows: {unsupported_row_types[0]}."
+        if rows_by_type["invoice"]:
+            return "personal advance repayment does not support invoice rows."
+        if not rows_by_type["oa"]:
+            return "personal advance repayment requires at least one OA row."
+
+        has_bank_debit = False
+        has_bank_credit = False
+        for row in rows_by_type["bank"]:
+            debit_amount = self._decimal_from_value(row.get("debit_amount"))
+            credit_amount = self._decimal_from_value(row.get("credit_amount"))
+            has_bank_debit = has_bank_debit or bool(debit_amount is not None and debit_amount > 0)
+            has_bank_credit = has_bank_credit or bool(credit_amount is not None and credit_amount > 0)
+        if not has_bank_debit:
+            return "personal advance repayment requires at least one bank debit row."
+        if not has_bank_credit:
+            return "personal advance repayment requires at least one bank credit row."
+
+        oa_total = Decimal(amount_summary["oa_total"])
+        bank_debit_total = Decimal(amount_summary["bank_debit_total"])
+        bank_credit_total = Decimal(amount_summary["bank_credit_total"])
+        if oa_total != bank_debit_total or bank_credit_total != bank_debit_total:
+            return "personal advance repayment amounts do not close."
+        return None
+
+    @staticmethod
+    def _plain_money(value: Decimal) -> str:
+        return f"{value.quantize(Decimal('0.01')):.2f}"
+
     def _can_confirm_link_row_types(self, *, row_ids: list[str], row_types: list[str], month: str) -> bool:
         known_types = {row_type for row_type in row_types if row_type != "unknown"}
         if len(known_types) >= 2:
@@ -8547,6 +8756,8 @@ class Application:
             add("内部往来")
         if relation_mode == "salary_personal_auto_match":
             add("工资")
+        if relation_mode == PERSONAL_ADVANCE_REPAYMENT_MODE:
+            add("还清个人暂借款")
         special_metadata = relation.get("special_metadata") if isinstance(relation, dict) else None
         special_type = str(special_metadata.get("special_type") or "") if isinstance(special_metadata, dict) else ""
         if special_type == CASH_PASS_THROUGH_MODE:
@@ -8881,6 +9092,8 @@ class Application:
             return {"code": "internal_transfer_pair", "label": "已匹配：内部往来款", "tone": "success"}
         if relation_mode == "salary_personal_auto_match":
             return {"code": "salary_personal_auto_match", "label": "已匹配：工资", "tone": "success"}
+        if relation_mode == PERSONAL_ADVANCE_REPAYMENT_MODE:
+            return {"code": PERSONAL_ADVANCE_REPAYMENT_MODE, "label": "已匹配：还清个人暂借款", "tone": "success"}
         if relation_mode == OA_INVOICE_OFFSET_AUTO_MATCH_MODE:
             if row_type == "invoice":
                 return {"code": OA_INVOICE_OFFSET_AUTO_MATCH_MODE, "label": "已关联OA", "tone": "success"}

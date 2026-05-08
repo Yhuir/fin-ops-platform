@@ -7,6 +7,7 @@ type OaBankExceptionModalProps = {
   rows: WorkbenchRecord[];
   onClose: () => void;
   onConfirmLink: () => void;
+  onSettleAsPair: (payload: { comment: string }) => void;
   onSubmitException: (payload: {
     exceptionCode: string;
     exceptionLabel: string;
@@ -18,6 +19,7 @@ export default function OaBankExceptionModal({
   rows,
   onClose,
   onConfirmLink,
+  onSettleAsPair,
   onSubmitException,
 }: OaBankExceptionModalProps) {
   const [selectedCode, setSelectedCode] = useState("");
@@ -28,14 +30,17 @@ export default function OaBankExceptionModal({
     const bankRows = rows.filter((row) => row.recordType === "bank");
     const invoiceRows = rows.filter((row) => row.recordType === "invoice");
     const oaTotal = oaRows.reduce((total, row) => total + parseAmount(row.amount), 0);
-    const bankTotal = bankRows.reduce((total, row) => total + parseAmount(row.amount), 0);
+    const bankDebitTotal = bankRows.reduce((total, row) => total + bankDebitAmount(row), 0);
+    const bankCreditTotal = bankRows.reduce((total, row) => total + bankCreditAmount(row), 0);
     return {
       oaCount: oaRows.length,
       bankCount: bankRows.length,
       invoiceCount: invoiceRows.length,
       oaTotal,
-      bankTotal,
-      differenceAmount: oaTotal - bankTotal,
+      bankDebitTotal,
+      bankCreditTotal,
+      bankNetTotal: bankCreditTotal - bankDebitTotal,
+      differenceAmount: oaTotal - bankDebitTotal,
     };
   }, [rows]);
 
@@ -51,7 +56,7 @@ export default function OaBankExceptionModal({
 
   const selectedOption = optionState.options.find((option) => option.code === selectedCode) ?? null;
   const showEquation = summary.oaCount > 0 && summary.bankCount > 0;
-  const submitLabel = showEquation ? "继续报异常" : "提交异常";
+  const submitLabel = selectedOption?.flow === "settle_as_pair" ? "确认闭环" : showEquation ? "继续报异常" : "提交异常";
 
   return (
     <div aria-label="OA流水异常处理弹窗" aria-modal="true" className="detail-modal-backdrop" role="dialog">
@@ -79,11 +84,19 @@ export default function OaBankExceptionModal({
                 <strong>{formatAmount(summary.oaTotal)}</strong>
               </div>
               <div className="oa-bank-equation-row">
-                <span>流水合计</span>
-                <strong>{formatAmount(summary.bankTotal)}</strong>
+                <span>流水支出</span>
+                <strong>{formatAmount(summary.bankDebitTotal)}</strong>
               </div>
               <div className="oa-bank-equation-row">
-                <span>差额</span>
+                <span>流水收入</span>
+                <strong>{formatAmount(summary.bankCreditTotal)}</strong>
+              </div>
+              <div className="oa-bank-equation-row">
+                <span>流水净额</span>
+                <strong>{formatAmount(summary.bankNetTotal)}</strong>
+              </div>
+              <div className="oa-bank-equation-row">
+                <span>OA与支出差额</span>
                 <strong>{formatAmount(summary.differenceAmount)}</strong>
               </div>
             </div>
@@ -142,6 +155,14 @@ export default function OaBankExceptionModal({
                 确认配对
               </button>
             </>
+          ) : selectedOption?.flow === "settle_as_pair" ? (
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => onSettleAsPair({ comment })}
+            >
+              确认闭环
+            </button>
           ) : (
             <button
               className="primary-button"
@@ -170,6 +191,24 @@ function parseAmount(rawValue: string) {
   const normalized = rawValue.replace(/,/g, "").trim();
   const value = Number(normalized);
   return Number.isFinite(value) ? value : 0;
+}
+
+function bankDebitAmount(row: WorkbenchRecord) {
+  const explicitDebit = parseAmount(row.tableValues.debitAmount ?? "");
+  if (explicitDebit > 0) {
+    return explicitDebit;
+  }
+  const direction = String(row.tableValues.direction ?? "").trim();
+  return direction.includes("支") ? parseAmount(row.amount) : 0;
+}
+
+function bankCreditAmount(row: WorkbenchRecord) {
+  const explicitCredit = parseAmount(row.tableValues.creditAmount ?? "");
+  if (explicitCredit > 0) {
+    return explicitCredit;
+  }
+  const direction = String(row.tableValues.direction ?? "").trim();
+  return direction.includes("收") ? parseAmount(row.amount) : 0;
 }
 
 function formatAmount(value: number) {

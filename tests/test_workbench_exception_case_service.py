@@ -54,6 +54,39 @@ class WorkbenchExceptionCaseServiceTests(unittest.TestCase):
         self.assertEqual(case["scope_months"], ["2026-04"])
         self.assertEqual(service.case_ids_for_rows(["invoice-001"]), ["WEX-000001"])
 
+    def test_create_settlement_case_records_audit_without_active_row_index(self) -> None:
+        service = WorkbenchExceptionCaseService()
+
+        case = service.create_settlement_case(
+            rows=[
+                {"id": "oa-advance-001", "type": "oa", "month": "2026-03"},
+                {"id": "bank-advance-pay-001", "type": "bank", "pay_receive_time": "2026-03-18 09:10:00"},
+                {"id": "bank-advance-repay-001", "type": "bank", "pay_receive_time": "2026-03-19 09:10:00"},
+            ],
+            exception_code="personal_advance_repayment_settlement",
+            exception_label="还清个人暂借款",
+            category="oa_bank_settlement",
+            comment="已确认借款还清",
+        )
+
+        self.assertEqual(case["id"], "WEX-000001")
+        self.assertEqual(case["status"], "settled")
+        self.assertEqual(case["exception_code"], "personal_advance_repayment_settlement")
+        self.assertEqual(case["exception_label"], "还清个人暂借款")
+        self.assertEqual(case["category"], "oa_bank_settlement")
+        self.assertEqual(
+            case["row_ids"],
+            ["oa-advance-001", "bank-advance-pay-001", "bank-advance-repay-001"],
+        )
+        self.assertEqual(case["row_types"], ["oa", "bank"])
+        self.assertEqual(case["scope_months"], ["2026-03"])
+        self.assertEqual(case["history"][0]["action"], "settled")
+        self.assertEqual(
+            service.case_ids_for_rows(["oa-advance-001", "bank-advance-pay-001", "bank-advance-repay-001"]),
+            [],
+        )
+        self.assertEqual(service.snapshot()["row_case_index"], {})
+
     def test_cancel_exception_cases_marks_cases_cancelled_and_clears_row_index(self) -> None:
         service = WorkbenchExceptionCaseService()
         service.create_exception_case(

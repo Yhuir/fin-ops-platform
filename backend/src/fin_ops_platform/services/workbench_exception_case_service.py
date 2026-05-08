@@ -55,10 +55,14 @@ EXCEPTION_CASE_DEFINITIONS: dict[str, dict[str, str]] = {
         "label": "待找流水与发票",
         "category": "manual",
     },
+    "personal_advance_repayment_settlement": {
+        "label": "还清个人暂借款",
+        "category": "oa_bank_settlement",
+    },
 }
 
 ACTIVE_CASE_STATUSES = {"confirmed", "ignored"}
-CASE_STATUSES = ACTIVE_CASE_STATUSES | {"cancelled"}
+CASE_STATUSES = ACTIVE_CASE_STATUSES | {"cancelled", "settled"}
 ROW_TYPES = {"oa", "bank", "invoice"}
 
 
@@ -155,6 +159,46 @@ class WorkbenchExceptionCaseService:
         self._cases[case_id] = case_payload
         for row_id in row_ids:
             self._row_case_index[row_id] = case_id
+        return deepcopy(case_payload)
+
+    def create_settlement_case(
+        self,
+        rows: list[dict[str, Any]],
+        exception_code: str,
+        exception_label: str,
+        category: str,
+        comment: str | None = None,
+        scope_months: list[str] | None = None,
+    ) -> dict[str, Any]:
+        normalized_rows = self._normalize_rows(rows)
+        normalized_code = self._normalize_exception_code(exception_code)
+        normalized_label = self._non_empty_text(exception_label, "exception_label")
+        normalized_category = self._non_empty_text(category, "category")
+
+        case_id = self._next_case_id()
+        now = self._now()
+        row_ids = [row["id"] for row in normalized_rows]
+        case_payload = {
+            "id": case_id,
+            "status": "settled",
+            "exception_code": normalized_code,
+            "exception_label": normalized_label,
+            "category": normalized_category,
+            "row_ids": row_ids,
+            "row_types": self._unique_preserve_order(row["type"] for row in normalized_rows),
+            "scope_months": self._normalize_scope_months(scope_months, normalized_rows),
+            "comment": comment,
+            "created_at": now,
+            "updated_at": now,
+            "history": [
+                {
+                    "action": "settled",
+                    "at": now,
+                    "comment": comment,
+                }
+            ],
+        }
+        self._cases[case_id] = case_payload
         return deepcopy(case_payload)
 
     def cancel_exception_cases(

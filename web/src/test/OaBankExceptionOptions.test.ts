@@ -25,6 +25,7 @@ describe("OA-bank exception option rules", () => {
     expect(result.mode).toBe("oa_bank");
     expect(result.options.map((option) => option.code)).toEqual([
       "oa_bank_amount_mismatch",
+      "personal_advance_repayment_settlement",
       "oa_one_to_many_bank",
     ]);
   });
@@ -34,6 +35,7 @@ describe("OA-bank exception option rules", () => {
     expect(result.mode).toBe("oa_bank");
     expect(result.options.map((option) => option.code)).toEqual([
       "oa_bank_amount_mismatch",
+      "personal_advance_repayment_settlement",
       "oa_many_to_one_bank",
     ]);
   });

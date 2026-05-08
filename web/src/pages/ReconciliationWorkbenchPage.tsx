@@ -19,6 +19,7 @@ import {
   confirmWorkbenchCashPassThrough,
   confirmWorkbenchCashTicketPurchase,
   confirmWorkbenchLink,
+  confirmWorkbenchPersonalAdvanceRepayment,
   fetchIgnoredWorkbenchRows,
   fetchWorkbenchOaSyncStatus,
   fetchWorkbenchRowDetail,
@@ -978,6 +979,26 @@ export default function ReconciliationWorkbenchPage() {
     await openConfirmPreview(rows);
   };
 
+  const handleSettlePersonalAdvanceRepayment = async (rows: WorkbenchRecord[], comment: string) => {
+    if (!ensureCanWriteWorkbench()) {
+      return;
+    }
+    setOaBankExceptionDialog(null);
+    await runBlockingAction({
+      loadingMessage: "正在确认还清个人暂借款...",
+      action: async () => {
+        const result = await confirmWorkbenchPersonalAdvanceRepayment({
+          month: WORKBENCH_VIEW_MONTH,
+          rowIds: rows.map((row) => row.id),
+          note: comment,
+        });
+        clearOpenSelection();
+        refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
+        return result.message || "已确认还清个人暂借款。";
+      },
+    });
+  };
+
   const handleRowAction = useCallback(async (row: WorkbenchRecord, action: WorkbenchInlineAction) => {
     if (action === "relation-status") {
       openActionResultDialog(`当前关联情况：${row.status}`, "关联情况");
@@ -1601,6 +1622,7 @@ export default function ReconciliationWorkbenchPage() {
           rows={oaBankExceptionDialog.rows}
           onClose={handleCloseOaBankExceptionDialog}
           onConfirmLink={() => handleConfirmFromOaBankException(oaBankExceptionDialog.rows)}
+          onSettleAsPair={({ comment }) => handleSettlePersonalAdvanceRepayment(oaBankExceptionDialog.rows, comment)}
           onSubmitException={({ exceptionCode, exceptionLabel, comment }) =>
             handleSubmitOaBankException({
               rows: oaBankExceptionDialog.rows,

@@ -297,6 +297,12 @@ type OaBankExceptionPayload = {
   comment?: string;
 };
 
+type ConfirmPersonalAdvanceRepaymentPayload = {
+  month: string;
+  rowIds: string[];
+  note?: string;
+};
+
 type IgnoreRowPayload = {
   month: string;
   rowId: string;
@@ -1410,6 +1416,18 @@ export async function submitOaBankException(payload: OaBankExceptionPayload) {
       exception_code: payload.exceptionCode,
       exception_label: payload.exceptionLabel,
       comment: payload.comment,
+    }),
+  });
+}
+
+export async function confirmWorkbenchPersonalAdvanceRepayment(payload: ConfirmPersonalAdvanceRepaymentPayload) {
+  return requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/confirm-personal-advance-repayment", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      month: payload.month,
+      row_ids: payload.rowIds,
+      note: payload.note,
     }),
   });
 }

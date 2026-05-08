@@ -2163,6 +2163,136 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertIsNone(app._workbench_override_service.case_id_for_row(bank_row["id"]))
         self.assertIsNone(app._workbench_override_service.case_id_for_row(invoice_row["id"]))
 
+    def test_confirm_personal_advance_repayment_creates_settled_case_and_pair_relation(self) -> None:
+        app = build_application()
+        raw_payload = build_personal_advance_repayment_raw_payload()
+        row_ids = [
+            "oa-personal-advance-001",
+            "bank-personal-advance-out-001",
+            "bank-personal-advance-in-001",
+            "bank-personal-advance-in-002",
+        ]
+
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            app.handle_request("GET", "/api/workbench?month=2026-03")
+            response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/confirm-personal-advance-repayment",
+                json.dumps({"month": "2026-03", "row_ids": row_ids, "note": "员工已归还备用金"}),
+            )
+            updated_workbench = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["action"], "confirm_personal_advance_repayment")
+        self.assertEqual(payload["amount_summary"]["oa_total"], "300000.00")
+        self.assertEqual(payload["amount_summary"]["bank_debit_total"], "300000.00")
+        self.assertEqual(payload["amount_summary"]["bank_credit_total"], "300000.00")
+        self.assertEqual(payload["amount_summary"]["bank_net_total"], "0.00")
+        self.assertCountEqual(payload["affected_row_ids"], row_ids)
+
+        relation = app._workbench_pair_relation_service.get_active_relation_by_case_id(payload["case_id"])
+        self.assertIsNotNone(relation)
+        assert relation is not None
+        self.assertEqual(relation["relation_mode"], "personal_advance_repayment_settlement")
+        self.assertCountEqual(relation["row_ids"], row_ids)
+        self.assertEqual(relation["amount_check"]["status"], "matched")
+        self.assertEqual(relation["special_metadata"]["special_type"], "personal_advance_repayment_settlement")
+        self.assertEqual(relation["special_metadata"]["cost_policy"], "exclude_all")
+
+        exception_snapshot = app._workbench_exception_case_service.snapshot()
+        exception_case = exception_snapshot["cases"][payload["exception_case_id"]]
+        self.assertEqual(exception_case["status"], "settled")
+        self.assertEqual(exception_case["exception_code"], "personal_advance_repayment_settlement")
+        self.assertEqual(exception_snapshot["row_case_index"], {})
+
+        paired_rows = flatten_groups(updated_workbench["paired"]["groups"], "oa")
+        self.assertIn("oa-personal-advance-001", [row["id"] for row in paired_rows])
+        paired_group = next(
+            group
+            for group in updated_workbench["paired"]["groups"]
+            if any(row["id"] == "oa-personal-advance-001" for row in group["oa_rows"])
+        )
+        self.assertEqual(paired_group["group_type"], "personal_advance_repayment_settlement")
+        self.assertEqual(paired_group["oa_rows"][0]["oa_bank_relation"]["label"], "已匹配：还清个人暂借款")
+        self.assertIn("还清个人暂借款", paired_group["oa_rows"][0]["tags"])
+        self.assertFalse(paired_group["oa_rows"][0].get("handled_exception"))
+
+    def test_confirm_personal_advance_repayment_rejects_unbalanced_amounts(self) -> None:
+        app = build_application()
+        raw_payload = build_personal_advance_repayment_raw_payload(bank_credit_amounts=["200000.00", "99999.99"])
+        row_ids = [
+            "oa-personal-advance-001",
+            "bank-personal-advance-out-001",
+            "bank-personal-advance-in-001",
+            "bank-personal-advance-in-002",
+        ]
+
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            app.handle_request("GET", "/api/workbench?month=2026-03")
+            response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/confirm-personal-advance-repayment",
+                json.dumps({"month": "2026-03", "row_ids": row_ids}),
+            )
+
+        self.assertEqual(response.status_code, 400)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["error"], "invalid_personal_advance_repayment_request")
+        self.assertEqual(payload["amount_summary"]["bank_credit_total"], "299999.99")
+
+    def test_confirm_personal_advance_repayment_rejects_missing_bank_credit_or_debit(self) -> None:
+        app_without_credit = build_application()
+        raw_without_credit = build_personal_advance_repayment_raw_payload(bank_credit_amounts=[])
+
+        with patch.object(app_without_credit, "_build_raw_workbench_payload", return_value=raw_without_credit):
+            app_without_credit.handle_request("GET", "/api/workbench?month=2026-03")
+            missing_credit_response = app_without_credit.handle_request(
+                "POST",
+                "/api/workbench/actions/confirm-personal-advance-repayment",
+                json.dumps({"month": "2026-03", "row_ids": ["oa-personal-advance-001", "bank-personal-advance-out-001"]}),
+            )
+
+        self.assertEqual(missing_credit_response.status_code, 400)
+        self.assertIn("bank credit", json.loads(missing_credit_response.body)["message"])
+
+        app_without_debit = build_application()
+        raw_without_debit = build_personal_advance_repayment_raw_payload(include_bank_debit=False)
+
+        with patch.object(app_without_debit, "_build_raw_workbench_payload", return_value=raw_without_debit):
+            app_without_debit.handle_request("GET", "/api/workbench?month=2026-03")
+            missing_debit_response = app_without_debit.handle_request(
+                "POST",
+                "/api/workbench/actions/confirm-personal-advance-repayment",
+                json.dumps({"month": "2026-03", "row_ids": ["oa-personal-advance-001", "bank-personal-advance-in-001"]}),
+            )
+
+        self.assertEqual(missing_debit_response.status_code, 400)
+        self.assertIn("bank debit", json.loads(missing_debit_response.body)["message"])
+
+    def test_confirm_personal_advance_repayment_rejects_invoice_rows(self) -> None:
+        app = build_application()
+        raw_payload = build_personal_advance_repayment_raw_payload(include_invoice=True)
+        row_ids = [
+            "oa-personal-advance-001",
+            "bank-personal-advance-out-001",
+            "bank-personal-advance-in-001",
+            "bank-personal-advance-in-002",
+            "invoice-personal-advance-001",
+        ]
+
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            app.handle_request("GET", "/api/workbench?month=2026-03")
+            response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/confirm-personal-advance-repayment",
+                json.dumps({"month": "2026-03", "row_ids": row_ids}),
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("invoice rows", json.loads(response.body)["message"])
+
     def test_confirm_and_cancel_link_invalidate_cached_read_model_for_follow_up_get(self) -> None:
         app = build_application()
         initial_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
@@ -4098,6 +4228,99 @@ def flatten_groups(groups: list[dict[str, object]], record_type: str) -> list[di
 
 def all_groups(payload: dict[str, object]) -> list[dict[str, object]]:
     return [*payload["paired"]["groups"], *payload["open"]["groups"]]
+
+
+def build_personal_advance_repayment_raw_payload(
+    *,
+    oa_amount: str = "300000.00",
+    bank_debit_amount: str = "300000.00",
+    bank_credit_amounts: list[str] | None = None,
+    include_bank_debit: bool = True,
+    include_invoice: bool = False,
+) -> dict[str, object]:
+    credit_amounts = ["200000.00", "100000.00"] if bank_credit_amounts is None else list(bank_credit_amounts)
+    oa_rows = [
+        {
+            "id": "oa-personal-advance-001",
+            "type": "oa",
+            "case_id": None,
+            "applicant": "测试员工",
+            "project_name": "个人暂借款",
+            "apply_type": "支付申请",
+            "amount": oa_amount,
+            "counterparty_name": "测试员工",
+            "reason": "个人暂借款",
+            "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"},
+            "available_actions": ["detail", "confirm_link", "mark_exception"],
+            "summary_fields": {"申请人": "测试员工"},
+            "detail_fields": {"申请日期": "2026-03-01"},
+        }
+    ]
+    bank_rows: list[dict[str, object]] = []
+    if include_bank_debit:
+        bank_rows.append(
+            {
+                "id": "bank-personal-advance-out-001",
+                "type": "bank",
+                "case_id": None,
+                "trade_time": "2026-03-02 09:00:00",
+                "pay_receive_time": "2026-03-02 09:00:00",
+                "debit_amount": bank_debit_amount,
+                "credit_amount": "",
+                "counterparty_name": "测试员工",
+                "invoice_relation": {"code": "pending_invoice_match", "label": "待关联发票", "tone": "warn"},
+                "available_actions": ["detail", "confirm_link", "mark_exception"],
+                "summary_fields": {"交易时间": "2026-03-02 09:00:00"},
+                "detail_fields": {"摘要": "个人暂借款付款"},
+            }
+        )
+    for index, amount in enumerate(credit_amounts, start=1):
+        bank_rows.append(
+            {
+                "id": f"bank-personal-advance-in-{index:03d}",
+                "type": "bank",
+                "case_id": None,
+                "trade_time": f"2026-03-{index + 2:02d} 09:00:00",
+                "pay_receive_time": f"2026-03-{index + 2:02d} 09:00:00",
+                "debit_amount": "",
+                "credit_amount": amount,
+                "counterparty_name": "测试员工",
+                "invoice_relation": {"code": "pending_invoice_match", "label": "待关联发票", "tone": "warn"},
+                "available_actions": ["detail", "confirm_link", "mark_exception"],
+                "summary_fields": {"交易时间": f"2026-03-{index + 2:02d} 09:00:00"},
+                "detail_fields": {"摘要": "个人暂借款还款"},
+            }
+        )
+    invoice_rows = (
+        [
+            {
+                "id": "invoice-personal-advance-001",
+                "type": "invoice",
+                "case_id": None,
+                "amount": "300000.00",
+                "total_with_tax": "300000.00",
+                "seller_name": "测试供应商",
+                "invoice_type": "进项发票",
+                "invoice_bank_relation": {"code": "pending_collection", "label": "待匹配流水", "tone": "warn"},
+                "available_actions": ["detail", "confirm_link", "mark_exception"],
+            }
+        ]
+        if include_invoice
+        else []
+    )
+    return {
+        "month": "2026-03",
+        "summary": {
+            "oa_count": len(oa_rows),
+            "bank_count": len(bank_rows),
+            "invoice_count": len(invoice_rows),
+            "paired_count": 0,
+            "open_count": len(oa_rows) + len(bank_rows) + len(invoice_rows),
+            "exception_count": 0,
+        },
+        "paired": {"oa": [], "bank": [], "invoice": []},
+        "open": {"oa": oa_rows, "bank": bank_rows, "invoice": invoice_rows},
+    }
 
 
 def build_oa_retention_raw_payload(
