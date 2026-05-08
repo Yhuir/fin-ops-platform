@@ -98,7 +98,13 @@ class ImportFormalizationApiTests(unittest.TestCase):
             confirm_payload = json.loads(confirm_response.body)
             job_payload = self._wait_for_background_job(app, confirm_payload["job"]["job_id"])
             self.assertEqual(job_payload["status"], "succeeded")
-            self.assertGreater(job_payload["result_summary"]["matching_results"], 0)
+            matching_job_id = job_payload["result_summary"]["enqueued_matching_job_id"]
+            self.assertTrue(matching_job_id)
+            matching_job_payload = self._wait_for_background_job(app, matching_job_id)
+            self.assertEqual(matching_job_payload["status"], "succeeded")
+            self.assertGreater(matching_job_payload["result_summary"]["candidate_count"], 0)
+            self.assertIn("2026-01", matching_job_payload["result_summary"]["affected_months"])
+            self.assertNotIn("matching_results", matching_job_payload["result_summary"])
 
             restarted = build_application(data_dir=Path(temp_dir))
             session_response = restarted.handle_request(

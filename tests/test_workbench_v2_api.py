@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 from pymongo.errors import ServerSelectionTimeoutError
 
@@ -198,6 +199,8 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 "conflict_candidate_keys": [],
                 "generated_at": "2026-05-06T10:00:00+00:00",
                 "source_versions": {},
+                "tags": [],
+                "special_metadata": {},
             }
             with (data_dir / "state.pkl").open("wb") as handle:
                 pickle.dump({"workbench_candidate_matches": {"candidates": {candidate_key: candidate}}}, handle)
@@ -422,6 +425,128 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             [row["id"] for row in payload["open"]["groups"][0]["invoice_rows"]],
             ["invoice-open-1", "invoice-open-2"],
         )
+
+    def test_oa_bank_incomplete_candidate_beats_single_row_no_confident_match(self) -> None:
+        app = build_application()
+        no_confident_candidate = app._workbench_candidate_match_service.upsert_candidate(
+            {
+                "scope_month": "2026-05",
+                "candidate_type": "bank",
+                "status": "needs_review",
+                "confidence": "low",
+                "rule_code": "no_confident_match",
+                "row_ids": ["bank-open"],
+                "oa_row_ids": [],
+                "bank_row_ids": ["bank-open"],
+                "invoice_row_ids": [],
+                "amount": "196.00",
+                "amount_delta": "0.00",
+                "explanation": "no invoice evidence",
+                "conflict_candidate_keys": [],
+                "generated_at": "2026-05-07T00:00:00+00:00",
+                "source_versions": {},
+            }
+        )
+        oa_bank_candidate = app._workbench_candidate_match_service.upsert_candidate(
+            {
+                "scope_month": "2026-05",
+                "candidate_type": "oa_bank",
+                "status": "incomplete",
+                "confidence": "medium",
+                "rule_code": "oa_bank_exact_amount",
+                "row_ids": ["oa-open", "bank-open"],
+                "oa_row_ids": ["oa-open"],
+                "bank_row_ids": ["bank-open"],
+                "invoice_row_ids": [],
+                "amount": "196.00",
+                "amount_delta": "0.00",
+                "explanation": "OA and bank matched; invoice evidence is missing.",
+                "conflict_candidate_keys": [],
+                "generated_at": "2026-05-07T00:00:00+00:00",
+                "source_versions": {},
+            }
+        )
+        raw_payload = {
+            "month": "2026-05",
+            "oa_status": {"code": "ready", "message": "OA 已同步"},
+            "summary": {"oa_count": 1, "bank_count": 1, "invoice_count": 0, "paired_count": 0, "open_count": 2, "exception_count": 0},
+            "paired": {"oa": [], "bank": [], "invoice": []},
+            "open": {
+                "oa": [
+                    {
+                        "id": "oa-open",
+                        "type": "oa",
+                        "case_id": None,
+                        "apply_type": "付款申请",
+                        "amount": "196.00",
+                        "counterparty_name": "田孟维",
+                        "direction": "payment",
+                        "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"},
+                    }
+                ],
+                "bank": [
+                    {
+                        "id": "bank-open",
+                        "type": "bank",
+                        "case_id": None,
+                        "debit_amount": "196.00",
+                        "credit_amount": "",
+                        "counterparty_name": "田孟维",
+                        "direction": "payment",
+                        "invoice_relation": {"code": "pending_invoice_match", "label": "待关联发票", "tone": "warn"},
+                    }
+                ],
+                "invoice": [],
+            },
+        }
+
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            payload = app._build_api_workbench_payload("2026-05")
+
+        self.assertNotEqual(oa_bank_candidate["candidate_key"], no_confident_candidate["candidate_key"])
+        self.assertEqual(payload["paired"]["groups"], [])
+        self.assertEqual(len(payload["open"]["groups"]), 1)
+        open_group = payload["open"]["groups"][0]
+        self.assertEqual(open_group["group_type"], "candidate")
+        self.assertEqual([row["id"] for row in open_group["oa_rows"]], ["oa-open"])
+        self.assertEqual([row["id"] for row in open_group["bank_rows"]], ["bank-open"])
+        self.assertEqual(open_group["invoice_rows"], [])
+        self.assertEqual(open_group["group_id"], f"case:{oa_bank_candidate['candidate_key']}")
+        self.assertEqual(open_group["oa_rows"][0]["case_id"], oa_bank_candidate["candidate_key"])
+        self.assertEqual(open_group["bank_rows"][0]["case_id"], oa_bank_candidate["candidate_key"])
+        self.assertEqual(open_group["oa_rows"][0]["oa_bank_relation"]["code"], "candidate_incomplete")
+        self.assertEqual(open_group["bank_rows"][0]["invoice_relation"]["code"], "candidate_incomplete")
+
+    def test_enqueued_workbench_auto_matching_does_not_run_legacy_matching_engine(self) -> None:
+        app = build_application()
+
+        def run_job_inline(job, handler):
+            result = handler(job)
+            app._background_job_service.succeed_job(job.job_id, "done", result_summary=result)
+            return SimpleNamespace(done=lambda: True)
+
+        with (
+            patch.object(app._background_job_service, "run_job", side_effect=run_job_inline),
+            patch.object(
+                app._workbench_matching_orchestrator,
+                "run",
+                return_value={"processed_months": ["2026-05"], "candidate_count": 2},
+            ) as run_orchestrator,
+            patch.object(app._matching_service, "run", return_value=SimpleNamespace(result_count=99)) as run_legacy,
+        ):
+            job = app._enqueue_workbench_auto_matching_for_scopes(
+                ["2026-05"],
+                reason="unit",
+                owner_user_id="system",
+            )
+
+        self.assertIsNotNone(job)
+        run_orchestrator.assert_called_once()
+        run_legacy.assert_not_called()
+        job_payload = app._background_job_service.get_job(job.job_id, "system").to_payload()
+        self.assertEqual(job_payload["result_summary"]["candidate_count"], 2)
+        self.assertEqual(job_payload["result_summary"]["affected_months"], ["2026-05"])
+        self.assertNotIn("matching_results", job_payload["result_summary"])
 
     def test_workbench_auto_matching_failure_queues_dirty_scope_without_raising(self) -> None:
         app = build_application()

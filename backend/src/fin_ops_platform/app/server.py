@@ -116,7 +116,7 @@ OA_INVOICE_OFFSET_AUTO_MATCH_MODE = "oa_invoice_offset_auto_match"
 OA_INVOICE_OFFSET_TAG = "冲"
 CASH_PASS_THROUGH_MODE = "cash_pass_through"
 CASH_TICKET_PURCHASE_MODE = "cash_ticket_purchase"
-WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-08-active-relation-candidate-precedence"
+WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-08-authoritative-candidate-pipeline"
 SYSTEM_AUTO_PAIR_RELATION_MODES = {
     "salary_personal_auto_match",
     "internal_transfer_pair",
@@ -5914,7 +5914,6 @@ class Application:
                 "processed_months": [],
                 "affected_months": normalized_months,
                 "candidate_count": 0,
-                "matching_results": 0,
             },
             source={
                 **(source or {}),
@@ -5928,20 +5927,6 @@ class Application:
         def run_workbench_matching(running_job):
             self._background_job_service.update_progress(
                 running_job.job_id,
-                phase="legacy_matching",
-                message="正在刷新基础发票流水匹配。",
-                current=0,
-                total=len(normalized_months),
-                result_summary={
-                    "processed_months": [],
-                    "affected_months": normalized_months,
-                    "candidate_count": 0,
-                    "matching_results": 0,
-                },
-            )
-            matching_run = self._matching_service.run(triggered_by=triggered_by or reason)
-            self._background_job_service.update_progress(
-                running_job.job_id,
                 phase="workbench_matching",
                 message=f"正在生成关联台候选：{', '.join(normalized_months)}。",
                 current=0,
@@ -5950,7 +5935,6 @@ class Application:
                     "processed_months": [],
                     "affected_months": normalized_months,
                     "candidate_count": 0,
-                    "matching_results": matching_run.result_count,
                 },
             )
 
@@ -5966,7 +5950,6 @@ class Application:
                     result_summary={
                         **progress_summary,
                         "affected_months": normalized_months,
-                        "matching_results": matching_run.result_count,
                     },
                 )
 
@@ -5980,7 +5963,6 @@ class Application:
                 **summary,
                 "processed_months": normalized_months,
                 "affected_months": normalized_months,
-                "matching_results": matching_run.result_count,
             }
             self._background_job_service.update_progress(
                 running_job.job_id,
@@ -7194,18 +7176,51 @@ class Application:
         ]
 
     @staticmethod
-    def _candidate_display_sort_key(candidate: dict[str, object]) -> tuple[int, str, str]:
+    def _candidate_display_sort_key(candidate: dict[str, object]) -> tuple[int, int, int, str, str]:
+        rule_code = str(candidate.get("rule_code") or "")
+        row_count = Application._candidate_row_count(candidate)
         status_priority = {
             "auto_closed": 0,
             "conflict": 1,
-            "needs_review": 2,
-            "incomplete": 3,
+            "incomplete": 2,
+            "needs_review": 3,
         }
+        status_rank = status_priority.get(str(candidate.get("status") or ""), 9)
+        has_special_metadata = bool(candidate.get("special_metadata"))
+        if rule_code == "no_confident_match":
+            quality_rank = 9
+        elif status_rank <= 1:
+            quality_rank = status_rank
+        elif row_count > 1:
+            quality_rank = 2
+        elif has_special_metadata:
+            quality_rank = 3
+        else:
+            quality_rank = 4
         return (
-            status_priority.get(str(candidate.get("status") or ""), 9),
-            str(candidate.get("rule_code") or ""),
+            quality_rank,
+            -row_count,
+            status_rank,
+            rule_code,
             str(candidate.get("candidate_key") or candidate.get("candidate_id") or ""),
         )
+
+    @staticmethod
+    def _candidate_row_count(candidate: dict[str, object]) -> int:
+        row_ids = {
+            str(row_id).strip()
+            for row_id in list(candidate.get("row_ids") or [])
+            if str(row_id).strip()
+        }
+        if row_ids:
+            return len(row_ids)
+        for field_name in ("oa_row_ids", "bank_row_ids", "invoice_row_ids"):
+            row_ids.update(
+                str(row_id).strip()
+                for row_id in list(candidate.get(field_name) or [])
+                if str(row_id).strip()
+            )
+        return len(row_ids)
 
     def _candidate_relation_payload(self, candidate: dict[str, object]) -> dict[str, str]:
         status = str(candidate.get("status") or "").strip()

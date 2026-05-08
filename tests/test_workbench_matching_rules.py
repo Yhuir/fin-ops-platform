@@ -23,6 +23,13 @@ class WorkbenchMatchingRulesTests(unittest.TestCase):
         self.assertEqual(candidate["oa_row_ids"], ["oa-001"])
         self.assertEqual(candidate["bank_row_ids"], ["bank-001"])
         self.assertEqual(candidate["invoice_row_ids"], [])
+        no_confident_bank = [
+            item
+            for item in candidates
+            if item["rule_code"] == "no_confident_match" and item["bank_row_ids"] == ["bank-001"]
+        ]
+        self.assertEqual(len(no_confident_bank), 1)
+        self.assertEqual(no_confident_bank[0]["status"], "needs_review")
 
     def test_oa_multi_invoice_exact_sum_is_generic_and_incomplete_without_bank(self) -> None:
         candidates = self.rules.generate_candidates(
