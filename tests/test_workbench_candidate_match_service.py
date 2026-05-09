@@ -88,6 +88,7 @@ class WorkbenchCandidateMatchServiceTests(unittest.TestCase):
                 **self._candidate("2026-05", "rule-a", ["oa-001", "bank-001"]),
                 "conflict_candidate_keys": ["candidate:conflict"],
                 "source_versions": {"oa": "sync-001", "bank": "import-001"},
+                "special_metadata": {"evidence": {"score": 101, "strong": ["counterparty_match"]}},
             }
         )
 
@@ -98,6 +99,16 @@ class WorkbenchCandidateMatchServiceTests(unittest.TestCase):
         loaded[0]["row_ids"].append("mutated-again")
 
         self.assertEqual(restored.snapshot(), {"candidates": {candidate["candidate_key"]: candidate}})
+
+    def test_from_snapshot_discards_candidates_from_old_schema_versions(self) -> None:
+        service = WorkbenchCandidateMatchService()
+        candidate = service.upsert_candidate(self._candidate("2026-05", "rule-a", ["oa-001", "bank-001"]))
+        snapshot = service.snapshot()
+        snapshot["candidates"][candidate["candidate_key"]]["schema_version"] = "old-schema"
+
+        restored = WorkbenchCandidateMatchService.from_snapshot(snapshot)
+
+        self.assertEqual(restored.snapshot(), {"candidates": {}})
 
     def test_candidate_key_is_stable_when_row_id_order_changes(self) -> None:
         service = WorkbenchCandidateMatchService()

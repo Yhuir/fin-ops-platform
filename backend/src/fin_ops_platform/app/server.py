@@ -118,7 +118,7 @@ OA_INVOICE_OFFSET_TAG = "冲"
 CASH_PASS_THROUGH_MODE = "cash_pass_through"
 CASH_TICKET_PURCHASE_MODE = "cash_ticket_purchase"
 PERSONAL_ADVANCE_REPAYMENT_MODE = "personal_advance_repayment_settlement"
-WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-08-authoritative-candidate-pipeline"
+WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-09-oa-attachment-source-link"
 SYSTEM_AUTO_PAIR_RELATION_MODES = {
     "salary_personal_auto_match",
     "internal_transfer_pair",

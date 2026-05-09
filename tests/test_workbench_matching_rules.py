@@ -31,6 +31,162 @@ class WorkbenchMatchingRulesTests(unittest.TestCase):
         self.assertEqual(len(no_confident_bank), 1)
         self.assertEqual(no_confident_bank[0]["status"], "needs_review")
 
+    def test_oa_bank_exact_amount_rejects_amount_only_generic_batch_reimbursement(self) -> None:
+        candidates = self.rules.generate_candidates(
+            "2026-01",
+            oa_rows=[
+                oa_row(
+                    "oa-hurong-350",
+                    "350.00",
+                    counterparty_name="",
+                    applicant_name="胡瑢",
+                    apply_type="日常报销",
+                    project_name="玉溪卷烟厂复烤车间技术升级改造项目-配电监控系统建设（第2次采购）",
+                    reason="玉溪德力西买材料；玉溪卓达买工具和材料",
+                    pay_receive_time="2026-01-04",
+                )
+            ],
+            bank_rows=[
+                bank_row(
+                    "bank-batch-350",
+                    "350.00",
+                    counterparty_name="批量账务集中处理",
+                    summary="报销",
+                    trade_time="2026-01-20 10:40:01",
+                )
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertIsNone(find_candidate_by_rows(candidates, "oa_bank_exact_amount", ["oa-hurong-350", "bank-batch-350"]))
+
+    def test_daily_reimbursement_applicant_matching_bank_counterparty_generates_incomplete_candidate(self) -> None:
+        candidates = self.rules.generate_candidates(
+            "2026-01",
+            oa_rows=[
+                oa_row(
+                    "oa-tian-196",
+                    "196.00",
+                    counterparty_name="",
+                    applicant_name="田孟维",
+                    apply_type="日常报销",
+                    reason="日常报销",
+                    pay_receive_time="2026-01-10",
+                )
+            ],
+            bank_rows=[
+                bank_row(
+                    "bank-tian-196",
+                    "196.00",
+                    counterparty_name="田孟维",
+                    summary="报销",
+                    trade_time="2026-01-11 09:00:00",
+                )
+            ],
+            invoice_rows=[],
+        )
+
+        candidate = find_candidate_by_rows(candidates, "oa_bank_exact_amount", ["oa-tian-196", "bank-tian-196"])
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate["status"], "incomplete")
+        self.assertEqual(candidate["confidence"], "medium")
+        self.assertEqual(
+            candidate["special_metadata"]["evidence"]["strong"],
+            ["daily_reimbursement_applicant_counterparty_match"],
+        )
+
+    def test_payment_application_matching_counterparty_generates_candidate(self) -> None:
+        candidates = self.rules.generate_candidates(
+            "2026-01",
+            oa_rows=[
+                oa_row(
+                    "oa-payment-500",
+                    "500.00",
+                    counterparty_name="云南设备供应商有限公司",
+                    apply_type="付款申请",
+                    pay_receive_time="2026-01-10",
+                )
+            ],
+            bank_rows=[
+                bank_row(
+                    "bank-payment-500",
+                    "500.00",
+                    counterparty_name="云南设备供应商有限公司",
+                    summary="货款",
+                    trade_time="2026-01-11 09:00:00",
+                )
+            ],
+            invoice_rows=[],
+        )
+
+        candidate = find_candidate_by_rows(candidates, "oa_bank_exact_amount", ["oa-payment-500", "bank-payment-500"])
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate["status"], "incomplete")
+        self.assertEqual(candidate["confidence"], "medium")
+        self.assertEqual(candidate["special_metadata"]["evidence"]["strong"], ["counterparty_match"])
+
+    def test_oa_bank_exact_amount_does_not_randomly_choose_when_one_oa_has_tied_banks(self) -> None:
+        candidates = self.rules.generate_candidates(
+            "2026-01",
+            oa_rows=[
+                oa_row(
+                    "oa-tied-banks",
+                    "196.00",
+                    counterparty_name="",
+                    applicant_name="田孟维",
+                    apply_type="日常报销",
+                )
+            ],
+            bank_rows=[
+                bank_row("bank-tied-a", "196.00", counterparty_name="田孟维", summary="报销"),
+                bank_row("bank-tied-b", "196.00", counterparty_name="田孟维", summary="报销"),
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertEqual(
+            [
+                candidate
+                for candidate in candidates
+                if candidate["rule_code"] == "oa_bank_exact_amount"
+                and candidate["oa_row_ids"] == ["oa-tied-banks"]
+            ],
+            [],
+        )
+
+    def test_oa_bank_exact_amount_does_not_randomly_choose_when_one_bank_has_tied_oas(self) -> None:
+        candidates = self.rules.generate_candidates(
+            "2026-01",
+            oa_rows=[
+                oa_row(
+                    "oa-tied-a",
+                    "196.00",
+                    counterparty_name="",
+                    applicant_name="田孟维",
+                    apply_type="日常报销",
+                ),
+                oa_row(
+                    "oa-tied-b",
+                    "196.00",
+                    counterparty_name="",
+                    applicant_name="田孟维",
+                    apply_type="日常报销",
+                ),
+            ],
+            bank_rows=[bank_row("bank-tied-oa", "196.00", counterparty_name="田孟维", summary="报销")],
+            invoice_rows=[],
+        )
+
+        self.assertEqual(
+            [
+                candidate
+                for candidate in candidates
+                if candidate["rule_code"] == "oa_bank_exact_amount"
+                and candidate["bank_row_ids"] == ["bank-tied-oa"]
+            ],
+            [],
+        )
+
     def test_oa_multi_invoice_exact_sum_is_generic_and_incomplete_without_bank(self) -> None:
         candidates = self.rules.generate_candidates(
             "2026-05",
@@ -47,6 +203,100 @@ class WorkbenchMatchingRulesTests(unittest.TestCase):
         self.assertEqual(candidate["confidence"], "medium")
         self.assertEqual(candidate["candidate_type"], "oa_invoice")
         self.assertCountEqual(candidate["invoice_row_ids"], ["invoice-meeting-001", "invoice-meeting-002"])
+
+    def test_oa_attachment_invoices_override_manual_duplicate_sum_for_oa_bank_candidate(self) -> None:
+        invoice_oa_70 = invoice_row(
+            "invoice-oa-70",
+            "66.04",
+            seller_name="附件票供应商A",
+            source_kind="oa_attachment_invoice",
+            derived_from_oa_id="oa-exp-1970",
+            invoice_no="INV-ATT-70",
+            total_with_tax="70.00",
+        )
+        invoice_oa_126 = invoice_row(
+            "invoice-oa-126",
+            "124.75",
+            seller_name="附件票供应商B",
+            source_kind="oa_attachment_invoice",
+            derived_from_oa_id="oa-exp-1970",
+            invoice_no="INV-ATT-126",
+            total_with_tax="126.00",
+        )
+        manual_duplicate_70 = invoice_row(
+            "invoice-manual-70",
+            "66.04",
+            seller_name="附件票供应商A",
+            source_kind="manual_invoice",
+            invoice_no="INV-ATT-70",
+            total_with_tax="70.00",
+        )
+        manual_duplicate_126 = invoice_row(
+            "invoice-manual-126",
+            "124.75",
+            seller_name="附件票供应商B",
+            source_kind="manual_invoice",
+            invoice_no="INV-ATT-126",
+            total_with_tax="126.00",
+        )
+
+        candidates = self.rules.generate_candidates(
+            "2026-05",
+            oa_rows=[oa_row("oa-exp-1970", "196.00", counterparty_name="OA报销对象")],
+            bank_rows=[bank_row("bank-exp-1970", "196.00", counterparty_name="银行付款对象")],
+            invoice_rows=[invoice_oa_70, invoice_oa_126, manual_duplicate_70, manual_duplicate_126],
+        )
+
+        candidate = find_candidate(candidates, "oa_attachment_invoice_source_link")
+        self.assertEqual(candidate["status"], "auto_closed")
+        self.assertEqual(candidate["confidence"], "high")
+        self.assertEqual(candidate["candidate_type"], "oa_bank_invoice")
+        self.assertEqual(candidate["amount"], "196.00")
+        self.assertEqual(candidate["oa_row_ids"], ["oa-exp-1970"])
+        self.assertEqual(candidate["bank_row_ids"], ["bank-exp-1970"])
+        self.assertCountEqual(candidate["invoice_row_ids"], ["invoice-oa-70", "invoice-oa-126"])
+        self.assertEqual(
+            sorted(candidate["row_ids"]),
+            ["bank-exp-1970", "invoice-oa-126", "invoice-oa-70", "oa-exp-1970"],
+        )
+        self.assertNotIn("invoice-manual-70", candidate["row_ids"])
+        self.assertNotIn("invoice-manual-126", candidate["row_ids"])
+
+    def test_oa_attachment_invoices_without_bank_generate_incomplete_candidate(self) -> None:
+        candidates = self.rules.generate_candidates(
+            "2026-05",
+            oa_rows=[oa_row("oa-exp-no-bank", "196.00", counterparty_name="")],
+            bank_rows=[],
+            invoice_rows=[
+                invoice_row(
+                    "invoice-oa-no-bank-70",
+                    "66.04",
+                    seller_name="附件票供应商A",
+                    source_kind="oa_attachment_invoice",
+                    derived_from_oa_id="oa-exp-no-bank",
+                    total_with_tax="70.00",
+                ),
+                invoice_row(
+                    "invoice-oa-no-bank-126",
+                    "124.75",
+                    seller_name="附件票供应商B",
+                    source_kind="oa_attachment_invoice",
+                    derived_from_oa_id="oa-exp-no-bank",
+                    total_with_tax="126.00",
+                ),
+            ],
+        )
+
+        candidate = find_candidate(candidates, "oa_attachment_invoice_source_link")
+        self.assertEqual(candidate["status"], "incomplete")
+        self.assertNotEqual(candidate["status"], "auto_closed")
+        self.assertEqual(candidate["confidence"], "high")
+        self.assertEqual(candidate["candidate_type"], "oa_invoice")
+        self.assertEqual(candidate["bank_row_ids"], [])
+        self.assertCountEqual(
+            candidate["invoice_row_ids"],
+            ["invoice-oa-no-bank-70", "invoice-oa-no-bank-126"],
+        )
 
     def test_invoice_matching_amount_prefers_total_with_tax_for_imported_invoices(self) -> None:
         invoice_a = invoice_row("invoice-tax-a", "100.00", seller_name="设备供应商")
@@ -326,23 +576,44 @@ def find_optional_candidate(candidates: list[dict[str, object]], rule_code: str)
     return matches[0] if matches else None
 
 
+def find_candidate_by_rows(
+    candidates: list[dict[str, object]],
+    rule_code: str,
+    row_ids: list[str],
+) -> dict[str, object] | None:
+    expected = sorted(row_ids)
+    matches = [
+        candidate
+        for candidate in candidates
+        if candidate["rule_code"] == rule_code and sorted(candidate["row_ids"]) == expected
+    ]
+    return matches[0] if matches else None
+
+
 def oa_row(
     row_id: str,
     amount: str,
     *,
     counterparty_name: str = "供应商A",
     applicant_name: str = "申请人",
+    apply_type: str = "付款申请",
+    project_name: str = "",
+    reason: str = "",
+    pay_receive_time: str = "2026-05-03",
     expense_items: list[dict[str, str]] | None = None,
 ) -> dict[str, object]:
     return {
         "id": row_id,
         "type": "oa",
         "amount": amount,
-        "apply_type": "付款申请",
+        "apply_type": apply_type,
         "counterparty_name": counterparty_name,
         "applicant_name": applicant_name,
+        "applicant": applicant_name,
+        "project_name": project_name,
+        "reason": reason,
         "expense_items": expense_items or [],
-        "pay_receive_time": "2026-05-03",
+        "pay_receive_time": pay_receive_time,
     }
 
 
@@ -382,12 +653,15 @@ def invoice_row(
     invoice_type: str = "进项发票",
     source_kind: str | None = None,
     oa_row_id: str | None = None,
+    derived_from_oa_id: str | None = None,
+    invoice_no: str | None = None,
+    total_with_tax: str | None = None,
 ) -> dict[str, object]:
     row: dict[str, object] = {
         "id": row_id,
         "type": "invoice",
         "amount": amount,
-        "total_with_tax": amount,
+        "total_with_tax": total_with_tax if total_with_tax is not None else amount,
         "seller_name": seller_name,
         "buyer_name": buyer_name,
         "invoice_type": invoice_type,
@@ -397,6 +671,10 @@ def invoice_row(
         row["source_kind"] = source_kind
     if oa_row_id is not None:
         row["oa_row_id"] = oa_row_id
+    if derived_from_oa_id is not None:
+        row["derived_from_oa_id"] = derived_from_oa_id
+    if invoice_no is not None:
+        row["invoice_no"] = invoice_no
     return row
 
 

@@ -464,6 +464,73 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in group["bank_rows"]], ["bk-attach-001"])
         self.assertCountEqual([row["id"] for row in group["invoice_rows"]], ["iv-attach-001", "iv-attach-002"])
 
+    def test_attaches_oa_attachment_invoices_to_source_oa_group_when_candidate_case_ids_differ(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-03",
+            oa_rows=[
+                {
+                    "id": "oa-tian",
+                    "type": "oa",
+                    "case_id": "candidate:tian",
+                    "apply_type": "支付申请",
+                    "amount": "196.00",
+                    "counterparty_name": "田女士",
+                    "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"},
+                }
+            ],
+            bank_rows=[
+                {
+                    "id": "bk-tian",
+                    "type": "bank",
+                    "case_id": "candidate:tian",
+                    "trade_time": "2026-03-25 14:22",
+                    "debit_amount": "196.00",
+                    "credit_amount": "",
+                    "counterparty_name": "田女士",
+                    "invoice_relation": {"code": "pending_match", "label": "待匹配", "tone": "warn"},
+                }
+            ],
+            invoice_rows=[
+                {
+                    "id": "iv-tian-70",
+                    "type": "invoice",
+                    "case_id": "candidate:tian-invoice-70",
+                    "source_kind": "oa_attachment_invoice",
+                    "derived_from_oa_id": "oa-tian",
+                    "amount": "66.04",
+                    "total_with_tax": "70.00",
+                    "issue_date": "2026-03-26",
+                    "seller_name": "田女士",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "invoice_type": "进项发票",
+                    "invoice_bank_relation": {"code": "pending_match", "label": "待匹配", "tone": "warn"},
+                },
+                {
+                    "id": "iv-tian-126",
+                    "type": "invoice",
+                    "case_id": "candidate:tian-invoice-126",
+                    "source_kind": "oa_attachment_invoice",
+                    "derived_from_oa_id": "oa-tian",
+                    "amount": "124.75",
+                    "total_with_tax": "126.00",
+                    "issue_date": "2026-03-26",
+                    "seller_name": "田女士",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "invoice_type": "进项发票",
+                    "invoice_bank_relation": {"code": "pending_match", "label": "待匹配", "tone": "warn"},
+                },
+            ],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 1)
+        self.assertEqual(payload["summary"]["open_count"], 0)
+        group = payload["paired"]["groups"][0]
+        self.assertEqual(group["group_type"], "auto_closed")
+        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-tian"])
+        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bk-tian"])
+        self.assertCountEqual([row["id"] for row in group["invoice_rows"]], ["iv-tian-70", "iv-tian-126"])
+
     def test_keeps_oa_and_multiple_invoices_open_when_bank_transaction_is_missing(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(

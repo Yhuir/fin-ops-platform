@@ -517,6 +517,96 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(open_group["oa_rows"][0]["oa_bank_relation"]["code"], "candidate_incomplete")
         self.assertEqual(open_group["bank_rows"][0]["invoice_relation"]["code"], "candidate_incomplete")
 
+    def test_amount_only_oa_bank_rows_do_not_share_case_id_or_open_group(self) -> None:
+        app = build_application()
+        candidates = app._workbench_matching_rules.generate_candidates(
+            "2026-01",
+            oa_rows=[
+                {
+                    "id": "oa-hurong-350",
+                    "type": "oa",
+                    "applicant": "胡瑢",
+                    "applicant_name": "胡瑢",
+                    "apply_type": "日常报销",
+                    "amount": "350.00",
+                    "project_name": "玉溪卷烟厂复烤车间技术升级改造项目-配电监控系统建设（第2次采购）",
+                    "reason": "玉溪德力西买材料；玉溪卓达买工具和材料",
+                    "counterparty_name": "",
+                    "pay_receive_time": "2026-01-04",
+                }
+            ],
+            bank_rows=[
+                {
+                    "id": "bank-batch-350",
+                    "type": "bank",
+                    "trade_time": "2026-01-20 10:40:01",
+                    "pay_receive_time": "2026-01-20 10:40:01",
+                    "debit_amount": "350.00",
+                    "credit_amount": "",
+                    "counterparty_name": "批量账务集中处理",
+                    "summary": "报销",
+                }
+            ],
+            invoice_rows=[],
+        )
+        for candidate in candidates:
+            app._workbench_candidate_match_service.upsert_candidate(candidate)
+
+        raw_payload = {
+            "month": "2026-01",
+            "oa_status": {"code": "ready", "message": "OA 已同步"},
+            "summary": {"oa_count": 1, "bank_count": 1, "invoice_count": 0, "paired_count": 0, "open_count": 2, "exception_count": 0},
+            "paired": {"oa": [], "bank": [], "invoice": []},
+            "open": {
+                "oa": [
+                    {
+                        "id": "oa-hurong-350",
+                        "type": "oa",
+                        "case_id": None,
+                        "applicant": "胡瑢",
+                        "applicant_name": "胡瑢",
+                        "apply_type": "日常报销",
+                        "amount": "350.00",
+                        "counterparty_name": "",
+                        "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"},
+                    }
+                ],
+                "bank": [
+                    {
+                        "id": "bank-batch-350",
+                        "type": "bank",
+                        "case_id": None,
+                        "debit_amount": "350.00",
+                        "credit_amount": "",
+                        "counterparty_name": "批量账务集中处理",
+                        "summary": "报销",
+                        "invoice_relation": {"code": "pending_invoice_match", "label": "待关联发票", "tone": "warn"},
+                    }
+                ],
+                "invoice": [],
+            },
+        }
+
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            payload = app._build_api_workbench_payload("2026-01")
+
+        open_rows = [
+            row
+            for group in payload["open"]["groups"]
+            for row in [*group["oa_rows"], *group["bank_rows"], *group["invoice_rows"]]
+        ]
+        rows_by_id = {row["id"]: row for row in open_rows}
+        oa_row_payload = rows_by_id["oa-hurong-350"]
+        bank_row_payload = rows_by_id["bank-batch-350"]
+        self.assertNotEqual(oa_row_payload.get("case_id"), bank_row_payload.get("case_id"))
+        self.assertFalse(
+            any(
+                [row["id"] for row in group["oa_rows"]] == ["oa-hurong-350"]
+                and [row["id"] for row in group["bank_rows"]] == ["bank-batch-350"]
+                for group in payload["open"]["groups"]
+            )
+        )
+
     def test_enqueued_workbench_auto_matching_does_not_run_legacy_matching_engine(self) -> None:
         app = build_application()
 
@@ -4585,8 +4675,8 @@ class _AttachmentRecord:
                 "issue_date": "2026-03-28",
                 "amount": "58,000.00",
                 "tax_rate": "13%",
-                "tax_amount": "6,673.45",
-                "total_with_tax": "64,673.45",
+                "tax_amount": "0.00",
+                "total_with_tax": "58,000.00",
                 "invoice_type": "进项发票",
                 "attachment_name": "设备发票.pdf",
                 "invoice_kind": "增值税电子专用发票",

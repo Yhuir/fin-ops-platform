@@ -83,6 +83,11 @@ class WorkbenchCandidateGroupingService:
         paired_groups = self._build_case_or_temp_groups(paired_rows, default_group_type="manual_confirmed")
         valid_paired_groups, demoted_paired_rows = self._split_valid_and_incomplete_paired_groups(paired_groups)
         open_case_groups, unattached_open_rows = self._build_open_case_groups([*open_rows, *demoted_paired_rows])
+        unattached_open_rows = self._attach_oa_attachment_invoices_to_source_groups(
+            [*valid_paired_groups, *open_case_groups.values()],
+            open_case_groups,
+            unattached_open_rows,
+        )
         target_groups_by_temp_key = self._index_target_groups([*valid_paired_groups, *open_case_groups.values()])
         remaining_rows = self._attach_unique_rows_to_existing_groups(unattached_open_rows, target_groups_by_temp_key)
 
@@ -186,6 +191,53 @@ class WorkbenchCandidateGroupingService:
             elif temp_key is not None and group.temp_key != temp_key and not self._is_oa_attachment_invoice_row(row):
                 group.temp_key = None
         return groups, unattached
+
+    def _attach_oa_attachment_invoices_to_source_groups(
+        self,
+        target_groups: list[CandidateGroup],
+        open_case_groups: "OrderedDict[str, CandidateGroup]",
+        unattached_rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        source_groups_by_oa_id: dict[str, list[CandidateGroup]] = defaultdict(list)
+        for group in target_groups:
+            for oa_row in group.oa_rows:
+                source_groups_by_oa_id[str(oa_row.get("id", ""))].append(group)
+
+        def source_group(row: dict[str, Any]) -> CandidateGroup | None:
+            source_oa_id = self._string_value(row.get("derived_from_oa_id"))
+            if source_oa_id is None:
+                return None
+            candidate_groups = source_groups_by_oa_id.get(source_oa_id, [])
+            if len(candidate_groups) != 1:
+                return None
+            return candidate_groups[0]
+
+        for group_id, group in list(open_case_groups.items()):
+            remaining_invoice_rows: list[dict[str, Any]] = []
+            for invoice_row in group.invoice_rows:
+                if not self._is_oa_attachment_invoice_row(invoice_row):
+                    remaining_invoice_rows.append(invoice_row)
+                    continue
+                target_group = source_group(invoice_row)
+                if target_group is None or target_group is group:
+                    remaining_invoice_rows.append(invoice_row)
+                    continue
+                target_group.append(invoice_row)
+            group.invoice_rows = remaining_invoice_rows
+            if not group.oa_rows and not group.bank_rows and not group.invoice_rows:
+                del open_case_groups[group_id]
+
+        remaining_rows: list[dict[str, Any]] = []
+        for row in unattached_rows:
+            if not self._is_oa_attachment_invoice_row(row):
+                remaining_rows.append(row)
+                continue
+            target_group = source_group(row)
+            if target_group is None:
+                remaining_rows.append(row)
+                continue
+            target_group.append(row)
+        return remaining_rows
 
     def _index_target_groups(self, groups: list[CandidateGroup]) -> dict[str, list[CandidateGroup]]:
         indexed: dict[str, list[CandidateGroup]] = defaultdict(list)
@@ -801,9 +853,9 @@ class WorkbenchCandidateGroupingService:
 
     def _attachment_invoice_reconciliation_amount(self, row: dict[str, Any]) -> Decimal | None:
         if self._is_oa_attachment_invoice_row(row):
-            amount = self._amount_from_value(row.get("amount"))
-            if amount is not None:
-                return amount
+            total_with_tax = self._amount_from_value(row.get("total_with_tax"))
+            if total_with_tax is not None:
+                return total_with_tax
         return self._amount(row)
 
     def _amount_bucket(self, amount: Decimal | None) -> Decimal | None:

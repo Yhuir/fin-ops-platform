@@ -9,7 +9,7 @@ from threading import RLock
 from typing import Any
 
 
-CANDIDATE_MATCH_SCHEMA_VERSION = "2026-05-workbench-candidate-match-v1"
+CANDIDATE_MATCH_SCHEMA_VERSION = "2026-05-oa-attachment-source-link"
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 VALID_CANDIDATE_STATUSES = {"auto_closed", "needs_review", "conflict", "incomplete"}
 VALID_CONFIDENCE_LEVELS = {"high", "medium", "low"}
@@ -109,6 +109,8 @@ class WorkbenchCandidateMatchService:
         normalized: dict[str, dict[str, Any]] = {}
         for candidate_key, candidate in candidates.items():
             if not isinstance(candidate, dict):
+                continue
+            if str(candidate.get("schema_version") or "").strip() != CANDIDATE_MATCH_SCHEMA_VERSION:
                 continue
             try:
                 normalized_candidate = cls._normalize_candidate(
