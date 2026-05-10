@@ -124,7 +124,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 rows=[
                     {
                         "account_no": "62229999",
-                        "txn_date": "2026-03-24",
+                        "trade_time": "2026-03-24 00:00:00",
                         "counterparty_name": "Vendor A",
                         "debit_amount": "50.00",
                         "credit_amount": "",
@@ -232,6 +232,42 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 "settings_data_reset:reset_oa_and_rebuild",
             ],
         )
+
+    def test_execute_data_reset_clears_cost_statistics_read_models(self) -> None:
+        for action in (
+            RESET_BANK_TRANSACTIONS_ACTION,
+            RESET_INVOICES_ACTION,
+            RESET_OA_AND_REBUILD_ACTION,
+        ):
+            with self.subTest(action=action), tempfile.TemporaryDirectory() as temp_dir:
+                app = build_application(data_dir=Path(temp_dir))
+                app._cost_statistics_read_model_service.upsert_read_model(
+                    "2026-03",
+                    "active",
+                    {"summary": {"transaction_count": 1}, "time_rows": []},
+                )
+                app._state_store.save_cost_statistics_read_models(
+                    app._cost_statistics_read_model_service.snapshot()
+                )
+                with patch.object(
+                    app,
+                    "_maybe_reconcile_historical_etc_repair",
+                    return_value={"status": "ok", "message": "ok", "batches": []},
+                ), patch.object(app, "_run_workbench_auto_matching_for_scopes"), patch.object(
+                    app,
+                    "_build_api_workbench_payload",
+                    return_value={"summary": {}, "paired": {"groups": []}, "open": {"groups": []}},
+                ):
+                    result = app._execute_settings_data_reset(action)
+
+                self.assertEqual(result["status"], "completed")
+                lifecycle_summary = result["derived_data_lifecycle"]
+                self.assertEqual(lifecycle_summary["event"], "settings_reset_completed")
+                self.assertIn("cost_statistics_read_models", lifecycle_summary["deleted_counts"])
+                self.assertIn("tax_offset_read_models", lifecycle_summary["deleted_counts"])
+                self.assertIn("file_import_sessions", lifecycle_summary["skipped"])
+                self.assertEqual(app._cost_statistics_read_model_service.snapshot(), {"read_models": {}})
+                self.assertEqual(app._state_store.load_cost_statistics_read_models(), {"read_models": {}})
 
     def test_reset_api_requires_admin_access(self) -> None:
         with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
@@ -1068,7 +1104,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 rows=[
                     {
                         "account_no": "62229999",
-                        "txn_date": "2026-03-24",
+                        "trade_time": "2026-03-24 00:00:00",
                         "counterparty_name": "Vendor A",
                         "debit_amount": "50.00",
                         "credit_amount": "",
@@ -1115,7 +1151,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 rows=[
                     {
                         "account_no": "62229999",
-                        "txn_date": "2026-03-24",
+                        "trade_time": "2026-03-24 00:00:00",
                         "counterparty_name": "Vendor A",
                         "debit_amount": "50.00",
                         "credit_amount": "",

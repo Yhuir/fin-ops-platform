@@ -332,7 +332,7 @@ class WorkbenchQueryService:
                 attachment_file_count=attachment_file_count,
             )
         )
-        case_id = record.case_id or (self._oa_attachment_case_id(record.id) if attachment_invoices else None)
+        case_id = record.case_id or None
         tags = self._oa_row_tags(
             existing_tags=list(source_metadata.get("tags") or []),
             attachment_invoice_count=len(attachment_invoices),
@@ -545,10 +545,6 @@ class WorkbenchQueryService:
             return max(int(getattr(record, "attachment_file_count", 0) or 0), 0)
         except (TypeError, ValueError):
             return 0
-
-    @staticmethod
-    def _oa_attachment_case_id(oa_row_id: str) -> str:
-        return f"CASE-OA-ATT-{oa_row_id}"
 
     @staticmethod
     def _attachment_invoice_row_id(oa_row_id: str, index: int) -> str:

@@ -356,8 +356,10 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
         ]
         self.assertEqual(len(attachment_invoice_rows), 1)
         invoice_row = attachment_invoice_rows[0]
-        self.assertIsNotNone(oa_row["case_id"])
-        self.assertEqual(invoice_row["case_id"], oa_row["case_id"])
+        self.assertIsNone(oa_row["case_id"])
+        self.assertIsNone(invoice_row["case_id"])
+        self.assertEqual(invoice_row["source_kind"], "oa_attachment_invoice")
+        self.assertEqual(invoice_row["derived_from_oa_id"], oa_row["id"])
         self.assertEqual(invoice_row["invoice_type"], "进项发票")
         self.assertEqual(invoice_row["seller_name"], "智能工厂设备商")
         self.assertEqual(invoice_row["detail_fields"]["附件文件名"], "设备发票.pdf")
@@ -383,8 +385,10 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
             if row.get("derived_from_oa_id") == oa_row["id"]
         ]
         self.assertEqual(len(attachment_invoice_rows), 2)
-        self.assertIsNotNone(oa_row["case_id"])
-        self.assertEqual({row["case_id"] for row in attachment_invoice_rows}, {oa_row["case_id"]})
+        self.assertIsNone(oa_row["case_id"])
+        self.assertEqual({row["case_id"] for row in attachment_invoice_rows}, {None})
+        self.assertEqual({row["source_kind"] for row in attachment_invoice_rows}, {"oa_attachment_invoice"})
+        self.assertEqual({row["derived_from_oa_id"] for row in attachment_invoice_rows}, {oa_row["id"]})
         self.assertIn("多明细", oa_row["tags"])
         self.assertIn("金额差异", oa_row["tags"])
 

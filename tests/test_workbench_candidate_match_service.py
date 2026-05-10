@@ -1,6 +1,9 @@
 import unittest
 
-from fin_ops_platform.services.workbench_candidate_match_service import WorkbenchCandidateMatchService
+from fin_ops_platform.services.workbench_candidate_match_service import (
+    CANDIDATE_MATCH_SCHEMA_VERSION,
+    WorkbenchCandidateMatchService,
+)
 
 
 class WorkbenchCandidateMatchServiceTests(unittest.TestCase):
@@ -79,7 +82,10 @@ class WorkbenchCandidateMatchServiceTests(unittest.TestCase):
         deleted_keys = service.clear()
 
         self.assertCountEqual(deleted_keys, [first["candidate_key"], second["candidate_key"]])
-        self.assertEqual(service.snapshot(), {"candidates": {}})
+        self.assertEqual(
+            service.snapshot(),
+            {"schema_version": CANDIDATE_MATCH_SCHEMA_VERSION, "candidates": {}, "scope_runs": {}},
+        )
 
     def test_snapshot_from_snapshot_round_trip_deepcopies_candidates(self) -> None:
         service = WorkbenchCandidateMatchService()
@@ -98,7 +104,14 @@ class WorkbenchCandidateMatchServiceTests(unittest.TestCase):
         loaded = restored.list_candidates_by_month("2026-05")
         loaded[0]["row_ids"].append("mutated-again")
 
-        self.assertEqual(restored.snapshot(), {"candidates": {candidate["candidate_key"]: candidate}})
+        self.assertEqual(
+            restored.snapshot(),
+            {
+                "schema_version": CANDIDATE_MATCH_SCHEMA_VERSION,
+                "candidates": {candidate["candidate_key"]: candidate},
+                "scope_runs": {},
+            },
+        )
 
     def test_from_snapshot_discards_candidates_from_old_schema_versions(self) -> None:
         service = WorkbenchCandidateMatchService()
@@ -108,7 +121,69 @@ class WorkbenchCandidateMatchServiceTests(unittest.TestCase):
 
         restored = WorkbenchCandidateMatchService.from_snapshot(snapshot)
 
-        self.assertEqual(restored.snapshot(), {"candidates": {}})
+        self.assertEqual(
+            restored.snapshot(),
+            {"schema_version": CANDIDATE_MATCH_SCHEMA_VERSION, "candidates": {}, "scope_runs": {}},
+        )
+
+    def test_scope_freshness_requires_current_schema_and_matching_source_versions(self) -> None:
+        service = WorkbenchCandidateMatchService()
+        source_versions = {"workbench": "v1", "rules": "r1"}
+
+        self.assertFalse(service.is_scope_fresh("2026-05", source_versions=source_versions))
+
+        service.mark_scope_processed(
+            "2026-05",
+            source_versions=source_versions,
+            candidate_count=0,
+            request_id="req-001",
+            reason="test",
+        )
+
+        self.assertTrue(service.is_scope_fresh("2026-05", source_versions=source_versions))
+        self.assertFalse(service.is_scope_fresh("2026-05", source_versions={"workbench": "v2", "rules": "r1"}))
+        self.assertEqual(service.stale_scope_months(["2026-05", "2026-06"], source_versions=source_versions), ["2026-06"])
+
+    def test_from_snapshot_discards_old_scope_run_schema_versions(self) -> None:
+        restored = WorkbenchCandidateMatchService.from_snapshot(
+            {
+                "schema_version": CANDIDATE_MATCH_SCHEMA_VERSION,
+                "candidates": {},
+                "scope_runs": {
+                    "2026-05": {
+                        "schema_version": "old-schema",
+                        "source_versions": {"workbench": "v1"},
+                        "candidate_count": 0,
+                    }
+                },
+            }
+        )
+
+        self.assertFalse(restored.is_scope_fresh("2026-05", source_versions={"workbench": "v1"}))
+
+    def test_delete_month_and_clear_remove_scope_run_freshness(self) -> None:
+        service = WorkbenchCandidateMatchService()
+        service.upsert_candidate(self._candidate("2026-05", "rule-a", ["bank-001"]))
+        service.mark_scope_processed(
+            "2026-05",
+            source_versions={"workbench": "v1"},
+            candidate_count=1,
+            request_id="req-001",
+            reason="test",
+        )
+
+        service.delete_month("2026-05")
+        self.assertFalse(service.is_scope_fresh("2026-05", source_versions={"workbench": "v1"}))
+
+        service.mark_scope_processed(
+            "2026-06",
+            source_versions={"workbench": "v1"},
+            candidate_count=0,
+            request_id="req-002",
+            reason="test",
+        )
+        service.clear()
+        self.assertFalse(service.is_scope_fresh("2026-06", source_versions={"workbench": "v1"}))
 
     def test_candidate_key_is_stable_when_row_id_order_changes(self) -> None:
         service = WorkbenchCandidateMatchService()

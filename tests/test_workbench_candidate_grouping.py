@@ -464,7 +464,7 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in group["bank_rows"]], ["bk-attach-001"])
         self.assertCountEqual([row["id"] for row in group["invoice_rows"]], ["iv-attach-001", "iv-attach-002"])
 
-    def test_attaches_oa_attachment_invoices_to_source_oa_group_when_candidate_case_ids_differ(self) -> None:
+    def test_does_not_attach_oa_attachment_invoices_to_source_oa_group_when_candidate_case_ids_differ(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(
             "2026-03",
@@ -523,13 +523,78 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
             ],
         )
 
-        self.assertEqual(payload["summary"]["paired_count"], 1)
-        self.assertEqual(payload["summary"]["open_count"], 0)
-        group = payload["paired"]["groups"][0]
-        self.assertEqual(group["group_type"], "auto_closed")
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(payload["summary"]["open_count"], 3)
+        group = next(group for group in payload["open"]["groups"] if group["oa_rows"])
+        self.assertEqual(group["group_type"], "candidate")
         self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-tian"])
         self.assertEqual([row["id"] for row in group["bank_rows"]], ["bk-tian"])
-        self.assertCountEqual([row["id"] for row in group["invoice_rows"]], ["iv-tian-70", "iv-tian-126"])
+        self.assertEqual(group["invoice_rows"], [])
+        self.assertCountEqual(
+            [ids for ids in group_ids(payload["open"]["groups"], "invoice_rows") if ids],
+            [["iv-tian-70"], ["iv-tian-126"]],
+        )
+
+    def test_does_not_attach_non_candidate_oa_attachment_invoice_to_candidate_source_group(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-02",
+            oa_rows=[
+                {
+                    "id": "oa-zhou-offset",
+                    "type": "oa",
+                    "case_id": "candidate:offset-800",
+                    "apply_type": "日常报销",
+                    "amount": "800.00",
+                    "counterparty_name": "云南溯源科技",
+                    "oa_bank_relation": {"code": "oa_invoice_offset_auto_match", "label": "冲", "tone": "success"},
+                }
+            ],
+            bank_rows=[],
+            invoice_rows=[
+                {
+                    "id": "iv-offset-selected",
+                    "type": "invoice",
+                    "case_id": "candidate:offset-800",
+                    "source_kind": "oa_attachment_invoice",
+                    "derived_from_oa_id": "oa-zhou-offset",
+                    "amount": "800.00",
+                    "total_with_tax": "800.00",
+                    "issue_date": "2026-02-09",
+                    "seller_name": "云南溯源科技",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "invoice_type": "进项发票",
+                    "invoice_bank_relation": {
+                        "code": "oa_invoice_offset_auto_match",
+                        "label": "冲",
+                        "tone": "success",
+                    },
+                },
+                {
+                    "id": "iv-offset-extra",
+                    "type": "invoice",
+                    "case_id": None,
+                    "source_kind": "oa_attachment_invoice",
+                    "derived_from_oa_id": "oa-zhou-offset",
+                    "amount": "30.00",
+                    "total_with_tax": "30.00",
+                    "issue_date": "2026-02-09",
+                    "seller_name": "云南溯源科技",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "invoice_type": "进项发票",
+                    "invoice_bank_relation": {"code": "pending_match", "label": "待匹配", "tone": "warn"},
+                },
+            ],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 1)
+        paired_group = payload["paired"]["groups"][0]
+        self.assertEqual([row["id"] for row in paired_group["oa_rows"]], ["oa-zhou-offset"])
+        self.assertEqual([row["id"] for row in paired_group["invoice_rows"]], ["iv-offset-selected"])
+        self.assertIn(
+            "iv-offset-extra",
+            [row["id"] for row in flatten_groups(payload["open"]["groups"], "invoice")],
+        )
 
     def test_keeps_oa_and_multiple_invoices_open_when_bank_transaction_is_missing(self) -> None:
         service = WorkbenchCandidateGroupingService()

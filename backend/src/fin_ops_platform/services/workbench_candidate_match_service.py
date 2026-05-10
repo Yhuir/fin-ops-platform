@@ -16,20 +16,34 @@ VALID_CONFIDENCE_LEVELS = {"high", "medium", "low"}
 
 
 class WorkbenchCandidateMatchService:
-    def __init__(self, *, candidates: dict[str, dict[str, Any]] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        candidates: dict[str, dict[str, Any]] | None = None,
+        scope_runs: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
         self._lock = RLock()
         self._candidates = self._normalize_candidates(candidates or {})
+        self._scope_runs = self._normalize_scope_runs(scope_runs or {})
 
     @classmethod
     def from_snapshot(cls, snapshot: dict[str, Any] | None) -> "WorkbenchCandidateMatchService":
         if not snapshot:
             return cls()
         candidates = snapshot.get("candidates")
-        return cls(candidates=candidates if isinstance(candidates, dict) else {})
+        scope_runs = snapshot.get("scope_runs")
+        return cls(
+            candidates=candidates if isinstance(candidates, dict) else {},
+            scope_runs=scope_runs if isinstance(scope_runs, dict) else {},
+        )
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
-            return {"candidates": deepcopy(self._candidates)}
+            return {
+                "schema_version": CANDIDATE_MATCH_SCHEMA_VERSION,
+                "candidates": deepcopy(self._candidates),
+                "scope_runs": deepcopy(self._scope_runs),
+            }
 
     @classmethod
     def build_candidate_key(
@@ -96,13 +110,68 @@ class WorkbenchCandidateMatchService:
             ]
             for candidate_key in deleted_keys:
                 self._candidates.pop(candidate_key, None)
+            self._scope_runs.pop(resolved_month, None)
             return deleted_keys
 
     def clear(self) -> list[str]:
         with self._lock:
             deleted_keys = list(self._candidates.keys())
             self._candidates.clear()
+            self._scope_runs.clear()
             return deleted_keys
+
+    def mark_scope_processed(
+        self,
+        scope_month: str,
+        *,
+        source_versions: dict[str, Any] | None,
+        candidate_count: int,
+        request_id: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        resolved_month = self._normalize_month(scope_month)
+        run = {
+            "schema_version": CANDIDATE_MATCH_SCHEMA_VERSION,
+            "source_versions": deepcopy(source_versions if isinstance(source_versions, dict) else {}),
+            "candidate_count": max(int(candidate_count or 0), 0),
+            "generated_at": self._timestamp(),
+            "request_id": str(request_id or "").strip(),
+            "reason": str(reason or "").strip(),
+        }
+        with self._lock:
+            self._scope_runs[resolved_month] = run
+            return deepcopy(run)
+
+    def is_scope_fresh(
+        self,
+        scope_month: str,
+        *,
+        source_versions: dict[str, Any] | None,
+    ) -> bool:
+        resolved_month = self._normalize_month(scope_month)
+        expected_versions = deepcopy(source_versions if isinstance(source_versions, dict) else {})
+        with self._lock:
+            scope_run = self._scope_runs.get(resolved_month)
+            if not isinstance(scope_run, dict):
+                return False
+            if str(scope_run.get("schema_version") or "").strip() != CANDIDATE_MATCH_SCHEMA_VERSION:
+                return False
+            persisted_versions = scope_run.get("source_versions")
+            return (persisted_versions if isinstance(persisted_versions, dict) else {}) == expected_versions
+
+    def stale_scope_months(
+        self,
+        scope_months: list[str],
+        *,
+        source_versions: dict[str, Any] | None,
+    ) -> list[str]:
+        stale: list[str] = []
+        for scope_month in sorted(dict.fromkeys(str(month or "").strip() for month in list(scope_months or []))):
+            if not scope_month:
+                continue
+            if not self.is_scope_fresh(scope_month, source_versions=source_versions):
+                stale.append(scope_month)
+        return stale
 
     @classmethod
     def _normalize_candidates(cls, candidates: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -120,6 +189,29 @@ class WorkbenchCandidateMatchService:
             except ValueError:
                 continue
             normalized[str(normalized_candidate["candidate_key"])] = normalized_candidate
+        return normalized
+
+    @classmethod
+    def _normalize_scope_runs(cls, scope_runs: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        normalized: dict[str, dict[str, Any]] = {}
+        for scope_month, scope_run in scope_runs.items():
+            if not isinstance(scope_run, dict):
+                continue
+            try:
+                resolved_month = cls._normalize_month(scope_month)
+            except ValueError:
+                continue
+            if str(scope_run.get("schema_version") or "").strip() != CANDIDATE_MATCH_SCHEMA_VERSION:
+                continue
+            source_versions = scope_run.get("source_versions")
+            normalized[resolved_month] = {
+                "schema_version": CANDIDATE_MATCH_SCHEMA_VERSION,
+                "source_versions": deepcopy(source_versions if isinstance(source_versions, dict) else {}),
+                "candidate_count": cls._non_negative_int(scope_run.get("candidate_count")),
+                "generated_at": str(scope_run.get("generated_at") or cls._timestamp()),
+                "request_id": str(scope_run.get("request_id") or "").strip(),
+                "reason": str(scope_run.get("reason") or "").strip(),
+            }
         return normalized
 
     @classmethod
@@ -216,6 +308,13 @@ class WorkbenchCandidateMatchService:
             if resolved_value and resolved_value not in normalized:
                 normalized.append(resolved_value)
         return normalized
+
+    @staticmethod
+    def _non_negative_int(value: Any) -> int:
+        try:
+            return max(int(value or 0), 0)
+        except (TypeError, ValueError):
+            return 0
 
     @staticmethod
     def _normalize_required_text(value: Any, field_name: str) -> str:

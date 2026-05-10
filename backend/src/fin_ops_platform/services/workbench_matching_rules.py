@@ -34,6 +34,7 @@ GENERIC_COUNTERPARTY_NAMES = {
 }
 GENERIC_SUMMARY_TERMS = {"报销", "转账", "付款", "支付", "费用", "代付", "批量"}
 TEXT_SPLIT_RE = re.compile(r"[\s,，.。;；:：、/\\|()（）\[\]【】{}<>《》\"'“”‘’+-]+")
+WORKBENCH_MATCHING_RULES_VERSION = "2026-05-09-cross-month-oa-attachment-bank"
 
 
 class WorkbenchMatchingRules:
@@ -280,34 +281,58 @@ class WorkbenchMatchingRules:
             if not attachment_invoices:
                 continue
             invoice_total = self._sum_amounts(attachment_invoices)
-            if invoice_total is None or invoice_total != target:
+            if invoice_total is None:
                 continue
+            invoice_delta = abs(invoice_total - target).quantize(CENT)
+            invoice_amount_closed = invoice_delta == ZERO
 
-            matching_bank_rows = [
-                bank_row
-                for bank_row in sorted(bank_rows, key=self._row_id)
-                if self._direction(bank_row) == self._direction(oa_row) and self._amount(bank_row) == target
-            ]
-            if matching_bank_rows:
-                for bank_row in matching_bank_rows:
-                    candidates.append(
-                        self._candidate(
-                            scope_month,
-                            rule_code="oa_attachment_invoice_source_link",
-                            rows=[oa_row, bank_row, *attachment_invoices],
-                            status="auto_closed",
-                            confidence="high",
-                            amount=target,
-                            explanation="OA attachment invoices are source-linked to the OA row and close with the bank amount.",
-                            source_versions=source_versions,
-                            special_metadata={
-                                "evidence": {
-                                    "strong": ["oa_attachment_invoice_source_link"],
-                                    "invoice_amount_field": "total_with_tax_or_amount",
-                                }
-                            },
-                        )
+            credible_bank_pairs = []
+            for bank_row in sorted(bank_rows, key=self._row_id):
+                if self._direction(bank_row) != self._direction(oa_row) or self._amount(bank_row) != target:
+                    continue
+                evidence = self._oa_bank_evidence(oa_row, bank_row)
+                if not evidence["eligible"]:
+                    continue
+                credible_bank_pairs.append(
+                    {
+                        "bank_row": bank_row,
+                        "evidence": evidence,
+                        "score": int(evidence["score"]),
+                    }
+                )
+            unique_bank_pairs = self._unique_top_scored_pairs(credible_bank_pairs)
+            if unique_bank_pairs:
+                pair = unique_bank_pairs[0]
+                evidence = pair["evidence"]
+                candidates.append(
+                    self._candidate(
+                        scope_month,
+                        rule_code="oa_attachment_invoice_source_link",
+                        rows=[oa_row, pair["bank_row"], *attachment_invoices],
+                        status="auto_closed",
+                        confidence="high",
+                        amount=target,
+                        amount_delta=invoice_delta,
+                        explanation=(
+                            "OA attachment invoices are source-linked to the OA row and close with credible OA-bank evidence."
+                            if invoice_amount_closed
+                            else "OA attachment invoices are source-linked to the OA row; OA amount closes with credible OA-bank evidence even though attachment invoice total differs."
+                        ),
+                        source_versions=source_versions,
+                        special_metadata={
+                            "evidence": {
+                                "strong": sorted({"oa_attachment_invoice_source_link", *evidence["strong"]}),
+                                "medium": evidence["medium"],
+                                "negative": evidence["negative"],
+                                "score": evidence["score"],
+                                "invoice_amount_field": "total_with_tax_or_amount",
+                                "invoice_total": self._format_amount(invoice_total),
+                                "target_amount": self._format_amount(target),
+                                "amount_closed": invoice_amount_closed,
+                            }
+                        },
                     )
+                )
                 continue
 
             candidates.append(
@@ -318,12 +343,20 @@ class WorkbenchMatchingRules:
                     status="incomplete",
                     confidence="high",
                     amount=target,
-                    explanation="OA attachment invoices are source-linked to the OA row and close the OA amount; bank transaction is missing.",
+                    amount_delta=invoice_delta,
+                    explanation=(
+                        "OA attachment invoices are source-linked to the OA row and close the OA amount; bank transaction is missing."
+                        if invoice_amount_closed
+                        else "OA attachment invoices are source-linked to the OA row, but invoice total differs from OA amount and bank transaction is missing."
+                    ),
                     source_versions=source_versions,
                     special_metadata={
                         "evidence": {
                             "strong": ["oa_attachment_invoice_source_link"],
                             "invoice_amount_field": "total_with_tax_or_amount",
+                            "invoice_total": self._format_amount(invoice_total),
+                            "target_amount": self._format_amount(target),
+                            "amount_closed": invoice_amount_closed,
                         }
                     },
                 )
@@ -748,10 +781,20 @@ class WorkbenchMatchingRules:
         oa_row: dict[str, Any],
         invoice_rows: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
+        oa_id = self._row_id(oa_row)
+        linked_attachment_invoice_numbers = {
+            invoice_no
+            for invoice in invoice_rows
+            if self._source_kind(invoice) == "oa_attachment_invoice"
+            and self._linked_oa_id(invoice) == oa_id
+            and (invoice_no := self._string_value(invoice.get("invoice_no"))) is not None
+        }
         return [
             invoice
             for invoice in sorted(invoice_rows, key=self._row_id)
-            if self._direction(invoice) == self._direction(oa_row)
+            if self._source_kind(invoice) != "oa_attachment_invoice"
+            and self._string_value(invoice.get("invoice_no")) not in linked_attachment_invoice_numbers
+            and self._direction(invoice) == self._direction(oa_row)
             and self._counterparties_compatible(oa_row, invoice)
         ]
 

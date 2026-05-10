@@ -1,6 +1,9 @@
 import unittest
 
-from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
+from fin_ops_platform.services.workbench_read_model_service import (
+    WORKBENCH_READ_MODEL_SERVICE_SCHEMA_VERSION,
+    WorkbenchReadModelService,
+)
 
 
 class WorkbenchReadModelServiceTests(unittest.TestCase):
@@ -9,12 +12,23 @@ class WorkbenchReadModelServiceTests(unittest.TestCase):
 
         read_model = service.upsert_read_model(
             scope_key="all",
-            payload={"summary": {"paired_count": 3}},
+            payload={
+                "workbench_read_model_schema_version": "application-payload-v1",
+                "summary": {"paired_count": 3},
+            },
             ignored_rows=[{"id": "ignored-bank-001", "type": "bank"}],
             generated_at="2026-04-08T12:00:00+00:00",
         )
 
+        self.assertEqual(
+            read_model["schema_version"],
+            WORKBENCH_READ_MODEL_SERVICE_SCHEMA_VERSION,
+        )
         self.assertEqual(read_model["scope_type"], "all_time")
+        self.assertEqual(
+            read_model["payload"]["workbench_read_model_schema_version"],
+            "application-payload-v1",
+        )
         self.assertEqual(read_model["ignored_rows"], [{"id": "ignored-bank-001", "type": "bank"}])
         self.assertEqual(service.get_read_model("all"), read_model)
         self.assertEqual(
@@ -31,6 +45,7 @@ class WorkbenchReadModelServiceTests(unittest.TestCase):
             {
                 "read_models": {
                     "2026-03": {
+                        "schema_version": WORKBENCH_READ_MODEL_SERVICE_SCHEMA_VERSION,
                         "scope_key": "2026-03",
                         "scope_type": "month",
                         "generated_at": "2026-04-08T12:00:00+00:00",
@@ -52,6 +67,7 @@ class WorkbenchReadModelServiceTests(unittest.TestCase):
             {
                 "read_models": {
                     "all": {
+                        "schema_version": WORKBENCH_READ_MODEL_SERVICE_SCHEMA_VERSION,
                         "scope_key": "all",
                         "scope_type": "all_time",
                         "generated_at": "2026-04-08T12:00:00+00:00",
@@ -59,6 +75,7 @@ class WorkbenchReadModelServiceTests(unittest.TestCase):
                         "ignored_rows": [],
                     },
                     "2026-03": {
+                        "schema_version": WORKBENCH_READ_MODEL_SERVICE_SCHEMA_VERSION,
                         "scope_key": "2026-03",
                         "scope_type": "month",
                         "generated_at": "2026-04-08T12:00:00+00:00",
@@ -79,9 +96,40 @@ class WorkbenchReadModelServiceTests(unittest.TestCase):
                 }
             },
         )
+        self.assertEqual(
+            snapshot["read_models"]["2026-03"]["schema_version"],
+            WORKBENCH_READ_MODEL_SERVICE_SCHEMA_VERSION,
+        )
 
+    def test_from_snapshot_discards_read_models_with_old_schema_version(self) -> None:
+        service = WorkbenchReadModelService.from_snapshot(
+            {
+                "read_models": {
+                    "all": {
+                        "schema_version": "old-schema",
+                        "scope_key": "all",
+                        "scope_type": "all_time",
+                        "generated_at": "2026-04-08T12:00:00+00:00",
+                        "payload": {"summary": {"paired_count": 5}},
+                        "ignored_rows": [],
+                    },
+                    "2026-03": {
+                        "schema_version": WORKBENCH_READ_MODEL_SERVICE_SCHEMA_VERSION,
+                        "scope_key": "2026-03",
+                        "scope_type": "month",
+                        "generated_at": "2026-04-08T12:00:00+00:00",
+                        "payload": {"summary": {"paired_count": 2}},
+                        "ignored_rows": [],
+                    },
+                }
+            }
+        )
 
-    def test_list_scope_keys_returns_current_scopes(self) -> None:
+        self.assertIsNone(service.get_read_model("all"))
+        self.assertIsNotNone(service.get_read_model("2026-03"))
+        self.assertEqual(service.list_scope_keys(), ["2026-03"])
+
+    def test_from_snapshot_discards_read_models_with_missing_schema_version(self) -> None:
         service = WorkbenchReadModelService.from_snapshot(
             {
                 "read_models": {
@@ -93,6 +141,35 @@ class WorkbenchReadModelServiceTests(unittest.TestCase):
                         "ignored_rows": [],
                     },
                     "2026-03": {
+                        "schema_version": WORKBENCH_READ_MODEL_SERVICE_SCHEMA_VERSION,
+                        "scope_key": "2026-03",
+                        "scope_type": "month",
+                        "generated_at": "2026-04-08T12:00:00+00:00",
+                        "payload": {"summary": {"paired_count": 2}},
+                        "ignored_rows": [],
+                    },
+                }
+            }
+        )
+
+        self.assertIsNone(service.get_read_model("all"))
+        self.assertIsNotNone(service.get_read_model("2026-03"))
+        self.assertEqual(service.list_scope_keys(), ["2026-03"])
+
+    def test_list_scope_keys_returns_current_scopes(self) -> None:
+        service = WorkbenchReadModelService.from_snapshot(
+            {
+                "read_models": {
+                    "all": {
+                        "schema_version": WORKBENCH_READ_MODEL_SERVICE_SCHEMA_VERSION,
+                        "scope_key": "all",
+                        "scope_type": "all_time",
+                        "generated_at": "2026-04-08T12:00:00+00:00",
+                        "payload": {"summary": {"paired_count": 5}},
+                        "ignored_rows": [],
+                    },
+                    "2026-03": {
+                        "schema_version": WORKBENCH_READ_MODEL_SERVICE_SCHEMA_VERSION,
                         "scope_key": "2026-03",
                         "scope_type": "month",
                         "generated_at": "2026-04-08T12:00:00+00:00",

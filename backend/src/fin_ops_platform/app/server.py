@@ -6,6 +6,7 @@ from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
+import hashlib
 import json
 import os
 import re
@@ -47,6 +48,7 @@ from fin_ops_platform.services.background_job_service import (
 )
 from fin_ops_platform.services.cost_statistics_read_model_service import CostStatisticsReadModelService
 from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
+from fin_ops_platform.services.derived_data_lifecycle_service import DerivedDataLifecycleService
 from fin_ops_platform.services.etc_service import (
     EtcBatchNotFoundError,
     EtcDraftRequestError,
@@ -96,10 +98,16 @@ from fin_ops_platform.services.tax_offset_service import TaxOffsetService
 from fin_ops_platform.services.workbench_candidate_grouping import WorkbenchCandidateGroupingService
 from fin_ops_platform.services.workbench_action_service import WorkbenchActionService
 from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
-from fin_ops_platform.services.workbench_candidate_match_service import WorkbenchCandidateMatchService
+from fin_ops_platform.services.workbench_candidate_match_service import (
+    CANDIDATE_MATCH_SCHEMA_VERSION,
+    WorkbenchCandidateMatchService,
+)
 from fin_ops_platform.services.workbench_matching_dirty_scope_service import WorkbenchMatchingDirtyScopeService
 from fin_ops_platform.services.workbench_matching_orchestrator import WorkbenchMatchingOrchestrator
-from fin_ops_platform.services.workbench_matching_rules import WorkbenchMatchingRules
+from fin_ops_platform.services.workbench_matching_rules import (
+    WORKBENCH_MATCHING_RULES_VERSION,
+    WorkbenchMatchingRules,
+)
 from fin_ops_platform.services.workbench_exception_case_service import WorkbenchExceptionCaseService
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
@@ -118,7 +126,7 @@ OA_INVOICE_OFFSET_TAG = "冲"
 CASH_PASS_THROUGH_MODE = "cash_pass_through"
 CASH_TICKET_PURCHASE_MODE = "cash_ticket_purchase"
 PERSONAL_ADVANCE_REPAYMENT_MODE = "personal_advance_repayment_settlement"
-WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-09-oa-attachment-source-link"
+WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-09-cross-month-oa-attachment-bank"
 SYSTEM_AUTO_PAIR_RELATION_MODES = {
     "salary_personal_auto_match",
     "internal_transfer_pair",
@@ -263,6 +271,7 @@ class Application:
         self._workbench_read_model_service = WorkbenchReadModelService.from_snapshot(
             persisted_state.get("workbench_read_models"),
         )
+        self._derived_data_lifecycle_service = DerivedDataLifecycleService()
         self._workbench_candidate_match_service = WorkbenchCandidateMatchService.from_snapshot(
             persisted_state.get("workbench_candidate_matches"),
         )
@@ -2573,7 +2582,7 @@ class Application:
             raw_payload = self._build_raw_workbench_payload(base_scope_key)
             candidate_payload = self._apply_candidate_matches_to_payload(raw_payload, base_scope_key)
             grouped_payload = self._group_row_payload(candidate_payload)
-            self._apply_workbench_runtime_metadata(grouped_payload)
+            self._apply_workbench_runtime_metadata(grouped_payload, base_scope_key)
             ignored_rows = self._extract_ignored_rows(candidate_payload)
             if not self._can_persist_workbench_payload(grouped_payload):
                 raise RuntimeError(str(grouped_payload.get("oa_status", {}).get("message") or "OA read model is not ready"))
@@ -3033,8 +3042,12 @@ class Application:
         self._reload_runtime_services()
         if action == RESET_OA_AND_REBUILD_ACTION:
             self._workbench_matching_dirty_scope_service = WorkbenchMatchingDirtyScopeService()
-        self._search_service.clear_cache()
-        self._invalidate_tax_offset_read_models()
+        lifecycle_summary = self._execute_derived_data_lifecycle_event(
+            "settings_reset_completed",
+            include_all=True,
+            metadata={"action": action},
+            schedule_cost_warmup=False,
+        )
         if action == RESET_OA_AND_REBUILD_ACTION:
             try:
                 if progress is not None:
@@ -3068,7 +3081,9 @@ class Application:
                     result.message = f"{result.message} 历史 ETC 批次需要确认或等待前置数据。"
         if progress is not None:
             progress("complete", "数据重置已完成。", 100)
-        return result.to_payload()
+        payload = result.to_payload()
+        payload["derived_data_lifecycle"] = lifecycle_summary
+        return payload
 
     def _active_data_reset_job(self) -> DataResetJob | None:
         with self._data_reset_jobs_lock:
@@ -6291,11 +6306,74 @@ class Application:
 
     def _workbench_matching_rows_for_scope(self, scope_month: str) -> dict[str, list[dict[str, object]]]:
         payload = self._build_raw_workbench_payload(scope_month)
+        oa_rows = self._workbench_matching_rows_from_payload(payload, "oa")
+        invoice_rows = self._workbench_matching_rows_from_payload(payload, "invoice")
+        bank_rows = self._workbench_matching_rows_from_payload(payload, "bank")
+        if self._should_include_cross_month_bank_rows(oa_rows, invoice_rows):
+            bank_rows.extend(self._workbench_matching_imported_bank_rows())
         return {
-            "oa_rows": self._workbench_matching_rows_from_payload(payload, "oa"),
-            "bank_rows": self._workbench_matching_rows_from_payload(payload, "bank"),
-            "invoice_rows": self._workbench_matching_rows_from_payload(payload, "invoice"),
+            "oa_rows": oa_rows,
+            "bank_rows": self._dedupe_workbench_matching_rows(bank_rows),
+            "invoice_rows": invoice_rows,
         }
+
+    @staticmethod
+    def _should_include_cross_month_bank_rows(
+        oa_rows: list[dict[str, object]],
+        invoice_rows: list[dict[str, object]],
+    ) -> bool:
+        oa_ids = {
+            str(row.get("id") or row.get("row_id") or "").strip()
+            for row in oa_rows
+            if isinstance(row, dict)
+        }
+        if not oa_ids:
+            return False
+        for row in invoice_rows:
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("source_kind") or "").strip() != "oa_attachment_invoice":
+                continue
+            linked_oa_id = str(row.get("derived_from_oa_id") or row.get("oa_row_id") or row.get("oa_id") or "").strip()
+            if linked_oa_id in oa_ids:
+                return True
+        return False
+
+    def _workbench_matching_imported_bank_rows(self) -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
+        for transaction in self._import_service.list_transactions():
+            direction = str(getattr(transaction, "txn_direction", "") or "").strip()
+            amount = getattr(transaction, "amount", None)
+            if amount is None:
+                continue
+            amount_text = str(amount)
+            debit_amount = amount_text if direction == "outflow" else ""
+            credit_amount = amount_text if direction == "inflow" else ""
+            if not debit_amount and not credit_amount:
+                continue
+            trade_time = (
+                str(getattr(transaction, "trade_time", None) or "")
+                or str(getattr(transaction, "pay_receive_time", None) or "")
+                or str(getattr(transaction, "txn_date", None) or "")
+            )
+            rows.append(
+                {
+                    "id": str(getattr(transaction, "id", "") or ""),
+                    "type": "bank",
+                    "case_id": None,
+                    "trade_time": trade_time,
+                    "pay_receive_time": str(getattr(transaction, "pay_receive_time", None) or trade_time),
+                    "account_no": str(getattr(transaction, "account_no", None) or ""),
+                    "account_name": str(getattr(transaction, "account_name", None) or ""),
+                    "counterparty_account_no": str(getattr(transaction, "counterparty_account_no", None) or ""),
+                    "debit_amount": debit_amount,
+                    "credit_amount": credit_amount,
+                    "counterparty_name": str(getattr(transaction, "counterparty_name_raw", None) or ""),
+                    "summary": str(getattr(transaction, "summary", None) or ""),
+                    "remark": str(getattr(transaction, "remark", None) or ""),
+                }
+            )
+        return self._dedupe_workbench_matching_rows(rows)
 
     @staticmethod
     def _workbench_matching_rows_from_payload(
@@ -6317,6 +6395,10 @@ class Application:
                         group_rows = group.get(f"{row_type}_rows")
                         if isinstance(group_rows, list):
                             rows.extend(row for row in group_rows if isinstance(row, dict))
+        return Application._dedupe_workbench_matching_rows(rows)
+
+    @staticmethod
+    def _dedupe_workbench_matching_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
         seen: set[str] = set()
         deduped: list[dict[str, object]] = []
         for row in rows:
@@ -6335,6 +6417,8 @@ class Application:
         parser_version = self._current_oa_attachment_invoice_parser_version()
         payload: dict[str, object] = {
             "workbench_read_model_schema_version": WORKBENCH_READ_MODEL_SCHEMA_VERSION,
+            "workbench_candidate_match_schema_version": CANDIDATE_MATCH_SCHEMA_VERSION,
+            "workbench_matching_rules_version": WORKBENCH_MATCHING_RULES_VERSION,
         }
         if parser_version:
             payload["oa_attachment_invoice_parser_version"] = parser_version
@@ -6520,7 +6604,7 @@ class Application:
             raw_payload = self._build_raw_workbench_payload(base_scope_key)
             candidate_payload = self._apply_candidate_matches_to_payload(raw_payload, base_scope_key)
             grouped_payload = self._group_row_payload(candidate_payload)
-            self._apply_workbench_runtime_metadata(grouped_payload)
+            self._apply_workbench_runtime_metadata(grouped_payload, base_scope_key)
             ignored_rows = self._extract_ignored_rows(candidate_payload)
             self._workbench_read_model_service.upsert_read_model(
                 scope_key=scope_key,
@@ -6624,8 +6708,20 @@ class Application:
         payload["issue_count"] = run.issue_count
         return payload
 
-    def _get_or_build_workbench_read_model(self, month: str, *, visibility_key: str = "global") -> dict[str, object]:
+    def _get_or_build_workbench_read_model(
+        self,
+        month: str,
+        *,
+        visibility_key: str = "global",
+        ensure_candidate_matches: bool = False,
+    ) -> dict[str, object]:
         read_model_scope_key = self._workbench_read_model_scope_key(month, visibility_key=visibility_key)
+        if ensure_candidate_matches:
+            self._ensure_workbench_candidate_matches_for_scope(
+                month,
+                reason="workbench_read_model_candidate_freshness",
+            )
+
         cached_read_model = self._workbench_read_model_service.get_read_model(read_model_scope_key)
         fallback_read_model: dict[str, object] | None = None
         if isinstance(cached_read_model, dict):
@@ -6648,7 +6744,7 @@ class Application:
         relation_payload = self._apply_pair_relations_to_payload(raw_payload)
         candidate_payload = self._apply_candidate_matches_to_payload(relation_payload, month)
         grouped_payload = self._group_row_payload(candidate_payload)
-        self._apply_workbench_runtime_metadata(grouped_payload)
+        self._apply_workbench_runtime_metadata(grouped_payload, month)
         ignored_rows = self._extract_ignored_rows(candidate_payload)
         if not self._can_persist_workbench_payload(grouped_payload):
             if fallback_read_model is not None:
@@ -6674,8 +6770,45 @@ class Application:
             )
         return read_model
 
+    def _ensure_workbench_candidate_matches_for_scope(self, month: str, *, reason: str) -> None:
+        source_versions = self._workbench_matching_source_versions()
+        scope_months = self._workbench_candidate_scope_months(month)
+        stale_months = self._workbench_candidate_match_service.stale_scope_months(
+            scope_months,
+            source_versions=source_versions,
+        )
+        if not stale_months:
+            return
+        self._run_workbench_auto_matching_for_scopes(
+            stale_months,
+            reason=reason,
+        )
+
+    def _workbench_candidate_scope_months(self, month: str) -> list[str]:
+        normalized_month = str(month or "").strip()
+        if SEARCH_MONTH_RE.match(normalized_month):
+            return [normalized_month]
+        if normalized_month == "all":
+            snapshot = self._workbench_candidate_match_service.snapshot()
+            candidate_snapshot = snapshot.get("candidates")
+            candidates = candidate_snapshot if isinstance(candidate_snapshot, dict) else {}
+            months = {
+                str(candidate.get("scope_month") or "").strip()
+                for candidate in candidates.values()
+                if isinstance(candidate, dict)
+            }
+            scope_runs = snapshot.get("scope_runs")
+            if isinstance(scope_runs, dict):
+                months.update(str(scope_month or "").strip() for scope_month in scope_runs.keys())
+            return sorted(month for month in months if SEARCH_MONTH_RE.match(month))
+        return []
+
     def _build_api_workbench_payload(self, month: str, *, visibility_key: str = "global") -> dict[str, object]:
-        read_model = self._get_or_build_workbench_read_model(month, visibility_key=visibility_key)
+        read_model = self._get_or_build_workbench_read_model(
+            month,
+            visibility_key=visibility_key,
+            ensure_candidate_matches=True,
+        )
         payload = read_model.get("payload")
         retained = self._apply_oa_retention_to_grouped_payload(payload if isinstance(payload, dict) else {})
         self._append_etc_invoice_summary_rows(retained)
@@ -6896,11 +7029,46 @@ class Application:
             return "—"
         return f"{value.quantize(Decimal('0.01')):,.2f}"
 
-    def _apply_workbench_runtime_metadata(self, payload: dict[str, object]) -> None:
+    def _apply_workbench_runtime_metadata(self, payload: dict[str, object], month: str) -> None:
         payload["workbench_read_model_schema_version"] = WORKBENCH_READ_MODEL_SCHEMA_VERSION
+        payload["workbench_candidate_match_schema_version"] = CANDIDATE_MATCH_SCHEMA_VERSION
+        payload["workbench_matching_rules_version"] = WORKBENCH_MATCHING_RULES_VERSION
+        payload["workbench_candidate_snapshot_hash"] = self._workbench_candidate_snapshot_hash(month)
         parser_version = self._current_oa_attachment_invoice_parser_version()
         if parser_version:
             payload["oa_attachment_invoice_parser_version"] = parser_version
+
+    def _workbench_candidate_snapshot_hash(self, month: str) -> str:
+        candidate_payload = [
+            {
+                "candidate_key": str(candidate.get("candidate_key") or ""),
+                "schema_version": str(candidate.get("schema_version") or ""),
+                "scope_month": str(candidate.get("scope_month") or ""),
+                "rule_code": str(candidate.get("rule_code") or ""),
+                "status": str(candidate.get("status") or ""),
+                "confidence": str(candidate.get("confidence") or ""),
+                "row_ids": [str(row_id) for row_id in list(candidate.get("row_ids") or [])],
+                "amount": str(candidate.get("amount") or ""),
+                "amount_delta": str(candidate.get("amount_delta") or ""),
+            }
+            for candidate in self._candidate_matches_for_scope(month)
+            if isinstance(candidate, dict)
+        ]
+        encoded = json.dumps(
+            sorted(
+                candidate_payload,
+                key=lambda candidate: (
+                    candidate["scope_month"],
+                    candidate["candidate_key"],
+                    candidate["rule_code"],
+                    candidate["row_ids"],
+                ),
+            ),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
 
     def _current_oa_attachment_invoice_parser_version(self) -> str:
         if isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter):
@@ -7150,9 +7318,23 @@ class Application:
             cached_schema_version = str(payload.get("workbench_read_model_schema_version") or "").strip()
             if cached_schema_version != WORKBENCH_READ_MODEL_SCHEMA_VERSION:
                 return False
+            cached_candidate_schema_version = str(
+                payload.get("workbench_candidate_match_schema_version") or ""
+            ).strip()
+            if cached_candidate_schema_version != CANDIDATE_MATCH_SCHEMA_VERSION:
+                return False
+            cached_rules_version = str(payload.get("workbench_matching_rules_version") or "").strip()
+            if cached_rules_version != WORKBENCH_MATCHING_RULES_VERSION:
+                return False
             expected_parser_version = self._current_oa_attachment_invoice_parser_version()
             cached_parser_version = str(payload.get("oa_attachment_invoice_parser_version") or "").strip()
             if expected_parser_version and cached_parser_version != expected_parser_version:
+                return False
+            expected_candidate_hash = self._workbench_candidate_snapshot_hash(
+                str(payload.get("month") or "all")
+            )
+            cached_candidate_hash = str(payload.get("workbench_candidate_snapshot_hash") or "").strip()
+            if cached_candidate_hash != expected_candidate_hash:
                 return False
             summary = payload.get("summary")
             if isinstance(summary, dict):
@@ -7374,7 +7556,7 @@ class Application:
                 continue
 
             relation = self._candidate_relation_payload(candidate)
-            case_id = str(candidate.get("candidate_key") or candidate.get("candidate_id") or "").strip()
+            case_id = self._candidate_application_case_id(candidate, row_ids, rows_by_id)
             if not case_id:
                 continue
             for row_id in row_ids:
@@ -7396,6 +7578,36 @@ class Application:
                     row["cost_excluded"] = True
             claimed_row_ids.update(row_ids)
         return result
+
+    @staticmethod
+    def _candidate_application_case_id(
+        candidate: dict[str, object],
+        row_ids: list[str],
+        rows_by_id: dict[str, dict[str, object]],
+    ) -> str:
+        existing_case_ids = {
+            case_id
+            for row_id in row_ids
+            if isinstance(row := rows_by_id.get(row_id), dict)
+            and (case_id := str(row.get("case_id") or "").strip())
+        }
+        if len(existing_case_ids) > 1:
+            return ""
+        if existing_case_ids:
+            case_id = next(iter(existing_case_ids))
+            if Application._candidate_can_extend_existing_case(candidate, case_id):
+                return case_id
+            return ""
+        return str(candidate.get("candidate_key") or candidate.get("candidate_id") or "").strip()
+
+    @staticmethod
+    def _candidate_can_extend_existing_case(candidate: dict[str, object], case_id: str) -> bool:
+        if not case_id.startswith("CASE-OA-ATT-"):
+            return False
+        candidate_type = str(candidate.get("candidate_type") or "").strip()
+        if candidate_type not in {"oa_bank", "oa_bank_invoice"}:
+            return False
+        return bool(candidate.get("oa_row_ids")) and bool(candidate.get("bank_row_ids"))
 
     @staticmethod
     def _apply_cash_turnover_candidate_metadata(
@@ -7622,7 +7834,7 @@ class Application:
             row_ids = [row_id for row_id in row_ids if row_id]
             if len(row_ids) < 2 or self._auto_pair_conflicts_with_manual_relation(row_ids):
                 continue
-            case_id = str(oa_row.get("case_id") or f"CASE-OA-OFFSET-{row_ids[0]}").strip()
+            case_id = f"CASE-OA-OFFSET-{row_ids[0]}"
             month_scope = self._month_scope_for_oa_invoice_offset_relation([oa_row, *attachment_invoice_rows])
             desired_relations[case_id] = {
                 "case_id": case_id,
@@ -7638,14 +7850,12 @@ class Application:
         invoice_rows: list[dict[str, object]],
     ) -> list[dict[str, object]]:
         oa_row_id = str(oa_row.get("id", "")).strip()
-        case_id = str(oa_row.get("case_id", "")).strip()
         matches: list[dict[str, object]] = []
         for invoice_row in invoice_rows:
             if str(invoice_row.get("source_kind", "")) != "oa_attachment_invoice":
                 continue
             derived_from_oa_id = str(invoice_row.get("derived_from_oa_id", "")).strip()
-            invoice_case_id = str(invoice_row.get("case_id", "")).strip()
-            if derived_from_oa_id == oa_row_id or (case_id and invoice_case_id == case_id):
+            if derived_from_oa_id == oa_row_id:
                 matches.append(invoice_row)
         return matches
 
@@ -7677,6 +7887,181 @@ class Application:
         payload["handled_exception"] = False
         return payload
 
+    def _execute_derived_data_lifecycle_event(
+        self,
+        event: str,
+        *,
+        months: list[str] | None = None,
+        scope_keys: list[str] | None = None,
+        include_all: bool = True,
+        metadata: dict[str, object] | None = None,
+        schedule_cost_warmup: bool = True,
+    ) -> dict[str, object]:
+        plan = self._derived_data_lifecycle_service.plan_event(
+            event,
+            months=months,
+            scope_keys=scope_keys,
+            include_all=include_all,
+            dry_run=False,
+            metadata=metadata,
+        )
+        return self._derived_data_lifecycle_service.execute_plan(
+            plan,
+            executors={
+                "workbench_read_model": self._derived_lifecycle_workbench_read_model_executor,
+                "workbench_candidate_matches": self._derived_lifecycle_candidate_matches_executor,
+                "workbench_matching_dirty_scopes": self._derived_lifecycle_dirty_scopes_executor,
+                "cost_statistics_read_model": lambda domain_plan: self._derived_lifecycle_cost_statistics_executor(
+                    domain_plan,
+                    schedule_warmup=schedule_cost_warmup,
+                ),
+                "tax_offset_read_model": self._derived_lifecycle_tax_offset_executor,
+                "tax_offset_month_cache": self._derived_lifecycle_tax_offset_month_cache_executor,
+                "search_cache": self._derived_lifecycle_search_cache_executor,
+                "oa_adapter_records_cache": self._derived_lifecycle_oa_adapter_cache_executor,
+                "historical_etc_repair_state": self._derived_lifecycle_historical_etc_executor,
+            },
+        )
+
+    def _derived_lifecycle_workbench_read_model_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
+        scope_keys = self._domain_plan_scope_keys(domain_plan)
+        if "all" in scope_keys:
+            deleted_scope_keys = list(self._workbench_read_model_service.snapshot().get("read_models", {}).keys())
+        else:
+            deleted_scope_keys = self._expand_workbench_read_model_scope_keys_for_base_scopes(scope_keys)
+        for scope_key in deleted_scope_keys:
+            self._workbench_read_model_service.delete_read_model(scope_key)
+        self._persist_workbench_read_models_best_effort(
+            snapshot=self._workbench_read_model_service.snapshot(),
+            changed_scope_keys=deleted_scope_keys,
+            operation="derived_lifecycle_workbench_read_model",
+        )
+        return {
+            "deleted_counts": {"workbench_read_models": len(deleted_scope_keys)},
+            "invalidated_scopes": deleted_scope_keys,
+        }
+
+    def _derived_lifecycle_candidate_matches_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
+        scope_keys = self._domain_plan_scope_keys(domain_plan)
+        if "all" in scope_keys:
+            deleted_candidate_keys = self._workbench_candidate_match_service.clear()
+        else:
+            deleted_candidate_keys = []
+            for month in self._months_from_lifecycle_scope_keys(scope_keys):
+                deleted_candidate_keys.extend(self._workbench_candidate_match_service.delete_month(month))
+        self._persist_workbench_candidate_matches_best_effort(operation="derived_lifecycle_candidate_matches")
+        return {
+            "deleted_counts": {"workbench_candidate_matches": len(deleted_candidate_keys)},
+            "invalidated_scopes": deleted_candidate_keys,
+        }
+
+    def _derived_lifecycle_dirty_scopes_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
+        scope_keys = self._domain_plan_scope_keys(domain_plan)
+        months = self._months_from_lifecycle_scope_keys(scope_keys)
+        if months:
+            dirty_months = self._workbench_matching_dirty_scope_service.mark_dirty(
+                months,
+                reason=str(domain_plan.get("reason") or "derived_lifecycle"),
+            )
+            self._persist_state()
+        else:
+            dirty_months = []
+        return {
+            "deleted_counts": {"workbench_matching_dirty_scopes": 0},
+            "invalidated_scopes": dirty_months,
+        }
+
+    def _derived_lifecycle_cost_statistics_executor(
+        self,
+        domain_plan: dict[str, object],
+        *,
+        schedule_warmup: bool,
+    ) -> dict[str, object]:
+        scope_keys = self._domain_plan_scope_keys(domain_plan)
+        if "all" in scope_keys:
+            deleted_scope_keys = self._invalidate_cost_statistics_read_models(schedule_warmup=schedule_warmup)
+        else:
+            deleted_scope_keys = self._invalidate_cost_statistics_read_model_scopes(
+                scope_keys,
+                reason="derived_lifecycle_cost_statistics",
+            )
+        return {
+            "deleted_counts": {"cost_statistics_read_models": len(deleted_scope_keys)},
+            "invalidated_scopes": deleted_scope_keys,
+            "enqueued_jobs": [] if not schedule_warmup else ["cost_statistics_cache_warmup"],
+        }
+
+    def _derived_lifecycle_tax_offset_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
+        scope_keys = self._domain_plan_scope_keys(domain_plan)
+        if "all" in scope_keys:
+            deleted_scope_keys = self._invalidate_tax_offset_read_models()
+        else:
+            deleted_scope_keys = self._invalidate_tax_offset_read_model_scopes(
+                scope_keys,
+                reason="derived_lifecycle_tax_offset",
+            )
+        return {
+            "deleted_counts": {"tax_offset_read_models": len(deleted_scope_keys)},
+            "invalidated_scopes": deleted_scope_keys,
+            "enqueued_jobs": ["tax_offset_cache_warmup"] if deleted_scope_keys else [],
+        }
+
+    def _derived_lifecycle_tax_offset_month_cache_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
+        scope_keys = self._domain_plan_scope_keys(domain_plan)
+        months = self._months_from_lifecycle_scope_keys(scope_keys)
+        self._tax_offset_service.clear_month_cache(None if "all" in scope_keys else months)
+        return {
+            "deleted_counts": {"tax_offset_month_cache": len(months) if months else int("all" in scope_keys)},
+            "invalidated_scopes": months or (["all"] if "all" in scope_keys else []),
+        }
+
+    def _derived_lifecycle_search_cache_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
+        self._search_service.clear_cache()
+        return {
+            "deleted_counts": {"search_cache": 1},
+            "invalidated_scopes": self._domain_plan_scope_keys(domain_plan),
+        }
+
+    def _derived_lifecycle_oa_adapter_cache_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
+        adapter = self._workbench_query_service._oa_adapter
+        if isinstance(adapter, MongoOAAdapter):
+            scope_keys = self._domain_plan_scope_keys(domain_plan)
+            months = self._months_from_lifecycle_scope_keys(scope_keys)
+            adapter.invalidate_records_cache(None if "all" in scope_keys else months)
+            invalidated = months or (["all"] if "all" in scope_keys else [])
+        else:
+            invalidated = []
+        return {
+            "deleted_counts": {"oa_adapter_records_cache": len(invalidated)},
+            "invalidated_scopes": invalidated,
+        }
+
+    @staticmethod
+    def _derived_lifecycle_historical_etc_executor(domain_plan: dict[str, object]) -> dict[str, object]:
+        return {
+            "deleted_counts": {"historical_etc_repair_state": 0},
+            "invalidated_scopes": Application._domain_plan_scope_keys(domain_plan),
+        }
+
+    @staticmethod
+    def _domain_plan_scope_keys(domain_plan: dict[str, object]) -> list[str]:
+        return [
+            str(scope_key).strip()
+            for scope_key in list(domain_plan.get("scope_keys") or [])
+            if str(scope_key).strip()
+        ]
+
+    @staticmethod
+    def _months_from_lifecycle_scope_keys(scope_keys: list[str]) -> list[str]:
+        return sorted(
+            {
+                part
+                for scope_key in list(scope_keys or [])
+                for part in str(scope_key).split(":")
+                if SEARCH_MONTH_RE.match(str(part).strip())
+            }
+        )
+
     def _invalidate_workbench_read_models(self, *, invalidate_cost_statistics: bool = True) -> None:
         snapshot = self._workbench_read_model_service.snapshot()
         for scope_key in list(snapshot.get("read_models", {}).keys()):
@@ -7699,7 +8084,7 @@ class Application:
         )
         return expanded_scope_keys
 
-    def _invalidate_cost_statistics_read_models(self) -> list[str]:
+    def _invalidate_cost_statistics_read_models(self, *, schedule_warmup: bool = True) -> list[str]:
         read_model_service = self._cost_statistics_read_model_service
         if read_model_service is None:
             return []
@@ -7709,7 +8094,7 @@ class Application:
             changed_scope_keys=deleted_scope_keys,
             operation="invalidate_cost_statistics_read_models",
         )
-        if not deleted_scope_keys:
+        if not schedule_warmup or not deleted_scope_keys:
             return deleted_scope_keys
         warmup_months = self._cost_statistics_warmup_months_from_read_model_scope_keys(deleted_scope_keys)
         if not warmup_months:

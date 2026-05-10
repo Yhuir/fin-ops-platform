@@ -85,6 +85,7 @@ class WorkbenchSpecialPairRuleServiceTests(unittest.TestCase):
                     "id": "invoice-offset-001",
                     "source_kind": "oa_attachment_invoice",
                     "case_id": "CASE-OFFSET-001",
+                    "derived_from_oa_id": "oa-offset-001",
                     "total_with_tax": "299.00",
                 }
             ],
@@ -95,6 +96,32 @@ class WorkbenchSpecialPairRuleServiceTests(unittest.TestCase):
         self.assertEqual(candidates[0]["rule_code"], OA_INVOICE_OFFSET_AUTO_MATCH)
         self.assertEqual(candidates[0]["special_metadata"]["cost_policy"], "exclude_all")
         self.assertIn("冲", candidates[0]["tags"])
+
+    def test_oa_attachment_invoice_offset_does_not_use_case_id_as_source_link(self) -> None:
+        candidates = self.service.generate_candidates(
+            "2026-03",
+            oa_rows=[
+                {
+                    "id": "oa-offset-001",
+                    "case_id": "CASE-POLLUTED",
+                    "applicant": "刘际涛",
+                    "amount": "299.00",
+                }
+            ],
+            bank_rows=[],
+            invoice_rows=[
+                {
+                    "id": "invoice-from-another-oa",
+                    "source_kind": "oa_attachment_invoice",
+                    "case_id": "CASE-POLLUTED",
+                    "derived_from_oa_id": "oa-offset-other",
+                    "total_with_tax": "299.00",
+                }
+            ],
+            settings={"offset_applicant_names": ["刘际涛"]},
+        )
+
+        self.assertEqual(candidates, [])
 
     def test_cash_turnover_hint_uses_or_semantics_and_keeps_cost_policy_hint_only(self) -> None:
         candidates = self.service.generate_candidates(

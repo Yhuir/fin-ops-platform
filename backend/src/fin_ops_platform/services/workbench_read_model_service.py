@@ -6,6 +6,9 @@ from threading import RLock
 from typing import Any
 
 
+WORKBENCH_READ_MODEL_SERVICE_SCHEMA_VERSION = "workbench_read_model_service.v1"
+
+
 class WorkbenchReadModelService:
     def __init__(self, *, read_models: dict[str, dict[str, Any]] | None = None) -> None:
         self._lock = RLock()
@@ -65,6 +68,7 @@ class WorkbenchReadModelService:
 
         normalized = self._normalize_read_model(
             {
+                "schema_version": WORKBENCH_READ_MODEL_SERVICE_SCHEMA_VERSION,
                 "scope_key": resolved_scope_key,
                 "scope_type": self._scope_type_for_key(resolved_scope_key),
                 "generated_at": generated_at or self._timestamp(),
@@ -90,6 +94,8 @@ class WorkbenchReadModelService:
         for scope_key, read_model in read_models.items():
             if not isinstance(read_model, dict):
                 continue
+            if read_model.get("schema_version") != WORKBENCH_READ_MODEL_SERVICE_SCHEMA_VERSION:
+                continue
             normalized_read_model = cls._normalize_read_model(read_model, fallback_scope_key=str(scope_key))
             normalized[str(normalized_read_model["scope_key"])] = normalized_read_model
         return normalized
@@ -101,6 +107,7 @@ class WorkbenchReadModelService:
             raise ValueError("read model requires a non-empty scope_key")
 
         normalized = deepcopy(read_model)
+        normalized["schema_version"] = WORKBENCH_READ_MODEL_SERVICE_SCHEMA_VERSION
         normalized["scope_key"] = resolved_scope_key
         normalized["scope_type"] = str(read_model.get("scope_type") or cls._scope_type_for_key(resolved_scope_key))
         normalized["generated_at"] = str(read_model.get("generated_at") or cls._timestamp())

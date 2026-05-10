@@ -155,19 +155,11 @@ class WorkbenchSpecialPairRuleService:
             return []
         candidates: list[dict[str, Any]] = []
         oa_by_id = {self._row_id(row): row for row in oa_rows}
-        oa_by_case_id: dict[str, dict[str, Any]] = {}
-        for oa_row in oa_rows:
-            case_id = str(oa_row.get("case_id") or "").strip()
-            if case_id:
-                oa_by_case_id[case_id] = oa_row
         for invoice_row in sorted(invoice_rows, key=self._row_id):
             if str(invoice_row.get("source_kind") or "") != "oa_attachment_invoice":
                 continue
             linked_oa_id = self._linked_oa_id(invoice_row)
             oa_row = oa_by_id.get(linked_oa_id or "")
-            if oa_row is None:
-                invoice_case_id = str(invoice_row.get("case_id") or "").strip()
-                oa_row = oa_by_case_id.get(invoice_case_id)
             if oa_row is None:
                 continue
             applicant_name = self._oa_applicant_name(oa_row)

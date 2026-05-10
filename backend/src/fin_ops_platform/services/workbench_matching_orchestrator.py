@@ -88,9 +88,10 @@ class WorkbenchMatchingOrchestrator:
                 summary["current_month"] = scope_month
                 self._candidate_match_service.delete_month(scope_month)
                 held_row_ids = self._manual_confirmed_row_ids(scope_month)
-                oa_rows = self._exclude_held_rows(self._rows_for_month("oa", scope_month), held_row_ids)
-                bank_rows = self._exclude_held_rows(self._rows_for_month("bank", scope_month), held_row_ids)
-                invoice_rows = self._exclude_held_rows(self._rows_for_month("invoice", scope_month), held_row_ids)
+                month_rows = self._rows_for_scope(scope_month)
+                oa_rows = self._exclude_held_rows(month_rows["oa_rows"], held_row_ids)
+                bank_rows = self._exclude_held_rows(month_rows["bank_rows"], held_row_ids)
+                invoice_rows = self._exclude_held_rows(month_rows["invoice_rows"], held_row_ids)
 
                 candidates = self._generate_candidates(scope_month, oa_rows, bank_rows, invoice_rows)
                 self._accumulate_rule_summary(summary)
@@ -102,6 +103,13 @@ class WorkbenchMatchingOrchestrator:
                     if upserted.get("status") == "conflict":
                         summary["conflict_count"] += 1
 
+                self._candidate_match_service.mark_scope_processed(
+                    scope_month,
+                    source_versions=self._source_versions(),
+                    candidate_count=len(candidates),
+                    request_id=str(summary["request_id"]),
+                    reason=str(summary["reason"]),
+                )
                 self._invalidate_read_models(scope_month)
                 summary["processed_months"].append(scope_month)
                 summary["duration_ms"] = self._duration_ms(started_at)
@@ -212,6 +220,36 @@ class WorkbenchMatchingOrchestrator:
 
     def _rows_for_month(self, row_type: str, scope_month: str) -> list[dict[str, Any]]:
         rows = self._resolve_rows(row_type, scope_month)
+        return self._normalize_rows(row_type, rows)
+
+    def _rows_for_scope(self, scope_month: str) -> dict[str, list[dict[str, Any]]]:
+        if callable(self._row_provider) and not any(
+            callable(getattr(self._row_provider, method_name, None))
+            for method_name in (
+                "get_oa_rows",
+                "list_oa_rows",
+                "get_bank_rows",
+                "list_bank_rows",
+                "get_invoice_rows",
+                "list_invoice_rows",
+            )
+        ):
+            payload = self._row_provider(scope_month)
+            if not isinstance(payload, dict):
+                raise ValueError("callable row_provider must return a dict.")
+            return {
+                "oa_rows": self._normalize_rows("oa", payload.get("oa_rows", [])),
+                "bank_rows": self._normalize_rows("bank", payload.get("bank_rows", [])),
+                "invoice_rows": self._normalize_rows("invoice", payload.get("invoice_rows", [])),
+            }
+        return {
+            "oa_rows": self._rows_for_month("oa", scope_month),
+            "bank_rows": self._rows_for_month("bank", scope_month),
+            "invoice_rows": self._rows_for_month("invoice", scope_month),
+        }
+
+    @staticmethod
+    def _normalize_rows(row_type: str, rows: Any) -> list[dict[str, Any]]:
         if not isinstance(rows, list):
             raise ValueError(f"{row_type} row provider must return a list.")
         normalized_rows: list[dict[str, Any]] = []
