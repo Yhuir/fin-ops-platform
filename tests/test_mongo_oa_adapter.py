@@ -92,7 +92,7 @@ class AttachmentStubMongoOAAdapter(StubMongoOAAdapter):
         *,
         form_documents: dict[str, list[dict]],
         project_documents: list[dict],
-        attachment_invoice_rows: list[dict[str, str]],
+        attachment_invoice_rows: list[dict[str, str]] | dict[str, list[dict[str, str]]],
         settings: MongoOASettings | None = None,
     ) -> None:
         super().__init__(form_documents=form_documents, project_documents=project_documents, settings=settings)
@@ -101,7 +101,79 @@ class AttachmentStubMongoOAAdapter(StubMongoOAAdapter):
     def _parse_attachment_invoices(self, files: list[dict[str, object]], *, month: str | None = None) -> list[dict[str, str]]:
         if not files:
             return []
+        if isinstance(self._attachment_invoice_rows, dict):
+            rows: list[dict[str, str]] = []
+            for file_entry in files:
+                file_name = str(file_entry.get("fileName") or file_entry.get("name") or "")
+                rows.extend(dict(row) for row in self._attachment_invoice_rows.get(file_name, []))
+            return rows
         return [dict(row) for row in self._attachment_invoice_rows]
+
+    def _parse_attachment_evidence_pool(
+        self,
+        files: list[dict[str, object]],
+        *,
+        month: str | None = None,
+    ) -> dict[str, list[dict[str, str]]]:
+        if not files:
+            return {"evidences": [], "invoices": [], "artifacts": []}
+        raw_invoices = self._parse_attachment_invoices(files, month=month)
+        files_by_name = {
+            self._attachment_display_name(file_entry): file_entry
+            for file_entry in files
+        }
+        fallback_file = files[0]
+        evidences: list[dict[str, str]] = []
+        for invoice in raw_invoices:
+            evidence = dict(invoice)
+            evidence.setdefault("evidence_type", "tax_invoice")
+            attachment_name = str(evidence.get("attachment_name") or evidence.get("source_attachment_name") or "")
+            file_entry = files_by_name.get(attachment_name, fallback_file)
+            evidences.append(self._normalize_parsed_attachment_evidence(evidence, file_entry=file_entry))
+        invoices = self._dedupe_attachment_invoices(self._attachment_invoices_from_evidences(evidences))
+        artifacts = [
+            self._attachment_artifact_for_file(
+                file_entry,
+                evidences=[
+                    evidence
+                    for evidence in evidences
+                    if evidence.get("source_attachment_key") == self._source_attachment_key(file_entry)
+                ],
+            )
+            for file_entry in files
+        ]
+        return {"evidences": evidences, "invoices": invoices, "artifacts": artifacts}
+
+
+def build_contextual_attachment_cache_fixture(
+    adapter: MongoOAAdapter,
+    file_entry: dict[str, object],
+    *,
+    external_id: str,
+    row_index: str,
+    item: dict,
+    project_id: str = "oa-project-001",
+    amount: str,
+    reimbursement_date: str = "",
+) -> tuple[str, dict[str, str]]:
+    expense_item_id = adapter._expense_item_id(
+        external_id=external_id,
+        row_index=row_index,
+        item=item,
+        project_id=project_id,
+        amount=amount,
+        reimbursement_date=reimbursement_date,
+    )
+    contextual_file = adapter._attachment_files_with_source_context(
+        [file_entry],
+        oa_external_id=external_id,
+        source_expense_row_index=row_index,
+        source_expense_item_id=expense_item_id,
+    )[0]
+    return (
+        adapter._attachment_invoice_cache_key(contextual_file),
+        adapter._attachment_invoice_source_fields(contextual_file),
+    )
 
 
 class QueryRecordingCollection:
@@ -305,7 +377,20 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual(reimbursement.detail_fields["费用内容摘要"], "角磨机（刘晓宇申请）；工控机改标签邮寄费用")
         self.assertEqual(reimbursement.detail_fields["报销日期范围"], "2026-01-06 至 2026-03-11")
         self.assertEqual(
-            reimbursement.expense_items,
+            [
+                {
+                    "row_index": item["row_index"],
+                    "project_name": item["project_name"],
+                    "amount": item["amount"],
+                    "expense_type": item["expense_type"],
+                    "expense_content": item["expense_content"],
+                    "reimbursement_date": item["reimbursement_date"],
+                    "attachment_file_count": item["attachment_file_count"],
+                    "attachment_files": item["attachment_files"],
+                    "attachment_invoices": item["attachment_invoices"],
+                }
+                for item in reimbursement.expense_items
+            ],
             [
                 {
                     "row_index": "0",
@@ -314,6 +399,9 @@ class MongoOAAdapterTests(unittest.TestCase):
                     "expense_type": "其他",
                     "expense_content": "角磨机（刘晓宇申请）",
                     "reimbursement_date": "2026-01-06",
+                    "attachment_file_count": "0",
+                    "attachment_files": [],
+                    "attachment_invoices": [],
                 },
                 {
                     "row_index": "1",
@@ -322,9 +410,13 @@ class MongoOAAdapterTests(unittest.TestCase):
                     "expense_type": "运费/邮费/杂费",
                     "expense_content": "工控机改标签邮寄费用",
                     "reimbursement_date": "2026-03-11",
+                    "attachment_file_count": "0",
+                    "attachment_files": [],
+                    "attachment_invoices": [],
                 },
             ],
         )
+        self.assertTrue(all(item["expense_item_id"].startswith("oa-exp-exp-001:item:") for item in reimbursement.expense_items))
 
     def test_expense_claim_single_project_display_keeps_real_project_and_dedupes_project_names(self) -> None:
         adapter = StubMongoOAAdapter(
@@ -790,6 +882,315 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertIn("40512344", reimbursement.detail_fields["附件发票摘要"])
         self.assertIn("40512345", reimbursement.detail_fields["附件发票摘要"])
 
+    def test_expense_claim_binds_attachment_invoices_to_each_expense_item(self) -> None:
+        adapter = AttachmentStubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-248",
+                        "form_id": "32",
+                        "modifiedTime": "2026-03-04T11:00:00",
+                        "data": {
+                            "ApplicationDate": "2026-03-04",
+                            "Reimbursement Personnel": "胡瑢",
+                            "titleName": "日常报销",
+                            "processId": "exp-248",
+                            "amount": "248",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailProjectName": "ht-project",
+                                    "detailReimbursementAmount": "120",
+                                    "feeContent": "工作证管理系统维护材料",
+                                    "detailReimbursementDate": "2026-03-04",
+                                    "detailReimbursementAttachment": {
+                                        "files": [
+                                            {"fileName": "248-item-0-a.pdf", "filePath": "/248-item-0-a.pdf", "suffix": "pdf"},
+                                            {"fileName": "248-item-0-b.pdf", "filePath": "/248-item-0-b.pdf", "suffix": "pdf"},
+                                        ]
+                                    },
+                                },
+                                {
+                                    "row_index": 1,
+                                    "detailProjectName": "ht-project",
+                                    "detailReimbursementAmount": "128",
+                                    "feeContent": "工作证管理系统维护服务",
+                                    "detailReimbursementDate": "2026-03-04",
+                                    "detailReimbursementAttachment": {
+                                        "files": [
+                                            {"fileName": "248-item-1-a.pdf", "filePath": "/248-item-1-a.pdf", "suffix": "pdf"},
+                                        ]
+                                    },
+                                },
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[{"_id": "ht-project", "data": {"name": "2024-2026年度红塔集团工作证管理系统维护项目"}}],
+            attachment_invoice_rows={
+                "248-item-0-a.pdf": [{"invoice_no": "248001", "attachment_name": "248-item-0-a.pdf", "amount": "60.00"}],
+                "248-item-0-b.pdf": [{"invoice_no": "248002", "attachment_name": "248-item-0-b.pdf", "amount": "60.00"}],
+                "248-item-1-a.pdf": [{"invoice_no": "248003", "attachment_name": "248-item-1-a.pdf", "amount": "128.00"}],
+            },
+        )
+
+        records = adapter.list_application_records("2026-03")
+
+        self.assertEqual(len(records), 1)
+        reimbursement = records[0]
+        self.assertEqual(reimbursement.id, "oa-exp-exp-248")
+        self.assertEqual(len(reimbursement.expense_items), 2)
+        self.assertEqual([len(item["attachment_invoices"]) for item in reimbursement.expense_items], [2, 1])
+        self.assertEqual([invoice["invoice_no"] for invoice in reimbursement.attachment_invoices], ["248001", "248002", "248003"])
+        for item in reimbursement.expense_items:
+            self.assertIn("expense_item_id", item)
+            self.assertEqual(item["attachment_file_count"], str(len(item["attachment_files"])))
+            for invoice in item["attachment_invoices"]:
+                self.assertEqual(invoice["source_expense_row_index"], item["row_index"])
+                self.assertEqual(invoice["source_expense_item_id"], item["expense_item_id"])
+                self.assertEqual(invoice["source_attachment_name"], invoice["attachment_name"])
+                self.assertTrue(invoice["source_attachment_key"])
+        self.assertEqual(reimbursement.detail_fields["附件发票数量"], "3")
+        self.assertEqual(reimbursement.detail_fields["附件发票识别情况"], "已解析 3 / 3")
+
+    def test_expense_claim_oa_2035_parses_attachment_evidences_invoices_and_payment_receipts(self) -> None:
+        cache = MemoryAttachmentInvoiceCache()
+        evidence_by_file = {
+            "oa-2035-etc-25.png": [
+                {
+                    "evidence_type": "payment_receipt",
+                    "document_kind": "wechat_etc_payment",
+                    "amount": "25.00",
+                    "merchant_name": "云南高速公路收费站",
+                    "paid_at": "2026-03-04",
+                    "transaction_no": "wx-etc-25",
+                    "payment_method": "微信",
+                }
+            ],
+            "oa-2035-etc-23.png": [
+                {
+                    "evidence_type": "payment_receipt",
+                    "document_kind": "wechat_etc_payment",
+                    "amount": "23.00",
+                    "merchant_name": "云南高速公路收费站",
+                    "paid_at": "2026-03-04",
+                    "transaction_no": "wx-etc-23",
+                    "payment_method": "微信",
+                }
+            ],
+            "oa-2035-toll-invoices.jpg": [
+                {
+                    "evidence_type": "machine_invoice",
+                    "document_kind": "yunnan_machine_invoice",
+                    "amount": "25.00",
+                    "total_with_tax": "25.00",
+                    "invoice_code": "053002203501",
+                    "invoice_no": "20350025",
+                    "seller_name": "云南高速公路收费站",
+                    "issue_date": "2026-03-04",
+                    "source_region_key": "left",
+                },
+                {
+                    "evidence_type": "machine_invoice",
+                    "document_kind": "yunnan_machine_invoice",
+                    "amount": "23.00",
+                    "total_with_tax": "23.00",
+                    "invoice_code": "053002203501",
+                    "invoice_no": "20350023",
+                    "seller_name": "云南高速公路收费站",
+                    "issue_date": "2026-03-04",
+                    "source_region_key": "right",
+                },
+            ],
+            "oa-2035-fuel-invoice.pdf": [
+                {
+                    "evidence_type": "tax_invoice",
+                    "document_kind": "digital_invoice",
+                    "amount": "200.00",
+                    "total_with_tax": "200.00",
+                    "digital_invoice_no": "255320000002035200",
+                    "seller_name": "中国石化销售股份有限公司云南昆明石油分公司",
+                    "issue_date": "2026-03-04",
+                }
+            ],
+            "oa-2035-fuel-payment.png": [
+                {
+                    "evidence_type": "payment_receipt",
+                    "document_kind": "wechat_fuel_payment",
+                    "amount": "200.00",
+                    "merchant_name": "中国石化销售股份有限公司云南昆明石油分公司",
+                    "paid_at": "2026-03-04",
+                    "merchant_order_no": "fuel-merchant-order-200",
+                    "payment_method": "微信",
+                }
+            ],
+        }
+
+        def parse_evidences(files: list[dict[str, object]]) -> list[dict[str, str]]:
+            rows: list[dict[str, str]] = []
+            for file_entry in files:
+                rows.extend(dict(row) for row in evidence_by_file[str(file_entry.get("fileName"))])
+            return rows
+
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-2035",
+                        "form_id": "32",
+                        "modifiedTime": "2026-03-04T11:00:00",
+                        "data": {
+                            "ApplicationDate": "2026-03-04",
+                            "Reimbursement Personnel": "胡瑢",
+                            "titleName": "日常报销",
+                            "processId": "2035",
+                            "amount": "248",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailProjectName": "yx-project",
+                                    "detailReimbursementAmount": "48",
+                                    "feeContent": "昆明玉溪来回过路费",
+                                    "detailReimbursementDate": "2026-03-04",
+                                    "detailReimbursementAttachment": {
+                                        "files": [
+                                            {"fileName": "oa-2035-etc-25.png", "filePath": "/oa-2035-etc-25.png", "suffix": "png"},
+                                            {"fileName": "oa-2035-etc-23.png", "filePath": "/oa-2035-etc-23.png", "suffix": "png"},
+                                            {"fileName": "oa-2035-toll-invoices.jpg", "filePath": "/oa-2035-toll-invoices.jpg", "suffix": "jpg"},
+                                        ]
+                                    },
+                                },
+                                {
+                                    "row_index": 1,
+                                    "detailProjectName": "yx-project",
+                                    "detailReimbursementAmount": "200",
+                                    "feeContent": "加油费200元",
+                                    "detailReimbursementDate": "2026-03-04",
+                                    "detailReimbursementAttachment": {
+                                        "files": [
+                                            {"fileName": "oa-2035-fuel-invoice.pdf", "filePath": "/oa-2035-fuel-invoice.pdf", "suffix": "pdf"},
+                                            {"fileName": "oa-2035-fuel-payment.png", "filePath": "/oa-2035-fuel-payment.png", "suffix": "png"},
+                                        ]
+                                    },
+                                },
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[{"_id": "yx-project", "data": {"name": "玉烟维护项目", "code": "YYWH"}}],
+            attachment_invoice_cache=cache,
+        )
+
+        with (
+            adapter.force_attachment_invoice_sync_parse(),
+            patch.object(adapter._attachment_invoice_service, "parse_evidences", side_effect=parse_evidences, create=True) as parse_evidences_mock,
+            patch.object(adapter._attachment_invoice_service, "parse_files", side_effect=AssertionError("parse_files fallback should not run")),
+        ):
+            records = adapter.list_application_records("2026-03")
+
+        parse_evidences_mock.assert_called()
+        self.assertEqual(len(records), 1)
+        reimbursement = records[0]
+        self.assertEqual(reimbursement.id, "oa-exp-2035")
+        self.assertEqual(reimbursement.attachment_file_count, 5)
+        self.assertEqual(len(reimbursement.expense_items), 2)
+        self.assertEqual(len(reimbursement.attachment_artifacts), 5)
+        self.assertEqual(len(reimbursement.attachment_evidences), 6)
+        self.assertEqual(len(reimbursement.attachment_invoices), 3)
+        self.assertEqual(
+            [len(item["attachment_evidences"]) for item in reimbursement.expense_items],
+            [4, 2],
+        )
+        self.assertEqual(
+            [len(item["attachment_invoices"]) for item in reimbursement.expense_items],
+            [2, 1],
+        )
+        self.assertEqual(
+            [evidence["evidence_type"] for evidence in reimbursement.attachment_evidences],
+            [
+                "payment_receipt",
+                "payment_receipt",
+                "machine_invoice",
+                "machine_invoice",
+                "tax_invoice",
+                "payment_receipt",
+            ],
+        )
+        self.assertEqual(
+            [invoice.get("invoice_no") or invoice.get("digital_invoice_no") for invoice in reimbursement.attachment_invoices],
+            ["20350025", "20350023", "255320000002035200"],
+        )
+        self.assertEqual(reimbursement.detail_fields["附件凭证数量"], "6")
+        self.assertEqual(reimbursement.detail_fields["附件发票数量"], "3")
+        self.assertEqual(reimbursement.detail_fields["付款凭证数量"], "3")
+        self.assertEqual(reimbursement.detail_fields["附件凭证识别情况"], "已解析 6 / 5")
+        self.assertEqual(reimbursement.detail_fields["附件发票金额合计"], "248")
+        self.assertEqual(reimbursement.detail_fields["付款凭证金额合计"], "248")
+        self.assertEqual(reimbursement.detail_fields["附件凭证闭环状态"], "付款凭证金额与附件发票金额一致")
+        self.assertEqual(len(cache.entries), 5)
+        self.assertTrue(all("evidences" in payload for payload in cache.entries.values()))
+        self.assertTrue(all("invoices" in payload for payload in cache.entries.values()))
+        self.assertTrue(all("artifacts" in payload for payload in cache.entries.values()))
+
+    def test_expense_claim_single_item_does_not_duplicate_attachment_invoice_for_292_case(self) -> None:
+        adapter = AttachmentStubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-292",
+                        "form_id": "32",
+                        "modifiedTime": "2026-03-24T11:00:00",
+                        "data": {
+                            "ApplicationDate": "2026-03-24",
+                            "Reimbursement Personnel": "胡瑢",
+                            "titleName": "日常报销",
+                            "processId": "exp-292",
+                            "amount": "292",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailProjectName": "energy-project",
+                                    "detailReimbursementAmount": "292",
+                                    "feeContent": "能源管理相关系统运维服务",
+                                    "detailReimbursementDate": "2026-03-24",
+                                    "detailReimbursementAttachment": {
+                                        "files": [
+                                            {"fileName": "292-invoice.pdf", "filePath": "/292-invoice.pdf", "suffix": "pdf"},
+                                            {"fileName": "292-invoice-copy.pdf", "filePath": "/292-invoice-copy.pdf", "suffix": "pdf"},
+                                        ]
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[{"_id": "energy-project", "data": {"name": "红云红河能源管理运维项目"}}],
+            attachment_invoice_rows={
+                "292-invoice.pdf": [{"invoice_no": "292001", "attachment_name": "292-invoice.pdf", "amount": "292.00"}],
+                "292-invoice-copy.pdf": [{"invoice_no": "292001", "attachment_name": "292-invoice-copy.pdf", "amount": "292.00"}],
+            },
+        )
+
+        records = adapter.list_application_records("2026-03")
+
+        self.assertEqual(len(records), 1)
+        reimbursement = records[0]
+        self.assertEqual(len(reimbursement.expense_items), 1)
+        self.assertEqual([invoice["invoice_no"] for invoice in reimbursement.expense_items[0]["attachment_invoices"]], ["292001"])
+        self.assertEqual([invoice["invoice_no"] for invoice in reimbursement.attachment_invoices], ["292001"])
+        invoice = reimbursement.attachment_invoices[0]
+        self.assertEqual(invoice["source_expense_row_index"], "0")
+        self.assertEqual(invoice["source_expense_item_id"], reimbursement.expense_items[0]["expense_item_id"])
+        self.assertEqual(invoice["source_attachment_name"], invoice["attachment_name"])
+        self.assertTrue(invoice["source_attachment_key"])
+        self.assertEqual(reimbursement.detail_fields["附件发票数量"], "1")
+
     def test_expense_claim_uses_header_amount_before_detail_sum(self) -> None:
         adapter = StubMongoOAAdapter(
             form_documents={
@@ -936,12 +1337,16 @@ class MongoOAAdapterTests(unittest.TestCase):
                 ],
             },
             project_documents=[],
-            attachment_invoice_rows=[
-                {"invoice_no": "40512344", "attachment_name": "invoice-a.pdf", "amount": "12.00"},
-                {"invoice_no": "40512344", "attachment_name": "invoice-a-copy.pdf", "amount": "12.00"},
-                {"digital_invoice_no": "25532000000191043884", "attachment_name": "invoice-b.pdf", "amount": "21.20"},
-                {"attachment_name": "invoice-b.pdf", "amount": "21.20"},
-            ],
+            attachment_invoice_rows={
+                "invoice-a.pdf": [
+                    {"invoice_no": "40512344", "attachment_name": "invoice-a.pdf", "amount": "12.00"},
+                    {"invoice_no": "40512344", "attachment_name": "invoice-a-copy.pdf", "amount": "12.00"},
+                ],
+                "invoice-b.pdf": [
+                    {"digital_invoice_no": "25532000000191043884", "attachment_name": "invoice-b.pdf", "amount": "21.20"},
+                    {"attachment_name": "invoice-b.pdf", "amount": "21.20"},
+                ],
+            },
         )
 
         records = adapter.list_application_records("2026-03")
@@ -950,12 +1355,37 @@ class MongoOAAdapterTests(unittest.TestCase):
         reimbursement = records[0]
         self.assertEqual(reimbursement.attachment_file_count, 2)
         self.assertEqual(
-            reimbursement.attachment_invoices,
             [
-                {"invoice_no": "40512344", "attachment_name": "invoice-a.pdf", "amount": "12.00"},
-                {"digital_invoice_no": "25532000000191043884", "attachment_name": "invoice-b.pdf", "amount": "21.20"},
+                {
+                    "invoice_no": invoice.get("invoice_no"),
+                    "digital_invoice_no": invoice.get("digital_invoice_no"),
+                    "attachment_name": invoice.get("attachment_name"),
+                    "amount": invoice.get("amount"),
+                    "source_expense_row_index": invoice.get("source_expense_row_index"),
+                    "source_attachment_name": invoice.get("source_attachment_name"),
+                }
+                for invoice in reimbursement.attachment_invoices
+            ],
+            [
+                {
+                    "invoice_no": "40512344",
+                    "digital_invoice_no": None,
+                    "attachment_name": "invoice-a.pdf",
+                    "amount": "12.00",
+                    "source_expense_row_index": "0",
+                    "source_attachment_name": "invoice-a.pdf",
+                },
+                {
+                    "invoice_no": None,
+                    "digital_invoice_no": "25532000000191043884",
+                    "attachment_name": "invoice-b.pdf",
+                    "amount": "21.20",
+                    "source_expense_row_index": "1",
+                    "source_attachment_name": "invoice-b.pdf",
+                },
             ],
         )
+        self.assertEqual([len(item["attachment_invoices"]) for item in reimbursement.expense_items], [1, 1])
         self.assertEqual(reimbursement.detail_fields["附件发票数量"], "2")
         self.assertEqual(reimbursement.detail_fields["附件发票识别情况"], "已解析 2 / 2")
 
@@ -1104,6 +1534,13 @@ class MongoOAAdapterTests(unittest.TestCase):
     def test_expense_claim_uses_cached_attachment_invoices_without_sync_parsing(self) -> None:
         cache = MemoryAttachmentInvoiceCache()
         file_entry = {"fileName": "invoice-a.pdf", "filePath": "/invoice-a.pdf", "suffix": "pdf"}
+        item = {
+            "row_index": 0,
+            "detailProjectName": "oa-project-001",
+            "detailReimbursementAmount": "120.00",
+            "feeContent": "顺丰邮寄发票",
+            "detailReimbursementAttachment": {"files": [file_entry]},
+        }
         adapter = StubMongoOAAdapter(
             form_documents={
                 "2": [],
@@ -1117,6 +1554,90 @@ class MongoOAAdapterTests(unittest.TestCase):
                             "Reimbursement Personnel": "刘际涛",
                             "titleName": "日常报销",
                             "processId": "exp-attach-cache-001",
+                            "schedule": [
+                                item
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[
+                {"_id": "oa-project-001", "data": {"name": "玉烟维护项目", "code": "YYWH"}},
+            ],
+            attachment_invoice_cache=cache,
+        )
+        cache_key, source_fields = build_contextual_attachment_cache_fixture(
+            adapter,
+            file_entry,
+            external_id="exp-attach-cache-001",
+            row_index="0",
+            item=item,
+            amount="120.00",
+        )
+        cache.save_oa_attachment_invoice_cache_entry(
+            cache_key,
+            {
+                "parser_version": adapter._attachment_invoice_cache_parser_version(),
+                "cache_schema_version": "2026-05-11-evidence-v1",
+                "evidences": [
+                    {
+                        "evidence_type": "tax_invoice",
+                        "invoice_no": "40512344",
+                        "seller_name": "云南顺丰速运有限公司",
+                        "buyer_name": "云南溯源科技有限公司",
+                        "issue_date": "2023-07-11",
+                        "amount": "11.32",
+                        "attachment_name": "invoice-a.pdf",
+                        **source_fields,
+                    }
+                ],
+                "invoices": [
+                    {
+                        "evidence_type": "tax_invoice",
+                        "invoice_no": "40512344",
+                        "seller_name": "云南顺丰速运有限公司",
+                        "buyer_name": "云南溯源科技有限公司",
+                        "issue_date": "2023-07-11",
+                        "amount": "11.32",
+                        "attachment_name": "invoice-a.pdf",
+                        **source_fields,
+                    }
+                ],
+                "artifacts": [
+                    {
+                        "attachment_name": "invoice-a.pdf",
+                        "file_path": "/invoice-a.pdf",
+                        "suffix": "pdf",
+                        "parse_status": "parsed",
+                        "parse_error": "",
+                        **source_fields,
+                    }
+                ],
+            },
+        )
+
+        with patch.object(adapter._attachment_invoice_service, "parse_files", side_effect=AssertionError("should not parse synchronously")):
+            records = adapter.list_application_records("2026-03")
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].attachment_invoices[0]["invoice_no"], "40512344")
+
+    def test_expense_claim_ignores_legacy_attachment_invoice_cache_without_source_fields(self) -> None:
+        cache = MemoryAttachmentInvoiceCache()
+        file_entry = {"fileName": "invoice-a.pdf", "filePath": "/invoice-a.pdf", "suffix": "pdf"}
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-legacy-cache",
+                        "form_id": "32",
+                        "modifiedTime": "2026-03-28T11:00:00",
+                        "data": {
+                            "ApplicationDate": "2026-03-28",
+                            "Reimbursement Personnel": "刘际涛",
+                            "titleName": "日常报销",
+                            "processId": "exp-legacy-cache-001",
                             "schedule": [
                                 {
                                     "row_index": 0,
@@ -1135,11 +1656,27 @@ class MongoOAAdapterTests(unittest.TestCase):
             ],
             attachment_invoice_cache=cache,
         )
+        legacy_cache_key = adapter._attachment_invoice_cache_key(file_entry)
         cache.save_oa_attachment_invoice_cache_entry(
-            adapter._attachment_invoice_cache_key(file_entry),
+            legacy_cache_key,
             {
                 "parser_version": adapter._attachment_invoice_cache_parser_version(),
                 "invoices": [
+                    {
+                        "invoice_no": "legacy-40512344",
+                        "amount": "11.32",
+                        "attachment_name": "invoice-a.pdf",
+                    }
+                ],
+            },
+        )
+
+        with (
+            adapter.force_attachment_invoice_sync_parse(),
+            patch.object(
+                adapter._attachment_invoice_service,
+                "parse_files",
+                return_value=[
                     {
                         "invoice_no": "40512344",
                         "seller_name": "云南顺丰速运有限公司",
@@ -1148,19 +1685,194 @@ class MongoOAAdapterTests(unittest.TestCase):
                         "amount": "11.32",
                         "attachment_name": "invoice-a.pdf",
                     }
-                ]
+                ],
+            ) as parse_files,
+        ):
+            records = adapter.list_application_records("2026-03")
+
+        parse_files.assert_called_once()
+        invoice = records[0].attachment_invoices[0]
+        self.assertEqual(invoice["invoice_no"], "40512344")
+        for field in (
+            "source_expense_row_index",
+            "source_expense_item_id",
+            "source_attachment_key",
+            "source_attachment_name",
+        ):
+            self.assertTrue(invoice.get(field), field)
+        current_payload = next(
+            payload
+            for payload in cache.entries.values()
+            if payload.get("parser_version") == adapter._attachment_invoice_cache_parser_version()
+            and payload.get("invoices")
+            and payload["invoices"][0].get("invoice_no") == "40512344"
+        )
+        for field in (
+            "source_expense_row_index",
+            "source_expense_item_id",
+            "source_attachment_key",
+            "source_attachment_name",
+        ):
+            self.assertTrue(current_payload["invoices"][0].get(field), field)
+        self.assertEqual(cache.entries[legacy_cache_key]["invoices"][0]["invoice_no"], "legacy-40512344")
+
+    def test_expense_claim_attachment_invoice_cache_version_controls_reparse(self) -> None:
+        cache = MemoryAttachmentInvoiceCache()
+        file_entry = {"fileName": "invoice-a.pdf", "filePath": "/invoice-a.pdf", "suffix": "pdf"}
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-cache-version",
+                        "form_id": "32",
+                        "modifiedTime": "2026-03-28T11:00:00",
+                        "data": {
+                            "ApplicationDate": "2026-03-28",
+                            "Reimbursement Personnel": "刘际涛",
+                            "titleName": "日常报销",
+                            "processId": "exp-cache-version-001",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailProjectName": "oa-project-001",
+                                    "detailReimbursementAmount": "120.00",
+                                    "feeContent": "顺丰邮寄发票",
+                                    "detailReimbursementAttachment": {"files": [file_entry]},
+                                }
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[
+                {"_id": "oa-project-001", "data": {"name": "玉烟维护项目", "code": "YYWH"}},
+            ],
+            attachment_invoice_cache=cache,
+        )
+        stale_cache_key = adapter._attachment_invoice_cache_key(file_entry)
+        cache.save_oa_attachment_invoice_cache_entry(
+            stale_cache_key,
+            {
+                "parser_version": "legacy-parser",
+                "invoices": [
+                    {
+                        "invoice_no": "legacy-40512344",
+                        "amount": "11.32",
+                        "attachment_name": "invoice-a.pdf",
+                    }
+                ],
             },
         )
 
-        with patch.object(adapter._attachment_invoice_service, "parse_files", side_effect=AssertionError("should not parse synchronously")):
+        with (
+            adapter.force_attachment_invoice_sync_parse(),
+            patch.object(
+                adapter._attachment_invoice_service,
+                "parse_files",
+                return_value=[
+                    {
+                        "invoice_no": "40512344",
+                        "amount": "11.32",
+                        "attachment_name": "invoice-a.pdf",
+                    }
+                ],
+            ),
+        ):
             records = adapter.list_application_records("2026-03")
 
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0].attachment_invoices[0]["invoice_no"], "40512344")
+        invoice = records[0].attachment_invoices[0]
+        self.assertEqual(invoice["invoice_no"], "40512344")
+        cache_payloads = list(cache.entries.values())
+        self.assertTrue(
+            any(payload.get("parser_version") == adapter._attachment_invoice_cache_parser_version() for payload in cache_payloads)
+        )
+        saved_invoice = next(
+            payload["invoices"][0]
+            for payload in cache_payloads
+            if payload.get("parser_version") == adapter._attachment_invoice_cache_parser_version()
+        )
+        for field in (
+            "source_expense_row_index",
+            "source_expense_item_id",
+            "source_attachment_key",
+            "source_attachment_name",
+        ):
+            self.assertTrue(saved_invoice.get(field), field)
+
+    def test_expense_claim_uses_stable_attachment_key_for_source_binding(self) -> None:
+        cache = MemoryAttachmentInvoiceCache()
+        first_file = {"fileName": "invoice.pdf", "filePath": "/expense/row-0/invoice.pdf", "suffix": "pdf"}
+        second_file = {"fileName": "invoice.pdf", "filePath": "/expense/row-1/invoice.pdf", "suffix": "pdf"}
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-stable-attachment-key",
+                        "form_id": "32",
+                        "modifiedTime": "2026-03-28T11:00:00",
+                        "data": {
+                            "ApplicationDate": "2026-03-28",
+                            "Reimbursement Personnel": "刘际涛",
+                            "titleName": "日常报销",
+                            "processId": "exp-stable-attachment-key-001",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailReimbursementAmount": "120.00",
+                                    "feeContent": "第一项",
+                                    "detailReimbursementAttachment": {"files": [first_file]},
+                                },
+                                {
+                                    "row_index": 1,
+                                    "detailReimbursementAmount": "172.00",
+                                    "feeContent": "第二项",
+                                    "detailReimbursementAttachment": {"files": [second_file]},
+                                },
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[],
+            attachment_invoice_cache=cache,
+        )
+
+        with (
+            adapter.force_attachment_invoice_sync_parse(),
+            patch.object(
+                adapter._attachment_invoice_service,
+                "parse_files",
+                side_effect=[
+                    [{"invoice_no": "40512344", "amount": "120.00", "attachment_name": "invoice.pdf"}],
+                    [{"invoice_no": "40512345", "amount": "172.00", "attachment_name": "invoice.pdf"}],
+                ],
+            ),
+        ):
+            records = adapter.list_application_records("2026-03")
+
+        invoices = records[0].attachment_invoices
+        self.assertEqual(len(invoices), 2)
+        first_key = invoices[0]["source_attachment_key"]
+        second_key = invoices[1]["source_attachment_key"]
+        self.assertNotEqual(first_key, second_key)
+        self.assertEqual(first_key, records[0].attachment_invoices[0]["source_attachment_key"])
+        self.assertNotEqual(
+            adapter._attachment_invoice_cache_key(first_file),
+            adapter._attachment_invoice_cache_key(second_file),
+        )
 
     def test_expense_claim_normalizes_current_cache_entry_amount_to_net_amount(self) -> None:
         cache = MemoryAttachmentInvoiceCache()
         file_entry = {"fileName": "invoice-a.pdf", "filePath": "/invoice-a.pdf", "suffix": "pdf"}
+        item = {
+            "row_index": 0,
+            "detailProjectName": "oa-project-001",
+            "detailReimbursementAmount": "215.00",
+            "feeContent": "设备费用",
+            "detailReimbursementAttachment": {"files": [file_entry]},
+        }
         adapter = StubMongoOAAdapter(
             form_documents={
                 "2": [],
@@ -1175,13 +1887,7 @@ class MongoOAAdapterTests(unittest.TestCase):
                             "titleName": "日常报销",
                             "processId": "exp-attach-cache-normalize-001",
                             "schedule": [
-                                {
-                                    "row_index": 0,
-                                    "detailProjectName": "oa-project-001",
-                                    "detailReimbursementAmount": "215.00",
-                                    "feeContent": "设备费用",
-                                    "detailReimbursementAttachment": {"files": [file_entry]},
-                                }
+                                item
                             ],
                         },
                     }
@@ -1192,13 +1898,22 @@ class MongoOAAdapterTests(unittest.TestCase):
             ],
             attachment_invoice_cache=cache,
         )
-        cache_key = adapter._attachment_invoice_cache_key(file_entry)
+        cache_key, source_fields = build_contextual_attachment_cache_fixture(
+            adapter,
+            file_entry,
+            external_id="exp-attach-cache-normalize-001",
+            row_index="0",
+            item=item,
+            amount="215.00",
+        )
         cache.save_oa_attachment_invoice_cache_entry(
             cache_key,
             {
                 "parser_version": adapter._attachment_invoice_cache_parser_version(),
-                "invoices": [
+                "cache_schema_version": "2026-05-11-evidence-v1",
+                "evidences": [
                     {
+                        "evidence_type": "tax_invoice",
                         "invoice_no": "25532000000191043884",
                         "seller_name": "玉溪市卓达自动化科技有限公司",
                         "buyer_name": "云南溯源科技有限公司",
@@ -1208,6 +1923,32 @@ class MongoOAAdapterTests(unittest.TestCase):
                         "tax_amount": "2.14",
                         "total_with_tax": "215.00",
                         "attachment_name": "invoice-a.pdf",
+                        **source_fields,
+                    }
+                ],
+                "invoices": [
+                    {
+                        "evidence_type": "tax_invoice",
+                        "invoice_no": "25532000000191043884",
+                        "seller_name": "玉溪市卓达自动化科技有限公司",
+                        "buyer_name": "云南溯源科技有限公司",
+                        "issue_date": "2025-12-26",
+                        "amount": "215.00",
+                        "net_amount": "212.86",
+                        "tax_amount": "2.14",
+                        "total_with_tax": "215.00",
+                        "attachment_name": "invoice-a.pdf",
+                        **source_fields,
+                    }
+                ],
+                "artifacts": [
+                    {
+                        "attachment_name": "invoice-a.pdf",
+                        "file_path": "/invoice-a.pdf",
+                        "suffix": "pdf",
+                        "parse_status": "parsed",
+                        "parse_error": "",
+                        **source_fields,
                     }
                 ],
             },
@@ -1330,8 +2071,20 @@ class MongoOAAdapterTests(unittest.TestCase):
         ):
             adapter._parse_attachment_invoice_files_in_background([(cache_key, file_entry)], month="2026-03")
 
-        self.assertEqual(cache.entries[cache_key]["invoices"], [{"invoice_no": "40512344", "attachment_name": "invoice-a.pdf"}])
+        cached_invoice = cache.entries[cache_key]["invoices"][0]
+        self.assertEqual(cached_invoice["invoice_no"], "40512344")
+        self.assertEqual(cached_invoice["attachment_name"], "invoice-a.pdf")
+        self.assertEqual(cache.entries[cache_key]["evidences"][0]["invoice_no"], "40512344")
+        self.assertEqual(cache.entries[cache_key]["artifacts"][0]["parse_status"], "parsed")
+        for field in (
+            "source_expense_row_index",
+            "source_expense_item_id",
+            "source_attachment_key",
+            "source_attachment_name",
+        ):
+            self.assertTrue(cached_invoice.get(field), field)
         self.assertEqual(cache.entries[cache_key]["parser_version"], adapter._attachment_invoice_cache_parser_version())
+        self.assertEqual(cache.entries[cache_key]["cache_schema_version"], "2026-05-11-evidence-v1")
         self.assertEqual(notified_months, ["2026-03"])
 
     def test_sync_attachment_parse_saves_cache_without_background_notification(self) -> None:
@@ -1351,11 +2104,23 @@ class MongoOAAdapterTests(unittest.TestCase):
             "parse_files",
             return_value=[{"invoice_no": "40512344", "attachment_name": "invoice-a.pdf"}],
         ):
-            invoices = adapter._parse_attachment_invoice_files_now([(cache_key, file_entry)], month="2026-03")
+            pool = adapter._parse_attachment_invoice_files_now([(cache_key, file_entry)], month="2026-03")
 
-        self.assertEqual(invoices, [{"invoice_no": "40512344", "attachment_name": "invoice-a.pdf"}])
-        self.assertEqual(cache.entries[cache_key]["invoices"], [{"invoice_no": "40512344", "attachment_name": "invoice-a.pdf"}])
+        invoices = pool["invoices"]
+        self.assertEqual(invoices[0]["invoice_no"], "40512344")
+        self.assertEqual(invoices[0]["attachment_name"], "invoice-a.pdf")
+        self.assertEqual(pool["evidences"][0]["invoice_no"], "40512344")
+        self.assertEqual(pool["artifacts"][0]["parse_status"], "parsed")
+        for field in (
+            "source_expense_row_index",
+            "source_expense_item_id",
+            "source_attachment_key",
+            "source_attachment_name",
+        ):
+            self.assertTrue(invoices[0].get(field), field)
+            self.assertTrue(cache.entries[cache_key]["invoices"][0].get(field), field)
         self.assertEqual(cache.entries[cache_key]["parser_version"], adapter._attachment_invoice_cache_parser_version())
+        self.assertEqual(cache.entries[cache_key]["cache_schema_version"], "2026-05-11-evidence-v1")
         self.assertEqual(notified_months, [])
 
     def test_fetch_projects_and_counterparties_derive_from_form_data(self) -> None:

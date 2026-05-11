@@ -2,11 +2,21 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import UTC, datetime
+import hashlib
+import json
 from threading import RLock
 from typing import Any
 
 
 WORKBENCH_READ_MODEL_SERVICE_SCHEMA_VERSION = "workbench_read_model_service.v1"
+READ_MODEL_SOURCE_VERSION_FIELDS = (
+    "exception_rules_version",
+    "exception_projection_version",
+    "case_snapshot_version",
+    "pair_relation_snapshot_version",
+    "candidate_snapshot_version",
+    "matching_rules_version",
+)
 
 
 class WorkbenchReadModelService:
@@ -61,10 +71,30 @@ class WorkbenchReadModelService:
         payload: dict[str, Any],
         ignored_rows: list[dict[str, Any]] | None = None,
         generated_at: str | None = None,
+        source_versions: dict[str, Any] | None = None,
+        exception_rules_version: str | None = None,
+        exception_projection_version: str | None = None,
+        case_snapshot_version: str | None = None,
+        pair_relation_snapshot_version: str | None = None,
+        candidate_snapshot_version: str | None = None,
+        matching_rules_version: str | None = None,
     ) -> dict[str, Any]:
         resolved_scope_key = str(scope_key).strip()
         if not resolved_scope_key:
             raise ValueError("scope_key is required for workbench read model.")
+
+        resolved_source_versions = self._merge_source_versions(
+            source_versions=source_versions,
+            exception_rules_version=exception_rules_version,
+            exception_projection_version=exception_projection_version,
+            case_snapshot_version=case_snapshot_version,
+            pair_relation_snapshot_version=pair_relation_snapshot_version,
+            candidate_snapshot_version=candidate_snapshot_version,
+            matching_rules_version=matching_rules_version,
+        )
+        resolved_payload = deepcopy(payload if isinstance(payload, dict) else {})
+        for field_name, value in resolved_source_versions.items():
+            resolved_payload.setdefault(field_name, value)
 
         normalized = self._normalize_read_model(
             {
@@ -72,14 +102,74 @@ class WorkbenchReadModelService:
                 "scope_key": resolved_scope_key,
                 "scope_type": self._scope_type_for_key(resolved_scope_key),
                 "generated_at": generated_at or self._timestamp(),
-                "payload": deepcopy(payload if isinstance(payload, dict) else {}),
+                "payload": resolved_payload,
                 "ignored_rows": deepcopy(ignored_rows if isinstance(ignored_rows, list) else []),
+                "source_versions": resolved_source_versions,
+                **resolved_source_versions,
             },
             fallback_scope_key=resolved_scope_key,
         )
         with self._lock:
             self._read_models[resolved_scope_key] = normalized
             return deepcopy(normalized)
+
+    def get_read_model_if_fresh(
+        self,
+        scope_key: str,
+        *,
+        source_versions: dict[str, Any] | None = None,
+        exception_rules_version: str | None = None,
+        exception_projection_version: str | None = None,
+        case_snapshot_version: str | None = None,
+        pair_relation_snapshot_version: str | None = None,
+        candidate_snapshot_version: str | None = None,
+        matching_rules_version: str | None = None,
+    ) -> dict[str, Any] | None:
+        if not self.is_read_model_fresh(
+            scope_key,
+            source_versions=source_versions,
+            exception_rules_version=exception_rules_version,
+            exception_projection_version=exception_projection_version,
+            case_snapshot_version=case_snapshot_version,
+            pair_relation_snapshot_version=pair_relation_snapshot_version,
+            candidate_snapshot_version=candidate_snapshot_version,
+            matching_rules_version=matching_rules_version,
+        ):
+            return None
+        return self.get_read_model(scope_key)
+
+    def is_read_model_fresh(
+        self,
+        scope_key: str,
+        *,
+        source_versions: dict[str, Any] | None = None,
+        exception_rules_version: str | None = None,
+        exception_projection_version: str | None = None,
+        case_snapshot_version: str | None = None,
+        pair_relation_snapshot_version: str | None = None,
+        candidate_snapshot_version: str | None = None,
+        matching_rules_version: str | None = None,
+    ) -> bool:
+        expected_versions = self._merge_source_versions(
+            source_versions=source_versions,
+            exception_rules_version=exception_rules_version,
+            exception_projection_version=exception_projection_version,
+            case_snapshot_version=case_snapshot_version,
+            pair_relation_snapshot_version=pair_relation_snapshot_version,
+            candidate_snapshot_version=candidate_snapshot_version,
+            matching_rules_version=matching_rules_version,
+        )
+        read_model = self.get_read_model(scope_key)
+        if not isinstance(read_model, dict):
+            return False
+        if not expected_versions:
+            return True
+        persisted_versions = read_model.get("source_versions")
+        normalized_persisted = persisted_versions if isinstance(persisted_versions, dict) else {}
+        for key, expected_value in expected_versions.items():
+            if normalized_persisted.get(key) != expected_value:
+                return False
+        return True
 
     def delete_read_model(self, scope_key: str) -> bool:
         resolved_scope_key = str(scope_key).strip()
@@ -115,7 +205,73 @@ class WorkbenchReadModelService:
         normalized["payload"] = deepcopy(payload if isinstance(payload, dict) else {})
         ignored_rows = read_model.get("ignored_rows")
         normalized["ignored_rows"] = deepcopy(ignored_rows if isinstance(ignored_rows, list) else [])
+        source_versions = read_model.get("source_versions")
+        normalized_source_versions = (
+            deepcopy(source_versions)
+            if isinstance(source_versions, dict)
+            else cls._source_versions_from_payload(normalized["payload"])
+        )
+        for field_name in READ_MODEL_SOURCE_VERSION_FIELDS:
+            value = read_model.get(field_name, normalized_source_versions.get(field_name))
+            if value in (None, ""):
+                normalized_source_versions.pop(field_name, None)
+                normalized.pop(field_name, None)
+                continue
+            normalized_value = str(value)
+            normalized_source_versions[field_name] = normalized_value
+            normalized[field_name] = normalized_value
+        normalized["source_versions"] = normalized_source_versions
         return normalized
+
+    @staticmethod
+    def snapshot_version(snapshot: Any) -> str:
+        encoded = json.dumps(
+            snapshot,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    @staticmethod
+    def _merge_source_versions(
+        *,
+        source_versions: dict[str, Any] | None = None,
+        exception_rules_version: str | None = None,
+        exception_projection_version: str | None = None,
+        case_snapshot_version: str | None = None,
+        pair_relation_snapshot_version: str | None = None,
+        candidate_snapshot_version: str | None = None,
+        matching_rules_version: str | None = None,
+    ) -> dict[str, str]:
+        merged: dict[str, str] = {}
+        if isinstance(source_versions, dict):
+            for key, value in source_versions.items():
+                if key not in READ_MODEL_SOURCE_VERSION_FIELDS or value in (None, ""):
+                    continue
+                merged[key] = str(value)
+        explicit_values = {
+            "exception_rules_version": exception_rules_version,
+            "exception_projection_version": exception_projection_version,
+            "case_snapshot_version": case_snapshot_version,
+            "pair_relation_snapshot_version": pair_relation_snapshot_version,
+            "candidate_snapshot_version": candidate_snapshot_version,
+            "matching_rules_version": matching_rules_version,
+        }
+        for key, value in explicit_values.items():
+            if value in (None, ""):
+                continue
+            merged[key] = str(value)
+        return merged
+
+    @staticmethod
+    def _source_versions_from_payload(payload: dict[str, Any]) -> dict[str, str]:
+        return {
+            field_name: str(payload[field_name])
+            for field_name in READ_MODEL_SOURCE_VERSION_FIELDS
+            if payload.get(field_name) not in (None, "")
+        }
 
     @staticmethod
     def _scope_type_for_key(scope_key: str) -> str:

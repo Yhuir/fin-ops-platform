@@ -30,9 +30,11 @@ class OAApplicationRecord:
     expense_type: str | None = None
     expense_content: str | None = None
     detail_fields: dict[str, Any] = field(default_factory=dict)
+    attachment_evidences: list[dict[str, str]] = field(default_factory=list)
+    attachment_artifacts: list[dict[str, str]] = field(default_factory=list)
     attachment_invoices: list[dict[str, str]] = field(default_factory=list)
     attachment_file_count: int = 0
-    expense_items: list[dict[str, str]] = field(default_factory=list)
+    expense_items: list[dict[str, Any]] = field(default_factory=list)
     amount_source: str | None = None
     amount_mismatch: dict[str, str] | None = None
     source: str | None = None
@@ -88,10 +90,14 @@ def build_attachment_invoice_detail_fields(
     attachment_invoices: list[dict[str, Any]] | None,
     *,
     attachment_file_count: int | None = None,
+    attachment_evidences: list[dict[str, Any]] | None = None,
+    attachment_artifacts: list[dict[str, Any]] | None = None,
 ) -> dict[str, str]:
     invoices = [invoice for invoice in (attachment_invoices or []) if isinstance(invoice, dict)]
+    evidences = [evidence for evidence in (attachment_evidences or []) if isinstance(evidence, dict)]
+    artifacts = [artifact for artifact in (attachment_artifacts or []) if isinstance(artifact, dict)]
     parsed_count = len(invoices)
-    total_count = max(parsed_count, int(attachment_file_count or 0))
+    total_count = max(parsed_count, len(artifacts), int(attachment_file_count or 0))
     if parsed_count == 0 and total_count == 0:
         return {}
 
@@ -117,7 +123,61 @@ def build_attachment_invoice_detail_fields(
     }
     if summary_items:
         detail_fields["附件发票摘要"] = "；".join(summary_items)
+    if evidences:
+        payment_receipts = [
+            evidence
+            for evidence in evidences
+            if clean_string(evidence.get("evidence_type") or "") == "payment_receipt"
+        ]
+        evidence_total_count = max(len(artifacts), int(attachment_file_count or 0)) or len(evidences)
+        invoice_total = _sum_attachment_amounts(invoices, prefer_total_with_tax=True)
+        payment_total = _sum_attachment_amounts(payment_receipts, prefer_total_with_tax=False)
+        detail_fields.update(
+            {
+                "附件凭证数量": str(len(evidences)),
+                "付款凭证数量": str(len(payment_receipts)),
+                "附件凭证识别情况": f"已解析 {len(evidences)} / {evidence_total_count or len(evidences)}",
+                "附件发票金额合计": _format_attachment_amount(invoice_total),
+                "付款凭证金额合计": _format_attachment_amount(payment_total),
+                "附件凭证闭环状态": _attachment_evidence_closure_status(invoice_total, payment_total),
+            }
+        )
     return detail_fields
+
+
+def _sum_attachment_amounts(rows: list[dict[str, Any]], *, prefer_total_with_tax: bool) -> float:
+    total = 0.0
+    for row in rows:
+        amount_text = clean_string(
+            (row.get("total_with_tax") if prefer_total_with_tax else None)
+            or row.get("amount")
+            or ""
+        )
+        if not amount_text:
+            continue
+        try:
+            total += float(amount_text.replace(",", ""))
+        except ValueError:
+            continue
+    return total
+
+
+def _format_attachment_amount(amount: float) -> str:
+    if amount == int(amount):
+        return str(int(amount))
+    return f"{amount:.2f}".rstrip("0").rstrip(".")
+
+
+def _attachment_evidence_closure_status(invoice_total: float, payment_total: float) -> str:
+    if invoice_total <= 0 and payment_total <= 0:
+        return "无可校验附件凭证"
+    if invoice_total <= 0:
+        return "缺少附件发票"
+    if payment_total <= 0:
+        return "缺少付款凭证"
+    if round(invoice_total, 2) == round(payment_total, 2):
+        return "付款凭证金额与附件发票金额一致"
+    return "付款凭证金额与附件发票金额不一致"
 
 
 def detect_etc_batch_metadata(*values: Any) -> dict[str, Any]:

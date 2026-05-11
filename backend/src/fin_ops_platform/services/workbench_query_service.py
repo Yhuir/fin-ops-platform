@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from decimal import Decimal, InvalidOperation
+from hashlib import sha1
 from threading import RLock
 from typing import Any
 
@@ -546,9 +547,58 @@ class WorkbenchQueryService:
         except (TypeError, ValueError):
             return 0
 
-    @staticmethod
-    def _attachment_invoice_row_id(oa_row_id: str, index: int) -> str:
+    @classmethod
+    def _attachment_invoice_row_id(
+        cls,
+        oa_row_id: str,
+        index: int,
+        attachment_invoice: dict[str, Any] | None = None,
+    ) -> str:
+        stable_identity = cls._attachment_invoice_stable_identity(attachment_invoice)
+        if stable_identity:
+            return f"oa-att-inv-{oa_row_id}-{stable_identity}"
         return f"oa-att-inv-{oa_row_id}-{index + 1:02d}"
+
+    @classmethod
+    def _attachment_invoice_stable_identity(cls, attachment_invoice: dict[str, Any] | None) -> str:
+        if not isinstance(attachment_invoice, dict):
+            return ""
+        identity_parts = [
+            cls._clean_identity_part(attachment_invoice.get("source_expense_item_id")),
+            cls._clean_identity_part(attachment_invoice.get("source_attachment_key")),
+            cls._clean_identity_part(attachment_invoice.get("digital_invoice_no")),
+            cls._clean_identity_part(attachment_invoice.get("invoice_no")),
+            cls._clean_identity_part(attachment_invoice.get("invoice_code")),
+            cls._clean_identity_part(attachment_invoice.get("issue_date")),
+            cls._clean_identity_part(attachment_invoice.get("total_with_tax")),
+            cls._clean_identity_part(attachment_invoice.get("net_amount")),
+            cls._clean_identity_part(attachment_invoice.get("amount")),
+            cls._clean_identity_part(attachment_invoice.get("tax_amount")),
+            cls._clean_identity_part(attachment_invoice.get("source_attachment_name")),
+            cls._clean_identity_part(attachment_invoice.get("attachment_name")),
+        ]
+        material = "|".join(part for part in identity_parts if part)
+        if not material:
+            return ""
+        return sha1(material.encode("utf-8")).hexdigest()[:16]
+
+    @staticmethod
+    def _clean_identity_part(value: Any) -> str:
+        text = str(value or "").strip()
+        return "" if text in {"—", "--"} else text
+
+    @classmethod
+    def _attachment_invoice_source_value(cls, attachment_invoice: dict[str, Any], key: str) -> str | None:
+        value = cls._clean_identity_part(attachment_invoice.get(key))
+        return value or None
+
+    @classmethod
+    def _attachment_invoice_display_name(cls, attachment_invoice: dict[str, Any]) -> str:
+        return (
+            cls._attachment_invoice_source_value(attachment_invoice, "source_attachment_name")
+            or cls._attachment_invoice_source_value(attachment_invoice, "attachment_name")
+            or "—"
+        )
 
     def _build_attachment_invoice_rows(
         self,
@@ -565,8 +615,22 @@ class WorkbenchQueryService:
         source_detail_fields = dict(oa_row.get("_detail_fields") or {})
         invoice_rows: list[dict[str, Any]] = []
         for index, attachment_invoice in enumerate(attachment_invoices):
+            row_id = self._attachment_invoice_row_id(oa_row["id"], index, attachment_invoice)
+            source_expense_row_index = self._attachment_invoice_source_value(
+                attachment_invoice,
+                "source_expense_row_index",
+            )
+            source_expense_item_id = self._attachment_invoice_source_value(
+                attachment_invoice,
+                "source_expense_item_id",
+            )
+            source_attachment_key = self._attachment_invoice_source_value(
+                attachment_invoice,
+                "source_attachment_key",
+            )
+            source_attachment_name = self._attachment_invoice_display_name(attachment_invoice)
             detail_fields = {
-                "序号": self._attachment_invoice_row_id(oa_row["id"], index),
+                "序号": row_id,
                 "发票代码": str(attachment_invoice.get("invoice_code") or "—"),
                 "发票号码": str(attachment_invoice.get("invoice_no") or "—"),
                 "数电发票号码": str(attachment_invoice.get("digital_invoice_no") or "—"),
@@ -586,15 +650,17 @@ class WorkbenchQueryService:
                 "备注": str(attachment_invoice.get("remark") or "—"),
                 "来源OA单号": str(source_detail_fields.get("OA单号") or "—"),
                 "来源OA明细行号": str(
-                    attachment_invoice.get("source_expense_row_index")
+                    source_expense_row_index
                     or source_detail_fields.get("明细行号")
                     or "整单"
                 ),
-                "附件文件名": str(attachment_invoice.get("attachment_name") or "—"),
+                "来源付款项ID": str(source_expense_item_id or "—"),
+                "来源附件Key": str(source_attachment_key or "—"),
+                "附件文件名": source_attachment_name,
                 "不含税金额": str(attachment_invoice.get("net_amount") or attachment_invoice.get("amount") or "—"),
             }
             invoice_row = self._build_invoice_row(
-                row_id=self._attachment_invoice_row_id(oa_row["id"], index),
+                row_id=row_id,
                 month=str(oa_row["_month"]),
                 section=section,
                 case_id=oa_row.get("case_id"),
@@ -624,6 +690,10 @@ class WorkbenchQueryService:
             )
             invoice_row["source_kind"] = "oa_attachment_invoice"
             invoice_row["derived_from_oa_id"] = oa_row["id"]
+            invoice_row["source_expense_row_index"] = source_expense_row_index
+            invoice_row["source_expense_item_id"] = source_expense_item_id
+            invoice_row["source_attachment_key"] = source_attachment_key
+            invoice_row["source_attachment_name"] = source_attachment_name if source_attachment_name != "—" else None
             invoice_rows.append(invoice_row)
         return invoice_rows
 

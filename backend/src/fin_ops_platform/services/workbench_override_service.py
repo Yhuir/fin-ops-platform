@@ -4,6 +4,11 @@ from copy import deepcopy
 from itertools import count
 from typing import Any
 
+from fin_ops_platform.services.workbench_exception_projection import (
+    EXCEPTION_PROJECTION_VERSION,
+    WorkbenchExceptionProjectionService,
+)
+
 
 class WorkbenchOverrideService:
     def __init__(
@@ -15,6 +20,11 @@ class WorkbenchOverrideService:
         self._row_overrides = deepcopy(row_overrides or {})
         self._case_counter_value = max(case_counter, 0)
         self._case_counter = count(self._case_counter_value + 1)
+        self._projection_service = WorkbenchExceptionProjectionService()
+
+    @property
+    def projection_version(self) -> str:
+        return EXCEPTION_PROJECTION_VERSION
 
     @classmethod
     def from_snapshot(cls, snapshot: dict[str, Any] | None) -> "WorkbenchOverrideService":
@@ -32,6 +42,7 @@ class WorkbenchOverrideService:
     def snapshot(self) -> dict[str, Any]:
         return {
             "case_counter": self._case_counter_value,
+            "projection_version": EXCEPTION_PROJECTION_VERSION,
             "row_overrides": deepcopy(self._row_overrides),
         }
 
@@ -96,11 +107,93 @@ class WorkbenchOverrideService:
         if "auto_close_suppressed" in override:
             payload["auto_close_suppressed"] = bool(override.get("auto_close_suppressed"))
 
+        for field_name in (
+            "projection_version",
+            "projection_kind",
+            "case_status",
+            "relation_status",
+            "relation_mode",
+            "scenario",
+            "resolution",
+            "amount_summary",
+            "display_tags",
+            "audit_summary",
+            "source_versions",
+            "candidate_ids",
+            "candidate_evidence",
+            "processed_exception_summary",
+            "group_metadata",
+            "oa_exemption",
+        ):
+            if field_name in override:
+                payload[field_name] = deepcopy(override.get(field_name))
+
+        if "tags" in override:
+            payload["tags"] = self._merge_text_lists(payload.get("tags"), override.get("tags"))
+
         detail_note = override.get("detail_note")
         if isinstance(detail_note, str) and detail_note.strip():
             self._sync_detail_note(payload, detail_note)
 
         return payload
+
+    def apply_exception_projection(
+        self,
+        case_payload: dict[str, Any],
+        rows: list[dict[str, Any]],
+        *,
+        candidate_evidence: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        projection = self._projection_service.project_exception_case(
+            case_payload,
+            rows,
+            candidate_evidence=candidate_evidence,
+        )
+        self._apply_projection_overrides(projection)
+        return [self.apply_to_row(row) for row in rows]
+
+    def apply_relation_projection(
+        self,
+        relation_payload: dict[str, Any],
+        rows: list[dict[str, Any]],
+        *,
+        case_payload: dict[str, Any] | None = None,
+        candidate_evidence: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        projection = self._projection_service.project_pair_relation(
+            relation_payload,
+            rows,
+            case_payload=case_payload,
+            candidate_evidence=candidate_evidence,
+        )
+        self._apply_projection_overrides(projection)
+        return [self.apply_to_row(row) for row in rows]
+
+    def clear_projection_for_case(self, case_id: str) -> list[str]:
+        resolved_case_id = str(case_id or "").strip()
+        if not resolved_case_id:
+            return []
+        cleared_row_ids: list[str] = []
+        for row_id, override in list(self._row_overrides.items()):
+            if not self._is_projection_override_for_case(override, resolved_case_id):
+                continue
+            del self._row_overrides[row_id]
+            cleared_row_ids.append(row_id)
+        return cleared_row_ids
+
+    def clear_projection_for_relation(self, case_id: str) -> list[str]:
+        resolved_case_id = str(case_id or "").strip()
+        if not resolved_case_id:
+            return []
+        cleared_row_ids: list[str] = []
+        for row_id, override in list(self._row_overrides.items()):
+            if not self._is_projection_override_for_case(override, resolved_case_id):
+                continue
+            if str(override.get("projection_kind") or "") != "pair_relation":
+                continue
+            del self._row_overrides[row_id]
+            cleared_row_ids.append(row_id)
+        return cleared_row_ids
 
     def confirm_link(self, *, rows: list[dict[str, Any]], case_id: str | None = None) -> tuple[str, list[dict[str, Any]]]:
         resolved_case_id = case_id or self._first_case_id(rows) or self._next_case_id()
@@ -288,6 +381,33 @@ class WorkbenchOverrideService:
         self._case_counter_value = next(self._case_counter)
         return f"CASE-AUTO-{self._case_counter_value:04d}"
 
+    def _apply_projection_overrides(self, projection: dict[str, Any]) -> None:
+        row_overrides = projection.get("row_overrides")
+        if not isinstance(row_overrides, dict):
+            return
+        group_metadata = projection.get("group_metadata")
+        processed_summary = projection.get("processed_exception_summary")
+        for row_id, override in row_overrides.items():
+            if not isinstance(override, dict):
+                continue
+            normalized_override = deepcopy(override)
+            if isinstance(group_metadata, dict):
+                normalized_override["group_metadata"] = deepcopy(group_metadata)
+            if isinstance(processed_summary, dict):
+                normalized_override["processed_exception_summary"] = deepcopy(processed_summary)
+            self._row_overrides[str(row_id)] = normalized_override
+
+    @staticmethod
+    def _is_projection_override_for_case(override: Any, case_id: str) -> bool:
+        if not isinstance(override, dict):
+            return False
+        if override.get("projection_version") != EXCEPTION_PROJECTION_VERSION:
+            return False
+        return case_id in {
+            str(override.get("case_id") or "").strip(),
+            str(override.get("exception_case_id") or "").strip(),
+        }
+
     @staticmethod
     def _first_case_id(rows: list[dict[str, Any]]) -> str | None:
         for row in rows:
@@ -317,6 +437,20 @@ class WorkbenchOverrideService:
             return
         if "备注" in summary_fields:
             summary_fields["备注"] = note
+
+    @staticmethod
+    def _merge_text_lists(*values: Any) -> list[str]:
+        merged: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            items = value if isinstance(value, list) else [value]
+            for item in items:
+                text = str(item or "").strip()
+                if not text or text in seen:
+                    continue
+                seen.add(text)
+                merged.append(text)
+        return merged
 
     @staticmethod
     def _normalize_row_overrides(row_overrides: dict[str, Any]) -> dict[str, dict[str, Any]]:

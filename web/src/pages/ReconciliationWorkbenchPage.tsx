@@ -4,9 +4,9 @@ import ActionStatusModal from "../components/workbench/ActionStatusModal";
 import CancelProcessedExceptionModal from "../components/workbench/CancelProcessedExceptionModal";
 import DetailDrawer from "../components/workbench/DetailDrawer";
 import IgnoredItemsModal from "../components/workbench/IgnoredItemsModal";
-import OaBankExceptionModal from "../components/workbench/OaBankExceptionModal";
 import ProcessedExceptionsModal from "../components/workbench/ProcessedExceptionsModal";
 import RelationPreviewTriPane from "../components/workbench/RelationPreviewTriPane";
+import WorkbenchExceptionModal from "../components/workbench/WorkbenchExceptionModal";
 import WorkbenchZone from "../components/workbench/WorkbenchZone";
 import type { WorkbenchPane } from "../components/workbench/ResizableTriPane";
 import { useAppChrome } from "../contexts/AppChromeContext";
@@ -19,18 +19,15 @@ import {
   confirmWorkbenchCashPassThrough,
   confirmWorkbenchCashTicketPurchase,
   confirmWorkbenchLink,
-  confirmWorkbenchPersonalAdvanceRepayment,
   fetchIgnoredWorkbenchRows,
   fetchWorkbenchOaSyncStatus,
   fetchWorkbenchRowDetail,
   fetchWorkbenchSettings,
   fetchWorkbenchWithProgress,
   ignoreWorkbenchRow,
-  markWorkbenchException,
   previewWorkbenchConfirmLink,
   previewWorkbenchWithdrawLink,
   saveWorkbenchSettings,
-  submitOaBankException,
   unignoreWorkbenchRow,
   withdrawWorkbenchLink,
 } from "../features/workbench/api";
@@ -43,11 +40,11 @@ import {
   type WorkbenchZoneDisplayState,
 } from "../features/workbench/groupDisplayModel";
 import { reorderWorkbenchColumnLayout, type WorkbenchColumnDropPosition } from "../features/workbench/columnLayout";
-import { buildOaBankExceptionOptions } from "../features/workbench/oaBankExceptionOptions";
 import type {
   IgnoredWorkbenchData,
   WorkbenchCandidateGroup,
   WorkbenchData,
+  WorkbenchExceptionApplyResult,
   WorkbenchOaSyncStatus,
   WorkbenchRecord,
   WorkbenchRelationPreview,
@@ -69,7 +66,7 @@ type RelationPreviewDialogState = {
   caseId?: string;
 };
 
-type OaBankExceptionDialogState = {
+type WorkbenchExceptionDialogState = {
   rows: WorkbenchRecord[];
 };
 
@@ -189,7 +186,7 @@ export default function ReconciliationWorkbenchPage() {
   const [workbenchSettings, setWorkbenchSettings] = useState<WorkbenchSettings | null>(null);
   const [ignoredModalOpen, setIgnoredModalOpen] = useState(false);
   const [processedExceptionsModalOpen, setProcessedExceptionsModalOpen] = useState(false);
-  const [oaBankExceptionDialog, setOaBankExceptionDialog] = useState<OaBankExceptionDialogState | null>(null);
+  const [workbenchExceptionDialog, setWorkbenchExceptionDialog] = useState<WorkbenchExceptionDialogState | null>(null);
   const [cashTicketPurchaseDialog, setCashTicketPurchaseDialog] = useState<CashTicketPurchaseDialogState | null>(null);
   const [cancelProcessedExceptionDialog, setCancelProcessedExceptionDialog] = useState<CancelProcessedExceptionDialogState | null>(null);
   const pairedDisplaySession = usePageSessionState<WorkbenchZoneDisplayState>({
@@ -489,10 +486,6 @@ export default function ReconciliationWorkbenchPage() {
 
   const applyLocalWithdrawLink = useCallback((rowIds: string[], afterGroups: WorkbenchCandidateGroup[]) => {
     setWorkbenchData((current) => (current ? updateWorkbenchAfterWithdrawLink(current, rowIds, afterGroups) : current));
-  }, []);
-
-  const applyLocalHandledException = useCallback((rowIds: string[], exceptionCode: string, label: string) => {
-    setWorkbenchData((current) => (current ? updateWorkbenchAfterHandledException(current, rowIds, exceptionCode, label) : current));
   }, []);
 
   const applyLocalCancelException = useCallback((rowIds: string[]) => {
@@ -877,30 +870,20 @@ export default function ReconciliationWorkbenchPage() {
     setCancelProcessedExceptionDialog(null);
   };
 
-  const openOaBankExceptionDialog = useCallback((rows: WorkbenchRecord[]) => {
+  const openWorkbenchExceptionDialog = useCallback((rows: WorkbenchRecord[]) => {
     if (!ensureCanWriteWorkbench()) {
       return;
     }
-    const summary = summarizeOaBankRows(rows);
-    const optionState = buildOaBankExceptionOptions(summary);
-    if (summary.invoiceCount > 0) {
-      openActionResultDialog("OA与银行流水异常处理暂不支持发票，请先取消发票选择。");
-      return;
-    }
-    if (summary.oaCount === 0 && summary.bankCount === 0) {
-      openActionResultDialog("请先选择 OA 或银行流水记录。");
-      return;
-    }
-    if (optionState.mode === "invalid" || optionState.options.length === 0) {
-      openActionResultDialog("当前选择无法进入 OA/流水异常处理。");
+    if (rows.length === 0) {
+      openActionResultDialog("请先选择待处理记录。");
       return;
     }
     handleCloseDetail();
-    setOaBankExceptionDialog({ rows });
+    setWorkbenchExceptionDialog({ rows });
   }, [ensureCanWriteWorkbench, handleCloseDetail, openActionResultDialog]);
 
-  const handleCloseOaBankExceptionDialog = () => {
-    setOaBankExceptionDialog(null);
+  const handleCloseWorkbenchExceptionDialog = () => {
+    setWorkbenchExceptionDialog(null);
   };
 
   const runBlockingAction = useCallback(async ({
@@ -935,69 +918,13 @@ export default function ReconciliationWorkbenchPage() {
     }
   }, [handleCloseDetail]);
 
-  const handleSubmitOaBankException = async ({
-    rows,
-    exceptionCode,
-    exceptionLabel,
-    comment,
-  }: {
-    rows: WorkbenchRecord[];
-    exceptionCode: string;
-    exceptionLabel: string;
-    comment: string;
-  }) => {
-    if (!ensureCanWriteWorkbench()) {
-      return;
+  const handleWorkbenchExceptionApplied = useCallback((result: WorkbenchExceptionApplyResult) => {
+    clearOpenSelection();
+    if (result.workbenchRefreshRequired) {
+      refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
     }
-    setOaBankExceptionDialog(null);
-    await runBlockingAction({
-      loadingMessage: "正在执行异常处理...",
-      action: async () => {
-        const result = await submitOaBankException({
-          month: WORKBENCH_VIEW_MONTH,
-          rowIds: rows.map((row) => row.id),
-          exceptionCode,
-          exceptionLabel,
-          comment,
-        });
-        clearOpenSelection();
-        applyLocalHandledException(
-          rows.map((row) => row.id),
-          exceptionCode,
-          exceptionLabel,
-        );
-        return result.message;
-      },
-    });
-  };
-
-  const handleConfirmFromOaBankException = async (rows: WorkbenchRecord[]) => {
-    if (!ensureCanWriteWorkbench()) {
-      return;
-    }
-    setOaBankExceptionDialog(null);
-    await openConfirmPreview(rows);
-  };
-
-  const handleSettlePersonalAdvanceRepayment = async (rows: WorkbenchRecord[], comment: string) => {
-    if (!ensureCanWriteWorkbench()) {
-      return;
-    }
-    setOaBankExceptionDialog(null);
-    await runBlockingAction({
-      loadingMessage: "正在确认还清个人暂借款...",
-      action: async () => {
-        const result = await confirmWorkbenchPersonalAdvanceRepayment({
-          month: WORKBENCH_VIEW_MONTH,
-          rowIds: rows.map((row) => row.id),
-          note: comment,
-        });
-        clearOpenSelection();
-        refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
-        return result.message || "已确认还清个人暂借款。";
-      },
-    });
-  };
+    setLastActionMessage(result.message ?? "已提交统一异常处理。");
+  }, [clearOpenSelection, refreshWorkbenchDataInBackground]);
 
   const handleRowAction = useCallback(async (row: WorkbenchRecord, action: WorkbenchInlineAction) => {
     if (action === "relation-status") {
@@ -1017,23 +944,7 @@ export default function ReconciliationWorkbenchPage() {
     }
 
     if (action === "flag-exception") {
-      if (row.recordType !== "invoice") {
-        openOaBankExceptionDialog([row]);
-        return;
-      }
-      await runBlockingAction({
-        loadingMessage: "正在执行异常处理...",
-        action: async () => {
-          const result = await markWorkbenchException({
-            month: WORKBENCH_VIEW_MONTH,
-            rowId: row.id,
-            exceptionCode: row.recordType === "invoice" ? "pending_collection" : "manual_review",
-            comment: `由关联台标记异常：${row.id}`,
-          });
-          refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
-          return result.message;
-        },
-      });
+      openWorkbenchExceptionDialog([row]);
       return;
     }
 
@@ -1104,7 +1015,7 @@ export default function ReconciliationWorkbenchPage() {
     }
 
     if (action === "handle-exception") {
-      openOaBankExceptionDialog([row]);
+      openWorkbenchExceptionDialog([row]);
       return;
     }
 
@@ -1117,11 +1028,10 @@ export default function ReconciliationWorkbenchPage() {
     ensureCanWriteWorkbench,
     openActionResultDialog,
     openCancelProcessedExceptionDialog,
-    openOaBankExceptionDialog,
+    openWorkbenchExceptionDialog,
     applyLocalCancelException,
     applyLocalConfirmLink,
     applyLocalWithdrawLink,
-    applyLocalHandledException,
     applyLocalIgnoreRow,
     refreshWorkbenchDataInBackground,
     runBlockingAction,
@@ -1298,33 +1208,7 @@ export default function ReconciliationWorkbenchPage() {
       openActionResultDialog("请先选择待处理记录。");
       return;
     }
-    const containsInvoice = selectedOpenRows.some((row) => row.recordType === "invoice");
-    const containsOaOrBank = selectedOpenRows.some((row) => row.recordType === "oa" || row.recordType === "bank");
-    if (containsInvoice && containsOaOrBank) {
-      openActionResultDialog("OA与银行流水异常处理暂不支持发票，请先取消发票选择。");
-      return;
-    }
-    if (containsInvoice) {
-      await runBlockingAction({
-        loadingMessage: "正在执行异常处理...",
-        action: async () => {
-          await Promise.all(
-            selectedOpenRows.map((row) =>
-              markWorkbenchException({
-                month: WORKBENCH_VIEW_MONTH,
-                rowId: row.id,
-                exceptionCode: "pending_collection",
-                comment: `由关联台批量标记异常：${row.id}`,
-              })),
-          );
-          clearOpenSelection();
-          refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
-          return `已对 ${selectedOpenRows.length} 条记录执行异常处理。`;
-        },
-      });
-      return;
-    }
-    openOaBankExceptionDialog(selectedOpenRows);
+    openWorkbenchExceptionDialog(selectedOpenRows);
   };
 
   const handleClearPairedSelection = () => {
@@ -1617,19 +1501,12 @@ export default function ReconciliationWorkbenchPage() {
           onConfirm={handleConfirmCancelProcessedException}
         />
       ) : null}
-      {oaBankExceptionDialog ? (
-        <OaBankExceptionModal
-          rows={oaBankExceptionDialog.rows}
-          onClose={handleCloseOaBankExceptionDialog}
-          onConfirmLink={() => handleConfirmFromOaBankException(oaBankExceptionDialog.rows)}
-          onSettleAsPair={({ comment }) => handleSettlePersonalAdvanceRepayment(oaBankExceptionDialog.rows, comment)}
-          onSubmitException={({ exceptionCode, exceptionLabel, comment }) =>
-            handleSubmitOaBankException({
-              rows: oaBankExceptionDialog.rows,
-              exceptionCode,
-              exceptionLabel,
-              comment,
-            })}
+      {workbenchExceptionDialog ? (
+        <WorkbenchExceptionModal
+          month={WORKBENCH_VIEW_MONTH}
+          rows={workbenchExceptionDialog.rows}
+          onApplied={handleWorkbenchExceptionApplied}
+          onClose={handleCloseWorkbenchExceptionDialog}
         />
       ) : null}
       {cashTicketPurchaseDialog ? (
@@ -1797,22 +1674,6 @@ function RelationPreviewDialog({
         </footer>
       </section>
     </div>
-  );
-}
-
-function summarizeOaBankRows(rows: WorkbenchRecord[]) {
-  return rows.reduce(
-    (summary, row) => {
-      if (row.recordType === "oa") {
-        summary.oaCount += 1;
-      } else if (row.recordType === "bank") {
-        summary.bankCount += 1;
-      } else if (row.recordType === "invoice") {
-        summary.invoiceCount += 1;
-      }
-      return summary;
-    },
-    { oaCount: 0, bankCount: 0, invoiceCount: 0 },
   );
 }
 
@@ -2023,25 +1884,6 @@ function removeRowsFromWorkbenchGroups(groups: WorkbenchCandidateGroup[], rowIds
   });
 }
 
-function updateWorkbenchAfterHandledException(data: WorkbenchData, rowIds: string[], exceptionCode: string, label: string) {
-  const targetRowIds = new Set(rowIds);
-  const nextOpenGroups = data.open.groups.map((group) => ({
-    ...group,
-    rows: {
-      oa: group.rows.oa.map((row) => targetRowIds.has(row.id) ? updateWorkbenchRowForException(row, exceptionCode, label) : row),
-      bank: group.rows.bank.map((row) => targetRowIds.has(row.id) ? updateWorkbenchRowForException(row, exceptionCode, label) : row),
-      invoice: group.rows.invoice.map((row) => targetRowIds.has(row.id) ? updateWorkbenchRowForException(row, exceptionCode, label) : row),
-    },
-  }));
-
-  return rebuildWorkbenchSummary({
-    ...data,
-    open: {
-      groups: nextOpenGroups,
-    },
-  });
-}
-
 function updateWorkbenchAfterCancelException(data: WorkbenchData, rowIds: string[]) {
   const targetRowIds = new Set(rowIds);
   const nextOpenGroups = data.open.groups.map((group) => ({
@@ -2159,30 +2001,6 @@ function updateWorkbenchRowForLinked(row: WorkbenchRecord, caseId: string): Work
       ...row.tableValues,
       reconciliationStatus: row.recordType === "oa" ? "完全关联" : row.tableValues.reconciliationStatus,
       invoiceRelationStatus: row.recordType === "bank" ? "完全关联" : row.tableValues.invoiceRelationStatus,
-    },
-  };
-}
-
-function updateWorkbenchRowForException(row: WorkbenchRecord, code: string, label: string): WorkbenchRecord {
-  const availableActions = row.recordType === "bank"
-    ? ["detail", "view_relation", "cancel_link", "handle_exception"]
-    : row.recordType === "invoice"
-      ? ["detail", "confirm_link", "mark_exception", "ignore"]
-      : ["detail", "confirm_link", "mark_exception"];
-
-  return {
-    ...row,
-    caseId: undefined,
-    status: label,
-    statusCode: code,
-    statusTone: "danger",
-    exceptionHandled: true,
-    availableActions,
-    actionVariant: row.recordType === "bank" ? "bank-review" : "confirm-exception",
-    tableValues: {
-      ...row.tableValues,
-      reconciliationStatus: row.recordType === "oa" ? label : row.tableValues.reconciliationStatus,
-      invoiceRelationStatus: row.recordType === "bank" ? label : row.tableValues.invoiceRelationStatus,
     },
   };
 }

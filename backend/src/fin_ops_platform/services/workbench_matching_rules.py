@@ -34,7 +34,7 @@ GENERIC_COUNTERPARTY_NAMES = {
 }
 GENERIC_SUMMARY_TERMS = {"报销", "转账", "付款", "支付", "费用", "代付", "批量"}
 TEXT_SPLIT_RE = re.compile(r"[\s,，.。;；:：、/\\|()（）\[\]【】{}<>《》\"'“”‘’+-]+")
-WORKBENCH_MATCHING_RULES_VERSION = "2026-05-09-cross-month-oa-attachment-bank"
+WORKBENCH_MATCHING_RULES_VERSION = "2026-05-11-deterministic-row-grouping"
 
 
 class WorkbenchMatchingRules:
@@ -496,20 +496,17 @@ class WorkbenchMatchingRules:
                 if self._direction(bank_row) != self._direction(invoice_row):
                     continue
                 same_counterparty = self._counterparties_compatible(bank_row, invoice_row, require_known=True)
-                rule_code = "exact_counterparty_amount_one_to_one" if same_counterparty else "bank_invoice_exact_amount"
+                if not same_counterparty:
+                    continue
                 candidates.append(
                     self._candidate(
                         scope_month,
-                        rule_code=rule_code,
+                        rule_code="exact_counterparty_amount_one_to_one",
                         rows=[bank_row, invoice_row],
-                        status="auto_closed" if same_counterparty else "needs_review",
-                        confidence="high" if same_counterparty else "medium",
+                        status="auto_closed",
+                        confidence="high",
                         amount=bank_amount,
-                        explanation=(
-                            "Counterparty, direction, and amount matched exactly."
-                            if same_counterparty
-                            else "Bank transaction and invoice amount matched exactly."
-                        ),
+                        explanation="Counterparty, direction, and amount matched exactly.",
                         source_versions=source_versions,
                     )
                 )

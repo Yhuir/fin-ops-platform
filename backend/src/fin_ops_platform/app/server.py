@@ -73,7 +73,6 @@ from fin_ops_platform.services.ledgers import LedgerReminderService
 from fin_ops_platform.services.live_workbench_service import LiveWorkbenchService
 from fin_ops_platform.services.matching import MatchingEngineService
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, load_mongo_oa_settings
-from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
 from fin_ops_platform.services.oa_identity_service import (
     OAIdentityConfigurationError,
     OAIdentityService,
@@ -108,7 +107,13 @@ from fin_ops_platform.services.workbench_matching_rules import (
     WORKBENCH_MATCHING_RULES_VERSION,
     WorkbenchMatchingRules,
 )
+from fin_ops_platform.services.workbench_exception_application_service import (
+    WorkbenchExceptionApplicationConflict,
+    WorkbenchExceptionApplicationService,
+)
 from fin_ops_platform.services.workbench_exception_case_service import WorkbenchExceptionCaseService
+from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_PROJECTION_VERSION
+from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as WORKBENCH_EXCEPTION_RULE_VERSION
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
@@ -126,7 +131,7 @@ OA_INVOICE_OFFSET_TAG = "冲"
 CASH_PASS_THROUGH_MODE = "cash_pass_through"
 CASH_TICKET_PURCHASE_MODE = "cash_ticket_purchase"
 PERSONAL_ADVANCE_REPAYMENT_MODE = "personal_advance_repayment_settlement"
-WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-09-cross-month-oa-attachment-bank"
+WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-11-oa-attachment-source-groups"
 SYSTEM_AUTO_PAIR_RELATION_MODES = {
     "salary_personal_auto_match",
     "internal_transfer_pair",
@@ -344,9 +349,11 @@ class Application:
             read_model_service=self._workbench_read_model_service,
             rules=self._workbench_matching_rules,
             special_rule_service=self._workbench_special_pair_rule_service,
+            exception_case_service=self._workbench_exception_case_service,
             settings_provider=self._workbench_matching_settings,
             source_versions_provider=self._workbench_matching_source_versions,
         )
+        self._configure_workbench_exception_application_service()
         self._workbench_action_service = WorkbenchActionService(self._workbench_query_service)
         self._live_workbench_service = LiveWorkbenchService(
             self._import_service,
@@ -425,6 +432,15 @@ class Application:
         if isinstance(oa_adapter, MongoOAAdapter):
             oa_adapter.set_attachment_invoice_cache_updated_callback(self._handle_oa_attachment_invoice_cache_updated)
         self._tax_api_routes = TaxApiRoutes(self._tax_offset_service)
+
+    def _configure_workbench_exception_application_service(self) -> None:
+        self._workbench_exception_application_service = WorkbenchExceptionApplicationService(
+            row_provider=lambda month, row_ids: self._resolve_live_rows_direct(row_ids, month_hint=month),
+            case_service=self._workbench_exception_case_service,
+            pair_relation_service=self._workbench_pair_relation_service,
+            candidate_match_service=self._workbench_candidate_match_service,
+            source_versions_provider=self._workbench_matching_source_versions,
+        )
 
     def _reload_runtime_services(self) -> None:
         self._initialize_runtime_services(self._load_persisted_state())
@@ -628,6 +644,10 @@ class Application:
         if method == "GET" and route_path.startswith("/api/workbench/rows/"):
             row_id = route_path.rsplit("/", 1)[-1]
             return self._handle_api_workbench_row_detail(row_id)
+        if method == "POST" and route_path == "/api/workbench/exception/preview":
+            return self._handle_api_workbench_exception_preview(body)
+        if method == "POST" and route_path == "/api/workbench/exception/apply":
+            return self._handle_api_workbench_exception_apply(body, request_id=request_id)
         if method == "POST" and route_path == "/api/workbench/actions/confirm-link":
             response = self._handle_api_workbench_confirm_link(body, request_id=request_id)
             self._emit_workbench_action_timing(
@@ -897,6 +917,8 @@ class Application:
                 "/api/workbench/settings",
                 "/api/workbench/settings/data-reset",
                 "/api/workbench/rows/{row_id}",
+                "/api/workbench/exception/preview",
+                "/api/workbench/exception/apply",
                 "/api/workbench/actions/confirm-link",
                 "/api/workbench/actions/mark-exception",
                 "/api/workbench/actions/cancel-link",
@@ -2371,6 +2393,80 @@ class Application:
             )
         return result
 
+    def _apply_workbench_exception_application(
+        self,
+        payload: dict[str, object],
+        *,
+        actor: str,
+        request_id: str | None = None,
+        action_name: str = "exception_apply",
+    ) -> dict[str, object]:
+        previous_exception_snapshot = self._workbench_exception_case_service.snapshot()
+        previous_pair_snapshot = self._workbench_pair_relation_service.snapshot()
+        previous_candidate_snapshot = self._workbench_candidate_match_service.snapshot()
+        previous_override_snapshot = self._workbench_override_service.snapshot()
+        result = self._workbench_exception_application_service.apply(payload, actor=actor)
+        row_ids = [
+            str(row_id)
+            for row_id in list(result.get("affected_row_ids") or [])
+            if str(row_id).strip()
+        ]
+        month = str(payload.get("month") or "")
+        rows = self._resolve_live_rows_direct(row_ids, month_hint=month) if row_ids else []
+        relation = result.get("pair_relation")
+        case_payload = result.get("case")
+        if isinstance(case_payload, dict):
+            if isinstance(relation, dict):
+                updated_rows = self._workbench_override_service.apply_relation_projection(
+                    relation,
+                    rows,
+                    case_payload=case_payload,
+                    candidate_evidence=list(result.get("candidate_evidence") or []),
+                )
+            else:
+                updated_rows = self._workbench_override_service.apply_exception_projection(
+                    case_payload,
+                    rows,
+                    candidate_evidence=list(result.get("candidate_evidence") or []),
+                )
+            result["updated_rows"] = updated_rows
+        try:
+            self._save_workbench_exception_cases_snapshot()
+            if isinstance(relation, dict):
+                self._persist_workbench_pair_relations(
+                    changed_case_ids=[str(relation.get("case_id") or "")],
+                )
+            self._save_workbench_overrides_snapshot(changed_row_ids=row_ids)
+            self._persist_workbench_candidate_matches_best_effort(operation=action_name)
+        except Exception as exc:
+            self._workbench_exception_case_service = WorkbenchExceptionCaseService.from_snapshot(previous_exception_snapshot)
+            self._workbench_pair_relation_service = WorkbenchPairRelationService.from_snapshot(previous_pair_snapshot)
+            self._workbench_candidate_match_service = WorkbenchCandidateMatchService.from_snapshot(previous_candidate_snapshot)
+            self._workbench_override_service = WorkbenchOverrideService.from_snapshot(previous_override_snapshot)
+            self._configure_workbench_exception_application_service()
+            raise StatePersistenceError("工作台状态暂时无法保存，请稍后重试。") from exc
+
+        changed_scope_keys = list(
+            self._scope_keys_for_row_ids(
+                month=month,
+                row_ids=row_ids,
+                month_scope=str(relation.get("month_scope") or "") if isinstance(relation, dict) else month,
+            )
+        )
+        self._invalidate_workbench_read_model_scopes(changed_scope_keys)
+        if isinstance(relation, dict):
+            self._schedule_workbench_pair_relation_persist(
+                changed_case_ids=[str(relation.get("case_id") or "")],
+                request_id=request_id,
+                action_name=action_name,
+            )
+        self._schedule_workbench_read_model_persist(
+            changed_scope_keys=changed_scope_keys,
+            request_id=request_id,
+            action_name=action_name,
+        )
+        return result
+
     def _workbench_persistence_unavailable_response(self, exc: StatePersistenceError) -> Response:
         return self._json_response(
             HTTPStatus.SERVICE_UNAVAILABLE,
@@ -2590,6 +2686,7 @@ class Application:
                 scope_key=scope_key,
                 payload=grouped_payload,
                 ignored_rows=ignored_rows,
+                source_versions=self._workbench_read_model_source_versions(),
             )
         if self._state_store is not None:
             self._persist_workbench_read_models_best_effort(
@@ -3741,6 +3838,62 @@ class Application:
             )
         return self._json_response(HTTPStatus.OK, preview)
 
+    def _handle_api_workbench_exception_preview(self, body: str | None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            preview = self._workbench_exception_application_service.preview(payload)
+        except KeyError as exc:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "workbench_row_not_found", "message": str(exc)},
+            )
+        except (TypeError, ValueError) as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_workbench_exception_preview_request", "message": str(exc)},
+            )
+        return self._json_response(HTTPStatus.OK, preview)
+
+    def _handle_api_workbench_exception_apply(
+        self,
+        body: str | None,
+        *,
+        request_id: str | None = None,
+    ) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        freshness_error = self._workbench_write_freshness_guard()
+        if freshness_error is not None:
+            return freshness_error
+        try:
+            result = self._apply_workbench_exception_application(
+                payload,
+                actor=str(payload.get("actor") or payload.get("confirmed_by") or "system"),
+                request_id=request_id,
+                action_name="exception_apply",
+            )
+        except WorkbenchExceptionApplicationConflict as exc:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {"error": exc.code, "message": str(exc), **({"payload": exc.payload} if exc.payload else {})},
+            )
+        except KeyError as exc:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "workbench_row_not_found", "message": str(exc)},
+            )
+        except StatePersistenceError as exc:
+            return self._workbench_persistence_unavailable_response(exc)
+        except (TypeError, ValueError) as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_workbench_exception_apply_request", "message": str(exc)},
+            )
+        return self._json_response(HTTPStatus.OK, result)
+
     def _handle_api_workbench_mark_exception(self, body: str | None) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
@@ -4255,6 +4408,72 @@ class Application:
             )
         return self._json_response(HTTPStatus.OK, result)
 
+    def _handle_legacy_workbench_exception_via_application(
+        self,
+        *,
+        month: str,
+        row_ids: list[str],
+        action_name: str,
+        invalid_error_code: str,
+        legacy_payload: dict[str, object],
+        response_message: str,
+    ) -> Response:
+        try:
+            normalized_row_ids = self._normalize_row_ids(row_ids)
+            preview = self._workbench_exception_application_service.preview(
+                {"month": month, "row_ids": normalized_row_ids}
+            )
+            result = self._apply_workbench_exception_application(
+                {
+                    "month": month,
+                    "row_ids": normalized_row_ids,
+                    "scenario_code": str(preview["scenario"]["scenario_code"]),
+                    "action_code": "manual_review",
+                    "payload": legacy_payload,
+                },
+                actor="system",
+                action_name=action_name,
+            )
+        except WorkbenchExceptionApplicationConflict as exc:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {"error": exc.code, "message": str(exc), **({"payload": exc.payload} if exc.payload else {})},
+            )
+        except KeyError as exc:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "workbench_row_not_found", "message": str(exc)},
+            )
+        except StatePersistenceError as exc:
+            return self._workbench_persistence_unavailable_response(exc)
+        except (TypeError, ValueError) as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": invalid_error_code, "message": str(exc)},
+            )
+
+        case_payload = result.get("case") if isinstance(result.get("case"), dict) else {}
+        case_id = str(case_payload.get("id") or "")
+        updated_rows = list(result.get("updated_rows") or [])
+        affected_row_ids = [
+            str(row_id)
+            for row_id in list(result.get("affected_row_ids") or normalized_row_ids)
+            if str(row_id).strip()
+        ]
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "success": True,
+                "action": action_name,
+                "month": month,
+                "affected_row_ids": affected_row_ids,
+                "updated_rows": updated_rows,
+                "exception_case_id": case_id,
+                "exception_case_ids": [case_id] if case_id else [],
+                "message": response_message,
+            },
+        )
+
     def _handle_live_workbench_confirm_link(
         self,
         payload: dict[str, object],
@@ -4428,53 +4647,17 @@ class Application:
                 {"error": "invalid_mark_exception_request", "message": str(exc)},
             )
 
-        grouped_payload = self._build_api_workbench_payload(month)
-        try:
-            row = self._resolve_live_row(grouped_payload, row_id)
-        except KeyError:
-            return self._json_response(
-                HTTPStatus.NOT_FOUND,
-                {"error": "workbench_row_not_found", "message": row_id},
-            )
-        try:
-            changed_scope_keys = self._scope_keys_for_rows(month=month, rows=[row])
-            def mutation() -> tuple[str, dict[str, object]]:
-                exception_case = self._workbench_exception_case_service.create_exception_case(
-                    rows=[row],
-                    exception_code=exception_code,
-                    exception_label=comment or exception_code,
-                    category=str(row.get("type") or "manual"),
-                    comment=comment,
-                    scope_months=[scope for scope in changed_scope_keys if SEARCH_MONTH_RE.match(scope)],
-                )
-                updated = self._workbench_override_service.mark_exception(
-                    row=row,
-                    exception_code=exception_code,
-                    comment=comment,
-                    exception_case_id=str(exception_case["id"]),
-                )
-                return str(exception_case["id"]), updated
-
-            exception_case_id, updated_row = self._persist_workbench_exception_and_override_change(
-                changed_row_ids=[row_id],
-                mutation=mutation,
-                changed_scope_keys=changed_scope_keys,
-                action_name="mark_exception",
-            )
-        except StatePersistenceError as exc:
-            return self._workbench_persistence_unavailable_response(exc)
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "success": True,
-                "action": "mark_exception",
-                "month": month,
-                "affected_row_ids": [updated_row["id"]],
-                "updated_rows": [updated_row],
-                "exception_case_id": exception_case_id,
-                "exception_case_ids": [exception_case_id],
-                "message": "已标记异常。",
+        return self._handle_legacy_workbench_exception_via_application(
+            month=month,
+            row_ids=[row_id],
+            action_name="mark_exception",
+            invalid_error_code="invalid_mark_exception_request",
+            legacy_payload={
+                "note": comment or "",
+                "legacy_exception_code": exception_code,
+                "legacy_exception_label": comment or exception_code,
             },
+            response_message="已标记异常。",
         )
 
     def _handle_live_workbench_cancel_link(
@@ -4703,59 +4886,30 @@ class Application:
                 {"error": "invalid_update_bank_exception_request", "message": str(exc)},
             )
 
-        grouped_payload = self._build_api_workbench_payload(month)
         try:
-            row = self._resolve_live_row(grouped_payload, row_id)
-        except KeyError:
+            rows = self._resolve_live_rows_direct([row_id], month_hint=month)
+        except KeyError as exc:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
-                {"error": "workbench_row_not_found", "message": row_id},
+                {"error": "workbench_row_not_found", "message": str(exc)},
             )
+        row = rows[0]
         if row.get("type") != "bank":
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_update_bank_exception_request", "message": "update_bank_exception only supports bank rows."},
             )
-        try:
-            changed_scope_keys = self._scope_keys_for_rows(month=month, rows=[row])
-            def mutation() -> tuple[str, dict[str, object]]:
-                exception_case = self._workbench_exception_case_service.create_exception_case(
-                    rows=[row],
-                    exception_code=relation_code,
-                    exception_label=relation_label,
-                    category="bank",
-                    comment=comment,
-                    scope_months=[scope for scope in changed_scope_keys if SEARCH_MONTH_RE.match(scope)],
-                )
-                updated = self._workbench_override_service.update_bank_exception(
-                    row=row,
-                    relation_code=relation_code,
-                    relation_label=relation_label,
-                    comment=comment,
-                    exception_case_id=str(exception_case["id"]),
-                )
-                return str(exception_case["id"]), updated
-
-            exception_case_id, updated_row = self._persist_workbench_exception_and_override_change(
-                changed_row_ids=[row_id],
-                mutation=mutation,
-                changed_scope_keys=changed_scope_keys,
-                action_name="update_bank_exception",
-            )
-        except StatePersistenceError as exc:
-            return self._workbench_persistence_unavailable_response(exc)
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "success": True,
-                "action": "update_bank_exception",
-                "month": month,
-                "affected_row_ids": [updated_row["id"]],
-                "updated_rows": [updated_row],
-                "exception_case_id": exception_case_id,
-                "exception_case_ids": [exception_case_id],
-                "message": "已更新银行异常分类。",
+        return self._handle_legacy_workbench_exception_via_application(
+            month=month,
+            row_ids=[row_id],
+            action_name="update_bank_exception",
+            invalid_error_code="invalid_update_bank_exception_request",
+            legacy_payload={
+                "note": comment or relation_label,
+                "legacy_relation_code": relation_code,
+                "legacy_relation_label": relation_label,
             },
+            response_message="已更新银行异常分类。",
         )
 
     def _handle_live_workbench_oa_bank_exception(self, payload: dict[str, object]) -> Response:
@@ -4779,59 +4933,84 @@ class Application:
                 {"error": "workbench_row_not_found", "message": str(exc)},
             )
 
-        if any(str(row.get("type")) == "invoice" for row in rows):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "invalid_oa_bank_exception_request",
-                    "message": "oa_bank_exception does not support invoice rows.",
-                },
-            )
         if not rows:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_oa_bank_exception_request", "message": "row_ids is required."},
             )
+        if any(str(row.get("type")) == "invoice" for row in rows):
+            return self._handle_live_workbench_oa_bank_exception_with_invoice(
+                month=month,
+                row_ids=row_ids,
+                exception_code=exception_code,
+                exception_label=exception_label,
+                comment=comment,
+            )
 
+        return self._handle_legacy_workbench_exception_via_application(
+            month=month,
+            row_ids=row_ids,
+            action_name="oa_bank_exception",
+            invalid_error_code="invalid_oa_bank_exception_request",
+            legacy_payload={
+                "note": comment or exception_label,
+                "legacy_exception_code": exception_code,
+                "legacy_exception_label": exception_label,
+            },
+            response_message=f"已对 {len(rows)} 条记录执行 OA/流水异常处理。",
+        )
+
+    def _handle_live_workbench_oa_bank_exception_with_invoice(
+        self,
+        *,
+        month: str,
+        row_ids: list[str],
+        exception_code: str,
+        exception_label: str,
+        comment: str | None,
+    ) -> Response:
         try:
-            changed_scope_keys = self._scope_keys_for_rows(month=month, rows=rows)
-            def mutation() -> tuple[str, list[dict[str, object]]]:
-                exception_case = self._workbench_exception_case_service.create_exception_case(
-                    rows=rows,
-                    exception_code=exception_code,
-                    exception_label=exception_label,
-                    comment=comment,
-                    category="oa_bank",
-                    scope_months=[scope for scope in changed_scope_keys if SEARCH_MONTH_RE.match(scope)],
-                )
-                updated = self._workbench_override_service.apply_oa_bank_exception(
-                    rows=rows,
-                    exception_code=exception_code,
-                    exception_label=exception_label,
-                    comment=comment,
-                    exception_case_id=str(exception_case["id"]),
-                )
-                return str(exception_case["id"]), updated
-
-            exception_case_id, updated_rows = self._persist_workbench_exception_and_override_change(
-                changed_row_ids=[str(row["id"]) for row in rows],
-                mutation=mutation,
-                changed_scope_keys=changed_scope_keys,
+            preview = self._workbench_exception_application_service.preview({"month": month, "row_ids": row_ids})
+            result = self._apply_workbench_exception_application(
+                {
+                    "month": month,
+                    "row_ids": row_ids,
+                    "scenario_code": str(preview["scenario"]["scenario_code"]),
+                    "action_code": "manual_review",
+                    "payload": {
+                        "note": comment or exception_label,
+                        "legacy_exception_code": exception_code,
+                        "legacy_exception_label": exception_label,
+                    },
+                },
+                actor="system",
                 action_name="oa_bank_exception",
+            )
+        except WorkbenchExceptionApplicationConflict as exc:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {"error": exc.code, "message": str(exc), **({"payload": exc.payload} if exc.payload else {})},
             )
         except StatePersistenceError as exc:
             return self._workbench_persistence_unavailable_response(exc)
+        except (KeyError, TypeError, ValueError) as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_oa_bank_exception_request", "message": str(exc)},
+            )
+
+        case_payload = result["case"]
         return self._json_response(
             HTTPStatus.OK,
             {
                 "success": True,
                 "action": "oa_bank_exception",
                 "month": month,
-                "affected_row_ids": [row["id"] for row in updated_rows],
-                "updated_rows": updated_rows,
-                "exception_case_id": exception_case_id,
-                "exception_case_ids": [exception_case_id],
-                "message": f"已对 {len(updated_rows)} 条记录执行 OA/流水异常处理。",
+                "affected_row_ids": list(result.get("affected_row_ids") or row_ids),
+                "updated_rows": list(result.get("updated_rows") or []),
+                "exception_case_id": str(case_payload.get("id") or ""),
+                "exception_case_ids": [str(case_payload.get("id") or "")],
+                "message": f"已对 {len(row_ids)} 条记录执行 OA/流水异常处理。",
             },
         )
 
@@ -6419,10 +6598,28 @@ class Application:
             "workbench_read_model_schema_version": WORKBENCH_READ_MODEL_SCHEMA_VERSION,
             "workbench_candidate_match_schema_version": CANDIDATE_MATCH_SCHEMA_VERSION,
             "workbench_matching_rules_version": WORKBENCH_MATCHING_RULES_VERSION,
+            "workbench_exception_rules_version": WORKBENCH_EXCEPTION_RULE_VERSION,
+            "workbench_exception_projection_version": EXCEPTION_PROJECTION_VERSION,
         }
         if parser_version:
             payload["oa_attachment_invoice_parser_version"] = parser_version
         return payload
+
+    def _workbench_read_model_source_versions(self) -> dict[str, object]:
+        return {
+            "exception_rules_version": WORKBENCH_EXCEPTION_RULE_VERSION,
+            "exception_projection_version": EXCEPTION_PROJECTION_VERSION,
+            "case_snapshot_version": WorkbenchReadModelService.snapshot_version(
+                self._workbench_exception_case_service.snapshot()
+            ),
+            "pair_relation_snapshot_version": WorkbenchReadModelService.snapshot_version(
+                self._workbench_pair_relation_service.snapshot()
+            ),
+            "candidate_snapshot_version": WorkbenchReadModelService.snapshot_version(
+                self._workbench_candidate_match_service.snapshot()
+            ),
+            "matching_rules_version": WORKBENCH_MATCHING_RULES_VERSION,
+        }
 
     def _persist_workbench_candidate_matches_best_effort(self, *, operation: str) -> None:
         if self._state_store is None:
@@ -6610,6 +6807,7 @@ class Application:
                 scope_key=scope_key,
                 payload=grouped_payload,
                 ignored_rows=ignored_rows,
+                source_versions=self._workbench_read_model_source_versions(),
             )
             if request_id is not None and action_name is not None:
                 self._emit_workbench_action_timing(
@@ -6716,21 +6914,34 @@ class Application:
         ensure_candidate_matches: bool = False,
     ) -> dict[str, object]:
         read_model_scope_key = self._workbench_read_model_scope_key(month, visibility_key=visibility_key)
-        if ensure_candidate_matches:
-            self._ensure_workbench_candidate_matches_for_scope(
-                month,
-                reason="workbench_read_model_candidate_freshness",
-            )
-
+        read_model_source_versions = self._workbench_read_model_source_versions()
         cached_read_model = self._workbench_read_model_service.get_read_model(read_model_scope_key)
         fallback_read_model: dict[str, object] | None = None
+        candidate_freshness_checked = False
         if isinstance(cached_read_model, dict):
             cached_payload = cached_read_model.get("payload")
             cached_ignored_rows = cached_read_model.get("ignored_rows")
+            cached_source_versions = cached_read_model.get("source_versions")
+            has_source_versions = isinstance(cached_source_versions, dict) and bool(cached_source_versions)
+            is_version_fresh = (not has_source_versions) or self._workbench_read_model_service.is_read_model_fresh(
+                read_model_scope_key,
+                source_versions=read_model_source_versions,
+            )
+            if (
+                ensure_candidate_matches
+                and isinstance(cached_payload, dict)
+                and str(cached_payload.get("workbench_candidate_snapshot_hash") or "").strip()
+            ):
+                self._ensure_workbench_candidate_matches_for_scope(
+                    month,
+                    reason="workbench_read_model_candidate_freshness",
+                )
+                candidate_freshness_checked = True
             if (
                 isinstance(cached_payload, dict)
                 and isinstance(cached_ignored_rows, list)
                 and self._can_use_cached_workbench_payload(cached_payload)
+                and is_version_fresh
             ):
                 return cached_read_model
             if (
@@ -6739,6 +6950,12 @@ class Application:
                 and self._can_fallback_to_stale_workbench_payload(cached_payload)
             ):
                 fallback_read_model = cached_read_model
+
+        if ensure_candidate_matches and not candidate_freshness_checked:
+            self._ensure_workbench_candidate_matches_for_scope(
+                month,
+                reason="workbench_read_model_candidate_freshness",
+            )
 
         raw_payload = self._build_raw_workbench_payload(month)
         relation_payload = self._apply_pair_relations_to_payload(raw_payload)
@@ -6761,6 +6978,7 @@ class Application:
             scope_key=read_model_scope_key,
             payload=grouped_payload,
             ignored_rows=ignored_rows,
+            source_versions=read_model_source_versions,
         )
         if self._state_store is not None:
             self._persist_workbench_read_models_best_effort(
@@ -7072,7 +7290,7 @@ class Application:
 
     def _current_oa_attachment_invoice_parser_version(self) -> str:
         if isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter):
-            return OAAttachmentInvoiceService.PARSER_VERSION
+            return MongoOAAdapter._attachment_invoice_cache_parser_version()
         return ""
 
     def _build_api_workbench_ignored_rows_payload(self, month: str, *, visibility_key: str = "global") -> list[dict[str, object]]:
@@ -7314,6 +7532,13 @@ class Application:
             return False
         if self._cached_payload_needs_oa_invoice_offset_rebuild(payload):
             return False
+        cached_candidate_hash = str(payload.get("workbench_candidate_snapshot_hash") or "").strip()
+        if cached_candidate_hash:
+            expected_candidate_hash = self._workbench_candidate_snapshot_hash(
+                str(payload.get("month") or "all")
+            )
+            if cached_candidate_hash != expected_candidate_hash:
+                return False
         if isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter):
             cached_schema_version = str(payload.get("workbench_read_model_schema_version") or "").strip()
             if cached_schema_version != WORKBENCH_READ_MODEL_SCHEMA_VERSION:
@@ -7554,6 +7779,9 @@ class Application:
                 continue
             if any(row_id in claimed_row_ids for row_id in row_ids):
                 continue
+            applicable_row_ids = [row_id for row_id in row_ids if isinstance(rows_by_id.get(row_id), dict)]
+            if not self._candidate_can_apply_to_rows(candidate, applicable_row_ids):
+                continue
 
             relation = self._candidate_relation_payload(candidate)
             case_id = self._candidate_application_case_id(candidate, row_ids, rows_by_id)
@@ -7578,6 +7806,17 @@ class Application:
                     row["cost_excluded"] = True
             claimed_row_ids.update(row_ids)
         return result
+
+    @staticmethod
+    def _candidate_can_apply_to_rows(candidate: dict[str, object], row_ids: list[str]) -> bool:
+        unique_row_ids = {str(row_id).strip() for row_id in row_ids if str(row_id).strip()}
+        if len(unique_row_ids) <= 1:
+            return True
+        return Application._candidate_is_determined(candidate)
+
+    @staticmethod
+    def _candidate_is_determined(candidate: dict[str, object]) -> bool:
+        return str(candidate.get("status") or "").strip() in {"auto_closed", "incomplete"}
 
     @staticmethod
     def _candidate_application_case_id(

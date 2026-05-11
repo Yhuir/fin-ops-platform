@@ -53,6 +53,16 @@ DEFAULT_OA_IMPORT_SETTINGS = {
     "form_types": [OA_IMPORT_FORM_TYPE_PAYMENT, OA_IMPORT_FORM_TYPE_EXPENSE],
     "statuses": [OA_IMPORT_STATUS_COMPLETED],
 }
+ATTACHMENT_INVOICE_SOURCE_CONTEXT_KEY = "_attachment_invoice_source_context"
+ATTACHMENT_EVIDENCE_CACHE_SCHEMA_VERSION = "2026-05-11-evidence-v1"
+ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION = ATTACHMENT_EVIDENCE_CACHE_SCHEMA_VERSION
+ATTACHMENT_INVOICE_REQUIRED_SOURCE_FIELDS = (
+    "source_expense_row_index",
+    "source_expense_item_id",
+    "source_attachment_key",
+    "source_attachment_name",
+)
+ATTACHMENT_INVOICE_EVIDENCE_TYPES = {"tax_invoice", "machine_invoice", "non_tax_receipt"}
 
 EXPENSE_TYPE_CANDIDATE_KEYS = (
     "feeType",
@@ -767,14 +777,15 @@ class MongoOAAdapter(OAAdapter):
         if not isinstance(items, list) or not items:
             items = [data]
         external_id = self._expense_external_id(data, document)
-        expense_items: list[dict[str, str]] = []
+        expense_items: list[dict[str, Any]] = []
         project_names_summary: list[str] = []
         expense_types_summary: list[str] = []
         expense_contents_summary: list[str] = []
         reimbursement_dates: list[str] = []
         detail_amounts: list[Decimal] = []
-        attachment_files: list[dict[str, object]] = []
+        attachment_file_count = 0
         etc_sources: list[Any] = [data]
+        record_month = self._derive_month(data, document)
         for index, item in enumerate(items):
             if not isinstance(item, dict):
                 continue
@@ -797,16 +808,60 @@ class MongoOAAdapter(OAAdapter):
                 self._append_unique(expense_contents_summary, expense_content)
             if reimbursement_date:
                 reimbursement_dates.append(reimbursement_date)
-            attachment_files.extend(self._attachment_files(item))
+            item_attachment_files = self._attachment_files(item)
+            attachment_file_count += len(item_attachment_files)
+            expense_item_id = self._expense_item_id(
+                external_id=external_id,
+                row_index=row_index,
+                item=item,
+                project_id=project_id,
+                amount=item_amount,
+                reimbursement_date=reimbursement_date,
+            )
+            contextual_attachment_files = self._attachment_files_with_source_context(
+                item_attachment_files,
+                oa_external_id=external_id,
+                source_expense_row_index=row_index,
+                source_expense_item_id=expense_item_id,
+            )
+            item_attachment_pool = self._parse_attachment_evidence_pool(
+                contextual_attachment_files,
+                month=record_month,
+            )
+            item_attachment_evidences = self._dedupe_attachment_evidences(
+                self._bind_attachment_evidences_to_expense_item(
+                    item_attachment_pool["evidences"],
+                    attachment_files=contextual_attachment_files,
+                    source_expense_row_index=row_index,
+                    source_expense_item_id=expense_item_id,
+                )
+            )
+            item_attachment_invoices = self._dedupe_attachment_invoices(
+                self._attachment_invoices_from_evidences(item_attachment_evidences)
+            )
+            item_attachment_artifacts = self._dedupe_attachment_artifacts(
+                self._bind_attachment_artifacts_to_expense_item(
+                    item_attachment_pool["artifacts"],
+                    attachment_files=contextual_attachment_files,
+                    source_expense_row_index=row_index,
+                    source_expense_item_id=expense_item_id,
+                )
+            )
             etc_sources.append(item)
             expense_items.append(
                 {
                     "row_index": row_index,
+                    "expense_item_id": expense_item_id,
                     "project_name": project_name,
                     "amount": item_amount,
                     "expense_type": expense_type or "—",
                     "expense_content": expense_content or "—",
                     "reimbursement_date": reimbursement_date,
+                    "attachment_file_count": str(len(item_attachment_files)),
+                    "attachment_files": [dict(file_entry) for file_entry in item_attachment_files],
+                    "attachment_evidences": item_attachment_evidences,
+                    "attachment_artifacts": item_attachment_artifacts,
+                    "attachment_invoices": item_attachment_invoices,
                 }
             )
 
@@ -827,9 +882,29 @@ class MongoOAAdapter(OAAdapter):
                 "difference": self._format_decimal(difference, decimal_places=self._decimal_places(header_amount_text)),
             }
 
-        record_month = self._derive_month(data, document)
+        attachment_evidences = self._dedupe_attachment_evidences(
+            [
+                dict(evidence)
+                for expense_item in expense_items
+                for evidence in expense_item.get("attachment_evidences", [])
+                if isinstance(evidence, dict)
+            ]
+        )
+        attachment_artifacts = self._dedupe_attachment_artifacts(
+            [
+                dict(artifact)
+                for expense_item in expense_items
+                for artifact in expense_item.get("attachment_artifacts", [])
+                if isinstance(artifact, dict)
+            ]
+        )
         attachment_invoices = self._dedupe_attachment_invoices(
-            self._parse_attachment_invoices(attachment_files, month=record_month)
+            [
+                dict(invoice)
+                for expense_item in expense_items
+                for invoice in expense_item.get("attachment_invoices", [])
+                if isinstance(invoice, dict)
+            ]
         )
         etc_metadata = detect_etc_batch_metadata(*etc_sources)
         real_project_names = self._unique_real_project_names(project_names_summary)
@@ -869,7 +944,9 @@ class MongoOAAdapter(OAAdapter):
         detail_fields.update(
             build_attachment_invoice_detail_fields(
                 attachment_invoices,
-                attachment_file_count=len(attachment_files),
+                attachment_file_count=attachment_file_count,
+                attachment_evidences=attachment_evidences,
+                attachment_artifacts=attachment_artifacts,
             )
         )
         return [
@@ -890,8 +967,10 @@ class MongoOAAdapter(OAAdapter):
                 expense_type=expense_type_summary,
                 expense_content=expense_content_summary,
                 detail_fields=detail_fields,
+                attachment_evidences=attachment_evidences,
+                attachment_artifacts=attachment_artifacts,
                 attachment_invoices=attachment_invoices,
-                attachment_file_count=len(attachment_files),
+                attachment_file_count=attachment_file_count,
                 expense_items=expense_items,
                 amount_source=amount_source,
                 amount_mismatch=amount_mismatch,
@@ -973,14 +1052,318 @@ class MongoOAAdapter(OAAdapter):
             "suffix": suffix,
         }
 
-    def _parse_attachment_invoices(self, files: list[dict[str, object]], *, month: str | None = None) -> list[dict[str, str]]:
-        if not files:
-            return []
-        cache = self._attachment_invoice_cache
-        if cache is None:
+    @staticmethod
+    def _attachment_files_with_source_context(
+        files: list[dict[str, object]],
+        *,
+        oa_external_id: str,
+        source_expense_row_index: str,
+        source_expense_item_id: str,
+    ) -> list[dict[str, object]]:
+        contextual_files: list[dict[str, object]] = []
+        context = {
+            "oa_external_id": clean_string(oa_external_id),
+            "source_expense_row_index": clean_string(source_expense_row_index),
+            "source_expense_item_id": clean_string(source_expense_item_id),
+        }
+        for file_entry in files:
+            if not isinstance(file_entry, dict):
+                continue
+            contextual_file = dict(file_entry)
+            contextual_file[ATTACHMENT_INVOICE_SOURCE_CONTEXT_KEY] = dict(context)
+            contextual_files.append(contextual_file)
+        return contextual_files
+
+    @staticmethod
+    def _expense_item_id(
+        *,
+        external_id: str,
+        row_index: str,
+        item: dict[str, Any],
+        project_id: str,
+        amount: str,
+        reimbursement_date: str,
+    ) -> str:
+        fingerprint = {
+            "external_id": clean_string(external_id),
+            "row_index": clean_string(row_index),
+            "project_id": clean_string(project_id),
+            "amount": clean_string(amount),
+            "reimbursement_date": clean_string(reimbursement_date),
+            "content": clean_string(item.get("feeContent") or item.get("detailCostStatement") or ""),
+        }
+        raw_fingerprint = json.dumps(fingerprint, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        digest = hashlib.sha256(raw_fingerprint.encode("utf-8")).hexdigest()[:12]
+        return f"oa-exp-{clean_string(external_id)}:item:{clean_string(row_index)}:{digest}"
+
+    def _bind_attachment_invoices_to_expense_item(
+        self,
+        invoices: list[dict[str, str]],
+        *,
+        attachment_files: list[dict[str, object]],
+        source_expense_row_index: str,
+        source_expense_item_id: str,
+    ) -> list[dict[str, str]]:
+        if not invoices:
             return []
 
+        files_by_name: dict[str, dict[str, object]] = {}
+        for file_entry in attachment_files:
+            display_name = self._attachment_display_name(file_entry)
+            if display_name:
+                files_by_name.setdefault(display_name, file_entry)
+        fallback_file = attachment_files[0] if len(attachment_files) == 1 else None
+
+        bound_invoices: list[dict[str, str]] = []
+        for invoice in invoices:
+            if not isinstance(invoice, dict):
+                continue
+            bound_invoice = dict(invoice)
+            invoice_attachment_name = clean_string(
+                bound_invoice.get("source_attachment_name")
+                or bound_invoice.get("attachment_name")
+                or ""
+            )
+            source_file = files_by_name.get(invoice_attachment_name) if invoice_attachment_name else fallback_file
+            if source_file is None and invoice_attachment_name:
+                source_attachment_name = invoice_attachment_name
+            elif source_file is not None:
+                source_attachment_name = self._attachment_display_name(source_file)
+            else:
+                source_attachment_name = invoice_attachment_name
+
+            source_attachment_key = (
+                self._source_attachment_key(source_file)
+                if source_file is not None
+                else self._source_attachment_key(
+                    {
+                        "fileName": source_attachment_name,
+                        ATTACHMENT_INVOICE_SOURCE_CONTEXT_KEY: {
+                            "source_expense_row_index": source_expense_row_index,
+                            "source_expense_item_id": source_expense_item_id,
+                        },
+                    }
+                )
+            )
+            bound_invoice["source_expense_row_index"] = clean_string(source_expense_row_index)
+            bound_invoice["source_expense_item_id"] = clean_string(source_expense_item_id)
+            bound_invoice["source_attachment_key"] = source_attachment_key
+            bound_invoice["source_attachment_name"] = source_attachment_name
+            bound_invoice["attachment_name"] = source_attachment_name
+            bound_invoices.append(bound_invoice)
+        self._save_bound_attachment_invoice_cache_entries(bound_invoices, attachment_files)
+        return bound_invoices
+
+    def _bind_attachment_evidences_to_expense_item(
+        self,
+        evidences: list[dict[str, str]],
+        *,
+        attachment_files: list[dict[str, object]],
+        source_expense_row_index: str,
+        source_expense_item_id: str,
+    ) -> list[dict[str, str]]:
+        return self._bind_attachment_rows_to_expense_item(
+            evidences,
+            attachment_files=attachment_files,
+            source_expense_row_index=source_expense_row_index,
+            source_expense_item_id=source_expense_item_id,
+        )
+
+    def _bind_attachment_artifacts_to_expense_item(
+        self,
+        artifacts: list[dict[str, str]],
+        *,
+        attachment_files: list[dict[str, object]],
+        source_expense_row_index: str,
+        source_expense_item_id: str,
+    ) -> list[dict[str, str]]:
+        source_artifacts = artifacts
+        if not source_artifacts:
+            source_artifacts = [
+                self._attachment_artifact_for_file(file_entry, evidences=[])
+                for file_entry in attachment_files
+            ]
+        return self._bind_attachment_rows_to_expense_item(
+            source_artifacts,
+            attachment_files=attachment_files,
+            source_expense_row_index=source_expense_row_index,
+            source_expense_item_id=source_expense_item_id,
+        )
+
+    def _bind_attachment_rows_to_expense_item(
+        self,
+        rows: list[dict[str, str]],
+        *,
+        attachment_files: list[dict[str, object]],
+        source_expense_row_index: str,
+        source_expense_item_id: str,
+    ) -> list[dict[str, str]]:
+        if not rows:
+            return []
+
+        files_by_name: dict[str, dict[str, object]] = {}
+        for file_entry in attachment_files:
+            display_name = self._attachment_display_name(file_entry)
+            if display_name:
+                files_by_name.setdefault(display_name, file_entry)
+        fallback_file = attachment_files[0] if len(attachment_files) == 1 else None
+
+        bound_rows: list[dict[str, str]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            bound_row = dict(row)
+            row_attachment_name = clean_string(
+                bound_row.get("source_attachment_name")
+                or bound_row.get("attachment_name")
+                or bound_row.get("source_attachment_key")
+                or ""
+            )
+            source_file = files_by_name.get(row_attachment_name) if row_attachment_name else fallback_file
+            if source_file is None and row_attachment_name:
+                source_attachment_name = row_attachment_name
+            elif source_file is not None:
+                source_attachment_name = self._attachment_display_name(source_file)
+            else:
+                source_attachment_name = row_attachment_name
+
+            source_attachment_key = (
+                self._source_attachment_key(source_file)
+                if source_file is not None
+                else self._source_attachment_key(
+                    {
+                        "fileName": source_attachment_name,
+                        ATTACHMENT_INVOICE_SOURCE_CONTEXT_KEY: {
+                            "source_expense_row_index": source_expense_row_index,
+                            "source_expense_item_id": source_expense_item_id,
+                        },
+                    }
+                )
+            )
+            bound_row["source_expense_row_index"] = clean_string(source_expense_row_index)
+            bound_row["source_expense_item_id"] = clean_string(source_expense_item_id)
+            bound_row["source_attachment_key"] = source_attachment_key
+            bound_row["source_attachment_name"] = source_attachment_name
+            if source_attachment_name:
+                bound_row["attachment_name"] = source_attachment_name
+            if not clean_string(bound_row.get("evidence_id") or "") and clean_string(bound_row.get("evidence_type") or ""):
+                bound_row["evidence_id"] = self._attachment_evidence_id(bound_row)
+            bound_rows.append(bound_row)
+        return bound_rows
+
+    def _save_bound_attachment_invoice_cache_entries(
+        self,
+        invoices: list[dict[str, str]],
+        attachment_files: list[dict[str, object]],
+    ) -> None:
+        cache = self._attachment_invoice_cache
+        if cache is None or not invoices or not attachment_files:
+            return
+        cache_key_by_source_attachment_key = {
+            self._source_attachment_key(file_entry): self._attachment_invoice_cache_key(file_entry)
+            for file_entry in attachment_files
+        }
+        invoices_by_cache_key: dict[str, list[dict[str, str]]] = {}
+        for invoice in invoices:
+            source_attachment_key = clean_string(invoice.get("source_attachment_key") or "")
+            cache_key = cache_key_by_source_attachment_key.get(source_attachment_key, "")
+            if not cache_key:
+                continue
+            invoices_by_cache_key.setdefault(cache_key, []).append(dict(invoice))
+        for cache_key, cache_invoices in invoices_by_cache_key.items():
+            cache_evidences = [dict(invoice) for invoice in cache_invoices]
+            cache.save_oa_attachment_invoice_cache_entry(
+                cache_key,
+                {
+                    "cache_key": cache_key,
+                    "parser_version": self._attachment_invoice_cache_parser_version(),
+                    "cache_schema_version": ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION,
+                    "evidences": cache_evidences,
+                    "invoices": cache_invoices,
+                    "artifacts": [],
+                    "parsed_at": datetime.now().isoformat(),
+                },
+            )
+
+    @staticmethod
+    def _attachment_display_name(file_entry: dict[str, object]) -> str:
+        file_name = clean_string(file_entry.get("fileName") or file_entry.get("name") or "")
+        file_path = clean_string(file_entry.get("filePath") or file_entry.get("url") or "")
+        return file_name or Path(file_path).name
+
+    @staticmethod
+    def _attachment_source_context(file_entry: dict[str, object]) -> dict[str, str]:
+        context = file_entry.get(ATTACHMENT_INVOICE_SOURCE_CONTEXT_KEY)
+        if not isinstance(context, dict):
+            return {}
+        return {
+            "oa_external_id": clean_string(context.get("oa_external_id") or ""),
+            "source_expense_row_index": clean_string(context.get("source_expense_row_index") or ""),
+            "source_expense_item_id": clean_string(context.get("source_expense_item_id") or ""),
+        }
+
+    @classmethod
+    def _source_attachment_key(cls, file_entry: dict[str, object]) -> str:
+        context = cls._attachment_source_context(file_entry)
+        file_id = clean_string(
+            file_entry.get("fileId")
+            or file_entry.get("file_id")
+            or file_entry.get("id")
+            or file_entry.get("uid")
+            or file_entry.get("attachmentId")
+            or file_entry.get("attachment_id")
+            or ""
+        )
+        file_path = clean_string(
+            file_entry.get("filePath")
+            or file_entry.get("url")
+            or file_entry.get("path")
+            or file_entry.get("downloadUrl")
+            or ""
+        )
+        file_name = cls._attachment_display_name(file_entry)
+        if file_id:
+            identity_kind = "id"
+            identity = file_id
+        elif file_path:
+            identity_kind = "path"
+            identity = file_path
+        else:
+            identity_kind = "name"
+            identity = file_name
+        fingerprint = {
+            "identity_kind": identity_kind,
+            "identity": identity,
+            "suffix": clean_string(file_entry.get("suffix") or Path(file_name or file_path).suffix.lstrip(".")).lower(),
+            "oa_external_id": context.get("oa_external_id", ""),
+            "source_expense_item_id": context.get("source_expense_item_id", ""),
+            "source_expense_row_index": context.get("source_expense_row_index", ""),
+        }
+        raw_fingerprint = json.dumps(fingerprint, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(raw_fingerprint.encode("utf-8")).hexdigest()
+
+    def _parse_attachment_invoices(self, files: list[dict[str, object]], *, month: str | None = None) -> list[dict[str, str]]:
+        return self._parse_attachment_evidence_pool(files, month=month)["invoices"]
+
+    def _parse_attachment_evidence_pool(
+        self,
+        files: list[dict[str, object]],
+        *,
+        month: str | None = None,
+    ) -> dict[str, list[dict[str, str]]]:
+        if not files:
+            return {"evidences": [], "invoices": [], "artifacts": []}
+        cache = self._attachment_invoice_cache
+        if cache is None:
+            artifacts = [
+                self._attachment_artifact_for_file(file_entry, evidences=[])
+                for file_entry in files
+            ]
+            return {"evidences": [], "invoices": [], "artifacts": artifacts}
+
+        cached_evidences: list[dict[str, str]] = []
         cached_invoices: list[dict[str, str]] = []
+        cached_artifacts: list[dict[str, str]] = []
         missing_files: list[tuple[str, dict[str, object]]] = []
         for file_entry in files:
             cache_key = self._attachment_invoice_cache_key(file_entry)
@@ -990,59 +1373,121 @@ class MongoOAAdapter(OAAdapter):
                 if changed:
                     cache.save_oa_attachment_invoice_cache_entry(cache_key, normalized_entry)
                     cached_entry = normalized_entry
+                cached_evidences.extend(
+                    dict(evidence)
+                    for evidence in cached_entry["evidences"]
+                    if isinstance(evidence, dict)
+                )
                 cached_invoices.extend(
                     dict(invoice)
                     for invoice in cached_entry["invoices"]
                     if isinstance(invoice, dict)
                 )
+                cached_artifacts.extend(
+                    dict(artifact)
+                    for artifact in cached_entry["artifacts"]
+                    if isinstance(artifact, dict)
+                )
                 continue
             missing_files.append((cache_key, file_entry))
         if missing_files and self._attachment_invoice_sync_parse_depth > 0:
-            cached_invoices.extend(self._parse_attachment_invoice_files_now(missing_files, month=month))
+            parsed_pool = self._parse_attachment_invoice_files_now(missing_files, month=month)
+            cached_evidences.extend(parsed_pool["evidences"])
+            cached_invoices.extend(parsed_pool["invoices"])
+            cached_artifacts.extend(parsed_pool["artifacts"])
         elif missing_files and self._attachment_invoice_parse_suppression_depth <= 0:
             self._schedule_attachment_invoice_parse(missing_files, month=month)
-        return cached_invoices
+            cached_artifacts.extend(
+                self._attachment_artifact_for_file(file_entry, evidences=[])
+                for _cache_key, file_entry in missing_files
+            )
+        return {
+            "evidences": cached_evidences,
+            "invoices": cached_invoices,
+            "artifacts": cached_artifacts,
+        }
 
     @staticmethod
     def _attachment_invoice_cache_parser_version() -> str:
-        return OAAttachmentInvoiceService.PARSER_VERSION
+        return f"{OAAttachmentInvoiceService.PARSER_VERSION}:{ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION}"
 
     def _is_current_attachment_invoice_cache_entry(self, entry: object) -> bool:
-        return (
+        if not (
             isinstance(entry, dict)
             and entry.get("parser_version") == self._attachment_invoice_cache_parser_version()
+            and entry.get("cache_schema_version") == ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION
+            and isinstance(entry.get("evidences"), list)
             and isinstance(entry.get("invoices"), list)
+            and isinstance(entry.get("artifacts"), list)
+        ):
+            return False
+        evidences = entry.get("evidences", [])
+        invoices = entry.get("invoices", [])
+        artifacts = entry.get("artifacts", [])
+        return (
+            all(isinstance(evidence, dict) and self._attachment_invoice_has_source_fields(evidence) for evidence in evidences)
+            and all(
+            isinstance(invoice, dict) and self._attachment_invoice_has_source_fields(invoice)
+            for invoice in invoices
+            )
+            and all(
+                isinstance(artifact, dict) and self._attachment_invoice_has_source_fields(artifact)
+                for artifact in artifacts
+            )
+        )
+
+    @staticmethod
+    def _attachment_invoice_has_source_fields(invoice: dict[str, object]) -> bool:
+        return all(
+            bool(clean_string(invoice.get(field) or ""))
+            for field in ATTACHMENT_INVOICE_REQUIRED_SOURCE_FIELDS
         )
 
     @staticmethod
     def _normalize_attachment_invoice_cache_entry(entry: dict[str, object]) -> tuple[dict[str, object], bool]:
         normalized_entry = dict(entry if isinstance(entry, dict) else {})
+        evidences = normalized_entry.get("evidences")
         invoices = normalized_entry.get("invoices")
-        if not isinstance(invoices, list):
+        if not isinstance(evidences, list) or not isinstance(invoices, list):
             return normalized_entry, False
 
+        normalized_evidences: list[dict[str, object]] = []
         normalized_invoices: list[dict[str, object]] = []
         changed = False
+        for evidence in evidences:
+            if not isinstance(evidence, dict):
+                continue
+            normalized_evidence = dict(evidence)
+            if MongoOAAdapter._normalize_attachment_amount_fields(normalized_evidence):
+                changed = True
+            normalized_evidences.append(normalized_evidence)
         for invoice in invoices:
             if not isinstance(invoice, dict):
                 continue
             normalized_invoice = dict(invoice)
-            net_amount = clean_string(normalized_invoice.get("net_amount") or "")
-            amount = clean_string(normalized_invoice.get("amount") or "")
-            total_with_tax = clean_string(normalized_invoice.get("total_with_tax") or "")
-            if net_amount and amount != net_amount and (not amount or amount == total_with_tax):
-                normalized_invoice["amount"] = net_amount
+            if MongoOAAdapter._normalize_attachment_amount_fields(normalized_invoice):
                 changed = True
             normalized_invoices.append(normalized_invoice)
+        normalized_entry["evidences"] = normalized_evidences
         normalized_entry["invoices"] = normalized_invoices
         return normalized_entry, changed
 
     @staticmethod
+    def _normalize_attachment_amount_fields(row: dict[str, object]) -> bool:
+        net_amount = clean_string(row.get("net_amount") or "")
+        amount = clean_string(row.get("amount") or "")
+        total_with_tax = clean_string(row.get("total_with_tax") or "")
+        if net_amount and amount != net_amount and (not amount or amount == total_with_tax):
+            row["amount"] = net_amount
+            return True
+        return False
+
+    @staticmethod
     def _attachment_invoice_cache_key(file_entry: dict[str, object]) -> str:
         fingerprint = {
-            "file_name": clean_string(file_entry.get("fileName") or file_entry.get("name") or ""),
-            "file_path": clean_string(file_entry.get("filePath") or file_entry.get("url") or ""),
-            "suffix": clean_string(file_entry.get("suffix") or ""),
+            "cache_schema_version": ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION,
+            "parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
+            "source_attachment_key": MongoOAAdapter._source_attachment_key(file_entry),
             "size": clean_string(file_entry.get("size") or file_entry.get("fileSize") or ""),
             "modified_time": clean_string(
                 file_entry.get("modifiedTime")
@@ -1053,6 +1498,150 @@ class MongoOAAdapter(OAAdapter):
         }
         raw_fingerprint = json.dumps(fingerprint, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(raw_fingerprint.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _attachment_invoice_source_fields(cls, file_entry: dict[str, object]) -> dict[str, str]:
+        context = cls._attachment_source_context(file_entry)
+        source_attachment_key = cls._source_attachment_key(file_entry)
+        source_attachment_name = cls._attachment_display_name(file_entry)
+        source_expense_row_index = context.get("source_expense_row_index") or clean_string(
+            file_entry.get("source_expense_row_index") or ""
+        )
+        if not source_expense_row_index:
+            source_expense_row_index = "0"
+        source_expense_item_id = context.get("source_expense_item_id") or clean_string(
+            file_entry.get("source_expense_item_id") or ""
+        )
+        if not source_expense_item_id:
+            source_expense_item_id = f"unknown-expense-item:{source_attachment_key[:12]}"
+        return {
+            "source_expense_row_index": source_expense_row_index,
+            "source_expense_item_id": source_expense_item_id,
+            "source_attachment_key": source_attachment_key,
+            "source_attachment_name": source_attachment_name,
+        }
+
+    @classmethod
+    def _normalize_parsed_attachment_invoice(
+        cls,
+        invoice: dict[str, object],
+        *,
+        file_entry: dict[str, object],
+    ) -> dict[str, str]:
+        normalized_invoice = cls._normalize_parsed_attachment_evidence(invoice, file_entry=file_entry)
+        if not clean_string(normalized_invoice.get("evidence_type") or ""):
+            normalized_invoice["evidence_type"] = "tax_invoice"
+        return normalized_invoice
+
+    @classmethod
+    def _normalize_parsed_attachment_evidence(
+        cls,
+        evidence: dict[str, object],
+        *,
+        file_entry: dict[str, object],
+    ) -> dict[str, str]:
+        normalized_evidence = {
+            str(key): clean_string(value) if value is not None else ""
+            for key, value in dict(evidence).items()
+        }
+        source_fields = cls._attachment_invoice_source_fields(file_entry)
+        source_attachment_name = (
+            clean_string(normalized_evidence.get("source_attachment_name") or "")
+            or source_fields["source_attachment_name"]
+            or clean_string(normalized_evidence.get("attachment_name") or "")
+        )
+        normalized_evidence.update(source_fields)
+        if source_attachment_name:
+            normalized_evidence["source_attachment_name"] = source_attachment_name
+            normalized_evidence["attachment_name"] = source_attachment_name
+        if not clean_string(normalized_evidence.get("evidence_id") or ""):
+            normalized_evidence["evidence_id"] = cls._attachment_evidence_id(normalized_evidence)
+        return normalized_evidence
+
+    @staticmethod
+    def _attachment_evidence_id(evidence: dict[str, object]) -> str:
+        fingerprint = {
+            "evidence_type": clean_string(evidence.get("evidence_type") or ""),
+            "document_kind": clean_string(evidence.get("document_kind") or ""),
+            "digital_invoice_no": clean_string(evidence.get("digital_invoice_no") or ""),
+            "invoice_code": clean_string(evidence.get("invoice_code") or ""),
+            "invoice_no": clean_string(evidence.get("invoice_no") or ""),
+            "transaction_no": clean_string(evidence.get("transaction_no") or ""),
+            "merchant_order_no": clean_string(evidence.get("merchant_order_no") or ""),
+            "amount": clean_string(evidence.get("amount") or ""),
+            "source_attachment_key": clean_string(evidence.get("source_attachment_key") or ""),
+            "source_region_key": clean_string(evidence.get("source_region_key") or ""),
+        }
+        raw_fingerprint = json.dumps(fingerprint, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(raw_fingerprint.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _attachment_artifact_for_file(
+        cls,
+        file_entry: dict[str, object],
+        *,
+        evidences: list[dict[str, str]],
+    ) -> dict[str, str]:
+        source_fields = cls._attachment_invoice_source_fields(file_entry)
+        source_attachment_name = source_fields["source_attachment_name"]
+        source_attachment_key = source_fields["source_attachment_key"]
+        return {
+            **source_fields,
+            "source_attachment_name": source_attachment_name,
+            "attachment_name": source_attachment_name,
+            "source_attachment_key": source_attachment_key,
+            "file_path": clean_string(
+                file_entry.get("filePath")
+                or file_entry.get("url")
+                or file_entry.get("path")
+                or file_entry.get("downloadUrl")
+                or ""
+            ),
+            "suffix": clean_string(file_entry.get("suffix") or Path(source_attachment_name).suffix.lstrip(".")).lower(),
+            "parse_status": "parsed" if evidences else "no_evidence",
+            "parse_error": "",
+        }
+
+    def _parse_attachment_evidences_from_service(
+        self,
+        files: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        parse_evidences = getattr(self._attachment_invoice_service, "parse_evidences", None)
+        if callable(parse_evidences):
+            return [
+                dict(evidence)
+                for evidence in parse_evidences(files)
+                if isinstance(evidence, dict)
+            ]
+        return [
+            {**dict(invoice), "evidence_type": clean_string(invoice.get("evidence_type") or "tax_invoice")}
+            for invoice in self._attachment_invoice_service.parse_files(files)
+            if isinstance(invoice, dict)
+        ]
+
+    @classmethod
+    def _attachment_invoices_from_evidences(cls, evidences: list[dict[str, str]]) -> list[dict[str, str]]:
+        return [
+            dict(evidence)
+            for evidence in evidences
+            if cls._is_attachment_invoice_evidence(evidence)
+        ]
+
+    @staticmethod
+    def _is_attachment_invoice_evidence(evidence: dict[str, object]) -> bool:
+        evidence_type = clean_string(evidence.get("evidence_type") or "")
+        if evidence_type in ATTACHMENT_INVOICE_EVIDENCE_TYPES:
+            return True
+        if evidence_type:
+            return False
+        return bool(
+            clean_string(
+                evidence.get("digital_invoice_no")
+                or evidence.get("invoice_no")
+                or evidence.get("invoice_code")
+                or ""
+            )
+        )
 
     def _schedule_attachment_invoice_parse(
         self,
@@ -1082,28 +1671,37 @@ class MongoOAAdapter(OAAdapter):
         files: list[tuple[str, dict[str, object]]],
         *,
         month: str | None = None,
-    ) -> list[dict[str, str]]:
+    ) -> dict[str, list[dict[str, str]]]:
         cache = self._attachment_invoice_cache
         if cache is None:
-            return []
+            return {"evidences": [], "invoices": [], "artifacts": []}
+        parsed_evidences: list[dict[str, str]] = []
         parsed_invoices: list[dict[str, str]] = []
+        parsed_artifacts: list[dict[str, str]] = []
         updated = False
         for cache_key, file_entry in files:
-            invoices = [
-                dict(invoice)
-                for invoice in self._attachment_invoice_service.parse_files([file_entry])
-                if isinstance(invoice, dict)
+            evidences = [
+                self._normalize_parsed_attachment_evidence(evidence, file_entry=file_entry)
+                for evidence in self._parse_attachment_evidences_from_service([file_entry])
+                if isinstance(evidence, dict)
             ]
+            invoices = self._dedupe_attachment_invoices(self._attachment_invoices_from_evidences(evidences))
+            artifacts = [self._attachment_artifact_for_file(file_entry, evidences=evidences)]
             cache.save_oa_attachment_invoice_cache_entry(
                 cache_key,
                 {
                     "cache_key": cache_key,
                     "parser_version": self._attachment_invoice_cache_parser_version(),
+                    "cache_schema_version": ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION,
+                    "evidences": evidences,
                     "invoices": invoices,
+                    "artifacts": artifacts,
                     "parsed_at": datetime.now().isoformat(),
                 },
             )
+            parsed_evidences.extend(evidences)
             parsed_invoices.extend(invoices)
+            parsed_artifacts.extend(artifacts)
             updated = True
         if updated:
             if month and month in self._records_cache:
@@ -1111,7 +1709,11 @@ class MongoOAAdapter(OAAdapter):
                 self._records_cache.pop("__all__", None)
             else:
                 self._records_cache.clear()
-        return parsed_invoices
+        return {
+            "evidences": parsed_evidences,
+            "invoices": parsed_invoices,
+            "artifacts": parsed_artifacts,
+        }
 
     def _parse_attachment_invoice_files_in_background(
         self,
@@ -1125,13 +1727,22 @@ class MongoOAAdapter(OAAdapter):
         updated = False
         try:
             for cache_key, file_entry in files:
-                invoices = self._attachment_invoice_service.parse_files([file_entry])
+                evidences = [
+                    self._normalize_parsed_attachment_evidence(evidence, file_entry=file_entry)
+                    for evidence in self._parse_attachment_evidences_from_service([file_entry])
+                    if isinstance(evidence, dict)
+                ]
+                invoices = self._dedupe_attachment_invoices(self._attachment_invoices_from_evidences(evidences))
+                artifacts = [self._attachment_artifact_for_file(file_entry, evidences=evidences)]
                 cache.save_oa_attachment_invoice_cache_entry(
                     cache_key,
                     {
                         "cache_key": cache_key,
                         "parser_version": self._attachment_invoice_cache_parser_version(),
-                        "invoices": [dict(invoice) for invoice in invoices],
+                        "cache_schema_version": ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION,
+                        "evidences": evidences,
+                        "invoices": invoices,
+                        "artifacts": artifacts,
                         "parsed_at": datetime.now().isoformat(),
                     },
                 )
@@ -1533,29 +2144,121 @@ class MongoOAAdapter(OAAdapter):
     def _dedupe_attachment_invoices(invoices: list[dict[str, str]]) -> list[dict[str, str]]:
         deduped: list[dict[str, str]] = []
         seen: set[tuple[str, str]] = set()
-        seen_attachment_names: set[str] = set()
         for invoice in invoices:
             if not isinstance(invoice, dict):
                 continue
-            invoice_no = clean_string(
-                invoice.get("invoice_no")
-                or invoice.get("digital_invoice_no")
-                or invoice.get("invoice_code")
-                or ""
-            )
-            attachment_name = clean_string(invoice.get("attachment_name") or "")
-            if not invoice_no and attachment_name in seen_attachment_names:
+            keys = MongoOAAdapter._attachment_invoice_dedupe_keys(invoice)
+            if any(key in seen for key in keys):
                 continue
-            key = ("invoice", invoice_no) if invoice_no else ("attachment", attachment_name)
-            if not key[1]:
-                key = ("payload", json.dumps(invoice, ensure_ascii=False, sort_keys=True, default=str))
+            seen.update(keys)
+            deduped.append(dict(invoice))
+        return deduped
+
+    @staticmethod
+    def _dedupe_attachment_evidences(evidences: list[dict[str, str]]) -> list[dict[str, str]]:
+        deduped: list[dict[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for evidence in evidences:
+            if not isinstance(evidence, dict):
+                continue
+            if MongoOAAdapter._is_attachment_invoice_evidence(evidence):
+                keys = MongoOAAdapter._attachment_invoice_dedupe_keys(evidence)
+                if any(key in seen for key in keys):
+                    continue
+                seen.update(keys)
+            else:
+                key = MongoOAAdapter._attachment_evidence_dedupe_key(evidence)
+                if key in seen:
+                    continue
+                seen.add(key)
+            deduped.append(dict(evidence))
+        return deduped
+
+    @staticmethod
+    def _dedupe_attachment_artifacts(artifacts: list[dict[str, str]]) -> list[dict[str, str]]:
+        deduped: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for artifact in artifacts:
+            if not isinstance(artifact, dict):
+                continue
+            key = clean_string(artifact.get("source_attachment_key") or "")
+            if not key:
+                key = json.dumps(artifact, ensure_ascii=False, sort_keys=True, default=str)
             if key in seen:
                 continue
             seen.add(key)
-            if attachment_name:
-                seen_attachment_names.add(attachment_name)
-            deduped.append(dict(invoice))
+            deduped.append(dict(artifact))
         return deduped
+
+    @staticmethod
+    def _attachment_evidence_dedupe_key(evidence: dict[str, object]) -> tuple[str, str]:
+        evidence_type = clean_string(evidence.get("evidence_type") or "")
+        if evidence_type in ATTACHMENT_INVOICE_EVIDENCE_TYPES or (
+            not evidence_type and MongoOAAdapter._is_attachment_invoice_evidence(evidence)
+        ):
+            return MongoOAAdapter._attachment_invoice_dedupe_key(evidence)
+        if evidence_type == "payment_receipt":
+            transaction_no = clean_string(evidence.get("transaction_no") or "")
+            if transaction_no:
+                return ("payment_receipt:transaction_no", transaction_no)
+            merchant_order_no = clean_string(evidence.get("merchant_order_no") or "")
+            if merchant_order_no:
+                return ("payment_receipt:merchant_order_no", merchant_order_no)
+            return (
+                "payment_receipt:fallback",
+                json.dumps(
+                    {
+                        "document_kind": clean_string(evidence.get("document_kind") or ""),
+                        "amount": clean_string(evidence.get("amount") or ""),
+                        "merchant_name": clean_string(evidence.get("merchant_name") or ""),
+                        "paid_at": clean_string(evidence.get("paid_at") or ""),
+                        "payment_method": clean_string(evidence.get("payment_method") or ""),
+                        "source_attachment_key": clean_string(evidence.get("source_attachment_key") or ""),
+                        "source_region_key": clean_string(evidence.get("source_region_key") or ""),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            )
+        evidence_id = clean_string(evidence.get("evidence_id") or "")
+        if evidence_id:
+            return (f"{evidence_type or 'unknown'}:evidence_id", evidence_id)
+        return (
+            f"{evidence_type or 'unknown'}:fallback",
+            json.dumps(evidence, ensure_ascii=False, sort_keys=True, default=str),
+        )
+
+    @staticmethod
+    def _attachment_invoice_dedupe_key(invoice: dict[str, object]) -> tuple[str, str]:
+        return MongoOAAdapter._attachment_invoice_dedupe_keys(invoice)[0]
+
+    @staticmethod
+    def _attachment_invoice_dedupe_keys(invoice: dict[str, object]) -> list[tuple[str, str]]:
+        keys: list[tuple[str, str]] = []
+        digital_invoice_no = clean_string(invoice.get("digital_invoice_no") or "")
+        if digital_invoice_no:
+            keys.append(("invoice:digital_invoice_no", digital_invoice_no))
+        invoice_code = clean_string(invoice.get("invoice_code") or "")
+        invoice_no = clean_string(invoice.get("invoice_no") or "")
+        if invoice_code and invoice_no:
+            keys.append(("invoice:code_no", f"{invoice_code}:{invoice_no}"))
+        fallback = {
+            "document_kind": clean_string(invoice.get("document_kind") or ""),
+            "invoice_no": invoice_no,
+            "invoice_code": invoice_code,
+            "amount": clean_string(invoice.get("total_with_tax") or invoice.get("amount") or ""),
+            "seller_name": clean_string(invoice.get("seller_name") or ""),
+            "issue_date": clean_string(invoice.get("issue_date") or ""),
+        }
+        if not invoice_no and not invoice_code and not digital_invoice_no:
+            fallback["source_attachment_name"] = clean_string(invoice.get("source_attachment_name") or invoice.get("attachment_name") or "")
+            fallback["source_region_key"] = clean_string(invoice.get("source_region_key") or "")
+        keys.append((
+            "invoice:fallback",
+            json.dumps(fallback, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        ))
+        return keys
 
     def _sync_import_settings_cache(self) -> None:
         settings = self._current_import_settings()

@@ -7,16 +7,20 @@ from time import perf_counter
 from typing import Any, Callable, Protocol
 
 from fin_ops_platform.services.workbench_candidate_match_service import WorkbenchCandidateMatchService
-from fin_ops_platform.services.workbench_matching_rules import WorkbenchMatchingRules
+from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION, WorkbenchMatchingRules
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
-from fin_ops_platform.services.workbench_special_pair_rule_service import WorkbenchSpecialPairRuleService
+from fin_ops_platform.services.workbench_special_pair_rule_service import (
+    WORKBENCH_SPECIAL_RULES_VERSION,
+    WorkbenchSpecialPairRuleService,
+)
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 LOGGER = logging.getLogger(__name__)
 MANUAL_CONFIRMED_RELATION_MODE = "manual_confirmed"
 ACTIVE_RELATION_STATUS = "active"
+WORKBENCH_EXCEPTION_RULES_VERSION = "2026-05-exception-preview-apply-candidate-contract"
 
 
 class WorkbenchMonthlyRowProvider(Protocol):
@@ -40,6 +44,7 @@ class WorkbenchMatchingOrchestrator:
         read_model_service: WorkbenchReadModelService,
         rules: WorkbenchMatchingRules,
         special_rule_service: WorkbenchSpecialPairRuleService | None = None,
+        exception_case_service: object | None = None,
         settings_provider: Callable[[], dict[str, Any]] | None = None,
         source_versions_provider: Callable[[], dict[str, Any]] | None = None,
         logger: logging.Logger | None = None,
@@ -50,6 +55,7 @@ class WorkbenchMatchingOrchestrator:
         self._read_model_service = read_model_service
         self._rules = rules
         self._special_rule_service = special_rule_service or WorkbenchSpecialPairRuleService()
+        self._exception_case_service = exception_case_service
         self._settings_provider = settings_provider
         self._source_versions_provider = source_versions_provider
         self._logger = logger or LOGGER
@@ -74,6 +80,9 @@ class WorkbenchMatchingOrchestrator:
             "conflict_count": 0,
             "skipped_rule_count": 0,
             "skipped_rules": [],
+            "suppressed_by_exception_case_count": 0,
+            "suppressed_by_pair_relation_count": 0,
+            "candidate_attached_to_exception_case_count": 0,
             "duration_ms": 0,
         }
 
@@ -87,13 +96,16 @@ class WorkbenchMatchingOrchestrator:
             for scope_month in scope_months:
                 summary["current_month"] = scope_month
                 self._candidate_match_service.delete_month(scope_month)
-                held_row_ids = self._manual_confirmed_row_ids(scope_month)
                 month_rows = self._rows_for_scope(scope_month)
+                held_row_ids = self._active_pair_relation_row_ids(scope_month)
+                scoped_held_row_ids = self._row_ids_in_scope(month_rows, held_row_ids)
+                summary["suppressed_by_pair_relation_count"] += len(scoped_held_row_ids)
                 oa_rows = self._exclude_held_rows(month_rows["oa_rows"], held_row_ids)
                 bank_rows = self._exclude_held_rows(month_rows["bank_rows"], held_row_ids)
                 invoice_rows = self._exclude_held_rows(month_rows["invoice_rows"], held_row_ids)
 
                 candidates = self._generate_candidates(scope_month, oa_rows, bank_rows, invoice_rows)
+                candidates = self._suppress_candidates_for_active_exception_cases(candidates, summary)
                 self._accumulate_rule_summary(summary)
                 for candidate in candidates:
                     upserted = self._candidate_match_service.upsert_candidate(candidate)
@@ -211,12 +223,17 @@ class WorkbenchMatchingOrchestrator:
         return payload
 
     def _source_versions(self) -> dict[str, Any]:
+        versions = {
+            "workbench_matching_rules_version": WORKBENCH_MATCHING_RULES_VERSION,
+            "workbench_special_rules_version": WORKBENCH_SPECIAL_RULES_VERSION,
+            "workbench_exception_rules_version": WORKBENCH_EXCEPTION_RULES_VERSION,
+        }
         if self._source_versions_provider is None:
-            return {}
+            return versions
         payload = self._source_versions_provider()
         if not isinstance(payload, dict):
             raise ValueError("source_versions_provider must return a dict.")
-        return payload
+        return {**versions, **payload}
 
     def _rows_for_month(self, row_type: str, scope_month: str) -> list[dict[str, Any]]:
         rows = self._resolve_rows(row_type, scope_month)
@@ -276,7 +293,7 @@ class WorkbenchMatchingOrchestrator:
             "or be callable with a scope month."
         )
 
-    def _manual_confirmed_row_ids(self, scope_month: str) -> set[str]:
+    def _active_pair_relation_row_ids(self, scope_month: str) -> set[str]:
         list_active_relations = getattr(self._pair_relation_service, "list_active_relations", None)
         if not callable(list_active_relations):
             raise ValueError("pair_relation_service must provide list_active_relations().")
@@ -287,8 +304,6 @@ class WorkbenchMatchingOrchestrator:
                 raise ValueError("pair_relation_service returned a non-dict active relation.")
             if str(relation.get("status") or ACTIVE_RELATION_STATUS) != ACTIVE_RELATION_STATUS:
                 continue
-            if str(relation.get("relation_mode") or MANUAL_CONFIRMED_RELATION_MODE) != MANUAL_CONFIRMED_RELATION_MODE:
-                continue
             month_scope = str(relation.get("month_scope") or "all").strip()
             if month_scope not in {"all", scope_month}:
                 continue
@@ -297,6 +312,49 @@ class WorkbenchMatchingOrchestrator:
                 if resolved_row_id:
                     held_row_ids.add(resolved_row_id)
         return held_row_ids
+
+    def _suppress_candidates_for_active_exception_cases(
+        self,
+        candidates: list[dict[str, Any]],
+        summary: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        if self._exception_case_service is None:
+            return candidates
+        resolved_candidates: list[dict[str, Any]] = []
+        for candidate in candidates:
+            row_ids = [str(row_id or "").strip() for row_id in list(candidate.get("row_ids") or []) if str(row_id or "").strip()]
+            case_ids = self._active_exception_case_ids(row_ids)
+            if not case_ids:
+                resolved_candidates.append(candidate)
+                continue
+            summary["candidate_attached_to_exception_case_count"] += 1
+            updated = deepcopy(candidate)
+            updated["consumed_by_case_id"] = case_ids[0]
+            special_metadata = deepcopy(updated.get("special_metadata") if isinstance(updated.get("special_metadata"), dict) else {})
+            special_metadata["active_exception_case_ids"] = case_ids
+            updated["special_metadata"] = special_metadata
+            if str(updated.get("status") or "") == "auto_closed":
+                updated["status"] = "suppressed"
+                updated["suppressed_reason"] = "active_exception_case"
+                summary["suppressed_by_exception_case_count"] += 1
+            resolved_candidates.append(updated)
+        return resolved_candidates
+
+    def _active_exception_case_ids(self, row_ids: list[str]) -> list[str]:
+        if not row_ids:
+            return []
+        case_ids_for_rows = getattr(self._exception_case_service, "case_ids_for_rows", None)
+        if not callable(case_ids_for_rows):
+            raise ValueError("exception_case_service must provide case_ids_for_rows(row_ids).")
+        case_ids = case_ids_for_rows(row_ids)
+        if not isinstance(case_ids, list):
+            raise ValueError("exception_case_service.case_ids_for_rows(row_ids) must return a list.")
+        normalized: list[str] = []
+        for case_id in case_ids:
+            resolved_case_id = str(case_id or "").strip()
+            if resolved_case_id and resolved_case_id not in normalized:
+                normalized.append(resolved_case_id)
+        return normalized
 
     @staticmethod
     def _exclude_held_rows(rows: list[dict[str, Any]], held_row_ids: set[str]) -> list[dict[str, Any]]:
@@ -310,6 +368,18 @@ class WorkbenchMatchingOrchestrator:
             if row_id not in held_row_ids:
                 filtered.append(row)
         return filtered
+
+    @staticmethod
+    def _row_ids_in_scope(month_rows: dict[str, list[dict[str, Any]]], row_ids: set[str]) -> set[str]:
+        if not row_ids:
+            return set()
+        scoped_ids: set[str] = set()
+        for rows in month_rows.values():
+            for row in rows:
+                row_id = str(row.get("id") or row.get("row_id") or "").strip()
+                if row_id in row_ids:
+                    scoped_ids.add(row_id)
+        return scoped_ids
 
     def _invalidate_read_models(self, scope_month: str) -> None:
         delete_read_model = getattr(self._read_model_service, "delete_read_model", None)

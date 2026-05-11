@@ -97,6 +97,41 @@ describe("Workbench candidate grouping layout", () => {
     expect(within(groupRow).getByText("进")).toBeInTheDocument();
   });
 
+  test("renders 248 source OA and three OA attachment invoices in the same horizontal group row", async () => {
+    installMockApiFetch();
+    renderWorkbenchPage();
+
+    const groupRow = await screen.findByTestId("candidate-group-open-case:CASE-202603-OA-ATTACHMENT-248");
+    const oaCell = within(groupRow).getByTestId("candidate-scroll-open-case:CASE-202603-OA-ATTACHMENT-248-oa");
+    const invoiceCell = within(groupRow).getByTestId(
+      "candidate-scroll-open-case:CASE-202603-OA-ATTACHMENT-248-invoice",
+    );
+
+    expect(within(oaCell).getByRole("row", { name: /胡瑢.*248\.00/ })).toBeInTheDocument();
+    expect(within(invoiceCell).getByRole("row", { name: /OAATT-248-001.*100\.00/ })).toBeInTheDocument();
+    expect(within(invoiceCell).getByRole("row", { name: /OAATT-248-002.*96\.00/ })).toBeInTheDocument();
+    expect(within(invoiceCell).getByRole("row", { name: /OAATT-248-003.*52\.00/ })).toBeInTheDocument();
+    expect(within(invoiceCell).getAllByRole("row")).toHaveLength(3);
+
+    expect(screen.queryByRole("row", { name: /胡瑢付款项/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: /付款项\s*[123].*248/ })).not.toBeInTheDocument();
+  });
+
+  test("renders 292 source OA with only one OA attachment invoice in the same horizontal group row", async () => {
+    installMockApiFetch();
+    renderWorkbenchPage();
+
+    const groupRow = await screen.findByTestId("candidate-group-open-case:CASE-202603-OA-ATTACHMENT-292");
+    const oaCell = within(groupRow).getByTestId("candidate-scroll-open-case:CASE-202603-OA-ATTACHMENT-292-oa");
+    const invoiceCell = within(groupRow).getByTestId(
+      "candidate-scroll-open-case:CASE-202603-OA-ATTACHMENT-292-invoice",
+    );
+
+    expect(within(oaCell).getByRole("row", { name: /胡瑢.*292\.00/ })).toBeInTheDocument();
+    expect(within(invoiceCell).getByRole("row", { name: /OAATT-292-001.*292\.00/ })).toBeInTheDocument();
+    expect(within(invoiceCell).getAllByRole("row")).toHaveLength(1);
+  });
+
   test("renders each candidate group as a shared sheet band instead of isolated cards", async () => {
     installMockApiFetch();
     renderWorkbenchPage();

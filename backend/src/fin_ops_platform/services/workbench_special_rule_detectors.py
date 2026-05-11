@@ -7,164 +7,85 @@ from typing import Any
 
 from fin_ops_platform.services.import_file_service import is_company_identity
 from fin_ops_platform.services.live_workbench_service import INTERNAL_TRANSFER_MATCH_WINDOW, clean_account_no
-from fin_ops_platform.services.workbench_special_rule_detectors import (
-    CASH_COUNTERPARTY_KEYWORDS,
-    CASH_FULL_TEXT_KEYWORDS,
-    CASH_TURNOVER_DETECTED,
-    CASH_TURNOVER_TAG,
-    INTERNAL_TRANSFER_PAIR,
-    OA_INVOICE_OFFSET_AUTO_MATCH,
-    OFFSET_TAG,
-    SALARY_PERSONAL_AUTO_MATCH,
-    WORKBENCH_SPECIAL_RULES_VERSION,
-    WorkbenchSpecialRuleDetector,
-)
 
 
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
-class WorkbenchSpecialPairRuleService:
-    def __init__(self, *, detector: WorkbenchSpecialRuleDetector | None = None) -> None:
-        self._detector = detector or WorkbenchSpecialRuleDetector()
+WORKBENCH_SPECIAL_RULES_VERSION = "2026-05-exception-special-rule-detectors"
+SALARY_PERSONAL_AUTO_MATCH = "salary_personal_auto_match"
+INTERNAL_TRANSFER_PAIR = "internal_transfer_pair"
+OA_INVOICE_OFFSET_AUTO_MATCH = "oa_invoice_offset_auto_match"
+CASH_TURNOVER_DETECTED = "cash_turnover_detected"
+CASH_TURNOVER_TAG = "现金往来"
+OFFSET_TAG = "冲"
+CASH_COUNTERPARTY_KEYWORDS = ("陈秀云", "太宏", "韦代连")
+CASH_FULL_TEXT_KEYWORDS = ("张双文公积金", "陈秀云社保")
 
-    def generate_candidates(
+
+class WorkbenchSpecialRuleDetector:
+    def evaluate(
         self,
-        scope_month: str,
+        *,
         oa_rows: list[dict[str, Any]],
         bank_rows: list[dict[str, Any]],
         invoice_rows: list[dict[str, Any]],
-        *,
         settings: dict[str, Any] | None = None,
-        source_versions: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         resolved_settings = settings if isinstance(settings, dict) else {}
-        resolved_versions = deepcopy(source_versions if isinstance(source_versions, dict) else {})
         oa = [self._with_type(row, "oa") for row in oa_rows]
         bank = [self._with_type(row, "bank") for row in bank_rows]
         invoices = [self._with_type(row, "invoice") for row in invoice_rows]
 
-        candidates = [
-            self._candidate_from_evaluation(scope_month, evaluation, resolved_versions)
-            for evaluation in self._detector.evaluate(
-                oa_rows=oa,
-                bank_rows=bank,
-                invoice_rows=invoices,
-                settings=resolved_settings,
-            )
-        ]
-        return self._dedupe_candidates(candidates)
+        evaluations: list[dict[str, Any]] = []
+        evaluations.extend(self._internal_transfer_pair(bank))
+        evaluations.extend(self._salary_personal_auto_match(bank))
+        evaluations.extend(self._oa_invoice_offset_auto_match(oa, invoices, resolved_settings))
+        evaluations.extend(self._cash_turnover_detected(bank))
+        return self._dedupe_evaluations(evaluations)
 
-    def _candidate_from_evaluation(
-        self,
-        scope_month: str,
-        evaluation: dict[str, Any],
-        source_versions: dict[str, Any],
-    ) -> dict[str, Any]:
-        rule_code = str(evaluation.get("rule_code") or "").strip()
-        evidence = deepcopy(evaluation.get("evidence") if isinstance(evaluation.get("evidence"), dict) else {})
-        evidence["rule_code"] = rule_code
-        evidence["confidence"] = str(evaluation.get("confidence") or "").strip()
-        evidence["suggested_action_code"] = str(evaluation.get("suggested_action_code") or "").strip()
-        evidence["display_tags"] = list(evaluation.get("display_tags") or [])
-        special_metadata: dict[str, Any] = {
-            "special_type": rule_code,
-            "cost_policy": str(evaluation.get("cost_policy") or "").strip(),
-            "evidence": evidence,
-        }
-        if rule_code in {INTERNAL_TRANSFER_PAIR, OA_INVOICE_OFFSET_AUTO_MATCH}:
-            special_metadata["cost_excluded"] = True
-        if rule_code == INTERNAL_TRANSFER_PAIR:
-            match_window_hours = evidence.get("match_window_hours")
-            if match_window_hours is not None:
-                special_metadata["match_window_hours"] = match_window_hours
-        if rule_code == CASH_TURNOVER_DETECTED:
-            special_metadata["cost_excluded"] = False
-            special_metadata["matches"] = deepcopy(evidence.get("matches") if isinstance(evidence.get("matches"), list) else [])
-        versions = deepcopy(source_versions)
-        if rule_code == OA_INVOICE_OFFSET_AUTO_MATCH:
-            versions = {**versions, "offset_display_tag": OFFSET_TAG, "offset_relation_mode": "oa_attachment_invoice"}
-        return self._candidate(
-            scope_month,
-            rule_code=rule_code,
-            rows=[
-                {"id": row_id, "type": "oa"}
-                for row_id in list(evaluation.get("oa_row_ids") or [])
-            ]
-            + [
-                {"id": row_id, "type": "bank"}
-                for row_id in list(evaluation.get("bank_row_ids") or [])
-            ]
-            + [
-                {"id": row_id, "type": "invoice"}
-                for row_id in list(evaluation.get("invoice_row_ids") or [])
-            ],
-            status=str(evaluation.get("status") or ""),
-            confidence=str(evaluation.get("confidence") or ""),
-            amount=self._amount_from_value(evaluation.get("amount")) or ZERO,
-            explanation=self._explanation_for_evaluation(evaluation),
-            source_versions=versions,
-            tags=list(evaluation.get("display_tags") or []),
-            special_metadata=special_metadata,
-        )
-
-    @staticmethod
-    def _explanation_for_evaluation(evaluation: dict[str, Any]) -> str:
-        rule_code = str(evaluation.get("rule_code") or "").strip()
-        if rule_code == SALARY_PERSONAL_AUTO_MATCH:
-            return "Detected salary payment to an individual counterparty from bank summary or remark."
-        if rule_code == INTERNAL_TRANSFER_PAIR:
-            return "Detected equal internal transfer between different company bank accounts within the time window."
-        if rule_code == OA_INVOICE_OFFSET_AUTO_MATCH:
-            return "Configured applicant OA attachment invoice auto matched for 冲 display."
-        if rule_code == CASH_TURNOVER_DETECTED:
-            return "Detected bank transaction matching cash turnover hint rules."
-        return "Detected special workbench matching rule evidence."
-
-    def _salary_personal_auto_match(
-        self,
-        scope_month: str,
-        bank_rows: list[dict[str, Any]],
-        source_versions: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        candidates: list[dict[str, Any]] = []
+    def _salary_personal_auto_match(self, bank_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        evaluations: list[dict[str, Any]] = []
         for bank_row in sorted(bank_rows, key=self._row_id):
             if self._direction(bank_row) != "outflow":
                 continue
-            remark = " ".join(str(bank_row.get(field) or "").strip() for field in ("summary", "remark"))
+            summary = str(bank_row.get("summary") or "").strip()
+            remark = str(bank_row.get("remark") or "").strip()
+            text = " ".join(value for value in (summary, remark) if value)
             counterparty = str(bank_row.get("counterparty_name") or "").strip()
-            if "工资" not in remark or not counterparty or is_company_identity(None, counterparty):
+            matched_fields = [
+                field_name
+                for field_name, value in (("summary", summary), ("remark", remark))
+                if "工资" in value
+            ]
+            if not matched_fields or not counterparty or is_company_identity(None, counterparty):
                 continue
             amount = self._amount(bank_row)
             if amount is None:
                 continue
-            candidates.append(
-                self._candidate(
-                    scope_month,
+            evaluations.append(
+                self._evaluation(
                     rule_code=SALARY_PERSONAL_AUTO_MATCH,
-                    rows=[bank_row],
-                    status="auto_closed",
                     confidence="high",
+                    suggested_action_code="auto_close_salary_payment",
+                    rows=[bank_row],
                     amount=amount,
-                    explanation="Detected salary payment to an individual counterparty from bank summary or remark.",
-                    source_versions=source_versions,
-                    tags=["工资"],
-                    special_metadata={
-                        "special_type": SALARY_PERSONAL_AUTO_MATCH,
-                        "cost_policy": "normal",
+                    status="auto_closed",
+                    evidence={
+                        "matched_fields": matched_fields,
+                        "amount": self._format_amount(amount),
+                        "counterparty_name": counterparty,
+                        "summary": text,
                     },
+                    display_tags=["工资"],
+                    cost_policy="normal",
                 )
             )
-        return candidates
+        return evaluations
 
-    def _internal_transfer_pair(
-        self,
-        scope_month: str,
-        bank_rows: list[dict[str, Any]],
-        source_versions: dict[str, Any],
-    ) -> list[dict[str, Any]]:
+    def _internal_transfer_pair(self, bank_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         outflows = sorted((row for row in bank_rows if self._direction(row) == "outflow"), key=self._bank_time_sort_key)
         inflows = sorted((row for row in bank_rows if self._direction(row) == "inflow"), key=self._bank_time_sort_key)
-        candidates: list[dict[str, Any]] = []
+        evaluations: list[dict[str, Any]] = []
         used_ids: set[str] = set()
         for outflow in outflows:
             if self._row_id(outflow) in used_ids or not self._is_company_bank_row(outflow):
@@ -191,35 +112,35 @@ class WorkbenchSpecialPairRuleService:
                     best_match = (delta, inflow)
             if best_match is None:
                 continue
-            inflow = best_match[1]
+            delta, inflow = best_match
             used_ids.update({self._row_id(outflow), self._row_id(inflow)})
-            candidates.append(
-                self._candidate(
-                    scope_month,
+            evaluations.append(
+                self._evaluation(
                     rule_code=INTERNAL_TRANSFER_PAIR,
-                    rows=[outflow, inflow],
-                    status="auto_closed",
                     confidence="high",
+                    suggested_action_code="auto_close_internal_transfer",
+                    rows=[outflow, inflow],
                     amount=outflow_amount,
-                    explanation="Detected equal internal transfer between different company bank accounts within the time window.",
-                    source_versions=source_versions,
-                    tags=["内部往来"],
-                    special_metadata={
-                        "special_type": INTERNAL_TRANSFER_PAIR,
-                        "cost_policy": "exclude_all",
+                    status="auto_closed",
+                    evidence={
+                        "matched_fields": ["amount", "account_no", "pay_receive_time"],
+                        "amount": self._format_amount(outflow_amount),
+                        "outflow_row_id": self._row_id(outflow),
+                        "inflow_row_id": self._row_id(inflow),
+                        "time_delta_seconds": int(delta.total_seconds()),
                         "match_window_hours": int(INTERNAL_TRANSFER_MATCH_WINDOW.total_seconds() // 3600),
                     },
+                    display_tags=["内部往来"],
+                    cost_policy="exclude_all",
                 )
             )
-        return candidates
+        return evaluations
 
     def _oa_invoice_offset_auto_match(
         self,
-        scope_month: str,
         oa_rows: list[dict[str, Any]],
         invoice_rows: list[dict[str, Any]],
         settings: dict[str, Any],
-        source_versions: dict[str, Any],
     ) -> list[dict[str, Any]]:
         applicant_names = {
             str(name).strip()
@@ -228,7 +149,7 @@ class WorkbenchSpecialPairRuleService:
         }
         if not applicant_names:
             return []
-        candidates: list[dict[str, Any]] = []
+        evaluations: list[dict[str, Any]] = []
         oa_by_id = {self._row_id(row): row for row in oa_rows}
         for invoice_row in sorted(invoice_rows, key=self._row_id):
             if str(invoice_row.get("source_kind") or "") != "oa_attachment_invoice":
@@ -243,61 +164,94 @@ class WorkbenchSpecialPairRuleService:
             amount = self._amount(invoice_row) or self._amount(oa_row)
             if amount is None:
                 continue
-            versions = {**source_versions, "offset_display_tag": OFFSET_TAG, "offset_relation_mode": "oa_attachment_invoice"}
-            candidates.append(
-                self._candidate(
-                    scope_month,
+            evaluations.append(
+                self._evaluation(
                     rule_code=OA_INVOICE_OFFSET_AUTO_MATCH,
-                    rows=[oa_row, invoice_row],
-                    status="auto_closed",
                     confidence="high",
+                    suggested_action_code="auto_close_oa_invoice_offset",
+                    rows=[oa_row, invoice_row],
                     amount=amount,
-                    explanation="Configured applicant OA attachment invoice auto matched for 冲 display.",
-                    source_versions=versions,
-                    tags=[OFFSET_TAG],
-                    special_metadata={
-                        "special_type": OA_INVOICE_OFFSET_AUTO_MATCH,
-                        "cost_policy": "exclude_all",
-                        "cost_excluded": True,
+                    status="auto_closed",
+                    evidence={
+                        "matched_fields": ["source_kind", "linked_oa_id", "applicant_name"],
+                        "amount": self._format_amount(amount),
+                        "linked_oa_id": linked_oa_id,
+                        "applicant_name": applicant_name,
                     },
+                    display_tags=[OFFSET_TAG],
+                    cost_policy="exclude_all",
                 )
             )
-        return candidates
+        return evaluations
 
-    def _cash_turnover_detected(
-        self,
-        scope_month: str,
-        bank_rows: list[dict[str, Any]],
-        source_versions: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        candidates: list[dict[str, Any]] = []
+    def _cash_turnover_detected(self, bank_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        evaluations: list[dict[str, Any]] = []
         for bank_row in sorted(bank_rows, key=self._row_id):
             matches = self._cash_turnover_matches(bank_row)
             if not matches:
                 continue
-            amount = self._amount(bank_row)
-            if amount is None:
-                amount = ZERO
-            candidates.append(
-                self._candidate(
-                    scope_month,
+            amount = self._amount(bank_row) or ZERO
+            evaluations.append(
+                self._evaluation(
                     rule_code=CASH_TURNOVER_DETECTED,
-                    rows=[bank_row],
-                    status="needs_review",
                     confidence="medium",
+                    suggested_action_code="review_cash_turnover",
+                    rows=[bank_row],
                     amount=amount,
-                    explanation="Detected bank transaction matching cash turnover hint rules.",
-                    source_versions=source_versions,
-                    tags=[CASH_TURNOVER_TAG],
-                    special_metadata={
-                        "special_type": CASH_TURNOVER_DETECTED,
-                        "cost_policy": "hint_only",
-                        "cost_excluded": False,
+                    status="needs_review",
+                    evidence={
+                        "matched_fields": sorted({match["matched_field"] for match in matches}),
+                        "amount": self._format_amount(amount),
                         "matches": matches,
                     },
+                    display_tags=[CASH_TURNOVER_TAG],
+                    cost_policy="hint_only",
                 )
             )
-        return candidates
+        return evaluations
+
+    def _evaluation(
+        self,
+        *,
+        rule_code: str,
+        confidence: str,
+        suggested_action_code: str,
+        rows: list[dict[str, Any]],
+        amount: Decimal,
+        status: str,
+        evidence: dict[str, Any],
+        display_tags: list[str],
+        cost_policy: str,
+    ) -> dict[str, Any]:
+        oa_ids = [self._row_id(row) for row in rows if row.get("type") == "oa"]
+        bank_ids = [self._row_id(row) for row in rows if row.get("type") == "bank"]
+        invoice_ids = [self._row_id(row) for row in rows if row.get("type") == "invoice"]
+        return {
+            "rule_code": rule_code,
+            "confidence": confidence,
+            "suggested_action_code": suggested_action_code,
+            "row_ids": sorted([*oa_ids, *bank_ids, *invoice_ids]),
+            "oa_row_ids": sorted(oa_ids),
+            "bank_row_ids": sorted(bank_ids),
+            "invoice_row_ids": sorted(invoice_ids),
+            "amount": self._format_amount(amount),
+            "status": status,
+            "evidence": deepcopy(evidence),
+            "display_tags": [tag for tag in display_tags if tag],
+            "cost_policy": cost_policy,
+        }
+
+    @classmethod
+    def _dedupe_evaluations(cls, evaluations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        deduped: dict[tuple[str, tuple[str, ...]], dict[str, Any]] = {}
+        for evaluation in evaluations:
+            key = (
+                str(evaluation.get("rule_code") or ""),
+                tuple(str(row_id) for row_id in list(evaluation.get("row_ids") or [])),
+            )
+            if key not in deduped:
+                deduped[key] = evaluation
+        return list(deduped.values())
 
     def _cash_turnover_matches(self, bank_row: dict[str, Any]) -> list[dict[str, str]]:
         matches: list[dict[str, str]] = []
@@ -354,68 +308,6 @@ class WorkbenchSpecialPairRuleService:
                 seen.add(key)
                 deduped.append(match)
         return deduped
-
-    def _candidate(
-        self,
-        scope_month: str,
-        *,
-        rule_code: str,
-        rows: list[dict[str, Any]],
-        status: str,
-        confidence: str,
-        amount: Decimal,
-        explanation: str,
-        source_versions: dict[str, Any],
-        tags: list[str] | None = None,
-        special_metadata: dict[str, Any] | None = None,
-        amount_delta: Decimal = ZERO,
-    ) -> dict[str, Any]:
-        oa_ids = [self._row_id(row) for row in rows if row.get("type") == "oa"]
-        bank_ids = [self._row_id(row) for row in rows if row.get("type") == "bank"]
-        invoice_ids = [self._row_id(row) for row in rows if row.get("type") == "invoice"]
-        row_ids = sorted([*oa_ids, *bank_ids, *invoice_ids])
-        return {
-            "scope_month": scope_month,
-            "candidate_type": self._candidate_type(oa_ids, bank_ids, invoice_ids),
-            "status": status,
-            "confidence": confidence,
-            "rule_code": rule_code,
-            "row_ids": row_ids,
-            "oa_row_ids": sorted(oa_ids),
-            "bank_row_ids": sorted(bank_ids),
-            "invoice_row_ids": sorted(invoice_ids),
-            "amount": self._format_amount(amount),
-            "amount_delta": self._format_amount(amount_delta),
-            "explanation": explanation,
-            "conflict_candidate_keys": [],
-            "source_versions": deepcopy(source_versions),
-            "tags": [str(tag).strip() for tag in list(tags or []) if str(tag).strip()],
-            "special_metadata": deepcopy(special_metadata if isinstance(special_metadata, dict) else {}),
-        }
-
-    @classmethod
-    def _dedupe_candidates(cls, candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        deduped: dict[tuple[str, str, tuple[str, ...]], dict[str, Any]] = {}
-        for candidate in candidates:
-            key = (
-                str(candidate.get("scope_month") or ""),
-                str(candidate.get("rule_code") or ""),
-                tuple(str(row_id) for row_id in list(candidate.get("row_ids") or [])),
-            )
-            if key not in deduped:
-                deduped[key] = candidate
-        return list(deduped.values())
-
-    @staticmethod
-    def _candidate_type(oa_ids: list[str], bank_ids: list[str], invoice_ids: list[str]) -> str:
-        parts: list[str] = []
-        if oa_ids:
-            parts.append("oa")
-        if bank_ids:
-            parts.append("bank")
-        if invoice_ids:
-            parts.append("invoice")
-        return "_".join(parts) or "unknown"
 
     def _direction(self, row: dict[str, Any]) -> str | None:
         row_type = str(row.get("type") or "")

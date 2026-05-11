@@ -1,4 +1,13 @@
 import type {
+  WorkbenchExceptionAction,
+  WorkbenchExceptionApplyPayload,
+  WorkbenchExceptionApplyResult,
+  WorkbenchExceptionCandidateEvidence,
+  WorkbenchExceptionPreview,
+  WorkbenchExceptionPreviewPayload,
+  WorkbenchExceptionWarning,
+} from "./exceptionTypes";
+import type {
   WorkbenchActionVariant,
   WorkbenchCandidateGroup,
   WorkbenchData,
@@ -203,7 +212,7 @@ type ApiWorkbenchSettingsOption =
 
 type ApiWorkbenchGroup = {
   group_id: string;
-  group_type: "auto_closed" | "manual_confirmed" | "candidate";
+  group_type: "auto_closed" | "manual_confirmed" | "candidate" | "source_linked";
   match_confidence: "high" | "medium" | "low";
   reason: string;
   oa_rows: ApiWorkbenchRow[];
@@ -253,6 +262,96 @@ type ApiWorkbenchActionResult = {
   exception_case_ids?: string[];
   updated_rows?: Array<{ id: string }>;
   message: string;
+};
+
+type ApiWorkbenchExceptionScenario = {
+  business_line?: string;
+  businessLine?: string;
+  scenario_code?: string;
+  scenarioCode?: string;
+  scenario_label?: string;
+  scenarioLabel?: string;
+  confidence?: string;
+  required_objects?: unknown[];
+  requiredObjects?: unknown[];
+  amount_relation?: string;
+  amountRelation?: string;
+};
+
+type ApiWorkbenchExceptionAmountSummary = {
+  oa_total?: unknown;
+  oaTotal?: unknown;
+  bank_expense_total?: unknown;
+  bankExpenseTotal?: unknown;
+  bank_income_total?: unknown;
+  bankIncomeTotal?: unknown;
+  input_invoice_total?: unknown;
+  inputInvoiceTotal?: unknown;
+  output_invoice_total?: unknown;
+  outputInvoiceTotal?: unknown;
+  relation?: unknown;
+  expense_relation?: unknown;
+  expenseRelation?: unknown;
+  income_relation?: unknown;
+  incomeRelation?: unknown;
+};
+
+type ApiWorkbenchExceptionAction = {
+  action_code?: string;
+  actionCode?: string;
+  label?: string;
+  result_status?: string;
+  resultStatus?: string;
+  required_fields?: unknown[];
+  requiredFields?: unknown[];
+  description?: string;
+};
+
+type ApiWorkbenchExceptionWarning = {
+  code?: string;
+  severity?: string;
+  message?: string;
+  label?: string;
+};
+
+type ApiWorkbenchExceptionCandidateEvidence = {
+  id?: string;
+  label?: string;
+  detail?: string;
+  metadata?: Record<string, unknown>;
+};
+
+type ApiWorkbenchExceptionPreview = {
+  rule_version?: string;
+  ruleVersion?: string;
+  scenario?: ApiWorkbenchExceptionScenario;
+  amount_summary?: ApiWorkbenchExceptionAmountSummary;
+  amountSummary?: ApiWorkbenchExceptionAmountSummary;
+  automatic_actions?: ApiWorkbenchExceptionAction[];
+  automaticActions?: ApiWorkbenchExceptionAction[];
+  available_actions?: ApiWorkbenchExceptionAction[];
+  availableActions?: ApiWorkbenchExceptionAction[];
+  warnings?: ApiWorkbenchExceptionWarning[];
+  workflow_projection?: Record<string, unknown>;
+  workflowProjection?: Record<string, unknown>;
+  candidate_evidence?: ApiWorkbenchExceptionCandidateEvidence[];
+  candidateEvidence?: ApiWorkbenchExceptionCandidateEvidence[];
+  can_apply?: boolean;
+  canApply?: boolean;
+};
+
+type ApiWorkbenchExceptionApplyResult = {
+  success?: boolean;
+  case?: Record<string, unknown> | null;
+  pair_relation?: Record<string, unknown> | null;
+  pairRelation?: Record<string, unknown> | null;
+  updated_rows?: Array<Record<string, unknown>>;
+  updatedRows?: Array<Record<string, unknown>>;
+  affected_row_ids?: unknown[];
+  affectedRowIds?: unknown[];
+  workbench_refresh_required?: boolean;
+  workbenchRefreshRequired?: boolean;
+  message?: string;
 };
 
 type ConfirmLinkPayload = {
@@ -574,12 +673,35 @@ function mapDetailFields(detailFields?: Record<string, unknown>): WorkbenchDetai
     return [];
   }
 
+  const seenLabels = new Set<string>();
   return Object.entries(detailFields)
     .filter(([label]) => label !== "资金方向")
     .map(([label, value]) => ({
-      label: label === "和发票关联情况" ? "和发票OA关联情况" : label,
+      label: normalizeDetailFieldLabel(label),
       value: toDetailDisplayValue(value),
-    }));
+    }))
+    .filter((field) => {
+      if (seenLabels.has(field.label)) {
+        return false;
+      }
+      seenLabels.add(field.label);
+      return true;
+    });
+}
+
+function normalizeDetailFieldLabel(label: string) {
+  const normalizedLabels: Record<string, string> = {
+    和发票关联情况: "和发票OA关联情况",
+    derived_from_oa_id: "来源OA单号",
+    source_oa_id: "来源OA单号",
+    source_oa_row_id: "来源OA单号",
+    source_expense_row_index: "来源OA明细行号",
+    source_expense_item_id: "来源付款项ID",
+    source_attachment_name: "来源附件文件名",
+    attachment_name: "来源附件文件名",
+    source_attachment_key: "来源附件Key",
+  };
+  return normalizedLabels[label] ?? label;
 }
 
 function resolveBankDirection(row: ApiWorkbenchRow) {
@@ -642,7 +764,7 @@ function mapPaneRows(panes: Record<WorkbenchRecordType, ApiWorkbenchRow[]>): Wor
 function mapGroup(group: ApiWorkbenchGroup): WorkbenchCandidateGroup {
   return {
     id: group.group_id,
-    groupType: group.group_type,
+    groupType: group.group_type === "source_linked" ? "candidate" : group.group_type,
     matchConfidence: group.match_confidence,
     reason: group.reason,
     rows: {
@@ -692,6 +814,126 @@ function mapRelationPreview(payload: ApiWorkbenchRelationPreview): WorkbenchRela
         : "unknown",
       mismatchFields: (amountSummary.mismatch_fields ?? []).map((field) => String(field)),
     },
+  };
+}
+
+function cleanWorkbenchExceptionStringList(value: unknown[] | undefined) {
+  return (value ?? [])
+    .map((item) => String(item).trim())
+    .filter(Boolean);
+}
+
+function camelizeKey(key: string) {
+  return key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
+}
+
+function camelizeUnknown(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(camelizeUnknown);
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entryValue]) => [camelizeKey(key), camelizeUnknown(entryValue)]),
+  );
+}
+
+function mapWorkbenchExceptionAction(action: ApiWorkbenchExceptionAction): WorkbenchExceptionAction {
+  const mapped: WorkbenchExceptionAction = {
+    actionCode: String(action.actionCode ?? action.action_code ?? "").trim(),
+    label: String(action.label ?? action.actionCode ?? action.action_code ?? "").trim(),
+    resultStatus: String(action.resultStatus ?? action.result_status ?? "open").trim() || "open",
+    requiredFields: cleanWorkbenchExceptionStringList(action.requiredFields ?? action.required_fields),
+  };
+  if (typeof action.description === "string" && action.description.trim()) {
+    mapped.description = action.description.trim();
+  }
+  return mapped;
+}
+
+function mapWorkbenchExceptionWarning(warning: ApiWorkbenchExceptionWarning): WorkbenchExceptionWarning {
+  return {
+    code: String(warning.code ?? "").trim(),
+    severity: String(warning.severity ?? "warning").trim() || "warning",
+    message: String(warning.message ?? warning.label ?? "").trim(),
+  };
+}
+
+function mapWorkbenchExceptionEvidence(
+  evidence: ApiWorkbenchExceptionCandidateEvidence,
+): WorkbenchExceptionCandidateEvidence {
+  const mapped: WorkbenchExceptionCandidateEvidence = {
+    id: typeof evidence.id === "string" && evidence.id.trim() ? evidence.id.trim() : undefined,
+    label: String(evidence.label ?? evidence.id ?? "候选证据").trim(),
+  };
+  if (typeof evidence.detail === "string" && evidence.detail.trim()) {
+    mapped.detail = evidence.detail.trim();
+  }
+  if (evidence.metadata && typeof evidence.metadata === "object") {
+    mapped.metadata = camelizeUnknown(evidence.metadata) as Record<string, unknown>;
+  }
+  return mapped;
+}
+
+function mapWorkbenchExceptionPreview(payload: ApiWorkbenchExceptionPreview): WorkbenchExceptionPreview {
+  const scenario = payload.scenario ?? {};
+  const amountSummary = payload.amountSummary ?? payload.amount_summary ?? {};
+  const requiredObjects = cleanWorkbenchExceptionStringList(scenario.requiredObjects ?? scenario.required_objects);
+  const mappedScenario = {
+    businessLine: String(scenario.businessLine ?? scenario.business_line ?? "").trim(),
+    scenarioCode: String(scenario.scenarioCode ?? scenario.scenario_code ?? "").trim(),
+    scenarioLabel: String(scenario.scenarioLabel ?? scenario.scenario_label ?? "").trim(),
+  };
+  if (typeof scenario.confidence === "string" && scenario.confidence.trim()) {
+    Object.assign(mappedScenario, { confidence: scenario.confidence.trim() });
+  }
+  if (requiredObjects.length > 0) {
+    Object.assign(mappedScenario, { requiredObjects });
+  }
+  if (typeof (scenario.amountRelation ?? scenario.amount_relation) === "string") {
+    Object.assign(mappedScenario, { amountRelation: String(scenario.amountRelation ?? scenario.amount_relation).trim() });
+  }
+  const businessLine = mappedScenario.businessLine;
+  const relationValue =
+    amountSummary.relation
+    ?? (businessLine === "income" ? amountSummary.incomeRelation ?? amountSummary.income_relation : undefined)
+    ?? (businessLine === "expense" ? amountSummary.expenseRelation ?? amountSummary.expense_relation : undefined)
+    ?? amountSummary.expenseRelation
+    ?? amountSummary.expense_relation
+    ?? amountSummary.incomeRelation
+    ?? amountSummary.income_relation;
+  return {
+    ruleVersion: String(payload.ruleVersion ?? payload.rule_version ?? "").trim(),
+    scenario: mappedScenario,
+    amountSummary: {
+      oaTotal: toDisplayValue(amountSummary.oaTotal ?? amountSummary.oa_total, "0.00"),
+      bankExpenseTotal: toDisplayValue(amountSummary.bankExpenseTotal ?? amountSummary.bank_expense_total, "0.00"),
+      bankIncomeTotal: toDisplayValue(amountSummary.bankIncomeTotal ?? amountSummary.bank_income_total, "0.00"),
+      inputInvoiceTotal: toDisplayValue(amountSummary.inputInvoiceTotal ?? amountSummary.input_invoice_total, "0.00"),
+      outputInvoiceTotal: toDisplayValue(amountSummary.outputInvoiceTotal ?? amountSummary.output_invoice_total, "0.00"),
+      relation: toDisplayValue(relationValue, "unknown"),
+    },
+    automaticActions: (payload.automaticActions ?? payload.automatic_actions ?? []).map(mapWorkbenchExceptionAction),
+    availableActions: (payload.availableActions ?? payload.available_actions ?? []).map(mapWorkbenchExceptionAction),
+    warnings: (payload.warnings ?? []).map(mapWorkbenchExceptionWarning),
+    workflowProjection: camelizeUnknown(payload.workflowProjection ?? payload.workflow_projection ?? {}) as Record<string, unknown>,
+    candidateEvidence: (payload.candidateEvidence ?? payload.candidate_evidence ?? []).map(mapWorkbenchExceptionEvidence),
+    canApply: payload.canApply ?? payload.can_apply ?? true,
+  };
+}
+
+function mapWorkbenchExceptionApplyResult(
+  payload: ApiWorkbenchExceptionApplyResult,
+): WorkbenchExceptionApplyResult {
+  return {
+    success: payload.success === true,
+    case: payload.case ?? null,
+    pairRelation: payload.pairRelation ?? payload.pair_relation ?? null,
+    updatedRows: payload.updatedRows ?? payload.updated_rows ?? [],
+    affectedRowIds: (payload.affectedRowIds ?? payload.affected_row_ids ?? []).map((rowId) => String(rowId)),
+    workbenchRefreshRequired: payload.workbenchRefreshRequired ?? payload.workbench_refresh_required ?? false,
+    message: typeof payload.message === "string" && payload.message.trim() ? payload.message.trim() : undefined,
   };
 }
 
@@ -1346,6 +1588,37 @@ export async function previewWorkbenchWithdrawLink(payload: WithdrawLinkPayload)
     }),
   });
   return mapRelationPreview(result);
+}
+
+export async function previewWorkbenchException(
+  payload: WorkbenchExceptionPreviewPayload,
+): Promise<WorkbenchExceptionPreview> {
+  const result = await requestJson<ApiWorkbenchExceptionPreview>("/api/workbench/exception/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      month: payload.month,
+      row_ids: payload.rowIds,
+    }),
+  });
+  return mapWorkbenchExceptionPreview(result);
+}
+
+export async function applyWorkbenchException(
+  payload: WorkbenchExceptionApplyPayload,
+): Promise<WorkbenchExceptionApplyResult> {
+  const result = await requestJson<ApiWorkbenchExceptionApplyResult>("/api/workbench/exception/apply", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      month: payload.month,
+      row_ids: payload.rowIds,
+      scenario_code: payload.scenarioCode,
+      action_code: payload.actionCode,
+      payload: payload.payload,
+    }),
+  });
+  return mapWorkbenchExceptionApplyResult(result);
 }
 
 export async function withdrawWorkbenchLink(payload: WithdrawLinkPayload) {

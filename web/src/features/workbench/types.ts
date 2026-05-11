@@ -1,5 +1,19 @@
 export type WorkbenchRecordType = "oa" | "bank" | "invoice";
 
+export type {
+  WorkbenchExceptionAction,
+  WorkbenchExceptionAmountSummary,
+  WorkbenchExceptionApplyPayload,
+  WorkbenchExceptionApplyResult,
+  WorkbenchExceptionBusinessLine,
+  WorkbenchExceptionCandidateEvidence,
+  WorkbenchExceptionPreview,
+  WorkbenchExceptionPreviewPayload,
+  WorkbenchExceptionResultStatus,
+  WorkbenchExceptionScenario,
+  WorkbenchExceptionWarning,
+} from "./exceptionTypes";
+
 export type WorkbenchActionVariant = "detail-only" | "bank-review" | "confirm-exception";
 
 export type WorkbenchDetailField = {

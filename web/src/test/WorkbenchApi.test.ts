@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { fetchWorkbench } from "../features/workbench/api";
+import { applyWorkbenchException, fetchWorkbench, previewWorkbenchException } from "../features/workbench/api";
 import { buildWorkbenchDisplayGroups, createEmptyWorkbenchZoneDisplayState } from "../features/workbench/groupDisplayModel";
 import type { WorkbenchCandidateGroup, WorkbenchRecord, WorkbenchRecordType } from "../features/workbench/types";
 
@@ -286,6 +286,214 @@ describe("workbench api bank amount mapping", () => {
     );
   });
 
+  test("maps OA attachment invoice source detail fields without splitting OA rows", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "2026-03",
+          summary: {
+            oa_count: 1,
+            bank_count: 0,
+            invoice_count: 3,
+            paired_count: 0,
+            open_count: 1,
+            exception_count: 0,
+          },
+          paired: { groups: [] },
+          open: {
+            groups: [
+              {
+                group_id: "CASE-202603-OA-ATTACHMENT-248",
+                group_type: "candidate",
+                match_confidence: "medium",
+                reason: "OA 附件发票按付款项归属展示",
+                oa_rows: [
+                  {
+                    id: "oa-exp-248",
+                    type: "oa",
+                    applicant: "胡瑢",
+                    project_name: "2024-2026年度红塔集团工作证管理系统维护项目",
+                    apply_type: "日常报销",
+                    amount: "248.00",
+                    counterparty_name: "胡瑢",
+                    oa_bank_relation: { code: "pending_match", label: "待找流水与发票", tone: "warn" },
+                    detail_fields: {
+                      明细摘要: "付款项 1 120.00；付款项 2 128.00",
+                    },
+                    available_actions: ["detail"],
+                  },
+                ],
+                bank_rows: [],
+                invoice_rows: [
+                  {
+                    id: "iv-oa-attachment-248-001",
+                    type: "invoice",
+                    source_kind: "oa_attachment_invoice",
+                    case_id: "CASE-202603-OA-ATTACHMENT-248",
+                    seller_name: "附件销方 A",
+                    buyer_name: "云南溯源科技有限公司",
+                    issue_date: "2026-03-04",
+                    amount: "120.00",
+                    tax_amount: "0.00",
+                    total_with_tax: "120.00",
+                    invoice_type: "进项普票",
+                    invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
+                    available_actions: ["detail"],
+                    detail_fields: {
+                      derived_from_oa_id: "oa-exp-248",
+                      source_expense_row_index: "1",
+                      source_expense_item_id: "oa-exp-248:item:1",
+                      source_attachment_name: "付款项1-交通费.pdf",
+                      source_attachment_key: "oa-exp-248/item-1/traffic.pdf",
+                    },
+                  },
+                  {
+                    id: "iv-oa-attachment-248-002",
+                    type: "invoice",
+                    source_kind: "oa_attachment_invoice",
+                    case_id: "CASE-202603-OA-ATTACHMENT-248",
+                    seller_name: "附件销方 B",
+                    buyer_name: "云南溯源科技有限公司",
+                    issue_date: "2026-03-04",
+                    amount: "128.00",
+                    tax_amount: "0.00",
+                    total_with_tax: "128.00",
+                    invoice_type: "进项普票",
+                    invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
+                    available_actions: ["detail"],
+                    detail_fields: {
+                      derived_from_oa_id: "oa-exp-248",
+                      source_expense_row_index: "2",
+                      source_expense_item_id: "oa-exp-248:item:2",
+                      source_attachment_name: "付款项2-住宿费.pdf",
+                      source_attachment_key: "oa-exp-248/item-2/hotel.pdf",
+                    },
+                  },
+                  {
+                    id: "iv-oa-attachment-248-003",
+                    type: "invoice",
+                    source_kind: "oa_attachment_invoice",
+                    case_id: "CASE-202603-OA-ATTACHMENT-248",
+                    seller_name: "附件销方 C",
+                    buyer_name: "云南溯源科技有限公司",
+                    issue_date: "2026-03-04",
+                    amount: "0.00",
+                    tax_amount: "0.00",
+                    total_with_tax: "0.00",
+                    invoice_type: "进项普票",
+                    invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
+                    available_actions: ["detail"],
+                    detail_fields: {
+                      derived_from_oa_id: "oa-exp-248",
+                      source_expense_row_index: "1",
+                      source_expense_item_id: "oa-exp-248:item:1",
+                      source_attachment_name: "付款项1-补充说明.pdf",
+                      source_attachment_key: "oa-exp-248/item-1/supplement.pdf",
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const payload = await fetchWorkbench("2026-03");
+    const group = payload.open.groups[0];
+    const firstAttachmentInvoice = group.rows.invoice[0];
+
+    expect(group.rows.oa).toHaveLength(1);
+    expect(group.rows.oa.map((row) => row.id)).toEqual(["oa-exp-248"]);
+    expect(group.rows.invoice).toHaveLength(3);
+    expect(group.rows.invoice.every((row) => row.sourceKind === "oa_attachment_invoice")).toBe(true);
+    expect(firstAttachmentInvoice.detailFields).toEqual(
+      expect.arrayContaining([
+        { label: "来源OA单号", value: "oa-exp-248" },
+        { label: "来源OA明细行号", value: "1" },
+        { label: "来源付款项ID", value: "oa-exp-248:item:1" },
+        { label: "来源附件文件名", value: "付款项1-交通费.pdf" },
+        { label: "来源附件Key", value: "oa-exp-248/item-1/traffic.pdf" },
+      ]),
+    );
+    expect(firstAttachmentInvoice.detailFields.map((field) => field.label)).not.toContain("source_expense_item_id");
+  });
+
+  test("maps the 292 OA attachment fixture as one OA row and one attachment invoice", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "2026-03",
+          summary: {
+            oa_count: 1,
+            bank_count: 0,
+            invoice_count: 1,
+            paired_count: 0,
+            open_count: 1,
+            exception_count: 0,
+          },
+          paired: { groups: [] },
+          open: {
+            groups: [
+              {
+                group_id: "CASE-202603-OA-ATTACHMENT-292",
+                group_type: "candidate",
+                match_confidence: "medium",
+                reason: "单付款项 OA 附件发票不重复",
+                oa_rows: [
+                  {
+                    id: "oa-exp-292",
+                    type: "oa",
+                    applicant: "胡瑢",
+                    project_name: "红云红河烟草能源管理运维项目",
+                    apply_type: "日常报销",
+                    amount: "292.00",
+                    counterparty_name: "胡瑢",
+                    oa_bank_relation: { code: "pending_match", label: "待找流水与发票", tone: "warn" },
+                    available_actions: ["detail"],
+                  },
+                ],
+                bank_rows: [],
+                invoice_rows: [
+                  {
+                    id: "iv-oa-attachment-292-001",
+                    type: "invoice",
+                    source_kind: "oa_attachment_invoice",
+                    case_id: "CASE-202603-OA-ATTACHMENT-292",
+                    seller_name: "附件销方",
+                    buyer_name: "云南溯源科技有限公司",
+                    issue_date: "2026-03-24",
+                    amount: "292.00",
+                    total_with_tax: "292.00",
+                    invoice_type: "进项普票",
+                    invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
+                    available_actions: ["detail"],
+                    detail_fields: {
+                      derived_from_oa_id: "oa-exp-292",
+                      source_expense_row_index: "1",
+                      source_expense_item_id: "oa-exp-292:item:1",
+                      source_attachment_name: "付款项1-发票.pdf",
+                      source_attachment_key: "oa-exp-292/item-1/invoice.pdf",
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const payload = await fetchWorkbench("2026-03");
+    const group = payload.open.groups[0];
+
+    expect(group.rows.oa).toHaveLength(1);
+    expect(group.rows.invoice).toHaveLength(1);
+    expect(group.rows.invoice[0].id).toBe("iv-oa-attachment-292-001");
+  });
+
   test("includes aggregated OA detail fields in pane search values", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
@@ -484,5 +692,190 @@ describe("workbench api bank amount mapping", () => {
     const state = createEmptyWorkbenchZoneDisplayState();
 
     expect(buildWorkbenchDisplayGroups(groups, state)).toBe(groups);
+  });
+});
+
+describe("workbench exception api", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test("previewWorkbenchException posts selected rows and maps backend-driven preview", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          rule_version: "exception_rules_v1",
+          scenario: {
+            business_line: "expense",
+            scenario_code: "expense_oa_bank_missing_invoice",
+            scenario_label: "OA和支出流水一致，缺进项发票",
+          },
+          amount_summary: {
+            oa_total: "100000.00",
+            bank_expense_total: "100000.00",
+            bank_income_total: "0.00",
+            input_invoice_total: "0.00",
+            output_invoice_total: "0.00",
+            expense_relation: "oa_equals_bank_missing_invoice",
+            income_relation: "not_applicable",
+          },
+          automatic_actions: [
+            {
+              action_code: "auto_close_when_invoice_arrives",
+              label: "补票后自动闭环",
+              result_status: "closed",
+              required_fields: [],
+            },
+          ],
+          available_actions: [
+            {
+              action_code: "wait_input_invoice",
+              label: "追进项发票",
+              result_status: "open",
+              required_fields: ["note"],
+            },
+          ],
+          warnings: [
+            {
+              code: "candidate_invoice_exists",
+              severity: "warning",
+              message: "已存在补票候选。",
+            },
+          ],
+          workflow_projection: {
+            next_status: "open",
+          },
+          candidate_evidence: [
+            {
+              id: "candidate-1",
+              label: "命中候选分组",
+              detail: "OA 与流水来自同一候选组。",
+            },
+          ],
+          can_apply: true,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const preview = await previewWorkbenchException({
+      month: "all",
+      rowIds: ["oa-1", "bank-1"],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/exception/preview",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          month: "all",
+          row_ids: ["oa-1", "bank-1"],
+        }),
+      }),
+    );
+    expect(preview).toEqual({
+      ruleVersion: "exception_rules_v1",
+      scenario: {
+        businessLine: "expense",
+        scenarioCode: "expense_oa_bank_missing_invoice",
+        scenarioLabel: "OA和支出流水一致，缺进项发票",
+      },
+      amountSummary: {
+        oaTotal: "100000.00",
+        bankExpenseTotal: "100000.00",
+        bankIncomeTotal: "0.00",
+        inputInvoiceTotal: "0.00",
+        outputInvoiceTotal: "0.00",
+        relation: "oa_equals_bank_missing_invoice",
+      },
+      automaticActions: [
+        {
+          actionCode: "auto_close_when_invoice_arrives",
+          label: "补票后自动闭环",
+          resultStatus: "closed",
+          requiredFields: [],
+        },
+      ],
+      availableActions: [
+        {
+          actionCode: "wait_input_invoice",
+          label: "追进项发票",
+          resultStatus: "open",
+          requiredFields: ["note"],
+        },
+      ],
+      warnings: [
+        {
+          code: "candidate_invoice_exists",
+          severity: "warning",
+          message: "已存在补票候选。",
+        },
+      ],
+      workflowProjection: {
+        nextStatus: "open",
+      },
+      candidateEvidence: [
+        {
+          id: "candidate-1",
+          label: "命中候选分组",
+          detail: "OA 与流水来自同一候选组。",
+        },
+      ],
+      canApply: true,
+    });
+  });
+
+  test("applyWorkbenchException posts selected action payload and maps refresh semantics", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          case: { id: "EXC-1" },
+          pair_relation: { id: "REL-1" },
+          updated_rows: [{ id: "bank-1" }],
+          affected_row_ids: ["bank-1"],
+          workbench_refresh_required: true,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await applyWorkbenchException({
+      month: "all",
+      rowIds: ["bank-1"],
+      scenarioCode: "expense_bank_invoice_missing_oa",
+      actionCode: "manual_oa_exempt",
+      payload: {
+        note: "业务确认无需 OA",
+        reason_code: "manual_business_exemption",
+        due_date: "2026-05-31",
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/exception/apply",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          month: "all",
+          row_ids: ["bank-1"],
+          scenario_code: "expense_bank_invoice_missing_oa",
+          action_code: "manual_oa_exempt",
+          payload: {
+            note: "业务确认无需 OA",
+            reason_code: "manual_business_exemption",
+            due_date: "2026-05-31",
+          },
+        }),
+      }),
+    );
+    expect(result).toEqual({
+      success: true,
+      case: { id: "EXC-1" },
+      pairRelation: { id: "REL-1" },
+      updatedRows: [{ id: "bank-1" }],
+      affectedRowIds: ["bank-1"],
+      workbenchRefreshRequired: true,
+    });
   });
 });

@@ -87,6 +87,83 @@ class WorkbenchExceptionCaseServiceTests(unittest.TestCase):
         )
         self.assertEqual(service.snapshot()["row_case_index"], {})
 
+    def test_create_case_from_action_writes_v2_fields_and_indexes_open_rows(self) -> None:
+        service = WorkbenchExceptionCaseService()
+
+        case = service.create_case_from_action(
+            rows=[
+                {"id": "oa-001", "type": "oa", "month": "2026-05"},
+                {"id": "bank-001", "type": "bank", "month": "2026-05"},
+            ],
+            scenario={
+                "business_line": "expense",
+                "scenario_code": "expense_oa_bank_missing_input_invoice_equal",
+                "scenario_label": "OA 和支出流水一致，缺进项发票",
+                "rule_version": "exception_rules_v1",
+            },
+            action={
+                "action_code": "wait_input_invoice",
+                "label": "等待进项发票",
+                "result_status": "open",
+                "relation_mode": "pending_input_invoice",
+            },
+            amount_summary={"expense_relation": "oa_equals_bank_missing_input_invoice"},
+            workflow_projection={"state": "WAIT_INPUT_INVOICE"},
+            actor="finance-user",
+            payload={"note": "继续追票"},
+            candidate_ids=["candidate-001"],
+            source_versions={"workbench_exception_rules_version": "exception_rules_v1"},
+            idempotency_key="idem-001",
+        )
+
+        self.assertEqual(case["schema_version"], 2)
+        self.assertEqual(case["status"], "open")
+        self.assertEqual(case["business_line"], "expense")
+        self.assertEqual(case["scenario_code"], "expense_oa_bank_missing_input_invoice_equal")
+        self.assertEqual(case["rule_version"], "exception_rules_v1")
+        self.assertEqual(case["amount_summary"]["expense_relation"], "oa_equals_bank_missing_input_invoice")
+        self.assertEqual(case["resolution"]["action_code"], "wait_input_invoice")
+        self.assertEqual(case["resolution"]["note"], "继续追票")
+        self.assertEqual(case["workflow_projection"], {"state": "WAIT_INPUT_INVOICE"})
+        self.assertEqual(case["audit"][0]["event"], "created")
+        self.assertEqual(case["audit"][0]["actor"], "finance-user")
+        self.assertEqual(case["candidate_ids"], ["candidate-001"])
+        self.assertEqual(case["source_versions"], {"workbench_exception_rules_version": "exception_rules_v1"})
+        self.assertEqual(service.case_ids_for_rows(["oa-001", "bank-001"]), ["WEX-000001"])
+        self.assertEqual(service.find_case_by_idempotency_key("idem-001")["id"], "WEX-000001")
+
+    def test_legacy_confirmed_snapshot_restores_as_active_v2_compatible_case(self) -> None:
+        restored = WorkbenchExceptionCaseService.from_snapshot(
+            {
+                "case_counter": 1,
+                "cases": {
+                    "WEX-000001": {
+                        "id": "WEX-000001",
+                        "status": "confirmed",
+                        "exception_code": "oa_bank_amount_mismatch",
+                        "exception_label": "金额不一致，继续异常",
+                        "category": "oa_bank",
+                        "row_ids": ["oa-001", "bank-001"],
+                        "row_types": ["oa", "bank"],
+                        "scope_months": ["2026-05"],
+                        "comment": "历史备注",
+                        "created_at": "2026-05-11T00:00:00+00:00",
+                        "updated_at": "2026-05-11T00:00:00+00:00",
+                        "history": [{"action": "created", "at": "2026-05-11T00:00:00+00:00"}],
+                    }
+                },
+                "row_case_index": {"oa-001": "WEX-000001", "bank-001": "WEX-000001"},
+            }
+        )
+
+        case = restored.snapshot()["cases"]["WEX-000001"]
+        self.assertEqual(case["status"], "confirmed")
+        self.assertEqual(case["schema_version"], 2)
+        self.assertEqual(case["business_line"], "expense")
+        self.assertEqual(case["scenario_code"], "oa_bank_amount_mismatch")
+        self.assertEqual(case["resolution"]["action_code"], "legacy_confirmed")
+        self.assertEqual(restored.case_ids_for_rows(["oa-001", "bank-001"]), ["WEX-000001"])
+
     def test_cancel_exception_cases_marks_cases_cancelled_and_clears_row_index(self) -> None:
         service = WorkbenchExceptionCaseService()
         service.create_exception_case(

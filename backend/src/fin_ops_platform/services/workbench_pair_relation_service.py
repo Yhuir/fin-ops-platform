@@ -74,6 +74,11 @@ class WorkbenchPairRelationService:
         note: str | None = None,
         amount_check: dict[str, Any] | None = None,
         special_metadata: dict[str, Any] | None = None,
+        exception_case_id: str | None = None,
+        rule_version: str | None = None,
+        evidence: dict[str, Any] | None = None,
+        oa_exemption: dict[str, Any] | None = None,
+        display_tags: list[str] | None = None,
     ) -> dict[str, Any]:
         resolved_case_id = str(case_id).strip()
         if not resolved_case_id:
@@ -100,6 +105,15 @@ class WorkbenchPairRelationService:
                     if isinstance(existing_relation, dict) and isinstance(existing_relation.get("special_metadata"), dict)
                     else {}
                 ),
+                "exception_case_id": str(exception_case_id or "").strip(),
+                "rule_version": str(rule_version or "").strip(),
+                "evidence": deepcopy(evidence) if isinstance(evidence, dict) else {},
+                "oa_exemption": deepcopy(oa_exemption) if isinstance(oa_exemption, dict) else None,
+                "display_tags": [
+                    str(tag).strip()
+                    for tag in list(display_tags or [])
+                    if str(tag).strip()
+                ],
                 "created_at": (
                     str(existing_relation.get("created_at"))
                     if isinstance(existing_relation, dict) and existing_relation.get("created_at")
@@ -137,6 +151,11 @@ class WorkbenchPairRelationService:
         special_metadata: dict[str, Any] | None = None,
         created_at: str | None = None,
         before_relations: list[dict[str, Any]] | None = None,
+        exception_case_id: str | None = None,
+        rule_version: str | None = None,
+        evidence: dict[str, Any] | None = None,
+        oa_exemption: dict[str, Any] | None = None,
+        display_tags: list[str] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         active_before_relations = self.active_relations_for_row_ids(row_ids)
         history_before_relations = (
@@ -158,6 +177,11 @@ class WorkbenchPairRelationService:
             note=note,
             amount_check=amount_check,
             special_metadata=special_metadata,
+            exception_case_id=exception_case_id,
+            rule_version=rule_version,
+            evidence=evidence,
+            oa_exemption=oa_exemption,
+            display_tags=display_tags,
         )
         history = self.record_history(
             operation_type="confirm_link",
@@ -427,6 +451,17 @@ class WorkbenchPairRelationService:
         normalized["amount_check"] = deepcopy(amount_check) if isinstance(amount_check, dict) else {}
         special_metadata = relation.get("special_metadata")
         normalized["special_metadata"] = deepcopy(special_metadata) if isinstance(special_metadata, dict) else {}
+        normalized["exception_case_id"] = str(relation.get("exception_case_id") or "")
+        normalized["rule_version"] = str(relation.get("rule_version") or "")
+        evidence = relation.get("evidence")
+        normalized["evidence"] = deepcopy(evidence) if isinstance(evidence, dict) else {}
+        oa_exemption = relation.get("oa_exemption")
+        normalized["oa_exemption"] = deepcopy(oa_exemption) if isinstance(oa_exemption, dict) else None
+        normalized["display_tags"] = [
+            str(tag).strip()
+            for tag in list(relation.get("display_tags") or [])
+            if str(tag).strip()
+        ]
         normalized["created_at"] = str(relation.get("created_at") or cls._timestamp())
         normalized["updated_at"] = str(relation.get("updated_at") or normalized["created_at"])
         return normalized

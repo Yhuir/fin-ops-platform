@@ -4,6 +4,167 @@ from fin_ops_platform.services.workbench_candidate_grouping import WorkbenchCand
 
 
 class WorkbenchCandidateGroupingTests(unittest.TestCase):
+    def test_open_exception_case_stays_open_and_candidate_does_not_promote_it(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-05",
+            oa_rows=[
+                {
+                    "id": "oa-open-case-001",
+                    "type": "oa",
+                    "case_id": "WEX-OPEN-001",
+                    "exception_case_id": "WEX-OPEN-001",
+                    "projection_version": "exception_projection_v1",
+                    "case_status": "open",
+                    "amount": "120.00",
+                    "counterparty_name": "云上客户",
+                    "oa_bank_relation": {"code": "wait_input_invoice", "label": "等待进项发票", "tone": "danger"},
+                    "handled_exception": True,
+                }
+            ],
+            bank_rows=[
+                {
+                    "id": "bk-open-case-candidate-001",
+                    "type": "bank",
+                    "case_id": "candidate:open-case-match",
+                    "debit_amount": "120.00",
+                    "credit_amount": "",
+                    "counterparty_name": "云上客户",
+                    "invoice_relation": {"code": "suggested_match", "label": "待人工确认", "tone": "warn"},
+                }
+            ],
+            invoice_rows=[
+                {
+                    "id": "iv-open-case-candidate-001",
+                    "type": "invoice",
+                    "case_id": "candidate:open-case-match",
+                    "amount": "120.00",
+                    "issue_date": "2026-05-11",
+                    "seller_name": "云上客户",
+                    "buyer_name": "杭州溯源科技有限公司",
+                    "invoice_type": "进项发票",
+                    "invoice_bank_relation": {"code": "suggested_match", "label": "待人工确认", "tone": "warn"},
+                }
+            ],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        open_case_group = next(group for group in payload["open"]["groups"] if group["group_id"] == "case:WEX-OPEN-001")
+        self.assertEqual(open_case_group["group_type"], "open_exception")
+        self.assertEqual([row["id"] for row in open_case_group["oa_rows"]], ["oa-open-case-001"])
+        self.assertIn(
+            "bk-open-case-candidate-001",
+            [row["id"] for row in flatten_groups(payload["open"]["groups"], "bank")],
+        )
+
+    def test_closed_case_relation_projection_groups_as_processed_exception(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-05",
+            oa_rows=[
+                {
+                    "id": "oa-closed-001",
+                    "type": "oa",
+                    "case_id": "WEX-CLOSED-001",
+                    "exception_case_id": "WEX-CLOSED-001",
+                    "projection_version": "exception_projection_v1",
+                    "projection_kind": "pair_relation",
+                    "case_status": "closed",
+                    "relation_mode": "expense_closed",
+                    "amount": "120.00",
+                    "counterparty_name": "云上客户",
+                    "oa_bank_relation": {"code": "expense_closed", "label": "已处理：支出闭环", "tone": "success"},
+                    "display_tags": ["支出闭环"],
+                }
+            ],
+            bank_rows=[
+                {
+                    "id": "bk-closed-001",
+                    "type": "bank",
+                    "case_id": "WEX-CLOSED-001",
+                    "exception_case_id": "WEX-CLOSED-001",
+                    "projection_version": "exception_projection_v1",
+                    "projection_kind": "pair_relation",
+                    "case_status": "closed",
+                    "relation_mode": "expense_closed",
+                    "debit_amount": "120.00",
+                    "credit_amount": "",
+                    "counterparty_name": "云上客户",
+                    "invoice_relation": {"code": "expense_closed", "label": "已处理：支出闭环", "tone": "success"},
+                    "display_tags": ["支出闭环"],
+                }
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 1)
+        group = payload["paired"]["groups"][0]
+        self.assertEqual(group["group_id"], "case:WEX-CLOSED-001")
+        self.assertEqual(group["group_type"], "processed_exception")
+        self.assertEqual(group["relation_mode"], "expense_closed")
+        self.assertEqual(group["display_tags"], ["支出闭环"])
+
+    def test_oa_exempt_relation_uses_projection_metadata_for_display_tags(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-05",
+            oa_rows=[],
+            bank_rows=[
+                {
+                    "id": "bk-oa-exempt-001",
+                    "type": "bank",
+                    "case_id": "WEX-OA-EXEMPT-001",
+                    "exception_case_id": "WEX-OA-EXEMPT-001",
+                    "projection_version": "exception_projection_v1",
+                    "projection_kind": "pair_relation",
+                    "case_status": "closed",
+                    "relation_mode": "oa_exempt",
+                    "debit_amount": "120.00",
+                    "credit_amount": "",
+                    "counterparty_name": "张三",
+                    "invoice_relation": {"code": "oa_exempt", "label": "已处理：免 OA", "tone": "success"},
+                    "display_tags": ["自动免OA", "工资"],
+                    "tags": ["自动免OA", "工资"],
+                }
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 1)
+        group = payload["paired"]["groups"][0]
+        self.assertEqual(group["group_type"], "processed_exception")
+        self.assertEqual(group["relation_mode"], "oa_exempt")
+        self.assertEqual(group["display_tags"], ["自动免OA", "工资"])
+        self.assertEqual(group["bank_rows"][0]["invoice_relation"]["code"], "oa_exempt")
+
+    def test_legacy_override_exception_still_displays_in_open_section(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-05",
+            oa_rows=[],
+            bank_rows=[
+                {
+                    "id": "bk-legacy-exception-001",
+                    "type": "bank",
+                    "case_id": "WEX-LEGACY-001",
+                    "exception_case_id": "WEX-LEGACY-001",
+                    "debit_amount": "99.00",
+                    "credit_amount": "",
+                    "counterparty_name": "旧供应商",
+                    "invoice_relation": {"code": "bank_missing_oa_fee", "label": "费用类银行流水缺OA", "tone": "danger"},
+                    "handled_exception": True,
+                }
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(payload["summary"]["exception_count"], 1)
+        group = payload["open"]["groups"][0]
+        self.assertEqual(group["group_id"], "case:WEX-LEGACY-001")
+        self.assertEqual(group["group_type"], "legacy_exception")
+        self.assertEqual(group["bank_rows"][0]["invoice_relation"]["code"], "bank_missing_oa_fee")
+
     def test_groups_aggregated_oa_with_manual_imported_invoice_sum(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(
@@ -300,6 +461,163 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-001"])
         self.assertEqual([row["id"] for row in group["invoice_rows"]], ["iv-oa-att-001"])
 
+    def test_oa_attachment_source_groups_248_oa_with_three_attachment_invoices_open(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-03",
+            oa_rows=[
+                oa_row(
+                    "oa-hurong-248",
+                    amount="248.00",
+                    counterparty_name="胡瑢",
+                    apply_type="日常报销",
+                )
+            ],
+            bank_rows=[],
+            invoice_rows=[
+                oa_attachment_invoice_row(
+                    "iv-hurong-100",
+                    derived_from_oa_id="oa-hurong-248",
+                    amount="94.34",
+                    total_with_tax="100.00",
+                    seller_name="昆明差旅服务有限公司",
+                ),
+                oa_attachment_invoice_row(
+                    "iv-hurong-96",
+                    derived_from_oa_id="oa-hurong-248",
+                    amount="90.57",
+                    total_with_tax="96.00",
+                    seller_name="云南餐饮服务有限公司",
+                ),
+                oa_attachment_invoice_row(
+                    "iv-hurong-52",
+                    derived_from_oa_id="oa-hurong-248",
+                    amount="49.06",
+                    total_with_tax="52.00",
+                    seller_name="昆明票务有限公司",
+                ),
+            ],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(payload["summary"]["open_count"], 1)
+        self.assertEqual(payload["paired"]["groups"], [])
+        group = payload["open"]["groups"][0]
+        self.assertEqual(group["group_type"], "source_linked")
+        self.assertEqual(group["match_confidence"], "high")
+        self.assertEqual(group["reason"], "oa_attachment_source_relation")
+        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-hurong-248"])
+        self.assertEqual(group["bank_rows"], [])
+        self.assertCountEqual(
+            [row["id"] for row in group["invoice_rows"]],
+            ["iv-hurong-100", "iv-hurong-96", "iv-hurong-52"],
+        )
+
+    def test_oa_attachment_source_groups_292_oa_with_single_attachment_invoice_open(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-03",
+            oa_rows=[
+                oa_row(
+                    "oa-hurong-292",
+                    amount="292.00",
+                    counterparty_name="",
+                    apply_type="日常报销",
+                )
+            ],
+            bank_rows=[],
+            invoice_rows=[
+                oa_attachment_invoice_row(
+                    "iv-hurong-292",
+                    derived_from_oa_id="oa-hurong-292",
+                    amount="275.47",
+                    total_with_tax="292.00",
+                    seller_name="云南中油严家山交通服务有限公司",
+                )
+            ],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(payload["summary"]["open_count"], 1)
+        group = payload["open"]["groups"][0]
+        self.assertEqual(group["group_type"], "source_linked")
+        self.assertEqual(group["reason"], "oa_attachment_source_relation")
+        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-hurong-292"])
+        self.assertEqual([row["id"] for row in group["invoice_rows"]], ["iv-hurong-292"])
+
+    def test_oa_attachment_invoice_stays_standalone_when_source_oa_is_missing(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-03",
+            oa_rows=[],
+            bank_rows=[],
+            invoice_rows=[
+                oa_attachment_invoice_row(
+                    "iv-orphan-001",
+                    derived_from_oa_id="oa-missing",
+                    amount="100.00",
+                    total_with_tax="106.00",
+                    seller_name="孤立供应商",
+                )
+            ],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(payload["summary"]["open_count"], 1)
+        group = payload["open"]["groups"][0]
+        self.assertNotEqual(group["reason"], "oa_attachment_source_relation")
+        self.assertEqual(group["oa_rows"], [])
+        self.assertEqual([row["id"] for row in group["invoice_rows"]], ["iv-orphan-001"])
+
+    def test_oa_attachment_invoice_with_manual_case_id_is_not_taken_by_source_group(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-03",
+            oa_rows=[oa_row("oa-manual-source", amount="100.00", counterparty_name="人工供应商")],
+            bank_rows=[],
+            invoice_rows=[
+                oa_attachment_invoice_row(
+                    "iv-manual-owned",
+                    derived_from_oa_id="oa-manual-source",
+                    amount="100.00",
+                    total_with_tax="100.00",
+                    seller_name="人工供应商",
+                    case_id="CASE-MANUAL-ATTACHMENT",
+                )
+            ],
+        )
+
+        self.assertFalse(
+            any(group["reason"] == "oa_attachment_source_relation" for group in payload["open"]["groups"])
+        )
+        case_group = next(group for group in payload["open"]["groups"] if group["group_id"] == "case:CASE-MANUAL-ATTACHMENT")
+        self.assertEqual([row["id"] for row in case_group["invoice_rows"]], ["iv-manual-owned"])
+        self.assertIn("oa-manual-source", [row["id"] for row in flatten_groups(payload["open"]["groups"], "oa")])
+
+    def test_ignored_oa_attachment_invoice_does_not_enter_source_group(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-03",
+            oa_rows=[oa_row("oa-ignored-source", amount="248.00", counterparty_name="胡瑢")],
+            bank_rows=[],
+            invoice_rows=[
+                oa_attachment_invoice_row(
+                    "iv-ignored-attachment",
+                    derived_from_oa_id="oa-ignored-source",
+                    amount="94.34",
+                    total_with_tax="100.00",
+                    seller_name="昆明差旅服务有限公司",
+                    ignored=True,
+                )
+            ],
+        )
+
+        self.assertFalse(
+            any(group["reason"] == "oa_attachment_source_relation" for group in payload["open"]["groups"])
+        )
+        self.assertCountEqual(group_ids(payload["open"]["groups"], "oa_rows"), [["oa-ignored-source"], []])
+        self.assertCountEqual(group_ids(payload["open"]["groups"], "invoice_rows"), [[], ["iv-ignored-attachment"]])
+
     def test_promotes_unique_three_way_chain_to_paired_group(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(
@@ -464,7 +782,7 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in group["bank_rows"]], ["bk-attach-001"])
         self.assertCountEqual([row["id"] for row in group["invoice_rows"]], ["iv-attach-001", "iv-attach-002"])
 
-    def test_does_not_attach_oa_attachment_invoices_to_source_oa_group_when_candidate_case_ids_differ(self) -> None:
+    def test_candidate_case_oa_attachment_invoices_still_join_source_oa_group(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(
             "2026-03",
@@ -524,16 +842,24 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         )
 
         self.assertEqual(payload["summary"]["paired_count"], 0)
-        self.assertEqual(payload["summary"]["open_count"], 3)
-        group = next(group for group in payload["open"]["groups"] if group["oa_rows"])
-        self.assertEqual(group["group_type"], "candidate")
-        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-tian"])
-        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bk-tian"])
-        self.assertEqual(group["invoice_rows"], [])
-        self.assertCountEqual(
-            [ids for ids in group_ids(payload["open"]["groups"], "invoice_rows") if ids],
-            [["iv-tian-70"], ["iv-tian-126"]],
+        self.assertEqual(payload["summary"]["open_count"], 2)
+        source_group = next(
+            group
+            for group in payload["open"]["groups"]
+            if group["reason"] == "oa_attachment_source_relation"
         )
+        self.assertEqual(source_group["group_type"], "source_linked")
+        self.assertEqual(source_group["match_confidence"], "high")
+        self.assertEqual([row["id"] for row in source_group["oa_rows"]], ["oa-tian"])
+        self.assertEqual(source_group["bank_rows"], [])
+        self.assertCountEqual(
+            [row["id"] for row in source_group["invoice_rows"]],
+            ["iv-tian-70", "iv-tian-126"],
+        )
+        bank_group = next(group for group in payload["open"]["groups"] if group["bank_rows"])
+        self.assertEqual([row["id"] for row in bank_group["bank_rows"]], ["bk-tian"])
+        self.assertEqual(bank_group["oa_rows"], [])
+        self.assertEqual(bank_group["invoice_rows"], [])
 
     def test_does_not_attach_non_candidate_oa_attachment_invoice_to_candidate_source_group(self) -> None:
         service = WorkbenchCandidateGroupingService()
@@ -913,6 +1239,132 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in group["bank_rows"]], ["bk-001"])
         self.assertEqual([row["id"] for row in group["invoice_rows"]], ["iv-001"])
 
+    def test_splits_cross_counterparty_bank_invoice_candidate_case_group(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-05",
+            oa_rows=[],
+            bank_rows=[
+                {
+                    "id": "bk-jiangyin-2000",
+                    "type": "bank",
+                    "case_id": "candidate:dirty-cross-counterparty",
+                    "debit_amount": "2000.00",
+                    "credit_amount": "",
+                    "counterparty_name": "江阴服务有限公司",
+                    "invoice_relation": {"code": "suggested_match", "label": "待人工确认", "tone": "warn"},
+                }
+            ],
+            invoice_rows=[
+                {
+                    "id": "iv-zijin-2000",
+                    "type": "invoice",
+                    "case_id": "candidate:dirty-cross-counterparty",
+                    "amount": "2000.00",
+                    "issue_date": "2026-05-06",
+                    "seller_name": "紫金科技有限公司",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "invoice_type": "进项发票",
+                    "invoice_bank_relation": {"code": "suggested_match", "label": "待人工确认", "tone": "warn"},
+                }
+            ],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(payload["summary"]["open_count"], 2)
+        self.assertCountEqual(group_ids(payload["open"]["groups"], "bank_rows"), [["bk-jiangyin-2000"], []])
+        self.assertCountEqual(group_ids(payload["open"]["groups"], "invoice_rows"), [[], ["iv-zijin-2000"]])
+
+    def test_keeps_same_counterparty_bank_invoice_candidate_case_group_together(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-05",
+            oa_rows=[],
+            bank_rows=[
+                {
+                    "id": "bk-same-counterparty-2000",
+                    "type": "bank",
+                    "case_id": "candidate:same-counterparty",
+                    "debit_amount": "2000.00",
+                    "credit_amount": "",
+                    "counterparty_name": "同主体服务有限公司",
+                    "invoice_relation": {"code": "suggested_match", "label": "待人工确认", "tone": "warn"},
+                }
+            ],
+            invoice_rows=[
+                {
+                    "id": "iv-same-counterparty-2000",
+                    "type": "invoice",
+                    "case_id": "candidate:same-counterparty",
+                    "amount": "2000.00",
+                    "issue_date": "2026-05-06",
+                    "seller_name": "同主体服务有限公司",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "invoice_type": "进项发票",
+                    "invoice_bank_relation": {"code": "suggested_match", "label": "待人工确认", "tone": "warn"},
+                }
+            ],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(payload["summary"]["open_count"], 1)
+        group = payload["open"]["groups"][0]
+        self.assertEqual(group["group_type"], "candidate")
+        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bk-same-counterparty-2000"])
+        self.assertEqual([row["id"] for row in group["invoice_rows"]], ["iv-same-counterparty-2000"])
+
+    def test_keeps_same_counterparty_oa_multi_invoice_sum_candidate_case_group_together(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-05",
+            oa_rows=[
+                {
+                    "id": "oa-meeting-300",
+                    "type": "oa",
+                    "case_id": "candidate:oa-invoice-sum",
+                    "apply_type": "付款申请",
+                    "amount": "300.00",
+                    "counterparty_name": "会务服务有限公司",
+                    "oa_bank_relation": {"code": "candidate_incomplete", "label": "候选未闭环", "tone": "warn"},
+                }
+            ],
+            bank_rows=[],
+            invoice_rows=[
+                {
+                    "id": "iv-meeting-120",
+                    "type": "invoice",
+                    "case_id": "candidate:oa-invoice-sum",
+                    "amount": "120.00",
+                    "total_with_tax": "120.00",
+                    "seller_name": "会务服务有限公司",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "invoice_type": "进项发票",
+                    "invoice_bank_relation": {"code": "candidate_incomplete", "label": "候选未闭环", "tone": "warn"},
+                },
+                {
+                    "id": "iv-meeting-180",
+                    "type": "invoice",
+                    "case_id": "candidate:oa-invoice-sum",
+                    "amount": "180.00",
+                    "total_with_tax": "180.00",
+                    "seller_name": "会务服务有限公司",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "invoice_type": "进项发票",
+                    "invoice_bank_relation": {"code": "candidate_incomplete", "label": "候选未闭环", "tone": "warn"},
+                },
+            ],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(payload["summary"]["open_count"], 1)
+        group = payload["open"]["groups"][0]
+        self.assertEqual(group["group_type"], "candidate")
+        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-meeting-300"])
+        self.assertCountEqual(
+            [row["id"] for row in group["invoice_rows"]],
+            ["iv-meeting-120", "iv-meeting-180"],
+        )
+
     def test_keeps_single_bank_salary_auto_match_in_paired_section(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(
@@ -1157,6 +1609,53 @@ def flatten_groups(groups: list[dict[str, object]], row_type: str) -> list[dict[
         for group in groups
         for row in group[f"{row_type}_rows"]
     ]
+
+
+def oa_row(
+    row_id: str,
+    *,
+    amount: str,
+    counterparty_name: str,
+    apply_type: str = "支付申请",
+) -> dict[str, object]:
+    return {
+        "id": row_id,
+        "type": "oa",
+        "case_id": None,
+        "apply_type": apply_type,
+        "amount": amount,
+        "counterparty_name": counterparty_name,
+        "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"},
+    }
+
+
+def oa_attachment_invoice_row(
+    row_id: str,
+    *,
+    derived_from_oa_id: str,
+    amount: str,
+    total_with_tax: str,
+    seller_name: str,
+    case_id: str | None = None,
+    ignored: bool = False,
+) -> dict[str, object]:
+    row: dict[str, object] = {
+        "id": row_id,
+        "type": "invoice",
+        "case_id": case_id,
+        "source_kind": "oa_attachment_invoice",
+        "derived_from_oa_id": derived_from_oa_id,
+        "amount": amount,
+        "total_with_tax": total_with_tax,
+        "issue_date": "2026-03-24",
+        "seller_name": seller_name,
+        "buyer_name": "云南溯源科技有限公司",
+        "invoice_type": "进项发票",
+        "invoice_bank_relation": {"code": "pending_match", "label": "待匹配", "tone": "warn"},
+    }
+    if ignored:
+        row["ignored"] = True
+    return row
 
 
 if __name__ == "__main__":

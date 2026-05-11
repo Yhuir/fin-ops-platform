@@ -187,6 +187,142 @@ class AggregatedAttachmentOAAdapter:
         return [AggregatedAttachmentRecord()]
 
 
+class SourceBoundAttachmentRecord:
+    def __init__(self) -> None:
+        self.id = "oa-exp-hurong-248"
+        self.month = "2026-03"
+        self.section = "open"
+        self.case_id = None
+        self.applicant = "胡瑢"
+        self.project_name = "2024-2026年度红塔集团工作证管理系统维护项目"
+        self.apply_type = "日常报销"
+        self.amount = "248.00"
+        self.counterparty_name = ""
+        self.reason = "工作证管理系统维护项目报销"
+        self.relation_code = "pending_match"
+        self.relation_label = "待找流水与发票"
+        self.relation_tone = "warn"
+        self.expense_type = "项目费用"
+        self.expense_content = "工作证维护费用"
+        self.detail_fields = {
+            "OA单号": "OA-HR-248",
+            "申请日期": "2026-03-04",
+        }
+        self.expense_items = [
+            {
+                "row_index": "0",
+                "expense_item_id": "oa-exp-hurong-248:item:0:maint",
+                "amount": "196.00",
+                "expense_content": "付款项1",
+            },
+            {
+                "row_index": "1",
+                "expense_item_id": "oa-exp-hurong-248:item:1:service",
+                "amount": "52.00",
+                "expense_content": "付款项2",
+            },
+        ]
+        self.attachment_invoices = [
+            {
+                "invoice_no": "24800001",
+                "seller_name": "红塔供应商A",
+                "buyer_name": "云南溯源科技有限公司",
+                "issue_date": "2026-03-04",
+                "amount": "100.00",
+                "total_with_tax": "100.00",
+                "invoice_type": "进项发票",
+                "source_expense_row_index": "0",
+                "source_expense_item_id": "oa-exp-hurong-248:item:0:maint",
+                "source_attachment_key": "oa-exp-hurong-248:item:0:att:a",
+                "source_attachment_name": "付款项1-发票A.pdf",
+                "attachment_name": "旧展示名A.pdf",
+            },
+            {
+                "invoice_no": "24800002",
+                "seller_name": "红塔供应商B",
+                "buyer_name": "云南溯源科技有限公司",
+                "issue_date": "2026-03-04",
+                "amount": "96.00",
+                "total_with_tax": "96.00",
+                "invoice_type": "进项发票",
+                "source_expense_row_index": "0",
+                "source_expense_item_id": "oa-exp-hurong-248:item:0:maint",
+                "source_attachment_key": "oa-exp-hurong-248:item:0:att:b",
+                "source_attachment_name": "付款项1-发票B.pdf",
+            },
+            {
+                "invoice_no": "24800003",
+                "seller_name": "红塔供应商C",
+                "buyer_name": "云南溯源科技有限公司",
+                "issue_date": "2026-03-04",
+                "amount": "52.00",
+                "total_with_tax": "52.00",
+                "invoice_type": "进项发票",
+                "source_expense_row_index": "1",
+                "source_expense_item_id": "oa-exp-hurong-248:item:1:service",
+                "source_attachment_key": "oa-exp-hurong-248:item:1:att:c",
+                "source_attachment_name": "付款项2-发票C.pdf",
+                "attachment_name": "付款项2-发票C.pdf",
+            },
+        ]
+        self.attachment_file_count = 3
+
+
+class SingleSourceAttachmentRecord:
+    def __init__(self) -> None:
+        self.id = "oa-exp-hurong-292"
+        self.month = "2026-03"
+        self.section = "open"
+        self.case_id = None
+        self.applicant = "胡瑢"
+        self.project_name = "红云红河烟草能源管理运维项目"
+        self.apply_type = "日常报销"
+        self.amount = "292.00"
+        self.counterparty_name = ""
+        self.reason = "能源管理运维项目报销"
+        self.relation_code = "pending_match"
+        self.relation_label = "待找流水与发票"
+        self.relation_tone = "warn"
+        self.expense_type = "项目费用"
+        self.expense_content = "能源管理运维费用"
+        self.detail_fields = {
+            "OA单号": "OA-HR-292",
+            "申请日期": "2026-03-24",
+            "明细行号": "0",
+        }
+        source_invoice = {
+            "invoice_no": "29200001",
+            "seller_name": "能源运维供应商",
+            "buyer_name": "云南溯源科技有限公司",
+            "issue_date": "2026-03-24",
+            "amount": "292.00",
+            "total_with_tax": "292.00",
+            "invoice_type": "进项发票",
+            "source_expense_row_index": "0",
+            "source_expense_item_id": "oa-exp-hurong-292:item:0:energy",
+            "source_attachment_key": "oa-exp-hurong-292:item:0:att:only",
+            "source_attachment_name": "能源管理运维发票.pdf",
+            "attachment_name": "能源管理运维发票.pdf",
+        }
+        self.expense_items = [
+            {
+                "row_index": "0",
+                "expense_item_id": "oa-exp-hurong-292:item:0:energy",
+                "amount": "292.00",
+                "attachment_invoices": [dict(source_invoice)],
+            }
+        ]
+        self.attachment_invoices = [source_invoice]
+        self.attachment_file_count = 1
+
+
+class SourceBoundAttachmentOAAdapter:
+    def list_application_records(self, month: str) -> list[object]:
+        if month != "2026-03":
+            return []
+        return [SourceBoundAttachmentRecord(), SingleSourceAttachmentRecord()]
+
+
 class AttachmentAwareOAAdapter:
     def list_application_records(self, month: str) -> list[object]:
         if month != "2026-03":
@@ -405,6 +541,69 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
         }
         self.assertEqual(row_numbers["40512344"], "0")
         self.assertEqual(row_numbers["40512345"], "整单")
+
+    def test_source_bound_attachment_invoice_rows_expose_payment_and_attachment_origin(self) -> None:
+        service = WorkbenchQueryService(oa_adapter=SourceBoundAttachmentOAAdapter())
+
+        payload = service.get_workbench("2026-03")
+
+        oa_rows = [row for row in payload["open"]["oa"] if row["id"] == "oa-exp-hurong-248"]
+        self.assertEqual(len(oa_rows), 1)
+        invoice_rows = [
+            row
+            for row in payload["open"]["invoice"]
+            if row.get("derived_from_oa_id") == "oa-exp-hurong-248"
+        ]
+        self.assertEqual(len(invoice_rows), 3)
+        self.assertEqual({row["source_kind"] for row in invoice_rows}, {"oa_attachment_invoice"})
+        self.assertTrue(
+            all(
+                row["id"] != f"oa-att-inv-oa-exp-hurong-248-{index:02d}"
+                for index, row in enumerate(invoice_rows, start=1)
+            )
+        )
+
+        by_invoice_no = {
+            row["detail_fields"]["发票号码"]: row
+            for row in invoice_rows
+        }
+        first_detail = by_invoice_no["24800001"]["detail_fields"]
+        self.assertEqual(first_detail["来源OA单号"], "OA-HR-248")
+        self.assertEqual(first_detail["来源OA明细行号"], "0")
+        self.assertEqual(first_detail["来源付款项ID"], "oa-exp-hurong-248:item:0:maint")
+        self.assertEqual(first_detail["来源附件Key"], "oa-exp-hurong-248:item:0:att:a")
+        self.assertEqual(first_detail["附件文件名"], "付款项1-发票A.pdf")
+        self.assertEqual(by_invoice_no["24800003"]["detail_fields"]["来源OA明细行号"], "1")
+        self.assertEqual(
+            by_invoice_no["24800003"]["source_expense_item_id"],
+            "oa-exp-hurong-248:item:1:service",
+        )
+        self.assertEqual(
+            by_invoice_no["24800003"]["source_attachment_key"],
+            "oa-exp-hurong-248:item:1:att:c",
+        )
+
+    def test_single_source_attachment_invoice_is_not_duplicated_from_expense_item_copy(self) -> None:
+        service = WorkbenchQueryService(oa_adapter=SourceBoundAttachmentOAAdapter())
+
+        payload = service.get_workbench("2026-03")
+
+        oa_rows = [row for row in payload["open"]["oa"] if row["id"] == "oa-exp-hurong-292"]
+        self.assertEqual(len(oa_rows), 1)
+        invoice_rows = [
+            row
+            for row in payload["open"]["invoice"]
+            if row.get("derived_from_oa_id") == "oa-exp-hurong-292"
+        ]
+        self.assertEqual(len(invoice_rows), 1)
+        self.assertEqual(
+            invoice_rows[0]["detail_fields"]["来源付款项ID"],
+            "oa-exp-hurong-292:item:0:energy",
+        )
+        self.assertEqual(
+            invoice_rows[0]["detail_fields"]["来源附件Key"],
+            "oa-exp-hurong-292:item:0:att:only",
+        )
 
     def test_oa_row_uses_project_display_without_polluting_real_project_summary(self) -> None:
         service = WorkbenchQueryService(oa_adapter=MultiProjectDisplayOAAdapter())

@@ -182,6 +182,84 @@ class WorkbenchReadModelServiceTests(unittest.TestCase):
 
         self.assertCountEqual(service.list_scope_keys(), ["all", "2026-03"])
 
+    def test_read_model_is_stale_when_case_snapshot_version_changes(self) -> None:
+        service = WorkbenchReadModelService()
+        read_model = service.upsert_read_model(
+            scope_key="2026-05",
+            payload={"month": "2026-05", "summary": {"paired_count": 0}},
+            exception_rules_version="exception_rules_v1",
+            exception_projection_version="exception_projection_v1",
+            case_snapshot_version="case:v1",
+            pair_relation_snapshot_version="relation:v1",
+            candidate_snapshot_version="candidate:v1",
+            matching_rules_version="matching:v1",
+        )
+
+        self.assertEqual(read_model["case_snapshot_version"], "case:v1")
+        self.assertTrue(
+            service.is_read_model_fresh(
+                "2026-05",
+                exception_rules_version="exception_rules_v1",
+                exception_projection_version="exception_projection_v1",
+                case_snapshot_version="case:v1",
+                pair_relation_snapshot_version="relation:v1",
+                candidate_snapshot_version="candidate:v1",
+                matching_rules_version="matching:v1",
+            )
+        )
+        self.assertFalse(
+            service.is_read_model_fresh(
+                "2026-05",
+                exception_rules_version="exception_rules_v1",
+                exception_projection_version="exception_projection_v1",
+                case_snapshot_version="case:v2",
+                pair_relation_snapshot_version="relation:v1",
+                candidate_snapshot_version="candidate:v1",
+                matching_rules_version="matching:v1",
+            )
+        )
+        self.assertIsNone(
+            service.get_read_model_if_fresh(
+                "2026-05",
+                case_snapshot_version="case:v2",
+            )
+        )
+
+    def test_read_model_is_stale_when_relation_snapshot_version_changes(self) -> None:
+        service = WorkbenchReadModelService()
+        service.upsert_read_model(
+            scope_key="2026-05",
+            payload={"month": "2026-05"},
+            source_versions={
+                "exception_rules_version": "exception_rules_v1",
+                "exception_projection_version": "exception_projection_v1",
+                "case_snapshot_version": "case:v1",
+                "pair_relation_snapshot_version": "relation:v1",
+                "candidate_snapshot_version": "candidate:v1",
+                "matching_rules_version": "matching:v1",
+            },
+        )
+
+        self.assertFalse(
+            service.is_read_model_fresh(
+                "2026-05",
+                source_versions={
+                    "exception_rules_version": "exception_rules_v1",
+                    "exception_projection_version": "exception_projection_v1",
+                    "case_snapshot_version": "case:v1",
+                    "pair_relation_snapshot_version": "relation:v2",
+                    "candidate_snapshot_version": "candidate:v1",
+                    "matching_rules_version": "matching:v1",
+                },
+            )
+        )
+
+    def test_snapshot_version_changes_when_payload_changes(self) -> None:
+        first = WorkbenchReadModelService.snapshot_version({"cases": {"WEX-1": {"status": "open"}}})
+        second = WorkbenchReadModelService.snapshot_version({"cases": {"WEX-1": {"status": "closed"}}})
+
+        self.assertNotEqual(first, second)
+
 
 if __name__ == "__main__":
     unittest.main()

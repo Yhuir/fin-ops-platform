@@ -202,6 +202,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 "source_versions": {},
                 "tags": [],
                 "special_metadata": {},
+                "consumed_by_case_id": "",
+                "consumed_by_relation_case_id": "",
+                "suppressed_reason": "",
+                "exception_preview": {},
             }
             with (data_dir / "state.pkl").open("wb") as handle:
                 pickle.dump({"workbench_candidate_matches": {"candidates": {candidate_key: candidate}}}, handle)
@@ -225,6 +229,145 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             app._workbench_candidate_match_service.snapshot(),
             {"schema_version": CANDIDATE_MATCH_SCHEMA_VERSION, "candidates": {}, "scope_runs": {}},
         )
+
+    def test_apply_candidate_matches_does_not_link_multi_row_needs_review_candidate(self) -> None:
+        app = build_application()
+        candidate = app._workbench_candidate_match_service.upsert_candidate(
+            {
+                "scope_month": "2026-05",
+                "candidate_type": "bank_invoice",
+                "status": "needs_review",
+                "confidence": "medium",
+                "rule_code": "same_amount",
+                "row_ids": ["bank-001", "invoice-001"],
+                "oa_row_ids": [],
+                "bank_row_ids": ["bank-001"],
+                "invoice_row_ids": ["invoice-001"],
+                "amount": "100.00",
+                "amount_delta": "0.00",
+                "explanation": "persisted review candidate",
+                "conflict_candidate_keys": [],
+                "generated_at": "2026-05-07T00:00:00+00:00",
+                "source_versions": {},
+            }
+        )
+        raw_payload = {
+            "month": "2026-05",
+            "paired": {"oa": [], "bank": [], "invoice": []},
+            "open": {
+                "oa": [],
+                "bank": [
+                    {
+                        "id": "bank-001",
+                        "type": "bank",
+                        "case_id": None,
+                        "debit_amount": "100.00",
+                        "credit_amount": "",
+                        "invoice_relation": {
+                            "code": "pending_invoice_match",
+                            "label": "待关联发票",
+                            "tone": "warn",
+                        },
+                    }
+                ],
+                "invoice": [
+                    {
+                        "id": "invoice-001",
+                        "type": "invoice",
+                        "case_id": None,
+                        "amount": "100.00",
+                        "total_with_tax": "100.00",
+                        "invoice_bank_relation": {
+                            "code": "pending_collection",
+                            "label": "待匹配流水",
+                            "tone": "warn",
+                        },
+                    }
+                ],
+            },
+        }
+
+        payload = app._apply_candidate_matches_to_payload(raw_payload, "2026-05")
+        grouped = app._group_row_payload(payload)
+        bank_row = payload["open"]["bank"][0]
+        invoice_row = payload["open"]["invoice"][0]
+
+        self.assertFalse(
+            bank_row.get("case_id") == invoice_row.get("case_id") == candidate["candidate_key"]
+        )
+        self.assertNotEqual(bank_row["invoice_relation"]["code"], "suggested_match")
+        self.assertNotEqual(invoice_row["invoice_bank_relation"]["code"], "suggested_match")
+        self.assertEqual(grouped["paired"]["groups"], [])
+        self.assertEqual(len(grouped["open"]["groups"]), 2)
+
+    def test_apply_candidate_matches_links_multi_row_auto_closed_candidate(self) -> None:
+        app = build_application()
+        candidate = app._workbench_candidate_match_service.upsert_candidate(
+            {
+                "scope_month": "2026-05",
+                "candidate_type": "bank_invoice",
+                "status": "auto_closed",
+                "confidence": "high",
+                "rule_code": "bank_invoice_exact_amount",
+                "row_ids": ["bank-001", "invoice-001"],
+                "oa_row_ids": [],
+                "bank_row_ids": ["bank-001"],
+                "invoice_row_ids": ["invoice-001"],
+                "amount": "100.00",
+                "amount_delta": "0.00",
+                "explanation": "persisted closed candidate",
+                "conflict_candidate_keys": [],
+                "generated_at": "2026-05-07T00:00:00+00:00",
+                "source_versions": {},
+            }
+        )
+        raw_payload = {
+            "month": "2026-05",
+            "paired": {"oa": [], "bank": [], "invoice": []},
+            "open": {
+                "oa": [],
+                "bank": [
+                    {
+                        "id": "bank-001",
+                        "type": "bank",
+                        "case_id": None,
+                        "debit_amount": "100.00",
+                        "credit_amount": "",
+                        "invoice_relation": {
+                            "code": "pending_invoice_match",
+                            "label": "待关联发票",
+                            "tone": "warn",
+                        },
+                    }
+                ],
+                "invoice": [
+                    {
+                        "id": "invoice-001",
+                        "type": "invoice",
+                        "case_id": None,
+                        "amount": "100.00",
+                        "total_with_tax": "100.00",
+                        "invoice_bank_relation": {
+                            "code": "pending_collection",
+                            "label": "待匹配流水",
+                            "tone": "warn",
+                        },
+                    }
+                ],
+            },
+        }
+
+        payload = app._apply_candidate_matches_to_payload(raw_payload, "2026-05")
+        grouped = app._group_row_payload(payload)
+        bank_row = payload["open"]["bank"][0]
+        invoice_row = payload["open"]["invoice"][0]
+
+        self.assertEqual(bank_row["case_id"], candidate["candidate_key"])
+        self.assertEqual(invoice_row["case_id"], candidate["candidate_key"])
+        self.assertEqual(bank_row["invoice_relation"]["code"], "automatic_match")
+        self.assertEqual(invoice_row["invoice_bank_relation"]["code"], "automatic_match")
+        self.assertEqual(len(grouped["open"]["groups"]), 1)
+        self.assertEqual(grouped["open"]["groups"][0]["group_type"], "candidate")
 
     def test_import_file_confirm_returns_preview_stale_when_existing_records_change(self) -> None:
         app = build_application()
@@ -1340,6 +1483,98 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         )
         self.assertEqual(read_model["payload"]["workbench_read_model_schema_version"], WORKBENCH_READ_MODEL_SCHEMA_VERSION)
 
+    def test_get_api_workbench_rebuilds_cached_read_model_from_old_oa_attachment_source_group_schema(self) -> None:
+        app = build_application()
+        app._workbench_query_service._oa_adapter = MongoOAAdapter(
+            settings=MongoOASettings(host="127.0.0.1", database="form_data_db")
+        )
+        old_schema_version = "2026-05-09-cross-month-oa-attachment-bank"
+        self.assertNotEqual(WORKBENCH_READ_MODEL_SCHEMA_VERSION, old_schema_version)
+        app._workbench_read_model_service.upsert_read_model(
+            scope_key="2026-03",
+            payload={
+                "month": "2026-03",
+                "oa_status": {"code": "ready", "message": "OA 已同步"},
+                "workbench_read_model_schema_version": old_schema_version,
+                "workbench_candidate_match_schema_version": CANDIDATE_MATCH_SCHEMA_VERSION,
+                "workbench_matching_rules_version": WORKBENCH_MATCHING_RULES_VERSION,
+                "workbench_candidate_snapshot_hash": app._workbench_candidate_snapshot_hash("2026-03"),
+                "oa_attachment_invoice_parser_version": app._current_oa_attachment_invoice_parser_version(),
+                "summary": {
+                    "oa_count": 1,
+                    "bank_count": 0,
+                    "invoice_count": 3,
+                    "paired_count": 0,
+                    "open_count": 4,
+                    "exception_count": 0,
+                },
+                "paired": {"groups": []},
+                "open": {
+                    "groups": [
+                        {
+                            "group_id": "temp:stale-oa",
+                            "group_type": "candidate",
+                            "match_confidence": "low",
+                            "reason": "standalone_row_group",
+                            "oa_rows": [{"id": "oa-stale-source", "type": "oa"}],
+                            "bank_rows": [],
+                            "invoice_rows": [],
+                        }
+                    ]
+                },
+            },
+            ignored_rows=[],
+            generated_at="2026-04-08T11:00:00+00:00",
+        )
+        raw_payload = {
+            "month": "2026-03",
+            "oa_status": {"code": "ready", "message": "OA 已同步"},
+            "summary": {
+                "oa_count": 1,
+                "bank_count": 0,
+                "invoice_count": 0,
+                "paired_count": 0,
+                "open_count": 1,
+                "exception_count": 0,
+            },
+            "paired": {"oa": [], "bank": [], "invoice": []},
+            "open": {
+                "oa": [
+                    {
+                        "id": "oa-rebuilt-source",
+                        "type": "oa",
+                        "case_id": None,
+                        "amount": "248.00",
+                        "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"},
+                    }
+                ],
+                "bank": [],
+                "invoice": [],
+            },
+        }
+
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload) as build_raw:
+            response = app.handle_request("GET", "/api/workbench?month=2026-03")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(build_raw.call_count, 2)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["open"]["groups"][0]["oa_rows"][0]["id"], "oa-rebuilt-source")
+        read_model = app._workbench_read_model_service.get_read_model("2026-03")
+        assert read_model is not None
+        self.assertEqual(read_model["payload"]["workbench_read_model_schema_version"], WORKBENCH_READ_MODEL_SCHEMA_VERSION)
+
+    def test_current_oa_attachment_invoice_parser_version_includes_source_schema_version(self) -> None:
+        app = build_application()
+        app._workbench_query_service._oa_adapter = MongoOAAdapter(
+            settings=MongoOASettings(host="127.0.0.1", database="form_data_db")
+        )
+
+        self.assertEqual(
+            app._current_oa_attachment_invoice_parser_version(),
+            MongoOAAdapter._attachment_invoice_cache_parser_version(),
+        )
+
     def test_get_api_workbench_rebuilds_cached_mongo_read_model_when_schema_version_missing(self) -> None:
         app = build_application()
         app._workbench_query_service._oa_adapter = MongoOAAdapter(
@@ -2319,8 +2554,56 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(oa_detail_response.status_code, 200)
         invoice_detail = json.loads(invoice_detail_response.body)["row"]
         oa_detail = json.loads(oa_detail_response.body)["row"]
+        self.assertEqual(invoice_detail["source_expense_item_id"], "oa-attach-202603-001:item:0:equipment")
+        self.assertEqual(invoice_detail["source_attachment_key"], "oa-attach-202603-001:item:0:att:equipment")
+        self.assertEqual(invoice_detail["source_attachment_name"], "设备发票.pdf")
+        self.assertEqual(invoice_detail["detail_fields"]["来源付款项ID"], "oa-attach-202603-001:item:0:equipment")
+        self.assertEqual(invoice_detail["detail_fields"]["来源附件Key"], "oa-attach-202603-001:item:0:att:equipment")
         self.assertEqual(invoice_detail["detail_fields"]["附件文件名"], "设备发票.pdf")
         self.assertEqual(oa_detail["detail_fields"]["附件发票数量"], "1")
+
+    def test_get_api_workbench_groups_oa_attachment_source_rows_in_open_payload(self) -> None:
+        app = build_application()
+        query_service = WorkbenchQueryService(oa_adapter=SourceBoundAttachmentOAAdapter())
+        action_service = WorkbenchActionService(query_service)
+        app._workbench_query_service = query_service
+        app._workbench_action_service = action_service
+        app._workbench_api_routes = WorkbenchApiRoutes(query_service, action_service)
+
+        with patch.object(app._live_workbench_service, "has_rows_for_month", return_value=False):
+            response = app.handle_request("GET", "/api/workbench?month=2026-03")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        source_groups = [
+            group
+            for group in payload["open"]["groups"]
+            if group["reason"] == "oa_attachment_source_relation"
+        ]
+
+        self.assertEqual(payload["paired"]["groups"], [])
+        self.assertEqual(len(source_groups), 2)
+        by_oa_id = {group["oa_rows"][0]["id"]: group for group in source_groups}
+        self.assertCountEqual(
+            list(by_oa_id),
+            ["oa-exp-hurong-248", "oa-exp-hurong-292"],
+        )
+
+        group_248 = by_oa_id["oa-exp-hurong-248"]
+        self.assertEqual(group_248["group_type"], "source_linked")
+        self.assertEqual(group_248["match_confidence"], "high")
+        self.assertCountEqual(
+            [row["detail_fields"]["发票号码"] for row in group_248["invoice_rows"]],
+            ["24800001", "24800002", "24800003"],
+        )
+        self.assertTrue(
+            all(row["derived_from_oa_id"] == "oa-exp-hurong-248" for row in group_248["invoice_rows"])
+        )
+
+        group_292 = by_oa_id["oa-exp-hurong-292"]
+        self.assertEqual(group_292["group_type"], "source_linked")
+        self.assertEqual([row["detail_fields"]["发票号码"] for row in group_292["invoice_rows"]], ["29200001"])
+        self.assertEqual(group_292["invoice_rows"][0]["derived_from_oa_id"], "oa-exp-hurong-292")
 
     def test_get_api_workbench_auto_pairs_offset_applicant_oa_with_attachment_invoice(self) -> None:
         app = build_application()
@@ -2388,7 +2671,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(relation["relation_mode"], "oa_invoice_offset_auto_match")
         self.assertCountEqual(
             relation["row_ids"],
-            ["oa-offset-202602-001", "oa-att-inv-oa-offset-202602-001-01"],
+            ["oa-offset-202602-001", group["invoice_rows"][0]["id"]],
         )
 
     def test_get_api_workbench_exposes_multi_project_display_and_real_project_names(self) -> None:
@@ -2774,7 +3057,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertTrue(update_bank_payload["success"])
         self.assertEqual(update_bank_payload["action"], "update_bank_exception")
         self.assertEqual(update_bank_payload["exception_case_ids"], [update_bank_payload["exception_case_id"]])
-        self.assertIn(update_bank_payload["exception_case_id"], app_for_bank_exception._workbench_exception_case_service.snapshot()["cases"])
+        update_bank_case = app_for_bank_exception._workbench_exception_case_service.snapshot()["cases"][update_bank_payload["exception_case_id"]]
+        self.assertEqual(update_bank_case["rule_version"], "exception_rules_v1")
+        self.assertEqual(update_bank_case["resolution"]["action_code"], "manual_review")
+        self.assertEqual(update_bank_case["resolution"]["legacy_relation_code"], "bank_fee")
 
         app_for_mark_exception = build_application()
         initial_open_for_mark = json.loads(app_for_mark_exception.handle_request("GET", "/api/workbench?month=2026-03").body)
@@ -2797,7 +3083,96 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(mark_payload["action"], "mark_exception")
         self.assertEqual(mark_payload["updated_rows"][0]["id"], open_invoice_after_confirm["id"])
         self.assertEqual(mark_payload["exception_case_ids"], [mark_payload["exception_case_id"]])
-        self.assertIn(mark_payload["exception_case_id"], app_for_mark_exception._workbench_exception_case_service.snapshot()["cases"])
+        mark_case = app_for_mark_exception._workbench_exception_case_service.snapshot()["cases"][mark_payload["exception_case_id"]]
+        self.assertEqual(mark_case["rule_version"], "exception_rules_v1")
+        self.assertEqual(mark_case["resolution"]["action_code"], "manual_review")
+        self.assertEqual(mark_case["resolution"]["legacy_exception_code"], "pending_collection")
+
+    def test_exception_preview_api_returns_backend_scenario_for_oa_bank_missing_invoice(self) -> None:
+        app = build_application()
+        rows = [
+            {
+                "id": "oa-exc-api-001",
+                "type": "oa",
+                "month": "2026-05",
+                "apply_type": "付款申请",
+                "amount": "100.00",
+            },
+            {
+                "id": "bank-exc-api-001",
+                "type": "bank",
+                "month": "2026-05",
+                "debit_amount": "100.00",
+                "credit_amount": "",
+                "summary": "支付供应商",
+            },
+        ]
+
+        with patch.object(app, "_resolve_live_rows_direct", return_value=rows):
+            response = app.handle_request(
+                "POST",
+                "/api/workbench/exception/preview",
+                json.dumps({"month": "2026-05", "row_ids": ["oa-exc-api-001", "bank-exc-api-001"]}),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["rule_version"], "exception_rules_v1")
+        self.assertEqual(payload["scenario"]["business_line"], "expense")
+        self.assertEqual(payload["scenario"]["scenario_code"], "expense_oa_bank_missing_input_invoice_equal")
+        self.assertEqual([action["action_code"] for action in payload["available_actions"]], ["wait_input_invoice"])
+        self.assertTrue(payload["can_apply"])
+
+    def test_exception_apply_api_creates_closed_case_and_pair_relation(self) -> None:
+        app = build_application()
+        rows = [
+            {
+                "id": "oa-exc-api-001",
+                "type": "oa",
+                "month": "2026-05",
+                "apply_type": "付款申请",
+                "amount": "100.00",
+            },
+            {
+                "id": "bank-exc-api-001",
+                "type": "bank",
+                "month": "2026-05",
+                "debit_amount": "100.00",
+                "credit_amount": "",
+                "summary": "支付供应商",
+            },
+            {
+                "id": "invoice-exc-api-001",
+                "type": "invoice",
+                "month": "2026-05",
+                "issue_date": "2026-05-10",
+                "total_with_tax": "100.00",
+                "invoice_type": "进项发票",
+            },
+        ]
+
+        with patch.object(app, "_resolve_live_rows_direct", return_value=rows):
+            response = app.handle_request(
+                "POST",
+                "/api/workbench/exception/apply",
+                json.dumps(
+                    {
+                        "month": "2026-05",
+                        "row_ids": ["oa-exc-api-001", "bank-exc-api-001", "invoice-exc-api-001"],
+                        "scenario_code": "expense_all_equal",
+                        "action_code": "confirm_closed",
+                        "payload": {},
+                    }
+                ),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["case"]["status"], "closed")
+        self.assertEqual(payload["pair_relation"]["relation_mode"], "normal_match")
+        self.assertEqual(payload["pair_relation"]["exception_case_id"], payload["case"]["id"])
+        self.assertCountEqual(payload["affected_row_ids"], ["oa-exc-api-001", "bank-exc-api-001", "invoice-exc-api-001"])
 
     def test_cancel_link_uses_existing_case_members_without_rebuilding_workbench(self) -> None:
         app = build_application()
@@ -4127,7 +4502,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(response_payload["affected_row_ids"], [oa_row["id"], bank_row["id"]])
         self.assertEqual(response_payload["exception_case_ids"], [response_payload["exception_case_id"]])
         exception_case = app._workbench_exception_case_service.snapshot()["cases"][response_payload["exception_case_id"]]
-        self.assertEqual(exception_case["status"], "confirmed")
+        self.assertEqual(exception_case["status"], "open")
+        self.assertEqual(exception_case["rule_version"], "exception_rules_v1")
+        self.assertEqual(exception_case["resolution"]["action_code"], "manual_review")
+        self.assertEqual(exception_case["resolution"]["legacy_exception_code"], "oa_bank_amount_mismatch")
         self.assertEqual(exception_case["row_ids"], [oa_row["id"], bank_row["id"]])
 
         updated_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
@@ -4138,9 +4516,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(updated_bank_row["invoice_relation"]["code"], "oa_bank_amount_mismatch")
         self.assertEqual(updated_bank_row["invoice_relation"]["label"], "金额不一致，继续异常")
 
-    def test_oa_bank_exception_rejects_invoice_rows(self) -> None:
+    def test_oa_bank_exception_accepts_invoice_rows_for_legacy_compatibility(self) -> None:
         app = build_application()
         payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
+        oa_row = flatten_groups(payload["open"]["groups"], "oa")[0]
         bank_row = flatten_groups(payload["open"]["groups"], "bank")[0]
         invoice_row = flatten_groups(payload["open"]["groups"], "invoice")[0]
 
@@ -4150,16 +4529,20 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             json.dumps(
                 {
                     "month": "2026-03",
-                    "row_ids": [bank_row["id"], invoice_row["id"]],
+                    "row_ids": [oa_row["id"], bank_row["id"], invoice_row["id"]],
                     "exception_code": "oa_bank_amount_mismatch",
                     "exception_label": "金额不一致，继续异常",
+                    "comment": "带发票的旧入口兼容",
                 }
             ),
         )
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 200)
         response_payload = json.loads(response.body)
-        self.assertEqual(response_payload["error"], "invalid_oa_bank_exception_request")
+        self.assertTrue(response_payload["success"])
+        self.assertEqual(response_payload["action"], "oa_bank_exception")
+        self.assertCountEqual(response_payload["affected_row_ids"], [oa_row["id"], bank_row["id"], invoice_row["id"]])
+        self.assertIn(response_payload["exception_case_id"], app._workbench_exception_case_service.snapshot()["cases"])
 
     def test_confirm_link_supports_cross_month_selection_in_all_time_view(self) -> None:
         app = build_application()
@@ -5293,6 +5676,10 @@ class _AttachmentRecord:
                 "tax_amount": "0.00",
                 "total_with_tax": "58,000.00",
                 "invoice_type": "进项发票",
+                "source_expense_row_index": "0",
+                "source_expense_item_id": "oa-attach-202603-001:item:0:equipment",
+                "source_attachment_key": "oa-attach-202603-001:item:0:att:equipment",
+                "source_attachment_name": "设备发票.pdf",
                 "attachment_name": "设备发票.pdf",
                 "invoice_kind": "增值税电子专用发票",
             }
@@ -5304,6 +5691,132 @@ class AttachmentAwareOAAdapter:
         if month != "2026-03":
             return []
         return [_AttachmentRecord()]
+
+
+class _SourceBoundAttachmentRecord:
+    def __init__(self) -> None:
+        self.id = "oa-exp-hurong-248"
+        self.month = "2026-03"
+        self.section = "open"
+        self.case_id = None
+        self.applicant = "胡瑢"
+        self.project_name = "2024-2026年度红塔集团工作证管理系统维护项目"
+        self.apply_type = "日常报销"
+        self.amount = "248.00"
+        self.counterparty_name = ""
+        self.reason = "工作证管理系统维护项目报销"
+        self.relation_code = "pending_match"
+        self.relation_label = "待找流水与发票"
+        self.relation_tone = "warn"
+        self.expense_type = "项目费用"
+        self.expense_content = "工作证维护费用"
+        self.detail_fields = {"OA单号": "OA-HR-248", "申请日期": "2026-03-04"}
+        self.expense_items = [
+            {
+                "row_index": "0",
+                "expense_item_id": "oa-exp-hurong-248:item:0:maint",
+                "amount": "196.00",
+                "expense_content": "付款项1",
+            },
+            {
+                "row_index": "1",
+                "expense_item_id": "oa-exp-hurong-248:item:1:service",
+                "amount": "52.00",
+                "expense_content": "付款项2",
+            },
+        ]
+        self.attachment_invoices = [
+            {
+                "invoice_no": "24800001",
+                "seller_name": "红塔供应商A",
+                "buyer_name": "云南溯源科技有限公司",
+                "issue_date": "2026-03-04",
+                "amount": "100.00",
+                "total_with_tax": "100.00",
+                "invoice_type": "进项发票",
+                "source_expense_row_index": "0",
+                "source_expense_item_id": "oa-exp-hurong-248:item:0:maint",
+                "source_attachment_key": "oa-exp-hurong-248:item:0:att:a",
+                "source_attachment_name": "付款项1-发票A.pdf",
+            },
+            {
+                "invoice_no": "24800002",
+                "seller_name": "红塔供应商B",
+                "buyer_name": "云南溯源科技有限公司",
+                "issue_date": "2026-03-04",
+                "amount": "96.00",
+                "total_with_tax": "96.00",
+                "invoice_type": "进项发票",
+                "source_expense_row_index": "0",
+                "source_expense_item_id": "oa-exp-hurong-248:item:0:maint",
+                "source_attachment_key": "oa-exp-hurong-248:item:0:att:b",
+                "source_attachment_name": "付款项1-发票B.pdf",
+            },
+            {
+                "invoice_no": "24800003",
+                "seller_name": "红塔供应商C",
+                "buyer_name": "云南溯源科技有限公司",
+                "issue_date": "2026-03-04",
+                "amount": "52.00",
+                "total_with_tax": "52.00",
+                "invoice_type": "进项发票",
+                "source_expense_row_index": "1",
+                "source_expense_item_id": "oa-exp-hurong-248:item:1:service",
+                "source_attachment_key": "oa-exp-hurong-248:item:1:att:c",
+                "source_attachment_name": "付款项2-发票C.pdf",
+            },
+        ]
+        self.attachment_file_count = 3
+
+
+class _SingleSourceAttachmentRecord:
+    def __init__(self) -> None:
+        self.id = "oa-exp-hurong-292"
+        self.month = "2026-03"
+        self.section = "open"
+        self.case_id = None
+        self.applicant = "胡瑢"
+        self.project_name = "红云红河烟草能源管理运维项目"
+        self.apply_type = "日常报销"
+        self.amount = "292.00"
+        self.counterparty_name = ""
+        self.reason = "能源管理运维项目报销"
+        self.relation_code = "pending_match"
+        self.relation_label = "待找流水与发票"
+        self.relation_tone = "warn"
+        self.expense_type = "项目费用"
+        self.expense_content = "能源管理运维费用"
+        self.detail_fields = {"OA单号": "OA-HR-292", "申请日期": "2026-03-24", "明细行号": "0"}
+        source_invoice = {
+            "invoice_no": "29200001",
+            "seller_name": "能源运维供应商",
+            "buyer_name": "云南溯源科技有限公司",
+            "issue_date": "2026-03-24",
+            "amount": "292.00",
+            "total_with_tax": "292.00",
+            "invoice_type": "进项发票",
+            "source_expense_row_index": "0",
+            "source_expense_item_id": "oa-exp-hurong-292:item:0:energy",
+            "source_attachment_key": "oa-exp-hurong-292:item:0:att:only",
+            "source_attachment_name": "能源管理运维发票.pdf",
+        }
+        self.expense_items = [
+            {
+                "row_index": "0",
+                "expense_item_id": "oa-exp-hurong-292:item:0:energy",
+                "amount": "292.00",
+                "attachment_invoices": [dict(source_invoice)],
+            }
+        ]
+        self.attachment_invoices = [source_invoice]
+        self.attachment_file_count = 1
+
+
+class SourceBoundAttachmentOAAdapter:
+    def list_application_records(self, month: str) -> list[object]:
+        if month != "2026-03":
+            return []
+        return [_SourceBoundAttachmentRecord(), _SingleSourceAttachmentRecord()]
 
 
 class _FailingOverrideStateStore:

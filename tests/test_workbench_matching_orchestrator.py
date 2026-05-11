@@ -2,9 +2,14 @@ import logging
 import unittest
 
 from fin_ops_platform.services.workbench_candidate_match_service import WorkbenchCandidateMatchService
-from fin_ops_platform.services.workbench_matching_orchestrator import WorkbenchMatchingOrchestrator
+from fin_ops_platform.services.workbench_matching_orchestrator import (
+    WORKBENCH_EXCEPTION_RULES_VERSION,
+    WorkbenchMatchingOrchestrator,
+)
+from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
+from fin_ops_platform.services.workbench_special_pair_rule_service import WORKBENCH_SPECIAL_RULES_VERSION
 
 
 class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
@@ -57,6 +62,66 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         self.assertEqual(rules.calls[0]["bank_rows"], [row("bank-free")])
         self.assertEqual(rules.calls[0]["invoice_rows"], [row("invoice-free")])
 
+    def test_active_pair_relation_rows_are_excluded_regardless_of_relation_mode(self) -> None:
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="case-internal-transfer",
+            row_ids=["bank-held"],
+            row_types=["bank"],
+            relation_mode="internal_transfer_pair",
+            created_by="tester",
+            month_scope="2026-05",
+        )
+        rules = EchoRules()
+
+        summary = self._orchestrator(
+            row_provider=FakeRowProvider(bank_rows={"2026-05": [row("bank-held"), row("bank-free")]}),
+            pair_relation_service=pair_service,
+            rules=rules,
+        ).run(changed_scope_months=["2026-05"], reason="unit-test", request_id="req-002b")
+
+        self.assertEqual(rules.calls[0]["bank_rows"], [row("bank-free")])
+        self.assertEqual(summary["suppressed_by_pair_relation_count"], 1)
+
+    def test_active_exception_case_rows_keep_candidate_evidence_but_suppress_auto_close(self) -> None:
+        candidate_service = WorkbenchCandidateMatchService()
+        rules = StaticRules([candidate("2026-05", "auto_rule", ["bank-case"], status="auto_closed")])
+
+        summary = self._orchestrator(
+            row_provider=FakeRowProvider(bank_rows={"2026-05": [row("bank-case")]}),
+            candidate_service=candidate_service,
+            exception_case_service=FakeExceptionCaseService({"bank-case": "WEX-000001"}),
+            rules=rules,
+        ).run(changed_scope_months=["2026-05"], reason="unit-test", request_id="req-002c")
+
+        stored = candidate_service.list_candidates_by_month("2026-05")[0]
+        self.assertEqual(stored["status"], "suppressed")
+        self.assertEqual(stored["suppressed_reason"], "active_exception_case")
+        self.assertEqual(stored["consumed_by_case_id"], "WEX-000001")
+        self.assertEqual(summary["auto_closed_count"], 0)
+        self.assertEqual(summary["suppressed_by_exception_case_count"], 1)
+        self.assertEqual(summary["candidate_attached_to_exception_case_count"], 1)
+
+    def test_source_versions_include_matching_special_and_exception_rules_versions(self) -> None:
+        candidate_service = WorkbenchCandidateMatchService()
+
+        self._orchestrator(
+            row_provider=FakeRowProvider(),
+            candidate_service=candidate_service,
+            rules=StaticRules([]),
+        ).run(changed_scope_months=["2026-05"], reason="unit-test", request_id="req-002d")
+
+        self.assertTrue(
+            candidate_service.is_scope_fresh(
+                "2026-05",
+                source_versions={
+                    "workbench_matching_rules_version": WORKBENCH_MATCHING_RULES_VERSION,
+                    "workbench_special_rules_version": WORKBENCH_SPECIAL_RULES_VERSION,
+                    "workbench_exception_rules_version": WORKBENCH_EXCEPTION_RULES_VERSION,
+                },
+            )
+        )
+
     def test_read_model_for_affected_scope_is_invalidated(self) -> None:
         read_model_service = WorkbenchReadModelService()
         read_model_service.upsert_read_model(scope_key="2026-05", payload={"cached": True})
@@ -80,11 +145,13 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         )
 
         orchestrator.run(changed_scope_months=["2026-05"], reason="unit-test", request_id="req-004a")
-        first_snapshot = candidate_service.snapshot()
+        first_candidates = candidate_service.list_candidates_by_month("2026-05")
         orchestrator.run(changed_scope_months=["2026-05"], reason="unit-test", request_id="req-004b")
 
-        self.assertEqual(candidate_service.snapshot(), first_snapshot)
-        self.assertEqual(len(candidate_service.list_candidates_by_month("2026-05")), 1)
+        second_candidates = candidate_service.list_candidates_by_month("2026-05")
+        self.assertEqual([candidate["candidate_key"] for candidate in second_candidates], [first_candidates[0]["candidate_key"]])
+        self.assertEqual(len(second_candidates), 1)
+        self.assertTrue(candidate_service.is_scope_fresh("2026-05", source_versions=orchestrator._source_versions()))
 
     def test_summary_counts_auto_closed_and_conflict_candidates(self) -> None:
         summary = self._orchestrator(
@@ -146,6 +213,7 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         pair_relation_service: WorkbenchPairRelationService | None = None,
         candidate_service: WorkbenchCandidateMatchService | None = None,
         read_model_service: WorkbenchReadModelService | None = None,
+        exception_case_service: object | None = None,
         rules: object,
     ) -> WorkbenchMatchingOrchestrator:
         return WorkbenchMatchingOrchestrator(
@@ -154,6 +222,7 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
             candidate_match_service=candidate_service or WorkbenchCandidateMatchService(),
             read_model_service=read_model_service or WorkbenchReadModelService(),
             rules=rules,
+            exception_case_service=exception_case_service,
             logger=logging.getLogger("fin_ops_platform.services.workbench_matching_orchestrator"),
         )
 
@@ -247,6 +316,19 @@ class FailingRules:
         source_versions: dict[str, object] | None = None,
     ) -> list[dict[str, object]]:
         raise RuntimeError("rules failed")
+
+
+class FakeExceptionCaseService:
+    def __init__(self, row_case_index: dict[str, str]) -> None:
+        self.row_case_index = row_case_index
+
+    def case_ids_for_rows(self, row_ids: list[str]) -> list[str]:
+        case_ids: list[str] = []
+        for row_id in row_ids:
+            case_id = self.row_case_index.get(row_id)
+            if case_id and case_id not in case_ids:
+                case_ids.append(case_id)
+        return case_ids
 
 
 class SkippingRules:

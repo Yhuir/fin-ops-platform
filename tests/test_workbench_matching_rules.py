@@ -616,6 +616,75 @@ class WorkbenchMatchingRulesTests(unittest.TestCase):
         self.assertEqual(candidate["confidence"], "high")
         self.assertEqual(candidate["candidate_type"], "bank_invoice")
 
+    def test_bank_invoice_exact_amount_does_not_create_amount_only_review_candidate(self) -> None:
+        candidates = self.rules.generate_candidates(
+            "2026-05",
+            oa_rows=[],
+            bank_rows=[
+                bank_row("bank-different-counterparty", "100.00", counterparty_name="供应商A"),
+                bank_row("bank-missing-counterparty", "100.00", counterparty_name=""),
+                bank_row("bank-amount-only", "100.00", counterparty_name=""),
+            ],
+            invoice_rows=[
+                invoice_row("invoice-different-counterparty", "100.00", seller_name="供应商B"),
+                invoice_row("invoice-missing-counterparty", "100.00", seller_name=""),
+                invoice_row("invoice-amount-only", "100.00", seller_name=""),
+            ],
+        )
+
+        disallowed_pairs = [
+            ("bank-different-counterparty", "invoice-different-counterparty"),
+            ("bank-missing-counterparty", "invoice-missing-counterparty"),
+            ("bank-amount-only", "invoice-amount-only"),
+        ]
+        review_candidates = [
+            candidate
+            for candidate in candidates
+            if candidate["rule_code"] == "bank_invoice_exact_amount" and candidate["status"] == "needs_review"
+        ]
+        for bank_id, invoice_id in disallowed_pairs:
+            self.assertFalse(
+                any(bank_id in candidate["bank_row_ids"] and invoice_id in candidate["invoice_row_ids"] for candidate in review_candidates),
+                f"unexpected amount-only review candidate for {bank_id} and {invoice_id}",
+            )
+
+    def test_bank_invoice_exact_amount_rejects_real_mismatched_counterparty_regression(self) -> None:
+        invoice = invoice_row(
+            "invoice-zijin-2000",
+            "2000.00",
+            seller_name="紫金财产保险股份有限公司云南分公司",
+            invoice_type="进项发票",
+            total_with_tax="2000.00",
+        )
+        invoice["issue_date"] = "2026-01-20"
+
+        candidates = self.rules.generate_candidates(
+            "2026-04",
+            oa_rows=[],
+            bank_rows=[
+                bank_row(
+                    "bank-sugaomei-2000",
+                    "2000.00",
+                    counterparty_name="江阴市溯高美电气有限公司",
+                    direction="outflow",
+                    trade_time="2026-04-23 00:00:00",
+                )
+            ],
+            invoice_rows=[invoice],
+        )
+
+        self.assertEqual(
+            [
+                candidate
+                for candidate in candidates
+                if candidate["rule_code"] == "bank_invoice_exact_amount"
+                and candidate["status"] == "needs_review"
+                and candidate["bank_row_ids"] == ["bank-sugaomei-2000"]
+                and candidate["invoice_row_ids"] == ["invoice-zijin-2000"]
+            ],
+            [],
+        )
+
     def test_salary_personal_auto_match(self) -> None:
         candidates = self.rules.generate_candidates(
             "2026-05",

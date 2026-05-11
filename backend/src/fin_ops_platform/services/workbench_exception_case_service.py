@@ -61,8 +61,9 @@ EXCEPTION_CASE_DEFINITIONS: dict[str, dict[str, str]] = {
     },
 }
 
-ACTIVE_CASE_STATUSES = {"confirmed", "ignored"}
-CASE_STATUSES = ACTIVE_CASE_STATUSES | {"cancelled", "settled"}
+ACTIVE_CASE_STATUSES = {"open", "ignored", "reopened", "legacy_confirmed", "confirmed"}
+CASE_STATUSES = ACTIVE_CASE_STATUSES | {"closed", "cancelled", "settled"}
+CASE_SCHEMA_VERSION = 2
 ROW_TYPES = {"oa", "bank", "invoice"}
 
 
@@ -156,6 +157,7 @@ class WorkbenchExceptionCaseService:
                 }
             ],
         }
+        self._ensure_v2_compat_fields(case_payload)
         self._cases[case_id] = case_payload
         for row_id in row_ids:
             self._row_case_index[row_id] = case_id
@@ -198,8 +200,179 @@ class WorkbenchExceptionCaseService:
                 }
             ],
         }
+        self._ensure_v2_compat_fields(case_payload)
         self._cases[case_id] = case_payload
         return deepcopy(case_payload)
+
+    def create_case_from_action(
+        self,
+        *,
+        rows: list[dict[str, Any]],
+        scenario: dict[str, Any],
+        action: dict[str, Any],
+        amount_summary: dict[str, Any],
+        workflow_projection: dict[str, Any],
+        actor: str,
+        payload: dict[str, Any] | None = None,
+        candidate_ids: list[str] | None = None,
+        source_versions: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_rows = self._normalize_rows(rows)
+        resolved_idempotency_key = str(idempotency_key or "").strip()
+        if resolved_idempotency_key:
+            existing_case = self.find_case_by_idempotency_key(resolved_idempotency_key)
+            if existing_case is not None:
+                return existing_case
+
+        result_status = str(action.get("result_status") or "").strip()
+        status = result_status if result_status in {"open", "closed"} else "open"
+        if status in ACTIVE_CASE_STATUSES:
+            active_case_ids = self.case_ids_for_rows([row["id"] for row in normalized_rows])
+            if active_case_ids:
+                raise ValueError(f"rows already have active exception cases: {', '.join(active_case_ids)}")
+
+        scenario_code = self._non_empty_text(scenario.get("scenario_code"), "scenario_code")
+        scenario_label = self._non_empty_text(scenario.get("scenario_label") or scenario_code, "scenario_label")
+        business_line = self._non_empty_text(scenario.get("business_line") or "manual", "business_line")
+        rule_version = self._non_empty_text(scenario.get("rule_version") or "exception_rules_v1", "rule_version")
+        action_code = self._non_empty_text(action.get("action_code"), "action_code")
+        action_label = self._non_empty_text(action.get("label") or action_code, "action_label")
+        now = self._now()
+        row_ids = [row["id"] for row in normalized_rows]
+        resolution_payload = deepcopy(payload if isinstance(payload, dict) else {})
+        resolution = {
+            "action_code": action_code,
+            "action_label": action_label,
+            "result_status": status,
+            "relation_mode": str(action.get("relation_mode") or ""),
+            **resolution_payload,
+        }
+        if "note" not in resolution:
+            note = resolution_payload.get("note")
+            resolution["note"] = str(note).strip() if note is not None else ""
+
+        case_id = self._next_case_id()
+        case_payload = {
+            "id": case_id,
+            "schema_version": CASE_SCHEMA_VERSION,
+            "status": status,
+            "business_line": business_line,
+            "scenario_code": scenario_code,
+            "scenario_label": scenario_label,
+            "rule_version": rule_version,
+            "row_ids": row_ids,
+            "row_types": self._unique_preserve_order(row["type"] for row in normalized_rows),
+            "scope_months": self._normalize_scope_months(None, normalized_rows),
+            "amount_summary": deepcopy(amount_summary if isinstance(amount_summary, dict) else {}),
+            "resolution": resolution,
+            "workflow_projection": deepcopy(workflow_projection if isinstance(workflow_projection, dict) else {}),
+            "audit": [
+                {
+                    "event": "created",
+                    "actor": str(actor or "system"),
+                    "at": now,
+                    "payload": {
+                        "scenario_code": scenario_code,
+                        "action_code": action_code,
+                    },
+                }
+            ],
+            "candidate_ids": self._normalize_optional_text_list(candidate_ids),
+            "source_versions": deepcopy(source_versions if isinstance(source_versions, dict) else {}),
+            "idempotency_key": resolved_idempotency_key,
+            "created_at": now,
+            "updated_at": now,
+            "exception_code": scenario_code,
+            "exception_label": scenario_label,
+            "category": business_line,
+            "comment": resolution.get("note") or None,
+            "history": [
+                {
+                    "action": "created",
+                    "at": now,
+                    "comment": resolution.get("note") or None,
+                }
+            ],
+        }
+        self._cases[case_id] = case_payload
+        if status in ACTIVE_CASE_STATUSES:
+            for row_id in row_ids:
+                self._row_case_index[row_id] = case_id
+        return deepcopy(case_payload)
+
+    def get_case(self, case_id: str) -> dict[str, Any] | None:
+        resolved_case_id = str(case_id or "").strip()
+        if not resolved_case_id:
+            return None
+        case_payload = self._cases.get(resolved_case_id)
+        if not isinstance(case_payload, dict):
+            return None
+        return deepcopy(case_payload)
+
+    def find_case_by_idempotency_key(self, idempotency_key: str) -> dict[str, Any] | None:
+        resolved_key = str(idempotency_key or "").strip()
+        if not resolved_key:
+            return None
+        for case_payload in self._cases.values():
+            if str(case_payload.get("idempotency_key") or "").strip() == resolved_key:
+                return deepcopy(case_payload)
+        return None
+
+    def preview_existing_case_conflicts(self, row_ids: list[str]) -> list[dict[str, Any]]:
+        return [
+            deepcopy(self._cases[case_id])
+            for case_id in self.case_ids_for_rows(row_ids)
+            if isinstance(self._cases.get(case_id), dict)
+        ]
+
+    def append_audit_event(
+        self,
+        case_id: str,
+        *,
+        event: str,
+        actor: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        resolved_case_id = str(case_id or "").strip()
+        case_payload = self._cases.get(resolved_case_id)
+        if not isinstance(case_payload, dict):
+            raise KeyError(resolved_case_id)
+        audit = case_payload.setdefault("audit", [])
+        if not isinstance(audit, list):
+            audit = []
+            case_payload["audit"] = audit
+        audit.append(
+            {
+                "event": self._non_empty_text(event, "event"),
+                "actor": str(actor or "system"),
+                "at": self._now(),
+                "payload": deepcopy(payload if isinstance(payload, dict) else {}),
+            }
+        )
+        case_payload["updated_at"] = self._now()
+        return deepcopy(case_payload)
+
+    def close_case(
+        self,
+        case_id: str,
+        *,
+        resolution: dict[str, Any],
+        actor: str,
+    ) -> dict[str, Any]:
+        case_payload = self._cases.get(str(case_id or "").strip())
+        if not isinstance(case_payload, dict):
+            raise KeyError(case_id)
+        case_payload["resolution"] = deepcopy(resolution)
+        return self._transition_case(case_payload, action="closed", status="closed", comment=str(resolution.get("note") or ""))
+
+    def reopen_case(self, case_id: str, *, reason: str, actor: str) -> dict[str, Any]:
+        case_payload = self._cases.get(str(case_id or "").strip())
+        if not isinstance(case_payload, dict):
+            raise KeyError(case_id)
+        reopened = self._transition_case(case_payload, action="reopened", status="reopened", comment=reason)
+        self.append_audit_event(str(case_id), event="reopened", actor=actor, payload={"reason": reason})
+        return reopened
 
     def cancel_exception_cases(
         self,
@@ -286,10 +459,18 @@ class WorkbenchExceptionCaseService:
             history = []
             case_payload["history"] = history
         history.append({"action": action, "at": now, "comment": comment})
+        audit = case_payload.setdefault("audit", [])
+        if isinstance(audit, list):
+            audit.append({"event": action, "actor": "system", "at": now, "payload": {"comment": comment}})
         if status not in ACTIVE_CASE_STATUSES:
             for row_id in list(case_payload.get("row_ids") or []):
                 if self._row_case_index.get(str(row_id)) == case_payload["id"]:
                     del self._row_case_index[str(row_id)]
+        else:
+            for row_id in list(case_payload.get("row_ids") or []):
+                resolved_row_id = str(row_id).strip()
+                if resolved_row_id:
+                    self._row_case_index[resolved_row_id] = str(case_payload["id"])
         return deepcopy(case_payload)
 
     def _next_case_id(self) -> str:
@@ -337,9 +518,15 @@ class WorkbenchExceptionCaseService:
             if status not in CASE_STATUSES:
                 raise ValueError(f"unsupported exception case status: {status}")
             case_payload["status"] = status
-            case_payload["exception_code"] = cls._normalize_exception_code(str(case_payload.get("exception_code") or ""))
-            case_payload["exception_label"] = cls._non_empty_text(case_payload.get("exception_label"), "exception_label")
-            case_payload["category"] = cls._non_empty_text(case_payload.get("category"), "category")
+            case_payload["exception_code"] = cls._normalize_case_code(case_payload)
+            case_payload["exception_label"] = cls._non_empty_text(
+                case_payload.get("exception_label") or case_payload.get("scenario_label"),
+                "exception_label",
+            )
+            case_payload["category"] = cls._non_empty_text(
+                case_payload.get("category") or case_payload.get("business_line") or "manual",
+                "category",
+            )
             row_ids = cls._normalize_text_list(case_payload.get("row_ids"), "row_ids")
             row_types = cls._normalize_row_types(case_payload.get("row_types"))
             case_payload["row_ids"] = row_ids
@@ -350,6 +537,7 @@ class WorkbenchExceptionCaseService:
             case_payload["updated_at"] = cls._non_empty_text(case_payload.get("updated_at"), "updated_at")
             history = case_payload.get("history")
             case_payload["history"] = deepcopy(history) if isinstance(history, list) else []
+            cls._ensure_v2_compat_fields(case_payload)
             normalized[case_id] = case_payload
         return normalized
 
@@ -388,6 +576,17 @@ class WorkbenchExceptionCaseService:
         return normalized_code
 
     @staticmethod
+    def _normalize_case_code(case_payload: dict[str, Any]) -> str:
+        normalized_code = str(case_payload.get("exception_code") or case_payload.get("scenario_code") or "").strip()
+        if normalized_code in EXCEPTION_CASE_DEFINITIONS:
+            return normalized_code
+        if int(case_payload.get("schema_version") or 0) >= CASE_SCHEMA_VERSION or str(case_payload.get("scenario_code") or "").strip():
+            if not normalized_code:
+                raise ValueError("exception_code is required.")
+            return normalized_code
+        raise ValueError(f"unsupported exception code: {normalized_code}")
+
+    @staticmethod
     def _normalize_scope_months(scope_months: list[str] | None, rows: list[dict[str, str]]) -> list[str]:
         if scope_months is not None:
             return WorkbenchExceptionCaseService._normalize_month_list(scope_months)
@@ -413,6 +612,14 @@ class WorkbenchExceptionCaseService:
         if not normalized:
             raise ValueError(f"{field_name} must not be empty.")
         return normalized
+
+    @staticmethod
+    def _normalize_optional_text_list(values: Any) -> list[str]:
+        if not isinstance(values, list):
+            return []
+        return WorkbenchExceptionCaseService._unique_preserve_order(
+            str(value).strip() for value in values if str(value).strip()
+        )
 
     @staticmethod
     def _normalize_row_types(values: Any) -> list[str]:
@@ -456,6 +663,90 @@ class WorkbenchExceptionCaseService:
     @staticmethod
     def _now() -> str:
         return datetime.now(UTC).isoformat()
+
+    @classmethod
+    def _ensure_v2_compat_fields(cls, case_payload: dict[str, Any]) -> None:
+        case_payload["schema_version"] = int(case_payload.get("schema_version") or CASE_SCHEMA_VERSION)
+        status = str(case_payload.get("status") or "")
+        exception_code = str(case_payload.get("exception_code") or case_payload.get("scenario_code") or "")
+        exception_label = str(case_payload.get("exception_label") or case_payload.get("scenario_label") or exception_code)
+        category = str(case_payload.get("category") or case_payload.get("business_line") or "manual")
+        business_line = str(case_payload.get("business_line") or cls._business_line_for_category(category))
+        case_payload["business_line"] = business_line
+        case_payload["scenario_code"] = str(case_payload.get("scenario_code") or exception_code)
+        case_payload["scenario_label"] = str(case_payload.get("scenario_label") or exception_label)
+        case_payload["rule_version"] = str(case_payload.get("rule_version") or "legacy")
+        amount_summary = case_payload.get("amount_summary")
+        case_payload["amount_summary"] = deepcopy(amount_summary) if isinstance(amount_summary, dict) else {}
+        resolution = case_payload.get("resolution")
+        if not isinstance(resolution, dict):
+            action_code = "legacy_settled" if status == "settled" else "legacy_confirmed"
+            resolution = {
+                "action_code": action_code,
+                "action_label": exception_label,
+                "result_status": "closed" if status in {"settled", "closed"} else "open",
+                "relation_mode": category,
+                "note": case_payload.get("comment") or "",
+            }
+        case_payload["resolution"] = deepcopy(resolution)
+        workflow_projection = case_payload.get("workflow_projection")
+        if not isinstance(workflow_projection, dict):
+            workflow_projection = {
+                "state": cls._workflow_state_for_status(status),
+                "allowed_next_events": ["CANCEL"] if status in ACTIVE_CASE_STATUSES else ["REOPEN"],
+                "assignee": None,
+                "due_at": None,
+            }
+        case_payload["workflow_projection"] = deepcopy(workflow_projection)
+        audit = case_payload.get("audit")
+        if not isinstance(audit, list):
+            audit = []
+            for history in list(case_payload.get("history") or []):
+                if not isinstance(history, dict):
+                    continue
+                audit.append(
+                    {
+                        "event": str(history.get("action") or "legacy_event"),
+                        "actor": "system",
+                        "at": str(history.get("at") or case_payload.get("updated_at") or cls._now()),
+                        "payload": {"comment": history.get("comment")},
+                    }
+                )
+            if not audit:
+                audit.append(
+                    {
+                        "event": "created",
+                        "actor": "system",
+                        "at": str(case_payload.get("created_at") or cls._now()),
+                        "payload": {},
+                    }
+                )
+        case_payload["audit"] = deepcopy(audit)
+        case_payload["candidate_ids"] = cls._normalize_optional_text_list(case_payload.get("candidate_ids"))
+        source_versions = case_payload.get("source_versions")
+        case_payload["source_versions"] = deepcopy(source_versions) if isinstance(source_versions, dict) else {}
+
+    @staticmethod
+    def _business_line_for_category(category: str) -> str:
+        if category == "invoice":
+            return "income"
+        if category in {"bank", "oa_bank", "oa_bank_settlement"}:
+            return "expense"
+        return str(category or "manual")
+
+    @staticmethod
+    def _workflow_state_for_status(status: str) -> str:
+        if status == "closed":
+            return "CLOSED"
+        if status == "settled":
+            return "LEGACY_SETTLED"
+        if status == "ignored":
+            return "IGNORED"
+        if status == "cancelled":
+            return "CANCELLED"
+        if status == "reopened":
+            return "REOPENED"
+        return "LEGACY_CONFIRMED" if status == "confirmed" else str(status or "OPEN").upper()
 
     @staticmethod
     def _max_case_counter(cases: dict[str, dict[str, Any]]) -> int:

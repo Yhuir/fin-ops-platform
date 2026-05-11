@@ -51,6 +51,12 @@ type MockApiOptions = {
   appHealth?: Record<string, unknown>;
   appHealthErrorStatus?: number;
   appHealthErrorBody?: Record<string, unknown>;
+  workbenchExceptionPreview?: Record<string, unknown>;
+  workbenchExceptionApply?: Record<string, unknown>;
+  workbenchExceptionPreviewStatus?: number;
+  workbenchExceptionApplyStatus?: number;
+  workbenchExceptionPreviewDelayMs?: number;
+  workbenchExceptionApplyDelayMs?: number;
 };
 
 const templateRegistry = [
@@ -106,6 +112,46 @@ const templateRegistry = [
 
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function buildDefaultWorkbenchExceptionPreview(rowIds: string[]) {
+  return {
+    rule_version: "exception_rules_v1",
+    scenario: {
+      business_line: "expense",
+      scenario_code: "expense_oa_bank_invoice_equal",
+      scenario_label: "OA、支出流水和进项发票金额一致",
+    },
+    amount_summary: {
+      oa_total: "58000.00",
+      bank_expense_total: "58000.00",
+      bank_income_total: "0.00",
+      input_invoice_total: "58000.00",
+      output_invoice_total: "0.00",
+      relation: "all_equal",
+    },
+    automatic_actions: [],
+    available_actions: [
+      {
+        action_code: "wait_input_invoice",
+        label: "追进项发票",
+        result_status: "open",
+        required_fields: ["note"],
+      },
+    ],
+    warnings: [],
+    workflow_projection: {
+      next_status: "open",
+    },
+    candidate_evidence: [
+      {
+        id: "mock-candidate",
+        label: `已选择 ${rowIds.length} 条记录`,
+        detail: "前端 mock preview 由后端驱动动作清单。",
+      },
+    ],
+    can_apply: true,
+  };
 }
 
 function createEtcInvoiceStore() {
@@ -979,6 +1025,40 @@ function buildWorkbenchRowPayload(month: string) {
           },
           available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
         },
+        {
+          id: "oa-exp-248",
+          type: "oa",
+          case_id: "CASE-202603-OA-ATTACHMENT-248",
+          applicant: "胡瑢",
+          project_name: "2024-2026年度红塔集团工作证管理系统维护项目",
+          apply_type: "日常报销",
+          amount: "248.00",
+          counterparty_name: "胡瑢",
+          reason: "OA 附件票来源归属待核销",
+          oa_bank_relation: { code: "pending_match", label: "待找流水与发票", tone: "warn" },
+          detail_fields: {
+            审批完成时间: "2026-03-04 10:18",
+            明细摘要: "付款项 1 100.00；付款项 2 96.00；付款项 3 52.00",
+          },
+          available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+        },
+        {
+          id: "oa-exp-292",
+          type: "oa",
+          case_id: "CASE-202603-OA-ATTACHMENT-292",
+          applicant: "胡瑢",
+          project_name: "红云红河烟草能源管理运维项目",
+          apply_type: "日常报销",
+          amount: "292.00",
+          counterparty_name: "胡瑢",
+          reason: "单张 OA 附件票来源归属待核销",
+          oa_bank_relation: { code: "pending_match", label: "待找流水与发票", tone: "warn" },
+          detail_fields: {
+            审批完成时间: "2026-03-24 11:30",
+            明细摘要: "付款项 1 292.00",
+          },
+          available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+        },
       ],
       bank: [
         {
@@ -1031,6 +1111,7 @@ function buildWorkbenchRowPayload(month: string) {
         {
           id: "iv-o-202603-001",
           type: "invoice",
+          source_kind: "oa_attachment_invoice",
           case_id: "CASE-202603-101",
           seller_tax_no: "91330108MA27B4011D",
           seller_name: "智能工厂设备商",
@@ -1046,6 +1127,11 @@ function buildWorkbenchRowPayload(month: string) {
           available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
           detail_fields: {
             发票号码: "12561048",
+            derived_from_oa_id: "oa-o-202603-001",
+            source_expense_row_index: "1",
+            source_expense_item_id: "oa-o-202603-001:item:1",
+            source_attachment_name: "设备尾款附件发票.pdf",
+            source_attachment_key: "oa-o-202603-001/item-1/invoice.pdf",
           },
         },
         {
@@ -1066,6 +1152,110 @@ function buildWorkbenchRowPayload(month: string) {
           available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
           detail_fields: {
             发票号码: "12561049",
+          },
+        },
+        {
+          id: "iv-oa-attachment-248-001",
+          type: "invoice",
+          source_kind: "oa_attachment_invoice",
+          case_id: "CASE-202603-OA-ATTACHMENT-248",
+          seller_tax_no: "91530100OAATT248A",
+          seller_name: "云南移动通信有限公司",
+          buyer_tax_no: "915300007194052520",
+          buyer_name: "杭州溯源科技有限公司",
+          issue_date: "2026-03-04",
+          amount: "100.00",
+          tax_rate: "0%",
+          tax_amount: "0.00",
+          total_with_tax: "100.00",
+          invoice_type: "进项普票",
+          invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
+          available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+          detail_fields: {
+            发票号码: "OAATT-248-001",
+            derived_from_oa_id: "oa-exp-248",
+            source_expense_row_index: "1",
+            source_expense_item_id: "oa-exp-248:item:1",
+            source_attachment_name: "付款项1-通信费.pdf",
+            source_attachment_key: "oa-exp-248/item-1/mobile.pdf",
+          },
+        },
+        {
+          id: "iv-oa-attachment-248-002",
+          type: "invoice",
+          source_kind: "oa_attachment_invoice",
+          case_id: "CASE-202603-OA-ATTACHMENT-248",
+          seller_tax_no: "91530100OAATT248B",
+          seller_name: "昆明图文服务有限公司",
+          buyer_tax_no: "915300007194052520",
+          buyer_name: "杭州溯源科技有限公司",
+          issue_date: "2026-03-04",
+          amount: "96.00",
+          tax_rate: "0%",
+          tax_amount: "0.00",
+          total_with_tax: "96.00",
+          invoice_type: "进项普票",
+          invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
+          available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+          detail_fields: {
+            发票号码: "OAATT-248-002",
+            derived_from_oa_id: "oa-exp-248",
+            source_expense_row_index: "2",
+            source_expense_item_id: "oa-exp-248:item:2",
+            source_attachment_name: "付款项2-图文费.pdf",
+            source_attachment_key: "oa-exp-248/item-2/print.pdf",
+          },
+        },
+        {
+          id: "iv-oa-attachment-248-003",
+          type: "invoice",
+          source_kind: "oa_attachment_invoice",
+          case_id: "CASE-202603-OA-ATTACHMENT-248",
+          seller_tax_no: "91530100OAATT248C",
+          seller_name: "昆明办公用品有限公司",
+          buyer_tax_no: "915300007194052520",
+          buyer_name: "杭州溯源科技有限公司",
+          issue_date: "2026-03-04",
+          amount: "52.00",
+          tax_rate: "0%",
+          tax_amount: "0.00",
+          total_with_tax: "52.00",
+          invoice_type: "进项普票",
+          invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
+          available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+          detail_fields: {
+            发票号码: "OAATT-248-003",
+            derived_from_oa_id: "oa-exp-248",
+            source_expense_row_index: "3",
+            source_expense_item_id: "oa-exp-248:item:3",
+            source_attachment_name: "付款项3-办公用品.pdf",
+            source_attachment_key: "oa-exp-248/item-3/office.pdf",
+          },
+        },
+        {
+          id: "iv-oa-attachment-292-001",
+          type: "invoice",
+          source_kind: "oa_attachment_invoice",
+          case_id: "CASE-202603-OA-ATTACHMENT-292",
+          seller_tax_no: "91530100OAATT292A",
+          seller_name: "云南能源服务有限公司",
+          buyer_tax_no: "915300007194052520",
+          buyer_name: "杭州溯源科技有限公司",
+          issue_date: "2026-03-24",
+          amount: "292.00",
+          tax_rate: "0%",
+          tax_amount: "0.00",
+          total_with_tax: "292.00",
+          invoice_type: "进项普票",
+          invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
+          available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+          detail_fields: {
+            发票号码: "OAATT-292-001",
+            derived_from_oa_id: "oa-exp-292",
+            source_expense_row_index: "1",
+            source_expense_item_id: "oa-exp-292:item:1",
+            source_attachment_name: "付款项1-能源服务.pdf",
+            source_attachment_key: "oa-exp-292/item-1/energy.pdf",
           },
         },
       ],
@@ -1122,7 +1312,7 @@ function buildGroups(
     string,
     {
       group_id: string;
-      group_type: "auto_closed" | "manual_confirmed" | "candidate";
+      group_type: "auto_closed" | "manual_confirmed" | "candidate" | "source_linked";
       match_confidence: "high" | "medium" | "low";
       reason: string;
       oa_rows: Array<Record<string, unknown>>;
@@ -1135,11 +1325,12 @@ function buildGroups(
     const caseId = typeof row.case_id === "string" && row.case_id ? row.case_id : null;
     const groupId = caseId ? `case:${caseId}` : `row:${String(row.id)}`;
     if (!groups.has(groupId)) {
+      const isOaAttachmentSourceGroup = caseId?.includes("OA-ATTACHMENT") ?? false;
       groups.set(groupId, {
         group_id: groupId,
-        group_type: section === "paired" ? "manual_confirmed" : "candidate",
-        match_confidence: section === "paired" ? "high" : "medium",
-        reason: caseId ? "mock_case_group" : "mock_row_group",
+        group_type: isOaAttachmentSourceGroup ? "source_linked" : section === "paired" ? "manual_confirmed" : "candidate",
+        match_confidence: section === "paired" || isOaAttachmentSourceGroup ? "high" : "medium",
+        reason: isOaAttachmentSourceGroup ? "oa_attachment_source_relation" : caseId ? "mock_case_group" : "mock_row_group",
         oa_rows: [],
         bank_rows: [],
         invoice_rows: [],
@@ -1831,6 +2022,34 @@ function buildWorkbenchDetail(rowId: string) {
           发票代码: "032002600111",
           发票号码: "00061345",
           备注: "已与银行付款和 OA 闭环",
+        },
+      },
+    },
+    "iv-o-202603-001": {
+      row: {
+        id: "iv-o-202603-001",
+        type: "invoice",
+        source_kind: "oa_attachment_invoice",
+        case_id: "CASE-202603-101",
+        seller_tax_no: "91330108MA27B4011D",
+        seller_name: "智能工厂设备商",
+        buyer_tax_no: "91310000MA1K8A001X",
+        buyer_name: "杭州溯源科技有限公司",
+        issue_date: "2026-03-28",
+        amount: "58,000.00",
+        tax_rate: "13%",
+        tax_amount: "7,540.00",
+        total_with_tax: "65,540.00",
+        invoice_type: "进项专票",
+        invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
+        available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+        detail_fields: {
+          发票号码: "12561048",
+          derived_from_oa_id: "oa-o-202603-001",
+          source_expense_row_index: "1",
+          source_expense_item_id: "oa-o-202603-001:item:1",
+          source_attachment_name: "设备尾款附件发票.pdf",
+          source_attachment_key: "oa-o-202603-001/item-1/invoice.pdf",
         },
       },
     },
@@ -3945,6 +4164,72 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       };
     },
+    "/api/workbench/exception/preview": ({ jsonBody }) => {
+      const rowIds = Array.isArray(jsonBody?.row_ids) ? (jsonBody.row_ids as string[]) : [];
+      return {
+        status: options.workbenchExceptionPreviewStatus ?? 200,
+        body: options.workbenchExceptionPreview
+          ? cloneJson(options.workbenchExceptionPreview)
+          : buildDefaultWorkbenchExceptionPreview(rowIds),
+      };
+    },
+    "/api/workbench/exception/apply": ({ jsonBody }) => {
+      const rowIds = Array.isArray(jsonBody?.row_ids) ? (jsonBody.row_ids as string[]) : [];
+      const month = String(jsonBody?.month ?? "");
+      const actionCode = String(jsonBody?.action_code ?? "workbench_exception");
+      const actionLabel = actionCode === "wait_input_invoice" ? "追进项发票" : actionCode;
+      const touchedMonths = new Set(
+        rowIds.map((rowId) => (month === "all" ? workbenchStateStore.resolveMonthForRow(rowId) : month)).filter(Boolean) as string[],
+      );
+
+      for (const resolvedMonth of touchedMonths) {
+        const payload = workbenchStateStore.get(resolvedMonth);
+        for (const pane of ["oa", "bank", "invoice"] as const) {
+          payload.open[pane] = payload.open[pane].map((row) => {
+            if (!rowIds.includes(String(row.id))) {
+              return row;
+            }
+            if (row.type === "oa") {
+              return {
+                ...row,
+                handled_exception: true,
+                oa_bank_relation: { code: actionCode, label: actionLabel, tone: "danger" },
+                available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+              };
+            }
+            if (row.type === "bank") {
+              return {
+                ...row,
+                handled_exception: true,
+                invoice_relation: { code: actionCode, label: actionLabel, tone: "danger" },
+                available_actions: ["detail", "view_relation", "cancel_link", "handle_exception"],
+              };
+            }
+            return {
+              ...row,
+              handled_exception: true,
+              invoice_bank_relation: { code: actionCode, label: actionLabel, tone: "danger" },
+              available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+            };
+          });
+        }
+      }
+
+      return {
+        status: options.workbenchExceptionApplyStatus ?? 200,
+        body: options.workbenchExceptionApply
+          ? cloneJson(options.workbenchExceptionApply)
+          : {
+              success: true,
+              case: { id: "EXC-MOCK-1" },
+              pair_relation: null,
+              updated_rows: rowIds.map((id) => ({ id })),
+              affected_row_ids: rowIds,
+              workbench_refresh_required: true,
+              message: "已提交统一异常处理。",
+            },
+      };
+    },
     "/api/workbench/actions/mark-exception": ({ jsonBody }) => ({
       body: {
         success: true,
@@ -4464,13 +4749,22 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     if (importPreviewDelay) {
       await new Promise((resolve) => window.setTimeout(resolve, importPreviewDelay));
     }
+    const workbenchExceptionDelay =
+      (url.pathname === "/api/workbench/exception/preview" ? options.workbenchExceptionPreviewDelayMs : undefined)
+      ?? (url.pathname === "/api/workbench/exception/apply" ? options.workbenchExceptionApplyDelayMs : undefined);
+    if (workbenchExceptionDelay) {
+      await new Promise((resolve) => window.setTimeout(resolve, workbenchExceptionDelay));
+    }
     if (isBinaryLikeResponse(response)) {
       if (options.actionDelayMs && url.pathname.startsWith("/api/workbench/actions/")) {
         await new Promise((resolve) => window.setTimeout(resolve, options.actionDelayMs));
       }
       return response;
     }
-    if (options.actionDelayMs && url.pathname.startsWith("/api/workbench/actions/")) {
+    if (
+      options.actionDelayMs
+      && (url.pathname.startsWith("/api/workbench/actions/") || url.pathname.startsWith("/api/workbench/exception/"))
+    ) {
       await new Promise((resolve) => window.setTimeout(resolve, options.actionDelayMs));
     }
     return jsonResponse(response);

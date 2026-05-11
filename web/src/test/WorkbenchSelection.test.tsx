@@ -40,6 +40,12 @@ function expectRelationPreviewTriPane(section: HTMLElement) {
   expect(within(invoicePane).getByText(/\d+ [项条]/)).toBeInTheDocument();
 }
 
+function fetchPath(input: RequestInfo | URL) {
+  const rawUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+  const url = new URL(rawUrl, "http://localhost");
+  return `${url.pathname}${url.search}`;
+}
+
 describe("Workbench row selection and detail modal", () => {
   test("clicking an open row toggles multi-selection without opening the detail modal", async () => {
     const user = userEvent.setup();
@@ -147,6 +153,30 @@ describe("Workbench row selection and detail modal", () => {
     await user.keyboard("{Escape}");
 
     expect(screen.queryByRole("dialog", { name: "详情弹窗" })).not.toBeInTheDocument();
+  });
+
+  test("OA attachment invoice detail shows source expense item and attachment fields", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    renderWorkbenchPage();
+
+    const invoiceRow = await screen.findByRole("row", {
+      name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
+    });
+    await user.click(within(invoiceRow).getByRole("button", { name: "详情" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "详情弹窗" });
+
+    expect(within(dialog).getByText("来源OA单号")).toBeInTheDocument();
+    expect(within(dialog).getByText("oa-o-202603-001")).toBeInTheDocument();
+    expect(within(dialog).getByText("来源OA明细行号")).toBeInTheDocument();
+    expect(within(dialog).getByText("来源付款项ID")).toBeInTheDocument();
+    expect(within(dialog).getByText("oa-o-202603-001:item:1")).toBeInTheDocument();
+    expect(within(dialog).getByText("来源附件文件名")).toBeInTheDocument();
+    expect(within(dialog).getByText("设备尾款附件发票.pdf")).toBeInTheDocument();
+    expect(within(dialog).getByText("来源附件Key")).toBeInTheDocument();
+    expect(within(dialog).getByText("oa-o-202603-001/item-1/invoice.pdf")).toBeInTheDocument();
+    expect(within(dialog).queryByText("source_expense_item_id")).not.toBeInTheDocument();
   });
 
   test("open zone header confirm link opens preview before submit", async () => {
@@ -333,6 +363,73 @@ describe("Workbench row selection and detail modal", () => {
         }),
       }),
     );
+  });
+
+  test("open zone exception action accepts invoice selections and uses the unified exception modal", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderWorkbenchPage();
+
+    const openZone = await screen.findByTestId("zone-open");
+    const openOaRow = within(openZone).getByRole("row", {
+      name: /陈涛.*智能工厂设备商/,
+    });
+    const openBankRow = within(openZone).getByRole("row", {
+      name: /2026-03-28.*智能工厂设备商/,
+    });
+    const openInvoiceRow = within(openZone).getByRole("row", {
+      name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
+    });
+
+    await user.click(openOaRow);
+    await user.click(openBankRow);
+    await user.click(openInvoiceRow);
+    const exceptionButton = within(openZone)
+      .getAllByRole("button", { name: "异常处理" })
+      .find((button) => button.classList.contains("zone-selection-btn"));
+    expect(exceptionButton).toBeDefined();
+    await user.click(exceptionButton!);
+
+    const dialog = await screen.findByRole("dialog", { name: "统一异常处理" });
+    expect(screen.queryByText("OA与银行流水异常处理暂不支持发票，请先取消发票选择。")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "OA流水异常处理弹窗" })).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/exception/preview",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          month: "all",
+          row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
+        }),
+      }),
+    );
+
+    await user.click(within(dialog).getByRole("radio", { name: /追进项发票/ }));
+    await user.type(within(dialog).getByLabelText("备注"), "已联系供应商补票");
+    await user.click(within(dialog).getByRole("button", { name: "提交处理" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workbench/exception/apply",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            month: "all",
+            row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
+            scenario_code: "expense_oa_bank_invoice_equal",
+            action_code: "wait_input_invoice",
+            payload: {
+              note: "已联系供应商补票",
+            },
+          }),
+        }),
+      );
+    });
+
+    const calledPaths = fetchMock.mock.calls.map(([input]) => fetchPath(input));
+    const applyIndex = calledPaths.findIndex((path) => path === "/api/workbench/exception/apply");
+    expect(applyIndex).toBeGreaterThanOrEqual(0);
+    expect(calledPaths.slice(applyIndex + 1)).toContain("/api/workbench?month=all");
   });
 
   test("workbench action shows a blocking loading modal and requires acknowledgement after completion", async () => {
@@ -1394,7 +1491,7 @@ describe("Workbench row selection and detail modal", () => {
     ).toBeInTheDocument();
   });
 
-  test("open zone header exception action opens the OA-bank modal and submits a structured exception", async () => {
+  test("open zone header exception action opens the unified modal instead of the OA-bank modal", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderWorkbenchPage();
@@ -1410,38 +1507,55 @@ describe("Workbench row selection and detail modal", () => {
     await user.click(openBankRow);
     await user.click(screen.getByRole("button", { name: "异常处理" }));
 
-    const exceptionModal = await screen.findByRole("dialog", { name: "OA流水异常处理弹窗" });
+    const exceptionModal = await screen.findByRole("dialog", { name: "统一异常处理" });
+    expect(screen.queryByRole("dialog", { name: "OA流水异常处理弹窗" })).not.toBeInTheDocument();
+    expect(within(exceptionModal).getByText("金额摘要")).toBeInTheDocument();
     expect(within(exceptionModal).getByText("OA合计")).toBeInTheDocument();
-    expect(within(exceptionModal).getAllByText("58,000.00")).toHaveLength(2);
-    expect(within(exceptionModal).getByText("流水支出")).toBeInTheDocument();
-    expect(within(exceptionModal).getByText("流水收入")).toBeInTheDocument();
-    expect(within(exceptionModal).getByText("流水净额")).toBeInTheDocument();
-    expect(within(exceptionModal).getByText("OA与支出差额")).toBeInTheDocument();
-
-    await user.selectOptions(within(exceptionModal).getByLabelText("异常情况"), "oa_bank_amount_mismatch");
-    await user.type(within(exceptionModal).getByLabelText("备注"), "金额核对后暂时继续异常");
-    fetchMock.mockClear();
-    await user.click(within(exceptionModal).getByRole("button", { name: "继续报异常" }));
-
-    expect(await screen.findByText("已对 2 条记录执行 OA/流水异常处理。")).toBeInTheDocument();
+    expect(within(exceptionModal).getAllByText("58,000.00").length).toBeGreaterThanOrEqual(2);
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/actions/oa-bank-exception",
+      "/api/workbench/exception/preview",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
           month: "all",
           row_ids: ["oa-o-202603-001", "bk-o-202603-001"],
-          exception_code: "oa_bank_amount_mismatch",
-          exception_label: "金额不一致，继续异常",
-          comment: "金额核对后暂时继续异常",
         }),
+      }),
+    );
+
+    await user.click(await within(exceptionModal).findByRole("radio", { name: /追进项发票/ }));
+    await user.type(within(exceptionModal).getByLabelText("备注"), "金额核对后暂时继续异常");
+    fetchMock.mockClear();
+    await user.click(within(exceptionModal).getByRole("button", { name: "提交处理" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workbench/exception/apply",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            month: "all",
+            row_ids: ["oa-o-202603-001", "bk-o-202603-001"],
+            scenario_code: "expense_oa_bank_invoice_equal",
+            action_code: "wait_input_invoice",
+            payload: {
+              note: "金额核对后暂时继续异常",
+            },
+          }),
+        }),
+      );
+    });
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/workbench/actions/oa-bank-exception",
+      expect.objectContaining({
+        method: "POST",
       }),
     );
     const workbenchRefreshCalls = fetchMock.mock.calls.filter(([input]) => {
       const rawUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       return new URL(rawUrl, "http://localhost").pathname === "/api/workbench";
     });
-    expect(workbenchRefreshCalls).toHaveLength(0);
+    expect(workbenchRefreshCalls.length).toBeGreaterThan(0);
   });
 
   test("processed exception rows move out of the open zone and appear in the processed exception modal", async () => {
@@ -1462,28 +1576,28 @@ describe("Workbench row selection and detail modal", () => {
     await user.click(openBankRow);
     await user.click(within(openZone).getByRole("button", { name: "异常处理" }));
 
-    const exceptionModal = await screen.findByRole("dialog", { name: "OA流水异常处理弹窗" });
-    await user.selectOptions(within(exceptionModal).getByLabelText("异常情况"), "oa_bank_amount_mismatch");
-    await user.click(within(exceptionModal).getByRole("button", { name: "继续报异常" }));
+    const exceptionModal = await screen.findByRole("dialog", { name: "统一异常处理" });
+    await user.click(await within(exceptionModal).findByRole("radio", { name: /追进项发票/ }));
+    await user.type(within(exceptionModal).getByLabelText("备注"), "金额核对后暂时继续异常");
+    await user.click(within(exceptionModal).getByRole("button", { name: "提交处理" }));
 
-    expect(await screen.findByText("已对 2 条记录执行 OA/流水异常处理。")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "确定" }));
-
-    expect(
-      within(openZone).queryByRole("row", {
-        name: /陈涛.*智能工厂设备商/,
-      }),
-    ).not.toBeInTheDocument();
-    expect(
-      within(openZone).queryByRole("row", {
-        name: /2026-03-28.*智能工厂设备商/,
-      }),
-    ).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        within(openZone).queryByRole("row", {
+          name: /陈涛.*智能工厂设备商/,
+        }),
+      ).not.toBeInTheDocument();
+      expect(
+        within(openZone).queryByRole("row", {
+          name: /2026-03-28.*智能工厂设备商/,
+        }),
+      ).not.toBeInTheDocument();
+    });
 
     await user.click(within(openZone).getByRole("button", { name: /已处理异常\d+项/ }));
 
     const processedModal = await screen.findByRole("dialog", { name: "已处理异常弹窗" });
-    expect(within(processedModal).getAllByText("金额不一致，继续异常").length).toBeGreaterThanOrEqual(2);
+    expect(within(processedModal).getAllByText("追进项发票").length).toBeGreaterThanOrEqual(2);
     expect(within(processedModal).getByText("OA")).toBeInTheDocument();
     expect(within(processedModal).getByText("银行流水")).toBeInTheDocument();
     expect(within(processedModal).queryByRole("button", { name: "详情" })).not.toBeInTheDocument();
@@ -1508,10 +1622,14 @@ describe("Workbench row selection and detail modal", () => {
     await user.click(openBankRow);
     await user.click(within(openZone).getByRole("button", { name: "异常处理" }));
 
-    const exceptionModal = await screen.findByRole("dialog", { name: "OA流水异常处理弹窗" });
-    await user.selectOptions(within(exceptionModal).getByLabelText("异常情况"), "oa_bank_amount_mismatch");
-    await user.click(within(exceptionModal).getByRole("button", { name: "继续报异常" }));
-    await user.click(await screen.findByRole("button", { name: "确定" }));
+    const exceptionModal = await screen.findByRole("dialog", { name: "统一异常处理" });
+    await user.click(await within(exceptionModal).findByRole("radio", { name: /追进项发票/ }));
+    await user.type(within(exceptionModal).getByLabelText("备注"), "金额核对后暂时继续异常");
+    await user.click(within(exceptionModal).getByRole("button", { name: "提交处理" }));
+
+    await waitFor(() => {
+      expect(within(openZone).queryByRole("row", { name: /陈涛.*智能工厂设备商/ })).not.toBeInTheDocument();
+    });
 
     await user.click(within(openZone).getByRole("button", { name: /已处理异常\d+项/ }));
 
@@ -1569,10 +1687,13 @@ describe("Workbench row selection and detail modal", () => {
     await user.click(openBankRow);
     await user.click(within(openZone).getByRole("button", { name: "异常处理" }));
 
-    const exceptionModal = await screen.findByRole("dialog", { name: "OA流水异常处理弹窗" });
-    await user.selectOptions(within(exceptionModal).getByLabelText("异常情况"), "oa_bank_amount_mismatch");
-    await user.click(within(exceptionModal).getByRole("button", { name: "继续报异常" }));
-    await user.click(await screen.findByRole("button", { name: "确定" }));
+    const exceptionModal = await screen.findByRole("dialog", { name: "统一异常处理" });
+    await user.click(await within(exceptionModal).findByRole("radio", { name: /追进项发票/ }));
+    await user.type(within(exceptionModal).getByLabelText("备注"), "金额核对后暂时继续异常");
+    await user.click(within(exceptionModal).getByRole("button", { name: "提交处理" }));
+    await waitFor(() => {
+      expect(within(openZone).queryByRole("row", { name: /陈涛.*智能工厂设备商/ })).not.toBeInTheDocument();
+    });
     fetchMock.mockClear();
 
     await user.click(within(openZone).getByRole("button", { name: /已处理异常\d+项/ }));

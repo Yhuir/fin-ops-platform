@@ -9,10 +9,11 @@ from threading import RLock
 from typing import Any
 
 
-CANDIDATE_MATCH_SCHEMA_VERSION = "2026-05-oa-attachment-source-link"
+CANDIDATE_MATCH_SCHEMA_VERSION = "2026-05-exception-candidate-lifecycle"
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
-VALID_CANDIDATE_STATUSES = {"auto_closed", "needs_review", "conflict", "incomplete"}
+VALID_CANDIDATE_STATUSES = {"auto_closed", "needs_review", "conflict", "incomplete", "consumed", "suppressed"}
 VALID_CONFIDENCE_LEVELS = {"high", "medium", "low"}
+VALID_SUPPRESSED_REASONS = {"", "active_exception_case", "active_pair_relation", "manual_override"}
 
 
 class WorkbenchCandidateMatchService:
@@ -120,6 +121,57 @@ class WorkbenchCandidateMatchService:
             self._scope_runs.clear()
             return deleted_keys
 
+    def mark_candidates_consumed(
+        self,
+        *,
+        candidate_keys: list[str] | None = None,
+        candidate_ids: list[str] | None = None,
+        row_ids: list[str] | None = None,
+        consumed_by_case_id: str,
+        consumed_by_relation_case_id: str | None = None,
+        exception_preview: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        resolved_case_id = self._normalize_required_text(consumed_by_case_id, "consumed_by_case_id")
+        return self._mark_candidates(
+            candidate_keys=candidate_keys,
+            candidate_ids=candidate_ids,
+            row_ids=row_ids,
+            updates={
+                "status": "consumed",
+                "consumed_by_case_id": resolved_case_id,
+                "consumed_by_relation_case_id": str(consumed_by_relation_case_id or "").strip(),
+                "suppressed_reason": "",
+                "exception_preview": deepcopy(exception_preview) if isinstance(exception_preview, dict) else None,
+            },
+        )
+
+    def mark_candidates_suppressed(
+        self,
+        *,
+        candidate_keys: list[str] | None = None,
+        candidate_ids: list[str] | None = None,
+        row_ids: list[str] | None = None,
+        suppressed_reason: str,
+        consumed_by_case_id: str | None = None,
+        consumed_by_relation_case_id: str | None = None,
+        exception_preview: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        resolved_reason = str(suppressed_reason or "").strip()
+        if resolved_reason not in VALID_SUPPRESSED_REASONS or not resolved_reason:
+            raise ValueError("suppressed_reason must be active_exception_case, active_pair_relation, or manual_override.")
+        return self._mark_candidates(
+            candidate_keys=candidate_keys,
+            candidate_ids=candidate_ids,
+            row_ids=row_ids,
+            updates={
+                "status": "suppressed",
+                "consumed_by_case_id": str(consumed_by_case_id or "").strip(),
+                "consumed_by_relation_case_id": str(consumed_by_relation_case_id or "").strip(),
+                "suppressed_reason": resolved_reason,
+                "exception_preview": deepcopy(exception_preview) if isinstance(exception_preview, dict) else None,
+            },
+        )
+
     def mark_scope_processed(
         self,
         scope_month: str,
@@ -157,7 +209,10 @@ class WorkbenchCandidateMatchService:
             if str(scope_run.get("schema_version") or "").strip() != CANDIDATE_MATCH_SCHEMA_VERSION:
                 return False
             persisted_versions = scope_run.get("source_versions")
-            return (persisted_versions if isinstance(persisted_versions, dict) else {}) == expected_versions
+            resolved_persisted_versions = persisted_versions if isinstance(persisted_versions, dict) else {}
+            if not expected_versions:
+                return resolved_persisted_versions == {}
+            return all(resolved_persisted_versions.get(key) == value for key, value in expected_versions.items())
 
     def stale_scope_months(
         self,
@@ -179,8 +234,6 @@ class WorkbenchCandidateMatchService:
         for candidate_key, candidate in candidates.items():
             if not isinstance(candidate, dict):
                 continue
-            if str(candidate.get("schema_version") or "").strip() != CANDIDATE_MATCH_SCHEMA_VERSION:
-                continue
             try:
                 normalized_candidate = cls._normalize_candidate(
                     candidate,
@@ -190,6 +243,72 @@ class WorkbenchCandidateMatchService:
                 continue
             normalized[str(normalized_candidate["candidate_key"])] = normalized_candidate
         return normalized
+
+    def _mark_candidates(
+        self,
+        *,
+        candidate_keys: list[str] | None,
+        candidate_ids: list[str] | None,
+        row_ids: list[str] | None,
+        updates: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        if updates.get("exception_preview") is None:
+            updates = {key: value for key, value in updates.items() if key != "exception_preview"}
+        with self._lock:
+            selected_keys = self._select_candidate_keys(
+                candidate_keys=candidate_keys,
+                candidate_ids=candidate_ids,
+                row_ids=row_ids,
+            )
+            updated_candidates: list[dict[str, Any]] = []
+            for candidate_key in selected_keys:
+                existing = self._candidates.get(candidate_key)
+                if not isinstance(existing, dict):
+                    continue
+                normalized = self._normalize_candidate(
+                    {
+                        **deepcopy(existing),
+                        **deepcopy(updates),
+                    },
+                    fallback_candidate_key=candidate_key,
+                )
+                self._candidates[candidate_key] = normalized
+                updated_candidates.append(deepcopy(normalized))
+            return updated_candidates
+
+    def _select_candidate_keys(
+        self,
+        *,
+        candidate_keys: list[str] | None,
+        candidate_ids: list[str] | None,
+        row_ids: list[str] | None,
+    ) -> list[str]:
+        selected: list[str] = []
+        requested_keys = {
+            str(candidate_key or "").strip()
+            for candidate_key in list(candidate_keys or [])
+            if str(candidate_key or "").strip()
+        }
+        requested_ids = {
+            str(candidate_id or "").strip()
+            for candidate_id in list(candidate_ids or [])
+            if str(candidate_id or "").strip()
+        }
+        requested_row_ids = {
+            str(row_id or "").strip()
+            for row_id in list(row_ids or [])
+            if str(row_id or "").strip()
+        }
+        if not requested_keys and not requested_ids and not requested_row_ids:
+            raise ValueError("candidate_keys, candidate_ids, or row_ids is required.")
+        for candidate_key, candidate in self._candidates.items():
+            if candidate_key in requested_keys or str(candidate.get("candidate_id") or "").strip() in requested_ids:
+                selected.append(candidate_key)
+                continue
+            candidate_row_ids = {str(row_id) for row_id in list(candidate.get("row_ids") or [])}
+            if requested_row_ids and requested_row_ids.intersection(candidate_row_ids):
+                selected.append(candidate_key)
+        return selected
 
     @classmethod
     def _normalize_scope_runs(cls, scope_runs: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -235,7 +354,9 @@ class WorkbenchCandidateMatchService:
 
         status = str(candidate.get("status") or "").strip()
         if status not in VALID_CANDIDATE_STATUSES:
-            raise ValueError("candidate.status must be one of auto_closed, needs_review, conflict, incomplete.")
+            raise ValueError(
+                "candidate.status must be one of auto_closed, needs_review, conflict, incomplete, consumed, suppressed."
+            )
         confidence = str(candidate.get("confidence") or "").strip()
         if confidence not in VALID_CONFIDENCE_LEVELS:
             raise ValueError("candidate.confidence must be one of high, medium, low.")
@@ -246,10 +367,14 @@ class WorkbenchCandidateMatchService:
 
         source_versions = candidate.get("source_versions")
 
+        suppressed_reason = str(candidate.get("suppressed_reason") or "").strip()
+        if suppressed_reason not in VALID_SUPPRESSED_REASONS:
+            raise ValueError("candidate.suppressed_reason is not supported.")
+
         return {
             "candidate_id": candidate_id,
             "candidate_key": candidate_key,
-            "schema_version": str(candidate.get("schema_version") or CANDIDATE_MATCH_SCHEMA_VERSION),
+            "schema_version": CANDIDATE_MATCH_SCHEMA_VERSION,
             "scope_month": scope_month,
             "candidate_type": cls._normalize_required_text(candidate.get("candidate_type"), "candidate_type"),
             "status": status,
@@ -269,6 +394,10 @@ class WorkbenchCandidateMatchService:
             "special_metadata": deepcopy(
                 candidate.get("special_metadata") if isinstance(candidate.get("special_metadata"), dict) else {}
             ),
+            "consumed_by_case_id": str(candidate.get("consumed_by_case_id") or "").strip(),
+            "consumed_by_relation_case_id": str(candidate.get("consumed_by_relation_case_id") or "").strip(),
+            "suppressed_reason": suppressed_reason,
+            "exception_preview": cls._normalize_exception_preview(candidate.get("exception_preview")),
         }
 
     @staticmethod
@@ -307,6 +436,23 @@ class WorkbenchCandidateMatchService:
             resolved_value = str(value or "").strip()
             if resolved_value and resolved_value not in normalized:
                 normalized.append(resolved_value)
+        return normalized
+
+    @classmethod
+    def _normalize_exception_preview(cls, value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+        preview = deepcopy(value)
+        scenario_code = str(preview.get("scenario_code") or "").strip()
+        available_action_codes = cls._normalize_optional_texts(preview.get("available_action_codes"))
+        normalized: dict[str, Any] = {}
+        if scenario_code:
+            normalized["scenario_code"] = scenario_code
+        if available_action_codes:
+            normalized["available_action_codes"] = available_action_codes
+        for key, payload in preview.items():
+            if key not in normalized and key not in {"scenario_code", "available_action_codes"}:
+                normalized[str(key)] = deepcopy(payload)
         return normalized
 
     @staticmethod

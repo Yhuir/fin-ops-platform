@@ -9,6 +9,7 @@ from fin_ops_platform.services.workbench_special_pair_rule_service import (
     SALARY_PERSONAL_AUTO_MATCH,
     WorkbenchSpecialPairRuleService,
 )
+from fin_ops_platform.services.workbench_special_rule_detectors import WorkbenchSpecialRuleDetector
 
 
 class WorkbenchSpecialPairRuleServiceTests(unittest.TestCase):
@@ -36,6 +37,10 @@ class WorkbenchSpecialPairRuleServiceTests(unittest.TestCase):
         self.assertEqual(candidates[0]["rule_code"], SALARY_PERSONAL_AUTO_MATCH)
         self.assertEqual(candidates[0]["status"], "auto_closed")
         self.assertIn("工资", candidates[0]["tags"])
+        self.assertEqual(
+            candidates[0]["special_metadata"]["evidence"]["suggested_action_code"],
+            "auto_close_salary_payment",
+        )
 
     def test_detects_internal_transfer_by_company_identity_without_exact_name_equality(self) -> None:
         candidates = self.service.generate_candidates(
@@ -67,6 +72,10 @@ class WorkbenchSpecialPairRuleServiceTests(unittest.TestCase):
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0]["rule_code"], INTERNAL_TRANSFER_PAIR)
         self.assertEqual(candidates[0]["special_metadata"]["cost_policy"], "exclude_all")
+        self.assertEqual(
+            candidates[0]["special_metadata"]["evidence"]["suggested_action_code"],
+            "auto_close_internal_transfer",
+        )
 
     def test_detects_configured_oa_attachment_invoice_offset(self) -> None:
         candidates = self.service.generate_candidates(
@@ -159,6 +168,63 @@ class WorkbenchSpecialPairRuleServiceTests(unittest.TestCase):
             self.assertEqual(candidate["special_metadata"]["cost_policy"], "hint_only")
             self.assertFalse(candidate["special_metadata"]["cost_excluded"])
             self.assertIn("现金往来", candidate["tags"])
+            self.assertEqual(
+                candidate["special_metadata"]["evidence"]["suggested_action_code"],
+                "review_cash_turnover",
+            )
+
+    def test_shared_detector_returns_standard_evidence_for_classifier_reuse(self) -> None:
+        detector = WorkbenchSpecialRuleDetector()
+
+        evaluations = detector.evaluate(
+            oa_rows=[],
+            bank_rows=[
+                {
+                    "id": "bank-salary-001",
+                    "debit_amount": "8,500.00",
+                    "summary": "工资",
+                    "remark": "3月工资",
+                    "counterparty_name": "张三",
+                },
+                {
+                    "id": "bank-cash-001",
+                    "debit_amount": "200.00",
+                    "remark": "备用金",
+                    "counterparty_name": "普通户名",
+                },
+            ],
+            invoice_rows=[],
+            settings={},
+        )
+
+        salary = next(item for item in evaluations if item["rule_code"] == SALARY_PERSONAL_AUTO_MATCH)
+        cash = next(item for item in evaluations if item["rule_code"] == CASH_TURNOVER_DETECTED)
+        self.assertEqual(
+            salary,
+            {
+                "rule_code": SALARY_PERSONAL_AUTO_MATCH,
+                "confidence": "high",
+                "suggested_action_code": "auto_close_salary_payment",
+                "row_ids": ["bank-salary-001"],
+                "oa_row_ids": [],
+                "bank_row_ids": ["bank-salary-001"],
+                "invoice_row_ids": [],
+                "amount": "8500.00",
+                "status": "auto_closed",
+                "evidence": {
+                    "matched_fields": ["summary", "remark"],
+                    "amount": "8500.00",
+                    "counterparty_name": "张三",
+                    "summary": "工资 3月工资",
+                },
+                "display_tags": ["工资"],
+                "cost_policy": "normal",
+            },
+        )
+        self.assertEqual(cash["confidence"], "medium")
+        self.assertEqual(cash["suggested_action_code"], "review_cash_turnover")
+        self.assertEqual(cash["status"], "needs_review")
+        self.assertEqual(cash["display_tags"], ["现金往来"])
 
 
 if __name__ == "__main__":
