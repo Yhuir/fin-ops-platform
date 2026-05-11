@@ -2251,7 +2251,7 @@ class MongoOAAdapter(OAAdapter):
             "seller_name": clean_string(invoice.get("seller_name") or ""),
             "issue_date": clean_string(invoice.get("issue_date") or ""),
         }
-        if not invoice_no and not invoice_code and not digital_invoice_no:
+        if not invoice_no and not invoice_code:
             fallback["source_attachment_name"] = clean_string(invoice.get("source_attachment_name") or invoice.get("attachment_name") or "")
             fallback["source_region_key"] = clean_string(invoice.get("source_region_key") or "")
         keys.append((
