@@ -185,15 +185,19 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["groups"][0]["counterparty_name"], "梁希涛")
         self.assertEqual(payload["groups"][0]["family"], "company")
         self.assertIn("summary_row", payload["groups"][0])
+        self.assertIn("flow_rows", payload["groups"][0])
+        self.assertIn("allocation_lots", payload["groups"][0])
         self.assertIn("lot_rows", payload["groups"][0])
+        self.assertIsInstance(payload["groups"][0]["flow_rows"], list)
+        self.assertIsInstance(payload["groups"][0]["allocation_lots"], list)
         self.assertIsInstance(payload["groups"][0]["lot_rows"], list)
         self.assertEqual(payload["groups"][0]["summary_row"]["row_kind"], "summary")
         self.assertEqual(payload["groups"][0]["summary_row"]["display_level"], "group_summary")
-        self.assertEqual(payload["groups"][0]["row_span"], 1 + len(payload["groups"][0]["lot_rows"]))
+        self.assertEqual(payload["groups"][0]["row_span"], 1 + len(payload["groups"][0]["flow_rows"]))
         self.assertNotIn("rows", payload)
         self.assertNotIn("rows", payload["groups"][0])
 
-    def test_grouped_view_preserves_service_lot_rows(self) -> None:
+    def test_grouped_view_preserves_service_flow_rows_and_allocation_lots(self) -> None:
         class FakeLedgerService:
             def list_grouped_ledger(self, **_: object) -> dict[str, object]:
                 return {
@@ -215,6 +219,38 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                                 "borrow_amount": "200000.00",
                                 "balance_amount": "20000.00",
                             },
+                            "flow_rows": [
+                                {
+                                    "relation_id": "turnover_rel_001",
+                                    "row_kind": "flow",
+                                    "flow_id": "bank:bank_001",
+                                    "source_bank_row_id": "bank_001",
+                                    "flow_direction": "income",
+                                    "flow_amount": "200000.00",
+                                    "borrow_amount": "200000.00",
+                                    "repayment_amount": "0.00",
+                                },
+                                {
+                                    "relation_id": "turnover_rel_001",
+                                    "row_kind": "flow",
+                                    "flow_id": "bank:bank_002",
+                                    "source_bank_row_id": "bank_002",
+                                    "flow_direction": "expense",
+                                    "flow_amount": "180000.00",
+                                    "borrow_amount": "0.00",
+                                    "repayment_amount": "180000.00",
+                                },
+                            ],
+                            "allocation_lots": [
+                                {
+                                    "relation_id": "turnover_rel_001",
+                                    "row_kind": "allocation_lot",
+                                    "lot_id": "lot_001",
+                                    "borrow_amount": "120000.00",
+                                    "allocated_repayment_amount": "100000.00",
+                                    "balance_amount": "20000.00",
+                                }
+                            ],
                             "lot_rows": [
                                 {
                                     "relation_id": "turnover_rel_001",
@@ -239,15 +275,18 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         payload = routes.list_grouped_ledger(family="company")
         group = payload["groups"][0]
 
-        self.assertEqual(group["row_span"], 2)
+        self.assertEqual(group["row_span"], 3)
         self.assertEqual(group["summary_row"]["row_kind"], "summary")
         self.assertEqual(group["summary_row"]["display_level"], "group_summary")
+        self.assertEqual([row["row_kind"] for row in group["flow_rows"]], ["flow", "flow"])
+        self.assertEqual([row["source_bank_row_id"] for row in group["flow_rows"]], ["bank_001", "bank_002"])
+        self.assertEqual(group["allocation_lots"][0]["row_kind"], "allocation_lot")
         self.assertEqual(group["lot_rows"][0]["row_kind"], "lot")
         self.assertEqual(group["lot_rows"][0]["lot_id"], "lot_001")
         self.assertEqual(group["lot_rows"][0]["balance_amount"], "20000.00")
         self.assertNotIn("rows", group)
 
-    def test_grouped_view_converts_legacy_rows_to_summary_with_empty_lots(self) -> None:
+    def test_grouped_view_converts_legacy_rows_to_summary_with_empty_flow_rows_and_lots(self) -> None:
         class FakeLegacyLedgerService:
             def list_grouped_ledger(self, **_: object) -> dict[str, object]:
                 return {
@@ -270,6 +309,15 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                                     "balance_amount": "20000.00",
                                 }
                             ],
+                            "lot_rows": [
+                                {
+                                    "relation_id": "turnover_rel_001",
+                                    "row_kind": "lot",
+                                    "lot_id": "lot_legacy",
+                                    "borrow_amount": "200000.00",
+                                    "repayment_amount": "200000.00",
+                                }
+                            ],
                         }
                     ],
                 }
@@ -283,7 +331,9 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertEqual(group["summary_row"]["relation_id"], "turnover_rel_001")
         self.assertEqual(group["summary_row"]["row_kind"], "summary")
-        self.assertEqual(group["lot_rows"], [])
+        self.assertEqual(group["flow_rows"], [])
+        self.assertEqual(group["allocation_lots"][0]["row_kind"], "allocation_lot")
+        self.assertEqual(group["lot_rows"][0]["row_kind"], "lot")
         self.assertEqual(group["row_span"], 1)
         self.assertNotIn("rows", group)
 
@@ -428,6 +478,12 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertIn("往来大类", payload["columns"])
         self.assertGreaterEqual(len(payload["rows"]), 1)
         self.assertIn("row_type", payload["rows"][0])
+        self.assertEqual(payload["rows"][0]["row_type"], "summary")
+        flow_rows = [row for row in payload["rows"] if row.get("row_type") == "flow"]
+        self.assertEqual(len(flow_rows), len({row["source_bank_row_id"] for row in flow_rows}))
+        for row in flow_rows:
+            self.assertIn(row["flow_direction"], {"income", "expense"})
+            self.assertRegex(row["flow_amount"], r"^\d+\.\d{2}$")
         self.assertIn("lot_id", payload["rows"][0])
         self.assertIn("balance_amount", payload["rows"][0])
         forbidden_keys = {"chips", "row_tone", "group_tone", "row_span", "bank_row_ids"}
@@ -453,11 +509,11 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         )
         self.assertIn("filename*=", response.headers["Content-Disposition"])
         self.assertIn("%E5%BE%80%E6%9D%A5%E6%AC%BE%E5%8F%B0%E8%B4%A6-", response.headers["Content-Disposition"])
-        self.assertEqual(header[:5], ["序号", "行类型", "批次 ID", "往来大类", "对方户名"])
+        self.assertEqual(header[:7], ["序号", "行类型", "源银行流水ID", "流水方向", "流水金额", "往来大类", "对方户名"])
         self.assertIn("余额", header)
         self.assertEqual(data_row[1], "合计")
-        self.assertEqual(data_row[3], "业务往来")
-        self.assertEqual(data_row[4], "昆明建设集团")
+        self.assertEqual(data_row[5], "业务往来")
+        self.assertEqual(data_row[6], "昆明建设集团")
 
     def test_confirm_and_withdraw_require_mutation_permission_and_write_audit(self) -> None:
         with self._without_default_test_auth(), TemporaryDirectory() as temp_dir:

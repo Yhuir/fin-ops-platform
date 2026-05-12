@@ -135,6 +135,206 @@ function groupedPayload(family: string) {
       ],
     },
     {
+      group_id: "counterparty:personal:jiaxiaohua",
+      counterparty_name: "贾小花",
+      family: "personal",
+      family_label: "个人往来",
+      pending_direction: "closed",
+      pending_direction_label: "已闭合",
+      pending_amount: "0.00",
+      closed_amount: "0.00",
+      row_span: 4,
+      group_tone: "success",
+      summary_row: {
+        row_kind: "summary",
+        relation_id: "rel-jiaxiaohua",
+        status: "confirmed",
+        status_label: "已闭合",
+        row_tone: "success",
+        borrow_amount: "300000.00",
+        borrow_date: "2026-02-04",
+        borrow_direction: "income",
+        repayment_amount: "300000.00",
+        repayment_date: "2026-03-04",
+        repayment_direction: "expense",
+        counterparty_bank_name: "建行通海支行",
+        repayment_remark: "个人暂借款",
+        interest_rate_type: "none",
+        interest_rate_value: "0.000000",
+        interest_paid_amount: "0.00",
+        loan_days: null,
+        accrued_interest: "0.00",
+        interest_paid_date: null,
+        interest_payment_method: "",
+        note: "贾小花合计",
+        bank_row_ids: ["bank-jia-income-200000", "bank-jia-income-100000", "bank-jia-expense-300000"],
+      },
+      rows: [
+        {
+          row_kind: "summary",
+          relation_id: "rel-jiaxiaohua",
+          status: "confirmed",
+          status_label: "已闭合",
+          row_tone: "success",
+          borrow_amount: "300000.00",
+          borrow_date: "2026-02-04",
+          borrow_direction: "income",
+          repayment_amount: "300000.00",
+          repayment_date: "2026-03-04",
+          repayment_direction: "expense",
+          counterparty_bank_name: "建行通海支行",
+          repayment_remark: "个人暂借款",
+          interest_rate_type: "none",
+          interest_rate_value: "0.000000",
+          interest_paid_amount: "0.00",
+          loan_days: null,
+          accrued_interest: "0.00",
+          interest_paid_date: null,
+          interest_payment_method: "",
+          note: "贾小花合计",
+          bank_row_ids: ["bank-jia-income-200000", "bank-jia-income-100000", "bank-jia-expense-300000"],
+        },
+      ],
+      flow_rows: [
+        {
+          row_kind: "flow",
+          flow_id: "bank:bank-jia-income-200000",
+          source_bank_row_id: "bank-jia-income-200000",
+          relation_id: "rel-jiaxiaohua",
+          status: "confirmed",
+          status_label: "流水",
+          row_tone: "success",
+          flow_direction: "income",
+          flow_amount: "200000.00",
+          borrow_amount: "200000.00",
+          borrow_date: "2026-02-04 13:20:48",
+          borrow_direction: "income",
+          repayment_amount: "0.00",
+          repayment_date: null,
+          repayment_direction: "expense",
+          counterparty_bank_name: "建行通海支行",
+          repayment_remark: "个人暂借款：待还款",
+          interest_rate_type: "none",
+          interest_rate_value: "0.000000",
+          interest_paid_amount: "0.00",
+          loan_days: null,
+          accrued_interest: "0.00",
+          interest_paid_date: null,
+          interest_payment_method: "",
+          note: "收入 200000",
+          bank_row_ids: ["bank-jia-income-200000"],
+        },
+        {
+          row_kind: "flow",
+          flow_id: "bank:bank-jia-income-100000",
+          source_bank_row_id: "bank-jia-income-100000",
+          relation_id: "rel-jiaxiaohua",
+          status: "confirmed",
+          status_label: "流水",
+          row_tone: "success",
+          flow_direction: "income",
+          flow_amount: "100000.00",
+          borrow_amount: "100000.00",
+          borrow_date: "2026-02-04 17:07:45",
+          borrow_direction: "income",
+          repayment_amount: "0.00",
+          repayment_date: null,
+          repayment_direction: "expense",
+          counterparty_bank_name: "建行通海支行",
+          repayment_remark: "个人暂借款：待还款",
+          interest_rate_type: "none",
+          interest_rate_value: "0.000000",
+          interest_paid_amount: "0.00",
+          loan_days: null,
+          accrued_interest: "0.00",
+          interest_paid_date: null,
+          interest_payment_method: "",
+          note: "收入 100000",
+          bank_row_ids: ["bank-jia-income-100000"],
+        },
+        {
+          row_kind: "flow",
+          flow_id: "bank:bank-jia-expense-300000",
+          source_bank_row_id: "bank-jia-expense-300000",
+          relation_id: "rel-jiaxiaohua",
+          status: "confirmed",
+          status_label: "流水",
+          row_tone: "warning",
+          flow_direction: "expense",
+          flow_amount: "300000.00",
+          borrow_amount: "0.00",
+          borrow_date: null,
+          borrow_direction: "income",
+          repayment_amount: "300000.00",
+          repayment_date: "2026-03-04 15:24:58",
+          repayment_direction: "expense",
+          counterparty_bank_name: "建行通海支行",
+          repayment_remark: "个人暂借款：已还款",
+          interest_rate_type: "none",
+          interest_rate_value: "0.000000",
+          interest_paid_amount: "0.00",
+          loan_days: null,
+          accrued_interest: "0.00",
+          interest_paid_date: null,
+          interest_payment_method: "",
+          note: "支出 300000",
+          bank_row_ids: ["bank-jia-expense-300000"],
+        },
+      ],
+      lot_rows: [
+        {
+          row_kind: "lot",
+          relation_id: "rel-jiaxiaohua",
+          lot_id: "lot-jia-200000",
+          status: "confirmed",
+          status_label: "批次明细",
+          row_tone: "info",
+          borrow_amount: "200000.00",
+          borrow_date: "2026-02-04",
+          borrow_direction: "income",
+          repayment_amount: "200000.00",
+          repayment_date: "2026-03-04",
+          repayment_direction: "expense",
+          counterparty_bank_name: "分摊批次一",
+          repayment_remark: "错误展示时会复制还款",
+          interest_rate_type: "none",
+          interest_rate_value: "0.000000",
+          interest_paid_amount: "0.00",
+          loan_days: 28,
+          accrued_interest: "0.00",
+          interest_paid_date: null,
+          interest_payment_method: "",
+          note: "批次 200000",
+          bank_row_ids: ["bank-jia-income-200000", "bank-jia-expense-300000"],
+        },
+        {
+          row_kind: "lot",
+          relation_id: "rel-jiaxiaohua",
+          lot_id: "lot-jia-100000",
+          status: "confirmed",
+          status_label: "批次明细",
+          row_tone: "info",
+          borrow_amount: "100000.00",
+          borrow_date: "2026-02-04",
+          borrow_direction: "income",
+          repayment_amount: "100000.00",
+          repayment_date: "2026-03-04",
+          repayment_direction: "expense",
+          counterparty_bank_name: "分摊批次二",
+          repayment_remark: "错误展示时会复制还款",
+          interest_rate_type: "none",
+          interest_rate_value: "0.000000",
+          interest_paid_amount: "0.00",
+          loan_days: 28,
+          accrued_interest: "0.00",
+          interest_paid_date: null,
+          interest_payment_method: "",
+          note: "批次 100000",
+          bank_row_ids: ["bank-jia-income-100000", "bank-jia-expense-300000"],
+        },
+      ],
+    },
+    {
       group_id: "counterparty:company:yunnan",
       counterparty_name: "云南建设有限公司",
       family: "company",
@@ -307,7 +507,7 @@ afterEach(() => {
 });
 
 describe("Turnover ledger page", () => {
-  test("renders grouped MUI table with collapsed summary rows, expandable lot rows, sticky left cells, and no status column", async () => {
+  test("renders grouped MUI table with collapsed summary rows, sticky left cells, and no status column", async () => {
     const fetchMock = installTurnoverLedgerFetch();
     renderTurnoverLedgerPage();
 
@@ -344,7 +544,8 @@ describe("Turnover ledger page", () => {
     expect(within(groupCell).getByText("个人往来")).toBeInTheDocument();
     expect(within(groupCell).getByText("待还款合计：800.00")).toBeInTheDocument();
     expect(within(table).getByText("待收款合计：2,000.00")).toBeInTheDocument();
-    expect(within(groupCell).getByRole("button", { name: "展开 张三 批次明细" })).toBeInTheDocument();
+    expect(within(groupCell).queryByRole("button", { name: "展开 张三 批次明细" })).not.toBeInTheDocument();
+    expect(within(groupCell).queryByRole("button", { name: "展开 张三 流水明细" })).not.toBeInTheDocument();
     expect(within(table).queryByText("招商银行批次账户")).not.toBeInTheDocument();
     expect(within(table).queryByText("明细")).not.toBeInTheDocument();
 
@@ -352,17 +553,37 @@ describe("Turnover ledger page", () => {
     expect(within(table).getByTestId("amount-expense-rel-personal-1-repayment")).toHaveClass("turnover-amount-expense");
     expect(within(table).getByTestId("turnover-row-rel-personal-1")).toHaveClass("turnover-row-warning");
     expect(within(table).queryByText("待人工确认")).not.toBeInTheDocument();
+  });
 
-    await userEvent.click(within(groupCell).getByRole("button", { name: "展开 张三 批次明细" }));
-    expect(groupCell).toHaveAttribute("rowspan", "3");
-    expect(within(groupCell).getByRole("button", { name: "收起 张三 批次明细" })).toBeInTheDocument();
-    expect(within(table).getByText("招商银行批次账户")).toBeInTheDocument();
-    expect(within(table).getByText("工商银行批次账户")).toBeInTheDocument();
-    expect(within(table).getAllByText("明细")).toHaveLength(2);
-    expect(within(table).getAllByText("张三")).toHaveLength(1);
-    expect(within(table).getByTestId("turnover-lot-row-rel-personal-1-0")).toHaveClass("turnover-lot-row");
-    expect(within(table).getByTestId("turnover-lot-row-rel-personal-1-1")).toHaveClass("turnover-lot-row");
-    expect(within(table).getAllByRole("button", { name: "编辑明细 rel-personal-1" })).toHaveLength(2);
+  test("expands Jia Xiaohua with real flow rows instead of allocation lot rows", async () => {
+    installTurnoverLedgerFetch();
+    renderTurnoverLedgerPage();
+
+    const page = await screen.findByTestId("turnover-ledger-page");
+    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
+
+    await userEvent.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
+
+    const flowRows = within(table).getAllByTestId(/^turnover-flow-row-rel-jiaxiaohua-/);
+    expect(flowRows).toHaveLength(3);
+    expect(within(table).getAllByText("流水")).toHaveLength(3);
+    expect(within(flowRows[0]).getByText("200,000.00")).toBeInTheDocument();
+    expect(within(flowRows[0]).getByTestId("amount-empty-rel-jiaxiaohua-repayment")).toHaveTextContent("-");
+    expect(within(flowRows[1]).getByText("100,000.00")).toBeInTheDocument();
+    expect(within(flowRows[1]).getByTestId("amount-empty-rel-jiaxiaohua-repayment")).toHaveTextContent("-");
+    expect(within(flowRows[2]).getByTestId("amount-empty-rel-jiaxiaohua-borrow")).toHaveTextContent("-");
+    expect(within(flowRows[2]).getByText("300,000.00")).toBeInTheDocument();
+    expect(within(table).getByText("200,000.00")).toBeInTheDocument();
+    expect(within(table).getByText("100,000.00")).toBeInTheDocument();
+    expect(within(table).getAllByText("300,000.00")).toHaveLength(3);
+    expect(within(table).getByText("2026-02-04 13:20:48")).toBeInTheDocument();
+    expect(within(table).getByText("2026-02-04 17:07:45")).toBeInTheDocument();
+    expect(within(table).getByText("2026-03-04 15:24:58")).toBeInTheDocument();
+    expect(within(table).queryByText("分摊批次一")).not.toBeInTheDocument();
+    expect(within(table).queryByText("分摊批次二")).not.toBeInTheDocument();
+    expect(within(table).queryByText("批次 200000")).not.toBeInTheDocument();
+    expect(within(table).queryByText("批次 100000")).not.toBeInTheDocument();
   });
 
   test("opens the extra drawer, enables save when dirty, saves, refreshes, and keeps relation actions in the drawer", async () => {

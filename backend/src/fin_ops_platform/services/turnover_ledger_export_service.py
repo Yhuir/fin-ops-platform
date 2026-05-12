@@ -14,7 +14,9 @@ XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sh
 EXPORT_COLUMNS = [
     "序号",
     "行类型",
-    "批次 ID",
+    "源银行流水ID",
+    "流水方向",
+    "流水金额",
     "往来大类",
     "对方户名",
     "待还款金额",
@@ -95,12 +97,18 @@ class TurnoverLedgerExportService:
     def _formal_row(self, sequence: int, group: dict[str, Any], row: dict[str, Any], *, row_type: str) -> dict[str, Any]:
         balance_amount = self._balance_amount(group, row)
         pending_repayment, pending_collection = self._pending_amounts(group, row, balance_amount=balance_amount)
-        normalized_row_type = "lot" if row_type == "lot" else "summary"
-        lot_id = str(row.get("lot_id") or "") if normalized_row_type == "lot" else ""
+        normalized_row_type = "flow" if row_type == "flow" else "summary"
+        source_bank_row_id = str(row.get("source_bank_row_id") or "") if normalized_row_type == "flow" else ""
+        flow_direction = str(row.get("flow_direction") or "") if normalized_row_type == "flow" else ""
+        flow_amount = (
+            self._format_money(self._money(row.get("flow_amount"))) if normalized_row_type == "flow" else "0.00"
+        )
         return {
             "序号": sequence,
-            "行类型": "明细" if normalized_row_type == "lot" else "合计",
-            "批次 ID": lot_id,
+            "行类型": "真实流水" if normalized_row_type == "flow" else "合计",
+            "源银行流水ID": source_bank_row_id,
+            "流水方向": flow_direction,
+            "流水金额": flow_amount,
             "往来大类": str(group.get("family_label") or row.get("family_label") or ""),
             "对方户名": str(group.get("counterparty_name") or row.get("counterparty_name") or ""),
             "待还款金额": self._format_money(pending_repayment),
@@ -122,16 +130,19 @@ class TurnoverLedgerExportService:
             "备注": str(row.get("note") or ""),
             "关系状态": str(row.get("status_label") or row.get("status") or ""),
             "row_type": normalized_row_type,
-            "lot_id": lot_id,
+            "lot_id": "",
+            "source_bank_row_id": source_bank_row_id,
+            "flow_direction": flow_direction,
+            "flow_amount": flow_amount,
             "balance_amount": self._format_money(balance_amount),
         }
 
     @classmethod
     def _export_rows_for_group(cls, group: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
         summary = group.get("summary_row")
-        lot_rows = [dict(row) for row in list(group.get("lot_rows") or []) if isinstance(row, dict)]
+        flow_rows = cls._deduplicated_flow_rows(group.get("flow_rows"))
         if isinstance(summary, dict):
-            return [("summary", dict(summary)), *(("lot", row) for row in lot_rows)]
+            return [("summary", dict(summary)), *(("flow", row) for row in flow_rows)]
         legacy_rows = [dict(row) for row in list(group.get("rows") or []) if isinstance(row, dict)]
         return [(cls._row_type_for_legacy_row(index, row), row) for index, row in enumerate(legacy_rows)]
 
@@ -139,10 +150,27 @@ class TurnoverLedgerExportService:
     def _row_type_for_legacy_row(index: int, row: dict[str, Any]) -> str:
         row_kind = str(row.get("row_kind") or "").strip().lower()
         if row_kind == "lot":
-            return "lot"
+            return "summary"
+        if row_kind == "flow":
+            return "flow"
         if row_kind == "summary":
             return "summary"
         return "summary" if index == 0 else "summary"
+
+    @staticmethod
+    def _deduplicated_flow_rows(value: Any) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        seen_source_ids: set[str] = set()
+        for row in list(value or []):
+            if not isinstance(row, dict):
+                continue
+            source_bank_row_id = str(row.get("source_bank_row_id") or "").strip()
+            if source_bank_row_id:
+                if source_bank_row_id in seen_source_ids:
+                    continue
+                seen_source_ids.add(source_bank_row_id)
+            rows.append(dict(row))
+        return rows
 
     def _pending_amounts(
         self,

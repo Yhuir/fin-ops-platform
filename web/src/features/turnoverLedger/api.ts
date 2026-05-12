@@ -5,10 +5,12 @@ import type {
   SaveTurnoverLedgerExtraResponse,
   TurnoverBankRow,
   TurnoverLedgerChip,
+  TurnoverLedgerAllocationLot,
   TurnoverLedgerExportDownload,
   TurnoverLedgerExportPreview,
   TurnoverLedgerExportRow,
   TurnoverLedgerFamilySummary,
+  TurnoverLedgerFlowRow,
   TurnoverLedgerGroup,
   TurnoverLedgerGroupedResponse,
   TurnoverLedgerGroupedRow,
@@ -85,20 +87,31 @@ type ApiTurnoverLedgerGroupedRow = {
   row_kind?: string | null;
   relation_id?: string | null;
   lot_id?: string | null;
+  flow_id?: string | null;
   parent_relation_id?: string | null;
+  source_bank_row_id?: string | null;
   principal_bank_row_id?: string | null;
   settlement_bank_row_ids?: string[];
   status?: string | null;
   status_label?: string | null;
   row_tone?: string | null;
+  transaction_at?: string | null;
+  flow_direction?: string | null;
+  flow_amount?: string | null;
   borrow_amount?: string | null;
   borrow_date?: string | null;
   borrow_direction?: string | null;
   repayment_amount?: string | null;
+  allocated_repayment_amount?: string | null;
   repayment_date?: string | null;
   repayment_direction?: string | null;
   balance_amount?: string | null;
+  business_type?: string | null;
+  category_label?: string | null;
   counterparty_bank_name?: string | null;
+  summary_text?: string | null;
+  allocation_status?: string | null;
+  allocated_lot_ids?: string[];
   repayment_remark?: string | null;
   interest_rate_type?: string | null;
   interest_rate_value?: string | null;
@@ -125,6 +138,8 @@ type ApiTurnoverLedgerGroup = {
   row_span?: number | null;
   group_tone?: string | null;
   summary_row?: ApiTurnoverLedgerGroupedRow | null;
+  flow_rows?: ApiTurnoverLedgerGroupedRow[];
+  allocation_lots?: ApiTurnoverLedgerGroupedRow[];
   lot_rows?: ApiTurnoverLedgerGroupedRow[];
   rows?: ApiTurnoverLedgerGroupedRow[];
 };
@@ -447,20 +462,31 @@ function mapGroupedRow(row: ApiTurnoverLedgerGroupedRow, fallbackRowKind = ""): 
     rowKind: text(row.row_kind, fallbackRowKind),
     relationId: text(row.relation_id),
     lotId: text(row.lot_id),
+    flowId: text(row.flow_id),
     parentRelationId: text(row.parent_relation_id),
+    sourceBankRowId: text(row.source_bank_row_id),
     principalBankRowId: text(row.principal_bank_row_id),
     settlementBankRowIds: stringList(row.settlement_bank_row_ids),
     status: text(row.status),
     statusLabel: text(row.status_label),
     rowTone: normalizeTone(row.row_tone),
+    transactionAt: row.transaction_at ?? null,
+    flowDirection: text(row.flow_direction),
+    flowAmount: text(row.flow_amount, "0.00"),
     borrowAmount: text(row.borrow_amount, "0.00"),
     borrowDate: row.borrow_date ?? null,
     borrowDirection: text(row.borrow_direction),
     repaymentAmount: text(row.repayment_amount, "0.00"),
+    allocatedRepaymentAmount: text(row.allocated_repayment_amount, "0.00"),
     repaymentDate: row.repayment_date ?? null,
     repaymentDirection: text(row.repayment_direction),
     balanceAmount: text(row.balance_amount, "0.00"),
+    businessType: row.business_type ?? null,
+    categoryLabel: text(row.category_label),
     counterpartyBankName: text(row.counterparty_bank_name),
+    summaryText: text(row.summary_text),
+    allocationStatus: text(row.allocation_status),
+    allocatedLotIds: stringList(row.allocated_lot_ids),
     repaymentRemark: text(row.repayment_remark),
     interestRateType: text(row.interest_rate_type, "none"),
     interestRateValue: text(row.interest_rate_value, "0.000000"),
@@ -481,6 +507,10 @@ function mapGroup(group: ApiTurnoverLedgerGroup): TurnoverLedgerGroup {
     : rows[0]
       ? { ...rows[0], rowKind: rows[0].rowKind || "summary" }
       : null;
+  const flowRows = (group.flow_rows ?? []).map((row) => mapGroupedRow(row, "flow") as TurnoverLedgerFlowRow);
+  const allocationLots = (group.allocation_lots ?? []).map((row) => (
+    mapGroupedRow(row, "allocation_lot") as TurnoverLedgerAllocationLot
+  ));
   const lotRows = (group.lot_rows ?? []).map((row) => mapGroupedRow(row, "lot"));
   const pendingDirection = text(group.pending_direction, "closed");
   const pendingAmount = text(group.pending_amount, "0.00");
@@ -499,6 +529,8 @@ function mapGroup(group: ApiTurnoverLedgerGroup): TurnoverLedgerGroup {
     groupTone: normalizeTone(group.group_tone),
     rows,
     summaryRow,
+    flowRows,
+    allocationLots,
     lotRows,
   };
 }

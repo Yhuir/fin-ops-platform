@@ -412,7 +412,7 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         row = next(
             row for row in group["lot_rows"] if row["bank_row_ids"] == ["txn-mixed-borrow-in"]
         )
-        self.assertEqual(row["row_kind"], "lot")
+        self.assertEqual(row["row_kind"], "allocation_lot")
         self.assertEqual(row["borrow_amount"], "9000.00")
         self.assertEqual(row["borrow_date"], "2026-01-01")
         self.assertEqual(row["borrow_direction"], "income")
@@ -451,7 +451,7 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         row = next(
             row for row in group["lot_rows"] if row["bank_row_ids"] == ["txn-mixed-borrow-out"]
         )
-        self.assertEqual(row["row_kind"], "lot")
+        self.assertEqual(row["row_kind"], "allocation_lot")
         self.assertEqual(row["borrow_amount"], "8000.00")
         self.assertEqual(row["borrow_date"], "2026-01-16")
         self.assertEqual(row["borrow_direction"], "expense")
@@ -514,7 +514,7 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
 
         group = payload["groups"][0]
         self.assertEqual(group["counterparty_name"], "贾小花")
-        self.assertEqual(group["row_span"], 3)
+        self.assertEqual(group["row_span"], 4)
         self.assertEqual(group["rows"][0], group["summary_row"])
         summary = group["summary_row"]
         self.assertEqual(summary["row_kind"], "summary")
@@ -525,15 +525,44 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         self.assertIsNone(summary["loan_days"])
         self.assertEqual(summary["accrued_interest"], "2761.65")
 
-        lot_rows = group["lot_rows"]
-        self.assertEqual(len(lot_rows), 2)
-        self.assertEqual([row["borrow_amount"] for row in lot_rows], ["200000.00", "100000.00"])
-        self.assertEqual([row["repayment_amount"] for row in lot_rows], ["200000.00", "100000.00"])
-        self.assertEqual([row["balance_amount"] for row in lot_rows], ["0.00", "0.00"])
-        self.assertEqual([row["loan_days"] for row in lot_rows], [28, 28])
-        self.assertEqual([row["accrued_interest"] for row in lot_rows], ["1841.10", "920.55"])
+        flow_rows = group["flow_rows"]
+        self.assertEqual(len(flow_rows), 3)
+        self.assertEqual([row["row_kind"] for row in flow_rows], ["flow", "flow", "flow"])
         self.assertEqual(
-            [row["settlement_bank_row_ids"] for row in lot_rows],
+            [row["source_bank_row_id"] for row in flow_rows],
+            ["txn-jia-principal-200k", "txn-jia-principal-100k", "txn-jia-repayment"],
+        )
+        self.assertEqual(len({row["source_bank_row_id"] for row in flow_rows}), 3)
+        self.assertEqual(
+            [(row["flow_direction"], row["flow_amount"]) for row in flow_rows],
+            [("income", "200000.00"), ("income", "100000.00"), ("expense", "300000.00")],
+        )
+        repayment_flow_rows = [
+            row
+            for row in flow_rows
+            if row["source_bank_row_id"] == "txn-jia-repayment"
+        ]
+        self.assertEqual(len(repayment_flow_rows), 1)
+        self.assertEqual(repayment_flow_rows[0]["borrow_amount"], "0.00")
+        self.assertEqual(repayment_flow_rows[0]["borrow_date"], None)
+        self.assertEqual(repayment_flow_rows[0]["repayment_amount"], "300000.00")
+        self.assertEqual(repayment_flow_rows[0]["repayment_date"], "2026-03-04")
+
+        allocation_lots = group["allocation_lots"]
+        self.assertIs(group["lot_rows"], allocation_lots)
+        self.assertEqual(len(allocation_lots), 2)
+        self.assertEqual([row["row_kind"] for row in allocation_lots], ["allocation_lot", "allocation_lot"])
+        self.assertEqual([row["borrow_amount"] for row in allocation_lots], ["200000.00", "100000.00"])
+        self.assertEqual(
+            [row["allocated_repayment_amount"] for row in allocation_lots],
+            ["200000.00", "100000.00"],
+        )
+        self.assertEqual([row["repayment_amount"] for row in allocation_lots], ["200000.00", "100000.00"])
+        self.assertEqual([row["balance_amount"] for row in allocation_lots], ["0.00", "0.00"])
+        self.assertEqual([row["loan_days"] for row in allocation_lots], [28, 28])
+        self.assertEqual([row["accrued_interest"] for row in allocation_lots], ["1841.10", "920.55"])
+        self.assertEqual(
+            [row["settlement_bank_row_ids"] for row in allocation_lots],
             [["txn-jia-repayment"], ["txn-jia-repayment"]],
         )
 
@@ -546,7 +575,7 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         payload = ledger_service.list_grouped_ledger(family="personal")
 
         group = payload["groups"][0]
-        self.assertEqual(group["row_span"], 3)
+        self.assertEqual(group["row_span"], 4)
         summary = group["summary_row"]
         self.assertEqual(summary["borrow_amount"], "300000.00")
         self.assertEqual(summary["repayment_amount"], "250000.00")

@@ -123,12 +123,14 @@ class TurnoverLedgerService:
             grouped_row = self._grouped_row_payload(relation, rows_by_id)
             if grouped_row is None:
                 continue
-            lot_rows = self._lot_row_payloads(relation, rows_by_id)
+            allocation_lots = self._lot_row_payloads(relation, rows_by_id)
+            flow_rows = self._flow_row_payloads(relation, rows_by_id, allocation_lots)
             items.append(
                 {
                     "legacy": legacy_row,
                     "row": grouped_row,
-                    "lot_rows": lot_rows,
+                    "flow_rows": flow_rows,
+                    "allocation_lots": allocation_lots,
                     "family": legacy_row.get("family"),
                     "status": legacy_row.get("status"),
                     "counterparty_name": legacy_row.get("counterparty_name"),
@@ -454,7 +456,7 @@ class TurnoverLedgerService:
             lot_rows.append(
                 {
                     "_lot_sort_key": self._row_fifo_sort_key(principal_row),
-                    "row_kind": "lot",
+                    "row_kind": "allocation_lot",
                     "lot_id": f"{relation_id}:lot:{principal_bank_row_id}",
                     "relation_id": relation_id,
                     "parent_relation_id": relation_id,
@@ -466,6 +468,7 @@ class TurnoverLedgerService:
                     "borrow_amount": self._format_money(borrow_amount),
                     "borrow_date": borrow_date,
                     "borrow_direction": borrow_direction,
+                    "allocated_repayment_amount": self._format_money(repayment_amount),
                     "repayment_amount": self._format_money(repayment_amount),
                     "repayment_date": latest_repayment_date,
                     "repayment_direction": repayment_direction,
@@ -487,6 +490,90 @@ class TurnoverLedgerService:
             )
         return lot_rows
 
+    def _flow_row_payloads(
+        self,
+        relation: dict[str, Any],
+        rows_by_id: dict[str, dict[str, Any]],
+        allocation_lots: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        relation_id = str(relation.get("relation_id") or "")
+        business_type = str(relation.get("business_type") or "")
+        bank_row_ids = [
+            str(row_id)
+            for row_id in list(relation.get("bank_row_ids") or [])
+            if str(row_id) in rows_by_id
+        ]
+        lot_ids_by_bank_row_id: dict[str, list[str]] = {}
+        for lot in allocation_lots:
+            lot_id = str(lot.get("lot_id") or "").strip()
+            if not lot_id:
+                continue
+            for bank_row_id in [
+                lot.get("principal_bank_row_id"),
+                *list(lot.get("settlement_bank_row_ids") or []),
+            ]:
+                normalized = str(bank_row_id or "").strip()
+                if not normalized:
+                    continue
+                lot_ids = lot_ids_by_bank_row_id.setdefault(normalized, [])
+                if lot_id not in lot_ids:
+                    lot_ids.append(lot_id)
+
+        flow_rows: list[dict[str, Any]] = []
+        seen_bank_row_ids: set[str] = set()
+        for bank_row_id in bank_row_ids:
+            if bank_row_id in seen_bank_row_ids:
+                continue
+            seen_bank_row_ids.add(bank_row_id)
+            bank_row = rows_by_id[bank_row_id]
+            direction = "income" if self._direction(bank_row) == "inflow" else "expense"
+            flow_amount = self._row_amount(bank_row)
+            transaction_at = self._transaction_at(bank_row)
+            transaction_date = self._date_from_value(transaction_at)
+            borrow_amount = flow_amount if direction == "income" else ZERO
+            repayment_amount = flow_amount if direction == "expense" else ZERO
+            allocated_lot_ids = lot_ids_by_bank_row_id.get(bank_row_id, [])
+            flow_rows.append(
+                {
+                    "_flow_sort_key": self._row_fifo_sort_key(bank_row),
+                    "row_kind": "flow",
+                    "flow_id": f"bank:{bank_row_id}",
+                    "relation_id": relation_id,
+                    "source_bank_row_id": bank_row_id,
+                    "transaction_at": transaction_at,
+                    "flow_direction": direction,
+                    "flow_amount": self._format_money(flow_amount),
+                    "borrow_amount": self._format_money(borrow_amount),
+                    "borrow_date": transaction_date if direction == "income" else None,
+                    "repayment_amount": self._format_money(repayment_amount),
+                    "repayment_date": transaction_date if direction == "expense" else None,
+                    "business_type": business_type,
+                    "category_label": str(bank_row.get("category_label") or "").strip(),
+                    "counterparty_bank_name": self._counterparty_bank_name([bank_row]),
+                    "summary_text": self._summary_text([bank_row]),
+                    "allocation_status": self._allocation_status(allocated_lot_ids),
+                    "allocated_lot_ids": allocated_lot_ids,
+                    "bank_row_ids": [bank_row_id],
+                }
+            )
+        return flow_rows
+
+    @staticmethod
+    def _allocation_status(allocated_lot_ids: list[str]) -> str:
+        return "allocated" if allocated_lot_ids else "unallocated"
+
+    @staticmethod
+    def _dedupe_flow_rows(flow_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        deduped_rows: list[dict[str, Any]] = []
+        seen_source_ids: set[str] = set()
+        for row in flow_rows:
+            source_bank_row_id = str(row.get("source_bank_row_id") or "").strip()
+            if not source_bank_row_id or source_bank_row_id in seen_source_ids:
+                continue
+            seen_source_ids.add(source_bank_row_id)
+            deduped_rows.append(row)
+        return deduped_rows
+
     def _group_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         groups_by_key: dict[tuple[str, str], dict[str, Any]] = {}
         for item in items:
@@ -501,13 +588,16 @@ class TurnoverLedgerService:
                     "family_label": TURNOVER_FAMILY_LABELS.get(family, family or "未知"),
                     "rows": [],
                     "lot_rows": [],
+                    "flow_rows": [],
+                    "allocation_lots": [],
                     "_items": [],
                     "_pending_repayment": ZERO,
                     "_pending_collection": ZERO,
                 },
             )
             group["_items"].append(item)
-            group["lot_rows"].extend(item.get("lot_rows") or [])
+            group["flow_rows"].extend(item.get("flow_rows") or [])
+            group["allocation_lots"].extend(item.get("allocation_lots") or [])
             balance_amount = item.get("balance_amount")
             if not isinstance(balance_amount, Decimal):
                 balance_amount = self._money(balance_amount)
@@ -524,41 +614,53 @@ class TurnoverLedgerService:
             pending_repayment = group.pop("_pending_repayment")
             pending_collection = group.pop("_pending_collection")
             group_items = group.pop("_items")
-            lot_rows = sorted(
-                list(group.get("lot_rows") or []),
+            flow_rows = sorted(
+                self._dedupe_flow_rows(list(group.get("flow_rows") or [])),
+                key=lambda row: (
+                    row.get("_flow_sort_key") or ("", ""),
+                ),
+            )
+            for flow_row in flow_rows:
+                flow_row.pop("_flow_sort_key", None)
+            allocation_lots = sorted(
+                list(group.get("allocation_lots") or []),
                 key=lambda row: (
                     row.get("_lot_sort_key") or ("", ""),
                 ),
             )
-            for lot_row in lot_rows:
-                lot_row.pop("_lot_sort_key", None)
-            group["lot_rows"] = lot_rows
-            summary_row = self._summary_row_payload(group_items, lot_rows)
+            for allocation_lot in allocation_lots:
+                allocation_lot.pop("_lot_sort_key", None)
+            group["flow_rows"] = flow_rows
+            group["allocation_lots"] = allocation_lots
+            group["lot_rows"] = allocation_lots
+            summary_row = self._summary_row_payload(group_items, allocation_lots, flow_rows)
             group.update(self._group_pending_payload(pending_repayment, pending_collection))
             group["summary_row"] = summary_row
             group["rows"] = [summary_row]
-            group["row_span"] = 1 + len(lot_rows)
+            group["row_span"] = 1 + len(flow_rows)
             groups.append(group)
         return groups
 
     def _summary_row_payload(
         self,
         items: list[dict[str, Any]],
-        lot_rows: list[dict[str, Any]],
+        allocation_lots: list[dict[str, Any]],
+        flow_rows: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         relation_rows = [dict(item.get("row") or {}) for item in items]
         relation_ids = self._unique_texts(row.get("relation_id") for row in relation_rows)
-        source_rows = lot_rows or relation_rows
-        borrow_amount = sum((self._money(row.get("borrow_amount")) for row in source_rows), ZERO)
-        repayment_amount = sum((self._money(row.get("repayment_amount")) for row in source_rows), ZERO)
-        balance_amount = sum((self._money(row.get("balance_amount")) for row in source_rows), ZERO)
-        accrued_interest = sum((self._money(row.get("accrued_interest")) for row in lot_rows), ZERO)
+        amount_rows = allocation_lots or relation_rows
+        balance_rows = allocation_lots or relation_rows
+        borrow_amount = sum((self._money(row.get("borrow_amount")) for row in amount_rows), ZERO)
+        repayment_amount = sum((self._money(row.get("repayment_amount")) for row in amount_rows), ZERO)
+        balance_amount = sum((self._money(row.get("balance_amount")) for row in balance_rows), ZERO)
+        accrued_interest = sum((self._money(row.get("accrued_interest")) for row in allocation_lots), ZERO)
         interest_paid_amount = sum(
             (self._money(row.get("interest_paid_amount")) for row in relation_rows),
             ZERO,
         )
-        borrow_dates = self._unique_texts(row.get("borrow_date") for row in source_rows)
-        repayment_dates = self._unique_texts(row.get("repayment_date") for row in source_rows)
+        borrow_dates = self._unique_texts(row.get("borrow_date") for row in amount_rows)
+        repayment_dates = self._unique_texts(row.get("repayment_date") for row in amount_rows)
         bank_row_ids: list[str] = []
         for row in relation_rows:
             for bank_row_id in list(row.get("bank_row_ids") or []):

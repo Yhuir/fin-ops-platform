@@ -250,6 +250,90 @@ describe("turnover ledger API", () => {
                 accrued_interest: "2761.64",
                 bank_row_ids: ["bank_001", "bank_002", "bank_003"],
               },
+              flow_rows: [
+                {
+                  row_kind: "flow",
+                  flow_id: "bank:bank_001",
+                  relation_id: "turnover_rel_001",
+                  source_bank_row_id: "bank_001",
+                  transaction_at: "2026-02-04T13:20:48",
+                  flow_direction: "income",
+                  flow_amount: "200000.00",
+                  borrow_amount: "200000.00",
+                  borrow_date: "2026-02-04",
+                  borrow_direction: "income",
+                  repayment_amount: "0.00",
+                  repayment_date: null,
+                  repayment_direction: "expense",
+                  business_type: "borrow_in",
+                  category_label: "个人暂借款：待还款",
+                  counterparty_bank_name: "中国建设银行",
+                  summary_text: "电子转账 / 暂借款",
+                  allocation_status: "allocated",
+                  allocated_lot_ids: ["lot-001"],
+                  bank_row_ids: ["bank_001"],
+                },
+                {
+                  row_kind: "flow",
+                  flow_id: "bank:bank_002",
+                  relation_id: "turnover_rel_001",
+                  source_bank_row_id: "bank_002",
+                  transaction_at: "2026-02-04T17:07:45",
+                  flow_direction: "income",
+                  flow_amount: "100000.00",
+                  borrow_amount: "100000.00",
+                  borrow_date: "2026-02-04",
+                  borrow_direction: "income",
+                  repayment_amount: "0.00",
+                  repayment_date: null,
+                  repayment_direction: "expense",
+                  business_type: "borrow_in",
+                  category_label: "个人暂借款：待还款",
+                  counterparty_bank_name: "中国建设银行",
+                  summary_text: "电子转账 / 暂借款",
+                  allocation_status: "allocated",
+                  allocated_lot_ids: ["lot-002"],
+                  bank_row_ids: ["bank_002"],
+                },
+                {
+                  row_kind: "flow",
+                  flow_id: "bank:bank_003",
+                  relation_id: "turnover_rel_001",
+                  source_bank_row_id: "bank_003",
+                  transaction_at: "2026-03-04T15:24:58",
+                  flow_direction: "expense",
+                  flow_amount: "300000.00",
+                  borrow_amount: "0.00",
+                  borrow_date: null,
+                  borrow_direction: "income",
+                  repayment_amount: "300000.00",
+                  repayment_date: "2026-03-04",
+                  repayment_direction: "expense",
+                  business_type: "borrow_in",
+                  category_label: "个人暂借款：已还款",
+                  counterparty_bank_name: "中国建设银行",
+                  summary_text: "电子转账 / 还暂借款",
+                  allocation_status: "allocated",
+                  allocated_lot_ids: ["lot-001", "lot-002"],
+                  bank_row_ids: ["bank_003"],
+                },
+              ],
+              allocation_lots: [
+                {
+                  row_kind: "allocation_lot",
+                  relation_id: "turnover_rel_001",
+                  lot_id: "lot-001",
+                  parent_relation_id: "turnover_rel_001",
+                  principal_bank_row_id: "bank_001",
+                  settlement_bank_row_ids: ["bank_003"],
+                  borrow_amount: "200000.00",
+                  allocated_repayment_amount: "200000.00",
+                  repayment_amount: "200000.00",
+                  balance_amount: "0.00",
+                  loan_days: 28,
+                  accrued_interest: "920.55",
+                },
+              ],
               lot_rows: [
                 {
                   row_kind: "lot",
@@ -356,6 +440,29 @@ describe("turnover ledger API", () => {
       balanceAmount: "0.00",
       bankRowIds: ["bank_001", "bank_002", "bank_003"],
     });
+    expect(ledger.groups[0].flowRows).toHaveLength(3);
+    expect(ledger.groups[0].flowRows.map((row) => row.sourceBankRowId)).toEqual(["bank_001", "bank_002", "bank_003"]);
+    expect(ledger.groups[0].flowRows[2]).toMatchObject({
+      rowKind: "flow",
+      flowId: "bank:bank_003",
+      sourceBankRowId: "bank_003",
+      transactionAt: "2026-03-04T15:24:58",
+      flowDirection: "expense",
+      flowAmount: "300000.00",
+      repaymentAmount: "300000.00",
+      categoryLabel: "个人暂借款：已还款",
+      summaryText: "电子转账 / 还暂借款",
+      allocationStatus: "allocated",
+      allocatedLotIds: ["lot-001", "lot-002"],
+      bankRowIds: ["bank_003"],
+    });
+    expect(ledger.groups[0].allocationLots).toHaveLength(1);
+    expect(ledger.groups[0].allocationLots[0]).toMatchObject({
+      rowKind: "allocation_lot",
+      lotId: "lot-001",
+      allocatedRepaymentAmount: "200000.00",
+      balanceAmount: "0.00",
+    });
     expect(ledger.groups[0].lotRows).toHaveLength(2);
     expect(ledger.groups[0].lotRows[0]).toMatchObject({
       rowKind: "lot",
@@ -410,6 +517,8 @@ describe("turnover ledger API", () => {
       balanceAmount: "800.00",
     });
     expect(ledger.groups[0].lotRows).toEqual([]);
+    expect(ledger.groups[0].flowRows).toEqual([]);
+    expect(ledger.groups[0].allocationLots).toEqual([]);
   });
 
   test("maps extra GET and PUT payloads", async () => {

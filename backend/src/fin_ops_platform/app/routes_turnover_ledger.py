@@ -310,13 +310,23 @@ class TurnoverLedgerApiRoutes:
             explicit_summary = group.get("summary_row")
             summary_row = dict(explicit_summary) if isinstance(explicit_summary, dict) else None
             explicit_lot_rows = [row for row in list(group.get("lot_rows") or []) if isinstance(row, dict)]
+            explicit_flow_rows = [row for row in list(group.get("flow_rows") or []) if isinstance(row, dict)]
+            explicit_allocation_lots = [
+                row for row in list(group.get("allocation_lots") or []) if isinstance(row, dict)
+            ]
             if summary_row is None:
                 summary_row = cls._summary_row_from_legacy_rows(legacy_rows)
             lot_rows = [cls._normalized_lot_row(row) for row in explicit_lot_rows]
+            allocation_lots = [
+                cls._normalized_allocation_lot(row) for row in (explicit_allocation_lots or explicit_lot_rows)
+            ]
+            flow_rows = cls._normalized_flow_rows(explicit_flow_rows)
             summary_row = cls._normalized_summary_row(summary_row)
             normalized_group["summary_row"] = summary_row
+            normalized_group["flow_rows"] = flow_rows
+            normalized_group["allocation_lots"] = allocation_lots
             normalized_group["lot_rows"] = lot_rows
-            normalized_group["row_span"] = 1 + len(lot_rows)
+            normalized_group["row_span"] = 1 + len(flow_rows)
             normalized_group.pop("rows", None)
             normalized_groups.append(normalized_group)
         return {
@@ -342,6 +352,27 @@ class TurnoverLedgerApiRoutes:
     def _normalized_lot_row(row: dict[str, object]) -> dict[str, object]:
         normalized = dict(row)
         normalized["row_kind"] = "lot"
+        return normalized
+
+    @classmethod
+    def _normalized_flow_rows(cls, rows: list[dict[str, object]]) -> list[dict[str, object]]:
+        normalized_rows: list[dict[str, object]] = []
+        seen_source_ids: set[str] = set()
+        for row in rows:
+            normalized = dict(row)
+            normalized["row_kind"] = "flow"
+            source_bank_row_id = str(normalized.get("source_bank_row_id") or "").strip()
+            if source_bank_row_id:
+                if source_bank_row_id in seen_source_ids:
+                    continue
+                seen_source_ids.add(source_bank_row_id)
+            normalized_rows.append(normalized)
+        return normalized_rows
+
+    @staticmethod
+    def _normalized_allocation_lot(row: dict[str, object]) -> dict[str, object]:
+        normalized = dict(row)
+        normalized["row_kind"] = "allocation_lot"
         return normalized
 
     @classmethod

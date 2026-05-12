@@ -66,23 +66,34 @@ export type TurnoverLedgerPendingDirection = "repayment" | "collection" | "close
 export type TurnoverLedgerInterestRateType = "annual" | "monthly" | "none" | string;
 
 export type TurnoverLedgerGroupedRow = {
-  rowKind: "summary" | "lot" | string;
+  rowKind: "summary" | "lot" | "flow" | "allocation_lot" | string;
   relationId: string;
   lotId: string;
+  flowId: string;
   parentRelationId: string;
+  sourceBankRowId: string;
   principalBankRowId: string;
   settlementBankRowIds: string[];
   status: TurnoverRelationStatus | string;
   statusLabel: string;
   rowTone: TurnoverRowTone;
+  transactionAt: string | null;
+  flowDirection: TurnoverLedgerDirection;
+  flowAmount: string;
   borrowAmount: string;
   borrowDate: string | null;
   borrowDirection: TurnoverLedgerDirection;
   repaymentAmount: string;
+  allocatedRepaymentAmount: string;
   repaymentDate: string | null;
   repaymentDirection: TurnoverLedgerDirection;
   balanceAmount: string;
+  businessType: string | null;
+  categoryLabel: string;
   counterpartyBankName: string;
+  summaryText: string;
+  allocationStatus: "allocated" | "partial" | "unallocated" | "not_applicable" | string;
+  allocatedLotIds: string[];
   repaymentRemark: string;
   interestRateType: TurnoverLedgerInterestRateType;
   interestRateValue: string;
@@ -93,6 +104,14 @@ export type TurnoverLedgerGroupedRow = {
   interestPaymentMethod: string;
   note: string;
   bankRowIds: string[];
+};
+
+export type TurnoverLedgerFlowRow = TurnoverLedgerGroupedRow & {
+  rowKind: "flow" | string;
+};
+
+export type TurnoverLedgerAllocationLot = TurnoverLedgerGroupedRow & {
+  rowKind: "allocation_lot" | "lot" | string;
 };
 
 export type TurnoverLedgerGroup = {
@@ -110,6 +129,8 @@ export type TurnoverLedgerGroup = {
   groupTone: TurnoverRowTone;
   rows: TurnoverLedgerGroupedRow[];
   summaryRow: TurnoverLedgerGroupedRow | null;
+  flowRows: TurnoverLedgerFlowRow[];
+  allocationLots: TurnoverLedgerAllocationLot[];
   lotRows: TurnoverLedgerGroupedRow[];
 };
 

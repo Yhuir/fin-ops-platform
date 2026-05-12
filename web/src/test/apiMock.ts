@@ -4423,10 +4423,63 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             settlement_bank_row_ids: row.bank_row_ids.slice(1),
             balance_amount: index === 0 ? group.pending_amount : "0.00",
           }));
+          const flowRows = group.rows.flatMap((row, index) => {
+            const baseFlow = {
+              relation_id: row.relation_id,
+              business_type: "borrow_in",
+              counterparty_bank_name: row.counterparty_bank_name,
+              summary_text: row.repayment_remark,
+              allocation_status: "allocated",
+              allocated_lot_ids: [`${row.relation_id}-lot-${index + 1}`],
+            };
+            return [
+              {
+                ...baseFlow,
+                row_kind: "flow",
+                flow_id: `bank:${row.bank_row_ids[0] ?? row.relation_id}`,
+                source_bank_row_id: row.bank_row_ids[0] ?? "",
+                transaction_at: row.borrow_date,
+                flow_direction: row.borrow_direction,
+                flow_amount: row.borrow_amount,
+                borrow_amount: row.borrow_amount,
+                borrow_date: row.borrow_date,
+                borrow_direction: row.borrow_direction,
+                repayment_amount: "0.00",
+                repayment_date: null,
+                repayment_direction: row.repayment_direction,
+                category_label: `${group.family_label}：${group.pending_direction_label}`,
+                bank_row_ids: row.bank_row_ids[0] ? [row.bank_row_ids[0]] : [],
+              },
+              {
+                ...baseFlow,
+                row_kind: "flow",
+                flow_id: `bank:${row.bank_row_ids[1] ?? `${row.relation_id}:settlement`}`,
+                source_bank_row_id: row.bank_row_ids[1] ?? "",
+                transaction_at: row.repayment_date,
+                flow_direction: row.repayment_direction,
+                flow_amount: row.repayment_amount,
+                borrow_amount: "0.00",
+                borrow_date: null,
+                borrow_direction: row.borrow_direction,
+                repayment_amount: row.repayment_amount,
+                repayment_date: row.repayment_date,
+                repayment_direction: row.repayment_direction,
+                category_label: `${group.family_label}：${row.repayment_date ? "已还款" : "待还款"}`,
+                bank_row_ids: row.bank_row_ids[1] ? [row.bank_row_ids[1]] : [],
+              },
+            ].filter((flowRow) => flowRow.source_bank_row_id);
+          });
+          const allocationLots = lotRows.map((row) => ({
+            ...row,
+            row_kind: "allocation_lot",
+            allocated_repayment_amount: row.repayment_amount,
+          }));
           return {
             ...group,
-            row_span: summaryRow ? 1 + lotRows.length : lotRows.length,
+            row_span: summaryRow ? 1 + flowRows.length : flowRows.length,
             summary_row: summaryRow,
+            flow_rows: flowRows,
+            allocation_lots: allocationLots,
             lot_rows: lotRows,
             rows: summaryRow ? [summaryRow] : [],
           };

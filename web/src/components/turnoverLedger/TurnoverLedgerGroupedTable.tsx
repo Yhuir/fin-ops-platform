@@ -47,8 +47,16 @@ const LEFT_CELL_BACKGROUND: Record<TurnoverRowTone, string> = {
   error: "#fdecec",
   muted: "#f5f5f5",
 };
-const LOT_ROW_BACKGROUND = "#f3f5fb";
-const LOT_ROW_HOVER_BACKGROUND = "#eceff8";
+const FLOW_ROW_BACKGROUND: Record<"income" | "expense" | "neutral", string> = {
+  income: "#eef8f0",
+  expense: "#fff5eb",
+  neutral: "#f3f5fb",
+};
+const FLOW_ROW_HOVER_BACKGROUND: Record<"income" | "expense" | "neutral", string> = {
+  income: "#e4f3e7",
+  expense: "#ffeddd",
+  neutral: "#eceff8",
+};
 
 type RuntimeGroupedRow = TurnoverLedgerGroupedRow & {
   rowKind?: "summary" | "lot" | string;
@@ -58,6 +66,7 @@ type RuntimeGroupedRow = TurnoverLedgerGroupedRow & {
 
 type RuntimeGroup = TurnoverLedgerGroup & {
   summaryRow?: TurnoverLedgerGroupedRow;
+  flowRows?: TurnoverLedgerGroupedRow[];
   lotRows?: TurnoverLedgerGroupedRow[];
   pendingRepaymentAmount?: string;
   pendingCollectionAmount?: string;
@@ -102,6 +111,25 @@ function directionKey(direction: TurnoverLedgerDirection | null | undefined): "i
   return "neutral";
 }
 
+function amountNumber(value: string | null | undefined) {
+  const parsed = Number(String(value ?? "").replace(/,/g, "").trim());
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function flowDirectionKey(row: TurnoverLedgerGroupedRow): "income" | "expense" | "neutral" {
+  const explicitDirection = directionKey(runtimeRow(row).flowDirection);
+  if (explicitDirection !== "neutral") {
+    return explicitDirection;
+  }
+  if (amountNumber(row.borrowAmount) > 0 && amountNumber(row.repaymentAmount) <= 0) {
+    return "income";
+  }
+  if (amountNumber(row.repaymentAmount) > 0 && amountNumber(row.borrowAmount) <= 0) {
+    return "expense";
+  }
+  return "neutral";
+}
+
 function rateText(row: TurnoverLedgerGroupedRow) {
   if (row.interestRateType === "none") {
     return "不计息";
@@ -134,13 +162,13 @@ function resolveRows(group: TurnoverLedgerGroup) {
     ?? rows.find((row) => runtimeRow(row).rowKind === "summary")
     ?? rows[0]
     ?? null;
-  const explicitLotRows = Array.isArray(compatibleGroup.lotRows) && compatibleGroup.lotRows.length > 0
-    ? compatibleGroup.lotRows
+  const explicitFlowRows = Array.isArray(compatibleGroup.flowRows) && compatibleGroup.flowRows.length > 0
+    ? compatibleGroup.flowRows
     : null;
-  const lotRows = explicitLotRows
-    ?? (summaryRow ? rows.filter((row, index) => row !== summaryRow && (runtimeRow(row).rowKind === "lot" || index > 0)) : []);
+  const flowRows = explicitFlowRows
+    ?? rows.filter((row) => row !== summaryRow && runtimeRow(row).rowKind === "flow");
 
-  return { summaryRow, lotRows };
+  return { summaryRow, flowRows };
 }
 
 function isFilledAmount(value: string | null | undefined) {
@@ -231,6 +259,32 @@ function AmountBlock({
   );
 }
 
+function EmptyAmountBlock({ testId }: { testId: string }) {
+  return (
+    <Stack spacing={0.5} alignItems="flex-start">
+      <Box
+        data-testid={testId}
+        className="turnover-amount-empty"
+        sx={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          minWidth: 88,
+          px: 0.75,
+          py: 0.35,
+          borderRadius: 0.75,
+          fontWeight: 800,
+          backgroundColor: AMOUNT_BACKGROUND.neutral,
+          color: "text.secondary",
+        }}
+      >
+        -
+      </Box>
+      <Chip size="small" variant="outlined" label="-" />
+    </Stack>
+  );
+}
+
 function BalanceBlock({
   group,
   expanded,
@@ -250,7 +304,7 @@ function BalanceBlock({
           <IconButton
             size="small"
             onClick={onToggle}
-            aria-label={`${expanded ? "收起" : "展开"} ${labelName} 批次明细`}
+            aria-label={`${expanded ? "收起" : "展开"} ${labelName} 流水明细`}
             sx={{ mt: -0.25, flex: "0 0 auto" }}
           >
             {expanded ? <KeyboardArrowDownIcon fontSize="small" /> : <KeyboardArrowRightIcon fontSize="small" />}
@@ -272,33 +326,43 @@ function BalanceBlock({
 
 function RowCells({
   row,
-  isLot,
+  rowKind,
   onEdit,
 }: {
   row: TurnoverLedgerGroupedRow;
-  isLot: boolean;
+  rowKind: "summary" | "flow";
   onEdit: (row: TurnoverLedgerGroupedRow) => void;
 }) {
+  const isFlow = rowKind === "flow";
+  const flowDirection = isFlow ? flowDirectionKey(row) : "neutral";
   return (
     <>
       <TableCell>
         <Stack spacing={0.75} alignItems="flex-start">
-          {isLot ? <Chip size="small" label="明细" color="info" variant="outlined" /> : null}
-          <AmountBlock
-            amount={row.borrowAmount}
-            date={row.borrowDate}
-            direction={row.borrowDirection}
-            testId={`amount-${directionKey(row.borrowDirection)}-${row.relationId}-borrow`}
-          />
+          {isFlow ? <Chip size="small" label="流水" color="info" variant="outlined" /> : null}
+          {isFlow && flowDirection !== "income" ? (
+            <EmptyAmountBlock testId={`amount-empty-${row.relationId}-borrow`} />
+          ) : (
+            <AmountBlock
+              amount={row.borrowAmount}
+              date={row.borrowDate}
+              direction={isFlow ? "income" : row.borrowDirection}
+              testId={`amount-${directionKey(isFlow ? "income" : row.borrowDirection)}-${row.relationId}-borrow`}
+            />
+          )}
         </Stack>
       </TableCell>
       <TableCell>
-        <AmountBlock
-          amount={row.repaymentAmount}
-          date={row.repaymentDate}
-          direction={row.repaymentDirection}
-          testId={`amount-${directionKey(row.repaymentDirection)}-${row.relationId}-repayment`}
-        />
+        {isFlow && flowDirection !== "expense" ? (
+          <EmptyAmountBlock testId={`amount-empty-${row.relationId}-repayment`} />
+        ) : (
+          <AmountBlock
+            amount={row.repaymentAmount}
+            date={row.repaymentDate}
+            direction={isFlow ? "expense" : row.repaymentDirection}
+            testId={`amount-${directionKey(isFlow ? "expense" : row.repaymentDirection)}-${row.relationId}-repayment`}
+          />
+        )}
       </TableCell>
       <TableCell>{formatNullable(row.counterpartyBankName)}</TableCell>
       <TableCell>{formatNullable(row.repaymentRemark)}</TableCell>
@@ -326,7 +390,7 @@ function RowCells({
           size="small"
           variant="outlined"
           onClick={() => onEdit(row)}
-          aria-label={`${isLot ? "编辑明细" : "编辑"} ${row.relationId}`}
+          aria-label={`${isFlow ? "编辑流水" : "编辑"} ${row.relationId}`}
         >
           编辑
         </Button>
@@ -396,15 +460,15 @@ export default function TurnoverLedgerGroupedTable({
           ) : null}
           {!loading
             ? groups.flatMap((group) => {
-                const { summaryRow, lotRows } = resolveRows(group);
+                const { summaryRow, flowRows } = resolveRows(group);
                 if (!summaryRow) {
                   return [];
                 }
                 const expanded = Boolean(expandedGroups[group.groupId]);
-                const visibleLotRows = expanded ? lotRows : [];
+                const visibleFlowRows = expanded ? flowRows : [];
                 const groupTone = normalizedTone(group.groupTone);
                 const summaryTone = normalizedTone(summaryRow.rowTone);
-                const rowSpan = 1 + visibleLotRows.length;
+                const rowSpan = 1 + visibleFlowRows.length;
                 const toggleGroup = () => {
                   setExpandedGroups((current) => ({
                     ...current,
@@ -441,32 +505,33 @@ export default function TurnoverLedgerGroupedTable({
                       <BalanceBlock
                         group={group}
                         expanded={expanded}
-                        canExpand={lotRows.length > 0}
+                        canExpand={flowRows.length > 0}
                         onToggle={toggleGroup}
                       />
                     </TableCell>
-                    <RowCells row={summaryRow} isLot={false} onEdit={onEdit} />
+                    <RowCells row={summaryRow} rowKind="summary" onEdit={onEdit} />
                   </TableRow>
                 );
-                const lots = visibleLotRows.map((row, index) => {
-                  const rowTone = normalizedTone(row.rowTone);
+                const flows = visibleFlowRows.map((row, index) => {
+                  const rowTone = flowDirectionKey(row);
+                  const rowId = runtimeRow(row).sourceBankRowId || runtimeRow(row).flowId || String(index);
                   return (
                     <TableRow
-                      key={`${group.groupId}:lot:${runtimeRow(row).lotId ?? row.relationId}:${index}`}
-                      data-testid={`turnover-lot-row-${row.relationId}-${index}`}
-                      className={`turnover-row-${rowTone} turnover-lot-row`}
+                      key={`${group.groupId}:flow:${rowId}`}
+                      data-testid={`turnover-flow-row-${row.relationId}-${index}`}
+                      className={`turnover-row-${rowTone} turnover-flow-row`}
                       hover
                       sx={{
-                        backgroundColor: LOT_ROW_BACKGROUND,
-                        "&:hover": { backgroundColor: LOT_ROW_HOVER_BACKGROUND },
+                        backgroundColor: FLOW_ROW_BACKGROUND[rowTone],
+                        "&:hover": { backgroundColor: FLOW_ROW_HOVER_BACKGROUND[rowTone] },
                         "& td": { verticalAlign: "top" },
                       }}
                     >
-                      <RowCells row={row} isLot onEdit={onEdit} />
+                      <RowCells row={row} rowKind="flow" onEdit={onEdit} />
                     </TableRow>
                   );
                 });
-                return [summary, ...lots];
+                return [summary, ...flows];
               })
             : null}
         </TableBody>

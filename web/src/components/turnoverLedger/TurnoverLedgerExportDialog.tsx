@@ -65,6 +65,9 @@ function formatPreviewValue(row: TurnoverLedgerExportRow, column: { key: keyof T
     if (rawValue === "lot") {
       return "明细";
     }
+    if (rawValue === "flow") {
+      return "真实流水";
+    }
   }
   return column.money ? formatMoney(String(rawValue ?? "")) : formatNullable(rawValue);
 }
