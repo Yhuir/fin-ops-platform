@@ -7,6 +7,7 @@ import SettingsPage from "../pages/SettingsPage";
 import AppHealthOperationsPage from "../pages/AppHealthOperationsPage";
 import BankDetailsPage from "../pages/BankDetailsPage";
 import EtcTicketManagementPage from "../pages/EtcTicketManagementPage";
+import TurnoverLedgerPage from "../pages/TurnoverLedgerPage";
 import ImportBankTransactionsPage from "../pages/imports/ImportBankTransactionsPage";
 import ImportInvoicesPage from "../pages/imports/ImportInvoicesPage";
 import ImportEtcInvoicesPage from "../pages/imports/ImportEtcInvoicesPage";
@@ -21,6 +22,7 @@ export default function AppRouter() {
       <Route path="/tax-offset" element={<TaxOffsetPage />} />
       <Route path="/cost-statistics" element={<CostStatisticsPage />} />
       <Route path="/bank-details" element={<BankDetailsPage />} />
+      <Route path="/turnover-ledger" element={<TurnoverLedgerPage />} />
       <Route path="/etc-tickets" element={<EtcTicketManagementPage />} />
       <Route path="/settings" element={<SettingsPage />} />
       <Route path="/operations/app-health" element={<AppHealthOperationsPage />} />

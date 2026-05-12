@@ -1026,19 +1026,19 @@ function buildWorkbenchRowPayload(month: string) {
           available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
         },
         {
-          id: "oa-exp-248",
+          id: "oa-exp-2035",
           type: "oa",
-          case_id: "CASE-202603-OA-ATTACHMENT-248",
+          case_id: "CASE-202603-OA-ATTACHMENT-2035",
           applicant: "胡瑢",
           project_name: "2024-2026年度红塔集团工作证管理系统维护项目",
           apply_type: "日常报销",
           amount: "248.00",
           counterparty_name: "胡瑢",
-          reason: "OA 附件票来源归属待核销",
+          reason: "OA 2035 附件凭证来源归属待核销",
           oa_bank_relation: { code: "pending_match", label: "待找流水与发票", tone: "warn" },
           detail_fields: {
             审批完成时间: "2026-03-04 10:18",
-            明细摘要: "付款项 1 100.00；付款项 2 96.00；付款项 3 52.00",
+            明细摘要: "付款项 0 48.00，昆明玉溪来回过路费；付款项 1 200.00，加油费",
           },
           available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
         },
@@ -1155,81 +1155,159 @@ function buildWorkbenchRowPayload(month: string) {
           },
         },
         {
-          id: "iv-oa-attachment-248-001",
+          id: "iv-oa-2035-machine-25",
           type: "invoice",
           source_kind: "oa_attachment_invoice",
-          case_id: "CASE-202603-OA-ATTACHMENT-248",
-          seller_tax_no: "91530100OAATT248A",
-          seller_name: "云南移动通信有限公司",
+          case_id: "CASE-202603-OA-ATTACHMENT-2035",
+          seller_tax_no: "91530100OA2035A",
+          seller_name: "昆玉高速公路收费站",
           buyer_tax_no: "915300007194052520",
           buyer_name: "杭州溯源科技有限公司",
           issue_date: "2026-03-04",
-          amount: "100.00",
+          amount: "25.00",
           tax_rate: "0%",
           tax_amount: "0.00",
-          total_with_tax: "100.00",
+          total_with_tax: "25.00",
           invoice_type: "进项普票",
           invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
           available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
           detail_fields: {
-            发票号码: "OAATT-248-001",
-            derived_from_oa_id: "oa-exp-248",
+            发票号码: "OA2035-MACHINE-25",
+            derived_from_oa_id: "oa-exp-2035",
+            source_expense_row_index: "0",
+            source_expense_item_id: "oa-exp-2035:item:0",
+            source_attachment_name: "过路费机打发票合图.jpg",
+            source_attachment_key: "oa-exp-2035/item-0/toll-invoices.jpg",
+          },
+        },
+        {
+          id: "iv-oa-2035-machine-23",
+          type: "invoice",
+          source_kind: "oa_attachment_invoice",
+          case_id: "CASE-202603-OA-ATTACHMENT-2035",
+          seller_tax_no: "91530100OA2035B",
+          seller_name: "玉昆高速公路收费站",
+          buyer_tax_no: "915300007194052520",
+          buyer_name: "杭州溯源科技有限公司",
+          issue_date: "2026-03-04",
+          amount: "23.00",
+          tax_rate: "0%",
+          tax_amount: "0.00",
+          total_with_tax: "23.00",
+          invoice_type: "进项普票",
+          invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
+          available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+          detail_fields: {
+            发票号码: "OA2035-MACHINE-23",
+            derived_from_oa_id: "oa-exp-2035",
+            source_expense_row_index: "0",
+            source_expense_item_id: "oa-exp-2035:item:0",
+            source_attachment_name: "过路费机打发票合图.jpg",
+            source_attachment_key: "oa-exp-2035/item-0/toll-invoices.jpg",
+          },
+        },
+        {
+          id: "iv-oa-2035-fuel-200",
+          type: "invoice",
+          source_kind: "oa_attachment_invoice",
+          case_id: "CASE-202603-OA-ATTACHMENT-2035",
+          seller_tax_no: "91530100OA2035C",
+          seller_name: "中国石油云南销售公司",
+          buyer_tax_no: "915300007194052520",
+          buyer_name: "杭州溯源科技有限公司",
+          issue_date: "2026-03-04",
+          amount: "200.00",
+          tax_rate: "0%",
+          tax_amount: "0.00",
+          total_with_tax: "200.00",
+          invoice_type: "进项普票",
+          invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
+          available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+          detail_fields: {
+            发票号码: "OA2035-FUEL-200",
+            derived_from_oa_id: "oa-exp-2035",
             source_expense_row_index: "1",
-            source_expense_item_id: "oa-exp-248:item:1",
-            source_attachment_name: "付款项1-通信费.pdf",
-            source_attachment_key: "oa-exp-248/item-1/mobile.pdf",
+            source_expense_item_id: "oa-exp-2035:item:1",
+            source_attachment_name: "加油电子发票.pdf",
+            source_attachment_key: "oa-exp-2035/item-1/fuel-invoice.pdf",
           },
         },
         {
-          id: "iv-oa-attachment-248-002",
+          id: "pay-oa-2035-etc-25",
           type: "invoice",
-          source_kind: "oa_attachment_invoice",
-          case_id: "CASE-202603-OA-ATTACHMENT-248",
-          seller_tax_no: "91530100OAATT248B",
-          seller_name: "昆明图文服务有限公司",
-          buyer_tax_no: "915300007194052520",
-          buyer_name: "杭州溯源科技有限公司",
+          source_kind: "oa_attachment_payment_receipt",
+          case_id: "CASE-202603-OA-ATTACHMENT-2035",
+          seller_tax_no: "",
+          seller_name: "微信支付",
+          buyer_tax_no: "",
+          buyer_name: "胡瑢",
           issue_date: "2026-03-04",
-          amount: "96.00",
-          tax_rate: "0%",
-          tax_amount: "0.00",
-          total_with_tax: "96.00",
-          invoice_type: "进项普票",
-          invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
+          amount: "25.00",
+          tax_rate: "",
+          tax_amount: "",
+          total_with_tax: "25.00",
+          invoice_type: "付款凭证",
+          invoice_bank_relation: { code: "evidence_only", label: "附件凭证", tone: "warn" },
           available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
           detail_fields: {
-            发票号码: "OAATT-248-002",
-            derived_from_oa_id: "oa-exp-248",
-            source_expense_row_index: "2",
-            source_expense_item_id: "oa-exp-248:item:2",
-            source_attachment_name: "付款项2-图文费.pdf",
-            source_attachment_key: "oa-exp-248/item-2/print.pdf",
+            交易单号: "WX2035ETC25",
+            derived_from_oa_id: "oa-exp-2035",
+            source_expense_row_index: "0",
+            source_expense_item_id: "oa-exp-2035:item:0",
+            source_attachment_name: "微信支付过路费25.png",
+            source_attachment_key: "oa-exp-2035/item-0/wechat-toll-25.png",
           },
         },
         {
-          id: "iv-oa-attachment-248-003",
+          id: "pay-oa-2035-etc-23",
           type: "invoice",
-          source_kind: "oa_attachment_invoice",
-          case_id: "CASE-202603-OA-ATTACHMENT-248",
-          seller_tax_no: "91530100OAATT248C",
-          seller_name: "昆明办公用品有限公司",
-          buyer_tax_no: "915300007194052520",
-          buyer_name: "杭州溯源科技有限公司",
+          source_kind: "oa_attachment_payment_receipt",
+          case_id: "CASE-202603-OA-ATTACHMENT-2035",
+          seller_tax_no: "",
+          seller_name: "微信支付",
+          buyer_tax_no: "",
+          buyer_name: "胡瑢",
           issue_date: "2026-03-04",
-          amount: "52.00",
-          tax_rate: "0%",
-          tax_amount: "0.00",
-          total_with_tax: "52.00",
-          invoice_type: "进项普票",
-          invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
+          amount: "23.00",
+          tax_rate: "",
+          tax_amount: "",
+          total_with_tax: "23.00",
+          invoice_type: "付款凭证",
+          invoice_bank_relation: { code: "evidence_only", label: "附件凭证", tone: "warn" },
           available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
           detail_fields: {
-            发票号码: "OAATT-248-003",
-            derived_from_oa_id: "oa-exp-248",
-            source_expense_row_index: "3",
-            source_expense_item_id: "oa-exp-248:item:3",
-            source_attachment_name: "付款项3-办公用品.pdf",
-            source_attachment_key: "oa-exp-248/item-3/office.pdf",
+            交易单号: "WX2035ETC23",
+            derived_from_oa_id: "oa-exp-2035",
+            source_expense_row_index: "0",
+            source_expense_item_id: "oa-exp-2035:item:0",
+            source_attachment_name: "微信支付过路费23.png",
+            source_attachment_key: "oa-exp-2035/item-0/wechat-toll-23.png",
+          },
+        },
+        {
+          id: "pay-oa-2035-fuel-200",
+          type: "invoice",
+          source_kind: "oa_attachment_payment_receipt",
+          case_id: "CASE-202603-OA-ATTACHMENT-2035",
+          seller_tax_no: "",
+          seller_name: "微信支付",
+          buyer_tax_no: "",
+          buyer_name: "胡瑢",
+          issue_date: "2026-03-04",
+          amount: "200.00",
+          tax_rate: "",
+          tax_amount: "",
+          total_with_tax: "200.00",
+          invoice_type: "付款凭证",
+          invoice_bank_relation: { code: "evidence_only", label: "附件凭证", tone: "warn" },
+          available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+          detail_fields: {
+            交易单号: "WX2035FUEL200",
+            derived_from_oa_id: "oa-exp-2035",
+            source_expense_row_index: "1",
+            source_expense_item_id: "oa-exp-2035:item:1",
+            source_attachment_name: "微信支付加油200.png",
+            source_attachment_key: "oa-exp-2035/item-1/wechat-fuel-200.png",
           },
         },
         {
@@ -3358,6 +3436,7 @@ function isBinaryLikeResponse(value: MockFetchResult): value is Response {
 export function installMockApiFetch(options: MockApiOptions = {}) {
   let latestImportSession = buildImportPreviewPayload([]);
   const etcInvoiceStore = createEtcInvoiceStore();
+  const turnoverExtraStore = new Map<string, Record<string, unknown>>();
   let latestEtcImportPreview = etcInvoiceStore.previewZip([]);
   let latestEtcDraftInvoiceIds: string[] = [];
   let latestEtcDraftBatchId = "";
@@ -4023,43 +4102,51 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       };
     },
-    "/api/bank-details/accounts": () => ({
-      body: {
-        total_balance: "130500.50",
-        balance_account_count: 1,
-        missing_balance_account_count: 1,
-        accounts: [
-          {
-            account_key: "icbc:6386",
-            bank_name: "工商银行",
-            account_last4: "6386",
-            display_name: "工商银行 6386",
-            latest_balance: "130500.50",
-            latest_balance_at: "2026-05-01 16:30:00",
-            has_balance: true,
-            transaction_count: 1,
-          },
-          {
-            account_key: "bocom:3847",
-            bank_name: "交通银行",
-            account_last4: "3847",
-            display_name: "交通银行 3847",
-            latest_balance: null,
-            latest_balance_at: null,
-            has_balance: false,
-            transaction_count: 0,
-          },
-        ],
-      },
-    }),
+    "/api/bank-details/accounts": ({ url }) => {
+      const dateFrom = url.searchParams.get("date_from");
+      const dateTo = url.searchParams.get("date_to");
+      const isCurrentYear = dateFrom === "2026-01-01" && dateTo === "2026-12-31";
+      return {
+        body: {
+          total_balance: "130500.50",
+          balance_account_count: 1,
+          missing_balance_account_count: 1,
+          accounts: [
+            {
+              account_key: "icbc:6386",
+              bank_name: "工商银行",
+              account_last4: "6386",
+              display_name: "工商银行 6386",
+              latest_balance: "130500.50",
+              latest_balance_at: "2026-05-01 16:30:00",
+              has_balance: true,
+              transaction_count: isCurrentYear ? 299 : 1,
+            },
+            {
+              account_key: "bocom:3847",
+              bank_name: "交通银行",
+              account_last4: "3847",
+              display_name: "交通银行 3847",
+              latest_balance: null,
+              latest_balance_at: null,
+              has_balance: false,
+              transaction_count: 0,
+            },
+          ],
+        },
+      };
+    },
     "/api/bank-details/transactions": ({ url }) => {
       const accountKey = url.searchParams.get("account_key");
       const dateFrom = url.searchParams.get("date_from");
       const dateTo = url.searchParams.get("date_to");
+      const page = Number(url.searchParams.get("page") ?? "1");
+      const pageSize = Number(url.searchParams.get("page_size") ?? "100");
+      const isCurrentYear = dateFrom === "2026-01-01" && dateTo === "2026-12-31";
       const rows = accountKey === "icbc:6386"
         ? [
           {
-            id: "bank-detail-001",
+            id: `bank-detail-${String(page).padStart(3, "0")}`,
             trade_time: "2026-05-01 10:30:00",
             counterparty_name: "云南溯源科技有限公司",
             direction: "income",
@@ -4070,6 +4157,9 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             purpose: "货款",
             bank_name: "工商银行",
             account_last4: "6386",
+            category_code: null,
+            category_label: null,
+            category_version: 1,
           },
         ]
         : [];
@@ -4079,14 +4169,416 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           date_from: dateFrom,
           date_to: dateTo,
           rows,
+          category_counts: {
+            borrow_in_company_pending_repayment: 2,
+            business_warranty_pending_collection: 1,
+            borrow_out_personal_pending_collection: 0,
+            uncategorized: accountKey === "icbc:6386" && isCurrentYear ? 296 : rows.length,
+          },
           pagination: {
-            page: 1,
-            page_size: 100,
+            page,
+            page_size: pageSize,
+            total: accountKey === "icbc:6386" && isCurrentYear ? 299 : rows.length,
+          },
+        },
+      };
+    },
+    "/api/bank-details/transactions/categories": ({ jsonBody }) => ({
+      body: {
+        updated_transaction_ids: Array.isArray(jsonBody?.updates)
+          ? jsonBody.updates.map((update) => (update as Record<string, unknown>).transaction_id)
+          : [],
+        updated_categories: Array.isArray(jsonBody?.updates)
+          ? jsonBody.updates.map((update) => {
+            const categoryCode = (update as Record<string, unknown>).category_code;
+            return {
+              transaction_id: (update as Record<string, unknown>).transaction_id,
+              category_code: categoryCode,
+              category_label: categoryCode === "borrow_in_company_pending_repayment" ? "公司暂借款：待还款" : null,
+              category_path: categoryCode === "borrow_in_company_pending_repayment" ? ["借入", "公司往来款", "待还款"] : [],
+              version: 2,
+            };
+          })
+          : [],
+        affected_months: ["2026-05"],
+        workbench_rebuild_queued: true,
+      },
+    }),
+    "/api/turnover-ledger": ({ url }) => {
+      const view = url.searchParams.get("view") ?? "";
+      const family = url.searchParams.get("family") ?? "all";
+      const page = Number(url.searchParams.get("page") ?? "1");
+      const pageSize = Number(url.searchParams.get("page_size") ?? "100");
+      const allRows = [
+        {
+          relation_id: "rel-suggested-personal",
+          status: "suggested",
+          status_label: "待人工确认",
+          row_tone: "warning",
+          chips: [
+            { label: "待确认", tone: "warning" },
+            { label: "部分闭合", tone: "info" },
+            { label: "未同步关联台", tone: "muted" },
+          ],
+          family: "personal",
+          family_label: "个人往来",
+          counterparty_name: "张三",
+          principal_amount: "1000.00",
+          settled_amount: "200.00",
+          balance_amount: "800.00",
+          first_transaction_at: "2026-05-01 10:00:00",
+          last_settlement_at: "2026-05-03 10:00:00",
+          bank_account_labels: ["建行 8106"],
+          summary_text: "暂借款 / 还款",
+          annual_interest_rate: "3.50%",
+          loan_days: 2,
+          accrued_interest: "0.19",
+          sync_to_workbench: false,
+          bank_row_ids: ["bank-personal-001", "bank-personal-002"],
+          category_codes: ["borrow_in_personal_pending_repayment", "borrow_in_personal_repaid"],
+          business_type: "borrow_in",
+        },
+        {
+          relation_id: "rel-deterministic-bank",
+          status: "deterministic",
+          status_label: "已闭合",
+          row_tone: "success",
+          chips: [
+            { label: "系统确认", tone: "success" },
+            { label: "已同步关联台", tone: "success" },
+          ],
+          family: "bank",
+          family_label: "银行往来",
+          counterparty_name: "昆明银行",
+          principal_amount: "5000.00",
+          settled_amount: "5000.00",
+          balance_amount: "0.00",
+          first_transaction_at: "2026-04-01 10:00:00",
+          last_settlement_at: "2026-04-20 10:00:00",
+          bank_account_labels: ["工行 6386"],
+          summary_text: "银行往来闭合",
+          annual_interest_rate: null,
+          loan_days: 19,
+          accrued_interest: null,
+          sync_to_workbench: true,
+          bank_row_ids: ["bank-bank-001", "bank-bank-002"],
+          category_codes: ["borrow_in_bank_pending_repayment", "borrow_in_bank_repaid"],
+          business_type: "borrow_in",
+        },
+        {
+          relation_id: "rel-company-001",
+          status: "confirmed",
+          status_label: "人工确认",
+          row_tone: "success",
+          chips: [
+            { label: "人工确认", tone: "success" },
+            { label: "已同步关联台", tone: "success" },
+          ],
+          family: "company",
+          family_label: "公司往来",
+          counterparty_name: "云南建设有限公司",
+          principal_amount: "3000.00",
+          settled_amount: "1000.00",
+          balance_amount: "2000.00",
+          first_transaction_at: "2026-05-02 09:00:00",
+          last_settlement_at: "2026-05-04 09:00:00",
+          bank_account_labels: ["建行 8106"],
+          summary_text: "公司暂借款",
+          annual_interest_rate: null,
+          loan_days: 2,
+          accrued_interest: null,
+          sync_to_workbench: true,
+          bank_row_ids: ["bank-company-001", "bank-company-002"],
+          category_codes: ["borrow_in_company_pending_repayment"],
+          business_type: "borrow_in",
+        },
+      ];
+      const rows = family === "all" ? allRows : allRows.filter((row) => row.family === family);
+      if (view === "grouped") {
+        const allGroups = [
+          {
+            group_id: "counterparty:personal:张三",
+            counterparty_name: "张三",
+            family: "personal",
+            family_label: "个人往来",
+            pending_direction: "repayment",
+            pending_direction_label: "待还款",
+            pending_amount: "800.00",
+            row_span: 1,
+            group_tone: "warning",
+            rows: [
+              {
+                relation_id: "rel-suggested-personal",
+                status: "suggested",
+                status_label: "待人工确认",
+                row_tone: "warning",
+                borrow_amount: "1000.00",
+                borrow_date: "2026-05-01",
+                borrow_direction: "income",
+                repayment_amount: "200.00",
+                repayment_date: "2026-05-03",
+                repayment_direction: "expense",
+                counterparty_bank_name: "建行 8106",
+                repayment_remark: "归还暂借款",
+                interest_rate_type: "annual",
+                interest_rate_value: "0.035000",
+                interest_paid_amount: "0.00",
+                loan_days: 2,
+                accrued_interest: "0.19",
+                interest_paid_date: null,
+                interest_payment_method: "",
+                note: "",
+                bank_row_ids: ["bank-personal-001", "bank-personal-002"],
+              },
+            ],
+          },
+          {
+            group_id: "counterparty:bank:昆明银行",
+            counterparty_name: "昆明银行",
+            family: "bank",
+            family_label: "银行往来",
+            pending_direction: "closed",
+            pending_direction_label: "已闭合",
+            pending_amount: "0.00",
+            row_span: 1,
+            group_tone: "success",
+            rows: [
+              {
+                relation_id: "rel-deterministic-bank",
+                status: "deterministic",
+                status_label: "已闭合",
+                row_tone: "success",
+                borrow_amount: "5000.00",
+                borrow_date: "2026-04-01",
+                borrow_direction: "income",
+                repayment_amount: "5000.00",
+                repayment_date: "2026-04-20",
+                repayment_direction: "expense",
+                counterparty_bank_name: "工行 6386",
+                repayment_remark: "银行往来闭合",
+                interest_rate_type: "none",
+                interest_rate_value: "0.000000",
+                interest_paid_amount: "0.00",
+                loan_days: 19,
+                accrued_interest: "0.00",
+                interest_paid_date: null,
+                interest_payment_method: "",
+                note: "",
+                bank_row_ids: ["bank-bank-001", "bank-bank-002"],
+              },
+            ],
+          },
+          {
+            group_id: "counterparty:company:云南建设有限公司",
+            counterparty_name: "云南建设有限公司",
+            family: "company",
+            family_label: "公司往来",
+            pending_direction: "repayment",
+            pending_direction_label: "待还款",
+            pending_amount: "2000.00",
+            row_span: 1,
+            group_tone: "success",
+            rows: [
+              {
+                relation_id: "rel-company-001",
+                status: "confirmed",
+                status_label: "人工确认",
+                row_tone: "success",
+                borrow_amount: "3000.00",
+                borrow_date: "2026-05-02",
+                borrow_direction: "income",
+                repayment_amount: "1000.00",
+                repayment_date: "2026-05-04",
+                repayment_direction: "expense",
+                counterparty_bank_name: "建行 8106",
+                repayment_remark: "公司暂借款",
+                interest_rate_type: "none",
+                interest_rate_value: "0.000000",
+                interest_paid_amount: "0.00",
+                loan_days: 2,
+                accrued_interest: "0.00",
+                interest_paid_date: null,
+                interest_payment_method: "",
+                note: "",
+                bank_row_ids: ["bank-company-001", "bank-company-002"],
+              },
+            ],
+          },
+        ];
+        const groups = family === "all" ? allGroups : allGroups.filter((group) => group.family === family);
+        const groupsWithLotRows = groups.map((group) => {
+          const summaryRow = group.rows[0]
+            ? {
+              ...group.rows[0],
+              row_kind: "summary",
+              balance_amount: group.pending_amount,
+            }
+            : null;
+          const lotRows = group.rows.map((row, index) => ({
+            ...row,
+            row_kind: "lot",
+            lot_id: `${row.relation_id}-lot-${index + 1}`,
+            parent_relation_id: row.relation_id,
+            principal_bank_row_id: row.bank_row_ids[0] ?? "",
+            settlement_bank_row_ids: row.bank_row_ids.slice(1),
+            balance_amount: index === 0 ? group.pending_amount : "0.00",
+          }));
+          return {
+            ...group,
+            row_span: summaryRow ? 1 + lotRows.length : lotRows.length,
+            summary_row: summaryRow,
+            lot_rows: lotRows,
+            rows: summaryRow ? [summaryRow] : [],
+          };
+        });
+        return {
+          body: {
+            summary: {
+              pending_repayment_amount: "2800.00",
+              repaid_amount: "6200.00",
+              pending_collection_amount: "0.00",
+              collected_amount: "0.00",
+              closed_amount: "5000.00",
+              suggested_count: groupsWithLotRows.flatMap((group) => group.rows).filter((row) => row.status === "suggested").length,
+              conflict_count: 0,
+              row_count: groupsWithLotRows.reduce((sum, group) => sum + group.row_span, 0),
+            },
+            family_summaries: [
+              { family: "personal", label: "个人往来", pending_amount: "800.00", closed_amount: "0.00", row_count: 1 },
+              { family: "company", label: "公司往来", pending_amount: "2000.00", closed_amount: "1000.00", row_count: 1 },
+              { family: "bank", label: "银行往来", pending_amount: "0.00", closed_amount: "5000.00", row_count: 1 },
+              { family: "business", label: "业务往来", pending_amount: "0.00", closed_amount: "0.00", row_count: 0 },
+            ],
+            groups: groupsWithLotRows,
+            pagination: {
+              page,
+              page_size: pageSize,
+              total: groupsWithLotRows.length,
+            },
+          },
+        };
+      }
+      return {
+        body: {
+          summary: {
+            pending_repayment_amount: "2800.00",
+            repaid_amount: "6200.00",
+            pending_collection_amount: "0.00",
+            collected_amount: "0.00",
+            closed_amount: "5000.00",
+            suggested_count: rows.filter((row) => row.status === "suggested").length,
+            conflict_count: 0,
+            row_count: rows.length,
+          },
+          family_summaries: [
+            { family: "personal", label: "个人往来", pending_amount: "800.00", closed_amount: "0.00", row_count: 1 },
+            { family: "company", label: "公司往来", pending_amount: "2000.00", closed_amount: "1000.00", row_count: 1 },
+            { family: "bank", label: "银行往来", pending_amount: "0.00", closed_amount: "5000.00", row_count: 1 },
+            { family: "business", label: "业务往来", pending_amount: "0.00", closed_amount: "0.00", row_count: 0 },
+          ],
+          rows,
+          pagination: {
+            page,
+            page_size: pageSize,
             total: rows.length,
           },
         },
       };
     },
+    "/api/turnover-ledger/export-preview": ({ url }) => {
+      const family = url.searchParams.get("family") ?? "all";
+      const scopeLabel = family === "all"
+        ? "全部"
+        : family === "personal"
+          ? "个人往来"
+          : family === "company"
+            ? "公司往来"
+            : family === "bank"
+              ? "银行往来"
+              : "业务往来";
+      return {
+        body: {
+          file_name: `往来款台账-${scopeLabel}-2026-05-12.xlsx`,
+          scope_label: scopeLabel,
+          summary: {
+            row_count: 1,
+            pending_repayment_amount: family === "business" ? "0.00" : "2800.00",
+            pending_collection_amount: family === "business" ? "8000.00" : "0.00",
+            accrued_interest: "0.19",
+          },
+          columns: [
+            "序号",
+            "行类型",
+            "批次 ID",
+            "往来大类",
+            "对方户名",
+            "待还款金额",
+            "待收款金额",
+            "余额",
+            "借款金额",
+            "借款日",
+            "还款金额",
+            "还款日",
+            "对方开户机构",
+            "还款备注",
+            "利率类型",
+            "利率值",
+            "已还利息额",
+            "借款天数",
+            "应还利息",
+            "还利息日期",
+            "还利息方式",
+            "备注",
+            "关系状态",
+          ],
+          rows: [
+            {
+              sequence_no: 1,
+              row_type: "summary",
+              lot_id: "",
+              family_label: scopeLabel === "全部" ? "个人往来" : scopeLabel,
+              counterparty_name: family === "business" ? "昆明客户" : "张三",
+              pending_repayment_amount: family === "business" ? "0.00" : "800.00",
+              pending_collection_amount: family === "business" ? "8000.00" : "0.00",
+              balance_amount: family === "business" ? "8000.00" : "800.00",
+              borrow_amount: family === "business" ? "8000.00" : "1000.00",
+              borrow_date: "2026-05-01",
+              repayment_amount: family === "business" ? "0.00" : "200.00",
+              repayment_date: family === "business" ? null : "2026-05-03",
+              counterparty_bank_name: family === "business" ? "招商银行" : "建行 8106",
+              repayment_remark: family === "business" ? "" : "归还暂借款",
+              interest_rate_type: family === "business" ? "none" : "annual",
+              interest_rate_value: family === "business" ? "0.000000" : "0.035000",
+              interest_paid_amount: "0.00",
+              loan_days: family === "business" ? null : 2,
+              accrued_interest: family === "business" ? "0.00" : "0.19",
+              interest_paid_date: null,
+              interest_payment_method: "",
+              note: "",
+              status_label: "待人工确认",
+            },
+          ],
+        },
+      };
+    },
+    "/api/turnover-ledger/export": ({ url }) => {
+      const family = url.searchParams.get("family") ?? "all";
+      const scopeLabel = family === "all" ? "全部" : family;
+      return binaryResponse({
+        body: `mock turnover ledger export ${scopeLabel}`,
+        status: 200,
+        headers: {
+          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": `attachment; filename="turnover-ledger-${scopeLabel}.xlsx"`,
+        },
+      });
+    },
+    "/api/turnover-ledger/relations/confirm": () => ({
+      body: {
+        relation_id: "rel-confirmed-personal",
+        status: "confirmed",
+      },
+    }),
     "/api/workbench/actions/confirm-link/preview": ({ jsonBody }) => {
       const rowIds = Array.isArray(jsonBody?.row_ids) ? (jsonBody.row_ids as string[]) : [];
       const month = String(jsonBody?.month ?? "");
@@ -4517,6 +5009,137 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       });
     }
+    const turnoverExtraMatch = url.pathname.match(/^\/api\/turnover-ledger\/relations\/([^/]+)\/extra$/);
+    if (turnoverExtraMatch) {
+      const relationId = decodeURIComponent(turnoverExtraMatch[1] ?? "");
+      const currentExtra = turnoverExtraStore.get(relationId) ?? {
+        relation_id: relationId,
+        interest_rate_type: "none",
+        interest_rate_value: "0.000000",
+        interest_paid_amount: "0.00",
+        interest_paid_date: null,
+        interest_payment_method: "",
+        note: "",
+        updated_at: null,
+        updated_by: "",
+      };
+      if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+        const nextExtra = {
+          ...currentExtra,
+          relation_id: relationId,
+          interest_rate_type: jsonBody?.interest_rate_type ?? currentExtra.interest_rate_type,
+          interest_rate_value: jsonBody?.interest_rate_value ?? currentExtra.interest_rate_value,
+          interest_paid_amount: jsonBody?.interest_paid_amount ?? currentExtra.interest_paid_amount,
+          interest_paid_date: jsonBody?.interest_paid_date ?? currentExtra.interest_paid_date,
+          interest_payment_method: jsonBody?.interest_payment_method ?? currentExtra.interest_payment_method,
+          note: jsonBody?.note ?? currentExtra.note,
+          updated_at: "2026-05-12T10:00:00+08:00",
+          updated_by: "mock-user",
+        };
+        turnoverExtraStore.set(relationId, nextExtra);
+        return jsonResponse({
+          body: {
+            extra: nextExtra,
+            row: {
+              relation_id: relationId,
+              status: "suggested",
+              status_label: "待人工确认",
+              row_tone: "warning",
+              borrow_amount: "1000.00",
+              borrow_date: "2026-05-01",
+              borrow_direction: "income",
+              repayment_amount: "200.00",
+              repayment_date: "2026-05-03",
+              repayment_direction: "expense",
+              counterparty_bank_name: "建行 8106",
+              repayment_remark: "归还暂借款",
+              interest_rate_type: nextExtra.interest_rate_type,
+              interest_rate_value: nextExtra.interest_rate_value,
+              interest_paid_amount: nextExtra.interest_paid_amount,
+              loan_days: 2,
+              accrued_interest: nextExtra.interest_rate_type === "none" ? "0.00" : "0.19",
+              interest_paid_date: nextExtra.interest_paid_date,
+              interest_payment_method: nextExtra.interest_payment_method,
+              note: nextExtra.note,
+              bank_row_ids: ["bank-personal-001", "bank-personal-002"],
+            },
+          },
+        });
+      }
+      return jsonResponse({ body: currentExtra });
+    }
+
+    const turnoverDetailMatch = url.pathname.match(/^\/api\/turnover-ledger\/relations\/([^/]+)$/);
+    if (turnoverDetailMatch && turnoverDetailMatch[1] !== "confirm") {
+      const relationId = decodeURIComponent(turnoverDetailMatch[1] ?? "");
+      return jsonResponse({
+        body: {
+          relation: {
+            relation_id: relationId,
+            status: "suggested",
+            status_label: "待人工确认",
+            row_tone: "warning",
+            chips: [
+              { label: "待确认", tone: "warning" },
+              { label: "未同步关联台", tone: "muted" },
+            ],
+            family: "personal",
+            family_label: "个人往来",
+            counterparty_name: "张三",
+            principal_amount: "1000.00",
+            settled_amount: "200.00",
+            balance_amount: "800.00",
+            first_transaction_at: "2026-05-01 10:00:00",
+            last_settlement_at: "2026-05-03 10:00:00",
+            bank_account_labels: ["建行 8106"],
+            summary_text: "暂借款",
+            annual_interest_rate: "3.50%",
+            loan_days: 2,
+            accrued_interest: "0.19",
+            sync_to_workbench: false,
+            bank_row_ids: ["bank-personal-001", "bank-personal-002"],
+            category_codes: ["borrow_in_personal_pending_repayment", "borrow_in_personal_repaid"],
+            business_type: "borrow_in",
+          },
+          bank_rows: [
+            {
+              id: "bank-personal-001",
+              trade_time: "2026-05-01 10:00:00",
+              counterparty_name: "张三",
+              direction_label: "收",
+              amount: "1000.00",
+              bank_account_label: "建行 8106",
+              summary: "暂借款",
+              purpose: "借款",
+              category_label: "个人暂借款：待还款",
+            },
+            {
+              id: "bank-personal-002",
+              trade_time: "2026-05-03 10:00:00",
+              counterparty_name: "张三",
+              direction_label: "支",
+              amount: "200.00",
+              bank_account_label: "建行 8106",
+              summary: "归还暂借款",
+              purpose: "还款",
+              category_label: "个人暂借款：已还款",
+            },
+          ],
+          audit_history: [{ action: "generated", note: "system" }],
+        },
+      });
+    }
+
+    const turnoverWithdrawMatch = url.pathname.match(/^\/api\/turnover-ledger\/relations\/([^/]+)\/withdraw$/);
+    if (turnoverWithdrawMatch) {
+      return jsonResponse({
+        body: {
+          relation_id: decodeURIComponent(turnoverWithdrawMatch[1] ?? ""),
+          status: "withdrawn",
+        },
+      });
+    }
+
     if (url.pathname.startsWith("/api/workbench/rows/")) {
       return jsonResponse({ body: buildWorkbenchDetail(url.pathname.split("/").pop() ?? "") });
     }

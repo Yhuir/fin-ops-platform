@@ -545,6 +545,61 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-hurong-292"])
         self.assertEqual([row["id"] for row in group["invoice_rows"]], ["iv-hurong-292"])
 
+    def test_oa_attachment_source_group_accepts_payment_and_unknown_but_does_not_auto_close(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-03",
+            oa_rows=[
+                oa_row(
+                    "oa-hurong-2035",
+                    amount="248.00",
+                    counterparty_name="胡瑢",
+                    apply_type="日常报销",
+                )
+            ],
+            bank_rows=[
+                {
+                    "id": "bank-hurong-2035",
+                    "type": "bank",
+                    "case_id": None,
+                    "debit_amount": "248.00",
+                    "credit_amount": "",
+                    "counterparty_name": "胡瑢",
+                    "invoice_relation": {"code": "pending_invoice_match", "label": "待关联发票", "tone": "warn"},
+                }
+            ],
+            invoice_rows=[
+                oa_attachment_invoice_row(
+                    "iv-hurong-2035",
+                    derived_from_oa_id="oa-hurong-2035",
+                    amount="248.00",
+                    total_with_tax="248.00",
+                    seller_name="云南高速公路联网收费有限公司",
+                ),
+                oa_attachment_evidence_row(
+                    "pay-hurong-2035",
+                    source_kind="oa_attachment_payment_receipt",
+                    derived_from_oa_id="oa-hurong-2035",
+                    amount="248.00",
+                ),
+                oa_attachment_evidence_row(
+                    "unknown-hurong-2035",
+                    source_kind="oa_attachment_unknown",
+                    derived_from_oa_id="oa-hurong-2035",
+                    amount="",
+                ),
+            ],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        source_group = next(group for group in payload["open"]["groups"] if group["reason"] == "oa_attachment_source_relation")
+        self.assertEqual(source_group["group_type"], "source_linked")
+        self.assertEqual([row["id"] for row in source_group["oa_rows"]], ["oa-hurong-2035"])
+        self.assertCountEqual(
+            [row["id"] for row in source_group["invoice_rows"]],
+            ["iv-hurong-2035", "pay-hurong-2035", "unknown-hurong-2035"],
+        )
+
     def test_oa_attachment_invoice_stays_standalone_when_source_oa_is_missing(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(
@@ -1656,6 +1711,29 @@ def oa_attachment_invoice_row(
     if ignored:
         row["ignored"] = True
     return row
+
+
+def oa_attachment_evidence_row(
+    row_id: str,
+    *,
+    source_kind: str,
+    derived_from_oa_id: str,
+    amount: str,
+) -> dict[str, object]:
+    return {
+        "id": row_id,
+        "type": "invoice",
+        "case_id": None,
+        "source_kind": source_kind,
+        "derived_from_oa_id": derived_from_oa_id,
+        "amount": amount,
+        "total_with_tax": amount,
+        "issue_date": "2026-03-24",
+        "seller_name": "",
+        "buyer_name": "",
+        "invoice_type": "附件凭证",
+        "invoice_bank_relation": {"code": "pending_match", "label": "待匹配", "tone": "warn"},
+    }
 
 
 if __name__ == "__main__":

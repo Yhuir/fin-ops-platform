@@ -34,6 +34,7 @@ COMPACT_DATE_TIME_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})[ T]?(\d{2})(\d{2})(\d
 COMPANY_TAX_NOS = {"91330106589876543T", "915300007194052520"}
 COMPANY_NAME_KEYWORDS = ("云南溯源科技有限公司", "溯源科技有限公司")
 ACCOUNT_METADATA_KEYWORDS = ("账号", "账户", "卡号")
+BANK_TEXT_FIELD_LABELS = ("摘要", "备注", "用途", "交易用途", "客户附言", "附言")
 TEMPLATE_DEFINITIONS: list[dict[str, Any]] = [
     {
         "template_code": "invoice_export",
@@ -884,6 +885,7 @@ def parse_icbc_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
                 "balance": mapped.get("余额"),
                 "summary": mapped.get("摘要"),
                 "remark": mapped.get("附言") or mapped.get("用途"),
+                "bank_text_fields": extract_bank_text_fields(mapped),
                 "voucher_no": mapped.get("凭证号"),
                 "bank_serial_no": mapped.get("附言") or mapped.get("凭证号"),
                 "currency": "CNY",
@@ -915,6 +917,7 @@ def parse_pingan_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
                 "balance": mapped.get("账户余额"),
                 "summary": mapped.get("摘要"),
                 "remark": mapped.get("交易用途"),
+                "bank_text_fields": extract_bank_text_fields(mapped),
                 "bank_serial_no": mapped.get("核心唯一流水号") or mapped.get("交易流水号"),
                 "enterprise_serial_no": mapped.get("业务流水号"),
                 "account_detail_no": mapped.get("交易流水号"),
@@ -952,6 +955,7 @@ def parse_cmbc_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
                 "balance": mapped.get("账户余额"),
                 "summary": mapped.get("客户附言"),
                 "remark": mapped.get("客户附言"),
+                "bank_text_fields": extract_bank_text_fields(mapped),
                 "voucher_no": mapped.get("凭证号"),
                 "bank_serial_no": mapped.get("交易流水号"),
                 "currency": currency,
@@ -988,6 +992,7 @@ def parse_ccb_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
                 "balance": mapped.get("余额"),
                 "summary": mapped.get("摘要"),
                 "remark": mapped.get("备注"),
+                "bank_text_fields": extract_bank_text_fields(mapped),
                 "account_detail_no": mapped.get("账户明细编号-交易流水号"),
                 "enterprise_serial_no": mapped.get("企业流水号"),
                 "voucher_kind": mapped.get("凭证种类"),
@@ -1024,6 +1029,7 @@ def parse_ceb_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
                 "debit_amount": first_mapped_value(mapped, "借方发生额", "借方发生额（元）"),
                 "balance": first_mapped_value(mapped, "账户余额", "账户余额（元）"),
                 "summary": mapped.get("摘要"),
+                "bank_text_fields": extract_bank_text_fields(mapped),
                 "voucher_no": mapped.get("凭证号"),
                 "bank_serial_no": mapped.get("流水号") or mapped.get("凭证号"),
                 "currency": "CNY",
@@ -1060,6 +1066,7 @@ def parse_bocom_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
                 "balance": mapped.get("账户余额"),
                 "summary": mapped.get("摘要"),
                 "remark": mapped.get("摘要"),
+                "bank_text_fields": extract_bank_text_fields(mapped),
                 "bank_serial_no": first_mapped_value(mapped, "流水号", "交易流水号", "凭证号"),
                 "currency": "CNY",
             }
@@ -1150,6 +1157,15 @@ def first_mapped_value(mapped: dict[str, str], *keys: str) -> str | None:
         if value:
             return value
     return None
+
+
+def extract_bank_text_fields(mapped: dict[str, str]) -> list[dict[str, str]]:
+    fields: list[dict[str, str]] = []
+    for label in BANK_TEXT_FIELD_LABELS:
+        value = clean(mapped.get(label))
+        if value:
+            fields.append({"label": label, "value": value})
+    return fields
 
 
 def extract_key_value_metadata(rows: list[list[str]]) -> dict[str, str]:

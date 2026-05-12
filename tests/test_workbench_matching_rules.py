@@ -368,6 +368,30 @@ class WorkbenchMatchingRulesTests(unittest.TestCase):
             ["invoice-oa-no-bank-70", "invoice-oa-no-bank-126"],
         )
 
+    def test_payment_receipt_attachment_rows_do_not_enter_invoice_matching_rules(self) -> None:
+        candidates = self.rules.generate_candidates(
+            "2026-05",
+            oa_rows=[oa_row("oa-payment-only", "248.00", counterparty_name="胡瑢", apply_type="日常报销")],
+            bank_rows=[bank_row("bank-payment-only", "248.00", counterparty_name="胡瑢")],
+            invoice_rows=[
+                invoice_row(
+                    "payment-receipt-248",
+                    "248.00",
+                    seller_name="胡瑢",
+                    source_kind="oa_attachment_payment_receipt",
+                    derived_from_oa_id="oa-payment-only",
+                    total_with_tax="248.00",
+                )
+            ],
+        )
+
+        self.assertFalse(
+            any("payment-receipt-248" in candidate["row_ids"] for candidate in candidates)
+        )
+        self.assertFalse(
+            any(candidate["rule_code"] == "oa_attachment_invoice_source_link" for candidate in candidates)
+        )
+
     def test_oa_attachment_invoices_with_amount_delta_auto_close_when_credible_bank_closes_oa_amount(self) -> None:
         candidates = self.rules.generate_candidates(
             "2026-03",

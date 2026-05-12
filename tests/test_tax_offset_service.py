@@ -235,6 +235,46 @@ class TaxOffsetServiceTests(unittest.TestCase):
         self.assertEqual(input_item["invoice_type"], "进项发票")
         self.assertEqual(payload["default_selected_input_ids"], [input_item["id"]])
 
+    def test_month_payload_excludes_payment_receipt_and_unknown_oa_attachment_rows(self) -> None:
+        service = TaxOffsetService(
+            import_service=ImportNormalizationService(),
+            certified_records_loader=lambda month: [],
+            oa_attachment_invoice_rows_loader=lambda month: [
+                {
+                    "id": "oa-att-inv-2035-001",
+                    "source_kind": "oa_attachment_invoice",
+                    "issue_date": "2026-03-04",
+                    "invoice_no": "53000125",
+                    "tax_rate": "0%",
+                    "tax_amount": "0.00",
+                    "amount": "25.00",
+                    "total_with_tax": "25.00",
+                    "invoice_type": "进项发票",
+                    "seller_name": "云南高速公路联网收费有限公司",
+                },
+                {
+                    "id": "oa-att-pay-2035-001",
+                    "source_kind": "oa_attachment_payment_receipt",
+                    "issue_date": "2026-03-04",
+                    "amount": "25.00",
+                    "total_with_tax": "25.00",
+                    "tax_amount": "0.00",
+                    "seller_name": "云南高速公路联网收费有限公司",
+                },
+                {
+                    "id": "oa-att-unknown-2035-001",
+                    "source_kind": "oa_attachment_unknown",
+                    "issue_date": "2026-03-04",
+                    "amount": "",
+                    "tax_amount": "",
+                },
+            ],
+        )
+
+        payload = service.get_month_payload("2026-03")
+
+        self.assertEqual([item["id"] for item in payload["input_plan_items"]], ["oa-att-inv-2035-001"])
+
     def test_month_payload_reuses_single_oa_attachment_snapshot_build(self) -> None:
         oa_loader_call_count = 0
 

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import App from "../app/App";
@@ -10,6 +10,14 @@ const WORKBENCH_RENDER_TIMEOUT = 3000;
 describe("Finance operations shell", () => {
   test("orders finance business above system operations in the sidebar", () => {
     expect(sidebarGroups.map((group) => group.title)).toEqual(["财务业务", "系统操作"]);
+  });
+
+  test("places turnover ledger directly below bank details in the finance sidebar", () => {
+    const financeLabels = sidebarGroups.find((group) => group.title === "财务业务")?.items.map((item) => item.label);
+    expect(financeLabels).toBeDefined();
+    const bankDetailsIndex = financeLabels?.indexOf("银行明细") ?? -1;
+    expect(bankDetailsIndex).toBeGreaterThanOrEqual(0);
+    expect(financeLabels?.[bankDetailsIndex + 1]).toBe("往来款管理");
   });
 
   test("loads the workbench as an all-time view and keeps the month picker scoped to tax offset", async () => {
@@ -66,6 +74,41 @@ describe("Finance operations shell", () => {
     expect(screen.getByRole("link", { name: "设置" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "导入中心" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "成本统计" })).toHaveAttribute("aria-current", "page");
+  });
+
+  test("renders the turnover ledger route from the shell sidebar", async () => {
+    window.history.pushState({}, "", "/turnover-ledger");
+    installMockApiFetch();
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "往来款管理" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "往来款管理" })).toHaveAttribute("aria-current", "page");
+  });
+
+  test("refreshes the workbench when turnover relations change", async () => {
+    window.history.pushState({}, "", "/");
+    const fetchMock = installMockApiFetch();
+
+    render(<App />);
+
+    expect(await screen.findByText("赵华", {}, { timeout: WORKBENCH_RENDER_TIMEOUT })).toBeInTheDocument();
+    const before = fetchMock.mock.calls.filter(([input]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/workbench";
+    }).length;
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("turnoverRelationUpdated", { detail: { relationId: "rel-company-001" } }));
+    });
+
+    await waitFor(() => {
+      const after = fetchMock.mock.calls.filter(([input]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/workbench";
+      }).length;
+      expect(after).toBeGreaterThan(before);
+    });
   });
 
   test("hides the global workbench title block while a zone is expanded", async () => {

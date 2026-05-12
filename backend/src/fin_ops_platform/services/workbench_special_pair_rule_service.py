@@ -12,6 +12,7 @@ from fin_ops_platform.services.workbench_special_rule_detectors import (
     CASH_FULL_TEXT_KEYWORDS,
     CASH_TURNOVER_DETECTED,
     CASH_TURNOVER_TAG,
+    EXTERNAL_TURNOVER_EVIDENCE,
     INTERNAL_TRANSFER_PAIR,
     OA_INVOICE_OFFSET_AUTO_MATCH,
     OFFSET_TAG,
@@ -71,7 +72,7 @@ class WorkbenchSpecialPairRuleService:
             "cost_policy": str(evaluation.get("cost_policy") or "").strip(),
             "evidence": evidence,
         }
-        if rule_code in {INTERNAL_TRANSFER_PAIR, OA_INVOICE_OFFSET_AUTO_MATCH}:
+        if str(evaluation.get("cost_policy") or "").strip() == "exclude_all":
             special_metadata["cost_excluded"] = True
         if rule_code == INTERNAL_TRANSFER_PAIR:
             match_window_hours = evidence.get("match_window_hours")
@@ -80,6 +81,8 @@ class WorkbenchSpecialPairRuleService:
         if rule_code == CASH_TURNOVER_DETECTED:
             special_metadata["cost_excluded"] = False
             special_metadata["matches"] = deepcopy(evidence.get("matches") if isinstance(evidence.get("matches"), list) else [])
+        if rule_code in {EXTERNAL_TURNOVER_EVIDENCE, OA_INVOICE_OFFSET_AUTO_MATCH} and special_metadata.get("cost_policy") == "hint_only":
+            special_metadata["cost_excluded"] = False
         versions = deepcopy(source_versions)
         if rule_code == OA_INVOICE_OFFSET_AUTO_MATCH:
             versions = {**versions, "offset_display_tag": OFFSET_TAG, "offset_relation_mode": "oa_attachment_invoice"}
@@ -118,6 +121,8 @@ class WorkbenchSpecialPairRuleService:
             return "Configured applicant OA attachment invoice auto matched for 冲 display."
         if rule_code == CASH_TURNOVER_DETECTED:
             return "Detected bank transaction matching cash turnover hint rules."
+        if rule_code == EXTERNAL_TURNOVER_EVIDENCE:
+            return "Manual external turnover category evidence requires review before closing."
         return "Detected special workbench matching rule evidence."
 
     def _salary_personal_auto_match(

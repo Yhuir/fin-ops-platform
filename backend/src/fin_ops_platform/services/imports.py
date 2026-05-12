@@ -22,6 +22,7 @@ ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
 WHITESPACE_RE = re.compile(r"\s+")
 PLACEHOLDER_EMPTY_VALUES = {"", "--", "—", "-", "——", "nan", "NaN", "None"}
+BANK_TEXT_FIELD_LABELS = ("摘要", "备注", "用途", "交易用途", "客户附言", "附言")
 
 
 @dataclass(slots=True)
@@ -485,6 +486,7 @@ class ImportNormalizationService:
             "counterparty_account_no": self._string_or_none(raw_row.get("counterparty_account_no")),
             "counterparty_bank_name": self._string_or_none(raw_row.get("counterparty_bank_name")),
             "remark": self._string_or_none(raw_row.get("remark")),
+            "bank_text_fields": self._normalize_bank_text_fields(raw_row),
             "account_detail_no": self._string_or_none(raw_row.get("account_detail_no")),
             "voucher_kind": self._string_or_none(raw_row.get("voucher_kind")),
             "project_id": self._string_or_none(raw_row.get("project_id")),
@@ -700,6 +702,7 @@ class ImportNormalizationService:
             counterparty_bank_name=normalized.get("counterparty_bank_name"),
             booked_date=normalized.get("booked_date"),
             remark=normalized.get("remark"),
+            bank_text_fields=list(normalized.get("bank_text_fields") or []),
             account_detail_no=normalized.get("account_detail_no"),
             enterprise_serial_no=normalized.get("enterprise_serial_no"),
             voucher_kind=normalized.get("voucher_kind"),
@@ -722,6 +725,7 @@ class ImportNormalizationService:
             self._invoice_fingerprint_index[invoice.data_fingerprint] = invoice.id
 
     def _register_transaction(self, transaction: BankTransaction) -> None:
+        self._ensure_transaction_metadata_fields(transaction)
         canonical_key = self._bank_transaction_identity_service.canonical_key_for_transaction(transaction)
         if canonical_key:
             transaction.source_unique_key = canonical_key
@@ -911,6 +915,11 @@ class ImportNormalizationService:
         if not hasattr(invoice, "workbench_visibility"):
             invoice.workbench_visibility = "visible"
 
+    @staticmethod
+    def _ensure_transaction_metadata_fields(transaction: BankTransaction) -> None:
+        if not hasattr(transaction, "bank_text_fields"):
+            transaction.bank_text_fields = []
+
     def _merge_invoice_from_normalized(self, invoice: Invoice, batch_id: str, normalized: dict[str, Any]) -> None:
         self._ensure_invoice_metadata_fields(invoice)
         for tag in normalized.get("tags") or []:
@@ -1094,6 +1103,36 @@ class ImportNormalizationService:
         if text in PLACEHOLDER_EMPTY_VALUES:
             return None
         return text
+
+    @staticmethod
+    def _normalize_bank_text_fields(raw_row: dict[str, Any]) -> list[dict[str, str]]:
+        fields: list[dict[str, str]] = []
+        seen_labels: set[str] = set()
+
+        def add_field(label: Any, value: Any) -> None:
+            clean_label = ImportNormalizationService._string_or_none(label)
+            clean_value = ImportNormalizationService._string_or_none(value)
+            if not clean_label or not clean_value or clean_label in seen_labels:
+                return
+            fields.append({"label": clean_label, "value": clean_value})
+            seen_labels.add(clean_label)
+
+        incoming = raw_row.get("bank_text_fields")
+        if isinstance(incoming, dict):
+            for label in BANK_TEXT_FIELD_LABELS:
+                add_field(label, incoming.get(label))
+            for label, value in incoming.items():
+                add_field(label, value)
+        elif isinstance(incoming, list):
+            for item in incoming:
+                if not isinstance(item, dict):
+                    continue
+                add_field(item.get("label"), item.get("value"))
+
+        for label in BANK_TEXT_FIELD_LABELS:
+            add_field(label, raw_row.get(label))
+
+        return fields
 
 
 def clean_string(value: Any) -> str:

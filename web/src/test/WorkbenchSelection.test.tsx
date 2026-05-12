@@ -432,6 +432,44 @@ describe("Workbench row selection and detail modal", () => {
     expect(calledPaths.slice(applyIndex + 1)).toContain("/api/workbench?month=all");
   });
 
+  test("open zone exception action accepts OA 2035 attachment payment receipt selections from the backend group", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderWorkbenchPage();
+
+    const openZone = await screen.findByTestId("zone-open");
+    const oa2035Row = within(openZone).getByRole("row", {
+      name: /胡瑢.*248\.00/,
+    });
+    const paymentReceiptRow = within(openZone).getByRole("row", {
+      name: /微信支付.*胡瑢.*200\.00/,
+    });
+
+    await user.click(oa2035Row);
+    await user.click(paymentReceiptRow);
+
+    expect(oa2035Row).toHaveAttribute("data-row-state", "selected");
+    expect(paymentReceiptRow).toHaveAttribute("data-row-state", "selected");
+
+    const exceptionButton = within(openZone)
+      .getAllByRole("button", { name: "异常处理" })
+      .find((button) => button.classList.contains("zone-selection-btn"));
+    expect(exceptionButton).toBeDefined();
+    await user.click(exceptionButton!);
+
+    expect(await screen.findByRole("dialog", { name: "统一异常处理" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/exception/preview",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          month: "all",
+          row_ids: ["oa-exp-2035", "pay-oa-2035-fuel-200"],
+        }),
+      }),
+    );
+  });
+
   test("workbench action shows a blocking loading modal and requires acknowledgement after completion", async () => {
     const user = userEvent.setup();
     installMockApiFetch({ actionDelayMs: 80 });

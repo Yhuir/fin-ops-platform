@@ -120,6 +120,7 @@ class BankTransaction:
     booked_date: str | None = None
     summary: str | None = None
     remark: str | None = None
+    bank_text_fields: list[dict[str, str]] = field(default_factory=list)
     account_detail_no: str | None = None
     enterprise_serial_no: str | None = None
     voucher_kind: str | None = None

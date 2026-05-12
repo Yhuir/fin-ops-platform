@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from fin_ops_platform.services.bank_transaction_category_service import BANK_TRANSACTION_CATEGORY_DEFINITIONS
 from fin_ops_platform.services.import_file_service import is_company_identity
 from fin_ops_platform.services.live_workbench_service import INTERNAL_TRANSFER_MATCH_WINDOW, clean_account_no
 
@@ -16,7 +17,10 @@ SALARY_PERSONAL_AUTO_MATCH = "salary_personal_auto_match"
 INTERNAL_TRANSFER_PAIR = "internal_transfer_pair"
 OA_INVOICE_OFFSET_AUTO_MATCH = "oa_invoice_offset_auto_match"
 CASH_TURNOVER_DETECTED = "cash_turnover_detected"
+EXTERNAL_TURNOVER_EVIDENCE = "external_turnover_evidence"
 CASH_TURNOVER_TAG = "现金往来"
+EXTERNAL_TURNOVER_TAG = "外部往来款"
+MANUAL_TURNOVER_CATEGORY_CODES = {*BANK_TRANSACTION_CATEGORY_DEFINITIONS.keys(), "external_turnover"}
 OFFSET_TAG = "冲"
 CASH_COUNTERPARTY_KEYWORDS = ("陈秀云", "太宏", "韦代连")
 CASH_FULL_TEXT_KEYWORDS = ("张双文公积金", "陈秀云社保")
@@ -40,7 +44,9 @@ class WorkbenchSpecialRuleDetector:
         evaluations.extend(self._internal_transfer_pair(bank))
         evaluations.extend(self._salary_personal_auto_match(bank))
         evaluations.extend(self._oa_invoice_offset_auto_match(oa, invoices, resolved_settings))
+        evaluations.extend(self._offset_category_evidence(bank))
         evaluations.extend(self._cash_turnover_detected(bank))
+        evaluations.extend(self._external_turnover_evidence(bank))
         return self._dedupe_evaluations(evaluations)
 
     def _salary_personal_auto_match(self, bank_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -88,7 +94,7 @@ class WorkbenchSpecialRuleDetector:
         evaluations: list[dict[str, Any]] = []
         used_ids: set[str] = set()
         for outflow in outflows:
-            if self._row_id(outflow) in used_ids or not self._is_company_bank_row(outflow):
+            if self._row_id(outflow) in used_ids or not self._is_internal_transfer_candidate_row(outflow):
                 continue
             outflow_time = self._parse_row_time(outflow)
             outflow_amount = self._amount(outflow)
@@ -96,7 +102,7 @@ class WorkbenchSpecialRuleDetector:
                 continue
             best_match: tuple[timedelta, dict[str, Any]] | None = None
             for inflow in inflows:
-                if self._row_id(inflow) in used_ids or not self._is_company_bank_row(inflow):
+                if self._row_id(inflow) in used_ids or not self._is_internal_transfer_candidate_row(inflow):
                     continue
                 if outflow_amount != self._amount(inflow):
                     continue
@@ -123,7 +129,7 @@ class WorkbenchSpecialRuleDetector:
                     amount=outflow_amount,
                     status="auto_closed",
                     evidence={
-                        "matched_fields": ["amount", "account_no", "pay_receive_time"],
+                        "matched_fields": self._internal_transfer_matched_fields(outflow, inflow),
                         "amount": self._format_amount(outflow_amount),
                         "outflow_row_id": self._row_id(outflow),
                         "inflow_row_id": self._row_id(inflow),
@@ -184,6 +190,32 @@ class WorkbenchSpecialRuleDetector:
             )
         return evaluations
 
+    def _offset_category_evidence(self, bank_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        evaluations: list[dict[str, Any]] = []
+        for bank_row in sorted(bank_rows, key=self._row_id):
+            if self._category_code(bank_row) != "offset":
+                continue
+            amount = self._amount(bank_row) or ZERO
+            evaluations.append(
+                self._evaluation(
+                    rule_code=OA_INVOICE_OFFSET_AUTO_MATCH,
+                    confidence="medium",
+                    suggested_action_code="review_oa_invoice_offset",
+                    rows=[bank_row],
+                    amount=amount,
+                    status="needs_review",
+                    evidence={
+                        "matched_fields": ["category_code"],
+                        "amount": self._format_amount(amount),
+                        "category_code": "offset",
+                        "category_label": OFFSET_TAG,
+                    },
+                    display_tags=[OFFSET_TAG],
+                    cost_policy="hint_only",
+                )
+            )
+        return evaluations
+
     def _cash_turnover_detected(self, bank_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         evaluations: list[dict[str, Any]] = []
         for bank_row in sorted(bank_rows, key=self._row_id):
@@ -203,8 +235,45 @@ class WorkbenchSpecialRuleDetector:
                         "matched_fields": sorted({match["matched_field"] for match in matches}),
                         "amount": self._format_amount(amount),
                         "matches": matches,
+                        **self._category_evidence(bank_row, expected_code="cash_turnover"),
                     },
                     display_tags=[CASH_TURNOVER_TAG],
+                    cost_policy="hint_only",
+                )
+            )
+        return evaluations
+
+    def _external_turnover_evidence(self, bank_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        evaluations: list[dict[str, Any]] = []
+        for bank_row in sorted(bank_rows, key=self._row_id):
+            category_code = self._category_code(bank_row)
+            if category_code not in MANUAL_TURNOVER_CATEGORY_CODES:
+                continue
+            amount = self._amount(bank_row) or ZERO
+            direction = self._direction(bank_row) or "unknown"
+            category_label = str(bank_row.get("category_label") or "").strip() or EXTERNAL_TURNOVER_TAG
+            category_path = [
+                str(item).strip()
+                for item in list(bank_row.get("category_path") or [])
+                if str(item).strip()
+            ]
+            evaluations.append(
+                self._evaluation(
+                    rule_code=EXTERNAL_TURNOVER_EVIDENCE,
+                    confidence="medium",
+                    suggested_action_code="review_external_turnover",
+                    rows=[bank_row],
+                    amount=amount,
+                    status="needs_review",
+                    evidence={
+                        "matched_fields": ["category_code"],
+                        "amount": self._format_amount(amount),
+                        "category_code": category_code,
+                        "category_label": category_label,
+                        "category_path": category_path,
+                        "direction": direction,
+                    },
+                    display_tags=[category_label],
                     cost_policy="hint_only",
                 )
             )
@@ -255,6 +324,14 @@ class WorkbenchSpecialRuleDetector:
 
     def _cash_turnover_matches(self, bank_row: dict[str, Any]) -> list[dict[str, str]]:
         matches: list[dict[str, str]] = []
+        if self._category_code(bank_row) == "cash_turnover":
+            matches.append(
+                {
+                    "matched_field": "category_code",
+                    "matched_keyword": "cash_turnover",
+                    "matched_rule": "manual_category",
+                }
+            )
         text_fields = ("summary", "remark", "purpose", "note")
         for field_name in text_fields:
             value = str(bank_row.get(field_name) or "")
@@ -308,6 +385,29 @@ class WorkbenchSpecialRuleDetector:
                 seen.add(key)
                 deduped.append(match)
         return deduped
+
+    def _is_internal_transfer_candidate_row(self, row: dict[str, Any]) -> bool:
+        if self._is_company_bank_row(row):
+            return True
+        return self._category_code(row) == "internal_transfer" and is_company_identity(None, self._bank_account_name(row))
+
+    def _internal_transfer_matched_fields(self, outflow: dict[str, Any], inflow: dict[str, Any]) -> list[str]:
+        fields = ["amount", "account_no", "pay_receive_time"]
+        if self._category_code(outflow) == "internal_transfer" or self._category_code(inflow) == "internal_transfer":
+            fields.append("category_code")
+        return fields
+
+    def _category_evidence(self, row: dict[str, Any], *, expected_code: str) -> dict[str, str]:
+        if self._category_code(row) != expected_code:
+            return {}
+        return {
+            "category_code": expected_code,
+            "category_label": str(row.get("category_label") or "").strip(),
+        }
+
+    @staticmethod
+    def _category_code(row: dict[str, Any]) -> str:
+        return str(row.get("category_code") or "").strip()
 
     def _direction(self, row: dict[str, Any]) -> str | None:
         row_type = str(row.get("type") or "")

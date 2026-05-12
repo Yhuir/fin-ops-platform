@@ -9,6 +9,18 @@ from fin_ops_platform.services.live_workbench_service import LiveWorkbenchServic
 from fin_ops_platform.services.matching import MatchingEngineService
 
 
+class StaticCategoryProvider:
+    def __init__(self, categories_by_transaction_id: dict[str, dict[str, str]]) -> None:
+        self.categories_by_transaction_id = categories_by_transaction_id
+
+    def bulk_get(self, transaction_ids: list[str]) -> dict[str, dict[str, str]]:
+        return {
+            transaction_id: self.categories_by_transaction_id[transaction_id]
+            for transaction_id in transaction_ids
+            if transaction_id in self.categories_by_transaction_id
+        }
+
+
 class LiveWorkbenchServiceTests(unittest.TestCase):
     def test_invoice_rows_expose_invoice_identity_fields_in_workbench_list(self) -> None:
         import_service = ImportNormalizationService()
@@ -48,9 +60,11 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
                 {
                     "account_no": "62220001",
                     "txn_date": "2026-03-27",
+                    "trade_time": "2026-03-27 08:00:00",
                     "counterparty_name": "Workbench API Client",
                     "credit_amount": "150.00",
                     "debit_amount": "",
+                    "bank_serial_no": "SERIAL-DEMO-001",
                     "summary": "api receipt",
                 }
             ],
@@ -65,8 +79,8 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
                 {
                     "account_no": "62220002",
                     "txn_date": "2026-03-28",
-                    "trade_time": "2026-03-28 09:15",
-                    "pay_receive_time": "2026-03-28 09:15",
+                    "trade_time": "2026-03-28 09:15:00",
+                    "pay_receive_time": "2026-03-28 09:15:00",
                     "counterparty_name": "真实供应商",
                     "debit_amount": "88.00",
                     "credit_amount": "",
@@ -83,7 +97,7 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
 
         self.assertEqual(len(bank_rows), 1)
         self.assertEqual(bank_rows[0]["counterparty_name"], "真实供应商")
-        self.assertEqual(bank_rows[0]["trade_time"], "2026-03-28 09:15")
+        self.assertEqual(bank_rows[0]["trade_time"], "2026-03-28 09:15:00")
 
     def test_invoice_rows_fill_missing_party_fields_from_company_identity_and_counterparty(self) -> None:
         known_company_invoice = Invoice(
@@ -193,6 +207,62 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
 
         self.assertIn(transaction_id, detail_rows)
         self.assertEqual(detail_rows[transaction_id]["counterparty_name"], "测试对手方")
+
+    def test_bank_rows_include_manual_category_and_historical_text_field_fallbacks(self) -> None:
+        import_service = ImportNormalizationService()
+        preview = import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="category-bank.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220008",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-03-20",
+                    "trade_time": "2026-03-20 12:15:00",
+                    "pay_receive_time": "2026-03-20 12:15:00",
+                    "counterparty_name": "外部往来客户",
+                    "debit_amount": "",
+                    "credit_amount": "600.00",
+                    "summary": "电子转账",
+                    "remark": "代购公车款",
+                },
+            ],
+        )
+        import_service.confirm_import(preview.id)
+        transaction_id = import_service.list_transactions()[0].id
+
+        service = LiveWorkbenchService(
+            import_service,
+            MatchingEngineService(import_service),
+            category_provider=StaticCategoryProvider(
+                {
+                    transaction_id: {
+                        "category_code": "borrow_in_company_pending_repayment",
+                        "category_label": "公司暂借款：待还款",
+                        "source": "manual",
+                    }
+                }
+            ),
+        )
+
+        payload = service.get_workbench("2026-03")
+        bank_row = payload["open"]["bank"][0]
+
+        self.assertEqual(bank_row["category_code"], "borrow_in_company_pending_repayment")
+        self.assertEqual(bank_row["category_label"], "公司暂借款：待还款")
+        self.assertEqual(bank_row["category_source"], "manual")
+        self.assertIn("公司暂借款：待还款", bank_row["tags"])
+        self.assertEqual(
+            bank_row["bank_text_fields"],
+            [
+                {"label": "摘要", "value": "电子转账"},
+                {"label": "备注", "value": "代购公车款"},
+            ],
+        )
+        detail = service.get_row_detail(transaction_id)
+        self.assertEqual(detail["detail_fields"]["摘要"], "电子转账")
+        self.assertEqual(detail["detail_fields"]["备注"], "代购公车款")
 
     def test_get_row_detail_uses_direct_lookup_without_rebuilding_cache(self) -> None:
         import_service = ImportNormalizationService()

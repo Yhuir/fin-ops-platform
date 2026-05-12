@@ -29,6 +29,7 @@ import type {
   WorkbenchOaImportOption,
   WorkbenchOaSyncStatus,
   WorkbenchInvoiceInventory,
+  WorkbenchSourceKind,
 } from "./types";
 
 export type WorkbenchBootstrapProgress = {
@@ -48,7 +49,7 @@ type ApiRelation = {
 type ApiWorkbenchRow = {
   id: string;
   type: WorkbenchRecordType;
-  source_kind?: string | null;
+  source_kind?: WorkbenchSourceKind | null;
   case_id?: string | null;
   exception_case_id?: string | null;
   handled_exception?: boolean | null;
@@ -69,6 +70,14 @@ type ApiWorkbenchRow = {
   invoice_relation?: ApiRelation | null;
   pay_receive_time?: string | null;
   remark?: string | null;
+  category_code?: string | null;
+  category_label?: string | null;
+  category_path?: string[] | null;
+  category_source?: string | null;
+  bank_text_fields?: Array<{
+    label?: string | null;
+    value?: string | null;
+  }> | null;
   repayment_date?: string | null;
   seller_tax_no?: string | null;
   seller_name?: string | null;
@@ -591,6 +600,15 @@ function rowLabel(row: ApiWorkbenchRow) {
   if (row.source_kind === "etc_invoice" || row.tags?.includes("ETC")) {
     return "ETC票";
   }
+  if (row.source_kind === "oa_attachment_invoice") {
+    return "OA附件";
+  }
+  if (row.source_kind === "oa_attachment_payment_receipt") {
+    return "付款凭证";
+  }
+  if (row.source_kind === "oa_attachment_unknown") {
+    return "未识别附件";
+  }
   return row.invoice_type?.includes("销") ? "销项票" : "进项票";
 }
 
@@ -606,6 +624,39 @@ function rowCounterparty(row: ApiWorkbenchRow) {
     return toDisplayValue(row.buyer_name ?? row.seller_name);
   }
   return toDisplayValue(row.counterparty_name);
+}
+
+const visibleBankTextFieldLabels = new Set(["摘要", "备注", "用途", "交易用途", "客户附言"]);
+
+function mapBankTextFields(row: ApiWorkbenchRow) {
+  if (!Array.isArray(row.bank_text_fields)) {
+    return [];
+  }
+
+  const seenLabels = new Set<string>();
+  return row.bank_text_fields
+    .map((field) => ({
+      label: String(field?.label ?? "").trim(),
+      value: String(field?.value ?? "").trim(),
+    }))
+    .filter((field) => {
+      if (!field.label || !field.value || !visibleBankTextFieldLabels.has(field.label)) {
+        return false;
+      }
+      if (seenLabels.has(field.label)) {
+        return false;
+      }
+      seenLabels.add(field.label);
+      return true;
+    });
+}
+
+function formatBankTextFieldsForNote(row: ApiWorkbenchRow) {
+  const fields = mapBankTextFields(row);
+  if (fields.length === 0) {
+    return toDisplayValue(row.remark);
+  }
+  return fields.map((field) => `${field.label}：${field.value}`).join("\n");
 }
 
 function mapTableValues(row: ApiWorkbenchRow): Record<string, string> {
@@ -640,7 +691,7 @@ function mapTableValues(row: ApiWorkbenchRow): Record<string, string> {
       paymentAccount: toDisplayValue(row.payment_account_label),
       invoiceRelationStatus: relationLabel,
       paymentOrReceiptTime: toDisplayValue(row.pay_receive_time),
-      note: toDisplayValue(row.remark),
+      note: formatBankTextFieldsForNote(row),
       loanRepaymentDate: toDisplayValue(row.repayment_date),
     };
   }
@@ -749,6 +800,11 @@ function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
     actionVariant: rowActionVariant(row),
     availableActions: row.available_actions ?? [],
     tags: Array.isArray(row.tags) ? row.tags.map((tag) => String(tag).trim()).filter(Boolean) : [],
+    categoryCode: toDisplayValue(row.category_code, "") || undefined,
+    categoryLabel: toDisplayValue(row.category_label, "") || undefined,
+    categoryPath: Array.isArray(row.category_path) ? row.category_path.map((item) => String(item).trim()).filter(Boolean) : undefined,
+    categorySource: toDisplayValue(row.category_source, "") || undefined,
+    bankTextFields: row.type === "bank" ? mapBankTextFields(row) : undefined,
     specialMetadata: row.special_metadata && typeof row.special_metadata === "object" ? row.special_metadata : undefined,
   };
 }

@@ -1,5 +1,13 @@
 export type WorkbenchRecordType = "oa" | "bank" | "invoice";
 
+export type WorkbenchSourceKind =
+  | "etc_invoice_summary"
+  | "etc_invoice"
+  | "oa_attachment_invoice"
+  | "oa_attachment_payment_receipt"
+  | "oa_attachment_unknown"
+  | (string & {});
+
 export type {
   WorkbenchExceptionAction,
   WorkbenchExceptionAmountSummary,
@@ -21,12 +29,17 @@ export type WorkbenchDetailField = {
   value: string;
 };
 
+export type WorkbenchBankTextField = {
+  label: string;
+  value: string;
+};
+
 export type WorkbenchRecord = {
   id: string;
   caseId?: string;
   exceptionCaseId?: string;
   recordType: WorkbenchRecordType;
-  sourceKind?: string;
+  sourceKind?: WorkbenchSourceKind;
   label: string;
   status: string;
   statusCode: string;
@@ -39,6 +52,11 @@ export type WorkbenchRecord = {
   actionVariant: WorkbenchActionVariant;
   availableActions: string[];
   tags?: string[];
+  categoryCode?: string;
+  categoryLabel?: string;
+  categoryPath?: string[];
+  categorySource?: string;
+  bankTextFields?: WorkbenchBankTextField[];
   specialMetadata?: Record<string, unknown>;
 };
 

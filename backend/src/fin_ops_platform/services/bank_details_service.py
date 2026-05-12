@@ -6,11 +6,21 @@ from decimal import Decimal
 from typing import Any
 
 from fin_ops_platform.domain.enums import TransactionDirection
+from fin_ops_platform.services.bank_transaction_category_service import (
+    BANK_TRANSACTION_CATEGORY_COUNT_KEYS,
+    BankTransactionCategoryService,
+)
 
 
 class BankDetailsService:
-    def __init__(self, import_service: Any) -> None:
+    def __init__(
+        self,
+        import_service: Any,
+        *,
+        category_service: BankTransactionCategoryService | None = None,
+    ) -> None:
         self._import_service = import_service
+        self._category_service = category_service
 
     def list_accounts(self, *, date_from: str | None = None, date_to: str | None = None) -> dict[str, Any]:
         transactions = self._transactions()
@@ -64,12 +74,15 @@ class BankDetailsService:
         normalized_page = max(int(page or 1), 1)
         normalized_page_size = min(max(int(page_size or 100), 1), 500)
         rows = []
+        filtered_transaction_ids: list[str] = []
         for transaction in self._transactions():
             payload = self._transaction_payload(transaction)
             if account_key and self._account_key(payload) != account_key:
                 continue
             if not self._date_in_range(payload.get("trade_time") or payload.get("txn_date"), date_from=date_from, date_to=date_to):
                 continue
+            transaction_id = str(payload.get("id") or "")
+            filtered_transaction_ids.append(transaction_id)
             rows.append(self._row_payload(payload))
         rows.sort(key=lambda item: str(item.get("trade_time") or ""), reverse=True)
         total = len(rows)
@@ -80,6 +93,7 @@ class BankDetailsService:
             "date_from": date_from,
             "date_to": date_to,
             "rows": rows[start:end],
+            "category_counts": self._category_counts(filtered_transaction_ids),
             "pagination": {
                 "page": normalized_page,
                 "page_size": normalized_page_size,
@@ -125,6 +139,7 @@ class BankDetailsService:
     def _row_payload(self, row: dict[str, Any]) -> dict[str, Any]:
         direction = self._direction(row)
         account = self._account_payload(row)
+        category = self._category_payload(str(row.get("id") or ""))
         return {
             "id": str(row.get("id") or ""),
             "trade_time": self._date_text(row.get("trade_time") or row.get("txn_date")),
@@ -137,7 +152,23 @@ class BankDetailsService:
             "purpose": str(row.get("remark") or row.get("purpose") or ""),
             "bank_name": account["bank_name"],
             "account_last4": account["account_last4"],
+            "category_code": category["category_code"],
+            "category_label": category["category_label"],
+            "category_path": list(category.get("category_path") or []),
+            "category_version": category["category_version"],
         }
+
+    def _category_payload(self, transaction_id: str) -> dict[str, Any]:
+        if self._category_service is None:
+            return {"category_code": None, "category_label": None, "category_path": [], "category_version": 0}
+        return self._category_service.get(transaction_id)
+
+    def _category_counts(self, transaction_ids: list[str]) -> dict[str, int]:
+        if self._category_service is None:
+            counts = {key: 0 for key in BANK_TRANSACTION_CATEGORY_COUNT_KEYS}
+            counts["uncategorized"] = len(transaction_ids)
+            return counts
+        return self._category_service.category_counts(transaction_ids)
 
     @staticmethod
     def _direction(row: dict[str, Any]) -> str:

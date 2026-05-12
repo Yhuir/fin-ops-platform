@@ -26,6 +26,14 @@ AUTO_PAIRED_CODES = {
 }
 ETC_BATCH_SOURCE = "etc_batch"
 ETC_BATCH_TAG = "ETC批量提交"
+OA_ATTACHMENT_INVOICE_SOURCE_KIND = "oa_attachment_invoice"
+OA_ATTACHMENT_PAYMENT_RECEIPT_SOURCE_KIND = "oa_attachment_payment_receipt"
+OA_ATTACHMENT_UNKNOWN_SOURCE_KIND = "oa_attachment_unknown"
+OA_ATTACHMENT_EVIDENCE_SOURCE_KINDS = {
+    OA_ATTACHMENT_INVOICE_SOURCE_KIND,
+    OA_ATTACHMENT_PAYMENT_RECEIPT_SOURCE_KIND,
+    OA_ATTACHMENT_UNKNOWN_SOURCE_KIND,
+}
 MAX_AGGREGATED_OA_INVOICE_CANDIDATES = 160
 MAX_INVOICE_SUBSET_SUM_STATES = 20000
 
@@ -40,6 +48,7 @@ class CandidateGroup:
     oa_rows: list[dict[str, Any]] = field(default_factory=list)
     bank_rows: list[dict[str, Any]] = field(default_factory=list)
     invoice_rows: list[dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def append(self, row: dict[str, Any]) -> None:
         key = row["type"]
@@ -76,6 +85,7 @@ class WorkbenchCandidateGroupingService:
         oa_rows: list[dict[str, Any]],
         bank_rows: list[dict[str, Any]],
         invoice_rows: list[dict[str, Any]],
+        turnover_relations: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         all_rows = [*oa_rows, *bank_rows, *invoice_rows]
         paired_rows = [row for row in all_rows if self._is_paired_row(row)]
@@ -91,6 +101,11 @@ class WorkbenchCandidateGroupingService:
             self._extract_oa_attachment_source_groups_from_candidate_context(open_case_groups, remaining_rows)
         )
         aggregated_oa_invoice_groups, remaining_rows = self._build_aggregated_oa_invoice_sum_groups(remaining_rows)
+        turnover_relation_groups, open_case_groups, remaining_rows = self._extract_turnover_relation_groups_from_candidate_context(
+            open_case_groups,
+            remaining_rows,
+            turnover_relations=turnover_relations,
+        )
         standalone_temp_groups = self._build_temp_groups(remaining_rows)
         merged_open_case_groups = self._merge_open_case_groups(list(open_case_groups.values()))
         merged_open_case_groups = self._split_unsafe_candidate_case_groups(merged_open_case_groups)
@@ -103,6 +118,7 @@ class WorkbenchCandidateGroupingService:
             *candidate_open_case_groups,
             *oa_attachment_source_groups,
             *aggregated_oa_invoice_groups,
+            *turnover_relation_groups,
             *candidate_groups,
         ]
         paired_output = [*valid_paired_groups, *promoted_open_case_groups, *promoted_groups]
@@ -120,6 +136,157 @@ class WorkbenchCandidateGroupingService:
             "paired": {"groups": [self._serialize_group(group, section="paired") for group in paired_output]},
             "open": {"groups": [self._serialize_group(group, section="open") for group in open_groups]},
         }
+
+    def _build_turnover_relation_groups(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        turnover_relations: list[dict[str, Any]] | None,
+    ) -> tuple[list[CandidateGroup], list[dict[str, Any]]]:
+        if not turnover_relations:
+            return [], rows
+
+        available_bank_rows_by_id: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
+        for row in rows:
+            if row.get("type") != "bank":
+                continue
+            row_id = self._string_value(row.get("id"))
+            if row_id:
+                available_bank_rows_by_id[row_id] = row
+
+        if not available_bank_rows_by_id:
+            return [], rows
+
+        groups: list[CandidateGroup] = []
+        consumed_bank_row_ids: set[str] = set()
+        for relation in turnover_relations:
+            if not self._is_syncable_turnover_relation(relation):
+                continue
+            relation_id = self._string_value(relation.get("relation_id"))
+            if not relation_id:
+                continue
+            bank_row_ids = [
+                row_id
+                for row_id in (
+                    self._string_value(row_id)
+                    for row_id in list(relation.get("bank_row_ids") or [])
+                )
+                if row_id
+            ]
+            if len(bank_row_ids) < 2:
+                continue
+            if any(row_id in consumed_bank_row_ids for row_id in bank_row_ids):
+                continue
+            relation_rows = [available_bank_rows_by_id.get(row_id) for row_id in bank_row_ids]
+            if any(row is None for row in relation_rows):
+                continue
+
+            group = CandidateGroup(
+                group_id=f"turnover:{relation_id}",
+                group_type="turnover_relation",
+                match_confidence="high",
+                reason="turnover_relation",
+                temp_key=None,
+                metadata={
+                    "group_source": "turnover_relation",
+                    "relation_id": relation_id,
+                    "relation_status": str(relation.get("status") or "").strip(),
+                    "relation_family": str(relation.get("category_family") or "").strip(),
+                    "relation_business_type": str(relation.get("business_type") or "").strip(),
+                    "sync_to_workbench": True,
+                },
+            )
+            for row in relation_rows:
+                if row is not None:
+                    group.append(row)
+            groups.append(group)
+            consumed_bank_row_ids.update(bank_row_ids)
+
+        if not consumed_bank_row_ids:
+            return [], rows
+        remaining_rows = [
+            row
+            for row in rows
+            if row.get("type") != "bank"
+            or self._string_value(row.get("id")) not in consumed_bank_row_ids
+        ]
+        return groups, remaining_rows
+
+    def _extract_turnover_relation_groups_from_candidate_context(
+        self,
+        open_case_groups: "OrderedDict[str, CandidateGroup]",
+        remaining_rows: list[dict[str, Any]],
+        *,
+        turnover_relations: list[dict[str, Any]] | None,
+    ) -> tuple[list[CandidateGroup], "OrderedDict[str, CandidateGroup]", list[dict[str, Any]]]:
+        if not turnover_relations:
+            return [], open_case_groups, remaining_rows
+
+        source_candidate_rows = list(remaining_rows)
+        splittable_group_ids: set[str] = set()
+        for group_id, group in open_case_groups.items():
+            if not self._can_split_open_case_group_for_turnover_relation(group):
+                continue
+            splittable_group_ids.add(group_id)
+            source_candidate_rows.extend([*group.oa_rows, *group.bank_rows, *group.invoice_rows])
+
+        original_remaining_row_keys = {id(row) for row in remaining_rows}
+        turnover_groups, remaining_source_rows = self._build_turnover_relation_groups(
+            source_candidate_rows,
+            turnover_relations=turnover_relations,
+        )
+        if not turnover_groups:
+            return [], open_case_groups, remaining_rows
+
+        consumed_row_keys = {
+            id(row)
+            for group in turnover_groups
+            for row in [*group.oa_rows, *group.bank_rows, *group.invoice_rows]
+        }
+        rebuilt_open_case_groups: "OrderedDict[str, CandidateGroup]" = OrderedDict()
+        for group_id, group in open_case_groups.items():
+            if group_id not in splittable_group_ids:
+                rebuilt_open_case_groups[group_id] = group
+                continue
+            remaining_group_rows = [
+                row
+                for row in [*group.oa_rows, *group.bank_rows, *group.invoice_rows]
+                if id(row) not in consumed_row_keys
+            ]
+            if not remaining_group_rows:
+                continue
+            rebuilt_group = CandidateGroup(
+                group_id=group.group_id,
+                group_type=self._group_type_for_open_case_rows(remaining_group_rows),
+                match_confidence=group.match_confidence,
+                reason=group.reason,
+                temp_key=group.temp_key,
+                metadata=deepcopy(group.metadata),
+            )
+            for row in remaining_group_rows:
+                rebuilt_group.append(row)
+            if rebuilt_group.group_type != "candidate":
+                rebuilt_group.match_confidence = "high"
+                rebuilt_group.reason = self._open_case_group_reason(rebuilt_group.group_type)
+            rebuilt_open_case_groups[group_id] = rebuilt_group
+
+        rebuilt_remaining_rows = [
+            row
+            for row in remaining_source_rows
+            if id(row) in original_remaining_row_keys
+        ]
+        return turnover_groups, rebuilt_open_case_groups, rebuilt_remaining_rows
+
+    @staticmethod
+    def _is_syncable_turnover_relation(relation: dict[str, Any]) -> bool:
+        if not isinstance(relation, dict):
+            return False
+        if str(relation.get("status") or "").strip() not in {"deterministic", "confirmed"}:
+            return False
+        return bool(relation.get("sync_to_workbench"))
+
+    def _can_split_open_case_group_for_turnover_relation(self, group: CandidateGroup) -> bool:
+        return self._can_split_open_case_group_for_oa_attachment_source(group)
 
     def _split_valid_and_incomplete_paired_groups(
         self,
@@ -160,7 +327,7 @@ class WorkbenchCandidateGroupingService:
             group.append(row)
             if group.temp_key is None:
                 group.temp_key = temp_key
-            elif temp_key is not None and group.temp_key != temp_key and not self._is_oa_attachment_invoice_row(row):
+            elif temp_key is not None and group.temp_key != temp_key and not self._is_oa_attachment_evidence_row(row):
                 group.temp_key = None
             group.group_type = self._group_type_for_existing_paired_rows(
                 [*group.oa_rows, *group.bank_rows, *group.invoice_rows],
@@ -194,7 +361,7 @@ class WorkbenchCandidateGroupingService:
             group.append(row)
             if group.temp_key is None:
                 group.temp_key = temp_key
-            elif temp_key is not None and group.temp_key != temp_key and not self._is_oa_attachment_invoice_row(row):
+            elif temp_key is not None and group.temp_key != temp_key and not self._is_oa_attachment_evidence_row(row):
                 group.temp_key = None
             group.group_type = self._group_type_for_open_case_rows(
                 [*group.oa_rows, *group.bank_rows, *group.invoice_rows]
@@ -340,7 +507,7 @@ class WorkbenchCandidateGroupingService:
 
         invoice_rows_by_source_id: "OrderedDict[str, list[dict[str, Any]]]" = OrderedDict()
         for row in rows:
-            source_id = self._oa_attachment_invoice_source_id(row)
+            source_id = self._oa_attachment_evidence_source_id(row)
             if source_id is None or source_id not in oa_rows_by_id:
                 continue
             invoice_rows_by_source_id.setdefault(source_id, []).append(row)
@@ -544,6 +711,8 @@ class WorkbenchCandidateGroupingService:
             return False
 
         if group.invoice_rows:
+            if any(self._is_non_invoice_oa_attachment_evidence_row(row) for row in group.invoice_rows):
+                return False
             invoice_amounts = [self._invoice_gross_amount(row) for row in group.invoice_rows]
             if any(amount is None for amount in invoice_amounts):
                 return False
@@ -649,6 +818,8 @@ class WorkbenchCandidateGroupingService:
             return True
         if self._qualifies_for_etc_batch_oa_bank_auto_close(group):
             return True
+        if any(self._is_non_invoice_oa_attachment_evidence_row(row) for row in group.invoice_rows):
+            return False
 
         total_count = len(group.oa_rows) + len(group.bank_rows) + len(group.invoice_rows)
         if total_count < 2:
@@ -984,6 +1155,8 @@ class WorkbenchCandidateGroupingService:
         return tags
 
     def _group_projection_metadata(self, group: CandidateGroup) -> dict[str, Any]:
+        if group.metadata:
+            return deepcopy(group.metadata)
         for row in [*group.oa_rows, *group.bank_rows, *group.invoice_rows]:
             metadata = row.get("group_metadata")
             if isinstance(metadata, dict):
@@ -1209,12 +1382,20 @@ class WorkbenchCandidateGroupingService:
 
     @staticmethod
     def _is_oa_attachment_invoice_row(row: dict[str, Any]) -> bool:
-        return str(row.get("source_kind", "")) == "oa_attachment_invoice"
+        return str(row.get("source_kind", "")) == OA_ATTACHMENT_INVOICE_SOURCE_KIND
 
-    def _oa_attachment_invoice_source_id(self, row: dict[str, Any]) -> str | None:
+    @staticmethod
+    def _is_oa_attachment_evidence_row(row: dict[str, Any]) -> bool:
+        return str(row.get("source_kind", "")).strip() in OA_ATTACHMENT_EVIDENCE_SOURCE_KINDS
+
+    @classmethod
+    def _is_non_invoice_oa_attachment_evidence_row(cls, row: dict[str, Any]) -> bool:
+        return cls._is_oa_attachment_evidence_row(row) and not cls._is_oa_attachment_invoice_row(row)
+
+    def _oa_attachment_evidence_source_id(self, row: dict[str, Any]) -> str | None:
         if row.get("type") != "invoice":
             return None
-        if not self._is_oa_attachment_invoice_row(row):
+        if not self._is_oa_attachment_evidence_row(row):
             return None
         if not self._can_join_oa_attachment_source_group(row):
             return None
@@ -1254,7 +1435,7 @@ class WorkbenchCandidateGroupingService:
             return False
         if self._case_id(row) or self._is_paired_row(row):
             return False
-        return not self._is_oa_attachment_invoice_row(row)
+        return not self._is_oa_attachment_evidence_row(row)
 
     def _invoice_matches_aggregated_oa_candidate(self, invoice_row: dict[str, Any], oa_row: dict[str, Any]) -> bool:
         if self._direction(invoice_row) != self._direction(oa_row):
@@ -1332,6 +1513,6 @@ class WorkbenchCandidateGroupingService:
     def _attachment_group_primary_row(self, group: CandidateGroup) -> dict[str, Any] | None:
         if len(group.oa_rows) != 1 or group.bank_rows:
             return None
-        if not group.invoice_rows or not all(self._is_oa_attachment_invoice_row(row) for row in group.invoice_rows):
+        if not group.invoice_rows or not all(self._is_oa_attachment_evidence_row(row) for row in group.invoice_rows):
             return None
         return group.oa_rows[0]

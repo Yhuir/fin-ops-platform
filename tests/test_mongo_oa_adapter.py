@@ -1675,9 +1675,10 @@ class MongoOAAdapterTests(unittest.TestCase):
             adapter.force_attachment_invoice_sync_parse(),
             patch.object(
                 adapter._attachment_invoice_service,
-                "parse_files",
+                "parse_evidences",
                 return_value=[
                     {
+                        "evidence_type": "tax_invoice",
                         "invoice_no": "40512344",
                         "seller_name": "云南顺丰速运有限公司",
                         "buyer_name": "云南溯源科技有限公司",
@@ -1686,11 +1687,11 @@ class MongoOAAdapterTests(unittest.TestCase):
                         "attachment_name": "invoice-a.pdf",
                     }
                 ],
-            ) as parse_files,
+            ) as parse_evidences,
         ):
             records = adapter.list_application_records("2026-03")
 
-        parse_files.assert_called_once()
+        parse_evidences.assert_called_once()
         invoice = records[0].attachment_invoices[0]
         self.assertEqual(invoice["invoice_no"], "40512344")
         for field in (
@@ -1769,9 +1770,10 @@ class MongoOAAdapterTests(unittest.TestCase):
             adapter.force_attachment_invoice_sync_parse(),
             patch.object(
                 adapter._attachment_invoice_service,
-                "parse_files",
+                "parse_evidences",
                 return_value=[
                     {
+                        "evidence_type": "tax_invoice",
                         "invoice_no": "40512344",
                         "amount": "11.32",
                         "attachment_name": "invoice-a.pdf",
@@ -1843,10 +1845,10 @@ class MongoOAAdapterTests(unittest.TestCase):
             adapter.force_attachment_invoice_sync_parse(),
             patch.object(
                 adapter._attachment_invoice_service,
-                "parse_files",
+                "parse_evidences",
                 side_effect=[
-                    [{"invoice_no": "40512344", "amount": "120.00", "attachment_name": "invoice.pdf"}],
-                    [{"invoice_no": "40512345", "amount": "172.00", "attachment_name": "invoice.pdf"}],
+                    [{"evidence_type": "tax_invoice", "invoice_no": "40512344", "amount": "120.00", "attachment_name": "invoice.pdf"}],
+                    [{"evidence_type": "tax_invoice", "invoice_no": "40512345", "amount": "172.00", "attachment_name": "invoice.pdf"}],
                 ],
             ),
         ):
@@ -2066,8 +2068,8 @@ class MongoOAAdapterTests(unittest.TestCase):
 
         with patch.object(
             adapter._attachment_invoice_service,
-            "parse_files",
-            return_value=[{"invoice_no": "40512344", "attachment_name": "invoice-a.pdf"}],
+            "parse_evidences",
+            return_value=[{"evidence_type": "tax_invoice", "invoice_no": "40512344", "attachment_name": "invoice-a.pdf"}],
         ):
             adapter._parse_attachment_invoice_files_in_background([(cache_key, file_entry)], month="2026-03")
 
@@ -2101,8 +2103,8 @@ class MongoOAAdapterTests(unittest.TestCase):
 
         with patch.object(
             adapter._attachment_invoice_service,
-            "parse_files",
-            return_value=[{"invoice_no": "40512344", "attachment_name": "invoice-a.pdf"}],
+            "parse_evidences",
+            return_value=[{"evidence_type": "tax_invoice", "invoice_no": "40512344", "attachment_name": "invoice-a.pdf"}],
         ):
             pool = adapter._parse_attachment_invoice_files_now([(cache_key, file_entry)], month="2026-03")
 

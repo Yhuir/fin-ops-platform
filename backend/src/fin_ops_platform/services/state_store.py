@@ -34,6 +34,8 @@ IMPORTS_META_COLLECTION = "imports_meta"
 IMPORT_BATCHES_COLLECTION = "import_batches"
 INVOICES_COLLECTION = "invoices"
 BANK_TRANSACTIONS_COLLECTION = "bank_transactions"
+BANK_TRANSACTION_CATEGORIES_META_COLLECTION = "bank_transaction_categories_meta"
+BANK_TRANSACTION_CATEGORIES_COLLECTION = "bank_transaction_categories"
 FILE_IMPORTS_META_COLLECTION = "file_imports_meta"
 FILE_IMPORT_SESSIONS_COLLECTION = "file_import_sessions"
 FILE_IMPORT_FILES_COLLECTION = "file_import_files"
@@ -52,6 +54,11 @@ WORKBENCH_CANDIDATE_MATCHES_META_COLLECTION = "workbench_candidate_matches_meta"
 WORKBENCH_CANDIDATE_MATCHES_COLLECTION = "workbench_candidate_matches"
 WORKBENCH_MATCHING_DIRTY_SCOPES_META_COLLECTION = "workbench_matching_dirty_scopes_meta"
 WORKBENCH_MATCHING_DIRTY_SCOPES_COLLECTION = "workbench_matching_dirty_scopes"
+TURNOVER_RELATIONS_META_COLLECTION = "turnover_relations_meta"
+TURNOVER_RELATIONS_COLLECTION = "turnover_relations"
+TURNOVER_RELATION_AUDIT_LOG_COLLECTION = "turnover_relation_audit_log"
+TURNOVER_LEDGER_EXTRAS_META_COLLECTION = "turnover_ledger_extras_meta"
+TURNOVER_LEDGER_EXTRAS_COLLECTION = "turnover_ledger_extras"
 COST_STATISTICS_READ_MODELS_META_COLLECTION = "cost_statistics_read_models_meta"
 COST_STATISTICS_READ_MODELS_COLLECTION = "cost_statistics_read_models"
 TAX_OFFSET_READ_MODELS_META_COLLECTION = "tax_offset_read_models_meta"
@@ -217,6 +224,8 @@ class ApplicationStateStore:
                 "import_batches": self._mongo_database[IMPORT_BATCHES_COLLECTION],
                 "invoices": self._mongo_database[INVOICES_COLLECTION],
                 "bank_transactions": self._mongo_database[BANK_TRANSACTIONS_COLLECTION],
+                "bank_transaction_categories_meta": self._mongo_database[BANK_TRANSACTION_CATEGORIES_META_COLLECTION],
+                "bank_transaction_categories": self._mongo_database[BANK_TRANSACTION_CATEGORIES_COLLECTION],
                 "file_imports_meta": self._mongo_database[FILE_IMPORTS_META_COLLECTION],
                 "file_import_sessions": self._mongo_database[FILE_IMPORT_SESSIONS_COLLECTION],
                 "file_import_files": self._mongo_database[FILE_IMPORT_FILES_COLLECTION],
@@ -235,6 +244,11 @@ class ApplicationStateStore:
                 "workbench_candidate_matches": self._mongo_database[WORKBENCH_CANDIDATE_MATCHES_COLLECTION],
                 "workbench_matching_dirty_scopes_meta": self._mongo_database[WORKBENCH_MATCHING_DIRTY_SCOPES_META_COLLECTION],
                 "workbench_matching_dirty_scopes": self._mongo_database[WORKBENCH_MATCHING_DIRTY_SCOPES_COLLECTION],
+                "turnover_relations_meta": self._mongo_database[TURNOVER_RELATIONS_META_COLLECTION],
+                "turnover_relations": self._mongo_database[TURNOVER_RELATIONS_COLLECTION],
+                "turnover_relation_audit_log": self._mongo_database[TURNOVER_RELATION_AUDIT_LOG_COLLECTION],
+                "turnover_ledger_extras_meta": self._mongo_database[TURNOVER_LEDGER_EXTRAS_META_COLLECTION],
+                "turnover_ledger_extras": self._mongo_database[TURNOVER_LEDGER_EXTRAS_COLLECTION],
                 "cost_statistics_read_models_meta": self._mongo_database[COST_STATISTICS_READ_MODELS_META_COLLECTION],
                 "cost_statistics_read_models": self._mongo_database[COST_STATISTICS_READ_MODELS_COLLECTION],
                 "tax_offset_read_models_meta": self._mongo_database[TAX_OFFSET_READ_MODELS_META_COLLECTION],
@@ -1022,11 +1036,35 @@ class ApplicationStateStore:
         snapshot = current_payload.get("workbench_candidate_matches")
         return snapshot if isinstance(snapshot, dict) else {}
 
-    def save_workbench_candidate_matches(self, snapshot: dict[str, Any]) -> None:
+    def save_workbench_candidate_matches(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        changed_scope_months: list[str] | None = None,
+    ) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
         if self._mongo_database is not None:
             self._run_mongo_operation(
                 lambda: self._save_workbench_candidate_matches_detailed(
+                    normalized_snapshot,
+                    datetime.now(UTC),
+                    changed_scope_months=changed_scope_months,
+                )
+            )
+            return
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        current_payload = self._load_local_pickle()
+        current_payload["workbench_candidate_matches"] = normalized_snapshot
+        with self._legacy_state_path.open("wb") as handle:
+            pickle.dump(current_payload, handle)
+
+    def save_workbench_matching_dirty_scopes(self, snapshot: dict[str, Any]) -> None:
+        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
+        if self._mongo_database is not None:
+            self._run_mongo_operation(
+                lambda: self._save_workbench_matching_dirty_scopes_detailed(
                     normalized_snapshot,
                     datetime.now(UTC),
                 )
@@ -1036,7 +1074,105 @@ class ApplicationStateStore:
         if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
             raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         current_payload = self._load_local_pickle()
-        current_payload["workbench_candidate_matches"] = normalized_snapshot
+        current_payload["workbench_matching_dirty_scopes"] = normalized_snapshot
+        with self._legacy_state_path.open("wb") as handle:
+            pickle.dump(current_payload, handle)
+
+    def load_bank_transaction_categories(self) -> dict[str, Any]:
+        if self._mongo_database is not None:
+            return self._load_bank_transaction_categories_detailed_payload()
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        current_payload = self._load_local_pickle()
+        snapshot = current_payload.get("bank_transaction_categories")
+        return snapshot if isinstance(snapshot, dict) else {}
+
+    def save_bank_transaction_categories(self, snapshot: dict[str, Any]) -> None:
+        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
+        if self._mongo_database is not None:
+            self._run_mongo_operation(
+                lambda: self._save_bank_transaction_categories_detailed(
+                    normalized_snapshot,
+                    datetime.now(UTC),
+                )
+            )
+            return
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        current_payload = self._load_local_pickle()
+        current_payload["bank_transaction_categories"] = normalized_snapshot
+        with self._legacy_state_path.open("wb") as handle:
+            pickle.dump(current_payload, handle)
+
+    def load_turnover_relations(self) -> dict[str, Any]:
+        if self._mongo_database is not None:
+            return self._load_turnover_relations_detailed_payload()
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        current_payload = self._load_local_pickle()
+        snapshot = current_payload.get("turnover_relations")
+        return snapshot if isinstance(snapshot, dict) else {}
+
+    def save_turnover_relations(self, snapshot: dict[str, Any]) -> None:
+        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
+        if self._mongo_database is not None:
+            self._run_mongo_operation(
+                lambda: self._save_turnover_relations_detailed(
+                    normalized_snapshot,
+                    datetime.now(UTC),
+                )
+            )
+            return
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        current_payload = self._load_local_pickle()
+        current_payload["turnover_relations"] = normalized_snapshot
+        with self._legacy_state_path.open("wb") as handle:
+            pickle.dump(current_payload, handle)
+
+    def load_turnover_relation_audit_log(self) -> list[Any]:
+        snapshot = self.load_turnover_relations()
+        audit_log = snapshot.get("audit_log") if isinstance(snapshot, dict) else None
+        return list(audit_log) if isinstance(audit_log, list) else []
+
+    def save_turnover_relation_audit_log(self, snapshot: dict[str, Any] | list[Any]) -> None:
+        audit_log = snapshot.get("audit_log") if isinstance(snapshot, dict) else snapshot
+        normalized_audit_log = list(audit_log) if isinstance(audit_log, list) else []
+        current_snapshot = self.load_turnover_relations()
+        if not isinstance(current_snapshot, dict):
+            current_snapshot = {}
+        current_snapshot["audit_log"] = normalized_audit_log
+        self.save_turnover_relations(current_snapshot)
+
+    def load_turnover_ledger_extras(self) -> dict[str, Any]:
+        if self._mongo_database is not None:
+            return self._load_turnover_ledger_extras_detailed_payload()
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        current_payload = self._load_local_pickle()
+        snapshot = current_payload.get("turnover_ledger_extras")
+        return snapshot if isinstance(snapshot, dict) else {}
+
+    def save_turnover_ledger_extras(self, snapshot: dict[str, Any]) -> None:
+        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
+        if self._mongo_database is not None:
+            self._run_mongo_operation(
+                lambda: self._save_turnover_ledger_extras_detailed(
+                    normalized_snapshot,
+                    datetime.now(UTC),
+                )
+            )
+            return
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        current_payload = self._load_local_pickle()
+        current_payload["turnover_ledger_extras"] = normalized_snapshot
         with self._legacy_state_path.open("wb") as handle:
             pickle.dump(current_payload, handle)
 
@@ -1139,6 +1275,11 @@ class ApplicationStateStore:
         if self._mongo_database is not None:
             updated_at = datetime.now(UTC)
             self._save_imports_detailed(payload.get("imports", {}), updated_at)
+            if "bank_transaction_categories" in payload:
+                self._save_bank_transaction_categories_detailed(
+                    payload.get("bank_transaction_categories", {}),
+                    updated_at,
+                )
             self._save_file_imports_detailed(payload.get("file_imports", {}), updated_at)
             self._save_matching_detailed(payload.get("matching", {}), updated_at)
             self._save_workbench_overrides_detailed(payload.get("workbench_overrides", {}), updated_at)
@@ -1155,6 +1296,10 @@ class ApplicationStateStore:
                     payload.get("workbench_matching_dirty_scopes", {}),
                     updated_at,
                 )
+            if "turnover_relations" in payload:
+                self._save_turnover_relations_detailed(payload.get("turnover_relations", {}), updated_at)
+            if "turnover_ledger_extras" in payload:
+                self._save_turnover_ledger_extras_detailed(payload.get("turnover_ledger_extras", {}), updated_at)
             if "cost_statistics_read_models" in payload:
                 self._save_cost_statistics_read_models_detailed(
                     payload.get("cost_statistics_read_models", {}),
@@ -1365,6 +1510,8 @@ class ApplicationStateStore:
                         "import_batches": IMPORT_BATCHES_COLLECTION,
                         "invoices": INVOICES_COLLECTION,
                         "bank_transactions": BANK_TRANSACTIONS_COLLECTION,
+                        "bank_transaction_categories_meta": BANK_TRANSACTION_CATEGORIES_META_COLLECTION,
+                        "bank_transaction_categories": BANK_TRANSACTION_CATEGORIES_COLLECTION,
                         "file_imports_meta": FILE_IMPORTS_META_COLLECTION,
                         "file_import_sessions": FILE_IMPORT_SESSIONS_COLLECTION,
                         "file_import_files": FILE_IMPORT_FILES_COLLECTION,
@@ -1381,6 +1528,11 @@ class ApplicationStateStore:
                         "workbench_candidate_matches": WORKBENCH_CANDIDATE_MATCHES_COLLECTION,
                         "workbench_matching_dirty_scopes_meta": WORKBENCH_MATCHING_DIRTY_SCOPES_META_COLLECTION,
                         "workbench_matching_dirty_scopes": WORKBENCH_MATCHING_DIRTY_SCOPES_COLLECTION,
+                        "turnover_relations_meta": TURNOVER_RELATIONS_META_COLLECTION,
+                        "turnover_relations": TURNOVER_RELATIONS_COLLECTION,
+                        "turnover_relation_audit_log": TURNOVER_RELATION_AUDIT_LOG_COLLECTION,
+                        "turnover_ledger_extras_meta": TURNOVER_LEDGER_EXTRAS_META_COLLECTION,
+                        "turnover_ledger_extras": TURNOVER_LEDGER_EXTRAS_COLLECTION,
                         "cost_statistics_read_models_meta": COST_STATISTICS_READ_MODELS_META_COLLECTION,
                         "cost_statistics_read_models": COST_STATISTICS_READ_MODELS_COLLECTION,
                         "tax_offset_read_models_meta": TAX_OFFSET_READ_MODELS_META_COLLECTION,
@@ -1411,6 +1563,7 @@ class ApplicationStateStore:
             return {}
 
         imports_payload = self._load_imports_detailed_payload()
+        bank_transaction_categories_payload = self._load_bank_transaction_categories_detailed_payload()
         file_imports_payload = self._load_file_imports_detailed_payload()
         matching_payload = self._load_matching_detailed_payload()
         workbench_overrides_payload = self._load_workbench_overrides_detailed_payload()
@@ -1419,6 +1572,8 @@ class ApplicationStateStore:
         workbench_read_models_payload = self._load_workbench_read_models_detailed_payload()
         workbench_candidate_matches_payload = self._load_workbench_candidate_matches_detailed_payload()
         workbench_matching_dirty_scopes_payload = self._load_workbench_matching_dirty_scopes_detailed_payload()
+        turnover_relations_payload = self._load_turnover_relations_detailed_payload()
+        turnover_ledger_extras_payload = self._load_turnover_ledger_extras_detailed_payload()
         cost_statistics_read_models_payload = self._load_cost_statistics_read_models_detailed_payload()
         tax_offset_read_models_payload = self._load_tax_offset_read_models_detailed_payload()
         app_health_alerts_payload = self._load_app_health_alerts_detailed_payload()
@@ -1426,6 +1581,7 @@ class ApplicationStateStore:
             bool(section)
             for section in (
                 imports_payload,
+                bank_transaction_categories_payload,
                 file_imports_payload,
                 matching_payload,
                 workbench_overrides_payload,
@@ -1434,6 +1590,8 @@ class ApplicationStateStore:
                 workbench_read_models_payload,
                 workbench_candidate_matches_payload,
                 workbench_matching_dirty_scopes_payload,
+                turnover_relations_payload,
+                turnover_ledger_extras_payload,
                 cost_statistics_read_models_payload,
                 tax_offset_read_models_payload,
                 app_health_alerts_payload,
@@ -1446,6 +1604,8 @@ class ApplicationStateStore:
             "file_imports": file_imports_payload or {},
             "matching": matching_payload or {},
         }
+        if bank_transaction_categories_payload:
+            payload["bank_transaction_categories"] = bank_transaction_categories_payload
         if workbench_overrides_payload:
             payload["workbench_overrides"] = workbench_overrides_payload
         if workbench_exception_cases_payload:
@@ -1458,6 +1618,10 @@ class ApplicationStateStore:
             payload["workbench_candidate_matches"] = workbench_candidate_matches_payload
         if workbench_matching_dirty_scopes_payload:
             payload["workbench_matching_dirty_scopes"] = workbench_matching_dirty_scopes_payload
+        if turnover_relations_payload:
+            payload["turnover_relations"] = turnover_relations_payload
+        if turnover_ledger_extras_payload:
+            payload["turnover_ledger_extras"] = turnover_ledger_extras_payload
         if cost_statistics_read_models_payload:
             payload["cost_statistics_read_models"] = cost_statistics_read_models_payload
         if tax_offset_read_models_payload:
@@ -1875,6 +2039,19 @@ class ApplicationStateStore:
         payload["candidates"] = candidates
         return payload
 
+    def _load_bank_transaction_categories_detailed_payload(self) -> dict[str, Any]:
+        meta_document = self._mongo_detailed_collections["bank_transaction_categories_meta"].find_one(
+            {"_id": STATE_DOCUMENT_ID}
+        )
+        meta_payload = self._load_binary_payload(meta_document)
+        categories = self._load_entities_by_id(self._mongo_detailed_collections["bank_transaction_categories"])
+        if not meta_payload and not categories:
+            return {}
+
+        payload = meta_payload if isinstance(meta_payload, dict) else {}
+        payload["categories"] = categories
+        return payload
+
     def _load_workbench_matching_dirty_scopes_detailed_payload(self) -> dict[str, Any]:
         meta_document = self._mongo_detailed_collections["workbench_matching_dirty_scopes_meta"].find_one(
             {"_id": STATE_DOCUMENT_ID}
@@ -1886,6 +2063,34 @@ class ApplicationStateStore:
 
         payload = meta_payload if isinstance(meta_payload, dict) else {}
         payload["dirty_scopes"] = dirty_scopes
+        return payload
+
+    def _load_turnover_relations_detailed_payload(self) -> dict[str, Any]:
+        meta_document = self._mongo_detailed_collections["turnover_relations_meta"].find_one(
+            {"_id": STATE_DOCUMENT_ID}
+        )
+        meta_payload = self._load_binary_payload(meta_document)
+        relations = self._load_entities_list(self._mongo_detailed_collections["turnover_relations"])
+        audit_log = self._load_entities_list(self._mongo_detailed_collections["turnover_relation_audit_log"])
+        if not meta_payload and not relations and not audit_log:
+            return {}
+
+        payload = meta_payload if isinstance(meta_payload, dict) else {}
+        payload["relations"] = relations
+        payload["audit_log"] = audit_log
+        return payload
+
+    def _load_turnover_ledger_extras_detailed_payload(self) -> dict[str, Any]:
+        meta_document = self._mongo_detailed_collections["turnover_ledger_extras_meta"].find_one(
+            {"_id": STATE_DOCUMENT_ID}
+        )
+        meta_payload = self._load_binary_payload(meta_document)
+        extras = self._load_entities_list(self._mongo_detailed_collections["turnover_ledger_extras"])
+        if not meta_payload and not extras:
+            return {}
+
+        payload = meta_payload if isinstance(meta_payload, dict) else {}
+        payload["extras"] = extras
         return payload
 
     def _load_cost_statistics_read_models_detailed_payload(self) -> dict[str, Any]:
@@ -2200,13 +2405,66 @@ class ApplicationStateStore:
             upsert=True,
         )
 
-    def _save_workbench_candidate_matches_detailed(self, snapshot: dict[str, Any], updated_at: datetime) -> None:
+    def _save_workbench_candidate_matches_detailed(
+        self,
+        snapshot: dict[str, Any],
+        updated_at: datetime,
+        *,
+        changed_scope_months: list[str] | None = None,
+    ) -> None:
         meta_payload = {
             key: value
             for key, value in snapshot.items()
             if key not in {"candidates"}
         }
         candidates = snapshot.get("candidates", {})
+        normalized_scope_months = {
+            str(scope_month).strip()
+            for scope_month in list(changed_scope_months or [])
+            if str(scope_month).strip()
+        }
+        collection = self._mongo_detailed_collections["workbench_candidate_matches"]
+        if changed_scope_months is not None:
+            if normalized_scope_months:
+                collection.delete_many({"scope_month": {"$in": sorted(normalized_scope_months)}})
+            candidate_documents = []
+            if isinstance(candidates, dict):
+                for candidate_key, candidate in candidates.items():
+                    serialized_candidate = self._serialize_value(candidate)
+                    if str(serialized_candidate.get("scope_month") or "").strip() not in normalized_scope_months:
+                        continue
+                    candidate_documents.append(
+                        {
+                            "_id": str(candidate_key),
+                            "candidate_id": serialized_candidate.get("candidate_id"),
+                            "candidate_key": serialized_candidate.get("candidate_key"),
+                            "scope_month": serialized_candidate.get("scope_month"),
+                            "candidate_type": serialized_candidate.get("candidate_type"),
+                            "status": serialized_candidate.get("status"),
+                            "confidence": serialized_candidate.get("confidence"),
+                            "rule_code": serialized_candidate.get("rule_code"),
+                            "row_ids": serialized_candidate.get("row_ids"),
+                            "generated_at": serialized_candidate.get("generated_at"),
+                            "payload": Binary(pickle.dumps(candidate)),
+                            "updated_at": updated_at,
+                        }
+                    )
+            for document in candidate_documents:
+                collection.replace_one({"_id": document["_id"]}, document, upsert=True)
+            self._mongo_detailed_collections["workbench_candidate_matches_meta"].update_one(
+                {"_id": STATE_DOCUMENT_ID},
+                {
+                    "$set": {
+                        **meta_payload,
+                        "candidate_count": collection.count_documents({}),
+                        "payload": Binary(pickle.dumps(meta_payload)),
+                        "updated_at": updated_at,
+                    }
+                },
+                upsert=True,
+            )
+            return
+
         candidate_documents = []
         if isinstance(candidates, dict):
             for candidate_key, candidate in candidates.items():
@@ -2227,16 +2485,54 @@ class ApplicationStateStore:
                         "updated_at": updated_at,
                     }
                 )
-        self._replace_collection_documents(
-            self._mongo_detailed_collections["workbench_candidate_matches"],
-            candidate_documents,
-        )
+        self._replace_collection_documents(collection, candidate_documents)
         self._mongo_detailed_collections["workbench_candidate_matches_meta"].update_one(
             {"_id": STATE_DOCUMENT_ID},
             {
                 "$set": {
                     **meta_payload,
                     "candidate_count": len(candidates) if isinstance(candidates, dict) else 0,
+                    "payload": Binary(pickle.dumps(meta_payload)),
+                    "updated_at": updated_at,
+                }
+            },
+                upsert=True,
+            )
+
+    def _save_bank_transaction_categories_detailed(self, snapshot: dict[str, Any], updated_at: datetime) -> None:
+        meta_payload = {
+            key: value
+            for key, value in snapshot.items()
+            if key not in {"categories"}
+        }
+        categories = snapshot.get("categories", {})
+        category_documents = []
+        if isinstance(categories, dict):
+            for transaction_id, record in categories.items():
+                serialized_record = self._serialize_value(record)
+                category_documents.append(
+                    {
+                        "_id": str(transaction_id),
+                        "transaction_id": serialized_record.get("transaction_id"),
+                        "category_code": serialized_record.get("category_code"),
+                        "category_label": serialized_record.get("category_label"),
+                        "category_path": serialized_record.get("category_path"),
+                        "version": serialized_record.get("version"),
+                        "updated_by": serialized_record.get("updated_by"),
+                        "updated_at": serialized_record.get("updated_at"),
+                        "payload": Binary(pickle.dumps(record)),
+                    }
+                )
+        self._replace_collection_documents(
+            self._mongo_detailed_collections["bank_transaction_categories"],
+            category_documents,
+        )
+        self._mongo_detailed_collections["bank_transaction_categories_meta"].update_one(
+            {"_id": STATE_DOCUMENT_ID},
+            {
+                "$set": {
+                    **meta_payload,
+                    "category_count": len(categories) if isinstance(categories, dict) else 0,
                     "payload": Binary(pickle.dumps(meta_payload)),
                     "updated_at": updated_at,
                 }
@@ -2278,6 +2574,111 @@ class ApplicationStateStore:
                 "$set": {
                     **meta_payload,
                     "dirty_scope_count": len(dirty_scopes) if isinstance(dirty_scopes, dict) else 0,
+                    "payload": Binary(pickle.dumps(meta_payload)),
+                    "updated_at": updated_at,
+                }
+            },
+            upsert=True,
+        )
+
+    def _save_turnover_relations_detailed(self, snapshot: dict[str, Any], updated_at: datetime) -> None:
+        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
+        meta_payload = {
+            key: value
+            for key, value in normalized_snapshot.items()
+            if key not in {"relations", "audit_log"}
+        }
+        relations = normalized_snapshot.get("relations", [])
+        audit_log = normalized_snapshot.get("audit_log", [])
+        relation_documents = []
+        if isinstance(relations, list):
+            for index, relation in enumerate(relations):
+                serialized_relation = self._serialize_value(relation)
+                relation_id = str(serialized_relation.get("relation_id") or f"relation-{index}")
+                relation_documents.append(
+                    {
+                        "_id": relation_id,
+                        "relation_id": relation_id,
+                        "status": serialized_relation.get("status"),
+                        "category_family": serialized_relation.get("category_family"),
+                        "business_type": serialized_relation.get("business_type"),
+                        "bank_row_ids": serialized_relation.get("bank_row_ids"),
+                        "sync_to_workbench": serialized_relation.get("sync_to_workbench"),
+                        "updated_at": updated_at,
+                        "payload": Binary(pickle.dumps(relation)),
+                    }
+                )
+        audit_documents = []
+        if isinstance(audit_log, list):
+            for index, entry in enumerate(audit_log):
+                serialized_entry = self._serialize_value(entry)
+                audit_id = str(serialized_entry.get("audit_id") or f"{index:08d}-{serialized_entry.get('relation_id', 'unknown')}-{serialized_entry.get('action', 'event')}")
+                audit_documents.append(
+                    {
+                        "_id": audit_id,
+                        "relation_id": serialized_entry.get("relation_id"),
+                        "action": serialized_entry.get("action"),
+                        "actor": serialized_entry.get("actor"),
+                        "created_at": serialized_entry.get("created_at"),
+                        "updated_at": updated_at,
+                        "payload": Binary(pickle.dumps(entry)),
+                    }
+                )
+        self._replace_collection_documents(self._mongo_detailed_collections["turnover_relations"], relation_documents)
+        self._replace_collection_documents(
+            self._mongo_detailed_collections["turnover_relation_audit_log"],
+            audit_documents,
+        )
+        self._mongo_detailed_collections["turnover_relations_meta"].update_one(
+            {"_id": STATE_DOCUMENT_ID},
+            {
+                "$set": {
+                    **meta_payload,
+                    "relation_count": len(relations) if isinstance(relations, list) else 0,
+                    "audit_log_count": len(audit_log) if isinstance(audit_log, list) else 0,
+                    "payload": Binary(pickle.dumps(meta_payload)),
+                    "updated_at": updated_at,
+                }
+            },
+            upsert=True,
+        )
+
+    def _save_turnover_ledger_extras_detailed(self, snapshot: dict[str, Any], updated_at: datetime) -> None:
+        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
+        meta_payload = {
+            key: value
+            for key, value in normalized_snapshot.items()
+            if key not in {"extras"}
+        }
+        extras = normalized_snapshot.get("extras", [])
+        extra_documents = []
+        if isinstance(extras, list):
+            for index, extra in enumerate(extras):
+                serialized_extra = self._serialize_value(extra)
+                relation_id = str(serialized_extra.get("relation_id") or f"turnover-ledger-extra-{index}")
+                extra_documents.append(
+                    {
+                        "_id": relation_id,
+                        "relation_id": relation_id,
+                        "interest_rate_type": serialized_extra.get("interest_rate_type"),
+                        "interest_rate_value": serialized_extra.get("interest_rate_value"),
+                        "interest_paid_amount": serialized_extra.get("interest_paid_amount"),
+                        "interest_paid_date": serialized_extra.get("interest_paid_date"),
+                        "updated_by": serialized_extra.get("updated_by"),
+                        "updated_at": updated_at,
+                        "payload": Binary(pickle.dumps(extra)),
+                    }
+                )
+        self._replace_collection_documents(
+            self._mongo_detailed_collections["turnover_ledger_extras"],
+            extra_documents,
+        )
+        self._mongo_detailed_collections["turnover_ledger_extras_meta"].update_one(
+            {"_id": STATE_DOCUMENT_ID},
+            {
+                "$set": {
+                    **meta_payload,
+                    "extra_count": len(extras) if isinstance(extras, list) else 0,
                     "payload": Binary(pickle.dumps(meta_payload)),
                     "updated_at": updated_at,
                 }
@@ -2638,6 +3039,7 @@ class ApplicationStateStore:
             bool(payload.get(key))
             for key in (
                 "imports",
+                "bank_transaction_categories",
                 "file_imports",
                 "matching",
                 "workbench_overrides",
@@ -2646,6 +3048,8 @@ class ApplicationStateStore:
                 "workbench_read_models",
                 "workbench_candidate_matches",
                 "workbench_matching_dirty_scopes",
+                "turnover_relations",
+                "turnover_ledger_extras",
                 "cost_statistics_read_models",
                 "tax_offset_read_models",
                 "app_health_alerts",

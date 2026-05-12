@@ -23,6 +23,9 @@ from fin_ops_platform.services.state_store import (
     OA_ATTACHMENT_INVOICE_CACHE_COLLECTION,
     STATE_COLLECTIONS,
     TAX_OFFSET_READ_MODELS_COLLECTION,
+    TURNOVER_LEDGER_EXTRAS_COLLECTION,
+    TURNOVER_RELATION_AUDIT_LOG_COLLECTION,
+    TURNOVER_RELATIONS_COLLECTION,
     WORKBENCH_CANDIDATE_MATCHES_COLLECTION,
     WORKBENCH_READ_MODELS_COLLECTION,
     WORKBENCH_PAIR_RELATIONS_COLLECTION,
@@ -86,7 +89,12 @@ class FakeCollection:
         to_delete = [
             key
             for key, document in self.documents.items()
-            if all(document.get(field) == value for field, value in query.items())
+            if all(
+                document.get(field) in value["$in"]
+                if isinstance(value, dict) and "$in" in value
+                else document.get(field) == value
+                for field, value in query.items()
+            )
         ]
         for key in to_delete:
             self.documents.pop(key, None)
@@ -710,6 +718,181 @@ class StateStoreTests(unittest.TestCase):
             self.assertEqual(loaded, snapshot)
             db = fake_client["fin_ops_platform_app"]
             self.assertIn("candidate:001", db[WORKBENCH_CANDIDATE_MATCHES_COLLECTION].documents)
+
+    def test_save_turnover_relations_persists_relations_and_audit_to_mongo_collections(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "app_mongo_config.json").write_text(
+                json.dumps({"host": "127.0.0.1", "database": "fin_ops_platform_app"}),
+                encoding="utf-8",
+            )
+            fake_client = FakeMongoClient()
+            snapshot = {
+                "schema_version": "test",
+                "relations": [
+                    {
+                        "relation_id": "turnover_rel_001",
+                        "status": "suggested",
+                        "bank_row_ids": ["txn-1"],
+                        "sync_to_workbench": False,
+                    }
+                ],
+                "audit_log": [
+                    {
+                        "relation_id": "turnover_rel_001",
+                        "action": "seed",
+                        "actor": "YNSYLP005",
+                    }
+                ],
+            }
+
+            with patch("fin_ops_platform.services.state_store.MongoClient", return_value=fake_client):
+                with patch(
+                    "fin_ops_platform.services.state_store.GridFSBucket",
+                    side_effect=lambda db, bucket_name: FakeGridFSBucket(db, bucket_name),
+                ):
+                    store = ApplicationStateStore(data_dir)
+                    store.save_turnover_relations(snapshot)
+                    loaded = store.load_turnover_relations()
+                    audit_log = store.load_turnover_relation_audit_log()
+
+            self.assertEqual(loaded, snapshot)
+            self.assertEqual(audit_log, snapshot["audit_log"])
+            db = fake_client["fin_ops_platform_app"]
+            self.assertIn("turnover_rel_001", db[TURNOVER_RELATIONS_COLLECTION].documents)
+            self.assertEqual(len(db[TURNOVER_RELATION_AUDIT_LOG_COLLECTION].documents), 1)
+
+    def test_save_turnover_ledger_extras_persists_locally_across_store_instances(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            snapshot = {
+                "version": 1,
+                "extras": [
+                    {
+                        "relation_id": "turnover_rel_001",
+                        "interest_rate_type": "annual",
+                        "interest_rate_value": "0.060000",
+                        "interest_paid_amount": "0.00",
+                        "interest_paid_date": None,
+                        "interest_payment_method": "",
+                        "note": "页面内维护备注",
+                        "updated_at": "2026-05-12T10:00:00+08:00",
+                        "updated_by": "YNSYLP005",
+                    }
+                ],
+            }
+
+            store = ApplicationStateStore(data_dir)
+            store.save_turnover_ledger_extras(snapshot)
+
+            reloaded = ApplicationStateStore(data_dir)
+            loaded = reloaded.load_turnover_ledger_extras()
+
+        self.assertEqual(loaded, snapshot)
+
+    def test_save_turnover_ledger_extras_persists_and_loads_mongo_snapshot(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "app_mongo_config.json").write_text(
+                json.dumps({"host": "127.0.0.1", "database": "fin_ops_platform_app"}),
+                encoding="utf-8",
+            )
+            fake_client = FakeMongoClient()
+            snapshot = {
+                "version": 1,
+                "extras": [
+                    {
+                        "relation_id": "turnover_rel_001",
+                        "interest_rate_type": "monthly",
+                        "interest_rate_value": "0.005000",
+                        "interest_paid_amount": "10.00",
+                        "interest_paid_date": "2026-05-12",
+                        "interest_payment_method": "银行转账",
+                        "note": "页面内维护备注",
+                        "updated_at": "2026-05-12T10:00:00+08:00",
+                        "updated_by": "YNSYLP005",
+                    }
+                ],
+            }
+
+            with patch("fin_ops_platform.services.state_store.MongoClient", return_value=fake_client):
+                with patch(
+                    "fin_ops_platform.services.state_store.GridFSBucket",
+                    side_effect=lambda db, bucket_name: FakeGridFSBucket(db, bucket_name),
+                ):
+                    store = ApplicationStateStore(data_dir)
+                    store.save_turnover_ledger_extras(snapshot)
+                    loaded = store.load_turnover_ledger_extras()
+
+            self.assertEqual(loaded, snapshot)
+            db = fake_client["fin_ops_platform_app"]
+            self.assertIn("turnover_rel_001", db[TURNOVER_LEDGER_EXTRAS_COLLECTION].documents)
+
+    def test_save_workbench_candidate_matches_can_update_changed_months_only(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "app_mongo_config.json").write_text(
+                json.dumps({"host": "127.0.0.1", "database": "fin_ops_platform_app"}),
+                encoding="utf-8",
+            )
+            fake_client = FakeMongoClient()
+
+            with patch("fin_ops_platform.services.state_store.MongoClient", return_value=fake_client):
+                with patch(
+                    "fin_ops_platform.services.state_store.GridFSBucket",
+                    side_effect=lambda db, bucket_name: FakeGridFSBucket(db, bucket_name),
+                ):
+                    store = ApplicationStateStore(data_dir)
+                    db = fake_client["fin_ops_platform_app"]
+                    collection = db[WORKBENCH_CANDIDATE_MATCHES_COLLECTION]
+                    collection.documents["candidate:old-mar"] = {
+                        "_id": "candidate:old-mar",
+                        "scope_month": "2026-03",
+                        "payload": Binary(pickle.dumps({"candidate_key": "candidate:old-mar", "scope_month": "2026-03"})),
+                    }
+                    collection.documents["candidate:keep-apr"] = {
+                        "_id": "candidate:keep-apr",
+                        "scope_month": "2026-04",
+                        "payload": Binary(pickle.dumps({"candidate_key": "candidate:keep-apr", "scope_month": "2026-04"})),
+                    }
+
+                    store.save_workbench_candidate_matches(
+                        {
+                            "scope_runs": {},
+                            "candidates": {
+                                "candidate:new-mar": {
+                                    "candidate_id": "candidate:new-mar",
+                                    "candidate_key": "candidate:new-mar",
+                                    "scope_month": "2026-03",
+                                    "candidate_type": "bank",
+                                    "status": "needs_review",
+                                    "confidence": "low",
+                                    "rule_code": "manual_category_dirty",
+                                    "row_ids": ["bank-001"],
+                                    "generated_at": "2026-03-01T00:00:00+00:00",
+                                },
+                                "candidate:keep-apr": {
+                                    "candidate_id": "candidate:keep-apr",
+                                    "candidate_key": "candidate:keep-apr",
+                                    "scope_month": "2026-04",
+                                    "candidate_type": "bank",
+                                    "status": "needs_review",
+                                    "confidence": "low",
+                                    "rule_code": "unrelated",
+                                    "row_ids": ["bank-002"],
+                                    "generated_at": "2026-04-01T00:00:00+00:00",
+                                },
+                            },
+                        },
+                        changed_scope_months=["2026-03"],
+                    )
+
+            db = fake_client["fin_ops_platform_app"]
+            collection = db[WORKBENCH_CANDIDATE_MATCHES_COLLECTION]
+            self.assertNotIn("candidate:old-mar", collection.documents)
+            self.assertIn("candidate:new-mar", collection.documents)
+            self.assertIn("candidate:keep-apr", collection.documents)
+            self.assertEqual(collection.delete_many_calls, 1)
 
     def test_save_workbench_read_models_does_not_rewrite_unrelated_detailed_collections(self) -> None:
         with TemporaryDirectory() as temp_dir:

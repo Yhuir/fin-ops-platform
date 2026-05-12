@@ -45,6 +45,39 @@ describe("Workbench candidate grouping layout", () => {
     };
   }
 
+  function createBankRecord(): WorkbenchRecord {
+    return {
+      id: "bank-text-fields-001",
+      caseId: "CASE-TEXT-FIELDS-001",
+      recordType: "bank",
+      label: "收入",
+      status: "待匹配",
+      statusCode: "pending_match",
+      statusTone: "warn",
+      exceptionHandled: false,
+      amount: "600.00",
+      counterparty: "测试客户",
+      tableValues: {
+        counterparty: "测试客户",
+        amount: "600.00",
+        direction: "收入",
+        paymentAccount: "建设银行 8106",
+        transactionTime: "2026-03-20 12:15:00",
+        invoiceRelationStatus: "待匹配",
+        note: "摘要：电子转账\n备注：代购公车款\n用途：货款",
+        loanRepaymentDate: "--",
+      },
+      detailFields: [],
+      actionVariant: "detail-only",
+      availableActions: ["detail"],
+      bankTextFields: [
+        { label: "摘要", value: "电子转账" },
+        { label: "备注", value: "代购公车款" },
+        { label: "用途", value: "货款" },
+      ],
+    } as WorkbenchRecord;
+  }
+
   function getZoneGroupOrder(zone: HTMLElement) {
     return Array.from(zone.querySelectorAll<HTMLElement>(".candidate-grid-body > [data-testid^='candidate-group-']")).map(
       (element) => element.getAttribute("data-testid") ?? "",
@@ -97,21 +130,54 @@ describe("Workbench candidate grouping layout", () => {
     expect(within(groupRow).getByText("进")).toBeInTheDocument();
   });
 
-  test("renders 248 source OA and three OA attachment invoices in the same horizontal group row", async () => {
+  test("renders bank note column from structured bank text fields", () => {
+    const bankColumns = getWorkbenchColumns("bank");
+    const bankGridStyle = getWorkbenchPaneGridStyle("bank");
+
+    render(
+      <WorkbenchRecordCard
+        canMutateData
+        columnGridStyle={bankGridStyle}
+        columns={bankColumns}
+        paneId="bank"
+        row={createBankRecord()}
+        rowState="idle"
+        showWorkflowActions={false}
+        zoneId="open"
+        onOpenDetail={() => undefined}
+        onRowAction={() => undefined}
+        onSelectRow={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText("摘要：电子转账")).toBeInTheDocument();
+    expect(screen.getByText("备注：代购公车款")).toBeInTheDocument();
+    expect(screen.getByText("用途：货款")).toBeInTheDocument();
+    expect(screen.queryByText(/交易用途：/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/客户附言：/)).not.toBeInTheDocument();
+  });
+
+  test("renders OA 2035 source OA, attachment invoices, and payment receipts in the same horizontal group row", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
 
-    const groupRow = await screen.findByTestId("candidate-group-open-case:CASE-202603-OA-ATTACHMENT-248");
-    const oaCell = within(groupRow).getByTestId("candidate-scroll-open-case:CASE-202603-OA-ATTACHMENT-248-oa");
+    const groupRow = await screen.findByTestId("candidate-group-open-case:CASE-202603-OA-ATTACHMENT-2035");
+    const oaCell = within(groupRow).getByTestId("candidate-scroll-open-case:CASE-202603-OA-ATTACHMENT-2035-oa");
     const invoiceCell = within(groupRow).getByTestId(
-      "candidate-scroll-open-case:CASE-202603-OA-ATTACHMENT-248-invoice",
+      "candidate-scroll-open-case:CASE-202603-OA-ATTACHMENT-2035-invoice",
     );
 
     expect(within(oaCell).getByRole("row", { name: /胡瑢.*248\.00/ })).toBeInTheDocument();
-    expect(within(invoiceCell).getByRole("row", { name: /OAATT-248-001.*100\.00/ })).toBeInTheDocument();
-    expect(within(invoiceCell).getByRole("row", { name: /OAATT-248-002.*96\.00/ })).toBeInTheDocument();
-    expect(within(invoiceCell).getByRole("row", { name: /OAATT-248-003.*52\.00/ })).toBeInTheDocument();
-    expect(within(invoiceCell).getAllByRole("row")).toHaveLength(3);
+    expect(within(invoiceCell).getByRole("row", { name: /OA2035-MACHINE-25.*25\.00/ })).toBeInTheDocument();
+    expect(within(invoiceCell).getByRole("row", { name: /OA2035-MACHINE-23.*23\.00/ })).toBeInTheDocument();
+    expect(within(invoiceCell).getByRole("row", { name: /OA2035-FUEL-200.*200\.00/ })).toBeInTheDocument();
+    expect(within(invoiceCell).getByRole("row", { name: /微信支付.*胡瑢.*25\.00/ })).toBeInTheDocument();
+    expect(within(invoiceCell).getByRole("row", { name: /微信支付.*胡瑢.*23\.00/ })).toBeInTheDocument();
+    expect(within(invoiceCell).getByRole("row", { name: /微信支付.*胡瑢.*200\.00/ })).toBeInTheDocument();
+    expect(within(invoiceCell).getAllByRole("row")).toHaveLength(6);
+    expect(within(invoiceCell).getAllByText("OA附件")).toHaveLength(3);
+    expect(within(invoiceCell).getAllByText("付款凭证")).toHaveLength(3);
+    expect(within(invoiceCell).queryByText("人工导入")).not.toBeInTheDocument();
 
     expect(screen.queryByRole("row", { name: /胡瑢付款项/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("row", { name: /付款项\s*[123].*248/ })).not.toBeInTheDocument();

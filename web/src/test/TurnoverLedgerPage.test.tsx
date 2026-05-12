@@ -1,0 +1,452 @@
+import { act, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, test, vi } from "vitest";
+
+import MuiProviders from "../app/MuiProviders";
+import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
+import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
+import type { SessionPayload } from "../features/session/api";
+import TurnoverLedgerPage from "../pages/TurnoverLedgerPage";
+
+const fullSession: SessionPayload = {
+  allowed: true,
+  user: {
+    userId: "1",
+    username: "TESTFULL001",
+    nickname: "测试全权限",
+    displayName: "测试全权限",
+    deptId: null,
+    deptName: null,
+    avatar: null,
+  },
+  roles: ["fin_ops_user"],
+  permissions: ["finops:app:view"],
+  accessTier: "full_access",
+  canAccessApp: true,
+  canMutateData: true,
+  canAdminAccess: false,
+};
+
+function renderTurnoverLedgerPage(session: SessionPayload = fullSession) {
+  const value: SessionContextValue = {
+    status: "authenticated",
+    session,
+    refresh: () => undefined,
+  };
+  return render(
+    <MuiProviders>
+      <SessionContext.Provider value={value}>
+        <PageSessionStateProvider>
+          <TurnoverLedgerPage />
+        </PageSessionStateProvider>
+      </SessionContext.Provider>
+    </MuiProviders>,
+  );
+}
+
+function requestUrls(fetchMock: ReturnType<typeof installTurnoverLedgerFetch>, pathname: string) {
+  return fetchMock.mock.calls
+    .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
+    .filter((url) => url.pathname === pathname);
+}
+
+function groupedPayload(family: string) {
+  const allGroups = [
+    {
+      group_id: "counterparty:personal:zhangsan",
+      counterparty_name: "张三",
+      family: "personal",
+      family_label: "个人往来",
+      pending_direction: "repayment",
+      pending_direction_label: "待还款",
+      pending_amount: "800.00",
+      row_span: 3,
+      group_tone: "warning",
+      rows: [
+        {
+          relation_id: "rel-personal-1",
+          status: "suggested",
+          status_label: "待人工确认",
+          row_tone: "warning",
+          borrow_amount: "1000.00",
+          borrow_date: "2026-05-01",
+          borrow_direction: "income",
+          repayment_amount: "200.00",
+          repayment_date: "2026-05-03",
+          repayment_direction: "expense",
+          counterparty_bank_name: "建设银行昆明分行",
+          repayment_remark: "归还暂借款",
+          interest_rate_type: "annual",
+          interest_rate_value: "0.060000",
+          interest_paid_amount: "10.00",
+          loan_days: 2,
+          accrued_interest: "0.33",
+          interest_paid_date: "2026-05-05",
+          interest_payment_method: "转账",
+          note: "页面内维护备注",
+          bank_row_ids: ["bank-personal-001", "bank-personal-002"],
+        },
+        {
+          relation_id: "rel-personal-1",
+          status: "confirmed",
+          status_label: "批次明细",
+          row_tone: "info",
+          borrow_amount: "600.00",
+          borrow_date: "2026-05-06",
+          borrow_direction: "income",
+          repayment_amount: "100.00",
+          repayment_date: "2026-05-07",
+          repayment_direction: "expense",
+          counterparty_bank_name: "招商银行批次账户",
+          repayment_remark: "归还借款批次一",
+          interest_rate_type: "none",
+          interest_rate_value: "0.000000",
+          interest_paid_amount: "0.00",
+          loan_days: 1,
+          accrued_interest: "0.00",
+          interest_paid_date: null,
+          interest_payment_method: "",
+          note: "批次一待还",
+          bank_row_ids: ["bank-personal-003"],
+        },
+        {
+          relation_id: "rel-personal-1",
+          status: "confirmed",
+          status_label: "批次明细",
+          row_tone: "info",
+          borrow_amount: "400.00",
+          borrow_date: "2026-05-08",
+          borrow_direction: "income",
+          repayment_amount: "100.00",
+          repayment_date: "2026-05-09",
+          repayment_direction: "expense",
+          counterparty_bank_name: "工商银行批次账户",
+          repayment_remark: "归还借款批次二",
+          interest_rate_type: "annual",
+          interest_rate_value: "0.060000",
+          interest_paid_amount: "0.00",
+          loan_days: 1,
+          accrued_interest: "0.07",
+          interest_paid_date: null,
+          interest_payment_method: "",
+          note: "批次二待还",
+          bank_row_ids: ["bank-personal-004"],
+        },
+      ],
+    },
+    {
+      group_id: "counterparty:company:yunnan",
+      counterparty_name: "云南建设有限公司",
+      family: "company",
+      family_label: "公司往来",
+      pending_direction: "collection",
+      pending_direction_label: "待收款",
+      pending_amount: "2000.00",
+      row_span: 1,
+      group_tone: "success",
+      rows: [
+        {
+          relation_id: "rel-company-1",
+          status: "confirmed",
+          status_label: "人工确认",
+          row_tone: "success",
+          borrow_amount: "3000.00",
+          borrow_date: "2026-05-02",
+          borrow_direction: "expense",
+          repayment_amount: "1000.00",
+          repayment_date: "2026-05-04",
+          repayment_direction: "income",
+          counterparty_bank_name: "中国银行",
+          repayment_remark: "回款",
+          interest_rate_type: "monthly",
+          interest_rate_value: "0.005000",
+          interest_paid_amount: "0.00",
+          loan_days: 2,
+          accrued_interest: "1.00",
+          interest_paid_date: null,
+          interest_payment_method: "",
+          note: "项目保证金",
+          bank_row_ids: ["bank-company-001", "bank-company-002"],
+        },
+      ],
+    },
+  ];
+  const groups = family === "all" ? allGroups : allGroups.filter((group) => group.family === family);
+  return {
+    summary: {
+      pending_repayment_amount: "800.00",
+      repaid_amount: "500.00",
+      pending_collection_amount: "2000.00",
+      collected_amount: "1000.00",
+      closed_amount: "300.00",
+      suggested_count: groups.filter((group) => group.rows[0]?.status === "suggested").length,
+      conflict_count: 0,
+      row_count: groups.length,
+    },
+    family_summaries: [
+      { family: "personal", label: "个人往来", pending_amount: "800.00", closed_amount: "300.00", row_count: 2 },
+      { family: "company", label: "公司往来", pending_amount: "2000.00", closed_amount: "0.00", row_count: 1 },
+    ],
+    groups,
+    pagination: {
+      page: 1,
+      page_size: 100,
+      total: groups.length,
+    },
+  };
+}
+
+function installTurnoverLedgerFetch() {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+    const method = (init?.method ?? "GET").toUpperCase();
+
+    if (url.pathname === "/api/turnover-ledger" && method === "GET") {
+      expect(url.searchParams.get("view")).toBe("grouped");
+      return Response.json(groupedPayload(url.searchParams.get("family") ?? "all"));
+    }
+    if (url.pathname === "/api/turnover-ledger/relations/rel-personal-1" && method === "GET") {
+      return Response.json({
+        relation: groupedPayload("personal").groups[0].rows[0],
+        bank_rows: [
+          {
+            id: "bank-personal-001",
+            trade_time: "2026-05-01 10:00:00",
+            counterparty_name: "张三",
+            direction_label: "收",
+            amount: "1000.00",
+            bank_account_label: "建行 8106",
+            summary: "暂借款",
+          },
+        ],
+        audit_history: [],
+      });
+    }
+    if (url.pathname === "/api/turnover-ledger/relations/rel-personal-1/extra" && method === "GET") {
+      return Response.json({
+        relation_id: "rel-personal-1",
+        interest_rate_type: "annual",
+        interest_rate_value: "0.060000",
+        interest_paid_amount: "10.00",
+        interest_paid_date: "2026-05-05",
+        interest_payment_method: "转账",
+        note: "页面内维护备注",
+      });
+    }
+    if (url.pathname === "/api/turnover-ledger/relations/rel-personal-1/extra" && method === "PUT") {
+      return Response.json({
+        relation_id: "rel-personal-1",
+        extra: JSON.parse(String(init?.body)),
+      });
+    }
+    if (url.pathname === "/api/turnover-ledger/export-preview" && method === "GET") {
+      return Response.json({
+        rows: [
+          {
+            sequence_no: 1,
+            row_type: "summary",
+            lot_id: "",
+            family_label: url.searchParams.get("family") === "company" ? "公司往来" : "个人往来",
+            counterparty_name: url.searchParams.get("family") === "company" ? "云南建设有限公司" : "张三",
+            pending_repayment_amount: "0.00",
+            pending_collection_amount: "2000.00",
+            balance_amount: "2000.00",
+            borrow_amount: "3000.00",
+            borrow_date: "2026-05-02",
+            repayment_amount: "1000.00",
+            repayment_date: "2026-05-04",
+            counterparty_bank_name: "中国银行",
+            repayment_remark: "回款",
+            interest_rate_type_label: "月息",
+            interest_rate_value: "0.005000",
+            interest_paid_amount: "0.00",
+            loan_days: 2,
+            accrued_interest: "1.00",
+            interest_paid_date: "",
+            interest_payment_method: "",
+            note: "项目保证金",
+            status_label: "人工确认",
+          },
+        ],
+        totals: {
+          pending_repayment_amount: "0.00",
+          pending_collection_amount: "2000.00",
+          accrued_interest: "1.00",
+        },
+      });
+    }
+    if (url.pathname === "/api/turnover-ledger/export" && method === "GET") {
+      return new Response(new Blob(["mock xlsx"], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }));
+    }
+    if (url.pathname === "/api/turnover-ledger/relations/confirm" && method === "POST") {
+      return Response.json({ relation_id: "rel-personal-1", status: "confirmed" });
+    }
+    if (url.pathname === "/api/turnover-ledger/relations/rel-personal-1/withdraw" && method === "POST") {
+      return Response.json({ relation_id: "rel-personal-1", status: "withdrawn" });
+    }
+    throw new Error(`Unexpected request ${method} ${url.pathname}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  Object.defineProperty(URL, "createObjectURL", {
+    configurable: true,
+    value: vi.fn(() => "blob:turnover-ledger"),
+  });
+  Object.defineProperty(URL, "revokeObjectURL", {
+    configurable: true,
+    value: vi.fn(),
+  });
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+  return fetchMock;
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+describe("Turnover ledger page", () => {
+  test("renders grouped MUI table with collapsed summary rows, expandable lot rows, sticky left cells, and no status column", async () => {
+    const fetchMock = installTurnoverLedgerFetch();
+    renderTurnoverLedgerPage();
+
+    const page = await screen.findByTestId("turnover-ledger-page");
+    expect(within(page).getByRole("heading", { name: "往来款管理" })).toBeInTheDocument();
+    expect(within(page).getByRole("tab", { name: "全部" })).toHaveAttribute("aria-selected", "true");
+    expect(within(page).getByText("待还款金额")).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "下载表格" })).toBeInTheDocument();
+
+    await waitFor(() => {
+      const request = requestUrls(fetchMock, "/api/turnover-ledger")[0];
+      expect(request?.searchParams.get("view")).toBe("grouped");
+      expect(request?.searchParams.get("family")).toBe("all");
+    });
+
+    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    expect(within(table).getByRole("columnheader", { name: "对方户名" })).toHaveClass("turnover-sticky-left-header");
+    expect(within(table).getByRole("columnheader", { name: "借款金额 / 借款日" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "还款金额 / 还款日" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "开户机构" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "还款备注" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "利息额 / 年息或月息" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "借款天数" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "应还利息" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "还利息日期 / 方式" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "备注" })).toBeInTheDocument();
+    expect(within(table).queryByRole("columnheader", { name: "关系状态" })).not.toBeInTheDocument();
+    expect(within(table).queryByRole("columnheader", { name: "对方户名 / 大类 / 余额" })).not.toBeInTheDocument();
+
+    const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:zhangsan");
+    expect(groupCell).toHaveClass("turnover-sticky-left-cell");
+    expect(groupCell).toHaveAttribute("rowspan", "1");
+    expect(within(groupCell).getByText("张三")).toBeInTheDocument();
+    expect(within(groupCell).getByText("个人往来")).toBeInTheDocument();
+    expect(within(groupCell).getByText("待还款合计：800.00")).toBeInTheDocument();
+    expect(within(table).getByText("待收款合计：2,000.00")).toBeInTheDocument();
+    expect(within(groupCell).getByRole("button", { name: "展开 张三 批次明细" })).toBeInTheDocument();
+    expect(within(table).queryByText("招商银行批次账户")).not.toBeInTheDocument();
+    expect(within(table).queryByText("明细")).not.toBeInTheDocument();
+
+    expect(within(table).getByTestId("amount-income-rel-personal-1-borrow")).toHaveClass("turnover-amount-income");
+    expect(within(table).getByTestId("amount-expense-rel-personal-1-repayment")).toHaveClass("turnover-amount-expense");
+    expect(within(table).getByTestId("turnover-row-rel-personal-1")).toHaveClass("turnover-row-warning");
+    expect(within(table).queryByText("待人工确认")).not.toBeInTheDocument();
+
+    await userEvent.click(within(groupCell).getByRole("button", { name: "展开 张三 批次明细" }));
+    expect(groupCell).toHaveAttribute("rowspan", "3");
+    expect(within(groupCell).getByRole("button", { name: "收起 张三 批次明细" })).toBeInTheDocument();
+    expect(within(table).getByText("招商银行批次账户")).toBeInTheDocument();
+    expect(within(table).getByText("工商银行批次账户")).toBeInTheDocument();
+    expect(within(table).getAllByText("明细")).toHaveLength(2);
+    expect(within(table).getAllByText("张三")).toHaveLength(1);
+    expect(within(table).getByTestId("turnover-lot-row-rel-personal-1-0")).toHaveClass("turnover-lot-row");
+    expect(within(table).getByTestId("turnover-lot-row-rel-personal-1-1")).toHaveClass("turnover-lot-row");
+    expect(within(table).getAllByRole("button", { name: "编辑明细 rel-personal-1" })).toHaveLength(2);
+  });
+
+  test("opens the extra drawer, enables save when dirty, saves, refreshes, and keeps relation actions in the drawer", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installTurnoverLedgerFetch();
+    const extraListener = vi.fn();
+    window.addEventListener("turnoverLedgerExtraUpdated", extraListener);
+    renderTurnoverLedgerPage();
+
+    const page = await screen.findByTestId("turnover-ledger-page");
+    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    expect(within(table).queryByRole("button", { name: "确认归并" })).not.toBeInTheDocument();
+
+    await user.click(within(table).getByRole("button", { name: "编辑 rel-personal-1" }));
+    const drawer = await screen.findByRole("presentation", { name: "编辑往来补充信息" });
+    expect(within(drawer).getByText("bank-personal-001")).toBeInTheDocument();
+    expect(within(drawer).getByRole("button", { name: "确认归并" })).toBeEnabled();
+    expect(within(drawer).getByRole("button", { name: "撤销归并" })).toBeDisabled();
+
+    const saveButton = within(drawer).getByRole("button", { name: "保存补充信息" });
+    expect(saveButton).toBeDisabled();
+    await user.clear(within(drawer).getByLabelText("利率值"));
+    await user.type(within(drawer).getByLabelText("利率值"), "0.070000");
+    expect(saveButton).toBeEnabled();
+    await user.click(saveButton);
+
+    await waitFor(() => {
+      const saveRequest = fetchMock.mock.calls.find(([input, init]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/turnover-ledger/relations/rel-personal-1/extra" && init?.method === "PUT";
+      });
+      expect(saveRequest).toBeDefined();
+      expect(JSON.parse(String(saveRequest?.[1]?.body))).toMatchObject({
+        interest_rate_type: "annual",
+        interest_rate_value: "0.070000",
+        interest_paid_amount: "10.00",
+        interest_paid_date: "2026-05-05",
+        interest_payment_method: "转账",
+        note: "页面内维护备注",
+      });
+    });
+    await waitFor(() => {
+      expect(requestUrls(fetchMock, "/api/turnover-ledger").length).toBeGreaterThanOrEqual(2);
+    });
+    await waitFor(() => {
+      const event = extraListener.mock.calls[0]?.[0] as CustomEvent | undefined;
+      expect(event?.detail).toEqual({ relationId: "rel-personal-1" });
+    });
+    window.removeEventListener("turnoverLedgerExtraUpdated", extraListener);
+  });
+
+  test("reloads on category updates and downloads a previewed export for the current tab", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installTurnoverLedgerFetch();
+    renderTurnoverLedgerPage();
+
+    const page = await screen.findByTestId("turnover-ledger-page");
+    await within(page).findByText("张三");
+    const before = requestUrls(fetchMock, "/api/turnover-ledger").length;
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("bankTransactionCategoryUpdated", { detail: { affectedMonths: ["2026-05"] } }));
+    });
+    await waitFor(() => {
+      expect(requestUrls(fetchMock, "/api/turnover-ledger").length).toBeGreaterThan(before);
+    });
+
+    await user.click(within(page).getByRole("tab", { name: "公司往来" }));
+    await within(page).findByText("云南建设有限公司");
+    await user.click(within(page).getByRole("button", { name: "下载表格" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "下载往来款台账" });
+    expect(within(dialog).getByRole("combobox", { name: "下载范围" })).toHaveTextContent("公司往来");
+    expect(await within(dialog).findByText("正式字段预览")).toBeInTheDocument();
+    expect(within(dialog).getByText("行类型")).toBeInTheDocument();
+    expect(within(dialog).getByText("余额")).toBeInTheDocument();
+    expect(within(dialog).getByText("合计")).toBeInTheDocument();
+    expect(within(dialog).getByText("对方户名")).toBeInTheDocument();
+    expect(within(dialog).getByText("云南建设有限公司")).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "确认下载" }));
+    await waitFor(() => {
+      const request = requestUrls(fetchMock, "/api/turnover-ledger/export").at(-1);
+      expect(request?.searchParams.get("family")).toBe("company");
+    });
+  });
+});

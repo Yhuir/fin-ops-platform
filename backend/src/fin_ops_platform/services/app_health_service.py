@@ -237,20 +237,29 @@ class AppHealthService:
 
     @staticmethod
     def _job_payload(job: object) -> dict[str, Any]:
+        payload: dict[str, Any]
         to_payload = getattr(job, "to_payload", None)
         if callable(to_payload):
-            payload = to_payload()
-            if isinstance(payload, dict):
-                return payload
-        return {
-            "job_id": getattr(job, "job_id", None),
-            "type": getattr(job, "type", None),
-            "label": getattr(job, "label", None),
-            "status": getattr(job, "status", None),
-            "created_at": getattr(job, "created_at", None),
-            "started_at": getattr(job, "started_at", None),
-            "updated_at": getattr(job, "updated_at", None),
-        }
+            raw_payload = to_payload()
+            if isinstance(raw_payload, dict):
+                payload = dict(raw_payload)
+            else:
+                payload = {}
+        else:
+            payload = {}
+        if not payload:
+            payload = {
+                "job_id": getattr(job, "job_id", None),
+                "type": getattr(job, "type", None),
+                "label": getattr(job, "label", None),
+                "status": getattr(job, "status", None),
+                "created_at": getattr(job, "created_at", None),
+                "started_at": getattr(job, "started_at", None),
+                "updated_at": getattr(job, "updated_at", None),
+            }
+        payload["retryable"] = AppHealthService._is_retryable_job(job)
+        payload["acknowledgeable"] = AppHealthService._is_acknowledgeable_job(job)
+        return payload
 
     @classmethod
     def _primary_job_payload(cls, job: object | None) -> dict[str, Any] | None:
@@ -287,6 +296,16 @@ class AppHealthService:
                     source.get("months"),
                     source.get("scope_months"),
                     source.get("scope_month"),
+                )
+            )
+        if job_type == "cost_statistics_cache_warmup":
+            return any(
+                cls._has_values(value)
+                for value in (
+                    getattr(job, "affected_months", []),
+                    source.get("affected_months"),
+                    source.get("months"),
+                    source.get("month"),
                 )
             )
         return False

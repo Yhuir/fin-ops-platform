@@ -32,6 +32,11 @@ from fin_ops_platform.app.auth import (
     resolve_oa_request_session,
 )
 from fin_ops_platform.app.routes_tax import TaxApiRoutes
+from fin_ops_platform.app.routes_turnover_ledger import (
+    InMemoryTurnoverLedgerExtraService,
+    TurnoverLedgerApiRoutes,
+    TurnoverLedgerExtraValidationError,
+)
 from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.access_control_service import AccessControlService
@@ -41,6 +46,12 @@ from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
 from fin_ops_platform.services.bank_details_service import BankDetailsService
+from fin_ops_platform.services.bank_transaction_category_service import (
+    BANK_TRANSACTION_CATEGORY_LABELS,
+    BankTransactionCategoryConflictError,
+    BankTransactionCategoryService,
+    BankTransactionCategoryValidationError,
+)
 from fin_ops_platform.services.background_job_service import (
     BackgroundJobAccessError,
     BackgroundJobNotFoundError,
@@ -94,6 +105,13 @@ from fin_ops_platform.services.state_store import ApplicationStateStore
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService, UploadedCertifiedImportFile
 from fin_ops_platform.services.tax_offset_read_model_service import TaxOffsetReadModelService
 from fin_ops_platform.services.tax_offset_service import TaxOffsetService
+from fin_ops_platform.services.turnover_ledger_service import TurnoverLedgerService
+from fin_ops_platform.services.turnover_ledger_export_service import XLSX_MIME_TYPE
+from fin_ops_platform.services.turnover_relation_service import (
+    TURNOVER_RELATION_SCHEMA_VERSION,
+    TurnoverRelationService,
+    TurnoverRelationValidationError,
+)
 from fin_ops_platform.services.workbench_candidate_grouping import WorkbenchCandidateGroupingService
 from fin_ops_platform.services.workbench_action_service import WorkbenchActionService
 from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
@@ -131,7 +149,7 @@ OA_INVOICE_OFFSET_TAG = "冲"
 CASH_PASS_THROUGH_MODE = "cash_pass_through"
 CASH_TICKET_PURCHASE_MODE = "cash_ticket_purchase"
 PERSONAL_ADVANCE_REPAYMENT_MODE = "personal_advance_repayment_settlement"
-WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-11-oa-attachment-source-groups"
+WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-11-oa-attachment-evidence-source-groups"
 SYSTEM_AUTO_PAIR_RELATION_MODES = {
     "salary_personal_auto_match",
     "internal_transfer_pair",
@@ -149,7 +167,7 @@ class Response:
             "Content-Type": "application/json; charset=utf-8",
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Headers": "Content-Type",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, OPTIONS",
         }
     )
 
@@ -249,10 +267,26 @@ class Application:
     def _load_persisted_state(self) -> dict[str, object]:
         return self._state_store.load() if self._state_store is not None else {}
 
+    @staticmethod
+    def _build_turnover_ledger_extra_service(snapshot: object) -> object:
+        try:
+            from fin_ops_platform.services.turnover_ledger_extra_service import TurnoverLedgerExtraService
+        except ModuleNotFoundError:
+            return InMemoryTurnoverLedgerExtraService.from_snapshot(snapshot if isinstance(snapshot, dict) else None)
+        return TurnoverLedgerExtraService.from_snapshot(snapshot if isinstance(snapshot, dict) else None)
+
     def _initialize_runtime_services(self, persisted_state: dict[str, object]) -> None:
         self._import_service = ImportNormalizationService.from_snapshot(
             persisted_state.get("imports"),
             id_registry=self._state_store,
+        )
+        self._bank_transaction_category_service = BankTransactionCategoryService.from_snapshot(
+            persisted_state.get("bank_transaction_categories"),
+            transaction_exists=self._bank_transaction_exists,
+        )
+        self._turnover_relation_service = TurnoverRelationService.from_snapshot(
+            persisted_state.get("turnover_relations"),
+            bank_rows=self._turnover_bank_transaction_rows(),
         )
         self._file_import_service = FileImportService.from_snapshot(
             self._import_service,
@@ -359,8 +393,21 @@ class Application:
             self._import_service,
             self._matching_service,
             bank_account_resolver=bank_account_resolver,
+            category_provider=self._bank_transaction_category_service,
         )
-        self._bank_details_service = BankDetailsService(self._import_service)
+        self._bank_details_service = BankDetailsService(
+            self._import_service,
+            category_service=self._bank_transaction_category_service,
+        )
+        self._turnover_ledger_extra_service = self._build_turnover_ledger_extra_service(
+            persisted_state.get("turnover_ledger_extras")
+        )
+        self._turnover_ledger_service = TurnoverLedgerService(
+            import_service=self._import_service,
+            category_service=self._bank_transaction_category_service,
+            relation_service=self._turnover_relation_service,
+            extra_service=self._turnover_ledger_extra_service,
+        )
         self._tax_certified_import_service = TaxCertifiedImportService(state_store=self._state_store)
         self._etc_service = EtcService(state_store=self._state_store)
         self._etc_service.set_canonical_invoice_key_exists(self._canonical_invoice_key_exists_for_etc_import)
@@ -432,6 +479,11 @@ class Application:
         if isinstance(oa_adapter, MongoOAAdapter):
             oa_adapter.set_attachment_invoice_cache_updated_callback(self._handle_oa_attachment_invoice_cache_updated)
         self._tax_api_routes = TaxApiRoutes(self._tax_offset_service)
+        self._turnover_ledger_api_routes = TurnoverLedgerApiRoutes(
+            ledger_service=self._turnover_ledger_service,
+            relation_service=self._turnover_relation_service,
+            extra_service=self._turnover_ledger_extra_service,
+        )
 
     def _configure_workbench_exception_application_service(self) -> None:
         self._workbench_exception_application_service = WorkbenchExceptionApplicationService(
@@ -444,6 +496,41 @@ class Application:
 
     def _reload_runtime_services(self) -> None:
         self._initialize_runtime_services(self._load_persisted_state())
+
+    def _bank_transaction_exists(self, transaction_id: str) -> bool:
+        normalized_transaction_id = str(transaction_id or "").strip()
+        if not normalized_transaction_id:
+            return False
+        try:
+            self._import_service.get_transaction(normalized_transaction_id)
+        except KeyError:
+            return False
+        return True
+
+    def _turnover_bank_transaction_rows(self) -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
+        for transaction in list(self._import_service.list_transactions()):
+            payload = self._serialize_value(transaction)
+            if not isinstance(payload, dict):
+                continue
+            transaction_id = str(payload.get("id") or "").strip()
+            if not transaction_id:
+                continue
+            category = self._bank_transaction_category_service.get(transaction_id)
+            category_code = category.get("category_code")
+            if not category_code:
+                continue
+            row = dict(payload)
+            row["category_code"] = category_code
+            row["category_label"] = category.get("category_label")
+            row["category_path"] = list(category.get("category_path") or [])
+            amount = row.get("amount") or "0.00"
+            direction = str(row.get("txn_direction") or "").strip().lower()
+            row["debit_amount"] = amount if direction == "outflow" else "0.00"
+            row["credit_amount"] = amount if direction == "inflow" else "0.00"
+            row["counterparty_name"] = str(row.get("counterparty_name_raw") or row.get("counterparty_name") or "")
+            rows.append(row)
+        return rows
 
     def _historical_etc_repair_seeded(self) -> bool:
         if self._state_store is None:
@@ -544,6 +631,28 @@ class Application:
                 page=query.get("page", [None])[0],
                 page_size=query.get("page_size", [None])[0],
             )
+        if method == "PATCH" and route_path == "/api/bank-details/transactions/categories":
+            return self._handle_api_bank_transaction_categories(body, headers)
+        if method == "GET" and route_path == "/api/turnover-ledger/export-preview":
+            return self._handle_api_turnover_ledger_export_preview(query)
+        if method == "GET" and route_path == "/api/turnover-ledger/export":
+            return self._handle_api_turnover_ledger_export(query)
+        if method == "GET" and route_path == "/api/turnover-ledger":
+            return self._handle_api_turnover_ledger(query)
+        if method == "GET" and route_path.startswith("/api/turnover-ledger/relations/") and route_path.endswith("/extra"):
+            relation_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_turnover_ledger_relation_extra(relation_id)
+        if method == "PUT" and route_path.startswith("/api/turnover-ledger/relations/") and route_path.endswith("/extra"):
+            relation_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_turnover_ledger_relation_extra_update(relation_id, body, headers)
+        if method == "GET" and route_path.startswith("/api/turnover-ledger/relations/"):
+            relation_id = unquote(route_path.rsplit("/", 1)[-1])
+            return self._handle_api_turnover_ledger_relation(relation_id)
+        if method == "POST" and route_path == "/api/turnover-ledger/relations/confirm":
+            return self._handle_api_turnover_ledger_confirm(body, headers)
+        if method == "POST" and route_path.startswith("/api/turnover-ledger/relations/") and route_path.endswith("/withdraw"):
+            relation_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_turnover_ledger_withdraw(relation_id, body, headers)
         if method == "GET" and route_path == "/api/oa-sync/status":
             return self._handle_api_oa_sync_status()
         if method == "GET" and route_path == "/api/app-health/stream":
@@ -1057,7 +1166,7 @@ class Application:
                 "X-Accel-Buffering": "no",
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Headers": "Content-Type",
-                "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, OPTIONS",
             },
         )
 
@@ -1282,7 +1391,7 @@ class Application:
     def _handle_api_background_jobs_active(self, headers: dict[str, str] | None) -> Response:
         owner_user_id = self._resolve_background_job_owner(headers)
         jobs = self._background_job_service.list_active_jobs(owner_user_id, include_system=True)
-        return self._json_response(HTTPStatus.OK, {"jobs": [job.to_payload() for job in jobs]})
+        return self._json_response(HTTPStatus.OK, {"jobs": [self._serialize_background_job(job) for job in jobs]})
 
     def _handle_api_background_job(self, job_id: str, headers: dict[str, str] | None) -> Response:
         owner_user_id = self._resolve_background_job_owner(headers)
@@ -1293,7 +1402,7 @@ class Application:
                 HTTPStatus.NOT_FOUND,
                 {"error": "background_job_not_found", "message": "后台任务不存在或不可见。"},
             )
-        return self._json_response(HTTPStatus.OK, {"job": job.to_payload()})
+        return self._json_response(HTTPStatus.OK, {"job": self._serialize_background_job(job)})
 
     def _handle_api_background_job_acknowledge(self, job_id: str, headers: dict[str, str] | None) -> Response:
         owner_user_id = self._resolve_background_job_owner(headers)
@@ -1304,7 +1413,7 @@ class Application:
                 HTTPStatus.NOT_FOUND,
                 {"error": "background_job_not_found", "message": "后台任务不存在或不可见。"},
             )
-        return self._json_response(HTTPStatus.OK, {"job": job.to_payload()})
+        return self._json_response(HTTPStatus.OK, {"job": self._serialize_background_job(job)})
 
     def _handle_api_background_job_retry(self, job_id: str, headers: dict[str, str] | None) -> Response:
         owner_user_id = self._resolve_background_job_owner(headers)
@@ -1317,10 +1426,16 @@ class Application:
             )
         if job.type == "file_import":
             return self._retry_file_import_background_job(job, owner_user_id)
+        if job.type == "cost_statistics_cache_warmup":
+            return self._retry_cost_statistics_cache_warmup_background_job(job, owner_user_id)
         return self._json_response(
             HTTPStatus.BAD_REQUEST,
             {"error": "background_job_retry_not_supported", "message": "当前后台任务没有可用的重新执行入口。"},
         )
+
+    @staticmethod
+    def _serialize_background_job(job) -> dict[str, object]:
+        return AppHealthService._job_payload(job)
 
     def _retry_file_import_background_job(self, job, owner_user_id: str) -> Response:
         source = job.source if isinstance(job.source, dict) else {}
@@ -1369,7 +1484,7 @@ class Application:
             return self._json_response(
                 HTTPStatus.ACCEPTED,
                 {
-                    "job": retry_job.to_payload() if retry_job is not None else None,
+                    "job": self._serialize_background_job(retry_job) if retry_job is not None else None,
                     "retry_mode": "workbench_matching",
                 },
             )
@@ -1393,6 +1508,52 @@ class Application:
                 "retry_mode": "file_preview",
             },
         )
+
+    def _retry_cost_statistics_cache_warmup_background_job(self, job, owner_user_id: str) -> Response:
+        months = self._retry_cost_statistics_warmup_months(job)
+        if not months:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "background_job_retry_not_supported",
+                    "message": "成本统计缓存预热任务缺少重新执行所需的月份范围。",
+                },
+            )
+        source = job.source if isinstance(job.source, dict) else {}
+        reason = str(source.get("reason") or "cost_statistics_cache_warmup_retry").strip()
+        retry_job = self._schedule_cost_statistics_cache_warmup(
+            months,
+            reason=f"retry:{reason}:{job.job_id}",
+        )
+        self._background_job_service.acknowledge_job(job.job_id, owner_user_id)
+        self._persist_state()
+        return self._json_response(
+            HTTPStatus.ACCEPTED,
+            {
+                "job": self._serialize_background_job(retry_job) if retry_job is not None else None,
+                "retry_mode": "cost_statistics_cache_warmup",
+            },
+        )
+
+    @staticmethod
+    def _retry_cost_statistics_warmup_months(job) -> list[str]:
+        source = job.source if isinstance(job.source, dict) else {}
+        candidates = [
+            getattr(job, "affected_months", []),
+            source.get("affected_months"),
+            source.get("months"),
+            source.get("month"),
+        ]
+        months: list[str] = []
+        for candidate in candidates:
+            values = candidate if isinstance(candidate, (list, tuple, set)) else [candidate]
+            for value in values:
+                month = str(value or "").strip()
+                if not month:
+                    continue
+                if month == "all" or SEARCH_MONTH_RE.match(month):
+                    months.append(month)
+        return list(dict.fromkeys(months))
 
     def _resolve_background_job_owner(self, headers: dict[str, str] | None) -> str:
         try:
@@ -2677,7 +2838,10 @@ class Application:
             base_scope_key = self._workbench_read_model_base_scope_key(scope_key)
             raw_payload = self._build_raw_workbench_payload(base_scope_key)
             candidate_payload = self._apply_candidate_matches_to_payload(raw_payload, base_scope_key)
-            grouped_payload = self._group_row_payload(candidate_payload)
+            grouped_payload = self._group_row_payload(
+                candidate_payload,
+                turnover_relations=self._active_turnover_relations_for_workbench(),
+            )
             self._apply_workbench_runtime_metadata(grouped_payload, base_scope_key)
             ignored_rows = self._extract_ignored_rows(candidate_payload)
             if not self._can_persist_workbench_payload(grouped_payload):
@@ -3739,7 +3903,7 @@ class Application:
                 "Content-Disposition": _build_content_disposition(filename),
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Headers": "Content-Type",
-                "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, OPTIONS",
             },
         )
 
@@ -4246,6 +4410,343 @@ class Application:
                 {"error": "invalid_bank_details_request", "message": str(exc)},
             )
         return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_bank_transaction_categories(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session = resolve_oa_request_session(
+            headers,
+            identity_service=self._oa_identity_service,
+            access_control_service=self._access_control_service,
+        )
+        if not session.can_mutate_data:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "permission_denied", "message": "当前账户没有保存银行流水分类的权限。"},
+            )
+
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        updates = payload.get("updates")
+        if not isinstance(updates, list):
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_category_update", "message": "updates must be an array."},
+            )
+
+        actor = session.identity.username or session.identity.user_id or "web_finance_user"
+        try:
+            update_result = self._bank_transaction_category_service.apply_updates(
+                updates,
+                actor=actor,
+            )
+        except BankTransactionCategoryConflictError as exc:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": exc.error_code,
+                    "message": str(exc),
+                    "transaction_id": exc.transaction_id,
+                    "expected_version": exc.expected_version,
+                    "actual_version": exc.actual_version,
+                },
+            )
+        except BankTransactionCategoryValidationError as exc:
+            status = HTTPStatus.NOT_FOUND if exc.error_code == "unknown_transaction_id" else HTTPStatus.BAD_REQUEST
+            return self._json_response(
+                status,
+                {
+                    "error": exc.error_code,
+                    "message": str(exc),
+                    "transaction_id": exc.transaction_id,
+                },
+            )
+
+        updated_transaction_ids = [
+            str(transaction_id)
+            for transaction_id in list(update_result.get("updated_transaction_ids") or [])
+            if str(transaction_id).strip()
+        ]
+        affected_months = self._bank_transaction_category_affected_months(updated_transaction_ids)
+        turnover_relations_updated = bool(
+            self._turnover_relation_service.invalidate_for_transaction_ids(
+                updated_transaction_ids,
+                actor=actor,
+            )
+        )
+        self._turnover_relation_service.rebuild_from_bank_rows(self._turnover_bank_transaction_rows())
+        workbench_rebuild_queued = self._invalidate_workbench_after_bank_transaction_categories(
+            affected_months,
+        )
+        if self._state_store is not None:
+            self._state_store.save_bank_transaction_categories(
+                self._bank_transaction_category_service.snapshot()
+            )
+            self._persist_turnover_relations_best_effort(operation="bank_transaction_category_updated")
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "updated_transaction_ids": updated_transaction_ids,
+                "updated_categories": list(update_result.get("updated_categories") or []),
+                "affected_months": affected_months,
+                "workbench_rebuild_queued": workbench_rebuild_queued,
+                "turnover_relations_updated": turnover_relations_updated,
+                "turnover_ledger_invalidated": bool(updated_transaction_ids),
+            },
+        )
+
+    def _handle_api_turnover_ledger(self, query: dict[str, list[str]]) -> Response:
+        try:
+            payload = self._turnover_ledger_api_routes.list_ledger(
+                view=query.get("view", [None])[0],
+                family=query.get("family", ["all"])[0],
+                status=query.get("status", [None])[0],
+                page=int(query.get("page", ["1"])[0] or 1),
+                page_size=int(query.get("page_size", ["50"])[0] or 50),
+            )
+        except (TypeError, ValueError) as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_turnover_ledger_request", "message": str(exc)},
+            )
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_turnover_ledger_export_preview(self, query: dict[str, list[str]]) -> Response:
+        try:
+            payload = self._turnover_ledger_api_routes.export_preview(
+                family=query.get("family", ["all"])[0],
+                limit=int(query.get("limit", ["20"])[0] or 20),
+            )
+        except (TypeError, ValueError) as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_turnover_ledger_export_request", "message": str(exc)},
+            )
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_turnover_ledger_export(self, query: dict[str, list[str]]) -> Response:
+        try:
+            filename, content = self._turnover_ledger_api_routes.export(
+                family=query.get("family", ["all"])[0],
+            )
+        except (TypeError, ValueError) as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_turnover_ledger_export_request", "message": str(exc)},
+            )
+        return Response(
+            status_code=int(HTTPStatus.OK),
+            body=content,
+            headers={
+                "Content-Type": XLSX_MIME_TYPE,
+                "Content-Disposition": _build_content_disposition(filename),
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, OPTIONS",
+            },
+        )
+
+    def _handle_api_turnover_ledger_relation(self, relation_id: str) -> Response:
+        try:
+            payload = self._turnover_ledger_api_routes.get_relation(relation_id)
+        except KeyError:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "unknown_relation_id", "message": "往来款关系不存在。"},
+            )
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_turnover_ledger_relation_extra(self, relation_id: str) -> Response:
+        try:
+            payload = self._turnover_ledger_api_routes.get_relation_extra(relation_id)
+        except KeyError:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "unknown_relation_id", "message": "往来款关系不存在。"},
+            )
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_turnover_ledger_relation_extra_update(
+        self,
+        relation_id: str,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session_response = self._turnover_mutation_session(headers)
+        if isinstance(session_response, Response):
+            return session_response
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        if not isinstance(payload, dict):
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_turnover_ledger_extra", "message": "payload must be an object."},
+            )
+        actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
+        try:
+            result = self._turnover_ledger_api_routes.update_relation_extra(
+                relation_id,
+                payload,
+                actor=actor,
+            )
+        except KeyError:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "unknown_relation_id", "message": "往来款关系不存在。"},
+            )
+        except (TurnoverLedgerExtraValidationError, ValueError) as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_turnover_ledger_extra", "message": str(exc)},
+            )
+        self._persist_turnover_ledger_extras_best_effort(operation="turnover_ledger_extra_updated")
+        result["turnover_ledger_invalidated"] = True
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _handle_api_turnover_ledger_confirm(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session_response = self._turnover_mutation_session(headers)
+        if isinstance(session_response, Response):
+            return session_response
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        bank_row_ids = payload.get("bank_row_ids")
+        if not isinstance(bank_row_ids, list):
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_bank_row_ids", "message": "bank_row_ids must be an array."},
+            )
+        actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
+        try:
+            result = self._turnover_ledger_api_routes.confirm_relation(
+                bank_row_ids=[str(row_id) for row_id in bank_row_ids],
+                actor=actor,
+                note=str(payload.get("note")) if payload.get("note") is not None else None,
+            )
+        except TurnoverRelationValidationError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": exc.error_code, "message": str(exc)},
+            )
+        affected_months = self._bank_transaction_category_affected_months(bank_row_ids)
+        self._after_turnover_relation_mutation(affected_months)
+        result["affected_months"] = affected_months
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _handle_api_turnover_ledger_withdraw(
+        self,
+        relation_id: str,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session_response = self._turnover_mutation_session(headers)
+        if isinstance(session_response, Response):
+            return session_response
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
+        try:
+            detail = self._turnover_ledger_api_routes.get_relation(relation_id)
+            relation = dict(detail.get("relation") or {})
+            if str(relation.get("source") or "") != "manual":
+                return self._json_response(
+                    HTTPStatus.BAD_REQUEST,
+                    {
+                        "error": "system_relation_cannot_withdraw",
+                        "message": "系统自动生成的往来款关系不能直接撤回，请先人工确认或调整银行流水标签。",
+                    },
+                )
+            bank_row_ids = list(relation.get("bank_row_ids") or [])
+            result = self._turnover_ledger_api_routes.withdraw_relation(
+                relation_id=relation_id,
+                actor=actor,
+                note=str(payload.get("note")) if payload.get("note") is not None else None,
+            )
+        except KeyError:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "unknown_relation_id", "message": "往来款关系不存在。"},
+            )
+        except TurnoverRelationValidationError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": exc.error_code, "message": str(exc)},
+            )
+        affected_months = self._bank_transaction_category_affected_months([str(row_id) for row_id in bank_row_ids])
+        self._after_turnover_relation_mutation(affected_months)
+        result["affected_months"] = affected_months
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _turnover_mutation_session(self, headers: dict[str, str] | None) -> OARequestSession | Response:
+        session = resolve_oa_request_session(
+            headers,
+            identity_service=self._oa_identity_service,
+            access_control_service=self._access_control_service,
+        )
+        if not session.can_mutate_data:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "permission_denied", "message": "当前账户没有操作往来款关系的权限。"},
+            )
+        return session
+
+    def _after_turnover_relation_mutation(self, affected_months: list[str]) -> None:
+        self._invalidate_workbench_after_bank_transaction_categories(affected_months)
+        self._persist_turnover_relations_best_effort(operation="turnover_relation_mutation")
+
+    def _bank_transaction_category_affected_months(self, transaction_ids: list[str]) -> list[str]:
+        months: set[str] = set()
+        for transaction_id in transaction_ids:
+            try:
+                transaction = self._import_service.get_transaction(transaction_id)
+            except KeyError:
+                continue
+            payload = self._serialize_value(transaction)
+            if not isinstance(payload, dict):
+                continue
+            month = str(payload.get("trade_time") or payload.get("txn_date") or "")[:7]
+            if SEARCH_MONTH_RE.match(month):
+                months.add(month)
+        return sorted(months)
+
+    def _invalidate_workbench_after_bank_transaction_categories(self, affected_months: list[str]) -> bool:
+        normalized_months = [
+            str(month).strip()
+            for month in list(affected_months or [])
+            if SEARCH_MONTH_RE.match(str(month).strip())
+        ]
+        if not normalized_months:
+            self._search_service.clear_cache()
+            return False
+        scope_keys = ["all", *normalized_months]
+        read_model_scope_keys = self._invalidate_workbench_read_model_scopes(scope_keys)
+        for month in normalized_months:
+            self._workbench_candidate_match_service.delete_month(month)
+        self._workbench_matching_dirty_scope_service.mark_dirty(
+            normalized_months,
+            reason="bank_transaction_category_updated",
+        )
+        self._search_service.clear_cache()
+        self._persist_workbench_candidate_matches_best_effort(
+            operation="bank_transaction_category_updated",
+            changed_scope_months=normalized_months,
+        )
+        self._persist_workbench_read_models_best_effort(
+            snapshot=self._workbench_read_model_service.snapshot(),
+            changed_scope_keys=read_model_scope_keys,
+            operation="bank_transaction_category_updated",
+        )
+        self._persist_workbench_matching_dirty_scopes_best_effort(operation="bank_transaction_category_updated")
+        return True
 
     def _list_tax_offset_oa_attachment_invoice_rows(self, month: str) -> list[dict[str, object]]:
         return self._workbench_query_service.list_attachment_invoice_rows_by_issue_month(month)
@@ -5833,7 +6334,7 @@ class Application:
                 "Content-Disposition": f'attachment; filename="{batch_id}.json"',
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Headers": "Content-Type",
-                "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, OPTIONS",
             },
         )
 
@@ -6535,6 +7036,14 @@ class Application:
                 or str(getattr(transaction, "pay_receive_time", None) or "")
                 or str(getattr(transaction, "txn_date", None) or "")
             )
+            category = self._bank_transaction_category_service.get(str(getattr(transaction, "id", "") or ""))
+            category_code = str(category.get("category_code") or "").strip()
+            category_label = str(category.get("category_label") or "").strip()
+            category_path = [
+                str(item).strip()
+                for item in list(category.get("category_path") or [])
+                if str(item).strip()
+            ]
             rows.append(
                 {
                     "id": str(getattr(transaction, "id", "") or ""),
@@ -6550,6 +7059,10 @@ class Application:
                     "counterparty_name": str(getattr(transaction, "counterparty_name_raw", None) or ""),
                     "summary": str(getattr(transaction, "summary", None) or ""),
                     "remark": str(getattr(transaction, "remark", None) or ""),
+                    "category_code": category_code,
+                    "category_label": category_label,
+                    "category_path": category_path,
+                    "category_source": str(category.get("source") or "").strip(),
                 }
             )
         return self._dedupe_workbench_matching_rows(rows)
@@ -6618,16 +7131,103 @@ class Application:
             "candidate_snapshot_version": WorkbenchReadModelService.snapshot_version(
                 self._workbench_candidate_match_service.snapshot()
             ),
+            "turnover_relation_snapshot_version": WorkbenchReadModelService.snapshot_version(
+                self._turnover_relation_snapshot_for_workbench()
+            ),
             "matching_rules_version": WORKBENCH_MATCHING_RULES_VERSION,
         }
 
-    def _persist_workbench_candidate_matches_best_effort(self, *, operation: str) -> None:
+    def _turnover_relation_snapshot_for_workbench(self) -> dict[str, object]:
+        active_relations = self._active_turnover_relations_for_workbench()
+        stable_relations: list[dict[str, object]] = []
+        for relation in active_relations:
+            stable_relations.append(
+                {
+                    "relation_id": str(relation.get("relation_id") or ""),
+                    "status": str(relation.get("status") or ""),
+                    "sync_to_workbench": bool(relation.get("sync_to_workbench")),
+                    "category_family": str(relation.get("category_family") or ""),
+                    "business_type": str(relation.get("business_type") or ""),
+                    "bank_row_ids": [
+                        str(row_id)
+                        for row_id in list(relation.get("bank_row_ids") or [])
+                        if str(row_id).strip()
+                    ],
+                    "principal_row_ids": [
+                        str(row_id)
+                        for row_id in list(relation.get("principal_row_ids") or [])
+                        if str(row_id).strip()
+                    ],
+                    "settlement_row_ids": [
+                        str(row_id)
+                        for row_id in list(relation.get("settlement_row_ids") or [])
+                        if str(row_id).strip()
+                    ],
+                }
+            )
+        stable_relations.sort(key=lambda relation: str(relation.get("relation_id") or ""))
+        return {
+            "schema_version": TURNOVER_RELATION_SCHEMA_VERSION,
+            "relations": stable_relations,
+        }
+
+    def _active_turnover_relations_for_workbench(self) -> list[dict[str, object]]:
+        relations = self._turnover_relation_service.rebuild_from_bank_rows(
+            self._turnover_bank_transaction_rows()
+        )
+        return [
+            relation
+            for relation in relations
+            if str(relation.get("status") or "").strip() in {"deterministic", "confirmed"}
+            and bool(relation.get("sync_to_workbench"))
+        ]
+
+    def _persist_workbench_candidate_matches_best_effort(
+        self,
+        *,
+        operation: str,
+        changed_scope_months: list[str] | None = None,
+    ) -> None:
         if self._state_store is None:
             return
         try:
             self._state_store.save_workbench_candidate_matches(
-                self._workbench_candidate_match_service.snapshot()
+                self._workbench_candidate_match_service.snapshot(),
+                changed_scope_months=changed_scope_months,
             )
+        except Exception as exc:
+            self._emit_workbench_persistence_warning(operation=operation, detail=str(exc))
+
+    def _persist_workbench_matching_dirty_scopes_best_effort(self, *, operation: str) -> None:
+        if self._state_store is None:
+            return
+        try:
+            self._state_store.save_workbench_matching_dirty_scopes(
+                self._workbench_matching_dirty_scope_service.snapshot()
+            )
+        except Exception as exc:
+            self._emit_workbench_persistence_warning(operation=operation, detail=str(exc))
+
+    def _persist_turnover_relations_best_effort(self, *, operation: str) -> None:
+        if self._state_store is None:
+            return
+        try:
+            self._state_store.save_turnover_relations(self._turnover_relation_service.snapshot())
+        except Exception as exc:
+            self._emit_workbench_persistence_warning(operation=operation, detail=str(exc))
+
+    def _persist_turnover_ledger_extras_best_effort(self, *, operation: str) -> None:
+        if self._state_store is None:
+            return
+        snapshot = self._turnover_ledger_api_routes.extras_snapshot()
+        try:
+            save_extras = getattr(self._state_store, "save_turnover_ledger_extras", None)
+            if callable(save_extras):
+                save_extras(snapshot)
+                return
+            current_payload = self._state_store.load()
+            current_payload["turnover_ledger_extras"] = snapshot
+            self._state_store.save(current_payload)
         except Exception as exc:
             self._emit_workbench_persistence_warning(operation=operation, detail=str(exc))
 
@@ -6648,6 +7248,7 @@ class Application:
         self._state_store.save(
             {
                 "imports": self._import_service.snapshot(),
+                "bank_transaction_categories": self._bank_transaction_category_service.snapshot(),
                 "file_imports": self._file_import_service.snapshot(),
                 "matching": self._matching_service.snapshot(),
                 "workbench_overrides": self._workbench_override_service.snapshot(),
@@ -6656,6 +7257,8 @@ class Application:
                 "workbench_read_models": self._workbench_read_model_service.snapshot(),
                 "workbench_candidate_matches": self._workbench_candidate_match_service.snapshot(),
                 "workbench_matching_dirty_scopes": self._workbench_matching_dirty_scope_service.snapshot(),
+                "turnover_relations": self._turnover_relation_service.snapshot(),
+                "turnover_ledger_extras": self._turnover_ledger_api_routes.extras_snapshot(),
                 "cost_statistics_read_models": cost_statistics_snapshot,
                 "tax_offset_read_models": tax_offset_snapshot,
             }
@@ -6800,7 +7403,10 @@ class Application:
             base_scope_key = self._workbench_read_model_base_scope_key(scope_key)
             raw_payload = self._build_raw_workbench_payload(base_scope_key)
             candidate_payload = self._apply_candidate_matches_to_payload(raw_payload, base_scope_key)
-            grouped_payload = self._group_row_payload(candidate_payload)
+            grouped_payload = self._group_row_payload(
+                candidate_payload,
+                turnover_relations=self._active_turnover_relations_for_workbench(),
+            )
             self._apply_workbench_runtime_metadata(grouped_payload, base_scope_key)
             ignored_rows = self._extract_ignored_rows(candidate_payload)
             self._workbench_read_model_service.upsert_read_model(
@@ -6921,9 +7527,7 @@ class Application:
         if isinstance(cached_read_model, dict):
             cached_payload = cached_read_model.get("payload")
             cached_ignored_rows = cached_read_model.get("ignored_rows")
-            cached_source_versions = cached_read_model.get("source_versions")
-            has_source_versions = isinstance(cached_source_versions, dict) and bool(cached_source_versions)
-            is_version_fresh = (not has_source_versions) or self._workbench_read_model_service.is_read_model_fresh(
+            is_version_fresh = self._workbench_read_model_service.is_read_model_fresh(
                 read_model_scope_key,
                 source_versions=read_model_source_versions,
             )
@@ -6960,7 +7564,10 @@ class Application:
         raw_payload = self._build_raw_workbench_payload(month)
         relation_payload = self._apply_pair_relations_to_payload(raw_payload)
         candidate_payload = self._apply_candidate_matches_to_payload(relation_payload, month)
-        grouped_payload = self._group_row_payload(candidate_payload)
+        grouped_payload = self._group_row_payload(
+            candidate_payload,
+            turnover_relations=self._active_turnover_relations_for_workbench(),
+        )
         self._apply_workbench_runtime_metadata(grouped_payload, month)
         ignored_rows = self._extract_ignored_rows(candidate_payload)
         if not self._can_persist_workbench_payload(grouped_payload):
@@ -7509,7 +8116,11 @@ class Application:
         return Application._group_row_payload(Application._merge_live_workbench_with_oa_rows(live_payload, oa_payload))
 
     @staticmethod
-    def _group_row_payload(payload: dict[str, object]) -> dict[str, object]:
+    def _group_row_payload(
+        payload: dict[str, object],
+        *,
+        turnover_relations: list[dict[str, object]] | None = None,
+    ) -> dict[str, object]:
         grouping_service = WorkbenchCandidateGroupingService()
         paired = payload.get("paired", {})
         open_rows = payload.get("open", {})
@@ -7521,6 +8132,7 @@ class Application:
             oa_rows=oa_rows,
             bank_rows=bank_rows,
             invoice_rows=invoice_rows,
+            turnover_relations=turnover_relations,
         )
         oa_status = payload.get("oa_status")
         if isinstance(oa_status, dict):
@@ -8360,7 +8972,7 @@ class Application:
                 project_scopes=["active", "all"],
                 include_all=True,
             )
-            warmup_months = [*specific_months, "all"]
+            warmup_months = specific_months
         else:
             deleted_scope_keys = read_model_service.invalidate_months(
                 [],
@@ -8397,7 +9009,7 @@ class Application:
         months = self._cost_statistics_months_from_workbench_scope_keys(scope_keys)
         specific_months = sorted(month for month in months if month != "all")
         if specific_months:
-            return [*specific_months, "all"]
+            return specific_months
         if "all" in months:
             return ["all"]
         return []
@@ -8415,19 +9027,19 @@ class Application:
                 return scope_key
         return str(self._cost_statistics_read_model_service.scope_key(month, project_scope))
 
-    def _schedule_cost_statistics_cache_warmup(self, months: list[str], reason: str) -> None:
+    def _schedule_cost_statistics_cache_warmup(self, months: list[str], reason: str):
         read_model_service = self._cost_statistics_read_model_service
         if read_model_service is None:
-            return
+            return None
         normalized_months = {
             str(month).strip()
             for month in list(months or [])
             if str(month).strip()
         }
         if not normalized_months:
-            return
+            return None
         ordered_months = sorted((month for month in normalized_months if month != "all"), reverse=True)
-        if "all" in normalized_months or ordered_months:
+        if "all" in normalized_months:
             ordered_months.append("all")
         deduped_months = list(dict.fromkeys(ordered_months))
         project_scopes = ["active", "all"]
@@ -8448,12 +9060,12 @@ class Application:
             total=len(affected_scope_keys),
             message="成本统计缓存预热任务已创建。",
             result_summary={"warmed": 0, "failed": 0},
-            source={"reason": reason},
+            source={"reason": reason, "months": deduped_months, "project_scopes": project_scopes},
             affected_scopes=affected_scope_keys,
             affected_months=deduped_months,
         )
         if not created:
-            return
+            return job
         self._background_job_service.run_job(
             job,
             lambda running_job: self._run_cost_statistics_cache_warmup_job(
@@ -8462,6 +9074,7 @@ class Application:
                 project_scopes=project_scopes,
             ),
         )
+        return job
 
     def _run_cost_statistics_cache_warmup_job(
         self,
@@ -9375,6 +9988,12 @@ class Application:
                 add("收")
             elif debit is not None and debit > 0:
                 add("支")
+            category_label = str(row.get("category_label") or "").strip()
+            category_code = str(row.get("category_code") or "").strip()
+            if category_label in set(BANK_TRANSACTION_CATEGORY_LABELS.values()):
+                add(category_label)
+            elif category_code in BANK_TRANSACTION_CATEGORY_LABELS:
+                add(BANK_TRANSACTION_CATEGORY_LABELS[category_code])
 
         if relation_mode == "internal_transfer_pair":
             add("内部往来")
@@ -10002,12 +10621,21 @@ def _build_handler_factory(app: Application) -> Callable[..., BaseHTTPRequestHan
         def do_POST(self) -> None:  # noqa: N802
             self._dispatch("POST")
 
+        def do_PATCH(self) -> None:  # noqa: N802
+            self._dispatch("PATCH")
+
+        def do_PUT(self) -> None:  # noqa: N802
+            self._dispatch("PUT")
+
+        def do_DELETE(self) -> None:  # noqa: N802
+            self._dispatch("DELETE")
+
         def do_OPTIONS(self) -> None:  # noqa: N802
             self._dispatch("OPTIONS")
 
         def _dispatch(self, method: str) -> None:
             body: bytes | None = None
-            if method == "POST":
+            if method in {"POST", "PUT", "PATCH", "DELETE"}:
                 content_length = int(self.headers.get("Content-Length", "0"))
                 body = self.rfile.read(content_length) if content_length > 0 else None
             response = app.handle_request(method, self.path, body, dict(self.headers.items()))

@@ -2,6 +2,7 @@ import AccountBalanceOutlinedIcon from "@mui/icons-material/AccountBalanceOutlin
 import AssessmentOutlinedIcon from "@mui/icons-material/AssessmentOutlined";
 import CalculateOutlinedIcon from "@mui/icons-material/CalculateOutlined";
 import DirectionsCarFilledOutlinedIcon from "@mui/icons-material/DirectionsCarFilledOutlined";
+import HandshakeOutlinedIcon from "@mui/icons-material/HandshakeOutlined";
 import HubOutlinedIcon from "@mui/icons-material/HubOutlined";
 import MonitorHeartOutlinedIcon from "@mui/icons-material/MonitorHeartOutlined";
 import ReceiptLongOutlinedIcon from "@mui/icons-material/ReceiptLongOutlined";
@@ -30,6 +31,7 @@ export const sidebarGroups: SidebarGroup[] = [
       { label: "税金抵扣", to: "/tax-offset", icon: CalculateOutlinedIcon },
       { label: "成本统计", to: "/cost-statistics", icon: AssessmentOutlinedIcon },
       { label: "银行明细", to: "/bank-details", icon: AccountBalanceOutlinedIcon },
+      { label: "往来款管理", to: "/turnover-ledger", icon: HandshakeOutlinedIcon },
       { label: "ETC票据管理", to: "/etc-tickets", icon: DirectionsCarFilledOutlinedIcon },
     ],
   },

@@ -2279,7 +2279,7 @@ body.column-layout-dragging {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   max-width: 100%;
 }
 
@@ -2340,6 +2340,14 @@ body.column-layout-dragging {
   font-size: 10px;
   font-weight: 700;
   white-space: nowrap;
+}
+
+.bank-category-tag {
+  max-width: 100%;
+  min-width: 0;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+  text-align: center;
 }
 
 .record-card-cell.column-compact {

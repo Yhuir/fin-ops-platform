@@ -15,6 +15,7 @@ READ_MODEL_SOURCE_VERSION_FIELDS = (
     "case_snapshot_version",
     "pair_relation_snapshot_version",
     "candidate_snapshot_version",
+    "turnover_relation_snapshot_version",
     "matching_rules_version",
 )
 

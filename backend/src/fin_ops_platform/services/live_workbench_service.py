@@ -8,6 +8,7 @@ from typing import Any
 from fin_ops_platform.domain.enums import MatchingConfidence, MatchingResultType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Invoice, MatchingResult
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
+from fin_ops_platform.services.bank_transaction_category_service import BANK_TRANSACTION_CATEGORY_LABELS
 from fin_ops_platform.services.import_file_service import is_company_identity
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.matching import MatchingEngineService
@@ -20,6 +21,7 @@ INTERNAL_TRANSFER_MATCH_WINDOW = timedelta(hours=72)
 INTERNAL_TRANSFER_COMPANY_NAME = "云南溯源科技有限公司"
 SALARY_AUTO_MATCH_RULE_CODE = "salary_personal_auto_match"
 INTERNAL_TRANSFER_RULE_CODE = "internal_transfer_pair"
+DEFAULT_BANK_TEXT_FIELD_LABELS = ("摘要", "备注", "用途", "交易用途", "客户附言", "附言")
 
 
 class LiveWorkbenchService:
@@ -29,10 +31,16 @@ class LiveWorkbenchService:
         matching_service: MatchingEngineService,
         *,
         bank_account_resolver: BankAccountResolver | None = None,
+        category_provider: Any | None = None,
+        bank_text_fields: list[str] | tuple[str, ...] | None = None,
     ) -> None:
         self._import_service = import_service
         self._matching_service = matching_service
         self._bank_account_resolver = bank_account_resolver or BankAccountResolver()
+        self._category_provider = category_provider
+        self._bank_text_field_labels = tuple(
+            label for label in (bank_text_fields or DEFAULT_BANK_TEXT_FIELD_LABELS) if isinstance(label, str) and label.strip()
+        )
         self._detail_rows_by_id: dict[str, dict[str, Any]] = {}
         self._company_identity: tuple[str, str | None] = (DEFAULT_COMPANY_NAME, None)
 
@@ -134,7 +142,8 @@ class LiveWorkbenchService:
             return None
         if transaction.source_batch_id in excluded_transaction_batch_ids:
             return None
-        return self._build_bank_row(transaction, result_by_object_id.get(row_id))
+        category = self._category_for_transaction(transaction.id)
+        return self._build_bank_row(transaction, result_by_object_id.get(row_id), category=category)
 
     def list_auto_pair_candidates(self, month: str = "all") -> list[MatchingResult]:
         results_by_object_id = self._existing_results_by_object_id()
@@ -157,7 +166,13 @@ class LiveWorkbenchService:
     def _serialize_row(row: dict[str, Any]) -> dict[str, Any]:
         return {key: value for key, value in row.items() if not key.startswith("_")}
 
-    def _build_bank_row(self, transaction: BankTransaction, result: MatchingResult | None) -> dict[str, Any]:
+    def _build_bank_row(
+        self,
+        transaction: BankTransaction,
+        result: MatchingResult | None,
+        *,
+        category: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         relation = relation_from_result(result)
         section = "paired" if result and result.result_type == MatchingResultType.AUTOMATIC_MATCH else "open"
         payment_account_label = self._bank_account_resolver.resolve_label(
@@ -169,6 +184,9 @@ class LiveWorkbenchService:
         direction_label = "支出" if transaction.txn_direction.value == "outflow" else "收入"
         account_field_label = "支付账户" if transaction.txn_direction.value == "outflow" else "收款账户"
         remark_value = self._build_bank_remark(transaction, result)
+        category_payload = self._normalize_category_record(category)
+        tags = self._bank_row_tags(transaction, category_payload)
+        bank_text_fields = self._build_bank_text_fields(transaction)
         return {
             "id": transaction.id,
             "type": "bank",
@@ -186,6 +204,12 @@ class LiveWorkbenchService:
             "pay_receive_time": transaction.pay_receive_time or transaction.trade_time,
             "summary": transaction.summary,
             "remark": remark_value,
+            "category_code": category_payload.get("category_code") if category_payload else None,
+            "category_label": category_payload.get("category_label") if category_payload else None,
+            "category_path": list(category_payload.get("category_path") or []) if category_payload else [],
+            "category_source": category_payload.get("category_source") if category_payload else None,
+            "tags": tags,
+            "bank_text_fields": bank_text_fields,
             "repayment_date": "",
             "available_actions": self._available_actions("bank", section),
             "_month": transaction.txn_date[:7] if transaction.txn_date else "",
@@ -298,10 +322,20 @@ class LiveWorkbenchService:
             if not self._invoice_is_workbench_visible(invoice):
                 continue
             self._detail_rows_by_id[invoice.id] = self._build_invoice_row(invoice, result_by_object_id.get(invoice.id))
-        for transaction in self._import_service.list_transactions():
+        transactions = [
+            transaction
+            for transaction in self._import_service.list_transactions()
+            if transaction.source_batch_id not in excluded_transaction_batch_ids
+        ]
+        categories_by_transaction_id = self._categories_for_transactions([transaction.id for transaction in transactions])
+        for transaction in transactions:
             if transaction.source_batch_id in excluded_transaction_batch_ids:
                 continue
-            self._detail_rows_by_id[transaction.id] = self._build_bank_row(transaction, result_by_object_id.get(transaction.id))
+            self._detail_rows_by_id[transaction.id] = self._build_bank_row(
+                transaction,
+                result_by_object_id.get(transaction.id),
+                category=categories_by_transaction_id.get(transaction.id),
+            )
 
     def _existing_results_by_object_id(self) -> dict[str, MatchingResult]:
         latest_run = self._matching_service.latest_run()
@@ -444,6 +478,120 @@ class LiveWorkbenchService:
         if counterpart_text in base_remark:
             return base_remark
         return f"{base_remark}；{counterpart_text}"
+
+    def _category_for_transaction(self, transaction_id: str) -> dict[str, str] | None:
+        return self._categories_for_transactions([transaction_id]).get(transaction_id)
+
+    def _categories_for_transactions(self, transaction_ids: list[str]) -> dict[str, dict[str, str]]:
+        provider = self._category_provider
+        if provider is None or not transaction_ids:
+            return {}
+
+        raw_records: Any
+        if hasattr(provider, "bulk_get"):
+            raw_records = provider.bulk_get(transaction_ids)
+        elif hasattr(provider, "get"):
+            raw_records = {
+                transaction_id: provider.get(transaction_id)
+                for transaction_id in transaction_ids
+            }
+        else:
+            return {}
+
+        normalized: dict[str, dict[str, str]] = {}
+        if isinstance(raw_records, dict):
+            iterable = raw_records.items()
+        elif isinstance(raw_records, list):
+            iterable = ((str(record.get("transaction_id") or ""), record) for record in raw_records if isinstance(record, dict))
+        else:
+            return {}
+
+        for transaction_id, record in iterable:
+            category = self._normalize_category_record(record)
+            if category is not None:
+                normalized[str(transaction_id)] = category
+        return normalized
+
+    @staticmethod
+    def _normalize_category_record(record: Any) -> dict[str, str] | None:
+        if record is None:
+            return None
+        code = str(
+            LiveWorkbenchService._record_value(record, "category_code")
+            or LiveWorkbenchService._record_value(record, "code")
+            or ""
+        ).strip()
+        if code not in BANK_TRANSACTION_CATEGORY_LABELS:
+            return None
+        label = str(
+            LiveWorkbenchService._record_value(record, "category_label")
+            or LiveWorkbenchService._record_value(record, "label")
+            or BANK_TRANSACTION_CATEGORY_LABELS[code]
+        ).strip()
+        source = str(
+            LiveWorkbenchService._record_value(record, "category_source")
+            or LiveWorkbenchService._record_value(record, "source")
+            or "manual"
+        ).strip() or "manual"
+        return {
+            "category_code": code,
+            "category_label": label,
+            "category_path": [
+                str(item).strip()
+                for item in list(LiveWorkbenchService._record_value(record, "category_path") or [])
+                if str(item).strip()
+            ],
+            "category_source": source,
+        }
+
+    @staticmethod
+    def _record_value(record: Any, key: str) -> Any:
+        if isinstance(record, dict):
+            return record.get(key)
+        return getattr(record, key, None)
+
+    @staticmethod
+    def _bank_row_tags(transaction: BankTransaction, category: dict[str, str] | None) -> list[str]:
+        tags: list[str] = []
+        for tag in list(getattr(transaction, "tags", []) or []):
+            text = str(tag).strip()
+            if text and text not in tags:
+                tags.append(text)
+        category_label = str((category or {}).get("category_label") or "").strip()
+        if category_label and category_label not in tags:
+            tags.append(category_label)
+        return tags
+
+    def _build_bank_text_fields(self, transaction: BankTransaction) -> list[dict[str, str]]:
+        fields_by_label: dict[str, str] = {}
+        raw_fields = getattr(transaction, "bank_text_fields", None)
+        if isinstance(raw_fields, dict):
+            for label, value in raw_fields.items():
+                self._add_bank_text_field(fields_by_label, label, value)
+        elif isinstance(raw_fields, list):
+            for item in raw_fields:
+                if isinstance(item, dict):
+                    self._add_bank_text_field(fields_by_label, item.get("label"), item.get("value"))
+
+        self._add_bank_text_field(fields_by_label, "摘要", transaction.summary)
+        self._add_bank_text_field(fields_by_label, "备注", transaction.remark)
+
+        return [
+            {"label": label, "value": fields_by_label[label]}
+            for label in self._bank_text_field_labels
+            if label in fields_by_label
+        ]
+
+    @staticmethod
+    def _add_bank_text_field(fields_by_label: dict[str, str], label: Any, value: Any) -> None:
+        normalized_label = str(label or "").strip()
+        if not normalized_label or normalized_label in fields_by_label:
+            return
+        if value in (None, "", "--", "—"):
+            return
+        text = str(value).strip()
+        if text:
+            fields_by_label[normalized_label] = text
 
     def _internal_transfer_counterpart_transaction(
         self,

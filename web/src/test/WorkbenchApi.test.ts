@@ -199,6 +199,15 @@ describe("workbench api bank amount mapping", () => {
                     invoice_relation: { code: "manual_review", label: "待人工核查", tone: "danger" },
                     pay_receive_time: "2026-03-20 16:05:40",
                     remark: "收入待核查",
+                    category_code: "borrow_in_company_pending_repayment",
+                    category_label: "公司暂借款：待还款",
+                    category_source: "manual",
+                    tags: ["公司暂借款：待还款"],
+                    bank_text_fields: [
+                      { label: "摘要", value: "电子转账" },
+                      { label: "备注", value: "代购公车款" },
+                      { label: "用途", value: "货款" },
+                    ],
                     repayment_date: "",
                     available_actions: ["detail"],
                   },
@@ -218,6 +227,320 @@ describe("workbench api bank amount mapping", () => {
     expect(bankRow.tableValues.amount).toBe("6,000.00");
     expect(bankRow.amount).toBe("6,000.00");
     expect(bankRow.tableValues.direction).toBe("收入");
+    expect((bankRow as any).categoryCode).toBe("borrow_in_company_pending_repayment");
+    expect((bankRow as any).categoryLabel).toBe("公司暂借款：待还款");
+    expect((bankRow as any).categorySource).toBe("manual");
+    expect((bankRow as any).bankTextFields).toEqual([
+      { label: "摘要", value: "电子转账" },
+      { label: "备注", value: "代购公车款" },
+      { label: "用途", value: "货款" },
+    ]);
+    expect(bankRow.tableValues.note).toBe("摘要：电子转账\n备注：代购公车款\n用途：货款");
+  });
+
+  test("maps OA 2035 attachment invoices, payment receipts, and unknown evidence without changing the backend group", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "2026-03",
+          summary: {
+            oa_count: 1,
+            bank_count: 0,
+            invoice_count: 7,
+            paired_count: 0,
+            open_count: 1,
+            exception_count: 0,
+          },
+          paired: { groups: [] },
+          open: {
+            groups: [
+              {
+                group_id: "case:CASE-202603-OA-ATTACHMENT-2035",
+                group_type: "source_linked",
+                match_confidence: "high",
+                reason: "oa_attachment_source_relation",
+                oa_rows: [
+                  {
+                    id: "oa-exp-2035",
+                    type: "oa",
+                    applicant: "胡瑢",
+                    project_name: "OA 2035 报销单",
+                    apply_type: "日常报销",
+                    amount: "248.00",
+                    counterparty_name: "胡瑢",
+                    oa_bank_relation: { code: "pending_match", label: "待找流水与发票", tone: "warn" },
+                    available_actions: ["detail"],
+                  },
+                ],
+                bank_rows: [],
+                invoice_rows: [
+                  {
+                    id: "iv-oa-2035-machine-25",
+                    type: "invoice",
+                    source_kind: "oa_attachment_invoice",
+                    case_id: "CASE-202603-OA-ATTACHMENT-2035",
+                    seller_name: "昆玉高速公路收费站",
+                    buyer_name: "云南溯源科技有限公司",
+                    issue_date: "2026-03-04",
+                    amount: "25.00",
+                    total_with_tax: "25.00",
+                    invoice_type: "进项普票",
+                    invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
+                    available_actions: ["detail"],
+                  },
+                  {
+                    id: "iv-oa-2035-machine-23",
+                    type: "invoice",
+                    source_kind: "oa_attachment_invoice",
+                    case_id: "CASE-202603-OA-ATTACHMENT-2035",
+                    seller_name: "玉昆高速公路收费站",
+                    buyer_name: "云南溯源科技有限公司",
+                    issue_date: "2026-03-04",
+                    amount: "23.00",
+                    total_with_tax: "23.00",
+                    invoice_type: "进项普票",
+                    invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
+                    available_actions: ["detail"],
+                  },
+                  {
+                    id: "iv-oa-2035-fuel-200",
+                    type: "invoice",
+                    source_kind: "oa_attachment_invoice",
+                    case_id: "CASE-202603-OA-ATTACHMENT-2035",
+                    seller_name: "中国石油云南销售公司",
+                    buyer_name: "云南溯源科技有限公司",
+                    issue_date: "2026-03-04",
+                    amount: "200.00",
+                    total_with_tax: "200.00",
+                    invoice_type: "进项普票",
+                    invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
+                    available_actions: ["detail"],
+                  },
+                  {
+                    id: "pay-oa-2035-etc-25",
+                    type: "invoice",
+                    source_kind: "oa_attachment_payment_receipt",
+                    case_id: "CASE-202603-OA-ATTACHMENT-2035",
+                    seller_name: "微信支付",
+                    buyer_name: "胡瑢",
+                    issue_date: "2026-03-04",
+                    amount: "25.00",
+                    total_with_tax: "25.00",
+                    invoice_type: "付款凭证",
+                    invoice_bank_relation: { code: "evidence_only", label: "附件凭证", tone: "warn" },
+                    available_actions: ["detail"],
+                  },
+                  {
+                    id: "pay-oa-2035-etc-23",
+                    type: "invoice",
+                    source_kind: "oa_attachment_payment_receipt",
+                    case_id: "CASE-202603-OA-ATTACHMENT-2035",
+                    seller_name: "微信支付",
+                    buyer_name: "胡瑢",
+                    issue_date: "2026-03-04",
+                    amount: "23.00",
+                    total_with_tax: "23.00",
+                    invoice_type: "付款凭证",
+                    invoice_bank_relation: { code: "evidence_only", label: "附件凭证", tone: "warn" },
+                    available_actions: ["detail"],
+                  },
+                  {
+                    id: "pay-oa-2035-fuel-200",
+                    type: "invoice",
+                    source_kind: "oa_attachment_payment_receipt",
+                    case_id: "CASE-202603-OA-ATTACHMENT-2035",
+                    seller_name: "微信支付",
+                    buyer_name: "胡瑢",
+                    issue_date: "2026-03-04",
+                    amount: "200.00",
+                    total_with_tax: "200.00",
+                    invoice_type: "付款凭证",
+                    invoice_bank_relation: { code: "evidence_only", label: "附件凭证", tone: "warn" },
+                    available_actions: ["detail"],
+                  },
+                  {
+                    id: "unk-oa-2035-scan",
+                    type: "invoice",
+                    source_kind: "oa_attachment_unknown",
+                    case_id: "CASE-202603-OA-ATTACHMENT-2035",
+                    seller_name: "未识别附件",
+                    buyer_name: "胡瑢",
+                    issue_date: "2026-03-04",
+                    amount: "0.00",
+                    total_with_tax: "0.00",
+                    invoice_type: "未知附件",
+                    invoice_bank_relation: { code: "evidence_only", label: "附件待识别", tone: "warn" },
+                    available_actions: ["detail"],
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const payload = await fetchWorkbench("2026-03");
+    const group = payload.open.groups[0];
+
+    expect(group.id).toBe("case:CASE-202603-OA-ATTACHMENT-2035");
+    expect(group.rows.oa.map((row) => row.id)).toEqual(["oa-exp-2035"]);
+    expect(group.rows.invoice.map((row) => row.id)).toEqual([
+      "iv-oa-2035-machine-25",
+      "iv-oa-2035-machine-23",
+      "iv-oa-2035-fuel-200",
+      "pay-oa-2035-etc-25",
+      "pay-oa-2035-etc-23",
+      "pay-oa-2035-fuel-200",
+      "unk-oa-2035-scan",
+    ]);
+    expect(group.rows.invoice.map((row) => row.sourceKind)).toEqual([
+      "oa_attachment_invoice",
+      "oa_attachment_invoice",
+      "oa_attachment_invoice",
+      "oa_attachment_payment_receipt",
+      "oa_attachment_payment_receipt",
+      "oa_attachment_payment_receipt",
+      "oa_attachment_unknown",
+    ]);
+    expect(group.rows.invoice.map((row) => row.label)).toEqual([
+      "OA附件",
+      "OA附件",
+      "OA附件",
+      "付款凭证",
+      "付款凭证",
+      "付款凭证",
+      "未识别附件",
+    ]);
+  });
+
+  test("keeps all-time CCB bank rows visible across paired and open groups by default", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "all",
+          summary: {
+            oa_count: 0,
+            bank_count: 4,
+            invoice_count: 1,
+            paired_count: 1,
+            open_count: 3,
+            exception_count: 0,
+          },
+          paired: {
+            groups: [
+              {
+                group_id: "case:CASE-CCB-PAIRED-001",
+                group_type: "manual_confirmed",
+                match_confidence: "high",
+                reason: "relation_snapshot",
+                oa_rows: [],
+                bank_rows: [
+                  {
+                    id: "ccb-apr-paired",
+                    type: "bank",
+                    trade_time: "2026-04-08 09:00:00",
+                    direction: "支出",
+                    debit_amount: "40.00",
+                    credit_amount: "",
+                    counterparty_name: "建设银行可见性测试供应商",
+                    payment_account_label: "建设银行 8106",
+                    invoice_relation: { code: "fully_linked", label: "完全关联", tone: "success" },
+                    available_actions: ["detail"],
+                  },
+                ],
+                invoice_rows: [
+                  {
+                    id: "invoice-apr-paired",
+                    type: "invoice",
+                    seller_name: "建设银行配对供应商",
+                    buyer_name: "云南溯源科技有限公司",
+                    issue_date: "2026-04-08",
+                    amount: "40.00",
+                    total_with_tax: "40.00",
+                    invoice_bank_relation: { code: "fully_linked", label: "完全关联", tone: "success" },
+                    available_actions: ["detail"],
+                  },
+                ],
+              },
+            ],
+          },
+          open: {
+            groups: [
+              {
+                group_id: "row:ccb-jan-open",
+                group_type: "candidate",
+                match_confidence: "low",
+                reason: "single_open_row",
+                oa_rows: [],
+                bank_rows: [
+                  {
+                    id: "ccb-jan-open",
+                    type: "bank",
+                    trade_time: "2026-01-08 09:00:00",
+                    direction: "支出",
+                    debit_amount: "10.00",
+                    credit_amount: "",
+                    counterparty_name: "建设银行可见性测试供应商",
+                    payment_account_label: "建设银行 8106",
+                    invoice_relation: { code: "pending_invoice_match", label: "待关联发票", tone: "warn" },
+                    available_actions: ["detail"],
+                  },
+                  {
+                    id: "ccb-feb-open",
+                    type: "bank",
+                    trade_time: "2026-02-08 09:00:00",
+                    direction: "支出",
+                    debit_amount: "20.00",
+                    credit_amount: "",
+                    counterparty_name: "建设银行可见性测试供应商",
+                    payment_account_label: "建设银行 8106",
+                    invoice_relation: { code: "pending_invoice_match", label: "待关联发票", tone: "warn" },
+                    available_actions: ["detail"],
+                  },
+                  {
+                    id: "ccb-mar-open",
+                    type: "bank",
+                    trade_time: "2026-03-08 09:00:00",
+                    direction: "支出",
+                    debit_amount: "30.00",
+                    credit_amount: "",
+                    counterparty_name: "建设银行可见性测试供应商",
+                    payment_account_label: "建设银行 8106",
+                    invoice_relation: { code: "pending_invoice_match", label: "待关联发票", tone: "warn" },
+                    available_actions: ["detail"],
+                  },
+                ],
+                invoice_rows: [],
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const payload = await fetchWorkbench("all");
+    const state = createEmptyWorkbenchZoneDisplayState();
+    const displayGroups = buildWorkbenchDisplayGroups([...payload.paired.groups, ...payload.open.groups], state);
+    const pairedBankRows = payload.paired.groups.flatMap((group) => group.rows.bank);
+    const openBankRows = payload.open.groups.flatMap((group) => group.rows.bank);
+    const displayBankRows = displayGroups.flatMap((group) => group.rows.bank);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/workbench?month=all", { method: "GET", signal: undefined });
+    expect(payload.summary.bankCount).toBe(4);
+    expect(pairedBankRows.map((row) => row.id)).toEqual(["ccb-apr-paired"]);
+    expect(openBankRows.map((row) => row.id)).toEqual(["ccb-jan-open", "ccb-feb-open", "ccb-mar-open"]);
+    expect(openBankRows).toHaveLength(3);
+    expect(pairedBankRows.length + openBankRows.length).toBe(4);
+    expect(displayBankRows.map((row) => row.id)).toEqual([
+      "ccb-apr-paired",
+      "ccb-jan-open",
+      "ccb-feb-open",
+      "ccb-mar-open",
+    ]);
+    expect(displayBankRows.every((row) => row.tableValues.paymentAccount === "建设银行 8106")).toBe(true);
   });
 
   test("keeps aggregated OA detail fields available for the detail drawer", async () => {

@@ -35,6 +35,11 @@ GENERIC_COUNTERPARTY_NAMES = {
 GENERIC_SUMMARY_TERMS = {"报销", "转账", "付款", "支付", "费用", "代付", "批量"}
 TEXT_SPLIT_RE = re.compile(r"[\s,，.。;；:：、/\\|()（）\[\]【】{}<>《》\"'“”‘’+-]+")
 WORKBENCH_MATCHING_RULES_VERSION = "2026-05-11-deterministic-row-grouping"
+OA_ATTACHMENT_INVOICE_SOURCE_KIND = "oa_attachment_invoice"
+NON_INVOICE_OA_ATTACHMENT_SOURCE_KINDS = {
+    "oa_attachment_payment_receipt",
+    "oa_attachment_unknown",
+}
 
 
 class WorkbenchMatchingRules:
@@ -58,7 +63,11 @@ class WorkbenchMatchingRules:
         resolved_versions = deepcopy(source_versions if isinstance(source_versions, dict) else {})
         oa = [self._with_type(row, "oa") for row in oa_rows]
         bank = [self._with_type(row, "bank") for row in bank_rows]
-        invoices = [self._with_type(row, "invoice") for row in invoice_rows]
+        invoices = [
+            self._with_type(row, "invoice")
+            for row in invoice_rows
+            if self._is_invoice_matching_source(row)
+        ]
 
         candidates: list[dict[str, Any]] = []
         candidates.extend(self._oa_bank_exact_amount(scope_month, oa, bank, resolved_versions))
@@ -265,7 +274,7 @@ class WorkbenchMatchingRules:
     ) -> list[dict[str, Any]]:
         attachment_invoices_by_oa_id: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for invoice_row in sorted(invoice_rows, key=self._row_id):
-            if self._source_kind(invoice_row) != "oa_attachment_invoice":
+            if self._source_kind(invoice_row) != OA_ATTACHMENT_INVOICE_SOURCE_KIND:
                 continue
             linked_oa_id = self._linked_oa_id(invoice_row)
             if linked_oa_id:
@@ -782,14 +791,14 @@ class WorkbenchMatchingRules:
         linked_attachment_invoice_numbers = {
             invoice_no
             for invoice in invoice_rows
-            if self._source_kind(invoice) == "oa_attachment_invoice"
+            if self._source_kind(invoice) == OA_ATTACHMENT_INVOICE_SOURCE_KIND
             and self._linked_oa_id(invoice) == oa_id
             and (invoice_no := self._string_value(invoice.get("invoice_no"))) is not None
         }
         return [
             invoice
             for invoice in sorted(invoice_rows, key=self._row_id)
-            if self._source_kind(invoice) != "oa_attachment_invoice"
+            if self._source_kind(invoice) != OA_ATTACHMENT_INVOICE_SOURCE_KIND
             and self._string_value(invoice.get("invoice_no")) not in linked_attachment_invoice_numbers
             and self._direction(invoice) == self._direction(oa_row)
             and self._counterparties_compatible(oa_row, invoice)
@@ -976,6 +985,10 @@ class WorkbenchMatchingRules:
     @staticmethod
     def _source_kind(row: dict[str, Any]) -> str:
         return str(row.get("source_kind") or "").strip()
+
+    @classmethod
+    def _is_invoice_matching_source(cls, row: dict[str, Any]) -> bool:
+        return cls._source_kind(row) not in NON_INVOICE_OA_ATTACHMENT_SOURCE_KINDS
 
     @staticmethod
     def _linked_oa_id(invoice_row: dict[str, Any]) -> str | None:

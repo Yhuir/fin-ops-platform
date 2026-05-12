@@ -12,6 +12,9 @@ from fin_ops_platform.services.workbench_special_pair_rule_service import (
 from fin_ops_platform.services.workbench_special_rule_detectors import WorkbenchSpecialRuleDetector
 
 
+EXTERNAL_TURNOVER_EVIDENCE = "external_turnover_evidence"
+
+
 class WorkbenchSpecialPairRuleServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.service = WorkbenchSpecialPairRuleService()
@@ -76,6 +79,69 @@ class WorkbenchSpecialPairRuleServiceTests(unittest.TestCase):
             candidates[0]["special_metadata"]["evidence"]["suggested_action_code"],
             "auto_close_internal_transfer",
         )
+
+    def test_internal_transfer_category_is_evidence_but_still_requires_distinct_accounts(self) -> None:
+        valid_candidates = self.service.generate_candidates(
+            "2026-03",
+            oa_rows=[],
+            bank_rows=[
+                {
+                    "id": "bank-tagged-out",
+                    "category_code": "internal_transfer",
+                    "account_name": "云南溯源科技有限公司",
+                    "counterparty_name": "未知账户",
+                    "account_no": "62220001",
+                    "debit_amount": "13,000.00",
+                    "credit_amount": "",
+                    "pay_receive_time": "2026-03-10 10:00:00",
+                },
+                {
+                    "id": "bank-tagged-in",
+                    "category_code": "internal_transfer",
+                    "account_name": "云南溯源科技有限公司",
+                    "counterparty_name": "未知账户",
+                    "account_no": "62220002",
+                    "debit_amount": "",
+                    "credit_amount": "13,000.00",
+                    "pay_receive_time": "2026-03-10 12:00:00",
+                },
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertEqual(len(valid_candidates), 1)
+        self.assertEqual(valid_candidates[0]["rule_code"], INTERNAL_TRANSFER_PAIR)
+        self.assertIn("category_code", valid_candidates[0]["special_metadata"]["evidence"]["matched_fields"])
+
+        invalid_candidates = self.service.generate_candidates(
+            "2026-03",
+            oa_rows=[],
+            bank_rows=[
+                {
+                    "id": "bank-same-account-out",
+                    "category_code": "internal_transfer",
+                    "account_name": "云南溯源科技有限公司",
+                    "counterparty_name": "未知账户",
+                    "account_no": "62220001",
+                    "debit_amount": "13,000.00",
+                    "credit_amount": "",
+                    "pay_receive_time": "2026-03-10 10:00:00",
+                },
+                {
+                    "id": "bank-same-account-in",
+                    "category_code": "internal_transfer",
+                    "account_name": "云南溯源科技有限公司",
+                    "counterparty_name": "未知账户",
+                    "account_no": "62220001",
+                    "debit_amount": "",
+                    "credit_amount": "13,000.00",
+                    "pay_receive_time": "2026-03-10 12:00:00",
+                },
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertEqual(invalid_candidates, [])
 
     def test_detects_configured_oa_attachment_invoice_offset(self) -> None:
         candidates = self.service.generate_candidates(
@@ -172,6 +238,93 @@ class WorkbenchSpecialPairRuleServiceTests(unittest.TestCase):
                 candidate["special_metadata"]["evidence"]["suggested_action_code"],
                 "review_cash_turnover",
             )
+
+    def test_cash_turnover_category_directly_creates_review_evidence(self) -> None:
+        candidates = self.service.generate_candidates(
+            "2026-03",
+            oa_rows=[],
+            bank_rows=[
+                {
+                    "id": "bank-tagged-cash",
+                    "category_code": "cash_turnover",
+                    "debit_amount": "200.00",
+                    "credit_amount": "",
+                    "remark": "普通备注",
+                    "counterparty_name": "普通户名",
+                },
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["rule_code"], CASH_TURNOVER_DETECTED)
+        self.assertEqual(candidates[0]["status"], "needs_review")
+        self.assertEqual(candidates[0]["special_metadata"]["cost_policy"], "hint_only")
+        self.assertIn("现金往来", candidates[0]["tags"])
+        self.assertEqual(
+            candidates[0]["special_metadata"]["evidence"]["category_code"],
+            "cash_turnover",
+        )
+
+    def test_offset_category_reuses_existing_offset_rule_code_without_auto_closing(self) -> None:
+        candidates = self.service.generate_candidates(
+            "2026-03",
+            oa_rows=[],
+            bank_rows=[
+                {
+                    "id": "bank-tagged-offset",
+                    "category_code": "offset",
+                    "debit_amount": "299.00",
+                    "credit_amount": "",
+                    "remark": "人工标记冲",
+                    "counterparty_name": "普通户名",
+                },
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["rule_code"], OA_INVOICE_OFFSET_AUTO_MATCH)
+        self.assertEqual(candidates[0]["status"], "needs_review")
+        self.assertIn("冲", candidates[0]["tags"])
+        self.assertFalse(candidates[0]["special_metadata"]["cost_excluded"])
+        self.assertEqual(
+            candidates[0]["special_metadata"]["evidence"]["category_code"],
+            "offset",
+        )
+
+    def test_external_turnover_category_enters_metadata_without_fake_closed_loop(self) -> None:
+        candidates = self.service.generate_candidates(
+            "2026-03",
+            oa_rows=[],
+            bank_rows=[
+                {
+                    "id": "bank-tagged-external",
+                    "category_code": "borrow_in_company_pending_repayment",
+                    "category_label": "公司暂借款：待还款",
+                    "category_path": ["借入", "公司往来款", "待还款"],
+                    "debit_amount": "",
+                    "credit_amount": "3,000.00",
+                    "remark": "外部借款",
+                    "counterparty_name": "外部客户",
+                },
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["rule_code"], EXTERNAL_TURNOVER_EVIDENCE)
+        self.assertEqual(candidates[0]["status"], "needs_review")
+        self.assertNotEqual(candidates[0]["status"], "auto_closed")
+        self.assertEqual(
+            candidates[0]["special_metadata"]["evidence"]["category_code"],
+            "borrow_in_company_pending_repayment",
+        )
+        self.assertEqual(
+            candidates[0]["special_metadata"]["evidence"]["category_path"],
+            ["借入", "公司往来款", "待还款"],
+        )
+        self.assertIn("公司暂借款：待还款", candidates[0]["tags"])
 
     def test_shared_detector_returns_standard_evidence_for_classifier_reuse(self) -> None:
         detector = WorkbenchSpecialRuleDetector()

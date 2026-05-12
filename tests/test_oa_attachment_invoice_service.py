@@ -186,6 +186,63 @@ MACHINE_PRINTED_TOLL_INVOICE_TEXT = """
 报销凭证
 """
 
+MACHINE_PRINTED_TOLL_INVOICE_PAIR_TEXT = """
+云南通用机打发票
+云南昆玉高速公路开发有限公司
+发票代码 153012525093
+发票号码 00827789
+收费金额：25
+报销凭证
+云南通用机打发票
+云南昆玉高速公路开发有限公司
+发票代码 153012525093
+发票号码 00233178
+收费金额：23
+报销凭证
+"""
+
+WECHAT_ETC_PAYMENT_25_TEXT = """
+全部账单
+联网公司
+-25.00
+当前状态 支付成功
+支付时间 2026年3月3日 17:06:18
+商品 -云南昆明南站高速通行费
+商户全称 云南公路联网收费管理有限公司
+收单机构 财付通支付科技有限公司
+支付方式 交通银行信用卡(3632)
+交易单号 4200002978202603030366873386
+商户单号 530010170840260303170616605197
+"""
+
+WECHAT_ETC_PAYMENT_23_TEXT = """
+全部账单
+联网公司
+-23.00
+当前状态 支付成功
+支付时间 2026年3月3日 10:06:57
+商品 -云南九龙池站高速通行费
+商户全称 云南公路联网收费管理有限公司
+收单机构 财付通支付科技有限公司
+支付方式 交通银行信用卡(3632)
+交易单号 4200003046202603030281812965
+商户单号 530010130860260303100655480647
+"""
+
+WECHAT_FUEL_PAYMENT_200_TEXT = """
+全部账单
+中国石化
+-200.00
+当前状态 支付成功
+支付时间 2026年3月4日 14:13:44
+商品 加油费
+商户全称 中国石化销售股份有限公司云南昆明石油分公司
+收单机构 财付通支付科技有限公司
+支付方式 交通银行信用卡(3632)
+交易单号 4200002000202603040000000200
+商户单号 fuel-merchant-order-200
+"""
+
 NON_TAX_PAYMENT_RECEIPT_TEXT = """
 云南省非税收入一般缴款书（电子）
 缴款码：53010026134004568343
@@ -425,6 +482,87 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         self.assertEqual(invoice["tax_amount"], "0.00")
         self.assertEqual(invoice["total_with_tax"], "15.00")
         self.assertEqual(invoice["invoice_kind"], "云南通用机打发票")
+
+    def test_parse_evidences_extracts_single_machine_printed_invoice(self) -> None:
+        service = OAAttachmentInvoiceService()
+        file_entry = {"fileName": "toll.jpg", "filePath": "/toll.jpg", "suffix": "jpg"}
+
+        with (
+            patch.object(service, "_download_content", return_value=b"fake-jpg-bytes"),
+            patch.object(service, "_extract_image_text", return_value=MACHINE_PRINTED_TOLL_INVOICE_TEXT),
+        ):
+            evidences = service.parse_evidences([file_entry])
+
+        self.assertEqual(len(evidences), 1)
+        self.assertEqual(evidences[0]["evidence_type"], "machine_invoice")
+        self.assertEqual(evidences[0]["document_kind"], "yunnan_machine_invoice")
+        self.assertEqual(evidences[0]["invoice_no"], "00582299")
+        self.assertEqual(evidences[0]["amount"], "15.00")
+        self.assertEqual(evidences[0]["source_region_key"], "machine_invoice:1")
+
+    def test_parse_evidences_extracts_multiple_machine_printed_invoices_from_one_ocr_text(self) -> None:
+        service = OAAttachmentInvoiceService()
+        file_entry = {"fileName": "toll-pair.jpg", "filePath": "/toll-pair.jpg", "suffix": "jpg"}
+
+        with (
+            patch.object(service, "_download_content", return_value=b"fake-jpg-bytes"),
+            patch.object(service, "_extract_image_text", return_value=MACHINE_PRINTED_TOLL_INVOICE_PAIR_TEXT),
+        ):
+            evidences = service.parse_evidences([file_entry])
+
+        self.assertEqual([evidence["evidence_type"] for evidence in evidences], ["machine_invoice", "machine_invoice"])
+        self.assertEqual([evidence["invoice_no"] for evidence in evidences], ["00827789", "00233178"])
+        self.assertEqual([evidence["amount"] for evidence in evidences], ["25.00", "23.00"])
+        self.assertEqual([evidence["source_region_key"] for evidence in evidences], ["machine_invoice:1", "machine_invoice:2"])
+
+    def test_parse_evidences_extracts_wechat_etc_payment_receipt_25(self) -> None:
+        service = OAAttachmentInvoiceService()
+        receipt = service._parse_payment_receipt_text(WECHAT_ETC_PAYMENT_25_TEXT)
+
+        self.assertIsNotNone(receipt)
+        assert receipt is not None
+        self.assertEqual(receipt["evidence_type"], "payment_receipt")
+        self.assertEqual(receipt["document_kind"], "wechat_etc_payment")
+        self.assertEqual(receipt["amount"], "25.00")
+        self.assertEqual(receipt["merchant_name"], "云南公路联网收费管理有限公司")
+        self.assertEqual(receipt["paid_at"], "2026-03-03 17:06:18")
+        self.assertEqual(receipt["transaction_no"], "4200002978202603030366873386")
+        self.assertEqual(receipt["merchant_order_no"], "530010170840260303170616605197")
+        self.assertEqual(receipt["payment_method"], "交通银行信用卡(3632)")
+
+    def test_parse_evidences_extracts_wechat_etc_payment_receipt_23(self) -> None:
+        service = OAAttachmentInvoiceService()
+        receipt = service._parse_payment_receipt_text(WECHAT_ETC_PAYMENT_23_TEXT)
+
+        self.assertIsNotNone(receipt)
+        assert receipt is not None
+        self.assertEqual(receipt["document_kind"], "wechat_etc_payment")
+        self.assertEqual(receipt["amount"], "23.00")
+        self.assertEqual(receipt["paid_at"], "2026-03-03 10:06:57")
+        self.assertEqual(receipt["transaction_no"], "4200003046202603030281812965")
+
+    def test_parse_evidences_extracts_wechat_fuel_payment_receipt_200(self) -> None:
+        service = OAAttachmentInvoiceService()
+        receipt = service._parse_payment_receipt_text(WECHAT_FUEL_PAYMENT_200_TEXT)
+
+        self.assertIsNotNone(receipt)
+        assert receipt is not None
+        self.assertEqual(receipt["document_kind"], "wechat_fuel_payment")
+        self.assertEqual(receipt["amount"], "200.00")
+        self.assertEqual(receipt["merchant_name"], "中国石化销售股份有限公司云南昆明石油分公司")
+        self.assertEqual(receipt["merchant_order_no"], "fuel-merchant-order-200")
+
+    def test_parse_files_does_not_return_payment_receipts(self) -> None:
+        service = OAAttachmentInvoiceService()
+        file_entry = {"fileName": "wechat-payment.png", "filePath": "/wechat-payment.png", "suffix": "png"}
+
+        with (
+            patch.object(service, "_download_content", return_value=b"fake-png-bytes"),
+            patch.object(service, "_extract_image_text", return_value=WECHAT_ETC_PAYMENT_25_TEXT),
+        ):
+            invoices = service.parse_files([file_entry])
+
+        self.assertEqual(invoices, [])
 
     def test_parse_invoice_text_accepts_non_tax_payment_receipt(self) -> None:
         service = OAAttachmentInvoiceService()

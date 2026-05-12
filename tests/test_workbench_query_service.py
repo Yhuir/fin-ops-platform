@@ -323,6 +323,80 @@ class SourceBoundAttachmentOAAdapter:
         return [SourceBoundAttachmentRecord(), SingleSourceAttachmentRecord()]
 
 
+class EvidenceAttachmentRecord:
+    def __init__(self) -> None:
+        self.id = "oa-evidence-2035"
+        self.month = "2026-03"
+        self.section = "open"
+        self.case_id = None
+        self.applicant = "胡瑢"
+        self.project_name = "工作证管理系统维护项目"
+        self.apply_type = "日常报销"
+        self.amount = "248.00"
+        self.counterparty_name = ""
+        self.reason = "OA 2035 附件凭证"
+        self.relation_code = "pending_match"
+        self.relation_label = "待找流水与发票"
+        self.relation_tone = "warn"
+        self.expense_type = "项目费用"
+        self.expense_content = "过路费；加油费"
+        self.detail_fields = {
+            "OA单号": "OA-2035",
+            "申请日期": "2026-03-04",
+        }
+        self.attachment_evidences = [
+            {
+                "evidence_id": "ev-invoice-25",
+                "evidence_type": "machine_invoice",
+                "document_kind": "云南通用机打发票",
+                "invoice_no": "53000125",
+                "seller_name": "云南高速公路联网收费有限公司",
+                "buyer_name": "云南溯源科技有限公司",
+                "issue_date": "2026-03-04",
+                "amount": "25.00",
+                "total_with_tax": "25.00",
+                "tax_amount": "0.00",
+                "source_expense_row_index": "0",
+                "source_expense_item_id": "oa-evidence-2035:item:0:toll",
+                "source_attachment_key": "oa-evidence-2035:item:0:att:invoice",
+                "source_attachment_name": "过路费发票合图.jpg",
+            },
+            {
+                "evidence_id": "ev-payment-25",
+                "evidence_type": "payment_receipt",
+                "document_kind": "微信支付凭证",
+                "merchant_name": "云南高速公路联网收费有限公司",
+                "paid_at": "2026-03-04 09:20:00",
+                "transaction_no": "wx-toll-25",
+                "payment_method": "微信",
+                "amount": "25.00",
+                "source_expense_row_index": "0",
+                "source_expense_item_id": "oa-evidence-2035:item:0:toll",
+                "source_attachment_key": "oa-evidence-2035:item:0:att:payment-25",
+                "source_attachment_name": "微信付款凭证25.jpg",
+            },
+            {
+                "evidence_id": "ev-unknown",
+                "evidence_type": "unknown",
+                "document_kind": "未知附件",
+                "amount": "",
+                "source_expense_row_index": "1",
+                "source_expense_item_id": "oa-evidence-2035:item:1:fuel",
+                "source_attachment_key": "oa-evidence-2035:item:1:att:unknown",
+                "source_attachment_name": "无法识别附件.png",
+            },
+        ]
+        self.attachment_invoices = []
+        self.attachment_file_count = 3
+
+
+class EvidenceAttachmentOAAdapter:
+    def list_application_records(self, month: str) -> list[object]:
+        if month != "2026-03":
+            return []
+        return [EvidenceAttachmentRecord()]
+
+
 class AttachmentAwareOAAdapter:
     def list_application_records(self, month: str) -> list[object]:
         if month != "2026-03":
@@ -582,6 +656,36 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
             by_invoice_no["24800003"]["source_attachment_key"],
             "oa-exp-hurong-248:item:1:att:c",
         )
+
+    def test_attachment_evidences_project_invoice_payment_and_unknown_rows_with_origin_fields(self) -> None:
+        service = WorkbenchQueryService(oa_adapter=EvidenceAttachmentOAAdapter())
+
+        payload = service.get_workbench("2026-03")
+
+        evidence_rows = [
+            row
+            for row in payload["open"]["invoice"]
+            if row.get("derived_from_oa_id") == "oa-evidence-2035"
+        ]
+        self.assertCountEqual(
+            [row["source_kind"] for row in evidence_rows],
+            ["oa_attachment_invoice", "oa_attachment_payment_receipt", "oa_attachment_unknown"],
+        )
+        for row in evidence_rows:
+            self.assertEqual(row["derived_from_oa_id"], "oa-evidence-2035")
+            self.assertTrue(row["source_expense_item_id"])
+            self.assertTrue(row["source_attachment_key"])
+            self.assertTrue(row["source_attachment_name"])
+
+        by_source_kind = {row["source_kind"]: row for row in evidence_rows}
+        invoice_row = by_source_kind["oa_attachment_invoice"]
+        self.assertEqual(invoice_row["detail_fields"]["发票号码"], "53000125")
+        self.assertEqual(invoice_row["detail_fields"]["附件文件名"], "过路费发票合图.jpg")
+        payment_row = by_source_kind["oa_attachment_payment_receipt"]
+        self.assertEqual(payment_row["detail_fields"]["付款凭证号"], "wx-toll-25")
+        self.assertEqual(payment_row["detail_fields"]["附件凭证类型"], "微信支付凭证")
+        unknown_row = by_source_kind["oa_attachment_unknown"]
+        self.assertEqual(unknown_row["detail_fields"]["附件凭证类型"], "未知附件")
 
     def test_single_source_attachment_invoice_is_not_duplicated_from_expense_item_copy(self) -> None:
         service = WorkbenchQueryService(oa_adapter=SourceBoundAttachmentOAAdapter())

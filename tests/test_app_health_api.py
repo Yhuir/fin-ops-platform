@@ -189,6 +189,29 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertTrue(payload["background_jobs"]["primary_attention"]["acknowledgeable"])
         self.assertTrue(payload["background_jobs"]["primary_attention"]["retryable"])
 
+    def test_app_health_marks_cost_statistics_warmup_attention_retryable_and_serializes_job_policy(self) -> None:
+        app = build_application()
+        job = app._background_job_service.create_job(
+            job_type="cost_statistics_cache_warmup",
+            label="预热成本统计缓存",
+            owner_user_id="system",
+            visibility="system",
+            affected_months=["2026-03"],
+            source={"reason": "cost_statistics_scope_invalidated", "months": ["2026-03"]},
+        )
+        app._background_job_service.fail_job(job.job_id, "服务重启，任务已中断，请重新执行。", "interrupted_by_restart")
+
+        response = app.handle_request("GET", "/api/app-health")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["background_jobs"]["primary_attention"]["job_id"], job.job_id)
+        self.assertTrue(payload["background_jobs"]["primary_attention"]["acknowledgeable"])
+        self.assertTrue(payload["background_jobs"]["primary_attention"]["retryable"])
+        self.assertEqual(payload["background_jobs"]["jobs"][0]["job_id"], job.job_id)
+        self.assertTrue(payload["background_jobs"]["jobs"][0]["acknowledgeable"])
+        self.assertTrue(payload["background_jobs"]["jobs"][0]["retryable"])
+
     def test_app_health_marks_interrupted_job_without_source_not_retryable_but_acknowledgeable(self) -> None:
         app = build_application()
         job = app._background_job_service.create_job(

@@ -279,7 +279,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertIsNone(service.get_read_model("all", "active"))
         self.assertIsNone(service.get_read_model("all", "all"))
         schedule_warmup.assert_called_once()
-        self.assertCountEqual(schedule_warmup.call_args.args[0], ["2026-03", "all"])
+        self.assertEqual(schedule_warmup.call_args.args[0], ["2026-03"])
 
         for project_scope in ("active", "all"):
             service.upsert_read_model(
@@ -301,6 +301,56 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertIsNone(service.get_read_model("all", "all"))
         schedule_warmup.assert_called_once()
         self.assertEqual(schedule_warmup.call_args.args[0], ["all"])
+
+    def test_cost_statistics_month_warmup_does_not_append_all_scope(self) -> None:
+        job = SimpleNamespace(job_id="warmup-job-2026-03", owner_user_id="system")
+
+        with (
+            patch.object(
+                self.app._background_job_service,
+                "create_or_get_idempotent_job_with_created",
+                return_value=(job, True),
+            ) as create_job,
+            patch.object(self.app._background_job_service, "run_job") as run_job,
+        ):
+            scheduled_job = self.app._schedule_cost_statistics_cache_warmup(
+                ["2026-03"],
+                reason="cost_statistics_scope_invalidated",
+            )
+
+        self.assertIs(scheduled_job, job)
+        self.assertEqual(create_job.call_args.kwargs["affected_months"], ["2026-03"])
+        self.assertEqual(create_job.call_args.kwargs["source"]["months"], ["2026-03"])
+        self.assertNotIn("all", create_job.call_args.kwargs["affected_months"])
+        run_job.assert_called_once()
+
+    def test_retry_failed_cost_statistics_warmup_requeues_months_and_acknowledges_old_job(self) -> None:
+        job = self.app._background_job_service.create_job(
+            job_type="cost_statistics_cache_warmup",
+            label="预热成本统计缓存",
+            owner_user_id="system",
+            visibility="system",
+            affected_months=["2026-03"],
+            source={"reason": "cost_statistics_scope_invalidated", "months": ["2026-03"]},
+        )
+        self.app._background_job_service.fail_job(
+            job.job_id,
+            "服务重启，任务已中断，请重新执行。",
+            "interrupted_by_restart",
+        )
+
+        with patch.object(self.app._background_job_service, "run_job") as run_job:
+            response = self.app.handle_request("POST", f"/api/background-jobs/{job.job_id}/retry", body="{}")
+
+        payload = json.loads(response.body)
+        old_job = self.app._background_job_service.get_job(job.job_id, "system")
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(payload["retry_mode"], "cost_statistics_cache_warmup")
+        self.assertEqual(payload["job"]["type"], "cost_statistics_cache_warmup")
+        self.assertEqual(payload["job"]["affected_months"], ["2026-03"])
+        self.assertEqual(old_job.status, "acknowledged")
+        run_job.assert_called_once()
 
     def test_import_preview_does_not_invalidate_cost_statistics_cache(self) -> None:
         with (

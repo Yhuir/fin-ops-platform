@@ -1,7 +1,12 @@
 import json
+import os
 import pickle
 import tempfile
 import unittest
+from contextlib import contextmanager
+from http.client import HTTPConnection
+from http.server import ThreadingHTTPServer
+from threading import Thread
 from unittest.mock import patch
 from decimal import Decimal
 from pathlib import Path
@@ -9,9 +14,10 @@ from types import SimpleNamespace
 
 from pymongo.errors import ServerSelectionTimeoutError
 
-from fin_ops_platform.app.server import Application, WORKBENCH_READ_MODEL_SCHEMA_VERSION, build_application
+from fin_ops_platform.app.server import Application, WORKBENCH_READ_MODEL_SCHEMA_VERSION, _build_handler_factory, build_application
 from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes
 from fin_ops_platform.domain.enums import BatchType
+from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, MongoOASettings
 from fin_ops_platform.services.oa_adapter import InMemoryOAAdapter, OAApplicationRecord
 from fin_ops_platform.services.settings_data_reset_service import RESET_OA_AND_REBUILD_ACTION
@@ -173,6 +179,34 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.addCleanup(cost_warmup_patcher.stop)
         cost_warmup_patcher.start()
 
+    def _create_imported_bank_transaction(
+        self,
+        app: Application,
+        *,
+        trade_time: str = "2026-04-03 09:00:00",
+    ) -> str:
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="bank.xlsx",
+            imported_by="YNSYLP005",
+            rows=[
+                {
+                    "account_no": "6222000011116386",
+                    "account_name": "云南溯源科技有限公司基本户",
+                    "txn_date": trade_time[:10],
+                    "trade_time": trade_time,
+                    "pay_receive_time": trade_time,
+                    "counterparty_name": "供应商A",
+                    "debit_amount": "100.00",
+                    "credit_amount": "",
+                    "summary": "付款",
+                    "remark": "货款",
+                }
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+        return app._import_service.list_transactions()[-1].id
+
     def test_application_restores_workbench_candidate_match_service_from_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)
@@ -229,6 +263,337 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             app._workbench_candidate_match_service.snapshot(),
             {"schema_version": CANDIDATE_MATCH_SCHEMA_VERSION, "candidates": {}, "scope_runs": {}},
         )
+
+    def test_patch_bank_transaction_categories_persists_and_invalidates_workbench_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            preview = app._import_service.preview_import(
+                batch_type=BatchType.BANK_TRANSACTION,
+                source_name="bank.xlsx",
+                imported_by="YNSYLP005",
+                rows=[
+                    {
+                        "account_no": "6222000011116386",
+                        "account_name": "云南溯源科技有限公司基本户",
+                        "txn_date": "2026-04-03",
+                        "trade_time": "2026-04-03 09:00:00",
+                        "pay_receive_time": "2026-04-03 09:00:00",
+                        "counterparty_name": "供应商A",
+                        "debit_amount": "100.00",
+                        "credit_amount": "",
+                        "summary": "付款",
+                        "remark": "货款",
+                    }
+                ],
+            )
+            app._import_service.confirm_import(preview.id)
+            transaction_id = app._import_service.list_transactions()[0].id
+            app._workbench_read_model_service.upsert_read_model(scope_key="all", payload={"month": "all"})
+            app._workbench_read_model_service.upsert_read_model(scope_key="2026-04", payload={"month": "2026-04"})
+            app._workbench_candidate_match_service.upsert_candidate(
+                {
+                    "scope_month": "2026-04",
+                    "candidate_type": "bank",
+                    "status": "needs_review",
+                    "confidence": "low",
+                    "rule_code": "no_confident_match",
+                    "row_ids": [transaction_id],
+                    "bank_row_ids": [transaction_id],
+                    "oa_row_ids": [],
+                    "invoice_row_ids": [],
+                    "amount": "100.00",
+                    "amount_delta": "100.00",
+                    "explanation": "stale candidate",
+                    "conflict_candidate_keys": [],
+                    "generated_at": "2026-04-03T00:00:00+00:00",
+                    "source_versions": {},
+                }
+            )
+            app._search_service.search(q="供应商", scope="bank", month="2026-04")
+
+            response = app.handle_request(
+                "PATCH",
+                "/api/bank-details/transactions/categories",
+                body=json.dumps(
+                    {
+                        "updates": [
+                            {
+                                "transaction_id": transaction_id,
+                                "category_code": "borrow_in_company_pending_repayment",
+                                "expected_version": 0,
+                            }
+                        ]
+                    }
+                ),
+            )
+            payload = json.loads(response.body)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(payload["updated_transaction_ids"], [transaction_id])
+            self.assertEqual(payload["updated_categories"][0]["category_label"], "公司暂借款：待还款")
+            self.assertEqual(payload["affected_months"], ["2026-04"])
+            self.assertTrue(payload["workbench_rebuild_queued"])
+            self.assertIsNone(app._workbench_read_model_service.get_read_model("all"))
+            self.assertIsNone(app._workbench_read_model_service.get_read_model("2026-04"))
+            self.assertEqual(app._workbench_candidate_match_service.list_candidates_by_month("2026-04"), [])
+            self.assertEqual(
+                app._state_store.load_bank_transaction_categories()["categories"][transaction_id]["category_code"],
+                "borrow_in_company_pending_repayment",
+            )
+            self.assertEqual(
+                [
+                    entry["scope_month"]
+                    for entry in app._workbench_matching_dirty_scope_service.list_dirty_scopes()
+                ],
+                ["2026-04"],
+            )
+
+    def test_http_server_dispatches_patch_bank_transaction_categories(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_id = self._create_imported_bank_transaction(app)
+            server = ThreadingHTTPServer(("127.0.0.1", 0), _build_handler_factory(app))
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+            try:
+                connection.request(
+                    "PATCH",
+                    "/api/bank-details/transactions/categories",
+                    body=json.dumps(
+                        {
+                            "updates": [
+                                {
+                                    "transaction_id": transaction_id,
+                                    "category_code": "borrow_in_company_pending_repayment",
+                                    "expected_version": 0,
+                                }
+                            ]
+                        }
+                    ),
+                    headers={"Content-Type": "application/json"},
+                )
+                response = connection.getresponse()
+                response_body = response.read().decode("utf-8")
+            finally:
+                connection.close()
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.getheader("Content-Type"), "application/json; charset=utf-8")
+        payload = json.loads(response_body)
+        self.assertEqual(payload["updated_transaction_ids"], [transaction_id])
+        self.assertEqual(payload["updated_categories"][0]["category_label"], "公司暂借款：待还款")
+
+    def test_patch_bank_transaction_categories_uses_targeted_persistence_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_id = self._create_imported_bank_transaction(app)
+            app._workbench_read_model_service.upsert_read_model(scope_key="all", payload={"month": "all"})
+            app._workbench_read_model_service.upsert_read_model(scope_key="2026-04", payload={"month": "2026-04"})
+            spy_store = _BankCategoryPersistenceSpyStateStore()
+            app._state_store = spy_store
+
+            response = app.handle_request(
+                "PATCH",
+                "/api/bank-details/transactions/categories",
+                body=json.dumps(
+                    {
+                        "updates": [
+                            {
+                                "transaction_id": transaction_id,
+                                "category_code": "borrow_in_company_pending_repayment",
+                                "expected_version": 0,
+                            }
+                        ]
+                    }
+                ),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["updated_transaction_ids"], [transaction_id])
+        self.assertEqual(spy_store.full_save_calls, 0)
+        self.assertEqual(spy_store.category_save_calls, 1)
+        self.assertEqual(spy_store.candidate_save_calls, 1)
+        self.assertEqual(spy_store.candidate_changed_scope_months, ["2026-04"])
+        self.assertEqual(spy_store.read_model_save_calls, 1)
+        self.assertEqual(spy_store.dirty_scope_save_calls, 1)
+        self.assertEqual(spy_store.turnover_relation_save_calls, 1)
+
+    def test_patch_bank_transaction_categories_rejects_readonly_export_user(self) -> None:
+        with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[],
+                allowed_usernames=["READONLY001"],
+                readonly_export_usernames=["READONLY001"],
+                admin_usernames=[],
+            )
+            app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
+                user_id="101",
+                username="READONLY001",
+                nickname="只读用户",
+                display_name="只读用户",
+                dept_id="01",
+                dept_name="财务部",
+                roles=["finance"],
+                permissions=[],
+            )
+
+            response = app.handle_request(
+                "PATCH",
+                "/api/bank-details/transactions/categories",
+                body=json.dumps({"updates": []}),
+                headers={"Authorization": "Bearer readonly-token"},
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(payload["error"], "permission_denied")
+
+    def test_patch_bank_transaction_categories_rejects_invalid_code(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_id = self._create_imported_bank_transaction(app)
+
+            response = app.handle_request(
+                "PATCH",
+                "/api/bank-details/transactions/categories",
+                body=json.dumps(
+                    {
+                        "updates": [
+                            {
+                                "transaction_id": transaction_id,
+                                "category_code": "unsupported",
+                                "expected_version": 0,
+                            }
+                        ]
+                    }
+                ),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(payload["error"], "invalid_category_code")
+        self.assertEqual(app._bank_transaction_category_service.snapshot()["categories"], {})
+
+    def test_patch_bank_transaction_categories_rejects_unknown_transaction(self) -> None:
+        app = build_application()
+
+        response = app.handle_request(
+            "PATCH",
+            "/api/bank-details/transactions/categories",
+            body=json.dumps(
+                {
+                    "updates": [
+                        {
+                            "transaction_id": "missing-txn",
+                            "category_code": "business_warranty_pending_collection",
+                            "expected_version": 0,
+                        }
+                    ]
+                }
+            ),
+        )
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(payload["error"], "unknown_transaction_id")
+
+    def test_patch_bank_transaction_categories_rejects_expected_version_conflict(self) -> None:
+        app = build_application()
+        transaction_id = self._create_imported_bank_transaction(app)
+        first_response = app.handle_request(
+            "PATCH",
+            "/api/bank-details/transactions/categories",
+            body=json.dumps(
+                {
+                    "updates": [
+                        {
+                            "transaction_id": transaction_id,
+                            "category_code": "business_bid_bond_pending_collection",
+                            "expected_version": 0,
+                        }
+                    ]
+                }
+            ),
+        )
+        self.assertEqual(first_response.status_code, 200)
+
+        response = app.handle_request(
+            "PATCH",
+            "/api/bank-details/transactions/categories",
+            body=json.dumps(
+                {
+                    "updates": [
+                        {
+                            "transaction_id": transaction_id,
+                            "category_code": "borrow_out_personal_pending_collection",
+                            "expected_version": 0,
+                        }
+                    ]
+                }
+            ),
+        )
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(payload["error"], "category_version_conflict")
+        self.assertEqual(payload["actual_version"], 1)
+
+    def test_workbench_bank_rows_include_saved_manual_category_from_application_service(self) -> None:
+        app = build_application()
+        transaction_id = self._create_imported_bank_transaction(app, trade_time="2026-04-03 09:00:00")
+
+        save_response = app.handle_request(
+            "PATCH",
+            "/api/bank-details/transactions/categories",
+            body=json.dumps(
+                {
+                    "updates": [
+                        {
+                            "transaction_id": transaction_id,
+                            "category_code": "borrow_in_company_pending_repayment",
+                            "expected_version": 0,
+                        }
+                    ]
+                }
+            ),
+        )
+        self.assertEqual(save_response.status_code, 200)
+
+        response = app.handle_request("GET", "/api/workbench?month=2026-04")
+        payload = json.loads(response.body)
+        bank_rows = [
+            *flatten_groups(payload["paired"]["groups"], "bank"),
+            *flatten_groups(payload["open"]["groups"], "bank"),
+        ]
+        bank_row = next(row for row in bank_rows if row["id"] == transaction_id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(bank_row["category_code"], "borrow_in_company_pending_repayment")
+        self.assertEqual(bank_row["category_label"], "公司暂借款：待还款")
+        self.assertEqual(bank_row["category_source"], "manual")
+        self.assertEqual(bank_row["category_path"], ["借入", "公司往来款", "待还款"])
+        self.assertIn("公司暂借款：待还款", bank_row["tags"])
+        self.assertIn({"label": "摘要", "value": "付款"}, bank_row["bank_text_fields"])
+        self.assertIn({"label": "备注", "value": "货款"}, bank_row["bank_text_fields"])
+
+    @contextmanager
+    def _without_default_test_auth(self):
+        previous = os.environ.get("FIN_OPS_TEST_DEFAULT_AUTH")
+        os.environ["FIN_OPS_TEST_DEFAULT_AUTH"] = "0"
+        try:
+            yield
+        finally:
+            if previous is None:
+                os.environ.pop("FIN_OPS_TEST_DEFAULT_AUTH", None)
+            else:
+                os.environ["FIN_OPS_TEST_DEFAULT_AUTH"] = previous
 
     def test_apply_candidate_matches_does_not_link_multi_row_needs_review_candidate(self) -> None:
         app = build_application()
@@ -2605,6 +2970,57 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual([row["detail_fields"]["发票号码"] for row in group_292["invoice_rows"]], ["29200001"])
         self.assertEqual(group_292["invoice_rows"][0]["derived_from_oa_id"], "oa-exp-hurong-292")
 
+    def test_get_api_workbench_groups_oa_2035_invoice_and_payment_evidences(self) -> None:
+        app = build_application()
+        record = OAApplicationRecord(
+            id="oa-2035",
+            month="2026-03",
+            section="open",
+            case_id=None,
+            applicant="胡瑢",
+            project_name="2024-2026年度红塔集团工作证管理系统维护项目",
+            apply_type="日常报销",
+            amount="248.00",
+            counterparty_name="",
+            reason="OA 2035：过路费和加油费",
+            relation_code="pending_match",
+            relation_label="待找流水与发票",
+            relation_tone="warn",
+            expense_type="车辆使用费",
+            expense_content="过路费；加油费",
+            detail_fields={"OA单号": "OA-2035", "申请日期": "2026-03-04"},
+            attachment_evidences=oa_2035_attachment_evidences(),
+            attachment_file_count=6,
+        )
+        query_service = WorkbenchQueryService(oa_adapter=InMemoryOAAdapter({"2026-03": [record]}))
+        action_service = WorkbenchActionService(query_service)
+        app._workbench_query_service = query_service
+        app._workbench_action_service = action_service
+        app._workbench_api_routes = WorkbenchApiRoutes(query_service, action_service)
+
+        with patch.object(app._live_workbench_service, "has_rows_for_month", return_value=False):
+            response = app.handle_request("GET", "/api/workbench?month=2026-03")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        source_group = next(group for group in payload["open"]["groups"] if group["reason"] == "oa_attachment_source_relation")
+        self.assertEqual([row["id"] for row in source_group["oa_rows"]], ["oa-2035"])
+        self.assertEqual(len(source_group["bank_rows"]), 0)
+        self.assertEqual(len(source_group["invoice_rows"]), 6)
+        self.assertEqual(
+            sum(1 for row in source_group["invoice_rows"] if row["source_kind"] == "oa_attachment_invoice"),
+            3,
+        )
+        self.assertEqual(
+            sum(1 for row in source_group["invoice_rows"] if row["source_kind"] == "oa_attachment_payment_receipt"),
+            3,
+        )
+        for row in source_group["invoice_rows"]:
+            self.assertEqual(row["derived_from_oa_id"], "oa-2035")
+            self.assertTrue(row["source_expense_item_id"])
+            self.assertTrue(row["source_attachment_key"])
+            self.assertTrue(row["source_attachment_name"])
+
     def test_get_api_workbench_auto_pairs_offset_applicant_oa_with_attachment_invoice(self) -> None:
         app = build_application()
         target_oa_record = OAApplicationRecord(
@@ -2962,6 +3378,83 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertIn("oa-o-202603-001", oa_ids)
         self.assertIn("oa-o-202604-001", oa_ids)
         self.assertGreaterEqual(payload["summary"]["oa_count"], 5)
+
+    def test_get_api_workbench_all_keeps_all_ccb_bank_rows_across_paired_and_open(self) -> None:
+        app = build_application()
+        ccb_rows = [
+            build_ccb_bank_row("ccb-jan-open", "2026-01-08 09:00:00", "10.00"),
+            build_ccb_bank_row("ccb-feb-open", "2026-02-08 09:00:00", "20.00"),
+            build_ccb_bank_row("ccb-mar-open", "2026-03-08 09:00:00", "30.00"),
+            build_ccb_bank_row("ccb-apr-paired", "2026-04-08 09:00:00", "40.00"),
+        ]
+        invoice_row = {
+            "id": "invoice-apr-paired",
+            "type": "invoice",
+            "case_id": None,
+            "amount": "40.00",
+            "total_with_tax": "40.00",
+            "seller_name": "建设银行配对供应商",
+            "buyer_name": "云南溯源科技有限公司",
+            "issue_date": "2026-04-08",
+            "invoice_type": "进项发票",
+            "invoice_bank_relation": {"code": "pending_collection", "label": "待匹配流水", "tone": "warn"},
+            "available_actions": ["detail", "confirm_link", "mark_exception"],
+        }
+        oa_row = {
+            "id": "oa-apr-paired",
+            "type": "oa",
+            "case_id": None,
+            "applicant": "建设银行配对申请人",
+            "project_name": "建设银行配对项目",
+            "apply_type": "支付申请",
+            "amount": "40.00",
+            "counterparty_name": "建设银行配对供应商",
+            "reason": "建设银行配对 fixture",
+            "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"},
+            "available_actions": ["detail", "confirm_link", "mark_exception"],
+        }
+        raw_payload = {
+            "month": "all",
+            "summary": {
+                "oa_count": 1,
+                "bank_count": len(ccb_rows),
+                "invoice_count": 1,
+                "paired_count": 0,
+                "open_count": len(ccb_rows) + 2,
+                "exception_count": 0,
+            },
+            "paired": {"oa": [], "bank": [], "invoice": []},
+            "open": {"oa": [oa_row], "bank": ccb_rows, "invoice": [invoice_row]},
+        }
+        app._workbench_pair_relation_service.create_active_relation(
+            case_id="CASE-CCB-PAIRED-001",
+            row_ids=["oa-apr-paired", "ccb-apr-paired", "invoice-apr-paired"],
+            row_types=["oa", "bank", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="test",
+            month_scope="all",
+        )
+
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            response = app.handle_request("GET", "/api/workbench?month=all")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        paired_bank_rows = flatten_groups(payload["paired"]["groups"], "bank")
+        open_bank_rows = flatten_groups(payload["open"]["groups"], "bank")
+        all_ccb_rows = [
+            row
+            for row in [*paired_bank_rows, *open_bank_rows]
+            if row.get("payment_account_label") == "建设银行 8106"
+        ]
+
+        self.assertEqual(payload["month"], "all")
+        self.assertCountEqual([row["id"] for row in all_ccb_rows], [row["id"] for row in ccb_rows])
+        self.assertEqual([row["id"] for row in paired_bank_rows], ["ccb-apr-paired"])
+        self.assertCountEqual([row["id"] for row in open_bank_rows], ["ccb-jan-open", "ccb-feb-open", "ccb-mar-open"])
+        self.assertEqual(len(paired_bank_rows) + len(open_bank_rows), len(ccb_rows))
+        self.assertLess(len(open_bank_rows), len(ccb_rows))
+        self.assertEqual(payload["summary"]["bank_count"], len(ccb_rows))
 
     def test_get_api_workbench_row_detail_supports_oa_bank_and_invoice(self) -> None:
         app = build_application()
@@ -5464,6 +5957,25 @@ def build_oa_retention_bank_row(row_id: str, case_id: str, trade_time: str) -> d
     }
 
 
+def build_ccb_bank_row(row_id: str, trade_time: str, amount: str) -> dict[str, object]:
+    return {
+        "id": row_id,
+        "type": "bank",
+        "case_id": None,
+        "trade_time": trade_time,
+        "pay_receive_time": trade_time,
+        "direction": "支出",
+        "debit_amount": amount,
+        "credit_amount": "",
+        "counterparty_name": "建设银行可见性测试供应商",
+        "payment_account_label": "建设银行 8106",
+        "invoice_relation": {"code": "pending_invoice_match", "label": "待关联发票", "tone": "warn"},
+        "available_actions": ["detail", "confirm_link", "mark_exception"],
+        "summary_fields": {"交易时间": trade_time, "账号": "建设银行 8106"},
+        "detail_fields": {"交易时间": trade_time, "账号": "建设银行 8106"},
+    }
+
+
 def build_oa_retention_invoice_row(row_id: str, case_id: str, issue_date: str) -> dict[str, object]:
     return {
         "id": row_id,
@@ -5819,6 +6331,103 @@ class SourceBoundAttachmentOAAdapter:
         return [_SourceBoundAttachmentRecord(), _SingleSourceAttachmentRecord()]
 
 
+def oa_2035_attachment_evidences() -> list[dict[str, str]]:
+    base = {
+        "issue_date": "2026-03-04",
+        "paid_at": "2026-03-04 09:00:00",
+        "buyer_name": "云南溯源科技有限公司",
+    }
+    return [
+        {
+            **base,
+            "evidence_id": "oa2035-inv-25",
+            "evidence_type": "machine_invoice",
+            "document_kind": "云南通用机打发票",
+            "invoice_no": "20350025",
+            "seller_name": "云南高速公路联网收费有限公司",
+            "amount": "25.00",
+            "total_with_tax": "25.00",
+            "tax_amount": "0.00",
+            "source_expense_row_index": "0",
+            "source_expense_item_id": "oa-2035:item:0:toll",
+            "source_attachment_key": "oa-2035:item:0:att:invoice-a",
+            "source_attachment_name": "过路费机打发票合图.jpg",
+        },
+        {
+            **base,
+            "evidence_id": "oa2035-inv-23",
+            "evidence_type": "machine_invoice",
+            "document_kind": "云南通用机打发票",
+            "invoice_no": "20350023",
+            "seller_name": "云南高速公路联网收费有限公司",
+            "amount": "23.00",
+            "total_with_tax": "23.00",
+            "tax_amount": "0.00",
+            "source_expense_row_index": "0",
+            "source_expense_item_id": "oa-2035:item:0:toll",
+            "source_attachment_key": "oa-2035:item:0:att:invoice-b",
+            "source_attachment_name": "过路费机打发票合图.jpg",
+        },
+        {
+            **base,
+            "evidence_id": "oa2035-inv-200",
+            "evidence_type": "tax_invoice",
+            "document_kind": "增值税电子普通发票",
+            "invoice_no": "20350200",
+            "seller_name": "云南中油严家山交通服务有限公司",
+            "amount": "176.99",
+            "total_with_tax": "200.00",
+            "tax_amount": "23.01",
+            "source_expense_row_index": "1",
+            "source_expense_item_id": "oa-2035:item:1:fuel",
+            "source_attachment_key": "oa-2035:item:1:att:invoice",
+            "source_attachment_name": "加油费电子发票.pdf",
+        },
+        {
+            **base,
+            "evidence_id": "oa2035-pay-25",
+            "evidence_type": "payment_receipt",
+            "document_kind": "微信支付凭证",
+            "merchant_name": "云南高速公路联网收费有限公司",
+            "transaction_no": "wx-toll-25",
+            "payment_method": "微信",
+            "amount": "25.00",
+            "source_expense_row_index": "0",
+            "source_expense_item_id": "oa-2035:item:0:toll",
+            "source_attachment_key": "oa-2035:item:0:att:payment-25",
+            "source_attachment_name": "微信付款凭证25.jpg",
+        },
+        {
+            **base,
+            "evidence_id": "oa2035-pay-23",
+            "evidence_type": "payment_receipt",
+            "document_kind": "微信支付凭证",
+            "merchant_name": "云南高速公路联网收费有限公司",
+            "transaction_no": "wx-toll-23",
+            "payment_method": "微信",
+            "amount": "23.00",
+            "source_expense_row_index": "0",
+            "source_expense_item_id": "oa-2035:item:0:toll",
+            "source_attachment_key": "oa-2035:item:0:att:payment-23",
+            "source_attachment_name": "微信付款凭证23.jpg",
+        },
+        {
+            **base,
+            "evidence_id": "oa2035-pay-200",
+            "evidence_type": "payment_receipt",
+            "document_kind": "微信支付凭证",
+            "merchant_name": "云南中油严家山交通服务有限公司",
+            "transaction_no": "wx-fuel-200",
+            "payment_method": "微信",
+            "amount": "200.00",
+            "source_expense_row_index": "1",
+            "source_expense_item_id": "oa-2035:item:1:fuel",
+            "source_attachment_key": "oa-2035:item:1:att:payment",
+            "source_attachment_name": "微信加油付款凭证200.jpg",
+        },
+    ]
+
+
 class _FailingOverrideStateStore:
     def save_workbench_overrides(self, snapshot: dict[str, object], *, changed_row_ids: list[str] | None = None) -> None:
         raise TimeoutError("mock override persistence timeout")
@@ -5840,3 +6449,52 @@ class _FailingReadModelStateStore:
         changed_scope_keys: list[str] | None = None,
     ) -> None:
         raise TimeoutError("mock read model persistence timeout")
+
+
+class _BankCategoryPersistenceSpyStateStore:
+    def __init__(self) -> None:
+        self.full_save_calls = 0
+        self.category_save_calls = 0
+        self.candidate_save_calls = 0
+        self.read_model_save_calls = 0
+        self.dirty_scope_save_calls = 0
+        self.turnover_relation_save_calls = 0
+        self.candidate_changed_scope_months: list[str] = []
+
+    def save(self, payload: dict[str, object]) -> None:
+        self.full_save_calls += 1
+        raise AssertionError("bank category saves must not persist full application state")
+
+    def save_bank_transaction_categories(self, snapshot: dict[str, object]) -> None:
+        self.category_save_calls += 1
+
+    def save_workbench_candidate_matches(
+        self,
+        snapshot: dict[str, object],
+        *,
+        changed_scope_months: list[str] | None = None,
+    ) -> None:
+        self.candidate_save_calls += 1
+        self.candidate_changed_scope_months = list(changed_scope_months or [])
+
+    def save_workbench_read_models(
+        self,
+        snapshot: dict[str, object],
+        *,
+        changed_scope_keys: list[str] | None = None,
+    ) -> None:
+        self.read_model_save_calls += 1
+
+    def save_workbench_matching_dirty_scopes(self, snapshot: dict[str, object]) -> None:
+        self.dirty_scope_save_calls += 1
+
+    def save_turnover_relations(self, snapshot: dict[str, object]) -> None:
+        self.turnover_relation_save_calls += 1
+
+    def save_cost_statistics_read_models(
+        self,
+        snapshot: dict[str, object],
+        *,
+        changed_scope_keys: list[str] | None = None,
+    ) -> None:
+        return None

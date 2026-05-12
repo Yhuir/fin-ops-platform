@@ -46,6 +46,12 @@ function renderBankDetailsPage() {
   );
 }
 
+function requestUrls(fetchMock: ReturnType<typeof installMockApiFetch>, pathname: string) {
+  return fetchMock.mock.calls
+    .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
+    .filter((url) => url.pathname === pathname);
+}
+
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -70,6 +76,21 @@ describe("Bank details page", () => {
     );
   });
 
+  test("requests the current year range for both accounts and transactions by default", async () => {
+    const fetchMock = installMockApiFetch();
+    renderBankDetailsPage();
+
+    await screen.findByText("云南溯源科技有限公司");
+
+    const accountRequest = requestUrls(fetchMock, "/api/bank-details/accounts").at(-1);
+    const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
+
+    expect(accountRequest?.searchParams.get("date_from")).toBe("2026-01-01");
+    expect(accountRequest?.searchParams.get("date_to")).toBe("2026-12-31");
+    expect(transactionRequest?.searchParams.get("date_from")).toBe("2026-01-01");
+    expect(transactionRequest?.searchParams.get("date_to")).toBe("2026-12-31");
+  });
+
   test("renders accounts as a list and transactions in the bank transaction data grid", async () => {
     installMockApiFetch();
     renderBankDetailsPage();
@@ -84,7 +105,114 @@ describe("Bank details page", () => {
     expect(await within(grid).findByText("云南溯源科技有限公司")).toBeInTheDocument();
   });
 
-  test("selecting account and filters request transactions without changing balances", async () => {
+  test("edits a transaction category, updates dirty counts, saves all changes, and publishes affected months", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    const categoryUpdatedListener = vi.fn();
+    window.addEventListener("bankTransactionCategoryUpdated", categoryUpdatedListener);
+
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    const grid = await within(page).findByRole("grid", { name: "交易流水" });
+    expect(within(grid).getByRole("columnheader", { name: "类别" })).toBeInTheDocument();
+    expect(await within(page).findByText("公司暂借款：待还款 2")).toBeInTheDocument();
+    expect(within(page).getByText("质保金：待收款 1")).toBeInTheDocument();
+    expect(within(page).getByText("未保存 0")).toBeInTheDocument();
+
+    const saveButton = within(page).getByRole("button", { name: "保存分类" });
+    expect(saveButton).toBeDisabled();
+
+    await user.click(within(page).getByLabelText("bank-detail-001 类别"));
+    await user.click(await screen.findByRole("option", { name: "借入 / 公司往来款 / 待还款" }));
+
+    expect(within(page).getByText("公司暂借款：待还款 3")).toBeInTheDocument();
+    expect(within(page).getByText("未保存 1")).toBeInTheDocument();
+    expect(saveButton).toBeEnabled();
+
+    await user.click(saveButton);
+
+    await waitFor(() => {
+      const saveRequest = fetchMock.mock.calls.find(([input]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/bank-details/transactions/categories";
+      });
+      expect(saveRequest).toBeDefined();
+      expect(saveRequest?.[1]).toMatchObject({ method: "PATCH" });
+      expect(JSON.parse(String(saveRequest?.[1]?.body))).toEqual({
+        updates: [
+          {
+            transaction_id: "bank-detail-001",
+            category_code: "borrow_in_company_pending_repayment",
+            expected_version: 1,
+          },
+        ],
+      });
+    });
+    await waitFor(() => {
+      expect(categoryUpdatedListener).toHaveBeenCalledWith(expect.objectContaining({
+        detail: { affectedMonths: ["2026-05"] },
+      }));
+    });
+    expect(await within(page).findByText("分类已保存")).toBeInTheDocument();
+    expect(within(page).getByText("未保存 0")).toBeInTheDocument();
+
+    window.removeEventListener("bankTransactionCategoryUpdated", categoryUpdatedListener);
+  });
+
+  test("prompts to save, discard, or cancel before switching accounts with dirty category changes", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("云南溯源科技有限公司");
+
+    await user.click(within(page).getByLabelText("bank-detail-001 类别"));
+    await user.click(await screen.findByRole("option", { name: "业务往来 / 质保金 / 待收款" }));
+    await user.click(within(page).getByRole("button", { name: /交通银行 3847/ }));
+
+    const dialog = await screen.findByRole("dialog", { name: "有未保存的分类变动" });
+    expect(within(dialog).getByText("当前有 1 条未保存分类变动。")).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "取消" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "有未保存的分类变动" })).not.toBeInTheDocument();
+    });
+    expect(within(page).getByRole("button", { name: /工商银行 6386/ })).toHaveAttribute("aria-current", "true");
+    expect(within(page).getByText("未保存 1")).toBeInTheDocument();
+
+    await user.click(within(page).getByRole("button", { name: /交通银行 3847/ }));
+    await user.click(await screen.findByRole("button", { name: "放弃变动" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "有未保存的分类变动" })).not.toBeInTheDocument();
+    });
+    await within(page).findByText("当前时间范围内没有流水。");
+    expect(within(page).getByRole("button", { name: /交通银行 3847/ })).toHaveAttribute("aria-current", "true");
+    expect(within(page).getByText("未保存 0")).toBeInTheDocument();
+
+    await user.click(within(page).getByRole("button", { name: /工商银行 6386/ }));
+    await within(page).findByText("云南溯源科技有限公司");
+    await user.click(within(page).getByLabelText("bank-detail-001 类别"));
+    await user.click(await screen.findByRole("option", { name: "借出 / 个人往来款 / 待收款" }));
+    await user.click(within(page).getByRole("button", { name: /交通银行 3847/ }));
+    await user.click(await screen.findByRole("button", { name: "保存并继续" }));
+
+    await waitFor(() => {
+      const saveRequest = fetchMock.mock.calls.find(([input]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/bank-details/transactions/categories";
+      });
+      expect(saveRequest).toBeDefined();
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "有未保存的分类变动" })).not.toBeInTheDocument();
+    });
+    await within(page).findByText("当前时间范围内没有流水。");
+    expect(within(page).getByRole("button", { name: /交通银行 3847/ })).toHaveAttribute("aria-current", "true");
+  });
+
+  test("selecting account and filters request accounts and transactions with the same date range", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderBankDetailsPage();
@@ -97,26 +225,65 @@ describe("Bank details page", () => {
     expect(within(page).getAllByText("130,500.50").length).toBeGreaterThan(0);
 
     await user.click(within(page).getByRole("button", { name: "上月" }));
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("date_from=2026-04-01&date_to=2026-04-30"),
-      expect.any(Object),
-    );
+    await waitFor(() => {
+      const accountRequest = requestUrls(fetchMock, "/api/bank-details/accounts").at(-1);
+      const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
+      expect(accountRequest?.searchParams.get("date_from")).toBe("2026-04-01");
+      expect(accountRequest?.searchParams.get("date_to")).toBe("2026-04-30");
+      expect(transactionRequest?.searchParams.get("date_from")).toBe("2026-04-01");
+      expect(transactionRequest?.searchParams.get("date_to")).toBe("2026-04-30");
+    });
     expect(within(page).getAllByText("130,500.50").length).toBeGreaterThan(0);
 
     await user.clear(within(page).getByLabelText("年月筛选"));
     await user.type(within(page).getByLabelText("年月筛选"), "2026-03");
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("date_from=2026-03-01&date_to=2026-03-31"),
-      expect.any(Object),
-    );
+    await waitFor(() => {
+      const accountRequest = requestUrls(fetchMock, "/api/bank-details/accounts").at(-1);
+      const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
+      expect(accountRequest?.searchParams.get("date_from")).toBe("2026-03-01");
+      expect(accountRequest?.searchParams.get("date_to")).toBe("2026-03-31");
+      expect(transactionRequest?.searchParams.get("date_from")).toBe("2026-03-01");
+      expect(transactionRequest?.searchParams.get("date_to")).toBe("2026-03-31");
+    });
 
     fireEvent.blur(within(page).getByLabelText("开始日期"), { target: { value: "2026-02-01" } });
     fireEvent.blur(within(page).getByLabelText("结束日期"), { target: { value: "2026-02-15" } });
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("date_from=2026-02-01&date_to=2026-02-15"),
-        expect.any(Object),
-      );
+      const accountRequest = requestUrls(fetchMock, "/api/bank-details/accounts").at(-1);
+      const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
+      expect(accountRequest?.searchParams.get("date_from")).toBe("2026-02-01");
+      expect(accountRequest?.searchParams.get("date_to")).toBe("2026-02-15");
+      expect(transactionRequest?.searchParams.get("date_from")).toBe("2026-02-01");
+      expect(transactionRequest?.searchParams.get("date_to")).toBe("2026-02-15");
+    });
+  });
+
+  test("shows server total and requests the second page with the default page size", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("云南溯源科技有限公司");
+
+    expect(within(page).getByText("共 299 条流水")).toBeInTheDocument();
+    expect(within(page).getByText("当前页 1 / 3")).toBeInTheDocument();
+
+    await user.click(within(page).getByLabelText(/go to next page/i));
+
+    await waitFor(() => {
+      const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
+      expect(transactionRequest?.searchParams.get("page")).toBe("2");
+      expect(transactionRequest?.searchParams.get("page_size")).toBe("100");
+    });
+
+    await user.click(within(page).getByRole("button", { name: "上月" }));
+
+    await waitFor(() => {
+      const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
+      expect(transactionRequest?.searchParams.get("date_from")).toBe("2026-04-01");
+      expect(transactionRequest?.searchParams.get("page")).toBe("1");
+      expect(transactionRequest?.searchParams.get("page_size")).toBe("100");
     });
   });
 

@@ -617,6 +617,16 @@ export default function ReconciliationWorkbenchPage() {
   }, [applyOaSyncStatus]);
 
   useEffect(() => {
+    const handleTurnoverRelationUpdated = () => {
+      refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
+    };
+    window.addEventListener("turnoverRelationUpdated", handleTurnoverRelationUpdated);
+    return () => {
+      window.removeEventListener("turnoverRelationUpdated", handleTurnoverRelationUpdated);
+    };
+  }, [refreshWorkbenchDataInBackground]);
+
+  useEffect(() => {
     document.body.classList.toggle("workbench-focus-mode", expandedZoneId !== null);
     document.body.classList.add("workbench-page-mode");
     return () => {

@@ -381,6 +381,62 @@ describe("Workbench columns and inline actions", () => {
     expect(within(moneyMetaRow as HTMLElement).getByText("招行")).toBeInTheDocument();
   });
 
+  test("renders the bank detail category tag in the bank amount metadata row", () => {
+    render(
+      <WorkbenchRecordCard
+        actionMode="default"
+        canMutateData
+        columns={[
+          { key: "amount", label: "金额", kind: "money", track: "minmax(144px, 144fr)", minWidth: 144 },
+        ]}
+        onOpenDetail={() => {}}
+        onRowAction={() => {}}
+        onSelectRow={() => {}}
+        paneId="bank"
+        row={{
+          id: "bank-category-amount-1",
+          caseId: "case:bank-category-amount-1",
+          recordType: "bank",
+          label: "银行流水",
+          status: "待人工核查",
+          statusCode: "manual_review",
+          statusTone: "danger",
+          exceptionHandled: false,
+          amount: "200,000.00",
+          counterparty: "梁希涛",
+          actionVariant: "detail-only",
+          availableActions: ["detail"],
+          detailFields: [],
+          categoryLabel: "公司暂借款：待还款",
+          categoryPath: ["借入", "公司往来款", "待还款"],
+          tableValues: {
+            counterparty: "梁希涛",
+            transactionTime: "2026-03-05 09:34:42",
+            invoiceRelationStatus: "候选未闭环",
+            amount: "200,000.00",
+            direction: "支出",
+            paymentAccount: "建设银行 8106",
+            note: "还暂借款",
+            repaymentDate: "--",
+          },
+        }}
+        rowState="idle"
+        showWorkflowActions
+        zoneId="open"
+      />,
+    );
+
+    const categoryTag = screen.getByText("公司暂借款：待还款");
+    const accountTag = screen.getByText("8106").closest(".bank-account-tag");
+    const metadataRow = categoryTag.closest(".money-cell-meta-row");
+
+    expect(categoryTag).toHaveClass("bank-category-tag");
+    expect(metadataRow).not.toBeNull();
+    expect(accountTag?.closest(".money-cell-meta-row")).toBe(metadataRow);
+    expect(within(metadataRow as HTMLElement).getByText("建行")).toBeInTheDocument();
+    expect(within(metadataRow as HTMLElement).getByText("支出")).toHaveClass("direction-tag");
+  });
+
   test("renders short bank names in bank row amount account tags", () => {
     render(
       <WorkbenchRecordCard

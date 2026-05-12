@@ -56,10 +56,11 @@ COMPANY_NAME_RE = re.compile(
 
 SUPPORTED_SUFFIXES = {"pdf", "jpg", "jpeg", "png", "docx"}
 SUPPORTED_DOCX_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
+INVOICE_EVIDENCE_TYPES = {"tax_invoice", "machine_invoice", "non_tax_receipt"}
 
 
 class OAAttachmentInvoiceService:
-    PARSER_VERSION = "2026-04-30-docx-railway-cny-machine-nontax"
+    PARSER_VERSION = "2026-05-11-evidence-machine-payment"
 
     def __init__(
         self,
@@ -76,16 +77,23 @@ class OAAttachmentInvoiceService:
         self._ocr_engine_unavailable = False
 
     def parse_files(self, files: list[dict[str, object]]) -> list[dict[str, str]]:
-        invoices: list[dict[str, str]] = []
+        return [
+            dict(evidence)
+            for evidence in self.parse_evidences(files)
+            if clean_string(evidence.get("evidence_type") or "") in INVOICE_EVIDENCE_TYPES
+        ]
+
+    def parse_evidences(self, files: list[dict[str, object]]) -> list[dict[str, str]]:
+        evidences: list[dict[str, str]] = []
         for file_entry in files:
             if not isinstance(file_entry, dict):
                 continue
             try:
-                parsed_invoices = self._parse_single_file(file_entry)
+                parsed_evidences = self._parse_single_file_evidences(file_entry)
             except Exception:
-                parsed_invoices = []
-            invoices.extend(parsed_invoices)
-        return invoices
+                parsed_evidences = []
+            evidences.extend(parsed_evidences)
+        return evidences
 
     def build_download_url(self, file_path: str) -> str:
         normalized_path = clean_string(file_path)
@@ -108,6 +116,13 @@ class OAAttachmentInvoiceService:
         )
 
     def _parse_single_file(self, file_entry: dict[str, object]) -> list[dict[str, str]]:
+        return [
+            dict(evidence)
+            for evidence in self._parse_single_file_evidences(file_entry)
+            if clean_string(evidence.get("evidence_type") or "") in INVOICE_EVIDENCE_TYPES
+        ]
+
+    def _parse_single_file_evidences(self, file_entry: dict[str, object]) -> list[dict[str, str]]:
         file_name = clean_string(file_entry.get("fileName") or file_entry.get("name") or "")
         file_path = clean_string(file_entry.get("filePath") or file_entry.get("url") or "")
         suffix = clean_string(file_entry.get("suffix") or Path(file_name or file_path).suffix.lstrip(".")).lower()
@@ -121,23 +136,35 @@ class OAAttachmentInvoiceService:
             return []
 
         attachment_name = file_name or Path(file_path).name
-        parsed_invoices: list[dict[str, str]] = []
+        parsed_evidences: list[dict[str, str]] = []
         seen_keys: set[str] = set()
         for extracted_text in self._extract_text_segments(content, suffix):
             if not extracted_text:
                 continue
-            parsed_invoice = self._parse_invoice_text(extracted_text)
-            if parsed_invoice is None:
-                continue
-            parsed_invoice["attachment_name"] = attachment_name
-            parsed_invoice.setdefault("invoice_type", "进项发票")
-            dedupe_key = self._invoice_dedupe_key(parsed_invoice)
-            if dedupe_key and dedupe_key in seen_keys:
-                continue
-            if dedupe_key:
-                seen_keys.add(dedupe_key)
-            parsed_invoices.append(parsed_invoice)
-        return parsed_invoices
+            for evidence in self._parse_evidences_from_text(extracted_text):
+                evidence["attachment_name"] = attachment_name
+                dedupe_key = self._evidence_dedupe_key(evidence)
+                if dedupe_key and dedupe_key in seen_keys:
+                    continue
+                if dedupe_key:
+                    seen_keys.add(dedupe_key)
+                parsed_evidences.append(evidence)
+        return parsed_evidences
+
+    def _parse_evidences_from_text(self, extracted_text: str) -> list[dict[str, str]]:
+        payment_receipt = self._parse_payment_receipt_text(extracted_text)
+        if payment_receipt is not None:
+            return [payment_receipt]
+
+        compact_text = re.sub(r"[\s\u3000]+", "", extracted_text).replace("：", ":").replace("￥", "¥")
+        machine_printed_invoices = self._parse_machine_printed_invoice_texts(extracted_text, compact_text)
+        if machine_printed_invoices:
+            return machine_printed_invoices
+
+        parsed_invoice = self._parse_invoice_text(extracted_text)
+        if parsed_invoice is None:
+            return []
+        return [self._invoice_to_evidence(parsed_invoice)]
 
     def _extract_text_segments(self, content: bytes, suffix: str) -> list[str]:
         if suffix == "pdf":
@@ -152,6 +179,37 @@ class OAAttachmentInvoiceService:
             clean_string(invoice.get(key) or "")
             for key in ("invoice_no", "issue_date", "total_with_tax", "attachment_name")
         )
+
+    @staticmethod
+    def _evidence_dedupe_key(evidence: dict[str, str]) -> str:
+        evidence_type = clean_string(evidence.get("evidence_type") or "")
+        if evidence_type == "payment_receipt":
+            transaction_no = clean_string(evidence.get("transaction_no") or "")
+            if transaction_no:
+                return f"payment_receipt:transaction_no:{transaction_no}"
+            merchant_order_no = clean_string(evidence.get("merchant_order_no") or "")
+            if merchant_order_no:
+                return f"payment_receipt:merchant_order_no:{merchant_order_no}"
+            return "|".join(
+                clean_string(evidence.get(key) or "")
+                for key in ("evidence_type", "document_kind", "amount", "merchant_name", "paid_at", "attachment_name")
+            )
+        if evidence_type in INVOICE_EVIDENCE_TYPES:
+            return "|".join(
+                clean_string(evidence.get(key) or "")
+                for key in (
+                    "evidence_type",
+                    "digital_invoice_no",
+                    "invoice_code",
+                    "invoice_no",
+                    "issue_date",
+                    "total_with_tax",
+                    "amount",
+                    "source_region_key",
+                    "attachment_name",
+                )
+            )
+        return "|".join(clean_string(evidence.get(key) or "") for key in sorted(evidence))
 
     def _download_content(self, url: str) -> bytes | None:
         request = Request(url, headers={"User-Agent": "fin-ops-platform/oa-attachment-parser"})
@@ -305,6 +363,137 @@ class OAAttachmentInvoiceService:
         except Exception:
             return b""
 
+    def _invoice_to_evidence(self, invoice: dict[str, str]) -> dict[str, str]:
+        evidence = dict(invoice)
+        invoice_kind = clean_string(evidence.get("invoice_kind") or "")
+        if "非税收入一般缴款书" in invoice_kind:
+            evidence_type = "non_tax_receipt"
+            document_kind = "non_tax_receipt"
+        elif "机打发票" in invoice_kind or "用机发票" in invoice_kind:
+            evidence_type = "machine_invoice"
+            document_kind = "yunnan_machine_invoice"
+        elif "铁路电子客票" in invoice_kind:
+            evidence_type = "tax_invoice"
+            document_kind = "railway_e_ticket_invoice"
+        else:
+            evidence_type = "tax_invoice"
+            document_kind = "digital_invoice"
+        evidence.setdefault("evidence_type", evidence_type)
+        evidence.setdefault("document_kind", document_kind)
+        evidence.setdefault("source_region_key", "document:1")
+        evidence.setdefault("invoice_type", "进项发票")
+        return evidence
+
+    def _parse_payment_receipt_text(self, extracted_text: str) -> dict[str, str] | None:
+        normalized_text = extracted_text.replace("：", ":").replace("－", "-")
+        compact_text = re.sub(r"[\s\u3000]+", "", normalized_text)
+        if not self._looks_like_payment_receipt(compact_text):
+            return None
+        amount = self._extract_payment_receipt_amount(normalized_text)
+        if not amount:
+            return None
+
+        merchant_name = self._extract_labeled_line_value(normalized_text, "商户全称")
+        transaction_no = self._extract_labeled_line_value(normalized_text, "交易单号")
+        merchant_order_no = self._extract_labeled_line_value(normalized_text, "商户单号")
+        payment_method = self._extract_labeled_line_value(normalized_text, "支付方式")
+        paid_at = self._extract_payment_receipt_paid_at(normalized_text)
+
+        if not any((merchant_name, transaction_no, merchant_order_no, paid_at)):
+            return None
+
+        return {
+            "evidence_type": "payment_receipt",
+            "document_kind": self._payment_receipt_document_kind(compact_text),
+            "amount": amount,
+            "net_amount": "",
+            "tax_amount": "",
+            "total_with_tax": "",
+            "invoice_no": "",
+            "invoice_code": "",
+            "digital_invoice_no": "",
+            "seller_name": "",
+            "buyer_name": "",
+            "merchant_name": merchant_name,
+            "paid_at": paid_at,
+            "issue_date": paid_at[:10] if paid_at else "",
+            "transaction_no": transaction_no,
+            "merchant_order_no": merchant_order_no,
+            "payment_method": payment_method,
+            "source_region_key": "payment_receipt:1",
+            "confidence": "high",
+            "parse_status": "parsed",
+        }
+
+    @staticmethod
+    def _looks_like_payment_receipt(compact_text: str) -> bool:
+        has_receipt_marker = any(
+            marker in compact_text
+            for marker in ("全部账单", "支付成功", "交易单号", "商户单号", "商户全称", "财付通")
+        )
+        has_invoice_marker = any(marker in compact_text for marker in ("发票号码", "发票代码", "价税合计"))
+        return has_receipt_marker and not has_invoice_marker
+
+    def _extract_payment_receipt_amount(self, text: str) -> str:
+        for line in text.splitlines():
+            normalized_line = clean_string(line).replace("￥", "¥")
+            match = re.search(r"(?<![0-9])[-]\s*¥?\s*([0-9]+(?:[.,，][0-9]{1,2})?)(?![0-9])", normalized_line)
+            if match is not None:
+                return self._normalize_amount_text(match.group(1))
+        match = re.search(r"(?<![0-9])[-]\s*¥?\s*([0-9]+(?:[.,，][0-9]{1,2})?)(?![0-9])", text)
+        return self._normalize_amount_text(match.group(1)) if match is not None else ""
+
+    @staticmethod
+    def _extract_labeled_line_value(text: str, label: str) -> str:
+        for line in text.splitlines():
+            normalized_line = clean_string(line).replace("：", ":")
+            if not normalized_line.startswith(label):
+                continue
+            value = clean_string(normalized_line[len(label) :].lstrip(":"))
+            if value:
+                return value
+        compact_text = re.sub(r"[\s\u3000]+", "", text.replace("：", ":"))
+        label_index = compact_text.find(f"{label}:")
+        if label_index < 0:
+            label_index = compact_text.find(label)
+            if label_index < 0:
+                return ""
+            start = label_index + len(label)
+        else:
+            start = label_index + len(label) + 1
+        end = len(compact_text)
+        for next_label in ("当前状态", "支付时间", "商品", "商户全称", "收单机构", "支付方式", "交易单号", "商户单号", "商家小程序", "账单服务"):
+            next_index = compact_text.find(next_label, start)
+            if next_index >= 0:
+                end = min(end, next_index)
+        return clean_string(compact_text[start:end])
+
+    @staticmethod
+    def _extract_payment_receipt_paid_at(text: str) -> str:
+        match = re.search(
+            r"支付时间[:：]?\s*(\d{4})年(\d{1,2})月(\d{1,2})日\s*(\d{1,2}:\d{2}:\d{2})",
+            text,
+        )
+        if match is None:
+            compact_text = re.sub(r"[\s\u3000]+", "", text)
+            match = re.search(r"支付时间[:：]?(\d{4})年(\d{1,2})月(\d{1,2})日(\d{1,2}:\d{2}:\d{2})", compact_text)
+        if match is None:
+            return ""
+        year, month, day, time_text = match.groups()
+        return f"{year}-{int(month):02d}-{int(day):02d} {time_text}"
+
+    @staticmethod
+    def _payment_receipt_document_kind(compact_text: str) -> str:
+        if any(marker in compact_text for marker in ("高速通行费", "ETC", "联网收费", "高速公路")):
+            return "wechat_etc_payment"
+        if any(marker in compact_text for marker in ("加油", "中国石化", "中国石油")):
+            return "wechat_fuel_payment"
+        if "支付宝" in compact_text:
+            return "alipay_payment"
+        if "财付通" in compact_text or "微信" in compact_text or "全部账单" in compact_text:
+            return "wechat_payment"
+        return "payment_receipt"
+
     def _parse_invoice_text(self, extracted_text: str) -> dict[str, str] | None:
         compact_text = re.sub(r"[\s\u3000]+", "", extracted_text).replace("：", ":").replace("￥", "¥")
 
@@ -316,15 +505,9 @@ class OAAttachmentInvoiceService:
             non_tax_receipt = self._parse_non_tax_payment_receipt_text(extracted_text, compact_text)
             if non_tax_receipt is not None:
                 return non_tax_receipt
-            machine_printed_invoice = self._parse_machine_printed_invoice_text(
-                extracted_text,
-                compact_text,
-                invoice_code=invoice_code,
-                invoice_no=invoice_no,
-                issue_date=issue_date,
-            )
-            if machine_printed_invoice is not None:
-                return machine_printed_invoice
+            machine_printed_invoices = self._parse_machine_printed_invoice_texts(extracted_text, compact_text)
+            if machine_printed_invoices:
+                return machine_printed_invoices[0]
             return None
 
         names = self._extract_names(compact_text)
@@ -364,6 +547,63 @@ class OAAttachmentInvoiceService:
             "invoice_kind": self._extract_invoice_kind(extracted_text),
         }
         return parsed
+
+    def _parse_machine_printed_invoice_texts(
+        self,
+        extracted_text: str,
+        compact_text: str,
+    ) -> list[dict[str, str]]:
+        if "机打发票" not in compact_text and "用机发票" not in compact_text:
+            return []
+
+        invoice_codes = [
+            clean_string(match.group(1))
+            for match in LOOSE_INVOICE_CODE_RE.finditer(compact_text)
+            if clean_string(match.group(1))
+        ]
+        invoice_numbers = [
+            clean_string(match.group(1))
+            for match in LOOSE_INVOICE_NO_RE.finditer(compact_text)
+            if clean_string(match.group(1))
+        ]
+        amounts = self._extract_machine_printed_total_amounts(extracted_text, compact_text)
+        if not invoice_numbers or not amounts:
+            return []
+
+        names = self._extract_names_from_lines(extracted_text) or self._extract_names(compact_text)
+        seller_name = names[0] if names else ""
+        issue_date = self._extract_issue_date(compact_text)
+        invoice_kind = self._extract_invoice_kind(extracted_text) or "通用机打发票"
+        evidences: list[dict[str, str]] = []
+        for index, invoice_no in enumerate(invoice_numbers):
+            invoice_code = invoice_codes[index] if index < len(invoice_codes) else (invoice_codes[0] if invoice_codes else "")
+            amount = amounts[index] if index < len(amounts) else amounts[-1]
+            if not invoice_code or not invoice_no or not amount:
+                continue
+            evidences.append(
+                {
+                    "evidence_type": "machine_invoice",
+                    "document_kind": "yunnan_machine_invoice",
+                    "invoice_code": invoice_code,
+                    "invoice_no": invoice_no,
+                    "seller_tax_no": "",
+                    "seller_name": seller_name,
+                    "buyer_tax_no": "",
+                    "buyer_name": "",
+                    "issue_date": issue_date,
+                    "amount": amount,
+                    "net_amount": amount,
+                    "tax_rate": "",
+                    "tax_amount": "0.00",
+                    "total_with_tax": amount,
+                    "invoice_type": "进项发票",
+                    "invoice_kind": invoice_kind,
+                    "source_region_key": f"machine_invoice:{index + 1}",
+                    "confidence": "high",
+                    "parse_status": "parsed",
+                }
+            )
+        return evidences
 
     def _parse_non_tax_payment_receipt_text(self, extracted_text: str, compact_text: str) -> dict[str, str] | None:
         if "非税收入一般缴款书" not in compact_text:
@@ -411,51 +651,31 @@ class OAAttachmentInvoiceService:
             return ""
         return clean_string(match.group(1))
 
-    def _parse_machine_printed_invoice_text(
-        self,
-        extracted_text: str,
-        compact_text: str,
-        *,
-        invoice_code: str,
-        invoice_no: str,
-        issue_date: str,
-    ) -> dict[str, str] | None:
-        if "机打发票" not in compact_text and "用机发票" not in compact_text:
-            return None
-        normalized_invoice_code = invoice_code or self._match_text(LOOSE_INVOICE_CODE_RE, compact_text)
-        normalized_invoice_no = invoice_no or self._match_text(LOOSE_INVOICE_NO_RE, compact_text)
-        total_amount = self._extract_machine_printed_total_amount(extracted_text)
-        if not normalized_invoice_code or not normalized_invoice_no or not total_amount:
-            return None
-
-        names = self._extract_names_from_lines(extracted_text) or self._extract_names(compact_text)
-        seller_name = names[0] if names else ""
-        return {
-            "invoice_code": normalized_invoice_code,
-            "invoice_no": normalized_invoice_no,
-            "seller_tax_no": "",
-            "seller_name": seller_name,
-            "buyer_tax_no": "",
-            "buyer_name": "",
-            "issue_date": issue_date,
-            "amount": total_amount,
-            "net_amount": total_amount,
-            "tax_rate": "",
-            "tax_amount": "0.00",
-            "total_with_tax": total_amount,
-            "invoice_type": "进项发票",
-            "invoice_kind": self._extract_invoice_kind(extracted_text) or "通用机打发票",
-        }
-
     def _extract_machine_printed_total_amount(self, extracted_text: str) -> str:
+        amounts = self._extract_machine_printed_total_amounts(
+            extracted_text,
+            re.sub(r"[\s\u3000]+", "", extracted_text).replace("：", ":").replace("￥", "¥"),
+        )
+        return amounts[0] if amounts else ""
+
+    def _extract_machine_printed_total_amounts(self, extracted_text: str, compact_text: str) -> list[str]:
+        amounts: list[str] = []
         for line in extracted_text.splitlines():
             normalized_line = clean_string(line).replace("：", ":")
             if "收费金额" not in normalized_line and not normalized_line.startswith("金额"):
                 continue
             amount_match = re.search(r"(?:收费金额|金额):?\s*([0-9]+(?:\.\d+)?)", normalized_line)
             if amount_match is not None:
-                return self._normalize_amount_text(amount_match.group(1))
-        return ""
+                amount = self._normalize_amount_text(amount_match.group(1))
+                if amount:
+                    amounts.append(amount)
+        if amounts:
+            return amounts
+        return [
+            self._normalize_amount_text(match.group(1))
+            for match in re.finditer(r"(?:收费金额|金额):?([0-9]+(?:\.\d+)?)", compact_text)
+            if self._normalize_amount_text(match.group(1))
+        ]
 
     @staticmethod
     def _match_text(pattern: re.Pattern[str], text: str) -> str:

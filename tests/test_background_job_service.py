@@ -298,6 +298,35 @@ class BackgroundJobServiceTests(unittest.TestCase):
         self.assertEqual(second_ack_payload["job"]["acknowledged_at"], ack_payload["job"]["acknowledged_at"])
         self.assertEqual(active_after_ack["jobs"], [])
 
+    def test_background_job_api_includes_retry_and_acknowledge_policy_for_failed_cost_warmup(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            job = app._background_job_service.create_job(
+                job_type="cost_statistics_cache_warmup",
+                label="预热成本统计缓存",
+                owner_user_id="system",
+                visibility="system",
+                affected_months=["2026-03"],
+                source={"reason": "cost_statistics_scope_invalidated", "months": ["2026-03"]},
+            )
+            app._background_job_service.fail_job(
+                job.job_id,
+                "服务重启，任务已中断，请重新执行。",
+                "interrupted_by_restart",
+            )
+
+            active_response = app.handle_request("GET", "/api/background-jobs/active")
+            active_payload = json.loads(active_response.body)
+            get_response = app.handle_request("GET", f"/api/background-jobs/{job.job_id}")
+            get_payload = json.loads(get_response.body)
+
+        self.assertEqual(active_response.status_code, 200)
+        self.assertTrue(active_payload["jobs"][0]["acknowledgeable"])
+        self.assertTrue(active_payload["jobs"][0]["retryable"])
+        self.assertEqual(get_response.status_code, 200)
+        self.assertTrue(get_payload["job"]["acknowledgeable"])
+        self.assertTrue(get_payload["job"]["retryable"])
+
 
 if __name__ == "__main__":
     unittest.main()

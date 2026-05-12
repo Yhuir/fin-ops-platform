@@ -1,7 +1,7 @@
 import { memo } from "react";
 
 import { getWorkbenchColumns } from "../../features/workbench/tableConfig";
-import type { WorkbenchRecord, WorkbenchRecordType } from "../../features/workbench/types";
+import type { WorkbenchRecord, WorkbenchRecordType, WorkbenchSourceKind } from "../../features/workbench/types";
 import type { WorkbenchColumn } from "../../features/workbench/tableConfig";
 import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import BankAccountValue from "../BankAccountValue";
@@ -184,6 +184,7 @@ function buildRowAriaLabel(row: WorkbenchRecord, paneId: WorkbenchRecordType, co
 
   if (paneId === "bank") {
     pushValue(row.tableValues.paymentAccount);
+    pushValue(row.categoryLabel);
     pushValue(row.tableValues.invoiceRelationStatus);
   }
 
@@ -222,11 +223,23 @@ function renderCellValue(
   }
 
   if (paneId === "bank" && column.kind === "money") {
-    return renderBankMoneyValue(column.key, value, row.tableValues.direction ?? "", row.tableValues.paymentAccount ?? "");
+    return renderBankMoneyValue(
+      column.key,
+      value,
+      row.tableValues.direction ?? "",
+      row.tableValues.paymentAccount ?? "",
+      row.categoryLabel ?? "",
+    );
   }
 
   if (paneId === "bank" && column.key === "note") {
-    return renderBankNoteValue(value, row.tableValues.invoiceRelationStatus ?? "", showInlineDetail, onOpenDetail);
+    return renderBankNoteValue(
+      value,
+      row.tableValues.invoiceRelationStatus ?? "",
+      showInlineDetail,
+      onOpenDetail,
+      row.bankTextFields,
+    );
   }
 
   if (paneId === "bank" && column.key === "counterparty") {
@@ -292,12 +305,27 @@ function renderOaApplicantValue(
   );
 }
 
-function renderBankNoteValue(value: string, relationStatus: string, showInlineDetail: boolean, onOpenDetail: () => void) {
+function renderBankNoteValue(
+  value: string,
+  relationStatus: string,
+  showInlineDetail: boolean,
+  onOpenDetail: () => void,
+  bankTextFields: WorkbenchRecord["bankTextFields"] = [],
+) {
   const internalTransferRemark = parseInternalTransferRemark(value, relationStatus);
+  const visibleBankTextFields = (bankTextFields ?? []).filter((field) => field.label.trim() && field.value.trim());
 
   return (
     <span className="compound-cell-value">
-      {internalTransferRemark ? (
+      {visibleBankTextFields.length > 0 ? (
+        <span className="compound-cell-primary bank-note-field-stack">
+          {visibleBankTextFields.map((field) => (
+            <span key={field.label} className="cell-text-value cell-text-value-full bank-note-field-line">
+              {`${field.label}：${field.value}`}
+            </span>
+          ))}
+        </span>
+      ) : internalTransferRemark ? (
         <>
           <span className="compound-cell-primary">
             <span className="inline-meta-tag">{internalTransferRemark.accountLabel}</span>
@@ -380,23 +408,36 @@ function renderDateTimeValue(value: string) {
   );
 }
 
-function renderBankMoneyValue(columnKey: string, value: string, direction: string, paymentAccount: string) {
+function renderBankMoneyValue(
+  columnKey: string,
+  value: string,
+  direction: string,
+  paymentAccount: string,
+  categoryLabel: string,
+) {
   const hasValue = value !== "--" && value !== "—" && value !== "";
   const normalizedDirection = resolveDirectionForMoneyCell(columnKey, direction, hasValue);
   const shouldShowDirectionTag = hasValue && normalizedDirection !== null;
   const shouldShowAccount = hasValue && paymentAccount !== "--" && paymentAccount !== "—" && paymentAccount !== "";
+  const normalizedCategoryLabel = categoryLabel.trim();
+  const shouldShowCategory = normalizedCategoryLabel !== "" && normalizedCategoryLabel !== "--" && normalizedCategoryLabel !== "—";
 
   return (
     <span className="money-cell-stack">
       <span className="money-cell-value">
         <span>{hasValue ? value : "--"}</span>
       </span>
-      {shouldShowDirectionTag || shouldShowAccount ? (
+      {shouldShowDirectionTag || shouldShowAccount || shouldShowCategory ? (
         <span className="money-cell-meta-row">
           {shouldShowDirectionTag ? <DirectionTag direction={normalizedDirection} /> : null}
           {shouldShowAccount ? (
             <span className="money-cell-account">
               <BankAccountValue value={compactBankAccountLabel(paymentAccount)} variant="tag" />
+            </span>
+          ) : null}
+          {shouldShowCategory ? (
+            <span className="inline-meta-tag bank-category-tag" title={normalizedCategoryLabel}>
+              {normalizedCategoryLabel}
             </span>
           ) : null}
         </span>
@@ -558,17 +599,19 @@ function renderInlineDateTimeTag(value: string) {
   );
 }
 
-function renderInvoicePartyValue(value: string, taxId: string, invoiceType: string, sourceKind?: string) {
+function renderInvoicePartyValue(value: string, taxId: string, invoiceType: string, sourceKind?: WorkbenchSourceKind) {
   const flowLabel = resolveInvoiceFlowLabel(invoiceType);
-  const sourceLabel = flowLabel ? resolveInvoiceSourceLabel(sourceKind) : null;
+  const sourceLabel = flowLabel || sourceKind ? resolveInvoiceSourceLabel(sourceKind) : null;
   const hasTaxId = taxId !== "--" && taxId !== "—" && taxId !== "";
 
   return (
     <span className="compound-cell-value invoice-party-value">
       <span className="compound-cell-primary invoice-party-primary">
-        {flowLabel ? (
+        {flowLabel || sourceLabel ? (
           <span className="invoice-direction-stack">
-            <span className={`invoice-flow-tag invoice-flow-tag-${flowLabel === "销" ? "output" : "input"}`}>{flowLabel}</span>
+            {flowLabel ? (
+              <span className={`invoice-flow-tag invoice-flow-tag-${flowLabel === "销" ? "output" : "input"}`}>{flowLabel}</span>
+            ) : null}
             {sourceLabel ? <span className="inline-meta-tag invoice-source-tag">{sourceLabel}</span> : null}
           </span>
         ) : null}
@@ -656,12 +699,21 @@ function resolveInvoiceFlowLabel(invoiceType: string) {
   return null;
 }
 
-function resolveInvoiceSourceLabel(sourceKind: string | undefined) {
+function resolveInvoiceSourceLabel(sourceKind: WorkbenchSourceKind | undefined) {
   if (sourceKind === "etc_invoice_summary") {
     return "ETC批次";
   }
   if (sourceKind === "etc_invoice") {
     return "ETC";
   }
-  return sourceKind === "oa_attachment_invoice" ? "OA附件" : "人工导入";
+  if (sourceKind === "oa_attachment_invoice") {
+    return "OA附件";
+  }
+  if (sourceKind === "oa_attachment_payment_receipt") {
+    return "付款凭证";
+  }
+  if (sourceKind === "oa_attachment_unknown") {
+    return "未识别附件";
+  }
+  return "人工导入";
 }
