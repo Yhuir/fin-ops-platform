@@ -1,4 +1,5 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import App from "../app/App";
 import { installMockApiFetch } from "./apiMock";
@@ -241,5 +242,138 @@ describe("AppHealthOperationsPage", () => {
     expect(within(alerts).getByText("active")).toBeInTheDocument();
     expect(within(alerts).getByText("alert-000")).toBeInTheDocument();
     expect(within(alerts).getByText("recovered")).toBeInTheDocument();
+  });
+
+  test("retries and acknowledges background jobs from the operations table", async () => {
+    const user = userEvent.setup();
+    const fetchMock = renderOperationsPage({
+      appHealth: {
+        status: "blocked",
+        generated_at: "2026-05-06T09:05:00+08:00",
+        session: {
+          status: "authenticated",
+          user: { username: "admin.ops", display_name: "运维管理员" },
+          access_tier: "admin",
+          can_mutate_data: true,
+        },
+        background_jobs: {
+          queued: 0,
+          running: 0,
+          attention: 1,
+          jobs: [
+            {
+              job_id: "job-cost-warmup",
+              type: "cost_statistics_cache_warmup",
+              label: "成本统计缓存预热",
+              status: "partial_success",
+              updated_at: "2026-05-06T09:03:00+08:00",
+              message: "成本统计缓存预热部分完成",
+              retryable: true,
+              retry_mode: "failed_scopes",
+              acknowledgeable: true,
+              attention: true,
+            },
+          ],
+        },
+        dependencies: {},
+        alerts: {
+          active: [],
+          recent_recovered: [],
+        },
+      },
+    });
+
+    const backgroundJobs = await screen.findByTestId("app-health-background-jobs", {}, { timeout: PAGE_TIMEOUT });
+    expect(await within(backgroundJobs).findByText("job-cost-warmup")).toBeInTheDocument();
+
+    const appHealthCallsBeforeRetry = fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/app-health")).length;
+    await user.click(within(backgroundJobs).getByRole("button", { name: "Retry job-cost-warmup" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/background-jobs/job-cost-warmup/retry"),
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/app-health"))).toHaveLength(appHealthCallsBeforeRetry + 1);
+    });
+
+    const appHealthCallsBeforeAcknowledge = fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/app-health")).length;
+    await user.click(within(backgroundJobs).getByRole("button", { name: "Acknowledge job-cost-warmup" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/background-jobs/job-cost-warmup/acknowledge"),
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/app-health"))).toHaveLength(appHealthCallsBeforeAcknowledge + 1);
+    });
+  });
+
+  test("acknowledges all attention jobs one by one when bulk endpoint is unavailable", async () => {
+    const user = userEvent.setup();
+    const fetchMock = renderOperationsPage({
+      appHealth: {
+        status: "blocked",
+        generated_at: "2026-05-06T09:05:00+08:00",
+        session: {
+          status: "authenticated",
+          user: { username: "admin.ops", display_name: "运维管理员" },
+          access_tier: "admin",
+          can_mutate_data: true,
+        },
+        background_jobs: {
+          queued: 0,
+          running: 0,
+          attention: 2,
+          jobs: [
+            {
+              job_id: "job-attention-1",
+              type: "cost_statistics_cache_warmup",
+              label: "成本统计缓存预热",
+              status: "failed",
+              retryable: true,
+              acknowledgeable: true,
+              attention: true,
+            },
+            {
+              job_id: "job-attention-2",
+              type: "file_import",
+              label: "导入发票",
+              status: "partial_success",
+              retryable: true,
+              acknowledgeable: true,
+              attention: true,
+            },
+          ],
+        },
+        dependencies: {},
+        alerts: {
+          active: [],
+          recent_recovered: [],
+        },
+      },
+    });
+
+    const backgroundJobs = await screen.findByTestId("app-health-background-jobs", {}, { timeout: PAGE_TIMEOUT });
+    const appHealthCallsBeforeAcknowledgeAll = fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/app-health")).length;
+    await user.click(within(backgroundJobs).getByRole("button", { name: "Acknowledge all attention" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/background-jobs/job-attention-1/acknowledge"),
+        expect.objectContaining({ method: "POST" }),
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/background-jobs/job-attention-2/acknowledge"),
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/app-health"))).toHaveLength(appHealthCallsBeforeAcknowledgeAll + 1);
+    });
   });
 });

@@ -23,19 +23,24 @@ class AppHealthService:
         state_store_info: dict[str, Any],
         rebuild_scheduled: bool,
         duration_ms: float,
+        attention_jobs: list[object] | None = None,
         alerts: dict[str, list[dict[str, Any]]] | None = None,
         generated_at: datetime | None = None,
     ) -> dict[str, Any]:
         now = generated_at or datetime.now(UTC)
+        resolved_attention_jobs = (
+            list(attention_jobs)
+            if attention_jobs is not None
+            else [
+                job
+                for job in active_jobs
+                if getattr(job, "status", None) in {"failed", "partial_success"}
+            ]
+        )
         running_jobs = [job for job in active_jobs if getattr(job, "status", None) == "running"]
         queued_jobs = [job for job in active_jobs if getattr(job, "status", None) == "queued"]
-        attention_jobs = [
-            job
-            for job in active_jobs
-            if getattr(job, "status", None) in {"failed", "partial_success"}
-        ]
         primary_running = self.primary_running_job([*queued_jobs, *running_jobs])
-        primary_attention = self.primary_attention_job(attention_jobs)
+        primary_attention = self.primary_attention_job(resolved_attention_jobs)
         rebuild_jobs = [
             job
             for job in active_jobs
@@ -82,7 +87,7 @@ class AppHealthService:
         )
         if session_blocked or dependency_unavailable:
             status = "blocked"
-        elif dirty_scopes or rebuilding or running_jobs or queued_jobs or attention_jobs:
+        elif dirty_scopes or rebuilding or active_jobs or resolved_attention_jobs:
             status = "busy"
         else:
             status = "ok"
@@ -102,9 +107,12 @@ class AppHealthService:
             "workbench_rebuild_running_seconds_max": round(max(rebuild_running_seconds, default=0), 2),
             "background_jobs_active_count": len(active_jobs),
             "background_jobs_running_count": len(running_jobs),
-            "background_jobs_attention_count": len(attention_jobs),
+            "background_jobs_attention_count": len(resolved_attention_jobs),
             "active_alert_count": len((alerts or {}).get("active", [])),
         }
+        active_job_payloads = [self._job_payload(job) for job in active_jobs]
+        attention_job_payloads = [self._job_payload(job) for job in resolved_attention_jobs]
+        combined_job_payloads = self._combine_job_payloads(active_job_payloads, attention_job_payloads)
         return {
             "version": APP_HEALTH_SCHEMA_VERSION,
             "status": status,
@@ -123,10 +131,12 @@ class AppHealthService:
                 "active": len(active_jobs),
                 "queued": len(queued_jobs),
                 "running": len(running_jobs),
-                "attention": len(attention_jobs),
+                "attention": len(resolved_attention_jobs),
                 "primary_running": self._primary_job_payload(primary_running),
                 "primary_attention": self._primary_job_payload(primary_attention),
-                "jobs": [self._job_payload(job) for job in active_jobs],
+                "active_jobs": active_job_payloads,
+                "attention_jobs": attention_job_payloads,
+                "jobs": combined_job_payloads,
             },
             "dependencies": dependencies,
             "metrics": metrics,
@@ -259,6 +269,7 @@ class AppHealthService:
             }
         payload["retryable"] = AppHealthService._is_retryable_job(job)
         payload["acknowledgeable"] = AppHealthService._is_acknowledgeable_job(job)
+        payload["attention"] = AppHealthService._is_attention_job(job)
         return payload
 
     @classmethod
@@ -299,13 +310,21 @@ class AppHealthService:
                 )
             )
         if job_type == "cost_statistics_cache_warmup":
+            result_summary = getattr(job, "result_summary", {})
+            if not isinstance(result_summary, dict):
+                result_summary = {}
             return any(
                 cls._has_values(value)
                 for value in (
+                    result_summary.get("failed_scope_keys"),
+                    result_summary.get("remaining_scope_keys"),
+                    result_summary.get("target_scope_keys"),
                     getattr(job, "affected_months", []),
+                    getattr(job, "affected_scopes", []),
                     source.get("affected_months"),
                     source.get("months"),
                     source.get("month"),
+                    source.get("target_scope_keys"),
                 )
             )
         return False
@@ -313,6 +332,28 @@ class AppHealthService:
     @staticmethod
     def _is_acknowledgeable_job(job: object) -> bool:
         return str(getattr(job, "status", "") or "") in {"failed", "partial_success"}
+
+    @staticmethod
+    def _is_attention_job(job: object) -> bool:
+        if str(getattr(job, "status", "") or "") not in {"failed", "partial_success"}:
+            return False
+        return not bool(getattr(job, "acknowledged_at", None) or getattr(job, "superseded_at", None))
+
+    @staticmethod
+    def _combine_job_payloads(
+        active_jobs: list[dict[str, Any]],
+        attention_jobs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        combined: list[dict[str, Any]] = []
+        seen_job_ids: set[str] = set()
+        for job in [*active_jobs, *attention_jobs]:
+            job_id = str(job.get("job_id") or "").strip()
+            if job_id and job_id in seen_job_ids:
+                continue
+            if job_id:
+                seen_job_ids.add(job_id)
+            combined.append(job)
+        return combined
 
     @staticmethod
     def _has_values(value: object) -> bool:

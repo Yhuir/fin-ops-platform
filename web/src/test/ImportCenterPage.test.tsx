@@ -27,8 +27,19 @@ function getPreviewFormData(fetchMock: ReturnType<typeof installMockApiFetch>) {
   return (previewCall?.[1] as RequestInit).body as FormData;
 }
 
+function getEtcPreviewFormData(fetchMock: ReturnType<typeof installMockApiFetch>) {
+  const previewCall = fetchMock.mock.calls.find(([url]) => String(url) === "/api/etc/import/preview");
+  expect(previewCall).toBeTruthy();
+  return (previewCall?.[1] as RequestInit).body as FormData;
+}
+
 function getFileOverrides(formData: FormData) {
   return JSON.parse(String(formData.get("file_overrides")));
+}
+
+async function selectReadyEtcTask(user: ReturnType<typeof userEvent.setup>) {
+  await screen.findByLabelText("ETC对账任务");
+  await user.selectOptions(screen.getByLabelText("ETC对账任务"), "etc_task_ready_001");
 }
 
 describe("Import pages", () => {
@@ -262,7 +273,7 @@ describe("Import pages", () => {
     unmount();
     renderAppAt("/imports/invoices");
 
-    expect(await screen.findByText("一月发票.xlsx")).toBeInTheDocument();
+    expect((await screen.findAllByText("一月发票.xlsx")).length).toBeGreaterThan(0);
     expect(screen.getAllByText("14").length).toBeGreaterThan(0);
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/imports/files/sessions/import_session_0001")).toBe(true);
 
@@ -350,6 +361,26 @@ describe("Import pages", () => {
     expect(screen.getByRole("button", { name: "开始预览" })).toBeDisabled();
   });
 
+  test("ETC invoice import requires a ready reconciliation task before preview", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+
+    renderAppAt("/imports/etc-invoices");
+
+    expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
+    expect(await screen.findByText("请选择已确认的 ETC 对账任务后再预览 ETC zip。")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "新建对账任务" })).not.toBeInTheDocument();
+
+    await user.upload(getUploadInput("上传ETC zip", "上传文件"), [
+      new File(["zip-a"], "etc-2026-03.zip", { type: "application/zip" }),
+    ]);
+
+    expect(screen.getByRole("button", { name: "开始预览" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "确认导入" })).toBeDisabled();
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/etc/reconciliation-tasks/ready-for-import")).toBe(true);
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/etc/import/preview")).toBe(false);
+  });
+
   test("ETC invoice import previews zip files with the ETC API and skips generic preview", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
@@ -357,6 +388,7 @@ describe("Import pages", () => {
     renderAppAt("/imports/etc-invoices");
 
     expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
+    await selectReadyEtcTask(user);
     await user.upload(getUploadInput("上传ETC zip", "上传文件"), [
       new File(["zip-a"], "etc-2026-03.zip", { type: "application/zip" }),
       new File(["zip-b"], "etc-2026-04.zip", { type: "application/zip" }),
@@ -370,13 +402,12 @@ describe("Import pages", () => {
     expect(screen.getByText("新发票待导入")).toBeInTheDocument();
     expect(screen.getAllByText("附件补齐").length).toBeGreaterThan(0);
 
-    const previewCall = fetchMock.mock.calls.find(([url]) => String(url) === "/api/etc/import/preview");
-    expect(previewCall).toBeTruthy();
-    const formData = (previewCall?.[1] as RequestInit).body as FormData;
+    const formData = getEtcPreviewFormData(fetchMock);
     expect((formData.getAll("files") as File[]).map((file) => file.name)).toEqual([
       "etc-2026-03.zip",
       "etc-2026-04.zip",
     ]);
+    expect(formData.get("task_id")).toBe("etc_task_ready_001");
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/imports/files/preview")).toBe(false);
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/etc/import/confirm")).toBe(false);
   });
@@ -388,6 +419,7 @@ describe("Import pages", () => {
     renderAppAt("/imports/etc-invoices");
 
     expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
+    await selectReadyEtcTask(user);
     await user.upload(getUploadInput("上传ETC zip", "上传文件"), [
       new File(["zip-a"], "etc-2026-03.zip", { type: "application/zip" }),
       new File(["zip-b"], "etc-2026-04.zip", { type: "application/zip" }),
@@ -409,6 +441,7 @@ describe("Import pages", () => {
     renderAppAt("/imports/etc-invoices");
 
     expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
+    await selectReadyEtcTask(user);
     await user.upload(getUploadInput("上传ETC zip", "上传文件"), [
       new File(["zip-a"], "etc-2026-03.zip", { type: "application/zip" }),
     ]);
@@ -420,6 +453,28 @@ describe("Import pages", () => {
     expect(await screen.findByText("预览后数据已变化，请重新预览后再确认。")).toBeInTheDocument();
   });
 
+  test("ETC import stale task preview error clears preview and requires re-preview", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({ etcImportConfirmStaleReconciliationTask: true });
+
+    renderAppAt("/imports/etc-invoices");
+
+    expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
+    await selectReadyEtcTask(user);
+    await user.upload(getUploadInput("上传ETC zip", "上传文件"), [
+      new File(["zip-a"], "etc-2026-03.zip", { type: "application/zip" }),
+    ]);
+    await user.click(screen.getByRole("button", { name: "开始预览" }));
+    expect(await screen.findByRole("heading", { name: "ETC导入预览" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "确认导入" }));
+
+    expect(await screen.findByText("对账任务已更新，请重新预览 ETC zip 后再确认导入。")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "ETC导入预览" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "开始预览" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "确认导入" })).toBeDisabled();
+  });
+
   test("ETC invoice import confirms the preview session and shows background job feedback", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
@@ -427,6 +482,7 @@ describe("Import pages", () => {
     renderAppAt("/imports/etc-invoices");
 
     expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
+    await selectReadyEtcTask(user);
     await user.upload(getUploadInput("上传ETC zip", "上传文件"), [
       new File(["zip-a"], "etc-2026-03.zip", { type: "application/zip" }),
     ]);
@@ -442,6 +498,7 @@ describe("Import pages", () => {
     expect(confirmCall).toBeTruthy();
     expect(JSON.parse(String((confirmCall?.[1] as RequestInit).body))).toEqual({
       sessionId: "etc_import_session_0001",
+      taskId: "etc_task_ready_001",
     });
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/imports/files/preview")).toBe(false);
   });
@@ -453,6 +510,7 @@ describe("Import pages", () => {
     renderAppAt("/imports/etc-invoices");
 
     expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
+    await selectReadyEtcTask(user);
     await user.upload(getUploadInput("上传ETC zip", "上传文件"), [
       new File(["zip-a"], "etc-2026-03.zip", { type: "application/zip" }),
     ]);

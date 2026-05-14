@@ -27,6 +27,8 @@ from fin_ops_platform.services.state_store import (
     TURNOVER_RELATION_AUDIT_LOG_COLLECTION,
     TURNOVER_RELATIONS_COLLECTION,
     WORKBENCH_CANDIDATE_MATCHES_COLLECTION,
+    NO_OA_BANK_BATCHES_COLLECTION,
+    NO_OA_BANK_BATCH_AUDIT_LOG_COLLECTION,
     WORKBENCH_READ_MODELS_COLLECTION,
     WORKBENCH_PAIR_RELATIONS_COLLECTION,
     default_data_dir,
@@ -622,6 +624,65 @@ class StateStoreTests(unittest.TestCase):
 
         self.assertEqual(loaded["pair_relation_history"][0]["operation_type"], "confirm_link")
         self.assertEqual(loaded["pair_relation_history"][0]["amount_check"]["status"], "mismatch")
+
+    def test_save_no_oa_bank_batches_persists_and_loads_local_snapshot(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            snapshot = {
+                "schema_version": "2026-05-no-oa-bank-batch-v1",
+                "batches": {
+                    "no_oa_batch_001": {
+                        "batch_id": "no_oa_batch_001",
+                        "batch_type": "fee",
+                        "status": "draft",
+                        "row_ids": ["bk-fee-001"],
+                    }
+                },
+                "audit_log": [{"operation": "submit", "batch_id": "no_oa_batch_001"}],
+            }
+
+            store = ApplicationStateStore(data_dir)
+            store.save_no_oa_bank_batches(snapshot)
+
+            reloaded = ApplicationStateStore(data_dir)
+            loaded = reloaded.load_no_oa_bank_batches()
+
+        self.assertEqual(loaded, snapshot)
+
+    def test_save_no_oa_bank_batches_persists_and_loads_mongo_snapshot(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "app_mongo_config.json").write_text(
+                json.dumps({"host": "127.0.0.1", "database": "fin_ops_platform_app"}),
+                encoding="utf-8",
+            )
+            fake_client = FakeMongoClient()
+            snapshot = {
+                "schema_version": "2026-05-no-oa-bank-batch-v1",
+                "batches": {
+                    "no_oa_batch_001": {
+                        "batch_id": "no_oa_batch_001",
+                        "batch_type": "fee",
+                        "status": "submitted",
+                        "row_ids": ["bk-fee-001"],
+                    }
+                },
+                "audit_log": [{"operation": "submit", "batch_id": "no_oa_batch_001"}],
+            }
+
+            with patch("fin_ops_platform.services.state_store.MongoClient", return_value=fake_client):
+                with patch(
+                    "fin_ops_platform.services.state_store.GridFSBucket",
+                    side_effect=lambda db, bucket_name: FakeGridFSBucket(db, bucket_name),
+                ):
+                    store = ApplicationStateStore(data_dir)
+                    store.save_no_oa_bank_batches(snapshot)
+                    loaded = store.load_no_oa_bank_batches()
+
+            db = fake_client["fin_ops_platform_app"]
+            self.assertEqual(loaded, snapshot)
+            self.assertIn("no_oa_batch_001", db[NO_OA_BANK_BATCHES_COLLECTION].documents)
+            self.assertEqual(db[NO_OA_BANK_BATCH_AUDIT_LOG_COLLECTION].count_documents({}), 1)
 
     def test_save_workbench_read_models_persists_and_loads_snapshot(self) -> None:
         with TemporaryDirectory() as temp_dir:

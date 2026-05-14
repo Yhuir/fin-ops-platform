@@ -142,7 +142,7 @@ class LiveWorkbenchService:
             return None
         if transaction.source_batch_id in excluded_transaction_batch_ids:
             return None
-        category = self._category_for_transaction(transaction.id)
+        category = self._category_for_transaction(transaction)
         return self._build_bank_row(transaction, result_by_object_id.get(row_id), category=category)
 
     def list_auto_pair_candidates(self, month: str = "all") -> list[MatchingResult]:
@@ -327,7 +327,7 @@ class LiveWorkbenchService:
             for transaction in self._import_service.list_transactions()
             if transaction.source_batch_id not in excluded_transaction_batch_ids
         ]
-        categories_by_transaction_id = self._categories_for_transactions([transaction.id for transaction in transactions])
+        categories_by_transaction_id = self._categories_for_transactions(transactions)
         for transaction in transactions:
             if transaction.source_batch_id in excluded_transaction_batch_ids:
                 continue
@@ -479,16 +479,26 @@ class LiveWorkbenchService:
             return base_remark
         return f"{base_remark}；{counterpart_text}"
 
-    def _category_for_transaction(self, transaction_id: str) -> dict[str, str] | None:
-        return self._categories_for_transactions([transaction_id]).get(transaction_id)
+    def _category_for_transaction(self, transaction: BankTransaction) -> dict[str, str] | None:
+        return self._categories_for_transactions([transaction]).get(transaction.id)
 
-    def _categories_for_transactions(self, transaction_ids: list[str]) -> dict[str, dict[str, str]]:
+    def _categories_for_transactions(self, transactions: list[Any]) -> dict[str, dict[str, str]]:
         provider = self._category_provider
-        if provider is None or not transaction_ids:
+        if provider is None or not transactions:
+            return {}
+
+        transaction_ids = [
+            str(getattr(transaction, "id", transaction) or "").strip()
+            for transaction in transactions
+            if str(getattr(transaction, "id", transaction) or "").strip()
+        ]
+        if not transaction_ids:
             return {}
 
         raw_records: Any
-        if hasattr(provider, "bulk_get"):
+        if hasattr(provider, "bulk_get_for_rows"):
+            raw_records = provider.bulk_get_for_rows(transactions)
+        elif hasattr(provider, "bulk_get"):
             raw_records = provider.bulk_get(transaction_ids)
         elif hasattr(provider, "get"):
             raw_records = {

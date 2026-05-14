@@ -50,10 +50,12 @@ class TurnoverLedgerService:
         category_service: BankTransactionCategoryService,
         relation_service: TurnoverRelationService,
         extra_service: Any | None = None,
+        category_provider: Any | None = None,
         today_provider: Callable[[], date] | None = None,
     ) -> None:
         self._import_service = import_service
         self._category_service = category_service
+        self._category_provider = category_provider
         self._relation_service = relation_service
         self._extra_service = extra_service
         self._today_provider = today_provider or date.today
@@ -196,12 +198,16 @@ class TurnoverLedgerService:
 
     def _bank_rows(self) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
-        for transaction in list(self._import_service.list_transactions()):
-            row = self._transaction_payload(transaction)
+        transaction_rows = [
+            self._transaction_payload(transaction)
+            for transaction in list(self._import_service.list_transactions())
+        ]
+        categories_by_transaction_id = self._categories_for_rows(transaction_rows)
+        for row in transaction_rows:
             transaction_id = str(row.get("id") or "").strip()
             if not transaction_id:
                 continue
-            category = self._category_service.get(transaction_id)
+            category = categories_by_transaction_id.get(transaction_id, {})
             category_code = category.get("category_code")
             if category_code not in BANK_TRANSACTION_CATEGORY_DEFINITIONS:
                 continue
@@ -216,6 +222,25 @@ class TurnoverLedgerService:
             enriched["counterparty_name"] = str(row.get("counterparty_name_raw") or row.get("counterparty_name") or "")
             rows.append(enriched)
         return rows
+
+    def _categories_for_rows(self, bank_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        provider = self._category_provider
+        if provider is not None and hasattr(provider, "bulk_get_for_rows"):
+            raw_records = provider.bulk_get_for_rows(bank_rows)
+        else:
+            transaction_ids = [
+                str(row.get("id") or "").strip()
+                for row in bank_rows
+                if str(row.get("id") or "").strip()
+            ]
+            raw_records = self._category_service.bulk_get(transaction_ids)
+        if not isinstance(raw_records, dict):
+            return {}
+        return {
+            str(transaction_id): record
+            for transaction_id, record in raw_records.items()
+            if isinstance(record, dict)
+        }
 
     @staticmethod
     def _transaction_payload(transaction: Any) -> dict[str, Any]:

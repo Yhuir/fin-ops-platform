@@ -28,6 +28,18 @@ class _LedgerExtraServiceStub:
         return dict(self._extras.get(relation_id, {}))
 
 
+class _EffectiveCategoryProviderStub:
+    def __init__(self, records_by_transaction_id: dict[str, dict[str, object]]) -> None:
+        self._records_by_transaction_id = dict(records_by_transaction_id)
+
+    def bulk_get_for_rows(self, bank_rows: list[dict[str, object]]) -> dict[str, dict[str, object]]:
+        return {
+            str(row.get("id") or ""): dict(self._records_by_transaction_id[str(row.get("id") or "")])
+            for row in bank_rows
+            if str(row.get("id") or "") in self._records_by_transaction_id
+        }
+
+
 class TurnoverLedgerServiceTests(unittest.TestCase):
     def _transaction(
         self,
@@ -374,6 +386,83 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         self.assertEqual(closed_row["bank_account_labels"], ["建行 8106"])
         self.assertIn("暂借款", closed_row["summary_text"])
         self.assertTrue(closed_row["sync_to_workbench"])
+
+    def test_ledger_uses_effective_category_provider_and_only_turnover_taxonomy(self) -> None:
+        transactions = [
+            self._transaction(
+                "txn-effective-turnover",
+                direction=TransactionDirection.INFLOW,
+                amount="9000.00",
+                counterparty="云南路桥",
+                trade_time="2026-01-01 09:00:00",
+                summary="公司暂借款",
+            ),
+            self._transaction(
+                "txn-auto-fee",
+                direction=TransactionDirection.OUTFLOW,
+                amount="10.00",
+                counterparty="建设银行",
+                trade_time="2026-01-01 09:05:00",
+                summary="网银手续费",
+            ),
+            self._transaction(
+                "txn-auto-internal-transfer",
+                direction=TransactionDirection.OUTFLOW,
+                amount="9000.00",
+                counterparty="云南溯源科技有限公司",
+                trade_time="2026-01-01 09:10:00",
+                summary="内部往来",
+            ),
+            self._transaction(
+                "txn-manual-clear",
+                direction=TransactionDirection.INFLOW,
+                amount="9000.00",
+                counterparty="云南路桥",
+                trade_time="2026-01-01 09:15:00",
+                summary="公司暂借款",
+            ),
+        ]
+        import_service = _ImportServiceStub(transactions)
+        category_service = BankTransactionCategoryService.from_snapshot(None)
+        ledger_service = TurnoverLedgerService(
+            import_service=import_service,
+            category_service=category_service,
+            relation_service=TurnoverRelationService.from_snapshot(None),
+            category_provider=_EffectiveCategoryProviderStub(
+                {
+                    "txn-effective-turnover": {
+                        "category_code": "borrow_in_company_pending_repayment",
+                        "category_label": "公司暂借款：待还款",
+                        "category_path": ["借入", "公司往来款", "待还款"],
+                        "category_source": "auto",
+                    },
+                    "txn-auto-fee": {
+                        "category_code": "fee",
+                        "category_label": "手续费",
+                        "category_path": ["自动识别", "手续费"],
+                        "category_source": "auto",
+                    },
+                    "txn-auto-internal-transfer": {
+                        "category_code": "internal_transfer",
+                        "category_label": "内部往来款",
+                        "category_path": ["自动识别", "内部往来款"],
+                        "category_source": "auto",
+                    },
+                    "txn-manual-clear": {
+                        "category_code": None,
+                        "category_label": None,
+                        "category_path": [],
+                        "category_source": "",
+                    },
+                }
+            ),
+        )
+
+        payload = ledger_service.list_ledger(family="company")
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        self.assertEqual(payload["rows"][0]["bank_row_ids"], ["txn-effective-turnover"])
+        self.assertEqual(payload["rows"][0]["category_codes"], ["borrow_in_company_pending_repayment"])
 
     def test_family_and_status_filters_are_applied_before_pagination(self) -> None:
         ledger_service, _, _ = self._service()

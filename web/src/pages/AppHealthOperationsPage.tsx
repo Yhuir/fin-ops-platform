@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
@@ -10,6 +11,7 @@ import { DataGrid, type GridColDef } from "@mui/x-data-grid";
 import { useSession, useSessionPermissions } from "../contexts/SessionContext";
 import { fetchAppHealth } from "../features/appHealth/api";
 import type { ApiAppHealthPayload } from "../features/appHealth/types";
+import { acknowledgeBackgroundJob, retryBackgroundJobById } from "../features/backgroundJobs/api";
 import { settingsDataGridSx, settingsTokens } from "../components/settings/settingsDesign";
 
 type OperationsPayload = ApiAppHealthPayload & Record<string, unknown>;
@@ -21,8 +23,9 @@ type GridRow = {
   label: string;
   updatedAt: string;
   message: string;
-  retryable: string;
-  acknowledgeable: string;
+  retryable: boolean;
+  acknowledgeable: boolean;
+  attention: boolean;
 };
 
 type JobSummary = {
@@ -129,6 +132,18 @@ function readRecordArray(source: Record<string, unknown>, keys: string[]) {
     }
   }
   return [];
+}
+
+function uniqueRecordsById(records: Record<string, unknown>[]) {
+  const seen = new Set<string>();
+  return records.filter((record, index) => {
+    const id = readString(record, ["job_id", "jobId", "id"], `job-${index + 1}`);
+    if (seen.has(id)) {
+      return false;
+    }
+    seen.add(id);
+    return true;
+  });
 }
 
 function readRecord(source: Record<string, unknown>, keys: string[]) {
@@ -241,17 +256,25 @@ function JobSummaryFields({ job }: { job: JobSummary | null }) {
 }
 
 function normalizeJobs(backgroundJobs: Record<string, unknown>): GridRow[] {
-  return readRecordArray(backgroundJobs, ["jobs", "recent_jobs", "recentJobs", "recent"]).map((job, index) => {
+  const jobs = uniqueRecordsById([
+    ...readRecordArray(backgroundJobs, ["jobs", "recent_jobs", "recentJobs", "recent"]),
+    ...readRecordArray(backgroundJobs, ["active_jobs", "activeJobs"]),
+    ...readRecordArray(backgroundJobs, ["attention_jobs", "attentionJobs"]),
+  ]);
+  return jobs.map((job, index) => {
     const id = readString(job, ["job_id", "jobId", "id"], `job-${index + 1}`);
+    const status = readString(job, ["status"]);
+    const attention = readBoolean(job, ["attention"]) || status === "failed" || status === "partial_success";
     return {
       id,
-      status: readString(job, ["status"]),
+      status,
       type: readString(job, ["type", "job_type", "jobType"]),
       label: readString(job, ["label", "name"]),
       updatedAt: readString(job, ["updated_at", "updatedAt", "finished_at", "finishedAt", "started_at", "startedAt", "created_at", "createdAt"]),
       message: readString(job, ["message", "error", "detail", "details"]),
-      retryable: readBoolean(job, ["retryable"]) ? "是" : "否",
-      acknowledgeable: readBoolean(job, ["acknowledgeable"]) ? "是" : "否",
+      retryable: readBoolean(job, ["retryable"]),
+      acknowledgeable: readBoolean(job, ["acknowledgeable"]),
+      attention,
     };
   });
 }
@@ -297,17 +320,6 @@ function toAlertRow(alert: Record<string, unknown>, index: number, state: "activ
   };
 }
 
-const jobColumns: GridColDef<GridRow>[] = [
-  { field: "id", headerName: "Job ID", minWidth: 128, flex: 0.9 },
-  { field: "status", headerName: "Status", minWidth: 112, flex: 0.6, renderCell: (params) => <StatusChip value={String(params.value ?? "")} /> },
-  { field: "type", headerName: "Type", minWidth: 144, flex: 0.9 },
-  { field: "label", headerName: "Label", minWidth: 160, flex: 1 },
-  { field: "updatedAt", headerName: "Updated", minWidth: 180, flex: 1 },
-  { field: "message", headerName: "Message", minWidth: 180, flex: 1.2 },
-  { field: "retryable", headerName: "Retryable", minWidth: 104, flex: 0.5 },
-  { field: "acknowledgeable", headerName: "Acknowledgeable", minWidth: 136, flex: 0.6 },
-];
-
 const alertColumns: GridColDef<AlertRow>[] = [
   { field: "id", headerName: "Alert ID", minWidth: 128, flex: 0.8 },
   { field: "state", headerName: "State", minWidth: 112, flex: 0.5, renderCell: (params) => <StatusChip value={String(params.value ?? "")} /> },
@@ -346,11 +358,20 @@ export default function AppHealthOperationsPage() {
   const [payload, setPayload] = useState<OperationsPayload | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [operationError, setOperationError] = useState<string | null>(null);
+  const [operatingJobId, setOperatingJobId] = useState<string | null>(null);
+  const [isAcknowledgingAll, setIsAcknowledgingAll] = useState(false);
+
+  const loadPayload = useCallback(async (signal?: AbortSignal) => {
+    const nextPayload = await fetchAppHealth(signal);
+    setPayload(nextPayload as OperationsPayload);
+  }, []);
 
   useEffect(() => {
     if (!canAdminAccess) {
       setPayload(null);
       setLoadError(null);
+      setOperationError(null);
       setIsLoading(false);
       return undefined;
     }
@@ -359,10 +380,7 @@ export default function AppHealthOperationsPage() {
     setIsLoading(true);
     setLoadError(null);
 
-    fetchAppHealth(controller.signal)
-      .then((nextPayload) => {
-        setPayload(nextPayload as OperationsPayload);
-      })
+    loadPayload(controller.signal)
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") {
           return;
@@ -378,7 +396,7 @@ export default function AppHealthOperationsPage() {
     return () => {
       controller.abort();
     };
-  }, [canAdminAccess]);
+  }, [canAdminAccess, loadPayload]);
 
   const normalized = useMemo(() => {
     const source = payload ?? {};
@@ -456,6 +474,123 @@ export default function AppHealthOperationsPage() {
     });
   }, [normalized.dependencies]);
 
+  const attentionRows = useMemo(
+    () => normalized.backgroundJobs.rows.filter((row) => row.attention && row.acknowledgeable),
+    [normalized.backgroundJobs.rows],
+  );
+
+  const refreshAfterOperation = useCallback(async () => {
+    await loadPayload();
+  }, [loadPayload]);
+
+  const handleRetryJob = useCallback(
+    async (row: GridRow) => {
+      if (!row.retryable) {
+        return;
+      }
+      setOperatingJobId(row.id);
+      setOperationError(null);
+      try {
+        await retryBackgroundJobById(row.id);
+        await refreshAfterOperation();
+      } catch (error) {
+        setOperationError(error instanceof Error && error.message.trim() ? error.message : "后台任务操作失败。");
+      } finally {
+        setOperatingJobId(null);
+      }
+    },
+    [refreshAfterOperation],
+  );
+
+  const handleAcknowledgeJob = useCallback(
+    async (row: GridRow) => {
+      if (!row.acknowledgeable) {
+        return;
+      }
+      setOperatingJobId(row.id);
+      setOperationError(null);
+      try {
+        await acknowledgeBackgroundJob(row.id);
+        await refreshAfterOperation();
+      } catch (error) {
+        setOperationError(error instanceof Error && error.message.trim() ? error.message : "后台任务操作失败。");
+      } finally {
+        setOperatingJobId(null);
+      }
+    },
+    [refreshAfterOperation],
+  );
+
+  const handleAcknowledgeAllAttention = useCallback(async () => {
+    if (attentionRows.length === 0) {
+      return;
+    }
+    setIsAcknowledgingAll(true);
+    setOperationError(null);
+    try {
+      for (const row of attentionRows) {
+        await acknowledgeBackgroundJob(row.id);
+      }
+      await refreshAfterOperation();
+    } catch (error) {
+      setOperationError(error instanceof Error && error.message.trim() ? error.message : "后台任务操作失败。");
+    } finally {
+      setIsAcknowledgingAll(false);
+    }
+  }, [attentionRows, refreshAfterOperation]);
+
+  const jobColumns = useMemo<GridColDef<GridRow>[]>(() => [
+    { field: "id", headerName: "Job ID", minWidth: 128, flex: 0.9 },
+    { field: "status", headerName: "Status", minWidth: 112, flex: 0.6, renderCell: (params) => <StatusChip value={String(params.value ?? "")} /> },
+    { field: "type", headerName: "Type", minWidth: 144, flex: 0.9 },
+    { field: "label", headerName: "Label", minWidth: 160, flex: 1 },
+    { field: "updatedAt", headerName: "Updated", minWidth: 180, flex: 1 },
+    { field: "message", headerName: "Message", minWidth: 180, flex: 1.2 },
+    {
+      field: "retryable",
+      headerName: "Retryable",
+      minWidth: 104,
+      flex: 0.5,
+      renderCell: (params) => params.row.retryable ? "是" : "否",
+    },
+    {
+      field: "acknowledgeable",
+      headerName: "Acknowledgeable",
+      minWidth: 136,
+      flex: 0.6,
+      renderCell: (params) => params.row.acknowledgeable ? "是" : "否",
+    },
+    {
+      field: "actions",
+      headerName: "Actions",
+      minWidth: 188,
+      sortable: false,
+      filterable: false,
+      renderCell: (params) => (
+        <Stack direction="row" spacing={0.75} sx={{ alignItems: "center", height: "100%" }}>
+          <Button
+            aria-label={`Retry ${params.row.id}`}
+            disabled={!params.row.retryable || operatingJobId === params.row.id || isAcknowledgingAll}
+            size="small"
+            variant="outlined"
+            onClick={() => { void handleRetryJob(params.row); }}
+          >
+            Retry
+          </Button>
+          <Button
+            aria-label={`Acknowledge ${params.row.id}`}
+            disabled={!params.row.acknowledgeable || operatingJobId === params.row.id || isAcknowledgingAll}
+            size="small"
+            variant="outlined"
+            onClick={() => { void handleAcknowledgeJob(params.row); }}
+          >
+            Acknowledge
+          </Button>
+        </Stack>
+      ),
+    },
+  ], [handleAcknowledgeJob, handleRetryJob, isAcknowledgingAll, operatingJobId]);
+
   if (!canAdminAccess) {
     return (
       <Box sx={{ p: { xs: 2, md: 3 }, bgcolor: settingsTokens.page, minHeight: "100%", minWidth: 0 }}>
@@ -492,6 +627,7 @@ export default function AppHealthOperationsPage() {
       <Stack spacing={2} sx={{ p: { xs: 2, md: 3 }, minWidth: 0 }}>
         {isLoading ? <Alert severity="info">正在加载 AppHealth 状态。</Alert> : null}
         {loadError ? <Alert severity="error">{loadError}</Alert> : null}
+        {operationError ? <Alert severity="error">{operationError}</Alert> : null}
 
         <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "repeat(2, minmax(0, 1fr))" }, gap: 2, minWidth: 0 }}>
           <Section title="Summary" testId="app-health-summary">
@@ -537,11 +673,27 @@ export default function AppHealthOperationsPage() {
 
         <Section title="Background Jobs" testId="app-health-background-jobs">
           <Stack spacing={1.5} sx={{ minWidth: 0 }}>
-            <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap", minWidth: 0 }}>
-              <Chip label={`Active ${normalized.backgroundJobs.active}`} size="small" variant="outlined" />
-              <Chip label={`Queued ${normalized.backgroundJobs.queued}`} size="small" color={normalized.backgroundJobs.queued > 0 ? "warning" : "default"} variant="outlined" />
-              <Chip label={`Running ${normalized.backgroundJobs.running}`} size="small" color={normalized.backgroundJobs.running > 0 ? "warning" : "default"} variant="outlined" />
-              <Chip label={`Attention ${normalized.backgroundJobs.attention}`} size="small" color={normalized.backgroundJobs.attention > 0 ? "error" : "default"} variant="outlined" />
+            <Stack
+              direction={{ xs: "column", md: "row" }}
+              spacing={1}
+              useFlexGap
+              sx={{ alignItems: { xs: "stretch", md: "center" }, justifyContent: "space-between", minWidth: 0 }}
+            >
+              <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap", minWidth: 0 }}>
+                <Chip label={`Active ${normalized.backgroundJobs.active}`} size="small" variant="outlined" />
+                <Chip label={`Queued ${normalized.backgroundJobs.queued}`} size="small" color={normalized.backgroundJobs.queued > 0 ? "warning" : "default"} variant="outlined" />
+                <Chip label={`Running ${normalized.backgroundJobs.running}`} size="small" color={normalized.backgroundJobs.running > 0 ? "warning" : "default"} variant="outlined" />
+                <Chip label={`Attention ${normalized.backgroundJobs.attention}`} size="small" color={normalized.backgroundJobs.attention > 0 ? "error" : "default"} variant="outlined" />
+              </Stack>
+              <Button
+                aria-label="Acknowledge all attention"
+                disabled={attentionRows.length === 0 || isAcknowledgingAll || operatingJobId !== null}
+                size="small"
+                variant="outlined"
+                onClick={() => { void handleAcknowledgeAllAttention(); }}
+              >
+                Acknowledge all attention
+              </Button>
             </Stack>
             <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(2, minmax(0, 1fr))" }, gap: 1.5, minWidth: 0 }}>
               <Field label="Primary running" value={<JobSummaryFields job={normalized.backgroundJobs.primaryRunning} />} />

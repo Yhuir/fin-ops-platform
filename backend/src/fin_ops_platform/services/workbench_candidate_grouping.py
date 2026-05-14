@@ -9,6 +9,7 @@ from itertools import count
 from typing import Any
 
 from fin_ops_platform.services.imports import normalize_name
+from fin_ops_platform.services.no_oa_bank_batch_service import NO_OA_BANK_BATCH_RELATION_MODE
 from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_PROJECTION_VERSION
 
 
@@ -18,11 +19,13 @@ SINGLE_BANK_AUTO_PAIRED_CODES = {"salary_personal_auto_match"}
 MULTI_BANK_AUTO_PAIRED_CODES = {"internal_transfer_pair"}
 OA_INVOICE_AUTO_PAIRED_CODES = {"oa_invoice_offset_auto_match"}
 OA_BANK_SETTLEMENT_PAIRED_CODES = {"personal_advance_repayment_settlement"}
+NO_OA_BANK_BATCH_PAIRED_CODES = {NO_OA_BANK_BATCH_RELATION_MODE}
 AUTO_PAIRED_CODES = {
     *SINGLE_BANK_AUTO_PAIRED_CODES,
     *MULTI_BANK_AUTO_PAIRED_CODES,
     *OA_INVOICE_AUTO_PAIRED_CODES,
     *OA_BANK_SETTLEMENT_PAIRED_CODES,
+    *NO_OA_BANK_BATCH_PAIRED_CODES,
 }
 ETC_BATCH_SOURCE = "etc_batch"
 ETC_BATCH_TAG = "ETC批量提交"
@@ -971,6 +974,8 @@ class WorkbenchCandidateGroupingService:
             if relation_codes and relation_codes.issubset(SINGLE_BANK_AUTO_PAIRED_CODES) and len(group.bank_rows) == 1:
                 return True
             if relation_codes and relation_codes.issubset(MULTI_BANK_AUTO_PAIRED_CODES) and len(group.bank_rows) >= 2:
+                return True
+            if relation_codes and relation_codes.issubset(NO_OA_BANK_BATCH_PAIRED_CODES):
                 return True
         if row_type_count == 2 and group.oa_rows and group.invoice_rows and not group.bank_rows:
             relation_codes = {

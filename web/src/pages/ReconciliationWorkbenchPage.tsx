@@ -617,12 +617,14 @@ export default function ReconciliationWorkbenchPage() {
   }, [applyOaSyncStatus]);
 
   useEffect(() => {
-    const handleTurnoverRelationUpdated = () => {
+    const handleRelationUpdated = () => {
       refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
     };
-    window.addEventListener("turnoverRelationUpdated", handleTurnoverRelationUpdated);
+    window.addEventListener("turnoverRelationUpdated", handleRelationUpdated);
+    window.addEventListener("workbenchRelationUpdated", handleRelationUpdated);
     return () => {
-      window.removeEventListener("turnoverRelationUpdated", handleTurnoverRelationUpdated);
+      window.removeEventListener("turnoverRelationUpdated", handleRelationUpdated);
+      window.removeEventListener("workbenchRelationUpdated", handleRelationUpdated);
     };
   }, [refreshWorkbenchDataInBackground]);
 

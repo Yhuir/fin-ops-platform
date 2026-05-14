@@ -431,6 +431,7 @@ describe("Workbench columns and inline actions", () => {
     const metadataRow = categoryTag.closest(".money-cell-meta-row");
 
     expect(categoryTag).toHaveClass("bank-category-tag");
+    expect(categoryTag).toHaveClass("bank-chip-auto-size");
     expect(metadataRow).not.toBeNull();
     expect(accountTag?.closest(".money-cell-meta-row")).toBe(metadataRow);
     expect(within(metadataRow as HTMLElement).getByText("建行")).toBeInTheDocument();

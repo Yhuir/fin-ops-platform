@@ -1,5 +1,7 @@
 from io import BytesIO
 import json
+from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import quote
@@ -8,7 +10,9 @@ import unittest
 from openpyxl import load_workbook
 
 from fin_ops_platform.app.server import build_application
+from fin_ops_platform.services.background_job_service import BackgroundJobService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.state_store import ApplicationStateStore
 from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes
 
 
@@ -324,7 +328,182 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertNotIn("all", create_job.call_args.kwargs["affected_months"])
         run_job.assert_called_once()
 
-    def test_retry_failed_cost_statistics_warmup_requeues_months_and_acknowledges_old_job(self) -> None:
+    def test_cost_statistics_warmup_result_summary_tracks_checkpoint_scope_keys(self) -> None:
+        def build_explorer(month: str, *, project_scope: str) -> dict[str, object]:
+            if project_scope == "all":
+                raise RuntimeError("boom")
+            return {
+                "month": month,
+                "summary": {"row_count": 1, "transaction_count": 1, "total_amount": "12.00"},
+                "time_rows": [],
+                "project_rows": [],
+                "expense_type_rows": [],
+            }
+
+        self.app._cost_statistics_service = SimpleNamespace(get_explorer=build_explorer)
+        job = self.app._background_job_service.create_job(
+            job_type="cost_statistics_cache_warmup",
+            label="预热成本统计缓存",
+            owner_user_id="system",
+            visibility="system",
+            total=2,
+        )
+        running_job = self.app._background_job_service.start_job(job.job_id)
+
+        result_summary = self.app._run_cost_statistics_cache_warmup_job(
+            running_job,
+            months=["2026-03"],
+            project_scopes=["active", "all"],
+        )
+        completed_job = self.app._background_job_service.get_job(job.job_id, "system")
+
+        self.assertEqual(completed_job.status, "partial_success")
+        self.assertEqual(result_summary["target_scope_keys"], ["active:2026-03", "all:2026-03"])
+        self.assertEqual(result_summary["warmed_scope_keys"], ["active:2026-03"])
+        self.assertEqual(result_summary["failed_scope_keys"], ["all:2026-03"])
+        self.assertEqual(result_summary["remaining_scope_keys"], [])
+        self.assertEqual(result_summary["warmed"], 1)
+        self.assertEqual(result_summary["failed"], 1)
+        self.assertEqual(result_summary["total"], 2)
+        self.assertEqual(completed_job.result_summary, result_summary)
+
+    def test_retry_partial_success_cost_statistics_warmup_only_requeues_failed_scopes(self) -> None:
+        job = self.app._background_job_service.create_job(
+            job_type="cost_statistics_cache_warmup",
+            label="预热成本统计缓存",
+            owner_user_id="system",
+            visibility="system",
+            affected_scopes=["active:2026-03", "all:2026-03"],
+            affected_months=["2026-03"],
+            result_summary={
+                "target_scope_keys": ["active:2026-03", "all:2026-03"],
+                "warmed_scope_keys": ["active:2026-03"],
+                "failed_scope_keys": ["all:2026-03"],
+                "remaining_scope_keys": [],
+                "warmed": 1,
+                "failed": 1,
+                "total": 2,
+            },
+            source={"reason": "cost_statistics_scope_invalidated", "months": ["2026-03"]},
+        )
+        self.app._background_job_service.start_job(job.job_id)
+        self.app._background_job_service.succeed_job(
+            job.job_id,
+            "成本统计缓存预热部分完成。",
+            result_summary=job.result_summary,
+            status="partial_success",
+        )
+
+        with patch.object(self.app._background_job_service, "run_job") as run_job:
+            response = self.app.handle_request("POST", f"/api/background-jobs/{job.job_id}/retry", body="{}")
+
+        payload = json.loads(response.body)
+        old_job = self.app._background_job_service.get_job(job.job_id, "system")
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(payload["job"]["affected_scopes"], ["all:2026-03"])
+        self.assertEqual(payload["job"]["result_summary"]["target_scope_keys"], ["all:2026-03"])
+        self.assertNotIn(job.job_id, payload["job"]["idempotency_key"])
+        self.assertEqual(old_job.status, "superseded")
+        self.assertEqual(old_job.superseded_by_job_id, payload["job"]["job_id"])
+        self.assertEqual(self.app._background_job_service.list_attention_jobs("system"), [])
+        run_job.assert_called_once()
+
+    def test_retry_interrupted_cost_statistics_warmup_requeues_remaining_and_failed_scopes(self) -> None:
+        job = self.app._background_job_service.create_job(
+            job_type="cost_statistics_cache_warmup",
+            label="预热成本统计缓存",
+            owner_user_id="system",
+            visibility="system",
+            affected_scopes=["active:2026-03", "all:2026-03"],
+            affected_months=["2026-03"],
+            result_summary={
+                "target_scope_keys": ["active:2026-03", "all:2026-03"],
+                "warmed_scope_keys": ["active:2026-03"],
+                "failed_scope_keys": ["all:2026-03"],
+                "remaining_scope_keys": ["active:all"],
+                "warmed": 1,
+                "failed": 1,
+                "total": 3,
+            },
+            source={"reason": "cost_statistics_scope_invalidated", "months": ["2026-03"]},
+        )
+        self.app._background_job_service.fail_job(
+            job.job_id,
+            "服务重启，任务已中断，请重新执行。",
+            "interrupted_by_restart",
+        )
+
+        with patch.object(self.app._background_job_service, "run_job") as run_job:
+            response = self.app.handle_request("POST", f"/api/background-jobs/{job.job_id}/retry", body="{}")
+
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(payload["job"]["affected_scopes"], ["active:all", "all:2026-03"])
+        self.assertEqual(payload["job"]["affected_months"], ["all", "2026-03"])
+        run_job.assert_called_once()
+
+    def test_startup_recovery_requeues_interrupted_cost_statistics_warmup_and_supersedes_old_job(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ApplicationStateStore(Path(temp_dir))
+            service = BackgroundJobService(store)
+            interrupted_job = service.create_job(
+                job_type="cost_statistics_cache_warmup",
+                label="预热成本统计缓存",
+                owner_user_id="system",
+                visibility="system",
+                affected_scopes=["active:2026-03", "all:2026-03"],
+                affected_months=["2026-03"],
+                result_summary={
+                    "target_scope_keys": ["active:2026-03", "all:2026-03"],
+                    "warmed_scope_keys": ["active:2026-03"],
+                    "failed_scope_keys": [],
+                    "remaining_scope_keys": ["all:2026-03"],
+                    "warmed": 1,
+                    "failed": 0,
+                    "total": 2,
+                },
+                source={"reason": "cost_statistics_scope_invalidated", "months": ["2026-03"]},
+            )
+            service.fail_job(
+                interrupted_job.job_id,
+                "服务重启，任务已中断，请重新执行。",
+                "interrupted_by_restart",
+            )
+
+            with patch.object(BackgroundJobService, "run_job") as run_job:
+                recovered_app = build_application(data_dir=Path(temp_dir))
+
+            jobs = recovered_app._background_job_service.list_active_jobs("system")
+            old_job = recovered_app._background_job_service.get_job(interrupted_job.job_id, "system")
+            attention_jobs = recovered_app._background_job_service.list_attention_jobs("system")
+
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0].affected_scopes, ["all:2026-03"])
+        self.assertEqual(old_job.status, "superseded")
+        self.assertEqual(old_job.superseded_by_job_id, jobs[0].job_id)
+        self.assertEqual(attention_jobs, [])
+        run_job.assert_called_once()
+
+    def test_cost_statistics_warmup_does_not_create_duplicate_running_job_for_same_target_scopes(self) -> None:
+        with patch.object(self.app._background_job_service, "run_job") as run_job:
+            first_job = self.app._schedule_cost_statistics_cache_warmup(
+                ["2026-03"],
+                reason="cost_statistics_scope_invalidated",
+            )
+            second_job = self.app._schedule_cost_statistics_cache_warmup(
+                ["2026-03"],
+                reason="another_reason_for_same_scope",
+            )
+
+        self.assertIsNotNone(first_job)
+        self.assertIsNotNone(second_job)
+        self.assertEqual(second_job.job_id, first_job.job_id)
+        self.assertEqual(len(self.app._background_job_service.list_active_jobs("system")), 1)
+        run_job.assert_called_once()
+
+    def test_retry_failed_cost_statistics_warmup_requeues_months_and_closes_old_job(self) -> None:
         job = self.app._background_job_service.create_job(
             job_type="cost_statistics_cache_warmup",
             label="预热成本统计缓存",
@@ -349,7 +528,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(payload["retry_mode"], "cost_statistics_cache_warmup")
         self.assertEqual(payload["job"]["type"], "cost_statistics_cache_warmup")
         self.assertEqual(payload["job"]["affected_months"], ["2026-03"])
-        self.assertEqual(old_job.status, "acknowledged")
+        self.assertEqual(old_job.status, "superseded")
         run_job.assert_called_once()
 
     def test_import_preview_does_not_invalidate_cost_statistics_cache(self) -> None:

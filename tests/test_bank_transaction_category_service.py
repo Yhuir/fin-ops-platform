@@ -3,6 +3,7 @@ import unittest
 from fin_ops_platform.services.bank_transaction_category_service import (
     BankTransactionCategoryConflictError,
     BankTransactionCategoryValidationError,
+    BANK_TRANSACTION_CATEGORY_LABELS,
     BankTransactionCategoryService,
 )
 
@@ -53,6 +54,30 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
 
         self.assertEqual(context.exception.error_code, "invalid_category_code")
         self.assertEqual(service.snapshot()["categories"], {})
+
+    def test_auto_business_category_codes_are_valid_manual_choices(self) -> None:
+        self.assertEqual(BANK_TRANSACTION_CATEGORY_LABELS["fee"], "手续费")
+        self.assertEqual(BANK_TRANSACTION_CATEGORY_LABELS["salary"], "工资")
+        self.assertEqual(BANK_TRANSACTION_CATEGORY_LABELS["holiday_bonus"], "过节费")
+        self.assertEqual(BANK_TRANSACTION_CATEGORY_LABELS["bonus"], "奖金")
+
+        service = BankTransactionCategoryService.from_snapshot(
+            None,
+            transaction_exists=lambda transaction_id: transaction_id in {"txn-fee", "txn-salary"},
+        )
+
+        result = service.apply_updates(
+            [
+                {"transaction_id": "txn-fee", "category_code": "fee", "expected_version": 0},
+                {"transaction_id": "txn-salary", "category_code": "salary", "expected_version": 0},
+            ],
+            actor="YNSYLP005",
+        )
+
+        self.assertEqual(result["updated_categories"][0]["category_label"], "手续费")
+        self.assertEqual(result["updated_categories"][0]["category_path"], ["自动识别", "手续费"])
+        self.assertEqual(result["updated_categories"][1]["category_label"], "工资")
+        self.assertEqual(result["updated_categories"][1]["category_path"], ["自动识别", "工资"])
 
     def test_apply_updates_rejects_unknown_transaction(self) -> None:
         service = BankTransactionCategoryService.from_snapshot(
@@ -109,6 +134,25 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
         counts = service.category_counts(["txn-1", "txn-2"])
         self.assertEqual(counts["borrow_out_company_pending_collection"], 0)
         self.assertEqual(counts["uncategorized"], 2)
+
+    def test_clear_category_without_existing_record_persists_manual_clear_override(self) -> None:
+        service = BankTransactionCategoryService.from_snapshot(
+            None,
+            transaction_exists=lambda transaction_id: transaction_id == "txn-uncategorized",
+        )
+
+        result = service.apply_updates(
+            [{"transaction_id": "txn-uncategorized", "category_code": None, "expected_version": 0}],
+            actor="YNSYLP005",
+        )
+
+        self.assertEqual(result["updated_categories"][0]["category_code"], None)
+        self.assertEqual(result["updated_categories"][0]["category_label"], None)
+        self.assertEqual(result["updated_categories"][0]["version"], 1)
+        stored = service.get("txn-uncategorized")
+        self.assertEqual(stored["category_code"], None)
+        self.assertEqual(stored["source"], "manual")
+        self.assertEqual(stored["category_version"], 1)
 
     def test_snapshot_round_trips_categories(self) -> None:
         service = BankTransactionCategoryService.from_snapshot(

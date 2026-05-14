@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent, type FormEvent, type MouseEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FocusEvent, type FormEvent, type MouseEvent } from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -9,29 +9,44 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogContentText from "@mui/material/DialogContentText";
 import DialogTitle from "@mui/material/DialogTitle";
 import Divider from "@mui/material/Divider";
-import MenuItem from "@mui/material/MenuItem";
+import Popover from "@mui/material/Popover";
 import Paper from "@mui/material/Paper";
 import List from "@mui/material/List";
 import ListItem from "@mui/material/ListItem";
 import ListItemButton from "@mui/material/ListItemButton";
-import ListSubheader from "@mui/material/ListSubheader";
 import ListItemText from "@mui/material/ListItemText";
-import Select from "@mui/material/Select";
 import Snackbar from "@mui/material/Snackbar";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import ToggleButton from "@mui/material/ToggleButton";
 import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Typography from "@mui/material/Typography";
-import { DataGrid, type GridColDef, type GridPaginationModel } from "@mui/x-data-grid";
+import {
+  DataGrid,
+  GridToolbarColumnsButton,
+  GridToolbarContainer,
+  GridToolbarExport,
+  GridToolbarFilterButton,
+  GridToolbarQuickFilter,
+  type GridColDef,
+  type GridLocaleText,
+  type GridPaginationModel,
+} from "@mui/x-data-grid";
+import { zhCN } from "@mui/x-data-grid/locales";
 import { DatePicker } from "@mui/x-date-pickers/DatePicker";
 import type { Dayjs } from "dayjs";
 import dayjs from "dayjs";
 
-import PageScaffold from "../components/common/PageScaffold";
 import StatePanel from "../components/common/StatePanel";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
+import BankCategoryTag from "../features/bankDetails/BankCategoryTag";
+import BankCategoryPicker from "../features/bankDetails/BankCategoryPicker";
 import { fetchBankDetailAccounts, fetchBankDetailTransactions, saveBankTransactionCategories } from "../features/bankDetails/api";
+import {
+  CATEGORY_LABEL_BY_CODE,
+  EMPTY_CATEGORY_COUNTS,
+  SELECTABLE_CATEGORY_OPTIONS,
+} from "../features/bankDetails/categoryOptions";
 import type {
   BankDateFilter,
   BankDetailAccount,
@@ -42,143 +57,42 @@ import type {
 
 const TODAY = new Date(2026, 4, 2);
 const DEFAULT_PAGE_SIZE = 100;
-
-type BankTransactionCategoryOption = {
-  code: BankTransactionCategoryCode;
-  root: string;
-  group: string;
-  status: string;
-  label: string;
-  menuLabel: string;
-};
-
-const CATEGORY_TREE: Array<{
-  root: string;
-  groups: Array<{
-    name: string;
-    displayName: string;
-    items: Array<{ code: BankTransactionCategoryCode; status: string }>;
-  }>;
-}> = [
-  {
-    root: "借入",
-    groups: [
-      {
-        name: "个人往来款",
-        displayName: "个人暂借款",
-        items: [
-          { code: "borrow_in_personal_pending_repayment", status: "待还款" },
-          { code: "borrow_in_personal_repaid", status: "已还款" },
-        ],
-      },
-      {
-        name: "公司往来款",
-        displayName: "公司暂借款",
-        items: [
-          { code: "borrow_in_company_pending_repayment", status: "待还款" },
-          { code: "borrow_in_company_repaid", status: "已还款" },
-        ],
-      },
-      {
-        name: "银行往来款",
-        displayName: "银行往来款",
-        items: [
-          { code: "borrow_in_bank_pending_repayment", status: "待还款" },
-          { code: "borrow_in_bank_repaid", status: "已还款" },
-        ],
-      },
-    ],
-  },
-  {
-    root: "借出",
-    groups: [
-      {
-        name: "个人往来款",
-        displayName: "个人往来款",
-        items: [
-          { code: "borrow_out_personal_lent", status: "已借款" },
-          { code: "borrow_out_personal_pending_collection", status: "待收款" },
-        ],
-      },
-      {
-        name: "公司往来款",
-        displayName: "公司往来款",
-        items: [
-          { code: "borrow_out_company_lent", status: "已借款" },
-          { code: "borrow_out_company_pending_collection", status: "待收款" },
-        ],
-      },
-      {
-        name: "货款往来款",
-        displayName: "货款往来款",
-        items: [
-          { code: "borrow_out_goods_lent", status: "已借款" },
-          { code: "borrow_out_goods_pending_collection", status: "待收款" },
-        ],
-      },
-    ],
-  },
-  {
-    root: "业务往来",
-    groups: [
-      {
-        name: "质保金",
-        displayName: "质保金",
-        items: [{ code: "business_warranty_pending_collection", status: "待收款" }],
-      },
-      {
-        name: "投标保证金",
-        displayName: "投标保证金",
-        items: [{ code: "business_bid_bond_pending_collection", status: "待收款" }],
-      },
-      {
-        name: "履约保证金",
-        displayName: "履约保证金",
-        items: [{ code: "business_performance_bond_pending_collection", status: "待收款" }],
-      },
-      {
-        name: "已开发票未收款",
-        displayName: "已开发票未收款",
-        items: [{ code: "business_invoiced_pending_collection", status: "待收款" }],
-      },
-    ],
-  },
+const ALL_ACCOUNTS_KEY = "__all_bank_accounts__";
+const FEATURED_CATEGORY_CODES: BankTransactionCategoryCode[] = [
+  "fee",
+  "salary",
+  "internal_transfer",
 ];
 
-const SELECTABLE_CATEGORY_OPTIONS: BankTransactionCategoryOption[] = CATEGORY_TREE.flatMap((rootNode) => (
-  rootNode.groups.flatMap((group) => (
-    group.items.map((item) => ({
-      code: item.code,
-      root: rootNode.root,
-      group: group.name,
-      status: item.status,
-      label: `${group.displayName}：${item.status}`,
-      menuLabel: `${rootNode.root} / ${group.name} / ${item.status}`,
-    }))
-  ))
-));
-
-const CATEGORY_LABEL_BY_CODE: Partial<Record<BankTransactionCategoryCode, string>> = {
-  ...Object.fromEntries(SELECTABLE_CATEGORY_OPTIONS.map((option) => [option.code, option.label])),
-  external_turnover: "外部往来款",
-  internal_transfer: "内部往来款",
-  offset: "冲",
-  cash_turnover: "现金往来",
-};
-const EMPTY_CATEGORY_COUNTS: BankTransactionCategoryCounts = {
-  uncategorized: 0,
-  ...Object.fromEntries(SELECTABLE_CATEGORY_OPTIONS.map((option) => [option.code, 0])),
+const DATA_GRID_LOCALE_TEXT: Partial<GridLocaleText> = {
+  ...zhCN.components.MuiDataGrid.defaultProps.localeText,
+  toolbarQuickFilterPlaceholder: "搜索流水",
+  filterPanelOperator: "条件",
+  filterPanelInputLabel: "值",
+  filterPanelInputPlaceholder: "输入筛选值",
+  paginationRowsPerPage: "每页行数",
+  paginationDisplayedRows: ({ from, to, count }) => `${from}-${to} / ${count === -1 ? `超过 ${to}` : count}`,
 };
 
 type SavedCategoryState = {
   categoryCode: BankTransactionCategoryCode | null;
   categoryLabel: string | null;
   categoryPath: string[];
+  categorySource: string;
   categoryVersion: number | null;
+  effectiveCategoryCode: BankTransactionCategoryCode | null;
+  effectiveCategoryLabel: string | null;
+  effectiveCategoryPath: string[];
+  effectiveCategorySource: string;
 };
 
 type PendingNavigation = {
   run: () => void;
+};
+
+type CategorySummaryItem = {
+  code: BankTransactionCategoryCode;
+  label: string;
 };
 
 function formatDate(date: Date) {
@@ -289,6 +203,15 @@ function categoryCountKey(categoryCode: BankTransactionCategoryCode | null) {
   return categoryCode ?? "uncategorized";
 }
 
+function baseCategoryCodeForCounts(savedCategory: SavedCategoryState | undefined) {
+  if (!savedCategory) {
+    return null;
+  }
+  return savedCategory.categorySource === "manual"
+    ? savedCategory.categoryCode
+    : savedCategory.effectiveCategoryCode;
+}
+
 function applyDirtyCategoryCounts(
   counts: BankTransactionCategoryCounts,
   savedCategoryByRowId: Record<string, SavedCategoryState>,
@@ -296,7 +219,7 @@ function applyDirtyCategoryCounts(
 ): BankTransactionCategoryCounts {
   const next = { ...counts };
   Object.entries(draftCategoryByRowId).forEach(([rowId, draftCategoryCode]) => {
-    const savedCategoryCode = savedCategoryByRowId[rowId]?.categoryCode ?? null;
+    const savedCategoryCode = baseCategoryCodeForCounts(savedCategoryByRowId[rowId]);
     if (savedCategoryCode === draftCategoryCode) {
       return;
     }
@@ -308,60 +231,112 @@ function applyDirtyCategoryCounts(
   return next;
 }
 
+function categoryLabelForCode(categoryCode: BankTransactionCategoryCode | null, fallback?: string | null) {
+  if (!categoryCode) {
+    return null;
+  }
+  return fallback?.trim() || CATEGORY_LABEL_BY_CODE[categoryCode] || categoryCode;
+}
+
+function counterpartyNameDensity(name: string) {
+  const length = name.trim().length;
+  if (length >= 28) {
+    return "dense";
+  }
+  if (length >= 20) {
+    return "compact";
+  }
+  return "regular";
+}
+
 const baseTransactionColumns: GridColDef<BankDetailTransaction>[] = [
-  {
-    field: "tradeTime",
-    headerName: "交易时间",
-    minWidth: 160,
-    flex: 1,
-  },
   {
     field: "counterpartyName",
     headerName: "对方户名",
-    minWidth: 200,
-    flex: 1.35,
+    width: 260,
+    minWidth: 230,
+    renderCell: ({ row }) => (
+      <Stack className="bank-counterparty-cell" justifyContent="center" spacing={0.5} sx={{ minWidth: 0, width: "100%" }}>
+        <Typography
+          className={`bank-counterparty-name ${counterpartyNameDensity(row.counterpartyName)}`}
+          component="span"
+          variant="body2"
+          fontWeight={750}
+        >
+          {row.counterpartyName}
+        </Typography>
+        <Stack direction="row" spacing={0.5} sx={{ minWidth: 0, maxWidth: "100%", overflow: "hidden" }}>
+          <Chip className="bank-trade-time-chip bank-trade-time-chip-full bank-chip-auto-size" label={row.tradeTime} size="small" variant="outlined" />
+        </Stack>
+      </Stack>
+    ),
   },
   {
     field: "amount",
     headerName: "金额",
-    minWidth: 170,
-    flex: 0.95,
+    width: 148,
+    minWidth: 140,
     align: "right",
     headerAlign: "right",
     renderCell: ({ row }) => (
-      <Stack direction="row" alignItems="center" justifyContent="flex-end" spacing={0.75} sx={{ width: "100%" }}>
-        <Chip
-          className={`direction-tag ${row.direction}`}
-          label={row.directionLabel}
-          size="small"
-          variant="filled"
-        />
-        <Typography component="span" variant="body2" fontWeight={700}>
-          {formatMoney(row.amount)}
-        </Typography>
+      <Stack className="bank-amount-cell" alignItems="stretch" justifyContent="center" spacing={0.5} sx={{ width: "100%" }}>
+        <Stack className="bank-amount-line" direction="row" alignItems="center" spacing={0.75}>
+          <Chip
+            className={`direction-tag bank-direction-tag-centered bank-chip-auto-size ${row.direction}`}
+            label={row.directionLabel}
+            size="small"
+            variant="filled"
+          />
+          <Typography component="span" variant="body2" fontWeight={800} sx={{ fontVariantNumeric: "tabular-nums" }}>
+            {formatMoney(row.amount)}
+          </Typography>
+        </Stack>
+        <Chip className="bank-source-chip bank-chip-auto-size" label={`${row.bankName} ${row.accountLast4}`} size="small" variant="outlined" />
       </Stack>
     ),
   },
   {
     field: "balance",
     headerName: "余额",
-    minWidth: 140,
-    flex: 0.85,
+    width: 112,
+    minWidth: 96,
     align: "right",
     headerAlign: "right",
     valueFormatter: (value) => formatMoney(value as string | null),
   },
   {
-    field: "summary",
-    headerName: "摘要",
-    minWidth: 150,
+    field: "summaryPurpose",
+    headerName: "摘要/用途",
+    minWidth: 210,
     flex: 1,
+    valueGetter: (_value, row) => [row.summary, row.purpose].map((value) => value.trim()).filter(Boolean).join(" "),
+    renderCell: ({ row }) => (
+      <Stack className="bank-summary-purpose-cell" justifyContent="center" spacing={0.5} sx={{ minWidth: 0, width: "100%" }}>
+        {row.summary.trim() ? (
+          <Typography component="span" variant="body2">
+            {row.summary}
+          </Typography>
+        ) : null}
+        {row.purpose.trim() ? (
+          <Typography component="span" variant="caption" color="text.secondary">
+            {row.purpose}
+          </Typography>
+        ) : null}
+      </Stack>
+    ),
   },
   {
-    field: "purpose",
-    headerName: "用途",
-    minWidth: 130,
-    flex: 0.8,
+    field: "actions",
+    headerName: "操作",
+    width: 68,
+    minWidth: 64,
+    sortable: false,
+    filterable: false,
+    align: "center",
+    headerAlign: "center",
+    renderCell: () => (
+      <Button size="small" variant="text">详情</Button>
+    ),
   },
 ];
 
@@ -369,8 +344,8 @@ export default function BankDetailsPage() {
   const selectedAccountSession = usePageSessionState<string | null>({
     pageKey: "bank-details",
     stateKey: "selectedAccountKey",
-    version: 1,
-    initialValue: null,
+    version: 2,
+    initialValue: ALL_ACCOUNTS_KEY,
     ttlMs: 24 * 60 * 60 * 1000,
     storage: "session",
     validate: (value): value is string | null => value === null || typeof value === "string",
@@ -420,6 +395,7 @@ export default function BankDetailsPage() {
   const [savingCategories, setSavingCategories] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
   const [snackbar, setSnackbar] = useState<{ severity: "success" | "error"; message: string } | null>(null);
+  const [dateFilterAnchorEl, setDateFilterAnchorEl] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
     draftCategoryByRowIdRef.current = draftCategoryByRowId;
@@ -441,9 +417,9 @@ export default function BankDetailsPage() {
           missingBalanceAccountCount: payload.missingBalanceAccountCount,
         });
         setSelectedAccountKey((current) => (
-          current && payload.accounts.some((account) => account.accountKey === current)
+          current && (current === ALL_ACCOUNTS_KEY || payload.accounts.some((account) => account.accountKey === current))
             ? current
-            : payload.accounts[0]?.accountKey ?? null
+            : ALL_ACCOUNTS_KEY
         ));
       })
       .catch((caught) => {
@@ -469,8 +445,9 @@ export default function BankDetailsPage() {
     const controller = new AbortController();
     setRowLoading(true);
     setError(null);
+    const accountKey = selectedAccountKey === ALL_ACCOUNTS_KEY ? null : selectedAccountKey;
     fetchBankDetailTransactions({
-      accountKey: selectedAccountKey,
+      accountKey,
       dateFrom: dateFilter.dateFrom,
       dateTo: dateFilter.dateTo,
       page: paginationModel.page + 1,
@@ -489,7 +466,12 @@ export default function BankDetailsPage() {
                 categoryCode: row.categoryCode,
                 categoryLabel: row.categoryLabel,
                 categoryPath: row.categoryPath,
+                categorySource: row.categorySource,
                 categoryVersion: row.categoryVersion,
+                effectiveCategoryCode: row.effectiveCategoryCode,
+                effectiveCategoryLabel: row.effectiveCategoryLabel,
+                effectiveCategoryPath: row.effectiveCategoryPath,
+                effectiveCategorySource: row.effectiveCategorySource,
               };
             }
           });
@@ -518,6 +500,22 @@ export default function BankDetailsPage() {
     () => applyDirtyCategoryCounts(categoryCounts, savedCategoryByRowId, draftCategoryByRowId),
     [categoryCounts, draftCategoryByRowId, savedCategoryByRowId],
   );
+  const visibleCategorySummary = useMemo<CategorySummaryItem[]>(() => {
+    const featured = FEATURED_CATEGORY_CODES.map((code) => ({
+      code,
+      label: CATEGORY_LABEL_BY_CODE[code] ?? code,
+    }));
+    const active = SELECTABLE_CATEGORY_OPTIONS
+      .filter((option) => (
+        !FEATURED_CATEGORY_CODES.includes(option.code)
+        && (effectiveCategoryCounts[option.code] ?? 0) > 0
+      ))
+      .map((option) => ({
+        code: option.code,
+        label: option.label,
+      }));
+    return [...featured, ...active];
+  }, [effectiveCategoryCounts]);
 
   useEffect(() => {
     if (dirtyCount === 0) {
@@ -535,6 +533,13 @@ export default function BankDetailsPage() {
     () => accountsData.accounts.find((account) => account.accountKey === selectedAccountKey) ?? null,
     [accountsData.accounts, selectedAccountKey],
   );
+  const isAllAccountsSelected = selectedAccountKey === ALL_ACCOUNTS_KEY;
+  const totalTransactionCount = useMemo(
+    () => accountsData.accounts.reduce((sum, account) => sum + account.transactionCount, 0),
+    [accountsData.accounts],
+  );
+  const currentViewTitle = isAllAccountsSelected ? "全部流水" : selectedAccount?.displayName ?? "账户流水";
+  const dateFilterOpen = Boolean(dateFilterAnchorEl);
 
   const totalPages = Math.max(1, Math.ceil(rowCount / paginationModel.pageSize));
 
@@ -579,6 +584,14 @@ export default function BankDetailsPage() {
     }
   };
 
+  const openDateFilterPopover = (event: MouseEvent<HTMLElement>) => {
+    setDateFilterAnchorEl(event.currentTarget);
+  };
+
+  const closeDateFilterPopover = () => {
+    setDateFilterAnchorEl(null);
+  };
+
   const handleMonthChange = (value: string) => {
     if (!value) {
       setMonthValue(value);
@@ -607,13 +620,36 @@ export default function BankDetailsPage() {
 
   const displayCategoryForRow = useCallback((row: BankDetailTransaction) => {
     if (hasOwnDraft(draftCategoryByRowId, row.id)) {
-      return draftCategoryByRowId[row.id] ?? null;
+      const categoryCode = draftCategoryByRowId[row.id] ?? null;
+      return {
+        categoryCode,
+        categoryLabel: categoryLabelForCode(categoryCode),
+        categorySource: "draft",
+      };
     }
-    return savedCategoryByRowId[row.id]?.categoryCode ?? row.categoryCode ?? null;
+    const savedCategory = savedCategoryByRowId[row.id];
+    if (savedCategory?.categorySource === "manual") {
+      return {
+        categoryCode: savedCategory.categoryCode,
+        categoryLabel: categoryLabelForCode(savedCategory.categoryCode, savedCategory.categoryLabel),
+        categorySource: savedCategory.categorySource,
+      };
+    }
+    return {
+      categoryCode: savedCategory?.effectiveCategoryCode ?? row.effectiveCategoryCode ?? null,
+      categoryLabel: categoryLabelForCode(
+        savedCategory?.effectiveCategoryCode ?? row.effectiveCategoryCode ?? null,
+        savedCategory?.effectiveCategoryLabel ?? row.effectiveCategoryLabel,
+      ),
+      categorySource: savedCategory?.effectiveCategorySource ?? row.effectiveCategorySource,
+    };
   }, [draftCategoryByRowId, savedCategoryByRowId]);
 
   const handleCategoryChange = useCallback((row: BankDetailTransaction, categoryCode: BankTransactionCategoryCode | null) => {
-    const savedCategoryCode = savedCategoryByRowId[row.id]?.categoryCode ?? row.categoryCode ?? null;
+    const savedCategory = savedCategoryByRowId[row.id];
+    const savedCategoryCode = savedCategory?.categorySource === "manual"
+      ? savedCategory.categoryCode
+      : savedCategory?.effectiveCategoryCode ?? row.effectiveCategoryCode ?? null;
     setDraftCategoryByRowId((current) => {
       const next = { ...current };
       if (categoryCode === savedCategoryCode) {
@@ -625,59 +661,33 @@ export default function BankDetailsPage() {
     });
   }, [savedCategoryByRowId]);
 
-  const transactionColumns = useMemo<GridColDef<BankDetailTransaction>[]>(() => [
-    ...baseTransactionColumns,
-    {
-      field: "categoryCode",
-      headerName: "类别",
-      minWidth: 190,
-      flex: 0.95,
-      sortable: false,
-      filterable: false,
-      renderCell: ({ row }) => {
-        const currentCategoryCode = displayCategoryForRow(row);
-        return (
-          <Select
-            fullWidth
-            inputProps={{ "aria-label": `${row.id} 类别` }}
-            size="small"
-            displayEmpty
-            value={currentCategoryCode ?? ""}
-            onChange={(event) => {
-              const nextValue = event.target.value;
-              handleCategoryChange(row, nextValue ? nextValue as BankTransactionCategoryCode : null);
-            }}
-            renderValue={(selected) => {
-              const selectedCode = selected ? selected as BankTransactionCategoryCode : null;
-              return selectedCode ? (
-                <Chip label={CATEGORY_LABEL_BY_CODE[selectedCode] ?? selectedCode} size="small" />
-              ) : "无";
-            }}
-          >
-            {[
-              <MenuItem key="none" value="">无</MenuItem>,
-              ...CATEGORY_TREE.flatMap((rootNode) => [
-                <ListSubheader key={`${rootNode.root}:root`}>{rootNode.root}</ListSubheader>,
-                ...rootNode.groups.flatMap((group) => [
-                  <ListSubheader key={`${rootNode.root}:${group.name}`} sx={{ pl: 4, typography: "caption" }}>
-                    {group.name}
-                  </ListSubheader>,
-                  ...group.items.map((item) => {
-                    const label = `${rootNode.root} / ${group.name} / ${item.status}`;
-                    return (
-                      <MenuItem key={item.code} value={item.code} sx={{ pl: 6 }}>
-                        {label}
-                      </MenuItem>
-                    );
-                  }),
-                ]),
-              ]),
-            ]}
-          </Select>
-        );
+  const transactionColumns = useMemo<GridColDef<BankDetailTransaction>[]>(() => {
+    const [counterpartyColumn, ...remainingColumns] = baseTransactionColumns;
+    return [
+      counterpartyColumn,
+      {
+        field: "categoryCode",
+        headerName: "类型",
+        width: 176,
+        minWidth: 156,
+        sortable: false,
+        filterable: false,
+        renderCell: ({ row }) => {
+          const currentCategory = displayCategoryForRow(row);
+          return (
+            <BankCategoryPicker
+              rowId={row.id}
+              categoryCode={currentCategory.categoryCode}
+              categoryLabel={currentCategory.categoryLabel}
+              categorySource={currentCategory.categorySource}
+              onChange={(nextCategoryCode) => handleCategoryChange(row, nextCategoryCode)}
+            />
+          );
+        },
       },
-    },
-  ], [displayCategoryForRow, handleCategoryChange]);
+      ...remainingColumns,
+    ];
+  }, [displayCategoryForRow, handleCategoryChange]);
 
   const saveCategoryChanges = useCallback(async () => {
     if (dirtyEntries.length === 0) {
@@ -700,7 +710,12 @@ export default function BankDetailsPage() {
             categoryCode: category.categoryCode,
             categoryLabel: category.categoryLabel,
             categoryPath: category.categoryPath,
+            categorySource: "manual",
             categoryVersion: category.version,
+            effectiveCategoryCode: category.categoryCode,
+            effectiveCategoryLabel: category.categoryLabel,
+            effectiveCategoryPath: category.categoryPath,
+            effectiveCategorySource: category.categoryCode ? "manual" : "",
           };
         });
         return next;
@@ -742,45 +757,67 @@ export default function BankDetailsPage() {
   };
 
   return (
-    <Box data-testid="bank-details-page">
-      <PageScaffold
-        className="bank-details-page"
-        title="银行明细"
-        actions={(
-          <Stack direction="row" flexWrap="wrap" alignItems="center" justifyContent="flex-end" gap={1}>
-            <Box sx={{ minWidth: 0, textAlign: { xs: "left", sm: "right" } }}>
+    <Box className="bank-details-page" data-testid="bank-details-page">
+      <Stack className="bank-details-workbench" spacing={1}>
+        {error ? <StatePanel tone="error">{error}</StatePanel> : null}
+        {loading ? <StatePanel tone="loading" compact>正在加载银行明细。</StatePanel> : null}
+        {!loading && accountsData.accounts.length === 0 ? (
+          <StatePanel tone="empty">暂无银行流水，请先在银行流水导入页面导入。</StatePanel>
+        ) : null}
+
+        <Box className="bank-details-layout">
+          <Paper component="aside" className="bank-account-tree" elevation={0}>
+            <Stack className="bank-account-summary" spacing={0.75}>
               <Typography color="text.secondary" variant="caption">总余额</Typography>
-              <Typography component="strong" variant="subtitle1" fontWeight={800} sx={{ display: "block" }}>
+              <Typography className="bank-balance-value bank-total-balance" component="strong" variant="h6" fontWeight={850}>
                 {displayBalance(accountsData.totalBalance)}
               </Typography>
-            </Box>
-            {accountsData.missingBalanceAccountCount > 0 ? (
-              <Chip label={`${accountsData.missingBalanceAccountCount} 个账户无余额`} size="small" color="warning" variant="outlined" />
-            ) : null}
-          </Stack>
-        )}
-      >
-        <Stack spacing={2}>
-          {error ? <StatePanel tone="error">{error}</StatePanel> : null}
-          {loading ? <StatePanel tone="loading" compact>正在加载银行明细。</StatePanel> : null}
-          {!loading && accountsData.accounts.length === 0 ? (
-            <StatePanel tone="empty">暂无银行流水，请先在银行流水导入页面导入。</StatePanel>
-          ) : null}
-
-          <Box className="bank-details-layout">
-            <Paper component="aside" className="bank-account-tree" elevation={0}>
-              <Stack className="bank-account-heading" direction="row" alignItems="center" justifyContent="space-between">
-                <Typography className="bank-section-title" component="h2" variant="subtitle2">银行账户</Typography>
-                <Chip className="bank-account-total-chip" label={`${accountsData.accounts.length} 个`} size="small" variant="outlined" />
+              <Stack direction="row" flexWrap="wrap" gap={0.75}>
+                <Chip className="bank-account-total-chip" label={`${accountsData.accounts.length} 个账户`} size="small" variant="outlined" />
+                {accountsData.missingBalanceAccountCount > 0 ? (
+                  <Chip label={`${accountsData.missingBalanceAccountCount} 个无余额`} size="small" color="warning" variant="outlined" />
+                ) : null}
               </Stack>
-              <List aria-label="银行账户" dense disablePadding>
-                {accountsData.accounts.map((account) => {
-                  const selected = account.accountKey === selectedAccountKey;
-                  return (
-                    <ListItem key={account.accountKey} disablePadding>
+            </Stack>
+            <List aria-label="银行账户" dense disablePadding>
+              <ListItem disablePadding>
+                <ListItemButton
+                  aria-current={isAllAccountsSelected ? "true" : undefined}
+                  aria-label={`全部流水 ${totalTransactionCount} 条`}
+                  className={`bank-account-node bank-account-all-node${isAllAccountsSelected ? " active" : ""}`}
+                  component="button"
+                  onClick={() => handleAccountSelect(ALL_ACCOUNTS_KEY)}
+                >
+                  <ListItemText
+                    disableTypography
+                    primary={(
+                      <Box className="bank-account-title-row">
+                        <Box className="bank-account-identity">
+                          <Typography className="bank-account-name" component="span">全部</Typography>
+                        </Box>
+                        <Chip className="bank-account-count-chip bank-account-title-count" label={`${totalTransactionCount} 条`} size="small" variant="outlined" />
+                      </Box>
+                    )}
+                    secondary={(
+                      <Typography className="bank-account-inline-balance bank-account-secondary-balance bank-balance-value" component="span">
+                        {displayBalance(accountsData.totalBalance)}
+                      </Typography>
+                    )}
+                  />
+                </ListItemButton>
+              </ListItem>
+              {accountsData.accounts.length > 0 ? (
+                <Divider className="bank-account-divider" component="li" aria-hidden="true" />
+              ) : null}
+              {accountsData.accounts.map((account, index) => {
+                const selected = account.accountKey === selectedAccountKey;
+                const showDivider = index < accountsData.accounts.length - 1;
+                return (
+                  <Fragment key={account.accountKey}>
+                    <ListItem disablePadding>
                       <ListItemButton
                         aria-current={selected ? "true" : undefined}
-                        aria-label={`${account.displayName} 余额 ${displayBalance(account.latestBalance)}`}
+                        aria-label={`${account.displayName} 余额 ${displayBalance(account.latestBalance)} ${account.transactionCount} 条`}
                         className={`bank-account-node${selected ? " active" : ""}`}
                         component="button"
                         onClick={() => handleAccountSelect(account.accountKey)}
@@ -788,54 +825,72 @@ export default function BankDetailsPage() {
                         <ListItemText
                           disableTypography
                           primary={(
-                            <Stack direction="row" alignItems="center" spacing={0.75} minWidth={0}>
-                              <Typography className="bank-account-name" component="span">{account.bankName}</Typography>
-                              <Typography className="bank-account-last4" component="span">{account.accountLast4}</Typography>
-                            </Stack>
+                            <Box className="bank-account-title-row">
+                              <Box className="bank-account-identity">
+                                <Typography className="bank-account-name" component="span">{account.bankName}</Typography>
+                                <Typography className="bank-account-last4" component="span">{account.accountLast4}</Typography>
+                              </Box>
+                              <Chip className="bank-account-count-chip bank-account-title-count" label={`${account.transactionCount} 条`} size="small" variant="outlined" />
+                            </Box>
                           )}
                           secondary={(
-                            <Stack direction="row" alignItems="center" spacing={0.75} minWidth={0}>
-                              <Chip className="bank-account-count-chip" label={`${account.transactionCount} 条`} size="small" variant="outlined" />
+                            <Stack className="bank-account-metric-row" direction="row" alignItems="center" spacing={0.75} minWidth={0}>
+                              {account.hasBalance ? (
+                                <Typography className="bank-account-inline-balance bank-account-secondary-balance bank-balance-value" component="span">
+                                  {displayBalance(account.latestBalance)}
+                                </Typography>
+                              ) : null}
                               {!account.hasBalance ? (
                                 <Chip className="bank-account-empty-chip" label="余额为空" size="small" variant="outlined" />
                               ) : null}
                             </Stack>
                           )}
                         />
-                        <Box className="bank-account-balance">
-                          <Typography component="strong">{displayBalance(account.latestBalance)}</Typography>
-                        </Box>
                       </ListItemButton>
                     </ListItem>
-                  );
-                })}
-              </List>
-            </Paper>
+                    {showDivider ? <Divider className="bank-account-divider" component="li" aria-hidden="true" /> : null}
+                  </Fragment>
+                );
+              })}
+            </List>
+          </Paper>
 
-            <Paper component="section" className="bank-transaction-panel" elevation={0}>
-              <Stack className="bank-transaction-toolbar" spacing={1.5}>
-                <Stack direction={{ xs: "column", lg: "row" }} alignItems={{ xs: "flex-start", lg: "center" }} justifyContent="space-between" spacing={1.5}>
-                  <Box>
-                    <Typography component="h2" variant="h6" fontWeight={800}>
-                      {selectedAccount?.displayName ?? "账户流水"}
-                    </Typography>
-                    <Typography color="text.secondary" variant="body2">
-                      {dateFilter.dateFrom} 至 {dateFilter.dateTo}
-                    </Typography>
-                  </Box>
-                  <Stack direction="row" flexWrap="wrap" gap={1}>
-                    <Chip label={`共 ${rowCount} 条流水`} size="small" variant="outlined" />
-                    <Chip label={`当前页 ${paginationModel.page + 1} / ${totalPages}`} size="small" variant="outlined" />
-                    {SELECTABLE_CATEGORY_OPTIONS.map((option) => (
-                      <Chip
-                        key={option.code}
-                        label={`${option.label} ${effectiveCategoryCounts[option.code] ?? 0}`}
-                        size="small"
-                        variant="outlined"
-                      />
-                    ))}
-                    <Chip label={`无 ${effectiveCategoryCounts.uncategorized}`} size="small" variant="outlined" />
-                    <Chip label={`未保存 ${dirtyCount}`} size="small" color={dirtyCount > 0 ? "warning" : "default"} variant="outlined" />
+          <Paper component="section" className="bank-transaction-panel" elevation={0}>
+            <Stack className="bank-transaction-toolbar" spacing={0.75}>
+              <Stack className="bank-transaction-header" direction="row" alignItems="flex-start" justifyContent="space-between" spacing={1}>
+                <Stack className="bank-transaction-title-row" direction="row" alignItems="center" spacing={1}>
+                  <Typography className="bank-transaction-title" component="h2" variant="subtitle1" fontWeight={850} noWrap>
+                    {currentViewTitle}
+                  </Typography>
+                </Stack>
+
+                <Stack className="bank-header-controls" direction="row" spacing={0.75} alignItems="center">
+                  <Stack className="bank-date-toolbar" spacing={0.5} alignItems="flex-end">
+                    <ToggleButtonGroup
+                      aria-label="日期快捷筛选"
+                      className="bank-date-presets"
+                      exclusive
+                      size="small"
+                      value={dateFilter.preset === "custom" || dateFilter.preset === "month" ? null : dateFilter.preset}
+                      onChange={handlePresetChange}
+                    >
+                      <ToggleButton value="current_month">本月</ToggleButton>
+                      <ToggleButton value="previous_month">上月</ToggleButton>
+                      <ToggleButton value="last_7_days">近7天</ToggleButton>
+                      <ToggleButton value="last_30_days">近30天</ToggleButton>
+                      <ToggleButton value="current_year">今年</ToggleButton>
+                    </ToggleButtonGroup>
+                    <Button
+                      aria-describedby={dateFilterOpen ? "bank-date-filter-popover" : undefined}
+                      className="bank-date-range-button"
+                      size="small"
+                      variant="outlined"
+                      onClick={openDateFilterPopover}
+                    >
+                      {dateFilter.dateFrom} - {dateFilter.dateTo}
+                    </Button>
+                  </Stack>
+                  <Stack className="bank-category-actions" direction="row" flexWrap="wrap" gap={0.75}>
                     <Button
                       loading={savingCategories}
                       disabled={dirtyCount === 0 || savingCategories}
@@ -854,134 +909,156 @@ export default function BankDetailsPage() {
                       撤销更改
                     </Button>
                   </Stack>
-                  <ToggleButtonGroup
-                    aria-label="日期快捷筛选"
-                    className="bank-date-presets"
-                    exclusive
-                    size="small"
-                    value={dateFilter.preset === "custom" || dateFilter.preset === "month" ? null : dateFilter.preset}
-                    onChange={handlePresetChange}
-                  >
-                    <ToggleButton value="current_month">本月</ToggleButton>
-                    <ToggleButton value="previous_month">上月</ToggleButton>
-                    <ToggleButton value="last_7_days">近7天</ToggleButton>
-                    <ToggleButton value="last_30_days">近30天</ToggleButton>
-                    <ToggleButton value="current_year">今年</ToggleButton>
-                  </ToggleButtonGroup>
-                </Stack>
-
-                <Stack className="bank-date-filter" direction={{ xs: "column", md: "row" }} spacing={1}>
-                  <TextField
-                    label="年月筛选"
-                    type="month"
-                    size="small"
-                    value={monthValue}
-                    onChange={(event) => handleMonthChange(event.target.value)}
-                    InputLabelProps={{ shrink: true }}
-                  />
-                  <DatePicker
-                    enableAccessibleFieldDOMStructure={false}
-                    label="开始日期"
-                    format="YYYY-MM-DD"
-                    value={dateValue(dateFilter.dateFrom)}
-                    onChange={(value) => {
-                      if (!value) {
-                        handleCustomDateChange("dateFrom", "");
-                        return;
-                      }
-                      const nextValue = formatPickerDate(value);
-                      if (nextValue) {
-                        handleCustomDateChange("dateFrom", nextValue);
-                      }
-                    }}
-                    slotProps={{
-                      textField: {
-                        size: "small",
-                        inputProps: {
-                          "aria-label": "开始日期",
-                          onInput: (event: FormEvent<HTMLInputElement>) => {
-                            if (event.currentTarget instanceof HTMLInputElement) {
-                              handleCustomDateTextChange("dateFrom", event.currentTarget.value);
-                            }
-                          },
-                        },
-                        onBlur: (event: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => handleCustomDateTextChange("dateFrom", event.target.value),
-                      },
-                    }}
-                  />
-                  <DatePicker
-                    enableAccessibleFieldDOMStructure={false}
-                    label="结束日期"
-                    format="YYYY-MM-DD"
-                    value={dateValue(dateFilter.dateTo)}
-                    onChange={(value) => {
-                      if (!value) {
-                        handleCustomDateChange("dateTo", "");
-                        return;
-                      }
-                      const nextValue = formatPickerDate(value);
-                      if (nextValue) {
-                        handleCustomDateChange("dateTo", nextValue);
-                      }
-                    }}
-                    slotProps={{
-                      textField: {
-                        size: "small",
-                        inputProps: {
-                          "aria-label": "结束日期",
-                          onInput: (event: FormEvent<HTMLInputElement>) => {
-                            if (event.currentTarget instanceof HTMLInputElement) {
-                              handleCustomDateTextChange("dateTo", event.currentTarget.value);
-                            }
-                          },
-                        },
-                        onBlur: (event: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => handleCustomDateTextChange("dateTo", event.target.value),
-                      },
-                    }}
-                  />
                 </Stack>
               </Stack>
+            </Stack>
 
-              <Divider />
+            <Divider />
 
-              <Box className="bank-transaction-grid" sx={{ height: { xs: 520, lg: 560 }, minHeight: 420, width: "100%" }}>
-                <DataGrid
-                  aria-label="交易流水"
-                  columns={transactionColumns}
-                  rows={rows}
-                  loading={rowLoading}
-                  disableRowSelectionOnClick
-                  paginationMode="server"
-                  rowCount={rowCount}
-                  paginationModel={paginationModel}
-                  onPaginationModelChange={setPaginationModel}
-                  pageSizeOptions={[100, 200, 500]}
-                  showToolbar
-                  getRowClassName={(params) => (params.indexRelativeToCurrentPage % 2 === 0 ? "bank-grid-row-even" : "bank-grid-row-odd")}
-                  localeText={{ toolbarQuickFilterPlaceholder: "搜索流水" }}
-                  slotProps={{
-                    toolbar: {
-                      quickFilterProps: {
-                        debounceMs: 200,
-                      },
-                    },
-                  }}
-                  slots={{ noRowsOverlay: EmptyTransactionOverlay }}
-                  sx={{
-                    height: "100%",
-                    borderColor: "#c6c6c6",
-                    borderRadius: 0,
-                    "--DataGrid-overlayHeight": "320px",
-                    "& .MuiDataGrid-columnHeaders": {
-                      backgroundColor: "#f4f4f4",
-                    },
-                  }}
-                />
-              </Box>
-            </Paper>
-          </Box>
+            <Box className="bank-transaction-grid bank-transaction-grid-readable">
+              <DataGrid
+                aria-label="交易流水"
+                columns={transactionColumns}
+                rows={rows}
+                loading={rowLoading}
+                disableRowSelectionOnClick
+                rowHeight={80}
+                getRowHeight={() => "auto"}
+                getEstimatedRowHeight={() => 88}
+                columnHeaderHeight={44}
+                columnBufferPx={1200}
+                disableVirtualization
+                paginationMode="server"
+                rowCount={rowCount}
+                paginationModel={paginationModel}
+                onPaginationModelChange={setPaginationModel}
+                pageSizeOptions={[100, 200, 500]}
+                showToolbar
+                getRowClassName={(params) => (params.indexRelativeToCurrentPage % 2 === 0 ? "bank-grid-row-even" : "bank-grid-row-odd")}
+                localeText={DATA_GRID_LOCALE_TEXT}
+                slots={{
+                  toolbar: () => (
+                    <GridToolbarContainer className="bank-grid-toolbar">
+                      <Stack className="bank-grid-toolbar-content" spacing={1}>
+                        <Stack className="bank-grid-category-summary" direction="row" gap={0.4}>
+                          <BankCategoryTag categoryCode={null} compact label="未分类" count={effectiveCategoryCounts.uncategorized} />
+                          <Chip className="bank-dirty-count-chip bank-chip-auto-size" label={`未保存 ${dirtyCount}`} size="small" color={dirtyCount > 0 ? "warning" : "default"} variant="outlined" />
+                          {visibleCategorySummary.map((option) => (
+                            <BankCategoryTag
+                              key={option.code}
+                              categoryCode={option.code}
+                              compact
+                              label={option.label}
+                              count={effectiveCategoryCounts[option.code] ?? 0}
+                            />
+                          ))}
+                        </Stack>
+                        <Stack className="bank-grid-toolbar-actions" direction="row" spacing={0.5} alignItems="center">
+                          <GridToolbarColumnsButton />
+                          <GridToolbarFilterButton />
+                          <GridToolbarExport printOptions={{ disableToolbarButton: true }} />
+                          <GridToolbarQuickFilter debounceMs={200} />
+                        </Stack>
+                      </Stack>
+                    </GridToolbarContainer>
+                  ),
+                  noRowsOverlay: EmptyTransactionOverlay,
+                }}
+                sx={{
+                  height: "100%",
+                  borderColor: "#c6c6c6",
+                  borderRadius: 0,
+                  "--DataGrid-overlayHeight": "320px",
+                  "& .MuiDataGrid-columnHeaders": {
+                    backgroundColor: "#f4f4f4",
+                  },
+                }}
+              />
+            </Box>
+          </Paper>
+        </Box>
+      </Stack>
+      <Popover
+        id="bank-date-filter-popover"
+        open={dateFilterOpen}
+        anchorEl={dateFilterAnchorEl}
+        onClose={closeDateFilterPopover}
+        anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+        transformOrigin={{ vertical: "top", horizontal: "right" }}
+        slotProps={{ paper: { className: "bank-date-filter-popover" } }}
+      >
+        <Stack className="bank-date-filter" spacing={1.25}>
+          <TextField
+            label="年月"
+            type="month"
+            size="small"
+            value={monthValue}
+            onChange={(event) => handleMonthChange(event.target.value)}
+            InputLabelProps={{ shrink: true }}
+            inputProps={{ "aria-label": "年月筛选" }}
+          />
+          <DatePicker
+            enableAccessibleFieldDOMStructure={false}
+            label="开始"
+            format="YYYY-MM-DD"
+            value={dateValue(dateFilter.dateFrom)}
+            onChange={(value) => {
+              if (!value) {
+                handleCustomDateChange("dateFrom", "");
+                return;
+              }
+              const nextValue = formatPickerDate(value);
+              if (nextValue) {
+                handleCustomDateChange("dateFrom", nextValue);
+              }
+            }}
+            slotProps={{
+              textField: {
+                size: "small",
+                inputProps: {
+                  "aria-label": "开始日期",
+                  onInput: (event: FormEvent<HTMLInputElement>) => {
+                    if (event.currentTarget instanceof HTMLInputElement) {
+                      handleCustomDateTextChange("dateFrom", event.currentTarget.value);
+                    }
+                  },
+                },
+                onBlur: (event: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => handleCustomDateTextChange("dateFrom", event.target.value),
+              },
+            }}
+          />
+          <DatePicker
+            enableAccessibleFieldDOMStructure={false}
+            label="结束"
+            format="YYYY-MM-DD"
+            value={dateValue(dateFilter.dateTo)}
+            onChange={(value) => {
+              if (!value) {
+                handleCustomDateChange("dateTo", "");
+                return;
+              }
+              const nextValue = formatPickerDate(value);
+              if (nextValue) {
+                handleCustomDateChange("dateTo", nextValue);
+              }
+            }}
+            slotProps={{
+              textField: {
+                size: "small",
+                inputProps: {
+                  "aria-label": "结束日期",
+                  onInput: (event: FormEvent<HTMLInputElement>) => {
+                    if (event.currentTarget instanceof HTMLInputElement) {
+                      handleCustomDateTextChange("dateTo", event.currentTarget.value);
+                    }
+                  },
+                },
+                onBlur: (event: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => handleCustomDateTextChange("dateTo", event.target.value),
+              },
+            }}
+          />
         </Stack>
-      </PageScaffold>
+      </Popover>
       <Dialog
         aria-labelledby="bank-category-dirty-dialog-title"
         open={pendingNavigation !== null}

@@ -21,6 +21,7 @@ export type ImportWorkflowDraft = {
   fileSelections: FileSelectionState;
   previewPayload: ImportSessionPayload | null;
   etcPreviewPayload: EtcImportPreviewResult | null;
+  selectedEtcTaskId: string;
   etcImported: boolean;
   feedbackMessage: string | null;
   errorMessage: string | null;
@@ -40,6 +41,7 @@ function createEmptyDraft(): ImportWorkflowDraft {
     fileSelections: {},
     previewPayload: null,
     etcPreviewPayload: null,
+    selectedEtcTaskId: "",
     etcImported: false,
     feedbackMessage: null,
     errorMessage: null,
@@ -135,6 +137,7 @@ export function useImportWorkflowDraft(mode: ImportWorkflowMode) {
     setFileSelections: createSetter("fileSelections"),
     setPreviewPayload: createSetter("previewPayload"),
     setEtcPreviewPayload: createSetter("etcPreviewPayload"),
+    setSelectedEtcTaskId: createSetter("selectedEtcTaskId"),
     setEtcImported: createSetter("etcImported"),
     setFeedbackMessage: createSetter("feedbackMessage"),
     setErrorMessage: createSetter("errorMessage"),
@@ -142,4 +145,3 @@ export function useImportWorkflowDraft(mode: ImportWorkflowMode) {
     setIsConfirming: createSetter("isConfirming"),
   };
 }
-

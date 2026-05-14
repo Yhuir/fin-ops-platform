@@ -160,6 +160,57 @@ class AppHealthServiceTests(unittest.TestCase):
         self.assertEqual(snapshot["workbench_read_model"]["rebuild_job_ids"], ["job_1"])
         self.assertGreaterEqual(snapshot["metrics"]["workbench_rebuild_running_seconds_max"], 480)
 
+    def test_build_snapshot_counts_active_and_attention_jobs_separately(self) -> None:
+        service = AppHealthService()
+        now = datetime.now(UTC)
+        running_job = FakeJob(
+            job_id="job_running",
+            type="file_import",
+            status="running",
+            created_at=now.isoformat(),
+            started_at=now.isoformat(),
+        )
+        failed_job = FakeJob(
+            job_id="job_failed",
+            type="file_import",
+            status="failed",
+            created_at=now.isoformat(),
+        )
+        partial_job = FakeJob(
+            job_id="job_partial",
+            type="workbench_matching",
+            status="partial_success",
+            created_at=(now - timedelta(seconds=1)).isoformat(),
+        )
+
+        snapshot = service.build_snapshot(
+            session=FakeSession(identity=FakeIdentity()),
+            active_jobs=[running_job],
+            attention_jobs=[failed_job, partial_job],
+            oa_sync_payload={"status": "synced", "dirty_scopes": []},
+            state_store_info={},
+            rebuild_scheduled=False,
+            duration_ms=1,
+            generated_at=now,
+        )
+
+        self.assertEqual(snapshot["status"], "busy")
+        self.assertEqual(snapshot["background_jobs"]["active"], 1)
+        self.assertEqual(snapshot["background_jobs"]["running"], 1)
+        self.assertEqual(snapshot["background_jobs"]["queued"], 0)
+        self.assertEqual(snapshot["background_jobs"]["attention"], 2)
+        self.assertEqual([job["job_id"] for job in snapshot["background_jobs"]["active_jobs"]], ["job_running"])
+        self.assertEqual(
+            [job["job_id"] for job in snapshot["background_jobs"]["attention_jobs"]],
+            ["job_failed", "job_partial"],
+        )
+        self.assertEqual(
+            [job["job_id"] for job in snapshot["background_jobs"]["jobs"]],
+            ["job_running", "job_failed", "job_partial"],
+        )
+        self.assertEqual(snapshot["metrics"]["background_jobs_active_count"], 1)
+        self.assertEqual(snapshot["metrics"]["background_jobs_attention_count"], 2)
+
     def test_dependency_error_marks_blocked(self) -> None:
         service = AppHealthService()
 

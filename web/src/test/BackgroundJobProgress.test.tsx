@@ -23,6 +23,32 @@ const runningEtcJob = {
   finished_at: null,
 };
 
+const failedCostWarmupJob = {
+  job_id: "job_cost_warmup_failed",
+  type: "cost_statistics_cache_warmup",
+  label: "成本统计缓存预热",
+  short_label: "成本统计缓存预热失败",
+  status: "failed",
+  phase: "failed",
+  current: 2,
+  total: 4,
+  percent: 50,
+  message: "成本统计缓存预热失败。",
+  result_summary: {
+    warmed: 2,
+    failed: 2,
+    total: 4,
+  },
+  retryable: true,
+  retry_mode: "failed_scopes",
+  acknowledgeable: true,
+  attention: true,
+  error: "warmup_failed",
+  created_at: "2026-05-03T18:30:00+08:00",
+  updated_at: "2026-05-03T18:30:02+08:00",
+  finished_at: "2026-05-03T18:30:02+08:00",
+};
+
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -38,49 +64,79 @@ describe("global background job page header", () => {
     });
   });
 
-  test("does not render a running job page header on the current page", async () => {
+  test("renders a running job page header on the current page", async () => {
     installMockApiFetch({ backgroundJobs: [runningEtcJob] });
     renderAppAt("/");
 
-    await waitFor(() => {
-      expect(screen.queryByTestId("background-progress-block")).not.toBeInTheDocument();
-    });
+    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("正在导入 ETC发票 3/31");
   });
 
-  test("does not render a failed job page header; the status icon still carries the reason", async () => {
-    installMockApiFetch({
+  test("renders a retry action for retryable cost warmup attention jobs", async () => {
+    const fetchMock = installMockApiFetch({
       backgroundJobs: [
-        runningEtcJob,
-        {
-          ...runningEtcJob,
-          job_id: "job_failed_001",
-          status: "failed",
-          short_label: "ETC发票导入失败",
-          error: "部分 XML 无法解析",
-        },
+        failedCostWarmupJob,
       ],
     });
     renderAppAt("/");
 
+    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("成本统计缓存预热失败");
+
+    await userEvent.click(screen.getByRole("button", { name: "重新执行" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/background-jobs/job_cost_warmup_failed/retry"),
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+  });
+
+  test("shows operation feedback when retry fails instead of appearing unresponsive", async () => {
+    installMockApiFetch({
+      backgroundJobs: [failedCostWarmupJob],
+      backgroundJobRetryStatus: 409,
+      backgroundJobRetryBody: { message: "成本统计缓存预热任务缺少重新执行所需的范围。" },
+    });
+    renderAppAt("/");
+
+    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("成本统计缓存预热失败");
+
+    await userEvent.click(screen.getByRole("button", { name: "重新执行" }));
+
+    expect(await screen.findByText("成本统计缓存预热任务缺少重新执行所需的范围。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重新执行" })).toBeEnabled();
+  });
+
+  test("acknowledges known attention jobs from the global progress header", async () => {
+    const fetchMock = installMockApiFetch({
+      backgroundJobs: [failedCostWarmupJob],
+    });
+    renderAppAt("/");
+
+    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("成本统计缓存预热失败");
+
+    await userEvent.click(screen.getByRole("button", { name: "确认已知" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/background-jobs/job_cost_warmup_failed/acknowledge"),
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
     await waitFor(() => {
       expect(screen.queryByTestId("background-progress-block")).not.toBeInTheDocument();
     });
-    expect(screen.queryByRole("button", { name: "确认已知" })).not.toBeInTheDocument();
   });
 
-  test("keeps the background job page header removed after route changes", async () => {
+  test("keeps the background job page header visible after route changes", async () => {
     const user = userEvent.setup();
     installMockApiFetch({ backgroundJobs: [runningEtcJob] });
     renderAppAt("/");
 
-    await waitFor(() => {
-      expect(screen.queryByTestId("background-progress-block")).not.toBeInTheDocument();
-    });
+    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("正在导入 ETC发票 3/31");
 
     await user.click(screen.getByRole("link", { name: "银行明细" }));
 
-    await waitFor(() => {
-      expect(screen.queryByTestId("background-progress-block")).not.toBeInTheDocument();
-    });
+    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("正在导入 ETC发票 3/31");
   });
 });

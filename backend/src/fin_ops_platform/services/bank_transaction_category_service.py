@@ -114,21 +114,68 @@ def _build_category_definitions() -> dict[str, dict[str, Any]]:
 
 
 BANK_TRANSACTION_CATEGORY_DEFINITIONS = _build_category_definitions()
+BANK_TRANSACTION_AUTO_CATEGORY_DEFINITIONS: dict[str, dict[str, Any]] = {
+    "fee": {
+        "category_code": "fee",
+        "category_label": "手续费",
+        "category_path": ["自动识别", "手续费"],
+    },
+    "salary": {
+        "category_code": "salary",
+        "category_label": "工资",
+        "category_path": ["自动识别", "工资"],
+    },
+    "holiday_bonus": {
+        "category_code": "holiday_bonus",
+        "category_label": "过节费",
+        "category_path": ["自动识别", "过节费"],
+    },
+    "bonus": {
+        "category_code": "bonus",
+        "category_label": "奖金",
+        "category_path": ["自动识别", "奖金"],
+    },
+}
+BANK_TRANSACTION_LEGACY_CATEGORY_DEFINITIONS: dict[str, dict[str, Any]] = {
+    "external_turnover": {
+        "category_code": "external_turnover",
+        "category_label": "外部往来款",
+        "category_path": [],
+    },
+    "internal_transfer": {
+        "category_code": "internal_transfer",
+        "category_label": "内部往来款",
+        "category_path": ["自动识别", "内部往来款"],
+    },
+    "offset": {
+        "category_code": "offset",
+        "category_label": "冲",
+        "category_path": [],
+    },
+    "cash_turnover": {
+        "category_code": "cash_turnover",
+        "category_label": "现金往来",
+        "category_path": [],
+    },
+}
 BANK_TRANSACTION_LEGACY_CATEGORY_LABELS: dict[str, str] = {
-    "external_turnover": "外部往来款",
-    "internal_transfer": "内部往来款",
-    "offset": "冲",
-    "cash_turnover": "现金往来",
+    code: str(definition["category_label"])
+    for code, definition in BANK_TRANSACTION_LEGACY_CATEGORY_DEFINITIONS.items()
 }
 BANK_TRANSACTION_CATEGORY_LABELS: dict[str, str] = {
     **{
         code: str(definition["category_label"])
         for code, definition in BANK_TRANSACTION_CATEGORY_DEFINITIONS.items()
     },
+    **{
+        code: str(definition["category_label"])
+        for code, definition in BANK_TRANSACTION_AUTO_CATEGORY_DEFINITIONS.items()
+    },
     **BANK_TRANSACTION_LEGACY_CATEGORY_LABELS,
 }
 BANK_TRANSACTION_CATEGORY_COUNT_KEYS = [
     *BANK_TRANSACTION_CATEGORY_DEFINITIONS.keys(),
+    *BANK_TRANSACTION_AUTO_CATEGORY_DEFINITIONS.keys(),
     *BANK_TRANSACTION_LEGACY_CATEGORY_LABELS.keys(),
     "uncategorized",
 ]
@@ -267,7 +314,7 @@ class BankTransactionCategoryService:
                 category_code = update["category_code"]
                 existing = self._categories.get(transaction_id)
                 previous_code = existing.get("category_code") if isinstance(existing, dict) else None
-                if previous_code == category_code:
+                if existing is not None and previous_code == category_code:
                     updated_categories.append(self._public_record(transaction_id, existing))
                     continue
 
@@ -338,6 +385,10 @@ class BankTransactionCategoryService:
         if category_code is None:
             return []
         definition = BANK_TRANSACTION_CATEGORY_DEFINITIONS.get(category_code)
+        if definition is None:
+            definition = BANK_TRANSACTION_AUTO_CATEGORY_DEFINITIONS.get(category_code)
+        if definition is None:
+            definition = BANK_TRANSACTION_LEGACY_CATEGORY_DEFINITIONS.get(category_code)
         if definition is None:
             return []
         return list(definition["category_path"])

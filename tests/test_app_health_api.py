@@ -141,7 +141,12 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["status"], "busy")
         self.assertEqual(payload["background_jobs"]["attention"], 2)
-        self.assertEqual(payload["background_jobs"]["active"], 2)
+        self.assertEqual(payload["background_jobs"]["active"], 0)
+        self.assertEqual(payload["background_jobs"]["active_jobs"], [])
+        self.assertEqual(
+            [job["job_id"] for job in payload["background_jobs"]["attention_jobs"]],
+            [partial_job.job_id, failed_job.job_id],
+        )
         self.assertEqual(payload["background_jobs"]["primary_attention"]["job_id"], failed_job.job_id)
         self.assertEqual(payload["background_jobs"]["primary_attention"]["type"], "file_import")
         self.assertEqual(payload["background_jobs"]["primary_attention"]["message"], "银行流水导入失败。")
@@ -149,6 +154,10 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertTrue(payload["background_jobs"]["primary_attention"]["acknowledgeable"])
         self.assertTrue(payload["background_jobs"]["primary_attention"]["retryable"])
         self.assertIsNone(payload["background_jobs"]["primary_running"])
+        self.assertEqual(
+            [job["job_id"] for job in payload["background_jobs"]["jobs"]],
+            [partial_job.job_id, failed_job.job_id],
+        )
 
     def test_app_health_excludes_acknowledged_failed_job_from_active_and_attention(self) -> None:
         app = build_application()
@@ -209,6 +218,9 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertTrue(payload["background_jobs"]["primary_attention"]["acknowledgeable"])
         self.assertTrue(payload["background_jobs"]["primary_attention"]["retryable"])
         self.assertEqual(payload["background_jobs"]["jobs"][0]["job_id"], job.job_id)
+        self.assertEqual(payload["background_jobs"]["active"], 0)
+        self.assertEqual(payload["background_jobs"]["active_jobs"], [])
+        self.assertEqual(payload["background_jobs"]["attention_jobs"][0]["job_id"], job.job_id)
         self.assertTrue(payload["background_jobs"]["jobs"][0]["acknowledgeable"])
         self.assertTrue(payload["background_jobs"]["jobs"][0]["retryable"])
 

@@ -44,7 +44,11 @@ export type BankTransactionCategoryCode =
   | "external_turnover"
   | "internal_transfer"
   | "offset"
-  | "cash_turnover";
+  | "cash_turnover"
+  | "fee"
+  | "salary"
+  | "holiday_bonus"
+  | "bonus";
 
 export type BankTransactionCategoryCounts = Record<string, number> & { uncategorized: number };
 
@@ -63,7 +67,18 @@ export type BankDetailTransaction = {
   categoryCode: BankTransactionCategoryCode | null;
   categoryLabel: string | null;
   categoryPath: string[];
+  categorySource: string;
   categoryVersion: number | null;
+  autoCategoryCode: BankTransactionCategoryCode | null;
+  autoCategoryLabel: string | null;
+  autoCategoryPath: string[];
+  autoCategorySource: string;
+  autoCategoryReason: string | null;
+  autoCategoryConfidence: string | null;
+  effectiveCategoryCode: BankTransactionCategoryCode | null;
+  effectiveCategoryLabel: string | null;
+  effectiveCategoryPath: string[];
+  effectiveCategorySource: string;
 };
 
 export type BankDetailTransactionsResponse = {

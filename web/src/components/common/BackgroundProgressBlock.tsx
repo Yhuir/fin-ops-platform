@@ -5,6 +5,7 @@ type BackgroundProgressBlockProps =
       kind: "job";
       job: BackgroundJob;
       extraCount: number;
+      operating: boolean;
       onAcknowledge: (jobId: string) => void;
       onRetry: (jobId: string) => void;
     }
@@ -33,12 +34,7 @@ function canAcknowledge(status: BackgroundJobStatus) {
 }
 
 function canRetry(job: BackgroundJob) {
-  const hasImportRetrySource =
-    job.type === "file_import"
-    && typeof job.source.session_id === "string"
-    && Array.isArray(job.source.selected_file_ids)
-    && job.source.selected_file_ids.length > 0;
-  return job.retryable && hasImportRetrySource && (job.status === "failed" || job.status === "partial_success");
+  return job.retryable && (job.status === "failed" || job.status === "partial_success");
 }
 
 export default function BackgroundProgressBlock(props: BackgroundProgressBlockProps) {
@@ -57,9 +53,11 @@ export default function BackgroundProgressBlock(props: BackgroundProgressBlockPr
     );
   }
 
-  const { job, extraCount, onAcknowledge, onRetry } = props;
+  const { job, extraCount, operating, onAcknowledge, onRetry } = props;
   const tone = statusTone(job.status);
   const label = job.shortLabel || job.message || job.label || "后台任务处理中";
+  const actionLabel = operating ? "处理中" : "重新执行";
+  const acknowledgeLabel = operating ? "处理中" : "确认已知";
 
   return (
     <div
@@ -74,22 +72,24 @@ export default function BackgroundProgressBlock(props: BackgroundProgressBlockPr
       {extraCount > 0 ? <span className="background-progress-extra">+{extraCount}</span> : null}
       {canRetry(job) ? (
         <button
-          aria-label="重新执行"
+          aria-label={actionLabel}
           className="background-progress-action"
+          disabled={operating}
           type="button"
           onClick={() => onRetry(job.jobId)}
         >
-          重新执行
+          {actionLabel}
         </button>
       ) : null}
-      {job.acknowledgeable !== false && canAcknowledge(job.status) ? (
+      {job.acknowledgeable && canAcknowledge(job.status) ? (
         <button
-          aria-label="确认已知"
+          aria-label={acknowledgeLabel}
           className="background-progress-close"
+          disabled={operating}
           type="button"
           onClick={() => onAcknowledge(job.jobId)}
         >
-          确认已知
+          {acknowledgeLabel}
         </button>
       ) : null}
     </div>

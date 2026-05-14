@@ -102,26 +102,43 @@ class BackgroundJobServiceTests(unittest.TestCase):
 
         self.assertEqual(active_jobs, [])
 
-    def test_failed_job_remains_active_until_acknowledged(self) -> None:
+    def test_failed_and_partial_success_jobs_are_attention_until_acknowledged(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = self._service(temp_dir)
-            job = service.create_job(
+            failed_job = service.create_job(
                 job_type="settings_data_reset",
                 label="重置 OA 数据",
                 owner_user_id="user-001",
                 visibility="system",
             )
+            partial_job = service.create_job(
+                job_type="workbench_matching",
+                label="生成关联台候选",
+                owner_user_id="user-001",
+                visibility="system",
+            )
 
-            service.start_job(job.job_id)
-            failed = service.fail_job(job.job_id, "数据重置失败。", "boom")
-            before_ack = service.list_active_jobs("another-user")
-            service.acknowledge_job(job.job_id, "another-user")
-            after_ack = service.list_active_jobs("another-user")
+            service.start_job(failed_job.job_id)
+            failed = service.fail_job(failed_job.job_id, "数据重置失败。", "boom")
+            partial = service.succeed_job(
+                partial_job.job_id,
+                "关联台候选部分完成。",
+                status="partial_success",
+            )
+            active_before_ack = service.list_active_jobs("another-user")
+            attention_before_ack = service.list_attention_jobs("another-user")
+            service.acknowledge_job(failed_job.job_id, "another-user")
+            service.acknowledge_job(partial_job.job_id, "another-user")
+            active_after_ack = service.list_active_jobs("another-user")
+            attention_after_ack = service.list_attention_jobs("another-user")
 
         self.assertEqual(failed.status, "failed")
-        self.assertEqual(before_ack[0].job_id, job.job_id)
-        self.assertEqual(before_ack[0].error, "boom")
-        self.assertEqual(after_ack, [])
+        self.assertEqual(partial.status, "partial_success")
+        self.assertEqual(active_before_ack, [])
+        self.assertEqual([item.job_id for item in attention_before_ack], [partial_job.job_id, failed_job.job_id])
+        self.assertEqual(attention_before_ack[1].error, "boom")
+        self.assertEqual(active_after_ack, [])
+        self.assertEqual(attention_after_ack, [])
 
     def test_acknowledge_job_is_idempotent_for_visible_acknowledged_job(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -141,6 +158,103 @@ class BackgroundJobServiceTests(unittest.TestCase):
         self.assertEqual(second_ack.status, "acknowledged")
         self.assertEqual(second_ack.acknowledged_at, first_ack.acknowledged_at)
         self.assertEqual(active_jobs, [])
+
+    def test_acknowledge_jobs_closes_multiple_attention_jobs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+            first = service.create_job(
+                job_type="file_import",
+                label="导入 银行流水",
+                owner_user_id="user-001",
+            )
+            second = service.create_job(
+                job_type="workbench_matching",
+                label="生成关联台候选",
+                owner_user_id="user-001",
+            )
+            service.fail_job(first.job_id, "银行流水导入失败。", "boom")
+            service.succeed_job(second.job_id, "关联台候选部分完成。", status="partial_success")
+
+            acknowledged = service.acknowledge_jobs([first.job_id, second.job_id], "user-001")
+            attention_jobs = service.list_attention_jobs("user-001")
+
+        self.assertEqual([item.status for item in acknowledged], ["acknowledged", "acknowledged"])
+        self.assertEqual(attention_jobs, [])
+
+    def test_superseded_job_is_not_active_or_attention(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+            old_job = service.create_job(
+                job_type="cost_statistics_cache_warmup",
+                label="预热成本统计缓存",
+                owner_user_id="system",
+                visibility="system",
+                affected_months=["2026-05"],
+            )
+            new_job = service.create_job(
+                job_type="cost_statistics_cache_warmup",
+                label="预热成本统计缓存",
+                owner_user_id="system",
+                visibility="system",
+                affected_months=["2026-05"],
+            )
+            service.fail_job(old_job.job_id, "服务重启，任务已中断，请重新执行。", "interrupted_by_restart")
+
+            superseded = service.supersede_job(
+                old_job.job_id,
+                "user-001",
+                superseded_by_job_id=new_job.job_id,
+            )
+            active_jobs = service.list_active_jobs("user-001")
+            attention_jobs = service.list_attention_jobs("user-001")
+
+        self.assertEqual(superseded.status, "superseded")
+        self.assertEqual(superseded.superseded_by_job_id, new_job.job_id)
+        self.assertIsNotNone(superseded.superseded_at)
+        self.assertEqual([item.job_id for item in active_jobs], [new_job.job_id])
+        self.assertEqual(attention_jobs, [])
+
+    def test_old_snapshot_without_superseded_fields_still_loads(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ApplicationStateStore(Path(temp_dir))
+            now = datetime.now(UTC).isoformat()
+            store.save_background_jobs(
+                {
+                    "job_legacy": {
+                        "job_id": "job_legacy",
+                        "type": "file_import",
+                        "label": "导入 银行流水",
+                        "short_label": "导入 银行流水失败",
+                        "owner_user_id": "user-001",
+                        "visibility": "owner",
+                        "status": "failed",
+                        "phase": "failed",
+                        "current": 0,
+                        "total": 0,
+                        "percent": 0,
+                        "message": "银行流水导入失败。",
+                        "result_summary": {},
+                        "error": "boom",
+                        "idempotency_key": None,
+                        "source": {},
+                        "affected_scopes": [],
+                        "affected_months": [],
+                        "created_at": now,
+                        "started_at": None,
+                        "updated_at": now,
+                        "finished_at": now,
+                        "acknowledged_at": None,
+                    }
+                }
+            )
+
+            service = BackgroundJobService(store, recent_success_seconds=60)
+            job = service.get_job("job_legacy", "user-001")
+            attention_jobs = service.list_attention_jobs("user-001")
+
+        self.assertIsNone(job.superseded_by_job_id)
+        self.assertIsNone(job.superseded_at)
+        self.assertEqual([item.job_id for item in attention_jobs], ["job_legacy"])
 
     def test_idempotent_create_returns_existing_unfailed_job(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -288,6 +402,8 @@ class BackgroundJobServiceTests(unittest.TestCase):
 
         self.assertEqual(active_response.status_code, 200)
         self.assertEqual(active_payload["jobs"][0]["job_id"], job.job_id)
+        self.assertEqual(active_payload["active_jobs"][0]["job_id"], job.job_id)
+        self.assertEqual(active_payload["attention_jobs"], [])
         self.assertEqual(active_payload["jobs"][0]["short_label"], "正在导入 ETC发票 1/2")
         self.assertEqual(get_response.status_code, 200)
         self.assertEqual(get_payload["job"]["job_id"], job.job_id)
@@ -323,9 +439,13 @@ class BackgroundJobServiceTests(unittest.TestCase):
         self.assertEqual(active_response.status_code, 200)
         self.assertTrue(active_payload["jobs"][0]["acknowledgeable"])
         self.assertTrue(active_payload["jobs"][0]["retryable"])
+        self.assertEqual(active_payload["active_jobs"], [])
+        self.assertEqual(active_payload["attention_jobs"][0]["job_id"], job.job_id)
+        self.assertTrue(active_payload["attention_jobs"][0]["attention"])
         self.assertEqual(get_response.status_code, 200)
         self.assertTrue(get_payload["job"]["acknowledgeable"])
         self.assertTrue(get_payload["job"]["retryable"])
+        self.assertTrue(get_payload["job"]["attention"])
 
 
 if __name__ == "__main__":

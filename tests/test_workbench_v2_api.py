@@ -184,6 +184,8 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         app: Application,
         *,
         trade_time: str = "2026-04-03 09:00:00",
+        summary: str = "付款",
+        remark: str = "货款",
     ) -> str:
         preview = app._import_service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
@@ -199,8 +201,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     "counterparty_name": "供应商A",
                     "debit_amount": "100.00",
                     "credit_amount": "",
-                    "summary": "付款",
-                    "remark": "货款",
+                    "summary": summary,
+                    "remark": remark,
+                    "selected_bank_name": "工商银行",
+                    "selected_bank_last4": "6386",
                 }
             ],
         )
@@ -544,6 +548,80 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(payload["error"], "category_version_conflict")
         self.assertEqual(payload["actual_version"], 1)
+
+    def test_bank_details_api_returns_auto_and_effective_category_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_id = self._create_imported_bank_transaction(
+                app,
+                trade_time="2026-04-03 09:15:30",
+                summary="网银手续费",
+                remark="转账手续费",
+            )
+
+            response = app.handle_request(
+                "GET",
+                "/api/bank-details/transactions?account_key=%E5%B7%A5%E5%95%86%E9%93%B6%E8%A1%8C%3A6386",
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        row = next(row for row in payload["rows"] if row["id"] == transaction_id)
+        self.assertEqual(row["trade_time"], "2026-04-03 09:15:30")
+        self.assertEqual(row["auto_category_code"], "fee")
+        self.assertEqual(row["auto_category_label"], "手续费")
+        self.assertEqual(row["auto_category_source"], "auto")
+        self.assertEqual(row["effective_category_code"], "fee")
+        self.assertEqual(row["effective_category_label"], "手续费")
+        self.assertEqual(row["effective_category_source"], "auto")
+        self.assertEqual(row["category_code"], "fee")
+        self.assertEqual(row["category_label"], "手续费")
+        self.assertEqual(row["category_source"], "auto")
+        self.assertEqual(payload["category_counts"]["fee"], 1)
+
+    def test_patch_manual_clear_immediately_suppresses_auto_in_bank_details_api(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_id = self._create_imported_bank_transaction(
+                app,
+                summary="网银手续费",
+                remark="转账手续费",
+            )
+
+            save_response = app.handle_request(
+                "PATCH",
+                "/api/bank-details/transactions/categories",
+                body=json.dumps(
+                    {
+                        "updates": [
+                            {
+                                "transaction_id": transaction_id,
+                                "category_code": None,
+                                "expected_version": 0,
+                            }
+                        ]
+                    }
+                ),
+            )
+            save_payload = json.loads(save_response.body)
+            list_response = app.handle_request(
+                "GET",
+                "/api/bank-details/transactions?account_key=%E5%B7%A5%E5%95%86%E9%93%B6%E8%A1%8C%3A6386",
+            )
+            list_payload = json.loads(list_response.body)
+
+        self.assertEqual(save_response.status_code, 200)
+        self.assertEqual(save_payload["updated_categories"][0]["category_code"], None)
+        self.assertEqual(save_payload["updated_categories"][0]["version"], 1)
+        self.assertEqual(list_response.status_code, 200)
+        row = next(row for row in list_payload["rows"] if row["id"] == transaction_id)
+        self.assertEqual(row["manual_category_source"], "manual")
+        self.assertEqual(row["auto_category_code"], "fee")
+        self.assertEqual(row["effective_category_code"], None)
+        self.assertEqual(row["category_code"], None)
+        self.assertEqual(row["category_version"], 1)
+        self.assertEqual(list_payload["category_counts"]["fee"], 0)
+        self.assertEqual(list_payload["category_counts"]["uncategorized"], 1)
 
     def test_workbench_bank_rows_include_saved_manual_category_from_application_service(self) -> None:
         app = build_application()
@@ -1124,6 +1202,85 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             [row["id"] for row in group["invoice_rows"]],
             ["invoice-oa-70", "invoice-oa-126"],
         )
+
+    def test_oa_bank_candidate_extends_existing_confirmed_oa_case_without_downgrading_oa(self) -> None:
+        app = build_application()
+        app._workbench_candidate_match_service.upsert_candidate(
+            {
+                "scope_month": "2026-03",
+                "candidate_type": "oa_bank",
+                "status": "incomplete",
+                "confidence": "medium",
+                "rule_code": "oa_bank_exact_amount",
+                "row_ids": ["oa-cost-confirmed", "bank-cost-confirmed"],
+                "oa_row_ids": ["oa-cost-confirmed"],
+                "bank_row_ids": ["bank-cost-confirmed"],
+                "invoice_row_ids": [],
+                "amount": "1250.00",
+                "amount_delta": "0.00",
+                "explanation": "OA and bank matched; invoice evidence is missing.",
+                "conflict_candidate_keys": [],
+                "generated_at": "2026-05-07T00:00:00+00:00",
+                "source_versions": {},
+            }
+        )
+        raw_payload = {
+            "month": "2026-03",
+            "oa_status": {"code": "ready", "message": "OA 已同步"},
+            "summary": {
+                "oa_count": 1,
+                "bank_count": 1,
+                "invoice_count": 0,
+                "paired_count": 1,
+                "open_count": 1,
+                "exception_count": 0,
+            },
+            "paired": {
+                "oa": [
+                    {
+                        "id": "oa-cost-confirmed",
+                        "type": "oa",
+                        "case_id": "CASE-COST-CONFIRMED",
+                        "apply_type": "日常报销",
+                        "amount": "1250.00",
+                        "counterparty_name": "昆明设备供应商",
+                        "direction": "payment",
+                        "oa_bank_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+                    }
+                ],
+                "bank": [],
+                "invoice": [],
+            },
+            "open": {
+                "oa": [],
+                "bank": [
+                    {
+                        "id": "bank-cost-confirmed",
+                        "type": "bank",
+                        "case_id": None,
+                        "debit_amount": "1,250.00",
+                        "credit_amount": "",
+                        "counterparty_name": "昆明设备供应商",
+                        "direction": "payment",
+                        "invoice_relation": {"code": "pending_match", "label": "待匹配", "tone": "warn"},
+                    }
+                ],
+                "invoice": [],
+            },
+        }
+
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            payload = app._build_api_workbench_payload("2026-03")
+
+        self.assertEqual(payload["paired"]["groups"], [])
+        self.assertEqual(len(payload["open"]["groups"]), 1)
+        group = payload["open"]["groups"][0]
+        self.assertEqual(group["group_id"], "case:CASE-COST-CONFIRMED")
+        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-cost-confirmed"])
+        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bank-cost-confirmed"])
+        self.assertEqual(group["oa_rows"][0]["oa_bank_relation"]["code"], "fully_linked")
+        self.assertEqual(group["bank_rows"][0]["case_id"], "CASE-COST-CONFIRMED")
+        self.assertEqual(group["bank_rows"][0]["invoice_relation"]["code"], "candidate_incomplete")
 
     def test_all_scope_cached_read_model_rebuilds_when_candidate_snapshot_is_missing(self) -> None:
         app = build_application()
@@ -2568,7 +2725,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(oa_ids, {"oa-existing-001", "oa-existing-002"})
         self.assertEqual(payload["summary"]["oa_count"], 2)
 
-    def test_get_api_workbench_persists_salary_auto_match_into_pair_relations(self) -> None:
+    def test_get_api_workbench_keeps_salary_auto_match_as_candidate_until_no_oa_submit(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
@@ -2594,15 +2751,14 @@ class WorkbenchV2ApiTests(unittest.TestCase):
 
         response = app.handle_request("GET", "/api/workbench?month=all")
         payload = json.loads(response.body)
+        auto_results = app._live_workbench_service.list_auto_pair_candidates("all")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["summary"]["paired_count"], 1)
-        self.assertEqual(flatten_groups(payload["paired"]["groups"], "bank")[0]["invoice_relation"]["label"], "已匹配：工资")
-        relation = app._workbench_pair_relation_service.get_active_relation_by_row_id(salary_row_id)
-        self.assertIsNotNone(relation)
-        assert relation is not None
-        self.assertEqual(relation["relation_mode"], "salary_personal_auto_match")
-        self.assertEqual(relation["row_ids"], [salary_row_id])
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual([row["id"] for row in flatten_groups(payload["open"]["groups"], "bank")], [salary_row_id])
+        self.assertEqual(len(auto_results), 1)
+        self.assertEqual(auto_results[0].rule_code, "salary_personal_auto_match")
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id(salary_row_id))
 
     def test_get_api_workbench_exposes_invoice_identity_fields_for_live_invoice_rows(self) -> None:
         app = build_application()
@@ -2632,7 +2788,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(invoice_row["invoice_no"], "9001")
         self.assertEqual(invoice_row["digital_invoice_no"], "—")
 
-    def test_get_api_workbench_persists_internal_transfer_auto_match_into_pair_relations(self) -> None:
+    def test_get_api_workbench_keeps_internal_transfer_auto_match_as_candidate_until_no_oa_submit(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
@@ -2668,16 +2824,15 @@ class WorkbenchV2ApiTests(unittest.TestCase):
 
         response = app.handle_request("GET", "/api/workbench?month=all")
         payload = json.loads(response.body)
+        auto_results = app._live_workbench_service.list_auto_pair_candidates("all")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["summary"]["paired_count"], 1)
-        paired_bank_rows = flatten_groups(payload["paired"]["groups"], "bank")
-        self.assertCountEqual([row["id"] for row in paired_bank_rows], internal_transfer_row_ids)
-        relation = app._workbench_pair_relation_service.get_active_relation_by_row_id(internal_transfer_row_ids[0])
-        self.assertIsNotNone(relation)
-        assert relation is not None
-        self.assertEqual(relation["relation_mode"], "internal_transfer_pair")
-        self.assertCountEqual(relation["row_ids"], internal_transfer_row_ids)
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        open_bank_rows = flatten_groups(payload["open"]["groups"], "bank")
+        self.assertCountEqual([row["id"] for row in open_bank_rows], internal_transfer_row_ids)
+        self.assertEqual(len(auto_results), 1)
+        self.assertEqual(auto_results[0].rule_code, "internal_transfer_pair")
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id(internal_transfer_row_ids[0]))
 
     def test_workbench_matching_rows_preserve_bank_identity_fields_for_internal_transfer_rules(self) -> None:
         app = build_application()

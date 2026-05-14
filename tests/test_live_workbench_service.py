@@ -4,6 +4,13 @@ from unittest.mock import patch
 
 from fin_ops_platform.domain.enums import BatchType, InvoiceType
 from fin_ops_platform.domain.models import Counterparty, Invoice
+from fin_ops_platform.services.bank_transaction_auto_category_service import (
+    BankTransactionAutoCategoryService,
+)
+from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
+from fin_ops_platform.services.bank_transaction_effective_category_provider import (
+    BankTransactionEffectiveCategoryProvider,
+)
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.live_workbench_service import LiveWorkbenchService
 from fin_ops_platform.services.matching import MatchingEngineService
@@ -22,6 +29,23 @@ class StaticCategoryProvider:
 
 
 class LiveWorkbenchServiceTests(unittest.TestCase):
+    def _effective_category_provider(
+        self,
+        import_service: ImportNormalizationService,
+    ) -> tuple[BankTransactionCategoryService, BankTransactionEffectiveCategoryProvider]:
+        transaction_ids = {transaction.id for transaction in import_service.list_transactions()}
+        category_service = BankTransactionCategoryService.from_snapshot(
+            None,
+            transaction_exists=lambda transaction_id: transaction_id in transaction_ids,
+        )
+        return (
+            category_service,
+            BankTransactionEffectiveCategoryProvider(
+                category_service=category_service,
+                auto_category_service=BankTransactionAutoCategoryService(),
+            ),
+        )
+
     def test_invoice_rows_expose_invoice_identity_fields_in_workbench_list(self) -> None:
         import_service = ImportNormalizationService()
         preview = import_service.preview_import(
@@ -263,6 +287,180 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
         detail = service.get_row_detail(transaction_id)
         self.assertEqual(detail["detail_fields"]["摘要"], "电子转账")
         self.assertEqual(detail["detail_fields"]["备注"], "代购公车款")
+
+    def test_bank_rows_include_auto_effective_category_tags(self) -> None:
+        import_service = ImportNormalizationService()
+        preview = import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="auto-fee-bank.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220009",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-03-21",
+                    "trade_time": "2026-03-21 12:15:00",
+                    "pay_receive_time": "2026-03-21 12:15:00",
+                    "counterparty_name": "建设银行",
+                    "debit_amount": "10.00",
+                    "credit_amount": "",
+                    "summary": "网银手续费",
+                },
+            ],
+        )
+        import_service.confirm_import(preview.id)
+        _, provider = self._effective_category_provider(import_service)
+
+        service = LiveWorkbenchService(
+            import_service,
+            MatchingEngineService(import_service),
+            category_provider=provider,
+        )
+
+        bank_row = service.get_workbench("2026-03")["open"]["bank"][0]
+
+        self.assertEqual(bank_row["category_code"], "fee")
+        self.assertEqual(bank_row["category_label"], "手续费")
+        self.assertEqual(bank_row["category_source"], "auto")
+        self.assertIn("手续费", bank_row["tags"])
+
+    def test_bank_rows_manual_category_overrides_auto_effective_category(self) -> None:
+        import_service = ImportNormalizationService()
+        preview = import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="manual-over-auto-bank.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220010",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-03-22",
+                    "trade_time": "2026-03-22 12:15:00",
+                    "pay_receive_time": "2026-03-22 12:15:00",
+                    "counterparty_name": "建设银行",
+                    "debit_amount": "10.00",
+                    "credit_amount": "",
+                    "summary": "网银手续费",
+                },
+            ],
+        )
+        import_service.confirm_import(preview.id)
+        transaction_id = import_service.list_transactions()[0].id
+        category_service, provider = self._effective_category_provider(import_service)
+        category_service.apply_updates(
+            [
+                {
+                    "transaction_id": transaction_id,
+                    "category_code": "bonus",
+                    "expected_version": 0,
+                }
+            ],
+            actor="YNSYLP005",
+        )
+
+        service = LiveWorkbenchService(
+            import_service,
+            MatchingEngineService(import_service),
+            category_provider=provider,
+        )
+
+        bank_row = service.get_workbench("2026-03")["open"]["bank"][0]
+
+        self.assertEqual(bank_row["category_code"], "bonus")
+        self.assertEqual(bank_row["category_label"], "奖金")
+        self.assertEqual(bank_row["category_source"], "manual")
+        self.assertIn("奖金", bank_row["tags"])
+        self.assertNotIn("手续费", bank_row["tags"])
+
+    def test_bank_rows_manual_clear_suppresses_auto_effective_category(self) -> None:
+        import_service = ImportNormalizationService()
+        preview = import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="manual-clear-auto-bank.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220011",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-03-23",
+                    "trade_time": "2026-03-23 12:15:00",
+                    "pay_receive_time": "2026-03-23 12:15:00",
+                    "counterparty_name": "建设银行",
+                    "debit_amount": "10.00",
+                    "credit_amount": "",
+                    "summary": "网银手续费",
+                },
+            ],
+        )
+        import_service.confirm_import(preview.id)
+        transaction_id = import_service.list_transactions()[0].id
+        category_service, provider = self._effective_category_provider(import_service)
+        category_service.apply_updates(
+            [{"transaction_id": transaction_id, "category_code": None, "expected_version": 0}],
+            actor="YNSYLP005",
+        )
+
+        service = LiveWorkbenchService(
+            import_service,
+            MatchingEngineService(import_service),
+            category_provider=provider,
+        )
+
+        bank_row = service.get_workbench("2026-03")["open"]["bank"][0]
+
+        self.assertIsNone(bank_row["category_code"])
+        self.assertIsNone(bank_row["category_label"])
+        self.assertIsNone(bank_row["category_source"])
+        self.assertNotIn("手续费", bank_row["tags"])
+
+    def test_bank_rows_include_auto_internal_transfer_effective_category(self) -> None:
+        import_service = ImportNormalizationService()
+        preview = import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="auto-internal-transfer-bank.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220001",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-03-24",
+                    "trade_time": "2026-03-24 09:15:00",
+                    "pay_receive_time": "2026-03-24 09:15:00",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "debit_amount": "50000.00",
+                    "credit_amount": "",
+                    "summary": "内部往来支出",
+                },
+                {
+                    "account_no": "62220002",
+                    "account_name": "云南溯源科技有限公司招商银行一般户",
+                    "txn_date": "2026-03-24",
+                    "trade_time": "2026-03-24 10:02:00",
+                    "pay_receive_time": "2026-03-24 10:02:00",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "debit_amount": "",
+                    "credit_amount": "50000.00",
+                    "summary": "内部往来收入",
+                },
+            ],
+        )
+        import_service.confirm_import(preview.id)
+        _, provider = self._effective_category_provider(import_service)
+
+        service = LiveWorkbenchService(
+            import_service,
+            MatchingEngineService(import_service),
+            category_provider=provider,
+        )
+
+        bank_rows = service.get_workbench("2026-03")["open"]["bank"]
+
+        self.assertEqual(len(bank_rows), 2)
+        for bank_row in bank_rows:
+            self.assertEqual(bank_row["category_code"], "internal_transfer")
+            self.assertEqual(bank_row["category_label"], "内部往来款")
+            self.assertEqual(bank_row["category_source"], "auto")
+            self.assertIn("内部往来款", bank_row["tags"])
 
     def test_get_row_detail_uses_direct_lookup_without_rebuilding_cache(self) -> None:
         import_service = ImportNormalizationService()

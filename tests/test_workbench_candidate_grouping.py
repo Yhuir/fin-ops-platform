@@ -1484,6 +1484,49 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         group = payload["paired"]["groups"][0]
         self.assertEqual([row["id"] for row in group["bank_rows"]], ["bk-transfer-001", "bk-transfer-002"])
 
+    def test_keeps_no_oa_bank_batch_relation_rows_in_paired_case_group(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-03",
+            oa_rows=[],
+            bank_rows=[
+                {
+                    "id": "bk-transfer-001",
+                    "type": "bank",
+                    "case_id": "no_oa_batch_internal_001",
+                    "relation_mode": "no_oa_bank_batch",
+                    "trade_time": "2026-03-19 11:15:00",
+                    "debit_amount": "",
+                    "credit_amount": "13000.00",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "invoice_relation": {"code": "no_oa_bank_batch", "label": "已匹配：内部往来款", "tone": "success"},
+                    "display_tags": ["免OA", "内部往来款"],
+                    "available_actions": ["detail"],
+                },
+                {
+                    "id": "bk-transfer-002",
+                    "type": "bank",
+                    "case_id": "no_oa_batch_internal_001",
+                    "relation_mode": "no_oa_bank_batch",
+                    "trade_time": "2026-03-19 11:16:00",
+                    "debit_amount": "13000.00",
+                    "credit_amount": "",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "invoice_relation": {"code": "no_oa_bank_batch", "label": "已匹配：内部往来款", "tone": "success"},
+                    "display_tags": ["免OA", "内部往来款"],
+                    "available_actions": ["detail"],
+                },
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 1)
+        self.assertEqual(payload["summary"]["open_count"], 0)
+        group = payload["paired"]["groups"][0]
+        self.assertEqual(group["relation_mode"], "no_oa_bank_batch")
+        self.assertEqual(group["display_tags"], ["免OA", "内部往来款"])
+        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bk-transfer-001", "bk-transfer-002"])
+
     def test_demotes_single_sided_internal_transfer_row_back_to_open_section(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(

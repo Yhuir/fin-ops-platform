@@ -54,6 +54,10 @@ class EtcBatchNotFoundError(EtcServiceError):
     pass
 
 
+class EtcBatchDeleteError(EtcServiceError):
+    pass
+
+
 class EtcDraftRequestError(EtcServiceError):
     pass
 
@@ -287,6 +291,16 @@ class EtcBatch:
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     confirmed_at: datetime | None = None
     error_message: str | None = None
+    reconciliation_task_id: str | None = None
+    statement_period_start: str | None = None
+    statement_period_end: str | None = None
+    oa_total_amount: Decimal | None = None
+    etc_invoice_amount: Decimal | None = None
+    supplement_amount: Decimal = Decimal("0.00")
+    etc_invoice_count: int | None = None
+    supplement_count: int = 0
+    supplement_items: list[dict[str, object]] = field(default_factory=list)
+    display_count_text: str | None = None
 
 
 @dataclass(slots=True)
@@ -1054,12 +1068,18 @@ class EtcService:
         self._persist()
         return replace(batch, invoice_ids=list(batch.invoice_ids), plate_summary=list(batch.plate_summary))
 
-    def create_oa_draft(self, invoice_ids: list[str], *, oa_client: EtcOAClient | None = None) -> EtcDraftResult:
+    def create_oa_draft(
+        self,
+        invoice_ids: list[str],
+        *,
+        oa_client: EtcOAClient | None = None,
+        reconciliation_task: object | None = None,
+    ) -> EtcDraftResult:
         invoices = self._validate_draft_invoices(invoice_ids)
-        batch = self._create_batch(invoices)
+        batch = self._create_batch(invoices, reconciliation_task=reconciliation_task)
         resolved_oa_client = oa_client or self.oa_client
         try:
-            attachments = self._upload_batch_attachments(invoices, resolved_oa_client)
+            attachments = self._upload_batch_attachments(invoices, resolved_oa_client, reconciliation_task=reconciliation_task)
             payload = self._build_oa_draft_payload(batch, attachments)
             oa_draft_id, oa_draft_url = resolved_oa_client.create_form_draft(form_id=2, payload=payload)
         except EtcOAClientError as exc:
@@ -1150,10 +1170,29 @@ class EtcService:
             "summary": summary,
             "plate_summary": list(batch.plate_summary),
             "invoice_items": [self._batch_invoice_item_payload(invoice) for invoice in invoices],
+            "supplement_items": list(getattr(batch, "supplement_items", []) or []),
         }
 
     def list_import_batches(self) -> list[EtcImportBatch]:
         return sorted(self._import_batches.values(), key=lambda batch: batch.created_at)
+
+    def delete_batch(self, batch_id: str) -> dict[str, object]:
+        resolved_batch_id = str(batch_id or "").strip()
+        if not resolved_batch_id:
+            raise EtcBatchNotFoundError("ETC batch not found: empty batch id")
+
+        import_batch = self._import_batches.get(resolved_batch_id)
+        if import_batch is not None:
+            result = self._delete_import_batch(import_batch)
+            self._persist()
+            return result
+
+        batch = self._batch_by_id_or_external_id(resolved_batch_id)
+        if batch is None:
+            raise EtcBatchNotFoundError(f"ETC batch not found: {resolved_batch_id}")
+        result = self._delete_submission_batch(batch)
+        self._persist()
+        return result
 
     def list_invoices_by_ids(self, invoice_ids: list[str]) -> list[EtcInvoice]:
         return [replace(self._get_invoice(invoice_id)) for invoice_id in invoice_ids]
@@ -1452,12 +1491,79 @@ class EtcService:
         import_batch_ids = {invoice.import_batch_id for invoice in invoices if invoice.import_batch_id}
         return [batch for batch_id in sorted(import_batch_ids) if (batch := self._import_batches.get(batch_id)) is not None]
 
-    def _create_batch(self, invoices: list[EtcInvoice]) -> EtcBatch:
+    def _delete_import_batch(self, import_batch: EtcImportBatch) -> dict[str, object]:
+        if str(import_batch.submission_batch_id or "").strip():
+            raise EtcBatchDeleteError("import batch has an OA draft and cannot be deleted before deleting the draft batch.")
+        invoice_ids = [str(invoice_id) for invoice_id in list(import_batch.invoice_ids or [])]
+        invoices = [self._invoices[invoice_id] for invoice_id in invoice_ids if invoice_id in self._invoices]
+        for invoice in invoices:
+            if invoice.status != EtcInvoiceStatus.UNSUBMITTED:
+                raise EtcBatchDeleteError("import batch contains submitted invoices and cannot be deleted.")
+            if str(invoice.current_batch_id or "").strip():
+                raise EtcBatchDeleteError("import batch contains invoices assigned to an OA batch and cannot be deleted.")
+        for invoice in invoices:
+            self._delete_invoice_files(invoice)
+            self._invoice_numbers.pop(invoice.invoice_number, None)
+            self._invoices.pop(invoice.id, None)
+        self._import_batches.pop(import_batch.id, None)
+        return {"deleted": True, "batchId": import_batch.id, "kind": "import_batch"}
+
+    def _delete_submission_batch(self, batch: EtcBatch) -> dict[str, object]:
+        if batch.status == EtcBatchStatus.SUBMITTED_CONFIRMED.value:
+            raise EtcBatchDeleteError("submitted ETC batch cannot be deleted.")
+        if str(batch.linked_oa_row_id or "").strip() or str(batch.linked_oa_case_id or "").strip():
+            raise EtcBatchDeleteError("ETC batch is linked to OA/workbench records and cannot be deleted.")
+        if batch.confirmed_at is not None:
+            raise EtcBatchDeleteError("ETC batch has submitted confirmation metadata and cannot be deleted.")
+        allowed_statuses = {
+            EtcBatchStatus.DRAFT_CREATING.value,
+            EtcBatchStatus.DRAFT_CREATED.value,
+            EtcBatchStatus.NOT_SUBMITTED.value,
+            EtcBatchStatus.FAILED.value,
+        }
+        if str(batch.status) not in allowed_statuses:
+            raise EtcBatchDeleteError(f"ETC batch status {batch.status} cannot be deleted.")
+
+        now = datetime.now(UTC)
+        invoices = [self._get_invoice(invoice_id) for invoice_id in batch.invoice_ids if invoice_id in self._invoices]
+        for invoice in invoices:
+            if invoice.status == EtcInvoiceStatus.SUBMITTED:
+                raise EtcBatchDeleteError("ETC batch contains submitted invoices and cannot be deleted.")
+        for invoice in invoices:
+            if invoice.current_batch_id == batch.id:
+                invoice.current_batch_id = None
+            invoice.status = EtcInvoiceStatus.UNSUBMITTED
+            invoice.updated_at = now
+        for import_batch in self._import_batches_for_invoices(invoices):
+            if import_batch.submission_batch_id == batch.id:
+                import_batch.submission_batch_id = None
+                import_batch.updated_at = now
+        self._batches.pop(batch.id, None)
+        return {"deleted": True, "batchId": batch.id, "kind": "submission_batch"}
+
+    def _delete_invoice_files(self, invoice: EtcInvoice) -> None:
+        for raw_path in (invoice.xml_file_path, invoice.pdf_file_path):
+            if not raw_path:
+                continue
+            path = Path(raw_path)
+            if path.exists():
+                path.unlink()
+            parent = path.parent
+            try:
+                if parent != self._invoice_file_root and parent.exists() and not any(parent.iterdir()):
+                    parent.rmdir()
+            except OSError:
+                pass
+
+    def _create_batch(self, invoices: list[EtcInvoice], *, reconciliation_task: object | None = None) -> EtcBatch:
         self._batch_counter += 1
         batch_id = f"etc_batch_{self._batch_counter:04d}"
         etc_batch_id = self._next_etc_batch_id()
         total_amount = sum((invoice.total_amount for invoice in invoices), Decimal("0.00")).quantize(Decimal("0.01"))
         summary = self._batch_computed_summary(invoices)
+        reconciliation_metadata = self._reconciliation_batch_metadata(reconciliation_task)
+        if reconciliation_metadata:
+            total_amount = Decimal(str(reconciliation_metadata["oa_total_amount"])).quantize(Decimal("0.01"))
         marker = f"ETC批量提交\netc_batch_id={etc_batch_id}"
         batch = EtcBatch(
             id=batch_id,
@@ -1472,11 +1578,32 @@ class EtcService:
             plate_summary=summary["plate_summary"],
             oa_marker=marker,
         )
+        if reconciliation_metadata:
+            batch.reconciliation_task_id = str(reconciliation_metadata["reconciliation_task_id"])
+            batch.statement_period_start = _optional_text(reconciliation_metadata.get("statement_period_start"))
+            batch.statement_period_end = _optional_text(reconciliation_metadata.get("statement_period_end"))
+            batch.oa_total_amount = Decimal(str(reconciliation_metadata["oa_total_amount"])).quantize(Decimal("0.01"))
+            batch.etc_invoice_amount = Decimal(str(reconciliation_metadata["etc_invoice_amount"])).quantize(Decimal("0.01"))
+            batch.supplement_amount = Decimal(str(reconciliation_metadata["supplement_amount"])).quantize(Decimal("0.01"))
+            batch.etc_invoice_count = int(reconciliation_metadata["etc_invoice_count"])
+            batch.supplement_count = int(reconciliation_metadata["supplement_count"])
+            batch.supplement_items = list(reconciliation_metadata["supplement_items"])
+            batch.display_count_text = (
+                f"ETC票 {batch.etc_invoice_count} + 补充凭证 {batch.supplement_count}"
+            )
+            batch.passage_start_date = _optional_text(reconciliation_metadata.get("period_start"))
+            batch.passage_end_date = _optional_text(reconciliation_metadata.get("period_end"))
         self._batches[batch.id] = batch
         self._persist()
         return batch
 
-    def _upload_batch_attachments(self, invoices: list[EtcInvoice], oa_client: EtcOAClient) -> list[EtcUploadedAttachment]:
+    def _upload_batch_attachments(
+        self,
+        invoices: list[EtcInvoice],
+        oa_client: EtcOAClient,
+        *,
+        reconciliation_task: object | None = None,
+    ) -> list[EtcUploadedAttachment]:
         attachments: list[EtcUploadedAttachment] = []
         for invoice in invoices:
             assert invoice.pdf_file_path is not None
@@ -1487,6 +1614,18 @@ class EtcService:
                     name=f"{invoice.invoice_number}.pdf",
                     url=attachment_url,
                     size=pdf_path.stat().st_size,
+                )
+            )
+        for supplement in list(getattr(reconciliation_task, "submission_supplement_attachments", []) or []):
+            stored_path = Path(str(getattr(supplement, "stored_path", "") or ""))
+            if not stored_path.exists() or not stored_path.is_file():
+                raise EtcOAClientError(f"ETC supplement attachment file is missing: {stored_path.name or stored_path}")
+            attachment_url = oa_client.upload_attachment(stored_path)
+            attachments.append(
+                EtcUploadedAttachment(
+                    name=str(getattr(supplement, "original_name", "") or stored_path.name),
+                    url=attachment_url,
+                    size=stored_path.stat().st_size,
                 )
             )
         return attachments
@@ -1648,7 +1787,7 @@ class EtcService:
         }
 
     def _batch_summary_payload(self, batch: EtcBatch) -> dict[str, object]:
-        return {
+        payload = {
             "id": batch.id,
             "etc_batch_id": batch.etc_batch_id,
             "source_type": getattr(batch, "source_type", "normal_oa_draft"),
@@ -1664,6 +1803,8 @@ class EtcService:
             "amount_delta": getattr(batch, "amount_delta", None),
             "note": getattr(batch, "note", ""),
         }
+        payload.update(self._batch_reconciliation_payload(batch))
+        return payload
 
     def _batch_invoice_item_payload(self, invoice: EtcInvoice) -> dict[str, object]:
         return {
@@ -1757,10 +1898,84 @@ class EtcService:
             "passage_start_date": None,
             "passage_end_date": None,
             "plate_summary": [],
+            "reconciliation_task_id": None,
+            "statement_period_start": None,
+            "statement_period_end": None,
+            "oa_total_amount": None,
+            "etc_invoice_amount": None,
+            "supplement_amount": Decimal("0.00"),
+            "etc_invoice_count": None,
+            "supplement_count": 0,
+            "supplement_items": [],
+            "display_count_text": None,
         }
         for field_name, default_value in defaults.items():
             if not hasattr(batch, field_name):
                 setattr(batch, field_name, list(default_value) if isinstance(default_value, list) else default_value)
+
+    @staticmethod
+    def _reconciliation_batch_metadata(reconciliation_task: object | None) -> dict[str, object]:
+        if reconciliation_task is None:
+            return {}
+        oa_total_amount = _decimal_or_none(getattr(reconciliation_task, "oa_total_amount", None))
+        if oa_total_amount is None:
+            return {}
+        etc_invoice_amount = _decimal_or_none(getattr(reconciliation_task, "etc_invoice_amount", None)) or Decimal("0.00")
+        supplement_amount = _decimal_or_none(getattr(reconciliation_task, "supplement_amount", None)) or Decimal("0.00")
+        supplement_items = []
+        evidences_by_id = {
+            str(getattr(evidence, "evidence_id", "")): evidence
+            for evidence in list(getattr(reconciliation_task, "supplement_evidences", []) or [])
+        }
+        for attachment in list(getattr(reconciliation_task, "submission_supplement_attachments", []) or []):
+            evidence = evidences_by_id.get(str(getattr(attachment, "evidence_id", "") or ""))
+            supplement_items.append(
+                {
+                    "id": str(getattr(attachment, "evidence_id", "") or getattr(attachment, "attachment_id", "") or ""),
+                    "sourceFileId": str(getattr(attachment, "source_file_id", "") or ""),
+                    "sourceName": str(getattr(attachment, "original_name", "") or ""),
+                    "storedPath": str(getattr(attachment, "stored_path", "") or ""),
+                    "amount": _decimal_or_none(getattr(attachment, "amount", None)) or Decimal("0.00"),
+                    "tags": list(getattr(attachment, "tags", []) or ["ETC补充凭证"]),
+                    "evidenceKind": str(getattr(evidence, "evidence_kind", "") or "non_etc") if evidence is not None else "non_etc",
+                    "merchantName": getattr(evidence, "merchant_name", None) if evidence is not None else None,
+                    "paidAt": getattr(evidence, "paid_at", None) if evidence is not None else None,
+                }
+            )
+        return {
+            "reconciliation_task_id": str(getattr(reconciliation_task, "task_id", "") or ""),
+            "period_start": getattr(reconciliation_task, "period_start", None),
+            "period_end": getattr(reconciliation_task, "period_end", None),
+            "statement_period_start": getattr(reconciliation_task, "statement_period_start", None),
+            "statement_period_end": getattr(reconciliation_task, "statement_period_end", None),
+            "oa_total_amount": oa_total_amount,
+            "etc_invoice_amount": etc_invoice_amount,
+            "supplement_amount": supplement_amount,
+            "etc_invoice_count": int(getattr(reconciliation_task, "etc_invoice_count", 0) or 0),
+            "supplement_count": int(getattr(reconciliation_task, "supplement_count", 0) or 0),
+            "supplement_items": supplement_items,
+        }
+
+    @staticmethod
+    def _batch_reconciliation_payload(batch: EtcBatch) -> dict[str, object]:
+        task_id = str(getattr(batch, "reconciliation_task_id", "") or "").strip()
+        if not task_id:
+            return {}
+        etc_invoice_count = int(getattr(batch, "etc_invoice_count", None) or getattr(batch, "invoice_count", 0) or 0)
+        supplement_count = int(getattr(batch, "supplement_count", 0) or 0)
+        return {
+            "reconciliation_task_id": task_id,
+            "statement_period_start": getattr(batch, "statement_period_start", None),
+            "statement_period_end": getattr(batch, "statement_period_end", None),
+            "oa_total_amount": getattr(batch, "oa_total_amount", None) or getattr(batch, "total_amount", Decimal("0.00")),
+            "etc_invoice_amount": getattr(batch, "etc_invoice_amount", None) or getattr(batch, "total_amount", Decimal("0.00")),
+            "supplement_amount": getattr(batch, "supplement_amount", Decimal("0.00")),
+            "etc_invoice_count": etc_invoice_count,
+            "supplement_count": supplement_count,
+            "supplement_items": list(getattr(batch, "supplement_items", []) or []),
+            "display_count_text": getattr(batch, "display_count_text", None)
+            or f"ETC票 {etc_invoice_count} + 补充凭证 {supplement_count}",
+        }
 
     def _next_invoice_id(self) -> str:
         self._invoice_counter += 1
@@ -1840,6 +2055,22 @@ def _decimal_from_amount(value: Decimal | str | int | float) -> Decimal:
         return Decimal(str(value).replace(",", ""))
     except (InvalidOperation, ValueError) as exc:
         raise EtcInvoiceRequestError("amount must be a valid decimal.") from exc
+
+
+def _decimal_or_none(value: object) -> Decimal | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value).replace(",", "")).quantize(Decimal("0.01"))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _optional_text(value: object) -> str | None:
+    text = str(value or "").strip()
+    return text or None
 
 
 def _normalize_date(value: str) -> str:

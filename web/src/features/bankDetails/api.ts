@@ -44,7 +44,18 @@ type ApiBankDetailTransaction = {
   category_code?: BankTransactionCategoryCode | null;
   category_label?: string | null;
   category_path?: string[];
+  category_source?: string | null;
   category_version?: number | null;
+  auto_category_code?: BankTransactionCategoryCode | null;
+  auto_category_label?: string | null;
+  auto_category_path?: string[];
+  auto_category_source?: string | null;
+  auto_category_reason?: string | null;
+  auto_category_confidence?: string | null;
+  effective_category_code?: BankTransactionCategoryCode | null;
+  effective_category_label?: string | null;
+  effective_category_path?: string[];
+  effective_category_source?: string | null;
 };
 
 type ApiBankDetailTransactionsResponse = {
@@ -133,7 +144,18 @@ function mapTransaction(row: ApiBankDetailTransaction): BankDetailTransaction {
     categoryCode: row.category_code ?? null,
     categoryLabel: row.category_label ?? null,
     categoryPath: Array.isArray(row.category_path) ? row.category_path.map(String).filter(Boolean) : [],
+    categorySource: row.category_source ?? "",
     categoryVersion: row.category_version ?? null,
+    autoCategoryCode: row.auto_category_code ?? null,
+    autoCategoryLabel: row.auto_category_label ?? null,
+    autoCategoryPath: Array.isArray(row.auto_category_path) ? row.auto_category_path.map(String).filter(Boolean) : [],
+    autoCategorySource: row.auto_category_source ?? "",
+    autoCategoryReason: row.auto_category_reason ?? null,
+    autoCategoryConfidence: row.auto_category_confidence ?? null,
+    effectiveCategoryCode: row.effective_category_code ?? null,
+    effectiveCategoryLabel: row.effective_category_label ?? null,
+    effectiveCategoryPath: Array.isArray(row.effective_category_path) ? row.effective_category_path.map(String).filter(Boolean) : [],
+    effectiveCategorySource: row.effective_category_source ?? "",
   };
 }
 

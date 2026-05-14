@@ -1,0 +1,234 @@
+import { afterEach, describe, expect, test, vi } from "vitest";
+
+import {
+  fetchNoOaBankBatchDetail,
+  fetchNoOaBankBatches,
+  submitNoOaBankBatch,
+  submitNoOaBankBatches,
+  withdrawNoOaBankBatch,
+} from "../features/noOaBankBatches/api";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("no OA bank batch API", () => {
+  test("maps snake_case and camelCase batch payloads", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({
+        summary: {
+          draft_count: 1,
+          submittedCount: 2,
+          withdrawn_count: 3,
+          conflictCount: 4,
+          total_amount: "12345.67",
+        },
+        batches: [
+          {
+            batch_id: "batch-fee-2026-05",
+            batch_type: "fee",
+            batch_label: "手续费",
+            scope_month: "2026-05",
+            account_key: "ccb:8106",
+            bank_name: "建设银行",
+            account_last4: "8106",
+            status: "draft",
+            row_count: 12,
+            total_amount: "88.00",
+            submitted_by: "",
+            submitted_at: null,
+            withdrawn_by: "",
+            withdrawn_at: null,
+            conflict_reason: "",
+            version: 7,
+          },
+          {
+            batchId: "batch-salary-2026-05",
+            batchType: "salary",
+            batchLabel: "工资",
+            scopeMonth: "2026-05",
+            accountKey: "icbc:6386",
+            bankName: "工商银行",
+            accountLast4: "6386",
+            status: "submitted",
+            rowCount: 4,
+            totalAmount: "10000.00",
+            submittedBy: "finance-user",
+            submittedAt: "2026-05-10T09:30:00",
+            withdrawnBy: "",
+            withdrawnAt: null,
+            version: 2,
+          },
+        ],
+      }), { status: 200, headers: { "Content-Type": "application/json" } })),
+    );
+
+    const payload = await fetchNoOaBankBatches({
+      month: "2026-05",
+      type: "all",
+      status: "all",
+      accountKey: "ccb:8106",
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/no-oa-bank-batches?month=2026-05&account_key=ccb%3A8106",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(payload.summary).toEqual({
+      draftCount: 1,
+      submittedCount: 2,
+      withdrawnCount: 3,
+      conflictCount: 4,
+      totalAmount: "12345.67",
+    });
+    expect(payload.batches).toEqual([
+      expect.objectContaining({
+        batchId: "batch-fee-2026-05",
+        batchType: "fee",
+        batchLabel: "手续费",
+        scopeMonth: "2026-05",
+        accountKey: "ccb:8106",
+        bankName: "建设银行",
+        accountLast4: "8106",
+        status: "draft",
+        rowCount: 12,
+        totalAmount: "88.00",
+        version: 7,
+      }),
+      expect.objectContaining({
+        batchId: "batch-salary-2026-05",
+        batchType: "salary",
+        batchLabel: "工资",
+        submittedBy: "finance-user",
+        submittedAt: "2026-05-10T09:30:00",
+      }),
+    ]);
+  });
+
+  test("maps batch detail rows", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({
+        batch: {
+          batch_id: "batch-fee-2026-05",
+          batch_type: "fee",
+          batch_label: "手续费",
+          scope_month: "2026-05",
+          account_key: "ccb:8106",
+          bank_name: "建设银行",
+          account_last4: "8106",
+          status: "draft",
+          row_count: 1,
+          total_amount: "8.80",
+          version: 1,
+        },
+        rows: [
+          {
+            transaction_id: "bank-row-001",
+            trade_time: "2026-05-03 10:20:00",
+            counterparty_name: "建设银行",
+            direction: "expense",
+            direction_label: "支",
+            amount: "8.80",
+            summary: "网银手续费",
+            purpose: "结算",
+            remark: "月结",
+            category_source: "auto",
+          },
+        ],
+      }), { status: 200, headers: { "Content-Type": "application/json" } })),
+    );
+
+    const detail = await fetchNoOaBankBatchDetail("batch-fee-2026-05");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/no-oa-bank-batches/batch-fee-2026-05",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(detail.rows[0]).toMatchObject({
+      transactionId: "bank-row-001",
+      tradeTime: "2026-05-03 10:20:00",
+      counterpartyName: "建设银行",
+      directionLabel: "支",
+      amount: "8.80",
+      summary: "网银手续费",
+      purpose: "结算",
+      remark: "月结",
+      categorySource: "auto",
+    });
+  });
+
+  test("submits, withdraws, and bulk submits with expected version payloads", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      batch: {
+        batch_id: "batch-fee-2026-05",
+        batch_type: "fee",
+        batch_label: "手续费",
+        scope_month: "2026-05",
+        account_key: "ccb:8106",
+        bank_name: "建设银行",
+        account_last4: "8106",
+        status: "submitted",
+        row_count: 1,
+        total_amount: "8.80",
+        version: 2,
+      },
+      affected_months: ["2026-05"],
+      workbench_rebuild_queued: true,
+      results: [],
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await submitNoOaBankBatch({ batchId: "batch-fee-2026-05", expectedVersion: 1, note: "确认" });
+    await withdrawNoOaBankBatch({ batchId: "batch-fee-2026-05", expectedVersion: 2, reason: "撤回重核" });
+    await submitNoOaBankBatches({
+      batches: [
+        { batchId: "batch-fee-2026-05", expectedVersion: 1 },
+        { batchId: "batch-bonus-2026-05", expectedVersion: 3 },
+      ],
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/no-oa-bank-batches/batch-fee-2026-05/submit",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ expected_version: 1, note: "确认" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/no-oa-bank-batches/batch-fee-2026-05/withdraw",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ expected_version: 2, reason: "撤回重核" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/no-oa-bank-batches/submit",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          batches: [
+            { batch_id: "batch-fee-2026-05", expected_version: 1 },
+            { batch_id: "batch-bonus-2026-05", expected_version: 3 },
+          ],
+        }),
+      }),
+    );
+  });
+
+  test("reports HTML responses as a backend routing problem", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("<!DOCTYPE html><html><body>vite fallback</body></html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html;charset=utf-8" },
+      })),
+    );
+
+    await expect(fetchNoOaBankBatches()).rejects.toThrow("接口返回了 HTML 页面");
+  });
+});

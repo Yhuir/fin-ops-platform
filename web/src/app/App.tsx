@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import { useTheme } from "@mui/material/styles";
@@ -8,6 +9,7 @@ import SessionGate from "../components/auth/SessionGate";
 import AppSidebar from "../components/shell/AppSidebar";
 import { collapsedSidebarWidth, expandedSidebarWidth } from "../components/shell/AppSidebar";
 import AppTopBar from "../components/shell/AppTopBar";
+import BackgroundProgressBlock from "../components/common/BackgroundProgressBlock";
 import { AppChromeProvider, useAppChrome } from "../contexts/AppChromeContext";
 import { AppHealthStatusProvider, useAppHealthStatus } from "../contexts/AppHealthStatusContext";
 import { ImportWorkflowDraftProvider } from "../contexts/ImportWorkflowDraftContext";
@@ -15,7 +17,7 @@ import { ImportProgressProvider } from "../contexts/ImportProgressContext";
 import { MonthProvider } from "../contexts/MonthContext";
 import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionProvider } from "../contexts/SessionContext";
-import { BackgroundJobProgressProvider } from "../features/backgroundJobs/BackgroundJobProgressProvider";
+import { BackgroundJobProgressProvider, useBackgroundJobProgress } from "../features/backgroundJobs/BackgroundJobProgressProvider";
 import MuiProviders from "./MuiProviders";
 import AppRouter from "./router";
 import { APP_BASE_PATH, isOaEmbeddedMode } from "./runtime";
@@ -50,6 +52,16 @@ function persistSidebarState(storageKey: string, expanded: boolean) {
 function AppShell() {
   const { workbenchStatus } = useAppChrome();
   const healthStatus = useAppHealthStatus();
+  const {
+    primaryJob,
+    extraCount,
+    connectionFailed,
+    operatingJobId,
+    operationError,
+    acknowledgeJob,
+    retryJob,
+    clearOperationError,
+  } = useBackgroundJobProgress();
   const theme = useTheme();
   const embedded = isOaEmbeddedMode();
   const isCompact = useMediaQuery(theme.breakpoints.down("md"), { noSsr: true });
@@ -96,6 +108,46 @@ function AppShell() {
           isCompact={isCompact}
           onOpenMobileSidebar={() => setMobileOpen(true)}
         />
+        {connectionFailed || primaryJob || operationError ? (
+          <Box
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "flex-end",
+              gap: 1,
+              justifyContent: "flex-end",
+              minWidth: 0,
+              px: { xs: 2, md: 3 },
+              pt: 1,
+            }}
+          >
+            {connectionFailed ? (
+              <BackgroundProgressBlock kind="connection_error" />
+            ) : primaryJob ? (
+              <BackgroundProgressBlock
+                kind="job"
+                job={primaryJob}
+                extraCount={extraCount}
+                operating={operatingJobId === primaryJob.jobId}
+                onAcknowledge={(jobId) => {
+                  acknowledgeJob(jobId).catch(() => undefined);
+                }}
+                onRetry={(jobId) => {
+                  retryJob(jobId).catch(() => undefined);
+                }}
+              />
+            ) : null}
+            {operationError ? (
+              <Alert
+                severity="error"
+                onClose={clearOperationError}
+                sx={{ maxWidth: "min(520px, 92vw)", py: 0.25 }}
+              >
+                {operationError}
+              </Alert>
+            ) : null}
+          </Box>
+        ) : null}
         <main className={`page-body${embedded ? " embedded" : ""}`}>
           <SessionGate>
             <AppRouter />

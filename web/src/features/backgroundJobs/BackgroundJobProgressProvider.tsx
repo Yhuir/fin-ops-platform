@@ -23,8 +23,11 @@ type BackgroundJobProgressContextValue = {
   primaryJob: BackgroundJob | null;
   extraCount: number;
   connectionFailed: boolean;
+  operatingJobId: string | null;
+  operationError: string | null;
   acknowledgeJob: (jobId: string) => Promise<void>;
   retryJob: (jobId: string) => Promise<void>;
+  clearOperationError: () => void;
   refresh: () => Promise<void>;
 };
 
@@ -75,6 +78,8 @@ function isAbortError(error: unknown) {
 export function BackgroundJobProgressProvider({ children }: { children: ReactNode }) {
   const [jobs, setJobs] = useState<BackgroundJob[]>([]);
   const [failureCount, setFailureCount] = useState(0);
+  const [operatingJobId, setOperatingJobId] = useState<string | null>(null);
+  const [operationError, setOperationError] = useState<string | null>(null);
   const jobsRef = useRef<BackgroundJob[]>([]);
   const timerRef = useRef<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -117,26 +122,51 @@ export function BackgroundJobProgressProvider({ children }: { children: ReactNod
 
   const acknowledgeJob = useCallback(
     async (jobId: string) => {
-      await acknowledgeBackgroundJob(jobId);
-      const nextJobs = jobsRef.current.filter((job) => job.jobId !== jobId);
-      jobsRef.current = nextJobs;
-      setJobs(nextJobs);
-      void refresh();
+      setOperatingJobId(jobId);
+      setOperationError(null);
+      try {
+        await acknowledgeBackgroundJob(jobId);
+        const nextJobs = jobsRef.current.filter((job) => job.jobId !== jobId);
+        jobsRef.current = nextJobs;
+        setJobs(nextJobs);
+        await refresh();
+      } catch (error) {
+        setOperationError(error instanceof Error && error.message.trim() ? error.message : "确认后台任务失败。");
+        throw error;
+      } finally {
+        setOperatingJobId(null);
+      }
     },
     [refresh],
   );
 
   const retryJob = useCallback(
     async (jobId: string) => {
+      setOperatingJobId(jobId);
+      setOperationError(null);
       const job = jobsRef.current.find((item) => item.jobId === jobId);
       if (!job) {
-        throw new Error("后台任务不存在，无法重新执行。");
+        const error = new Error("后台任务不存在，无法重新执行。");
+        setOperationError(error.message);
+        setOperatingJobId(null);
+        throw error;
       }
-      await retryBackgroundJob(job);
-      await refresh();
+      try {
+        await retryBackgroundJob(job);
+        await refresh();
+      } catch (error) {
+        setOperationError(error instanceof Error && error.message.trim() ? error.message : "重新执行后台任务失败。");
+        throw error;
+      } finally {
+        setOperatingJobId(null);
+      }
     },
     [refresh],
   );
+
+  const clearOperationError = useCallback(() => {
+    setOperationError(null);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -197,11 +227,14 @@ export function BackgroundJobProgressProvider({ children }: { children: ReactNod
       primaryJob,
       extraCount: Math.max(0, jobs.length - 1),
       connectionFailed: !primaryJob && failureCount >= MAX_FAILURES_BEFORE_WARNING,
+      operatingJobId,
+      operationError,
       acknowledgeJob,
       retryJob,
+      clearOperationError,
       refresh,
     }),
-    [acknowledgeJob, failureCount, jobs, primaryJob, refresh, retryJob],
+    [acknowledgeJob, clearOperationError, failureCount, jobs, operatingJobId, operationError, primaryJob, refresh, retryJob],
   );
 
   return (

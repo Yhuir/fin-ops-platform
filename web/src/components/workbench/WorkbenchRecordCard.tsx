@@ -436,7 +436,7 @@ function renderBankMoneyValue(
             </span>
           ) : null}
           {shouldShowCategory ? (
-            <span className="inline-meta-tag bank-category-tag" title={normalizedCategoryLabel}>
+            <span className="inline-meta-tag bank-category-tag bank-chip-auto-size" title={normalizedCategoryLabel}>
               {normalizedCategoryLabel}
             </span>
           ) : null}

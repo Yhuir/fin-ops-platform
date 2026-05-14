@@ -28,7 +28,7 @@ import {
   previewImportFiles,
   resolveImportApiErrorMessage,
 } from "../../features/imports/api";
-import { confirmEtcImportSession, previewEtcZipFiles } from "../../features/etc/api";
+import { confirmEtcImportSession, fetchReadyEtcReconciliationTasks, previewEtcZipFiles } from "../../features/etc/api";
 import { fetchWorkbenchSettings, fetchWorkbenchWithProgress } from "../../features/workbench/api";
 import type {
   ImportBatchType,
@@ -40,7 +40,7 @@ import type {
   ImportRowDecision,
   ImportSessionPayload,
 } from "../../features/imports/types";
-import type { EtcImportItem, EtcImportPreviewResult } from "../../features/etc/types";
+import type { EtcImportItem, EtcImportPreviewResult, EtcReconciliationTaskSummary } from "../../features/etc/types";
 import type { BankAccountMapping } from "../../features/workbench/types";
 import { useImportWorkflowDraft } from "../../contexts/ImportWorkflowDraftContext";
 import type { FileSelectionState } from "../../contexts/ImportWorkflowDraftContext";
@@ -112,6 +112,8 @@ const IMPORT_ROW_DECISION_LABELS: Record<string, string> = {
   suspected_duplicate: "需复核",
   error: "异常",
 };
+
+const STALE_RECONCILIATION_PREVIEW_MESSAGE = "对账任务已更新，请重新预览 ETC zip 后再确认导入。";
 
 const DUPLICATE_TYPE_LABELS: Record<string, string> = {
   duplicate_in_file: "文件内重复",
@@ -224,6 +226,13 @@ function formatFileSize(file: File) {
 
 function buildBankAccountOptionLabel(bankOption: BankAccountMapping) {
   return `${bankOption.bankName} ${bankOption.last4}`.trim();
+}
+
+function buildEtcTaskOptionLabel(task: EtcReconciliationTaskSummary) {
+  const period = task.periodStart && task.periodEnd ? `${task.periodStart} 至 ${task.periodEnd}` : "未设置期间";
+  const plates = task.vehiclePlates.length > 0 ? ` / ${task.vehiclePlates.join("、")}` : "";
+  const amount = task.oaTotalAmount ? ` / OA ${task.oaTotalAmount}` : "";
+  return `${task.title || task.taskId} / ${period} / ETC票 ${task.etcInvoiceCount} + 补充凭证 ${task.supplementCount}${amount}${plates}`;
 }
 
 function formatSelectedBankAccountLabel(file: Pick<ImportFilePreview, "selectedBankName" | "selectedBankLast4">) {
@@ -473,6 +482,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     setFileSelections,
     setPreviewPayload,
     setEtcPreviewPayload,
+    setSelectedEtcTaskId,
     setEtcImported,
     setFeedbackMessage,
     setErrorMessage,
@@ -485,6 +495,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     fileSelections,
     previewPayload,
     etcPreviewPayload,
+    selectedEtcTaskId,
     etcImported,
     feedbackMessage,
     errorMessage,
@@ -492,6 +503,8 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     isConfirming,
   } = draft;
   const [bankOptions, setBankOptions] = useState<BankAccountMapping[]>([]);
+  const [readyEtcTasks, setReadyEtcTasks] = useState<EtcReconciliationTaskSummary[]>([]);
+  const [readyEtcTasksLoading, setReadyEtcTasksLoading] = useState(mode === "etc_invoice");
   const [settingsLoading, setSettingsLoading] = useState(mode === "bank_transaction");
   const [conflictDialogOpen, setConflictDialogOpen] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
@@ -525,6 +538,36 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       .finally(() => {
         if (!controller.signal.aborted) {
           setSettingsLoading(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [mode]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    if (mode !== "etc_invoice") {
+      setReadyEtcTasks([]);
+      setReadyEtcTasksLoading(false);
+      return () => controller.abort();
+    }
+
+    setReadyEtcTasksLoading(true);
+    fetchReadyEtcReconciliationTasks(controller.signal)
+      .then((tasks) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setReadyEtcTasks(tasks);
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          setErrorMessage(resolveImportApiErrorMessage(error, "ETC 对账任务加载失败，请稍后重试。"));
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setReadyEtcTasksLoading(false);
         }
       });
 
@@ -582,6 +625,11 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     () => new Map(bankOptions.map((item) => [item.id, item])),
     [bankOptions],
   );
+  const selectedEtcTask = useMemo(
+    () => readyEtcTasks.find((task) => task.taskId === selectedEtcTaskId) ?? null,
+    [readyEtcTasks, selectedEtcTaskId],
+  );
+  const hasSelectedEtcTask = mode !== "etc_invoice" || Boolean(selectedEtcTask);
 
   const canUseBankImport = mode !== "bank_transaction" || bankOptions.length > 0;
   const allFilesConfigured = selectedFiles.length > 0 && selectedFiles.every((file) => {
@@ -591,16 +639,28 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     const selection = fileSelections[buildSelectedFileKey(file)];
     return mode === "bank_transaction" ? Boolean(selection?.bankMappingId) : Boolean(selection?.invoiceBatchType);
   });
-  const canPreview = canUseBankImport && allFilesConfigured && !isPreviewing && !isConfirming && !settingsLoading;
+  const canPreview = canUseBankImport
+    && hasSelectedEtcTask
+    && allFilesConfigured
+    && !isPreviewing
+    && !isConfirming
+    && !settingsLoading
+    && !readyEtcTasksLoading;
   const confirmableFileIds = useMemo(
     () => previewPayload?.files.filter(canConfirmFile).map((file) => file.id) ?? [],
     [previewPayload],
   );
   const canConfirm = confirmableFileIds.length > 0 && !isPreviewing && !isConfirming;
-  const canConfirmEtc = Boolean(etcPreviewPayload?.sessionId) && !etcImported && !isPreviewing && !isConfirming;
+  const canConfirmEtc = Boolean(etcPreviewPayload?.sessionId)
+    && Boolean(selectedEtcTaskId)
+    && Boolean(selectedEtcTask)
+    && !etcImported
+    && !isPreviewing
+    && !isConfirming;
   const hasDraftContent = selectedFiles.length > 0
     || Boolean(previewPayload)
     || Boolean(etcPreviewPayload)
+    || Boolean(selectedEtcTaskId)
     || Object.keys(fileSelections).length > 0
     || Boolean(feedbackMessage)
     || Boolean(errorMessage);
@@ -778,6 +838,11 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     resetPreviewState();
   }
 
+  function handleEtcTaskChange(taskId: string) {
+    setSelectedEtcTaskId(taskId);
+    resetPreviewState();
+  }
+
   function handleRemoveFile(file: File) {
     const key = buildSelectedFileKey(file);
     setSelectedFiles((current) => current.filter((item) => buildSelectedFileKey(item) !== key));
@@ -818,6 +883,10 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
 
   async function handlePreview() {
     if (mode === "etc_invoice") {
+      if (!selectedEtcTask) {
+        setErrorMessage("请选择已确认的 ETC 对账任务后再预览 ETC zip。");
+        return;
+      }
       if (selectedFiles.length === 0) {
         setErrorMessage("请先选择至少一个 ETC zip 文件。");
         return;
@@ -830,7 +899,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       setErrorMessage(null);
       setFeedbackMessage(null);
       try {
-        const payload = await previewEtcZipFiles(selectedFiles);
+        const payload = await previewEtcZipFiles(selectedFiles, selectedEtcTask.taskId);
         updateDraft((current) => ({
           ...current,
           etcPreviewPayload: payload,
@@ -892,6 +961,10 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       return;
     }
     if (mode === "etc_invoice") {
+      if (!selectedEtcTask) {
+        setErrorMessage("请选择已确认的 ETC 对账任务后再预览 ETC zip。");
+        return;
+      }
       if (!etcPreviewPayload?.sessionId) {
         setErrorMessage("请先预览 ETC zip 文件。");
         return;
@@ -899,10 +972,14 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       setIsConfirming(true);
       setErrorMessage(null);
       try {
-        const payload = await confirmEtcImportSession(etcPreviewPayload.sessionId);
+        const payload = await confirmEtcImportSession(etcPreviewPayload.sessionId, selectedEtcTask.taskId);
         setEtcImported(true);
         setFeedbackMessage(payload.job ? "已开始后台导入" : "已导入 ETC票据管理");
       } catch (error) {
+        if (error instanceof Error && error.message === STALE_RECONCILIATION_PREVIEW_MESSAGE) {
+          setEtcPreviewPayload(null);
+          setEtcImported(false);
+        }
         setErrorMessage(resolveImportApiErrorMessage(error, "确认导入失败，请稍后重试。"));
       } finally {
         setIsConfirming(false);
@@ -973,6 +1050,13 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
           {confirmAuditMessage ? <Alert severity="info">{confirmAuditMessage}</Alert> : null}
           {settingsLoading ? <Alert severity="info">正在加载银行账户映射...</Alert> : null}
           {!settingsLoading && !canUseBankImport ? <Alert severity="warning">设置里还没有银行账户映射，请先在设置中维护银行。</Alert> : null}
+          {mode === "etc_invoice" && readyEtcTasksLoading ? <Alert severity="info">正在加载可导入的 ETC 对账任务...</Alert> : null}
+          {mode === "etc_invoice" && !readyEtcTasksLoading && readyEtcTasks.length === 0 ? (
+            <Alert severity="warning">当前没有已确认且可导入的 ETC 对账任务。导入页不能新建任务，请先在 ETC 对账页完成确认。</Alert>
+          ) : null}
+          {mode === "etc_invoice" && !readyEtcTasksLoading && readyEtcTasks.length > 0 && !selectedEtcTask ? (
+            <Alert severity="warning">请选择已确认的 ETC 对账任务后再预览 ETC zip。</Alert>
+          ) : null}
 
           <Box
             sx={{
@@ -988,6 +1072,38 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                   <Typography component="h2" variant="h6" fontWeight={800}>文件</Typography>
                   <Chip size="small" label={`已选 ${selectedFiles.length}`} />
                 </Stack>
+
+                {mode === "etc_invoice" ? (
+                  <Stack spacing={1}>
+                    <FormControl size="small" fullWidth>
+                      <InputLabel id="etc-reconciliation-task-label">ETC对账任务</InputLabel>
+                      <Select
+                        native
+                        labelId="etc-reconciliation-task-label"
+                        label="ETC对账任务"
+                        value={selectedEtcTaskId}
+                        disabled={isPreviewing || isConfirming || readyEtcTasksLoading || readyEtcTasks.length === 0}
+                        inputProps={{ "aria-label": "ETC对账任务" }}
+                        onChange={(event) => handleEtcTaskChange(event.target.value)}
+                      >
+                        <option aria-label="未选择ETC对账任务" value="" />
+                        {readyEtcTasks.map((task) => (
+                          <option key={task.taskId} value={task.taskId}>
+                            {buildEtcTaskOptionLabel(task)}
+                          </option>
+                        ))}
+                      </Select>
+                    </FormControl>
+                    {selectedEtcTask ? (
+                      <Stack direction="row" flexWrap="wrap" gap={1} aria-label="已选ETC对账任务">
+                        <Chip size="small" label={`任务 ${selectedEtcTask.title || selectedEtcTask.taskId}`} />
+                        <Chip size="small" label={`版本 ${selectedEtcTask.version}`} />
+                        <Chip size="small" label={`ETC票 ${selectedEtcTask.etcInvoiceCount}`} />
+                        <Chip size="small" label={`补充凭证 ${selectedEtcTask.supplementCount}`} />
+                      </Stack>
+                    ) : null}
+                  </Stack>
+                ) : null}
 
                 <Box
                   component="label"

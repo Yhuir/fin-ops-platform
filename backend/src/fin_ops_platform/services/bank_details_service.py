@@ -6,7 +6,12 @@ from decimal import Decimal
 from typing import Any
 
 from fin_ops_platform.domain.enums import TransactionDirection
+from fin_ops_platform.services.bank_transaction_auto_category_service import (
+    BankTransactionAutoCategoryService,
+    resolve_effective_category,
+)
 from fin_ops_platform.services.bank_transaction_category_service import (
+    BANK_TRANSACTION_CATEGORY_LABELS,
     BANK_TRANSACTION_CATEGORY_COUNT_KEYS,
     BankTransactionCategoryService,
 )
@@ -18,9 +23,11 @@ class BankDetailsService:
         import_service: Any,
         *,
         category_service: BankTransactionCategoryService | None = None,
+        auto_category_service: BankTransactionAutoCategoryService | None = None,
     ) -> None:
         self._import_service = import_service
         self._category_service = category_service
+        self._auto_category_service = auto_category_service
 
     def list_accounts(self, *, date_from: str | None = None, date_to: str | None = None) -> dict[str, Any]:
         transactions = self._transactions()
@@ -73,17 +80,21 @@ class BankDetailsService:
     ) -> dict[str, Any]:
         normalized_page = max(int(page or 1), 1)
         normalized_page_size = min(max(int(page_size or 100), 1), 500)
-        rows = []
-        filtered_transaction_ids: list[str] = []
+        context_payloads: list[dict[str, Any]] = []
+        display_payloads: list[dict[str, Any]] = []
         for transaction in self._transactions():
             payload = self._transaction_payload(transaction)
-            if account_key and self._account_key(payload) != account_key:
-                continue
             if not self._date_in_range(payload.get("trade_time") or payload.get("txn_date"), date_from=date_from, date_to=date_to):
                 continue
-            transaction_id = str(payload.get("id") or "")
-            filtered_transaction_ids.append(transaction_id)
-            rows.append(self._row_payload(payload))
+            context_payloads.append(payload)
+            if account_key and self._account_key(payload) != account_key:
+                continue
+            display_payloads.append(payload)
+        auto_categories = self._auto_category_payloads(context_payloads)
+        rows = [
+            self._row_payload(payload, auto_category=auto_categories.get(str(payload.get("id") or "")))
+            for payload in display_payloads
+        ]
         rows.sort(key=lambda item: str(item.get("trade_time") or ""), reverse=True)
         total = len(rows)
         start = (normalized_page - 1) * normalized_page_size
@@ -93,7 +104,7 @@ class BankDetailsService:
             "date_from": date_from,
             "date_to": date_to,
             "rows": rows[start:end],
-            "category_counts": self._category_counts(filtered_transaction_ids),
+            "category_counts": self._category_counts(rows),
             "pagination": {
                 "page": normalized_page,
                 "page_size": normalized_page_size,
@@ -136,13 +147,23 @@ class BankDetailsService:
             return None
         return max(with_balance, key=lambda row: str(row.get("trade_time") or row.get("txn_date") or ""))
 
-    def _row_payload(self, row: dict[str, Any]) -> dict[str, Any]:
+    def _row_payload(
+        self,
+        row: dict[str, Any],
+        *,
+        auto_category: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         direction = self._direction(row)
         account = self._account_payload(row)
-        category = self._category_payload(str(row.get("id") or ""))
+        manual_category = self._category_payload(str(row.get("id") or ""))
+        effective_category = resolve_effective_category(manual_category, auto_category)
+        effective_code = effective_category["effective_category_code"]
+        effective_label = effective_category["effective_category_label"]
+        effective_path = list(effective_category["effective_category_path"] or [])
+        effective_source = effective_category["effective_category_source"]
         return {
             "id": str(row.get("id") or ""),
-            "trade_time": self._date_text(row.get("trade_time") or row.get("txn_date")),
+            "trade_time": self._trade_time_text(row.get("trade_time") or row.get("txn_date")),
             "counterparty_name": str(row.get("counterparty_name_raw") or row.get("counterparty_name") or ""),
             "direction": direction,
             "direction_label": "收" if direction == "income" else "支",
@@ -152,10 +173,26 @@ class BankDetailsService:
             "purpose": str(row.get("remark") or row.get("purpose") or ""),
             "bank_name": account["bank_name"],
             "account_last4": account["account_last4"],
-            "category_code": category["category_code"],
-            "category_label": category["category_label"],
-            "category_path": list(category.get("category_path") or []),
-            "category_version": category["category_version"],
+            "manual_category_code": manual_category["category_code"],
+            "manual_category_label": manual_category["category_label"],
+            "manual_category_path": list(manual_category.get("category_path") or []),
+            "manual_category_source": str(manual_category.get("source") or ""),
+            "manual_category_version": manual_category["category_version"],
+            "auto_category_code": auto_category.get("category_code") if isinstance(auto_category, dict) else None,
+            "auto_category_label": auto_category.get("category_label") if isinstance(auto_category, dict) else None,
+            "auto_category_path": list(auto_category.get("category_path") or []) if isinstance(auto_category, dict) else [],
+            "auto_category_source": str(auto_category.get("source") or "") if isinstance(auto_category, dict) else "",
+            "auto_category_reason": str(auto_category.get("reason") or "") if isinstance(auto_category, dict) else "",
+            "auto_category_confidence": str(auto_category.get("confidence") or "") if isinstance(auto_category, dict) else "",
+            "effective_category_code": effective_code,
+            "effective_category_label": effective_label,
+            "effective_category_path": effective_path,
+            "effective_category_source": effective_source,
+            "category_code": effective_code,
+            "category_label": effective_label,
+            "category_path": effective_path,
+            "category_source": effective_source,
+            "category_version": manual_category["category_version"],
         }
 
     def _category_payload(self, transaction_id: str) -> dict[str, Any]:
@@ -163,12 +200,34 @@ class BankDetailsService:
             return {"category_code": None, "category_label": None, "category_path": [], "category_version": 0}
         return self._category_service.get(transaction_id)
 
-    def _category_counts(self, transaction_ids: list[str]) -> dict[str, int]:
-        if self._category_service is None:
-            counts = {key: 0 for key in BANK_TRANSACTION_CATEGORY_COUNT_KEYS}
-            counts["uncategorized"] = len(transaction_ids)
-            return counts
-        return self._category_service.category_counts(transaction_ids)
+    def _auto_category_payloads(self, rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        if self._auto_category_service is None:
+            return {}
+        return self._auto_category_service.suggestions_by_transaction_id(
+            [self._auto_category_input_row(row) for row in rows]
+        )
+
+    def _auto_category_input_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(row)
+        direction = self._direction(row)
+        amount = self._format_decimal(row.get("amount"))
+        payload["counterparty_name"] = str(row.get("counterparty_name") or row.get("counterparty_name_raw") or "")
+        payload["debit_amount"] = amount if direction == "expense" else ""
+        payload["credit_amount"] = amount if direction == "income" else ""
+        payload["pay_receive_time"] = str(row.get("pay_receive_time") or row.get("trade_time") or row.get("txn_date") or "")
+        return payload
+
+    @staticmethod
+    def _category_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+        counts = {key: 0 for key in BANK_TRANSACTION_CATEGORY_COUNT_KEYS}
+        for row in rows:
+            category_code = row.get("effective_category_code")
+            if category_code in BANK_TRANSACTION_CATEGORY_LABELS:
+                counts.setdefault(str(category_code), 0)
+                counts[str(category_code)] += 1
+            else:
+                counts["uncategorized"] += 1
+        return counts
 
     @staticmethod
     def _direction(row: dict[str, Any]) -> str:
@@ -191,6 +250,12 @@ class BankDetailsService:
             return value.date().isoformat()
         text = str(value or "").strip()
         return text[:10]
+
+    @staticmethod
+    def _trade_time_text(value: Any) -> str:
+        if isinstance(value, datetime):
+            return value.isoformat(sep=" ")
+        return str(value or "").strip()
 
     @staticmethod
     def _format_decimal(value: Any) -> str:

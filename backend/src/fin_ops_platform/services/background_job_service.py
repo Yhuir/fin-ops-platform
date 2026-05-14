@@ -18,10 +18,19 @@ BACKGROUND_JOB_STATUSES = {
     "failed",
     "cancelled",
     "acknowledged",
+    "superseded",
 }
 ACTIVE_BACKGROUND_JOB_STATUSES = {"queued", "running"}
-TERMINAL_BACKGROUND_JOB_STATUSES = {"succeeded", "partial_success", "failed", "cancelled", "acknowledged"}
-IDEMPOTENT_REUSABLE_STATUSES = {"queued", "running", "succeeded", "partial_success"}
+ATTENTION_BACKGROUND_JOB_STATUSES = {"failed", "partial_success"}
+TERMINAL_BACKGROUND_JOB_STATUSES = {
+    "succeeded",
+    "partial_success",
+    "failed",
+    "cancelled",
+    "acknowledged",
+    "superseded",
+}
+IDEMPOTENT_REUSABLE_STATUSES = {"queued", "running", "succeeded"}
 SENSITIVE_KEY_PARTS = ("password", "token", "secret", "content", "raw_file", "raw")
 
 
@@ -50,6 +59,8 @@ class BackgroundJob:
     updated_at: str
     finished_at: str | None
     acknowledged_at: str | None
+    superseded_by_job_id: str | None
+    superseded_at: str | None
 
     def to_payload(self) -> dict[str, object]:
         return asdict(self)
@@ -123,6 +134,8 @@ class BackgroundJobService:
             updated_at=now,
             finished_at=None,
             acknowledged_at=None,
+            superseded_by_job_id=None,
+            superseded_at=None,
         )
         job.short_label = self._build_short_label(job)
         with self._lock:
@@ -203,12 +216,13 @@ class BackgroundJobService:
 
         with self._lock:
             jobs = self._load_jobs()
+            now_dt = datetime.now(UTC)
             for payload in jobs.values():
                 job = self._job_from_payload(payload)
                 if (
                     job.owner_user_id == normalized_owner
                     and job.idempotency_key == normalized_key
-                    and (reuse_any_status or job.status in IDEMPOTENT_REUSABLE_STATUSES)
+                    and (reuse_any_status or self._is_idempotent_reusable(job, now_dt))
                 ):
                     return job, False
 
@@ -238,6 +252,8 @@ class BackgroundJobService:
                 updated_at=now,
                 finished_at=None,
                 acknowledged_at=None,
+                superseded_by_job_id=None,
+                superseded_at=None,
             )
             job.short_label = self._build_short_label(job)
             jobs[job.job_id] = job.to_payload()
@@ -334,6 +350,64 @@ class BackgroundJobService:
 
         return self._mutate_job(job_id, mutate)
 
+    def acknowledge_jobs(self, job_ids: list[str], owner_user_id: str) -> list[BackgroundJob]:
+        owner = self._normalize_owner(owner_user_id)
+        normalized_job_ids = [str(job_id or "").strip() for job_id in job_ids]
+        normalized_job_ids = [job_id for job_id in normalized_job_ids if job_id]
+        if not normalized_job_ids:
+            return []
+        with self._lock:
+            jobs = self._load_jobs()
+            loaded_jobs: list[BackgroundJob] = []
+            for job_id in normalized_job_ids:
+                payload = jobs.get(job_id)
+                if payload is None:
+                    raise BackgroundJobNotFoundError(job_id)
+                job = self._job_from_payload(payload)
+                if not self._can_view(job, owner, include_system=True):
+                    raise BackgroundJobAccessError(job.job_id)
+                loaded_jobs.append(job)
+
+            now = self._now()
+            acknowledged_jobs: list[BackgroundJob] = []
+            for job in loaded_jobs:
+                if job.status != "acknowledged":
+                    job.status = "acknowledged"
+                    job.acknowledged_at = now
+                    job.updated_at = now
+                    job.short_label = self._build_short_label(job)
+                    jobs[job.job_id] = job.to_payload()
+                acknowledged_jobs.append(job)
+            self._save_jobs(jobs)
+            return acknowledged_jobs
+
+    def supersede_job(
+        self,
+        job_id: str,
+        owner_user_id: str,
+        *,
+        superseded_by_job_id: str,
+    ) -> BackgroundJob:
+        owner = self._normalize_owner(owner_user_id)
+        replacement_job_id = str(superseded_by_job_id or "").strip()
+        if not replacement_job_id:
+            raise ValueError("superseded_by_job_id is required.")
+
+        def mutate(job: BackgroundJob) -> None:
+            if not self._can_view(job, owner, include_system=True):
+                raise BackgroundJobAccessError(job.job_id)
+            if job.status == "superseded" and job.superseded_by_job_id == replacement_job_id:
+                return
+            now = self._now()
+            job.status = "superseded"
+            job.phase = "superseded"
+            job.superseded_by_job_id = replacement_job_id
+            job.superseded_at = now
+            job.finished_at = job.finished_at or now
+            job.updated_at = now
+
+        return self._mutate_job(job_id, mutate)
+
     def get_job(self, job_id: str, owner_user_id: str) -> BackgroundJob:
         owner = self._normalize_owner(owner_user_id)
         with self._lock:
@@ -369,6 +443,17 @@ class BackgroundJobService:
             if self._can_view(job, owner, include_system=include_system) and self._is_active(job, now)
         ]
         return sorted(active_jobs, key=lambda item: item.updated_at, reverse=True)
+
+    def list_attention_jobs(self, owner_user_id: str, *, include_system: bool = True) -> list[BackgroundJob]:
+        owner = self._normalize_owner(owner_user_id)
+        with self._lock:
+            jobs = [self._job_from_payload(payload) for payload in self._load_jobs().values()]
+        attention_jobs = [
+            job
+            for job in jobs
+            if self._can_view(job, owner, include_system=include_system) and self._is_attention(job)
+        ]
+        return sorted(attention_jobs, key=lambda item: item.updated_at, reverse=True)
 
     def run_job(self, job: BackgroundJob, handler: Callable[[BackgroundJob], dict[str, object] | None]) -> Future:
         def runner() -> None:
@@ -470,6 +555,12 @@ class BackgroundJobService:
             updated_at=str(payload.get("updated_at") or now),
             finished_at=str(payload.get("finished_at")) if payload.get("finished_at") not in (None, "") else None,
             acknowledged_at=str(payload.get("acknowledged_at")) if payload.get("acknowledged_at") not in (None, "") else None,
+            superseded_by_job_id=(
+                str(payload.get("superseded_by_job_id"))
+                if payload.get("superseded_by_job_id") not in (None, "")
+                else None
+            ),
+            superseded_at=str(payload.get("superseded_at")) if payload.get("superseded_at") not in (None, "") else None,
         )
         job.short_label = job.short_label or cls._build_short_label(job)
         return job
@@ -486,21 +577,36 @@ class BackgroundJobService:
             return f"{label}部分完成{progress}"
         if job.status == "failed":
             return f"{label}失败"
+        if job.status == "superseded":
+            return f"{label}已被新任务替代"
         return label
 
     def _is_active(self, job: BackgroundJob, now: datetime) -> bool:
         if job.status in ACTIVE_BACKGROUND_JOB_STATUSES:
             return True
+        if job.status in {"acknowledged", "superseded"}:
+            return False
         if job.acknowledged_at:
             return False
-        if job.status in {"failed", "partial_success"}:
-            return True
         if job.status == "succeeded":
             finished_at = self._parse_time(job.finished_at or job.updated_at)
             if finished_at is None:
                 return True
             return now - finished_at <= self._recent_success_window
         return False
+
+    @staticmethod
+    def _is_attention(job: BackgroundJob) -> bool:
+        if job.status not in ATTENTION_BACKGROUND_JOB_STATUSES:
+            return False
+        return not bool(job.acknowledged_at or job.superseded_at)
+
+    def _is_idempotent_reusable(self, job: BackgroundJob, now: datetime) -> bool:
+        if job.status not in IDEMPOTENT_REUSABLE_STATUSES:
+            return False
+        if job.status == "succeeded":
+            return self._is_active(job, now)
+        return True
 
     @staticmethod
     def _can_view(job: BackgroundJob, owner_user_id: str, *, include_system: bool) -> bool:

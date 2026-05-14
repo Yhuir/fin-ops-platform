@@ -32,6 +32,8 @@ type MockApiOptions = {
   etcImportPreviewDelayMs?: number;
   importConfirmPreviewStale?: boolean;
   etcImportConfirmPreviewStale?: boolean;
+  etcImportConfirmStaleReconciliationTask?: boolean;
+  readyEtcReconciliationTasks?: Array<Record<string, unknown>>;
   workbenchColumnLayouts?: {
     oa?: string[];
     bank?: string[];
@@ -48,6 +50,10 @@ type MockApiOptions = {
   dataResetPasswordShouldFail?: boolean;
   dataResetJobPollsBeforeComplete?: number;
   backgroundJobs?: Array<Record<string, unknown>>;
+  backgroundJobRetryStatus?: number;
+  backgroundJobRetryBody?: Record<string, unknown>;
+  backgroundJobAcknowledgeStatus?: number;
+  backgroundJobAcknowledgeBody?: Record<string, unknown>;
   appHealth?: Record<string, unknown>;
   appHealthErrorStatus?: number;
   appHealthErrorBody?: Record<string, unknown>;
@@ -410,6 +416,14 @@ function createEtcInvoiceStore() {
       const batch = batches.find((item) => item.id === batchId);
       return batch ? cloneJson(hydrateBatch(batch, true)) : null;
     },
+    deleteBatch(batchId: string) {
+      const batch = batches.find((item) => item.id === batchId);
+      if (!batch || batch.status !== "unsubmitted") {
+        return false;
+      }
+      batches = batches.filter((item) => item.id !== batchId);
+      return true;
+    },
     previewZip(fileNames: string[]) {
       return {
         sessionId: "etc_import_session_0001",
@@ -489,6 +503,24 @@ function createEtcInvoiceStore() {
         },
       };
     },
+    readyReconciliationTasks(tasks?: Array<Record<string, unknown>>) {
+      return {
+        tasks: tasks ?? [
+          {
+            taskId: "etc_task_ready_001",
+            status: "ready_for_import",
+            version: 7,
+            title: "2026-03 ETC 对账",
+            periodStart: "2026-03-01",
+            periodEnd: "2026-03-31",
+            oaTotalAmount: "108.40",
+            etcInvoiceCount: 8,
+            supplementCount: 1,
+            vehiclePlates: ["云ADA0381"],
+          },
+        ],
+      };
+    },
     markSubmitted(invoiceIds: string[]) {
       invoices = invoices.map((invoice) =>
         invoiceIds.includes(invoice.id)
@@ -536,6 +568,275 @@ function createEtcInvoiceStore() {
           ? { ...item, status: "unsubmitted" as const }
           : item,
       );
+    },
+  };
+}
+
+function createEtcReconciliationTaskStore() {
+  let nextTaskNumber = 2;
+  let tasks = [
+    {
+      taskId: "etc-recon-task-001",
+      status: "reviewing",
+      version: 3,
+      title: "2026-02 ETC 对账",
+      periodStart: "2026-02-27",
+      periodEnd: "2026-02-28",
+      statementPeriodStart: "2026-02-01",
+      statementPeriodEnd: "2026-02-29",
+      oaTotalAmount: "120.00",
+      etcInvoiceAmount: "90.00",
+      supplementAmount: "30.00",
+      etcInvoiceCount: 2,
+      supplementCount: 1,
+      canConfirm: false,
+      vehiclePlates: ["云ADA0381", "云A8H66Q"],
+      creditCardItems: [
+        {
+          item_id: "card-item-suggested",
+          transaction_date: "2026-02-27",
+          posting_date: "2026-02-28",
+          card_last4: "7788",
+          description: "财付通-微信支付-贵州黔通智联",
+          amount: "30.00",
+          settlement_amount: "30.00",
+          is_etc_candidate: true,
+          candidate_reason: "ETC关键词",
+          recommendation_status: "suggested_match",
+          manual_resolution: "unresolved",
+        },
+        {
+          item_id: "card-item-missing",
+          transaction_date: "2026-02-28",
+          posting_date: "2026-02-29",
+          card_last4: "7788",
+          description: "高速通行费",
+          amount: "60.00",
+          settlement_amount: "60.00",
+          is_etc_candidate: true,
+          recommendation_status: "missing_ticket",
+          manual_resolution: "manual_confirmed",
+          review_note: "纸质说明已补",
+        },
+        {
+          item_id: "card-item-covered",
+          transaction_date: "2026-02-28",
+          posting_date: "2026-02-29",
+          card_last4: "7788",
+          description: "停车费补充凭证",
+          amount: "30.00",
+          settlement_amount: "30.00",
+          is_etc_candidate: false,
+          recommendation_status: "not_candidate",
+          manual_resolution: "covered_by_supplement",
+        },
+      ],
+      ticketRootItems: [
+        {
+          item_id: "ticket-item-001",
+          vehicle_plate: "云ADA0381",
+          transaction_at: "2026-02-27T10:00:00",
+          amount: "30.00",
+          entry_station: "昆明东",
+          exit_station: "玉溪北",
+          invoice_count: 1,
+          recommendation_status: "suggested_match",
+          linked_credit_card_item_ids: ["card-item-suggested"],
+        },
+        {
+          item_id: "ticket-item-extra",
+          vehicle_plate: "云A8H66Q",
+          transaction_at: "2026-02-28T18:00:00",
+          amount: "12.00",
+          entry_station: "昆明南",
+          exit_station: "呈贡",
+          invoice_count: 1,
+          recommendation_status: "extra_ticket",
+          linked_credit_card_item_ids: [],
+        },
+      ],
+      supplementEvidences: [
+        {
+          evidence_id: "supplement-001",
+          source_name: "parking.pdf",
+          evidence_kind: "non_etc_invoice",
+          amount: "30.00",
+          paid_at: "2026-02-28",
+          merchant_name: "停车场",
+          tags: ["ETC补充凭证"],
+          include_in_etc_zip_check: false,
+          include_in_oa_submission: true,
+          include_in_workbench: true,
+        },
+      ],
+      parseIssues: [
+        {
+          issue_id: "parse-issue-001",
+          severity: "blocking",
+          message: "票根网缺少车牌号，已阻止该页进入核对。",
+          source_page: 2,
+          field_name: "vehicle_plate",
+        },
+      ],
+    },
+    {
+      taskId: "etc_task_ready_001",
+      status: "ready_for_import",
+      version: 7,
+      title: "2026-03 ETC 对账",
+      periodStart: "2026-03-01",
+      periodEnd: "2026-03-31",
+      statementPeriodStart: "2026-03-01",
+      statementPeriodEnd: "2026-03-31",
+      oaTotalAmount: "108.40",
+      etcInvoiceAmount: "96.40",
+      supplementAmount: "12.00",
+      etcInvoiceCount: 8,
+      supplementCount: 1,
+      canConfirm: false,
+      vehiclePlates: ["云ADA0381"],
+      creditCardItems: [],
+      ticketRootItems: [],
+      supplementEvidences: [],
+      parseIssues: [],
+    },
+  ];
+
+  const findTask = (taskId: string) => tasks.find((task) => task.taskId === taskId);
+  const bump = (taskId: string, patch: Record<string, unknown> = {}) => {
+    const existing = findTask(taskId);
+    if (!existing) {
+      return null;
+    }
+    const next = { ...existing, ...patch, version: existing.version + 1 };
+    tasks = tasks.map((task) => (task.taskId === taskId ? next : task));
+    return cloneJson(next);
+  };
+
+  return {
+    list() {
+      return { tasks: cloneJson(tasks) };
+    },
+    ready() {
+      return { tasks: cloneJson(tasks.filter((task) => task.status === "ready_for_import")) };
+    },
+    get(taskId: string) {
+      const task = findTask(taskId);
+      return task ? cloneJson(task) : null;
+    },
+    deleteTask(taskId: string, expectedVersion: number) {
+      const task = findTask(taskId);
+      if (!task) {
+        return { ok: false, status: 404, body: { message: "ETC对账任务不存在。" } };
+      }
+      if (task.version !== expectedVersion) {
+        return { ok: false, status: 409, body: { error: "task_version_conflict", message: "task_version_conflict" } };
+      }
+      if (!["draft", "reviewing"].includes(task.status)) {
+        return { ok: false, status: 409, body: { error: "invalid_reconciliation_task_status", message: "invalid_reconciliation_task_status" } };
+      }
+      tasks = tasks.filter((item) => item.taskId !== taskId);
+      return { ok: true, status: 200, body: { deleted: true, taskId, kind: "reconciliation_task" } };
+    },
+    create(title: string) {
+      const task = {
+        ...cloneJson(tasks[0]),
+        taskId: `etc-recon-task-${String(nextTaskNumber).padStart(3, "0")}`,
+        title: title || "新建ETC对账批次",
+        status: "draft",
+        version: 1,
+        canConfirm: false,
+        creditCardItems: [],
+        ticketRootItems: [],
+        supplementEvidences: [],
+        parseIssues: [],
+      };
+      nextTaskNumber += 1;
+      tasks = [task, ...tasks];
+      return cloneJson(task);
+    },
+    upload(taskId: string) {
+      return bump(taskId);
+    },
+    patchItem(taskId: string, itemId: string, payload: Record<string, unknown>) {
+      const existing = findTask(taskId);
+      if (!existing) {
+        return null;
+      }
+      const action = String(payload.action ?? "");
+      if (action === "link_ticket") {
+        const ticketItemId = String(payload.ticketItemId ?? payload.ticket_item_id ?? "");
+        return bump(taskId, {
+          creditCardItems: existing.creditCardItems.map((item) =>
+            item.item_id === itemId
+              ? { ...item, manual_resolution: "included_etc" }
+              : item,
+          ),
+          ticketRootItems: existing.ticketRootItems.map((item) =>
+            item.item_id === ticketItemId
+              ? {
+                  ...item,
+                  linked_credit_card_item_ids: Array.from(new Set([...(item.linked_credit_card_item_ids ?? []), itemId])),
+                }
+              : item,
+          ),
+        });
+      }
+      if (action === "link_supplement") {
+        return bump(taskId, {
+          creditCardItems: existing.creditCardItems.map((item) =>
+            item.item_id === itemId
+              ? {
+                  ...item,
+                  manual_resolution: "covered_by_supplement",
+                  review_note: String(payload.note ?? item.review_note ?? ""),
+                }
+              : item,
+          ),
+        });
+      }
+      if (action === "exclude_card") {
+        return bump(taskId, {
+          creditCardItems: existing.creditCardItems.map((item) =>
+            item.item_id === itemId
+              ? {
+                  ...item,
+                  manual_resolution: String(payload.manualResolution ?? payload.manual_resolution ?? "excluded_non_etc"),
+                  manual_resolution_reason: String(payload.reason ?? payload.note ?? ""),
+                }
+              : item,
+          ),
+        });
+      }
+      if (action === "manual_confirm") {
+        return bump(taskId, {
+          creditCardItems: existing.creditCardItems.map((item) =>
+            item.item_id === itemId
+              ? {
+                  ...item,
+                  manual_resolution: "manual_confirmed",
+                  review_note: String(payload.note ?? ""),
+                }
+              : item,
+          ),
+        });
+      }
+      return bump(taskId, {
+        creditCardItems: existing.creditCardItems.map((item) =>
+          item.item_id === itemId
+            ? {
+                ...item,
+                manual_resolution: String(payload.manualResolution ?? payload.manual_resolution ?? item.manual_resolution),
+              }
+            : item,
+        ),
+      });
+    },
+    confirm(taskId: string) {
+      return bump(taskId, { status: "ready_for_import", canConfirm: false });
+    },
+    reopen(taskId: string) {
+      return bump(taskId, { status: "reviewing" });
     },
   };
 }
@@ -3436,6 +3737,7 @@ function isBinaryLikeResponse(value: MockFetchResult): value is Response {
 export function installMockApiFetch(options: MockApiOptions = {}) {
   let latestImportSession = buildImportPreviewPayload([]);
   const etcInvoiceStore = createEtcInvoiceStore();
+  const etcReconciliationTaskStore = createEtcReconciliationTaskStore();
   const turnoverExtraStore = new Map<string, Record<string, unknown>>();
   let latestEtcImportPreview = etcInvoiceStore.previewZip([]);
   let latestEtcDraftInvoiceIds: string[] = [];
@@ -4051,18 +4353,55 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         keyword: url.searchParams.get("keyword"),
       }),
     }),
+    "/api/etc/reconciliation-tasks/ready-for-import": () => ({
+      body: etcReconciliationTaskStore.ready(),
+    }),
+    "/api/etc/reconciliation-tasks": ({ jsonBody, init }) => {
+      if (init?.method === "POST") {
+        return { status: 201, body: etcReconciliationTaskStore.create(String(jsonBody?.title ?? "")) };
+      }
+      return { body: etcReconciliationTaskStore.list() };
+    },
     "/api/etc/import/preview": ({ formData }) => {
       const fileNames = (formData?.getAll("files") as File[] | undefined)?.map((file) => file.name) ?? [];
+      const taskId = String(formData?.get("task_id") ?? formData?.get("taskId") ?? "");
+      if (!taskId) {
+        return {
+          status: 400,
+          body: {
+            error: "task_id_required",
+            message: "task_id is required.",
+          },
+        };
+      }
       latestEtcImportPreview = etcInvoiceStore.previewZip(fileNames);
       return { body: cloneJson(latestEtcImportPreview) };
     },
     "/api/etc/import/confirm": ({ jsonBody }) => {
       const sessionId = String(jsonBody?.sessionId ?? jsonBody?.session_id ?? "");
+      const taskId = String(jsonBody?.taskId ?? jsonBody?.task_id ?? "");
+      if (!taskId) {
+        return {
+          status: 400,
+          body: {
+            error: "task_id_required",
+            message: "task_id is required.",
+          },
+        };
+      }
       if (options.etcImportConfirmPreviewStale) {
         return {
           status: 409,
           body: {
             error: "preview_stale",
+          },
+        };
+      }
+      if (options.etcImportConfirmStaleReconciliationTask) {
+        return {
+          status: 409,
+          body: {
+            error: "stale_reconciliation_task_preview",
           },
         };
       }
@@ -4143,7 +4482,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const page = Number(url.searchParams.get("page") ?? "1");
       const pageSize = Number(url.searchParams.get("page_size") ?? "100");
       const isCurrentYear = dateFrom === "2026-01-01" && dateTo === "2026-12-31";
-      const rows = accountKey === "icbc:6386"
+      const rows = !accountKey || accountKey === "icbc:6386"
         ? [
           {
             id: `bank-detail-${String(page).padStart(3, "0")}`,
@@ -4159,7 +4498,19 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             account_last4: "6386",
             category_code: null,
             category_label: null,
+            category_path: [],
+            category_source: "",
             category_version: 1,
+            auto_category_code: "salary",
+            auto_category_label: "工资",
+            auto_category_path: ["自动识别", "工资"],
+            auto_category_source: "bank_transaction_auto_category_service",
+            auto_category_reason: "摘要命中工资规则",
+            auto_category_confidence: "high",
+            effective_category_code: "salary",
+            effective_category_label: "工资",
+            effective_category_path: ["自动识别", "工资"],
+            effective_category_source: "auto",
           },
         ]
         : [];
@@ -4173,12 +4524,16 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             borrow_in_company_pending_repayment: 2,
             business_warranty_pending_collection: 1,
             borrow_out_personal_pending_collection: 0,
-            uncategorized: accountKey === "icbc:6386" && isCurrentYear ? 296 : rows.length,
+            salary: !accountKey || accountKey === "icbc:6386" ? 1 : 0,
+            fee: 0,
+            holiday_bonus: 0,
+            bonus: 0,
+            uncategorized: (!accountKey || accountKey === "icbc:6386") && isCurrentYear ? 295 : rows.length,
           },
           pagination: {
             page,
             page_size: pageSize,
-            total: accountKey === "icbc:6386" && isCurrentYear ? 299 : rows.length,
+            total: (!accountKey || accountKey === "icbc:6386") && isCurrentYear ? 299 : rows.length,
           },
         },
       };
@@ -5045,8 +5400,9 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         ? (JSON.parse(init.body) as Record<string, unknown>)
         : null;
     const formData = init?.body instanceof FormData ? init.body : null;
+    const method = (init?.method ?? "GET").toUpperCase();
 
-    if ((init?.method ?? "GET").toUpperCase() === "DELETE" && url.pathname.startsWith("/api/workbench/settings/projects/")) {
+    if (method === "DELETE" && url.pathname.startsWith("/api/workbench/settings/projects/")) {
       const projectId = decodeURIComponent(url.pathname.split("/").pop() ?? "");
       workbenchSettingsState = {
         ...workbenchSettingsState,
@@ -5209,8 +5565,58 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     if (url.pathname.startsWith("/imports/files/sessions/")) {
       return jsonResponse({ body: latestImportSession });
     }
+    if (url.pathname === "/api/etc/reconciliation-tasks/ready-for-import") {
+      return jsonResponse({ body: etcReconciliationTaskStore.ready() });
+    }
+    const etcReconciliationTaskRoute = url.pathname.match(/^\/api\/etc\/reconciliation-tasks\/([^/]+)(?:\/([^/]+)(?:\/([^/]+))?)?$/);
+    if (etcReconciliationTaskRoute) {
+      const taskId = decodeURIComponent(etcReconciliationTaskRoute[1] ?? "");
+      const segment = etcReconciliationTaskRoute[2] ? decodeURIComponent(etcReconciliationTaskRoute[2]) : "";
+      const trailing = etcReconciliationTaskRoute[3] ? decodeURIComponent(etcReconciliationTaskRoute[3]) : "";
+      if (!segment && method === "GET") {
+        const task = etcReconciliationTaskStore.get(taskId);
+        return task
+          ? jsonResponse({ body: task })
+          : jsonResponse({ status: 404, body: { message: "ETC对账任务不存在。" } });
+      }
+      if (!segment && method === "DELETE") {
+        const result = etcReconciliationTaskStore.deleteTask(taskId, Number(jsonBody?.expectedVersion ?? jsonBody?.expected_version ?? 0));
+        return jsonResponse({ status: result.status, body: result.body });
+      }
+      if (method === "POST" && ["credit-card-statement", "ticket-root-files", "ticket-root-texts", "supplement-evidences"].includes(segment)) {
+        const task = etcReconciliationTaskStore.upload(taskId);
+        return task
+          ? jsonResponse({ body: task })
+          : jsonResponse({ status: 404, body: { message: "ETC对账任务不存在。" } });
+      }
+      if (method === "PATCH" && segment === "items" && trailing) {
+        const task = etcReconciliationTaskStore.patchItem(taskId, trailing, jsonBody ?? {});
+        return task
+          ? jsonResponse({ body: task })
+          : jsonResponse({ status: 404, body: { message: "ETC对账任务不存在。" } });
+      }
+      if (method === "POST" && segment === "confirm") {
+        const task = etcReconciliationTaskStore.confirm(taskId);
+        return task
+          ? jsonResponse({ body: task })
+          : jsonResponse({ status: 404, body: { message: "ETC对账任务不存在。" } });
+      }
+      if (method === "POST" && segment === "reopen") {
+        const task = etcReconciliationTaskStore.reopen(taskId);
+        return task
+          ? jsonResponse({ body: task })
+          : jsonResponse({ status: 404, body: { message: "ETC对账任务不存在。" } });
+      }
+    }
+    const etcBatchDeleteMatch = url.pathname.match(/^\/api\/etc\/batches\/([^/]+)$/);
+    if (etcBatchDeleteMatch && method === "DELETE") {
+      const deleted = etcInvoiceStore.deleteBatch(decodeURIComponent(etcBatchDeleteMatch[1] ?? ""));
+      return deleted
+        ? jsonResponse({ body: { deleted: true } })
+        : jsonResponse({ status: 409, body: { error: "etc_batch_delete_conflict", message: "ETC批次不能删除。" } });
+    }
     const etcBatchDetailMatch = url.pathname.match(/^\/api\/etc\/batches\/([^/]+)$/);
-    if (etcBatchDetailMatch) {
+    if (etcBatchDetailMatch && method === "GET") {
       const batch = etcInvoiceStore.batchDetail(decodeURIComponent(etcBatchDetailMatch[1] ?? ""));
       return batch
         ? jsonResponse({ body: batch })
@@ -5354,6 +5760,12 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       && url.pathname.startsWith("/api/background-jobs/")
       && url.pathname.endsWith("/acknowledge")
     ) {
+      if (options.backgroundJobAcknowledgeStatus) {
+        return jsonResponse({
+          status: options.backgroundJobAcknowledgeStatus,
+          body: options.backgroundJobAcknowledgeBody ?? { message: "acknowledge failed" },
+        });
+      }
       const jobId = decodeURIComponent(url.pathname.split("/")[3] ?? "");
       backgroundJobs = backgroundJobs.filter((job) => String(job.job_id ?? job.jobId ?? "") !== jobId);
       return jsonResponse({
@@ -5370,6 +5782,12 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       && url.pathname.startsWith("/api/background-jobs/")
       && url.pathname.endsWith("/retry")
     ) {
+      if (options.backgroundJobRetryStatus) {
+        return jsonResponse({
+          status: options.backgroundJobRetryStatus,
+          body: options.backgroundJobRetryBody ?? { message: "retry failed" },
+        });
+      }
       const jobId = decodeURIComponent(url.pathname.split("/")[3] ?? "");
       backgroundJobs = backgroundJobs.filter((job) => String(job.job_id ?? job.jobId ?? "") !== jobId);
       return jsonResponse({

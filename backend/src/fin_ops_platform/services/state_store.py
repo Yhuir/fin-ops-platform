@@ -54,6 +54,9 @@ WORKBENCH_CANDIDATE_MATCHES_META_COLLECTION = "workbench_candidate_matches_meta"
 WORKBENCH_CANDIDATE_MATCHES_COLLECTION = "workbench_candidate_matches"
 WORKBENCH_MATCHING_DIRTY_SCOPES_META_COLLECTION = "workbench_matching_dirty_scopes_meta"
 WORKBENCH_MATCHING_DIRTY_SCOPES_COLLECTION = "workbench_matching_dirty_scopes"
+NO_OA_BANK_BATCHES_META_COLLECTION = "no_oa_bank_batches_meta"
+NO_OA_BANK_BATCHES_COLLECTION = "no_oa_bank_batches"
+NO_OA_BANK_BATCH_AUDIT_LOG_COLLECTION = "no_oa_bank_batch_audit_log"
 TURNOVER_RELATIONS_META_COLLECTION = "turnover_relations_meta"
 TURNOVER_RELATIONS_COLLECTION = "turnover_relations"
 TURNOVER_RELATION_AUDIT_LOG_COLLECTION = "turnover_relation_audit_log"
@@ -71,6 +74,7 @@ TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION = "tax_certified_import_sessions"
 TAX_CERTIFIED_IMPORT_BATCHES_COLLECTION = "tax_certified_import_batches"
 TAX_CERTIFIED_IMPORT_RECORDS_COLLECTION = "tax_certified_import_records"
 ETC_STATE_COLLECTION = "etc_state"
+ETC_RECONCILIATION_STATE_COLLECTION = "etc_reconciliation_state"
 HISTORICAL_ETC_REPAIR_BUNDLES_COLLECTION = "historical_etc_repair_bundles"
 HISTORICAL_ETC_REPAIR_PARSED_SEEDS_COLLECTION = "historical_etc_repair_parsed_seeds"
 HISTORICAL_ETC_REPAIR_STATES_COLLECTION = "historical_etc_repair_states"
@@ -181,12 +185,15 @@ class ApplicationStateStore:
         self._oa_sync_state_path = root / "oa_sync_state.pkl"
         self._tax_certified_imports_path = root / "tax_certified_imports.pkl"
         self._etc_state_path = root / "etc" / "etc_state.pkl"
+        self._etc_reconciliation_state_path = root / "etc_reconciliation" / "tasks.pkl"
+        self._etc_reconciliation_file_root = root / "etc_reconciliation" / "files"
         self._historical_etc_repair_root = root / "historical_etc_repair"
         self._historical_etc_repair_bundles_path = self._historical_etc_repair_root / "bundles.json"
         self._historical_etc_repair_parsed_seeds_path = self._historical_etc_repair_root / "parsed_seeds.json"
         self._historical_etc_repair_states_path = self._historical_etc_repair_root / "states.json"
         self._background_jobs_path = root / "background_jobs.pkl"
         self._app_health_alerts_path = root / "app_health_alerts.pkl"
+        self._no_oa_bank_batches_path = root / "no_oa_bank_batches.pkl"
         self._data_dir.mkdir(parents=True, exist_ok=True)
 
         self._mongo_settings = load_mongo_state_settings(root)
@@ -244,6 +251,9 @@ class ApplicationStateStore:
                 "workbench_candidate_matches": self._mongo_database[WORKBENCH_CANDIDATE_MATCHES_COLLECTION],
                 "workbench_matching_dirty_scopes_meta": self._mongo_database[WORKBENCH_MATCHING_DIRTY_SCOPES_META_COLLECTION],
                 "workbench_matching_dirty_scopes": self._mongo_database[WORKBENCH_MATCHING_DIRTY_SCOPES_COLLECTION],
+                "no_oa_bank_batches_meta": self._mongo_database[NO_OA_BANK_BATCHES_META_COLLECTION],
+                "no_oa_bank_batches": self._mongo_database[NO_OA_BANK_BATCHES_COLLECTION],
+                "no_oa_bank_batch_audit_log": self._mongo_database[NO_OA_BANK_BATCH_AUDIT_LOG_COLLECTION],
                 "turnover_relations_meta": self._mongo_database[TURNOVER_RELATIONS_META_COLLECTION],
                 "turnover_relations": self._mongo_database[TURNOVER_RELATIONS_COLLECTION],
                 "turnover_relation_audit_log": self._mongo_database[TURNOVER_RELATION_AUDIT_LOG_COLLECTION],
@@ -261,6 +271,7 @@ class ApplicationStateStore:
                 "tax_certified_import_batches": self._mongo_database[TAX_CERTIFIED_IMPORT_BATCHES_COLLECTION],
                 "tax_certified_import_records": self._mongo_database[TAX_CERTIFIED_IMPORT_RECORDS_COLLECTION],
                 "etc_state": self._mongo_database[ETC_STATE_COLLECTION],
+                "etc_reconciliation_state": self._mongo_database[ETC_RECONCILIATION_STATE_COLLECTION],
                 "historical_etc_repair_bundles": self._mongo_database[HISTORICAL_ETC_REPAIR_BUNDLES_COLLECTION],
                 "historical_etc_repair_parsed_seeds": self._mongo_database[HISTORICAL_ETC_REPAIR_PARSED_SEEDS_COLLECTION],
                 "historical_etc_repair_states": self._mongo_database[HISTORICAL_ETC_REPAIR_STATES_COLLECTION],
@@ -562,6 +573,81 @@ class ApplicationStateStore:
         self._etc_state_path.parent.mkdir(parents=True, exist_ok=True)
         with self._etc_state_path.open("wb") as handle:
             pickle.dump(normalized_snapshot, handle)
+
+    def load_etc_reconciliation_state(self) -> dict[str, Any]:
+        if self._mongo_database is not None:
+            document = self._mongo_detailed_collections["etc_reconciliation_state"].find_one({"_id": STATE_DOCUMENT_ID})
+            payload = self._load_binary_payload(document)
+            return payload if isinstance(payload, dict) else {}
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        if not self._etc_reconciliation_state_path.exists():
+            return {}
+        with self._etc_reconciliation_state_path.open("rb") as handle:
+            loaded = pickle.load(handle)  # noqa: S301 - trusted local application state
+        return loaded if isinstance(loaded, dict) else {}
+
+    def save_etc_reconciliation_state(self, snapshot: dict[str, Any]) -> None:
+        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
+        if self._mongo_database is not None:
+            self._mongo_detailed_collections["etc_reconciliation_state"].update_one(
+                {"_id": STATE_DOCUMENT_ID},
+                {
+                    "$set": {
+                        "payload": Binary(pickle.dumps(normalized_snapshot)),
+                        "updated_at": datetime.now(UTC),
+                    }
+                },
+                upsert=True,
+            )
+            return
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        self._etc_reconciliation_state_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._etc_reconciliation_state_path.open("wb") as handle:
+            pickle.dump(normalized_snapshot, handle)
+
+    def store_etc_reconciliation_file(self, *, task_id: str, file_id: str, file_name: str, content: bytes) -> str:
+        sanitized_name = self._sanitize_name(file_name)
+        content_bytes = bytes(content or b"")
+        if self._mongo_file_bucket is not None:
+            gridfs_id = f"etc_reconciliation:{task_id}:{file_id}"
+            try:
+                self._mongo_file_bucket.delete(gridfs_id)
+            except Exception:
+                pass
+            self._mongo_file_bucket.upload_from_stream_with_id(
+                gridfs_id,
+                sanitized_name,
+                BytesIO(content_bytes),
+                metadata={
+                    "task_id": task_id,
+                    "file_id": file_id,
+                    "file_name": file_name,
+                    "stored_at": datetime.now(UTC),
+                    "purpose": "etc_reconciliation_source",
+                },
+            )
+            return self._build_gridfs_ref(gridfs_id, sanitized_name)
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo GridFS is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        task_dir = self._etc_reconciliation_file_root / task_id
+        task_dir.mkdir(parents=True, exist_ok=True)
+        target_path = task_dir / f"{file_id}_{sanitized_name}"
+        target_path.write_bytes(content_bytes)
+        return str(target_path)
+
+    def read_etc_reconciliation_file(self, stored_file_path: str) -> bytes:
+        if self._is_gridfs_ref(stored_file_path):
+            if self._mongo_file_bucket is None:
+                raise RuntimeError("Mongo GridFS is not configured for stored ETC reconciliation file access.")
+            stream = self._mongo_file_bucket.open_download_stream(self._parse_gridfs_ref(stored_file_path))
+            return stream.read()
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Local ETC reconciliation file access is disabled in FIN_OPS_STORAGE_MODE=mongo_only.")
+        return Path(stored_file_path).read_bytes()
 
     def save_historical_etc_repair_bundle(
         self,
@@ -992,6 +1078,31 @@ class ApplicationStateStore:
         with self._legacy_state_path.open("wb") as handle:
             pickle.dump(current_payload, handle)
 
+    def load_no_oa_bank_batches(self) -> dict[str, Any]:
+        if self._mongo_database is not None:
+            return self._run_mongo_operation(self._load_no_oa_bank_batches_detailed_payload)
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        if not self._no_oa_bank_batches_path.exists():
+            return {}
+        with self._no_oa_bank_batches_path.open("rb") as handle:
+            loaded = pickle.load(handle)  # noqa: S301 - trusted local application state
+        return loaded if isinstance(loaded, dict) else {}
+
+    def save_no_oa_bank_batches(self, snapshot: dict[str, Any]) -> None:
+        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
+        if self._mongo_database is not None:
+            self._run_mongo_operation(
+                lambda: self._save_no_oa_bank_batches_detailed(normalized_snapshot, datetime.now(UTC))
+            )
+            return
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        with self._no_oa_bank_batches_path.open("wb") as handle:
+            pickle.dump(normalized_snapshot, handle)
+
     def load_workbench_read_models(self) -> dict[str, Any]:
         if self._mongo_database is not None:
             return self._load_workbench_read_models_detailed_payload()
@@ -1296,6 +1407,8 @@ class ApplicationStateStore:
                     payload.get("workbench_matching_dirty_scopes", {}),
                     updated_at,
                 )
+            if "no_oa_bank_batches" in payload:
+                self._save_no_oa_bank_batches_detailed(payload.get("no_oa_bank_batches", {}), updated_at)
             if "turnover_relations" in payload:
                 self._save_turnover_relations_detailed(payload.get("turnover_relations", {}), updated_at)
             if "turnover_ledger_extras" in payload:
@@ -1528,6 +1641,9 @@ class ApplicationStateStore:
                         "workbench_candidate_matches": WORKBENCH_CANDIDATE_MATCHES_COLLECTION,
                         "workbench_matching_dirty_scopes_meta": WORKBENCH_MATCHING_DIRTY_SCOPES_META_COLLECTION,
                         "workbench_matching_dirty_scopes": WORKBENCH_MATCHING_DIRTY_SCOPES_COLLECTION,
+                        "no_oa_bank_batches_meta": NO_OA_BANK_BATCHES_META_COLLECTION,
+                        "no_oa_bank_batches": NO_OA_BANK_BATCHES_COLLECTION,
+                        "no_oa_bank_batch_audit_log": NO_OA_BANK_BATCH_AUDIT_LOG_COLLECTION,
                         "turnover_relations_meta": TURNOVER_RELATIONS_META_COLLECTION,
                         "turnover_relations": TURNOVER_RELATIONS_COLLECTION,
                         "turnover_relation_audit_log": TURNOVER_RELATION_AUDIT_LOG_COLLECTION,
@@ -1572,6 +1688,7 @@ class ApplicationStateStore:
         workbench_read_models_payload = self._load_workbench_read_models_detailed_payload()
         workbench_candidate_matches_payload = self._load_workbench_candidate_matches_detailed_payload()
         workbench_matching_dirty_scopes_payload = self._load_workbench_matching_dirty_scopes_detailed_payload()
+        no_oa_bank_batches_payload = self._load_no_oa_bank_batches_detailed_payload()
         turnover_relations_payload = self._load_turnover_relations_detailed_payload()
         turnover_ledger_extras_payload = self._load_turnover_ledger_extras_detailed_payload()
         cost_statistics_read_models_payload = self._load_cost_statistics_read_models_detailed_payload()
@@ -1590,6 +1707,7 @@ class ApplicationStateStore:
                 workbench_read_models_payload,
                 workbench_candidate_matches_payload,
                 workbench_matching_dirty_scopes_payload,
+                no_oa_bank_batches_payload,
                 turnover_relations_payload,
                 turnover_ledger_extras_payload,
                 cost_statistics_read_models_payload,
@@ -1618,6 +1736,8 @@ class ApplicationStateStore:
             payload["workbench_candidate_matches"] = workbench_candidate_matches_payload
         if workbench_matching_dirty_scopes_payload:
             payload["workbench_matching_dirty_scopes"] = workbench_matching_dirty_scopes_payload
+        if no_oa_bank_batches_payload:
+            payload["no_oa_bank_batches"] = no_oa_bank_batches_payload
         if turnover_relations_payload:
             payload["turnover_relations"] = turnover_relations_payload
         if turnover_ledger_extras_payload:
@@ -2063,6 +2183,21 @@ class ApplicationStateStore:
 
         payload = meta_payload if isinstance(meta_payload, dict) else {}
         payload["dirty_scopes"] = dirty_scopes
+        return payload
+
+    def _load_no_oa_bank_batches_detailed_payload(self) -> dict[str, Any]:
+        meta_document = self._mongo_detailed_collections["no_oa_bank_batches_meta"].find_one(
+            {"_id": STATE_DOCUMENT_ID}
+        )
+        meta_payload = self._load_binary_payload(meta_document)
+        batches = self._load_entities_by_id(self._mongo_detailed_collections["no_oa_bank_batches"])
+        audit_log = self._load_entities_list(self._mongo_detailed_collections["no_oa_bank_batch_audit_log"])
+        if not meta_payload and not batches and not audit_log:
+            return {}
+
+        payload = meta_payload if isinstance(meta_payload, dict) else {}
+        payload["batches"] = batches
+        payload["audit_log"] = audit_log
         return payload
 
     def _load_turnover_relations_detailed_payload(self) -> dict[str, Any]:
@@ -2581,6 +2716,72 @@ class ApplicationStateStore:
             upsert=True,
         )
 
+    def _save_no_oa_bank_batches_detailed(self, snapshot: dict[str, Any], updated_at: datetime) -> None:
+        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
+        meta_payload = {
+            key: value
+            for key, value in normalized_snapshot.items()
+            if key not in {"batches", "audit_log"}
+        }
+        batches = normalized_snapshot.get("batches", {})
+        batch_documents = []
+        if isinstance(batches, dict):
+            for batch_id, batch in batches.items():
+                serialized_batch = self._serialize_value(batch)
+                batch_documents.append(
+                    {
+                        "_id": str(batch_id),
+                        "batch_id": serialized_batch.get("batch_id"),
+                        "batch_key": serialized_batch.get("batch_key"),
+                        "batch_type": serialized_batch.get("batch_type"),
+                        "scope_month": serialized_batch.get("scope_month"),
+                        "account_key": serialized_batch.get("account_key"),
+                        "status": serialized_batch.get("status"),
+                        "row_ids": serialized_batch.get("row_ids"),
+                        "relation_case_id": serialized_batch.get("relation_case_id"),
+                        "version": serialized_batch.get("version"),
+                        "payload": Binary(pickle.dumps(batch)),
+                        "updated_at": updated_at,
+                    }
+                )
+        self._replace_collection_documents(self._mongo_detailed_collections["no_oa_bank_batches"], batch_documents)
+
+        audit_log = normalized_snapshot.get("audit_log", [])
+        audit_documents = []
+        if isinstance(audit_log, list):
+            for index, entry in enumerate(audit_log):
+                if not isinstance(entry, dict):
+                    continue
+                audit_documents.append(
+                    {
+                        "_id": f"{index:012d}",
+                        "batch_id": str(entry.get("batch_id") or ""),
+                        "operation": str(entry.get("operation") or ""),
+                        "actor": str(entry.get("actor") or ""),
+                        "created_at": str(entry.get("created_at") or ""),
+                        "payload": Binary(pickle.dumps(entry)),
+                        "updated_at": updated_at,
+                    }
+                )
+        self._replace_collection_documents(
+            self._mongo_detailed_collections["no_oa_bank_batch_audit_log"],
+            audit_documents,
+        )
+
+        self._mongo_detailed_collections["no_oa_bank_batches_meta"].update_one(
+            {"_id": STATE_DOCUMENT_ID},
+            {
+                "$set": {
+                    **meta_payload,
+                    "batch_count": len(batches) if isinstance(batches, dict) else 0,
+                    "audit_log_count": len(audit_documents),
+                    "payload": Binary(pickle.dumps(meta_payload)),
+                    "updated_at": updated_at,
+                }
+            },
+            upsert=True,
+        )
+
     def _save_turnover_relations_detailed(self, snapshot: dict[str, Any], updated_at: datetime) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
         meta_payload = {
@@ -3048,6 +3249,7 @@ class ApplicationStateStore:
                 "workbench_read_models",
                 "workbench_candidate_matches",
                 "workbench_matching_dirty_scopes",
+                "no_oa_bank_batches",
                 "turnover_relations",
                 "turnover_ledger_extras",
                 "cost_statistics_read_models",

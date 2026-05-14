@@ -54,6 +54,10 @@ export type EtcBatchSummary = {
   linkedOaApplyDate: string;
   linkedOaAmount: string;
   amountDelta: string;
+  etcInvoiceCount: number;
+  supplementCount: number;
+  supplementAmount: string;
+  displayCountText: string;
   note: string;
 };
 
@@ -138,4 +142,155 @@ export type EtcOaDraftPayload = {
   etcBatchId: string;
   oaDraftId: string;
   oaDraftUrl: string;
+};
+
+export type EtcReconciliationTaskStatus =
+  | "draft"
+  | "reviewing"
+  | "ready_for_import"
+  | "importing"
+  | "imported"
+  | "closed";
+
+export type EtcRecommendationStatus =
+  | "not_candidate"
+  | "suggested_match"
+  | "needs_review"
+  | "missing_ticket"
+  | "extra_ticket"
+  | string;
+
+export type EtcManualResolution =
+  | "unresolved"
+  | "included_etc"
+  | "covered_by_supplement"
+  | "excluded_non_etc"
+  | "excluded_error"
+  | "manual_confirmed"
+  | string;
+
+export type EtcCreditCardItem = {
+  itemId: string;
+  transactionDate: string;
+  postingDate: string;
+  cardLast4: string;
+  description: string;
+  amount: string;
+  settlementAmount: string;
+  isEtcCandidate: boolean;
+  candidateReason: string;
+  recommendationStatus: EtcRecommendationStatus;
+  manualResolution: EtcManualResolution;
+  manualResolutionReason: string;
+  reviewNote: string;
+};
+
+export type EtcTicketRootItem = {
+  itemId: string;
+  sourceFileId: string;
+  vehiclePlate: string;
+  transactionAt: string;
+  amount: string;
+  entryStation: string;
+  exitStation: string;
+  invoiceCount: number;
+  recommendationStatus: EtcRecommendationStatus;
+  linkedCreditCardItemIds: string[];
+};
+
+export type EtcSupplementEvidence = {
+  evidenceId: string;
+  sourceName: string;
+  evidenceKind: string;
+  amount: string;
+  paidAt: string;
+  merchantName: string;
+  tags: string[];
+  includeInEtcZipCheck: boolean;
+  includeInOaSubmission: boolean;
+  includeInWorkbench: boolean;
+};
+
+export type EtcSourceFile = {
+  fileId: string;
+  sourceKind: string;
+  originalName: string;
+  contentType?: string;
+  hasBlockingIssue: boolean;
+};
+
+export type EtcTicketRootTextEntry = {
+  clientId: string;
+  text: string;
+};
+
+export type EtcParseIssue = {
+  issueId: string;
+  fileId: string;
+  sourceKind: string;
+  originalName: string;
+  severity: "info" | "warning" | "blocking" | string;
+  message: string;
+  sourcePage: number | null;
+  sourceLine: number | null;
+  extractionMethod: string;
+  fieldName: string;
+};
+
+export type EtcReconciliationTask = {
+  taskId: string;
+  status: EtcReconciliationTaskStatus;
+  version: number;
+  title: string;
+  periodStart: string | null;
+  periodEnd: string | null;
+  statementPeriodStart: string | null;
+  statementPeriodEnd: string | null;
+  approvedDelta: string;
+  approvedDeltaNote: string;
+  cardLast4: string;
+  oaTotalAmount: string;
+  etcInvoiceAmount: string;
+  supplementAmount: string;
+  etcInvoiceCount: number;
+  supplementCount: number;
+  canConfirm: boolean;
+  vehiclePlates: string[];
+  confirmedItemSetHash: string;
+  creditCardItems: EtcCreditCardItem[];
+  ticketRootItems: EtcTicketRootItem[];
+  supplementEvidences: EtcSupplementEvidence[];
+  sourceFiles: EtcSourceFile[];
+  parseIssues: EtcParseIssue[];
+};
+
+export type EtcReconciliationTaskSummary = Pick<
+  EtcReconciliationTask,
+  | "taskId"
+  | "status"
+  | "version"
+  | "title"
+  | "periodStart"
+  | "periodEnd"
+  | "oaTotalAmount"
+  | "etcInvoiceCount"
+  | "supplementCount"
+  | "vehiclePlates"
+>;
+
+export type EtcReconciliationTaskListPayload = {
+  items: EtcReconciliationTask[];
+};
+
+export type EtcCreateReconciliationTaskPayload = {
+  title?: string;
+};
+
+export type EtcPatchReconciliationItemPayload = {
+  action: string;
+  manualResolution?: EtcManualResolution;
+  note?: string;
+  reason?: string;
+  supplementEvidenceId?: string;
+  [key: string]: unknown;
 };

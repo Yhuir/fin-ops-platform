@@ -24,6 +24,14 @@ export default defineConfig(function (_a) {
                 "/imports": {
                     target: env.VITE_API_PROXY_TARGET || "http://127.0.0.1:8001",
                     changeOrigin: true,
+                    bypass: function (req) {
+                        var _a;
+                        var requestPath = (_a = req.url) !== null && _a !== void 0 ? _a : "";
+                        if (/^\/imports\/(files|templates|batches|preview|confirm)(\/|$)/.test(requestPath)) {
+                            return undefined;
+                        }
+                        return "/index.html";
+                    },
                 },
                 "/fin-ops-api": {
                     target: env.VITE_API_PROXY_TARGET || "http://127.0.0.1:8001",

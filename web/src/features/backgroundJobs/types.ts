@@ -5,7 +5,8 @@ export type BackgroundJobStatus =
   | "partial_success"
   | "failed"
   | "cancelled"
-  | "acknowledged";
+  | "acknowledged"
+  | "superseded";
 
 export type BackgroundJobType =
   | "etc_invoice_import"
@@ -15,7 +16,8 @@ export type BackgroundJobType =
   | "workbench_matching"
   | "workbench_rebuild"
   | "tax_certified_import"
-  | "etc_oa_draft";
+  | "etc_oa_draft"
+  | "cost_statistics_cache_warmup";
 
 export type BackgroundJob = {
   jobId: string;
@@ -31,7 +33,10 @@ export type BackgroundJob = {
   resultSummary: Record<string, unknown>;
   source: Record<string, unknown>;
   retryable: boolean;
+  retryMode: string;
   acknowledgeable: boolean;
+  attention: boolean;
+  supersededByJobId: string | null;
   affectedMonths: string[];
   error: string | null;
   createdAt: string;

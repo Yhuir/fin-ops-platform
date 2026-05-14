@@ -46,11 +46,15 @@ from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
 from fin_ops_platform.services.bank_details_service import BankDetailsService
+from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_service import (
     BANK_TRANSACTION_CATEGORY_LABELS,
     BankTransactionCategoryConflictError,
     BankTransactionCategoryService,
     BankTransactionCategoryValidationError,
+)
+from fin_ops_platform.services.bank_transaction_effective_category_provider import (
+    BankTransactionEffectiveCategoryProvider,
 )
 from fin_ops_platform.services.background_job_service import (
     BackgroundJobAccessError,
@@ -61,6 +65,7 @@ from fin_ops_platform.services.cost_statistics_read_model_service import CostSta
 from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
 from fin_ops_platform.services.derived_data_lifecycle_service import DerivedDataLifecycleService
 from fin_ops_platform.services.etc_service import (
+    EtcBatchDeleteError,
     EtcBatchNotFoundError,
     EtcDraftRequestError,
     EtcImportPreviewStaleError,
@@ -74,6 +79,22 @@ from fin_ops_platform.services.etc_service import (
     EtcServiceError,
     UploadedEtcZipFile,
 )
+import fin_ops_platform.services.etc_document_parsers as etc_document_parsers
+from fin_ops_platform.services.etc_document_parsers import (
+    CcbCreditCardStatementParser,
+    SupplementEvidenceParser,
+    TicketRootClipboardTextParser,
+    TicketRootDocumentParser,
+)
+from fin_ops_platform.services.etc_reconciliation_models import SourceFileKind
+from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
+from fin_ops_platform.services.etc_reconciliation_zip_filter import (
+    EtcZipFilterPreview,
+    StaleReconciliationPreviewError,
+    filter_uploads_by_allowlist,
+    preview_etc_zip_for_task,
+    validate_etc_zip_confirm_for_task,
+)
 from fin_ops_platform.services.historical_etc_repair_service import HistoricalEtcRepairService
 from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile
 from fin_ops_platform.services.import_preview_audit import ImportPreviewStaleError
@@ -84,6 +105,10 @@ from fin_ops_platform.services.ledgers import LedgerReminderService
 from fin_ops_platform.services.live_workbench_service import LiveWorkbenchService
 from fin_ops_platform.services.matching import MatchingEngineService
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, load_mongo_oa_settings
+from fin_ops_platform.services.no_oa_bank_batch_service import (
+    NO_OA_BANK_BATCH_RELATION_MODE,
+    NoOaBankBatchService,
+)
 from fin_ops_platform.services.oa_identity_service import (
     OAIdentityConfigurationError,
     OAIdentityService,
@@ -167,7 +192,7 @@ class Response:
             "Content-Type": "application/json; charset=utf-8",
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Headers": "Content-Type",
-            "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, OPTIONS",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
         }
     )
 
@@ -258,6 +283,7 @@ class Application:
         self._workbench_matching_running_scope_months: set[str] = set()
         self._seed_payload = build_demo_seed()
         self._initialize_runtime_services(self._load_persisted_state())
+        self._recover_interrupted_cost_statistics_cache_warmup_jobs()
         if (
             os.getenv("FIN_OPS_DISABLE_STARTUP_HISTORICAL_ETC_REPAIR", "").strip() not in {"1", "true", "yes"}
             and self._historical_etc_repair_needs_startup_reconcile()
@@ -284,6 +310,11 @@ class Application:
             persisted_state.get("bank_transaction_categories"),
             transaction_exists=self._bank_transaction_exists,
         )
+        self._bank_transaction_auto_category_service = BankTransactionAutoCategoryService()
+        self._bank_transaction_effective_category_provider = BankTransactionEffectiveCategoryProvider(
+            category_service=self._bank_transaction_category_service,
+            auto_category_service=self._bank_transaction_auto_category_service,
+        )
         self._turnover_relation_service = TurnoverRelationService.from_snapshot(
             persisted_state.get("turnover_relations"),
             bank_rows=self._turnover_bank_transaction_rows(),
@@ -305,6 +336,13 @@ class Application:
         )
         self._workbench_pair_relation_service = WorkbenchPairRelationService.from_snapshot(
             persisted_state.get("workbench_pair_relations"),
+        )
+        no_oa_bank_batches_snapshot = persisted_state.get("no_oa_bank_batches")
+        if not isinstance(no_oa_bank_batches_snapshot, dict) and self._state_store is not None:
+            no_oa_bank_batches_snapshot = self._state_store.load_no_oa_bank_batches()
+        self._no_oa_bank_batch_service = NoOaBankBatchService.from_snapshot(
+            no_oa_bank_batches_snapshot if isinstance(no_oa_bank_batches_snapshot, dict) else None,
+            pair_relation_service=self._workbench_pair_relation_service,
         )
         self._workbench_amount_check_service = WorkbenchAmountCheckService()
         self._workbench_read_model_service = WorkbenchReadModelService.from_snapshot(
@@ -393,11 +431,12 @@ class Application:
             self._import_service,
             self._matching_service,
             bank_account_resolver=bank_account_resolver,
-            category_provider=self._bank_transaction_category_service,
+            category_provider=self._bank_transaction_effective_category_provider,
         )
         self._bank_details_service = BankDetailsService(
             self._import_service,
             category_service=self._bank_transaction_category_service,
+            auto_category_service=self._bank_transaction_auto_category_service,
         )
         self._turnover_ledger_extra_service = self._build_turnover_ledger_extra_service(
             persisted_state.get("turnover_ledger_extras")
@@ -407,10 +446,13 @@ class Application:
             category_service=self._bank_transaction_category_service,
             relation_service=self._turnover_relation_service,
             extra_service=self._turnover_ledger_extra_service,
+            category_provider=self._bank_transaction_effective_category_provider,
         )
         self._tax_certified_import_service = TaxCertifiedImportService(state_store=self._state_store)
         self._etc_service = EtcService(state_store=self._state_store)
         self._etc_service.set_canonical_invoice_key_exists(self._canonical_invoice_key_exists_for_etc_import)
+        self._etc_reconciliation_task_service = EtcReconciliationTaskService(state_store=self._state_store)
+        self._etc_reconciliation_import_previews: dict[str, EtcZipFilterPreview] = {}
         self._historical_etc_repair_service = (
             HistoricalEtcRepairService(
                 state_store=self._state_store,
@@ -509,6 +551,7 @@ class Application:
 
     def _turnover_bank_transaction_rows(self) -> list[dict[str, object]]:
         rows: list[dict[str, object]] = []
+        transaction_payloads: list[dict[str, object]] = []
         for transaction in list(self._import_service.list_transactions()):
             payload = self._serialize_value(transaction)
             if not isinstance(payload, dict):
@@ -516,7 +559,13 @@ class Application:
             transaction_id = str(payload.get("id") or "").strip()
             if not transaction_id:
                 continue
-            category = self._bank_transaction_category_service.get(transaction_id)
+            transaction_payloads.append(payload)
+        categories_by_transaction_id = self._bank_transaction_effective_category_provider.bulk_get_for_rows(
+            transaction_payloads
+        )
+        for payload in transaction_payloads:
+            transaction_id = str(payload.get("id") or "").strip()
+            category = categories_by_transaction_id.get(transaction_id, {})
             category_code = category.get("category_code")
             if not category_code:
                 continue
@@ -588,7 +637,7 @@ class Application:
     ) -> Response:
         request_started_at = monotonic()
         parsed = urlparse(path)
-        route_path = parsed.path
+        route_path = self._normalize_route_path(parsed.path)
         query = parse_qs(parsed.query)
         timed_action = self._workbench_timed_action_for_route(method=method, route_path=route_path)
         request_id = uuid4().hex[:12] if timed_action is not None else None
@@ -633,6 +682,19 @@ class Application:
             )
         if method == "PATCH" and route_path == "/api/bank-details/transactions/categories":
             return self._handle_api_bank_transaction_categories(body, headers)
+        if method == "GET" and route_path == "/api/no-oa-bank-batches":
+            return self._handle_api_no_oa_bank_batches(query)
+        if method == "POST" and route_path == "/api/no-oa-bank-batches/submit":
+            return self._handle_api_no_oa_bank_batches_bulk_submit(body, headers)
+        if method == "GET" and route_path.startswith("/api/no-oa-bank-batches/"):
+            batch_id = unquote(route_path.rsplit("/", 1)[-1])
+            return self._handle_api_no_oa_bank_batch_detail(batch_id)
+        if method == "POST" and route_path.startswith("/api/no-oa-bank-batches/") and route_path.endswith("/submit"):
+            batch_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_no_oa_bank_batch_submit(batch_id, body, headers)
+        if method == "POST" and route_path.startswith("/api/no-oa-bank-batches/") and route_path.endswith("/withdraw"):
+            batch_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_no_oa_bank_batch_withdraw(batch_id, body, headers)
         if method == "GET" and route_path == "/api/turnover-ledger/export-preview":
             return self._handle_api_turnover_ledger_export_preview(query)
         if method == "GET" and route_path == "/api/turnover-ledger/export":
@@ -691,6 +753,14 @@ class Application:
             return self._handle_api_etc_import_confirm(body, headers)
         if method == "POST" and route_path == "/api/etc/import":
             return self._handle_api_etc_import(body, headers)
+        if method == "GET" and route_path == "/api/etc/reconciliation-tasks/ready-for-import":
+            return self._handle_api_etc_reconciliation_ready_for_import()
+        if method == "GET" and route_path == "/api/etc/reconciliation-tasks":
+            return self._handle_api_etc_reconciliation_tasks()
+        if method == "POST" and route_path == "/api/etc/reconciliation-tasks":
+            return self._handle_api_etc_reconciliation_task_create(body)
+        if route_path.startswith("/api/etc/reconciliation-tasks/"):
+            return self._route_api_etc_reconciliation_task(method, route_path, body, headers)
         if method == "GET" and route_path == "/api/etc/invoices":
             return self._handle_api_etc_invoices(
                 status=query.get("status", [None])[0],
@@ -709,6 +779,9 @@ class Application:
                 page=query.get("page", [None])[0],
                 page_size=query.get("page_size", [None])[0],
             )
+        if method == "DELETE" and route_path.startswith("/api/etc/batches/"):
+            batch_id = unquote(route_path.rsplit("/", 1)[-1])
+            return self._handle_api_etc_batch_delete(batch_id)
         if method == "GET" and route_path.startswith("/api/etc/batches/"):
             batch_id = unquote(route_path.rsplit("/", 1)[-1])
             return self._handle_api_etc_batch_detail(batch_id)
@@ -1018,6 +1091,12 @@ class Application:
                 "/api/etc/import/confirm",
                 "/api/etc/invoices",
                 "/api/etc/invoices/revoke-submitted",
+                "/api/etc/reconciliation-tasks/{task_id}",
+                "/api/etc/reconciliation-tasks/{task_id}/ticket-root-texts",
+                "/api/etc/reconciliation-tasks/{task_id}/ticket-root-files",
+                "/api/etc/reconciliation-tasks/{task_id}/credit-card-statement",
+                "/api/etc/reconciliation-tasks/{task_id}/supplement-evidences",
+                "/api/etc/batches/{batch_id}",
                 "/api/etc/batches/draft",
                 "/api/etc/batches/{batch_id}/confirm-submitted",
                 "/api/etc/batches/{batch_id}/mark-not-submitted",
@@ -1166,7 +1245,7 @@ class Application:
                 "X-Accel-Buffering": "no",
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Headers": "Content-Type",
-                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, OPTIONS",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
             },
         )
 
@@ -1227,6 +1306,7 @@ class Application:
     def _build_app_health_snapshot(self, session: OARequestSession, *, started_at: float) -> dict[str, object]:
         owner_user_id = session.identity.username or session.identity.user_id or "web_finance_user"
         active_jobs = self._background_job_service.list_active_jobs(owner_user_id, include_system=True)
+        attention_jobs = self._background_job_service.list_attention_jobs(owner_user_id, include_system=True)
         oa_sync_payload = self._app_health_oa_sync_payload()
         state_store_info = {
             "storage_mode": self._state_store.storage_mode if self._state_store is not None else "memory",
@@ -1239,6 +1319,7 @@ class Application:
             state_store_info=state_store_info,
             rebuild_scheduled=self._is_oa_sync_rebuild_scheduled(),
             duration_ms=self._duration_ms(started_at),
+            attention_jobs=attention_jobs,
             alerts={"active": [], "recent_recovered": []},
         )
         alerts = self._app_health_alert_service.evaluate(snapshot_without_alerts)
@@ -1251,6 +1332,7 @@ class Application:
             state_store_info=state_store_info,
             rebuild_scheduled=self._is_oa_sync_rebuild_scheduled(),
             duration_ms=self._duration_ms(started_at),
+            attention_jobs=attention_jobs,
             alerts=alerts,
         )
         self._emit_app_health_timing(snapshot)
@@ -1388,10 +1470,389 @@ class Application:
             },
         )
 
+    def _handle_api_etc_reconciliation_tasks(self) -> Response:
+        return self._json_response(
+            HTTPStatus.OK,
+            {"tasks": [self._etc_reconciliation_task_payload(task) for task in self._etc_reconciliation_task_service.list_tasks()]},
+        )
+
+    def _handle_api_etc_reconciliation_ready_for_import(self) -> Response:
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "tasks": [
+                    self._etc_reconciliation_task_payload(task)
+                    for task in self._etc_reconciliation_task_service.list_ready_for_import_tasks()
+                ]
+            },
+        )
+
+    def _handle_api_etc_reconciliation_task_create(self, body: str | bytes | None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        task = self._etc_reconciliation_task_service.create_task(
+            title=str(payload.get("title") or "").strip(),
+            created_by=str(payload.get("createdBy") or payload.get("created_by") or "web_finance_user"),
+        )
+        return self._json_response(HTTPStatus.CREATED, self._etc_reconciliation_task_payload(task))
+
+    def _route_api_etc_reconciliation_task(
+        self,
+        method: str,
+        route_path: str,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        relative = route_path.removeprefix("/api/etc/reconciliation-tasks/").strip("/")
+        parts = [unquote(part) for part in relative.split("/") if part]
+        if not parts:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
+        task_id = parts[0]
+        if method == "GET" and len(parts) == 1:
+            try:
+                task = self._etc_reconciliation_task_service.get_task(task_id)
+            except KeyError:
+                return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
+            return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
+        if method == "DELETE" and len(parts) == 1:
+            return self._handle_api_etc_reconciliation_task_delete(task_id, body)
+        if method == "DELETE" and len(parts) == 3 and parts[1] == "source-files":
+            return self._handle_api_etc_reconciliation_source_file_delete(task_id, parts[2], body)
+        if method == "POST" and len(parts) == 2 and parts[1] == "credit-card-statement":
+            return self._handle_api_etc_reconciliation_upload(
+                task_id=task_id,
+                source_kind=SourceFileKind.CREDIT_CARD_STATEMENT,
+                body=body,
+                headers=headers,
+            )
+        if method == "POST" and len(parts) == 2 and parts[1] == "ticket-root-files":
+            return self._handle_api_etc_reconciliation_upload(
+                task_id=task_id,
+                source_kind=SourceFileKind.TICKET_ROOT,
+                body=body,
+                headers=headers,
+            )
+        if method == "POST" and len(parts) == 2 and parts[1] == "ticket-root-texts":
+            return self._handle_api_etc_reconciliation_ticket_root_texts(task_id, body)
+        if method == "POST" and len(parts) == 2 and parts[1] == "supplement-evidences":
+            return self._handle_api_etc_reconciliation_upload(
+                task_id=task_id,
+                source_kind=SourceFileKind.SUPPLEMENT_EVIDENCE,
+                body=body,
+                headers=headers,
+            )
+        if method == "PATCH" and len(parts) == 3 and parts[1] == "items":
+            return self._handle_api_etc_reconciliation_item_patch(task_id, parts[2], body)
+        if method == "POST" and len(parts) == 2 and parts[1] == "confirm":
+            return self._handle_api_etc_reconciliation_confirm(task_id, body)
+        if method == "POST" and len(parts) == 2 and parts[1] == "reopen":
+            return self._handle_api_etc_reconciliation_reopen(task_id, body)
+        return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task_route"})
+
+    def _handle_api_etc_reconciliation_upload(
+        self,
+        *,
+        task_id: str,
+        source_kind: SourceFileKind,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        fields, files, error = self._load_multipart_body(body, headers)
+        if error is not None:
+            return error
+        if not files:
+            return self._json_response(HTTPStatus.BAD_REQUEST, {"error": "invalid_reconciliation_upload", "message": "file is required."})
+        actor = (fields.get("actor") or ["web_finance_user"])[0]
+        try:
+            task = self._etc_reconciliation_task_service.get_task(task_id)
+            expected_version = self._expected_version_from_fields(fields)
+            if task.version != expected_version:
+                raise ValueError("task_version_conflict")
+            if source_kind == SourceFileKind.TICKET_ROOT and _has_ticket_root_clipboard_source(task):
+                raise ValueError("ticket_root_source_mode_conflict")
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
+        except ValueError as error:
+            return self._reconciliation_error_response(error)
+        try:
+            for upload in files:
+                wrong_slot_message = self._reconciliation_wrong_slot_message(
+                    expected_source_kind=source_kind,
+                    content=upload.content,
+                )
+                if wrong_slot_message:
+                    return self._json_response(
+                        HTTPStatus.BAD_REQUEST,
+                        {
+                            "error": "wrong_reconciliation_source_kind",
+                            "message": wrong_slot_message,
+                        },
+                    )
+                source_file = self._etc_reconciliation_task_service.store_uploaded_source_file(
+                    task_id=task.task_id,
+                    source_kind=source_kind,
+                    original_name=upload.file_name,
+                    content_type="application/octet-stream",
+                    content=upload.content,
+                    created_by=actor,
+                )
+                if source_kind == SourceFileKind.CREDIT_CARD_STATEMENT:
+                    parse_result = CcbCreditCardStatementParser().parse_pdf_bytes(file_id=source_file.file_id, content=upload.content)
+                elif source_kind == SourceFileKind.TICKET_ROOT:
+                    parse_result = TicketRootDocumentParser().parse_file(file_id=source_file.file_id, content=upload.content)
+                else:
+                    parse_result = SupplementEvidenceParser().parse_text(
+                        file_id=source_file.file_id,
+                        text=upload.content.decode("utf-8", errors="ignore"),
+                        source_name=source_file.original_name,
+                        evidence_kind_override=(fields.get("evidenceKind") or [None])[0],
+                    )
+                task = self._etc_reconciliation_task_service.apply_parse_result(task_id=task_id, parse_result=parse_result, actor=actor)
+        except ValueError as error:
+            return self._reconciliation_error_response(error)
+        return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
+
+    def _handle_api_etc_reconciliation_ticket_root_texts(
+        self,
+        task_id: str,
+        body: str | bytes | None,
+    ) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        entries = payload.get("entries")
+        if not isinstance(entries, list) or not entries:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_ticket_root_text_entries", "message": "entries is required."},
+            )
+        try:
+            task = self._etc_reconciliation_task_service.get_task(task_id)
+            expected_version = self._expected_version_from_payload(payload)
+            if task.version != expected_version:
+                raise ValueError("task_version_conflict")
+            if _has_ticket_root_file_source(task):
+                raise ValueError("ticket_root_source_mode_conflict_pdf")
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
+        except ValueError as value_error:
+            return self._reconciliation_error_response(value_error)
+
+        actor = str(payload.get("actor") or "web_finance_user")
+        parser = TicketRootClipboardTextParser()
+        try:
+            for index, entry in enumerate(entries, start=1):
+                if not isinstance(entry, dict):
+                    return self._json_response(
+                        HTTPStatus.BAD_REQUEST,
+                        {"error": "invalid_ticket_root_text_entry", "message": "entry must be an object."},
+                    )
+                text = str(entry.get("text") or "")
+                if not text.strip():
+                    return self._json_response(
+                        HTTPStatus.BAD_REQUEST,
+                        {"error": "invalid_ticket_root_text_entry", "message": "text is required."},
+                    )
+                source_file = self._etc_reconciliation_task_service.store_uploaded_source_file(
+                    task_id=task.task_id,
+                    source_kind=SourceFileKind.TICKET_ROOT,
+                    original_name=_ticket_root_clipboard_source_name(text, index=index),
+                    content_type="text/plain; charset=utf-8",
+                    content=text.encode("utf-8"),
+                    created_by=actor,
+                )
+                parse_result = parser.parse_text(file_id=source_file.file_id, text=text)
+                task = self._etc_reconciliation_task_service.apply_parse_result(
+                    task_id=task_id,
+                    parse_result=parse_result,
+                    actor=actor,
+                )
+        except ValueError as value_error:
+            return self._reconciliation_error_response(value_error)
+        return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
+
+    def _handle_api_etc_reconciliation_source_file_delete(
+        self,
+        task_id: str,
+        file_id: str,
+        body: str | bytes | None,
+    ) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            expected_version = self._expected_version_from_payload(payload)
+            task = self._etc_reconciliation_task_service.delete_source_file(
+                task_id=task_id,
+                file_id=file_id,
+                expected_version=expected_version,
+                actor=str(payload.get("actor") or "web_finance_user"),
+            )
+        except KeyError as error:
+            code = str(error).strip("'") or "unknown_source_file"
+            status = HTTPStatus.NOT_FOUND if code == "unknown_source_file" else HTTPStatus.NOT_FOUND
+            return self._json_response(status, {"error": code, "message": code})
+        except ValueError as error:
+            return self._reconciliation_error_response(error)
+        return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
+
+    def _handle_api_etc_reconciliation_item_patch(self, task_id: str, item_id: str, body: str | bytes | None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            expected_version = self._expected_version_from_payload(payload)
+            task = self._etc_reconciliation_task_service.patch_item(
+                task_id=task_id,
+                item_id=item_id,
+                expected_version=expected_version,
+                actor=str(payload.get("actor") or "web_finance_user"),
+                payload=payload,
+            )
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
+        except ValueError as error:
+            return self._reconciliation_error_response(error)
+        return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
+
+    def _handle_api_etc_reconciliation_confirm(self, task_id: str, body: str | bytes | None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            expected_version = self._expected_version_from_payload(payload)
+            task = self._etc_reconciliation_task_service.confirm_task(
+                task_id=task_id,
+                expected_version=expected_version,
+                actor=str(payload.get("actor") or "web_finance_user"),
+                approved_delta=payload.get("approvedDelta", payload.get("approved_delta")),
+                approved_delta_note=payload.get("approvedDeltaNote", payload.get("approved_delta_note")),
+            )
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
+        except ValueError as error:
+            return self._reconciliation_error_response(error)
+        return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
+
+    def _handle_api_etc_reconciliation_reopen(self, task_id: str, body: str | bytes | None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            expected_version = self._expected_version_from_payload(payload)
+            task = self._etc_reconciliation_task_service.reopen_task(
+                task_id=task_id,
+                expected_version=expected_version,
+                actor=str(payload.get("actor") or "web_finance_user"),
+            )
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
+        except ValueError as error:
+            return self._reconciliation_error_response(error)
+        return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
+
+    def _handle_api_etc_reconciliation_task_delete(self, task_id: str, body: str | bytes | None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            expected_version = self._expected_version_from_payload(payload)
+            result = self._etc_reconciliation_task_service.delete_task(
+                task_id=task_id,
+                expected_version=expected_version,
+                actor=str(payload.get("actor") or "web_finance_user"),
+            )
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
+        except ValueError as error:
+            return self._reconciliation_error_response(error)
+        return self._json_response(HTTPStatus.OK, result)
+
+    @staticmethod
+    def _expected_version_from_payload(payload: dict[str, object]) -> int:
+        raw_value = payload.get("expectedVersion", payload.get("expected_version"))
+        if raw_value in (None, ""):
+            raise ValueError("expected_version_required")
+        try:
+            return int(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid_expected_version") from exc
+
+    @staticmethod
+    def _expected_version_from_fields(fields: dict[str, list[str]]) -> int:
+        values = fields.get("expectedVersion") or fields.get("expected_version") or []
+        raw_value = values[0] if values else None
+        if raw_value in (None, ""):
+            raise ValueError("expected_version_required")
+        try:
+            return int(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid_expected_version") from exc
+
+    def _reconciliation_error_response(self, error: ValueError) -> Response:
+        code = str(error) or "invalid_reconciliation_request"
+        status = HTTPStatus.CONFLICT if code in {
+            "task_version_conflict",
+            "stale_reconciliation_task_preview",
+            "invalid_reconciliation_task_status",
+            "reconciliation_task_has_submission_link",
+            "ticket_root_source_mode_conflict",
+            "ticket_root_source_mode_conflict_pdf",
+        } else HTTPStatus.BAD_REQUEST
+        messages = {
+            "ticket_root_source_mode_conflict": "已有手工粘贴票根网源，请先删除已有手工粘贴源后再上传 PDF/JPG。",
+            "ticket_root_source_mode_conflict_pdf": "已有票根网 PDF/JPG 源文件，请先删除已有票根网源文件后再提交手工粘贴。",
+        }
+        normalized_code = "ticket_root_source_mode_conflict" if code == "ticket_root_source_mode_conflict_pdf" else code
+        return self._json_response(status, {"error": normalized_code, "message": messages.get(code, code)})
+
+    @staticmethod
+    def _reconciliation_wrong_slot_message(*, expected_source_kind: SourceFileKind, content: bytes) -> str | None:
+        text = content.decode("utf-8", errors="ignore")
+        if content.lstrip().startswith(b"%PDF"):
+            extracted_text = etc_document_parsers._extract_pdf_text(content)
+            if extracted_text.strip():
+                text = f"{text}\n{extracted_text}"
+        if not text.strip():
+            return None
+        looks_like_statement = any(
+            marker in text
+            for marker in (
+                "龙卡信用卡对账单",
+                "中国建设银行信用卡账单",
+                "建设银行信用卡账单",
+                "信用卡账单",
+                "Credit Card Statement",
+                "Statement Date",
+                "Payment Due Date",
+            )
+        )
+        looks_like_ticket_root = any(
+            marker in text
+            for marker in ("票根网", "通行明细", "车牌号", "发票张数", "入口站", "出口站")
+        )
+        if expected_source_kind == SourceFileKind.TICKET_ROOT and looks_like_statement:
+            return "检测到信用卡账单，请上传到信用卡账单栏。"
+        if expected_source_kind == SourceFileKind.CREDIT_CARD_STATEMENT and looks_like_ticket_root:
+            return "检测到票根网文件，请上传到票根网栏。"
+        return None
+
     def _handle_api_background_jobs_active(self, headers: dict[str, str] | None) -> Response:
         owner_user_id = self._resolve_background_job_owner(headers)
-        jobs = self._background_job_service.list_active_jobs(owner_user_id, include_system=True)
-        return self._json_response(HTTPStatus.OK, {"jobs": [self._serialize_background_job(job) for job in jobs]})
+        active_jobs = self._background_job_service.list_active_jobs(owner_user_id, include_system=True)
+        attention_jobs = self._background_job_service.list_attention_jobs(owner_user_id, include_system=True)
+        active_payloads = [self._serialize_background_job(job) for job in active_jobs]
+        attention_payloads = [self._serialize_background_job(job) for job in attention_jobs]
+        jobs = AppHealthService._combine_job_payloads(active_payloads, attention_payloads)
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "jobs": jobs,
+                "active_jobs": active_payloads,
+                "attention_jobs": attention_payloads,
+            },
+        )
 
     def _handle_api_background_job(self, job_id: str, headers: dict[str, str] | None) -> Response:
         owner_user_id = self._resolve_background_job_owner(headers)
@@ -1510,22 +1971,23 @@ class Application:
         )
 
     def _retry_cost_statistics_cache_warmup_background_job(self, job, owner_user_id: str) -> Response:
-        months = self._retry_cost_statistics_warmup_months(job)
-        if not months:
+        target_scope_keys = self._retry_cost_statistics_warmup_scope_keys(job)
+        if not target_scope_keys:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
                     "error": "background_job_retry_not_supported",
-                    "message": "成本统计缓存预热任务缺少重新执行所需的月份范围。",
+                    "message": "成本统计缓存预热任务缺少重新执行所需的范围。",
                 },
             )
         source = job.source if isinstance(job.source, dict) else {}
         reason = str(source.get("reason") or "cost_statistics_cache_warmup_retry").strip()
         retry_job = self._schedule_cost_statistics_cache_warmup(
-            months,
-            reason=f"retry:{reason}:{job.job_id}",
+            [],
+            reason=f"retry:{reason}",
+            target_scope_keys=target_scope_keys,
         )
-        self._background_job_service.acknowledge_job(job.job_id, owner_user_id)
+        self._close_replaced_cost_statistics_warmup_job(job, owner_user_id, retry_job)
         self._persist_state()
         return self._json_response(
             HTTPStatus.ACCEPTED,
@@ -1534,6 +1996,62 @@ class Application:
                 "retry_mode": "cost_statistics_cache_warmup",
             },
         )
+
+    @staticmethod
+    def _result_summary_scope_keys(result_summary: object, field: str) -> list[str]:
+        if not isinstance(result_summary, dict):
+            return []
+        return [
+            str(scope_key).strip()
+            for scope_key in list(result_summary.get(field) or [])
+            if str(scope_key).strip()
+        ]
+
+    def _retry_cost_statistics_warmup_scope_keys(self, job) -> list[str]:
+        result_summary = job.result_summary if isinstance(job.result_summary, dict) else {}
+        failed_scope_keys = self._result_summary_scope_keys(result_summary, "failed_scope_keys")
+        remaining_scope_keys = self._result_summary_scope_keys(result_summary, "remaining_scope_keys")
+        if getattr(job, "status", None) == "partial_success" and failed_scope_keys:
+            return self._normalize_cost_statistics_scope_keys(failed_scope_keys)
+        if getattr(job, "error", None) == "interrupted_by_restart" and remaining_scope_keys:
+            return self._normalize_cost_statistics_scope_keys([*remaining_scope_keys, *failed_scope_keys])
+        derived_remaining_scope_keys = self._derive_remaining_cost_statistics_warmup_scope_keys(job)
+        if getattr(job, "error", None) == "interrupted_by_restart" and derived_remaining_scope_keys:
+            return self._normalize_cost_statistics_scope_keys([*derived_remaining_scope_keys, *failed_scope_keys])
+        target_scope_keys = self._result_summary_scope_keys(result_summary, "target_scope_keys")
+        if target_scope_keys:
+            return self._normalize_cost_statistics_scope_keys(target_scope_keys)
+        affected_scope_keys = [
+            str(scope_key).strip()
+            for scope_key in list(getattr(job, "affected_scopes", []) or [])
+            if str(scope_key).strip()
+        ]
+        if affected_scope_keys:
+            return self._normalize_cost_statistics_scope_keys(affected_scope_keys)
+        months = self._retry_cost_statistics_warmup_months(job)
+        return [
+            target["scope_key"]
+            for target in self._cost_statistics_warmup_targets(months=months, project_scopes=["active", "all"])
+        ]
+
+    def _derive_remaining_cost_statistics_warmup_scope_keys(self, job) -> list[str]:
+        result_summary = job.result_summary if isinstance(job.result_summary, dict) else {}
+        target_scope_keys = self._result_summary_scope_keys(result_summary, "target_scope_keys")
+        if not target_scope_keys:
+            return []
+        completed_scope_keys = set(
+            self._normalize_cost_statistics_scope_keys(
+                [
+                    *self._result_summary_scope_keys(result_summary, "warmed_scope_keys"),
+                    *self._result_summary_scope_keys(result_summary, "failed_scope_keys"),
+                ]
+            )
+        )
+        return [
+            scope_key
+            for scope_key in self._normalize_cost_statistics_scope_keys(target_scope_keys)
+            if scope_key not in completed_scope_keys
+        ]
 
     @staticmethod
     def _retry_cost_statistics_warmup_months(job) -> list[str]:
@@ -1567,7 +2085,7 @@ class Application:
         return session.identity.username or session.identity.user_id or "web_finance_user"
 
     def _handle_api_etc_import_preview(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
-        _fields, files, error = self._load_multipart_body(body, headers)
+        fields, files, error = self._load_multipart_body(body, headers)
         if error is not None:
             return error
         if not files:
@@ -1582,7 +2100,26 @@ class Application:
                 {"error": "invalid_etc_import_request", "message": "Only .zip files can be imported."},
             )
         uploads = [UploadedEtcZipFile(file_name=file.file_name, content=file.content) for file in files]
-        payload = self._etc_service.preview_import_zips(uploads)
+        task_id = (fields.get("task_id") or fields.get("taskId") or [""])[0].strip()
+        if not task_id:
+            return self._json_response(HTTPStatus.BAD_REQUEST, {"error": "task_id_required", "message": "task_id is required."})
+        try:
+            task = self._etc_reconciliation_task_service.get_task(task_id)
+            reconciliation_preview = preview_etc_zip_for_task(task=task, uploads=uploads)
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
+        except ValueError as error:
+            return self._reconciliation_error_response(error)
+        filtered_uploads = filter_uploads_by_allowlist(
+            uploads=uploads,
+            allowed_invoice_numbers=reconciliation_preview.allowed_invoice_numbers,
+        )
+        payload = self._etc_service.preview_import_zips(filtered_uploads)
+        session_id = str(payload.get("sessionId") or "")
+        if session_id:
+            self._etc_reconciliation_import_previews[session_id] = reconciliation_preview
+        payload["taskId"] = task_id
+        payload["reconciliationFilter"] = reconciliation_preview.to_payload()
         return self._json_response(HTTPStatus.OK, payload)
 
     def _handle_api_etc_import_confirm(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
@@ -1590,12 +2127,153 @@ class Application:
         if error is not None:
             return error
         session_id = payload.get("sessionId")
+        task_id = payload.get("taskId") or payload.get("task_id")
         if not isinstance(session_id, str) or not session_id.strip():
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_etc_import_request", "message": "sessionId is required."},
             )
         normalized_session_id = session_id.strip()
+        if not isinstance(task_id, str) or not task_id.strip():
+            return self._json_response(HTTPStatus.BAD_REQUEST, {"error": "task_id_required", "message": "task_id is required."})
+        normalized_task_id = task_id.strip()
+        try:
+            task = self._etc_reconciliation_task_service.get_task(normalized_task_id)
+            reconciliation_preview = self._etc_reconciliation_import_previews.get(normalized_session_id)
+            if reconciliation_preview is None:
+                raise StaleReconciliationPreviewError("stale_reconciliation_task_preview")
+            total = self._etc_service.get_import_session_item_total(normalized_session_id)
+            self._etc_service.validate_import_session_preview_fresh(normalized_session_id)
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
+        except EtcImportPreviewStaleError as error:
+            return self._json_response(HTTPStatus.CONFLICT, {"error": "preview_stale", "message": str(error)})
+        except StaleReconciliationPreviewError as error:
+            return self._json_response(HTTPStatus.CONFLICT, {"error": "stale_reconciliation_task_preview", "message": str(error)})
+        except ValueError as error:
+            return self._reconciliation_error_response(error)
+        except EtcServiceError as error:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_import_session_not_found", "message": str(error)})
+
+        owner_user_id = self._resolve_background_job_owner(headers)
+        idempotency_key = f"etc_import_session:{normalized_session_id}"
+        existing_job = self._background_job_service.get_idempotent_job(owner_user_id, idempotency_key)
+        if existing_job is not None:
+            return self._json_response(HTTPStatus.ACCEPTED, {"job": existing_job.to_payload()})
+        try:
+            validate_etc_zip_confirm_for_task(task=task, preview=reconciliation_preview)
+        except (StaleReconciliationPreviewError, EtcImportPreviewStaleError) as error:
+            return self._json_response(HTTPStatus.CONFLICT, {"error": "stale_reconciliation_task_preview", "message": str(error)})
+        except ValueError as error:
+            return self._reconciliation_error_response(error)
+        initial_summary = {
+            "created": 0,
+            "imported": 0,
+            "updated": 0,
+            "attachments_completed": 0,
+            "duplicates": 0,
+            "failed": 0,
+            "total": total,
+        }
+        job, created = self._background_job_service.create_or_get_idempotent_job_with_created(
+            job_type="etc_invoice_import",
+            label="导入 ETC发票",
+            owner_user_id=owner_user_id,
+            idempotency_key=idempotency_key,
+            phase="queued",
+            current=0,
+            total=total,
+            message="ETC发票导入任务已创建。",
+            result_summary=initial_summary,
+            source={"session_id": normalized_session_id},
+            affected_scopes=["etc_invoices", "imports", "workbench"],
+            reuse_any_status=True,
+        )
+        if not created:
+            return self._json_response(HTTPStatus.ACCEPTED, {"job": job.to_payload()})
+        try:
+            self._etc_reconciliation_task_service.begin_import(
+                task_id=normalized_task_id,
+                task_version=reconciliation_preview.task_version,
+                confirmed_item_set_hash=reconciliation_preview.confirmed_item_set_hash,
+                import_session_id=normalized_session_id,
+                actor=owner_user_id,
+            )
+        except ValueError as error:
+            self._background_job_service.fail_job(job.job_id, "ETC发票导入任务未启动。", str(error))
+            return self._reconciliation_error_response(error)
+
+        def run_etc_import(running_job):
+            def progress_callback(result) -> None:
+                summary = self._etc_import_job_summary(result, total)
+                self._background_job_service.update_progress(
+                    running_job.job_id,
+                    phase="persist_items",
+                    message=f"正在导入 ETC发票 {summary['total_current']}/{total}。",
+                    current=int(summary["total_current"]),
+                    total=total,
+                    result_summary={key: value for key, value in summary.items() if key != "total_current"},
+                )
+
+            try:
+                result = self._etc_service.confirm_import_session_with_progress(
+                    normalized_session_id,
+                    progress_callback=progress_callback,
+                )
+            except Exception as exc:
+                self._etc_reconciliation_task_service.mark_import_failed(
+                    task_id=normalized_task_id,
+                    task_version=reconciliation_preview.task_version,
+                    confirmed_item_set_hash=reconciliation_preview.confirmed_item_set_hash,
+                    actor=owner_user_id,
+                    note=str(exc),
+                )
+                raise
+            import_batch = next(
+                (
+                    batch
+                    for batch in self._etc_service.list_import_batches()
+                    if batch.source_session_id == normalized_session_id
+                ),
+                None,
+            )
+            changed_months = self._sync_etc_import_result_to_canonical_invoices(result)
+            self._refresh_after_etc_invoice_sync(changed_months, reason="etc_invoice_import_confirm")
+            summary = self._etc_import_job_summary(result, total)
+            result_summary = {key: value for key, value in summary.items() if key != "total_current"}
+            status = "partial_success" if result.failed > 0 else "succeeded"
+            if status == "partial_success":
+                self._etc_reconciliation_task_service.mark_import_failed(
+                    task_id=normalized_task_id,
+                    task_version=reconciliation_preview.task_version,
+                    confirmed_item_set_hash=reconciliation_preview.confirmed_item_set_hash,
+                    actor=owner_user_id,
+                    note="ETC zip import partially failed; task remains ready for retry.",
+                )
+            else:
+                self._etc_reconciliation_task_service.mark_imported(
+                    task_id=normalized_task_id,
+                    task_version=reconciliation_preview.task_version,
+                    confirmed_item_set_hash=reconciliation_preview.confirmed_item_set_hash,
+                    import_batch_id=getattr(import_batch, "id", None),
+                    actor=owner_user_id,
+                )
+            message = "ETC发票导入部分完成。" if status == "partial_success" else "ETC发票导入完成。"
+            self._background_job_service.succeed_job(
+                running_job.job_id,
+                message,
+                result_summary=result_summary,
+                status=status,
+            )
+            return result_summary
+
+        self._background_job_service.run_job(job, run_etc_import)
+        return self._json_response(
+            HTTPStatus.ACCEPTED,
+            {"job": job.to_payload()},
+        )
+
+    def _handle_api_etc_import_confirm_legacy(self, normalized_session_id: str, headers: dict[str, str] | None) -> Response:
         try:
             total = self._etc_service.get_import_session_item_total(normalized_session_id)
             self._etc_service.validate_import_session_preview_fresh(normalized_session_id)
@@ -1663,10 +2341,7 @@ class Application:
             return result_summary
 
         self._background_job_service.run_job(job, run_etc_import)
-        return self._json_response(
-            HTTPStatus.ACCEPTED,
-            {"job": job.to_payload()},
-        )
+        return self._json_response(HTTPStatus.ACCEPTED, {"job": job.to_payload()})
 
     @staticmethod
     def _etc_import_job_summary(result, total: int) -> dict[str, int]:
@@ -1848,6 +2523,34 @@ class Application:
             )
         return self._json_response(HTTPStatus.OK, detail)
 
+    def _handle_api_etc_batch_delete(self, batch_id: str) -> Response:
+        task = None
+        resolved_submission_batch_id = batch_id
+        try:
+            existing_batch = self._etc_service.get_batch(batch_id)
+            resolved_submission_batch_id = str(getattr(existing_batch, "id", "") or batch_id)
+            task = self._etc_reconciliation_task_service.find_task_for_oa_batch_id(str(getattr(existing_batch, "id", "")))
+        except EtcBatchNotFoundError:
+            task = None
+        try:
+            result = self._etc_service.delete_batch(batch_id)
+            if result.get("kind") == "submission_batch" and task is not None:
+                self._etc_reconciliation_task_service.record_oa_draft_deleted(
+                    task_id=str(getattr(task, "task_id")),
+                    oa_draft_batch_id=resolved_submission_batch_id,
+                    actor="system",
+                )
+        except EtcBatchNotFoundError as error:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_batch_not_found", "message": str(error)})
+        except EtcBatchDeleteError as error:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {"error": "etc_batch_delete_conflict", "message": str(error)},
+            )
+        except ValueError as error:
+            return self._reconciliation_error_response(error)
+        return self._json_response(HTTPStatus.OK, result)
+
     def _etc_batch_counts(self) -> dict[str, int]:
         import_batches = [
             batch
@@ -1911,6 +2614,7 @@ class Application:
     def _etc_submission_batch_detail_payload(self, batch: object) -> dict[str, object] | None:
         detail = self._etc_service.get_batch_detail(str(getattr(batch, "id", "")))
         invoices = list(detail.get("invoice_items") or [])
+        supplement_items = list(detail.get("supplement_items") or getattr(batch, "supplement_items", []) or [])
         summary = self._serialize_etc_batch_summary(
             id_value=str(getattr(batch, "id", "")),
             etc_batch_id=str(getattr(batch, "etc_batch_id", "")),
@@ -1929,11 +2633,13 @@ class Application:
             note=getattr(batch, "note", ""),
             created_at=getattr(batch, "created_at", None),
         )
+        summary.update(self._etc_batch_reconciliation_summary_payload(batch))
         return {
             "batch": self._serialize_value(batch),
             "summary": summary,
             "plateSummary": summary["plate_summary"],
             "invoiceItems": invoices,
+            "supplementItems": self._serialize_value(supplement_items),
         }
 
     def _etc_import_batch_detail_payload(self, import_batch: object) -> dict[str, object] | None:
@@ -2019,6 +2725,25 @@ class Application:
             "amount_delta": amount_delta,
             "note": note,
             "created_at": created_at,
+        }
+
+    @staticmethod
+    def _etc_batch_reconciliation_summary_payload(batch: object) -> dict[str, object]:
+        task_id = str(getattr(batch, "reconciliation_task_id", "") or "").strip()
+        if not task_id:
+            return {}
+        etc_invoice_count = int(getattr(batch, "etc_invoice_count", None) or getattr(batch, "invoice_count", 0) or 0)
+        supplement_count = int(getattr(batch, "supplement_count", 0) or 0)
+        return {
+            "reconciliationTaskId": task_id,
+            "oaTotalAmount": getattr(batch, "oa_total_amount", None) or getattr(batch, "total_amount", None),
+            "etcInvoiceAmount": getattr(batch, "etc_invoice_amount", None) or getattr(batch, "total_amount", None),
+            "supplementAmount": getattr(batch, "supplement_amount", None),
+            "etcInvoiceCount": etc_invoice_count,
+            "supplementCount": supplement_count,
+            "displayCountText": getattr(batch, "display_count_text", None) or f"ETC票 {etc_invoice_count} + 补充凭证 {supplement_count}",
+            "statementPeriodStart": getattr(batch, "statement_period_start", None),
+            "statementPeriodEnd": getattr(batch, "statement_period_end", None),
         }
 
     @staticmethod
@@ -2170,33 +2895,7 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_etc_draft_request", "message": "invoiceIds must be a string array."},
             )
-        try:
-            result = self._etc_service.create_oa_draft(invoice_ids, oa_client=self._build_etc_oa_client(headers))
-        except EtcInvoiceNotFoundError as error:
-            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_invoice_not_found", "message": str(error)})
-        except EtcOAClientError as error:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_etc_draft_request", "message": str(error)},
-            )
-        except EtcDraftRequestError as error:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_etc_draft_request", "message": str(error)},
-            )
-        changed_months = self._sync_etc_invoices_to_canonical_invoices(
-            self._etc_service.list_invoices_by_ids(invoice_ids),
-        )
-        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_oa_draft_created")
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "batchId": result.batch_id,
-                "etcBatchId": result.etc_batch_id,
-                "oaDraftId": result.oa_draft_id,
-                "oaDraftUrl": result.oa_draft_url,
-            },
-        )
+        return self._create_etc_batch_draft_from_invoice_ids(invoice_ids, headers)
 
     def _handle_api_etc_batch_draft_for_batch(self, batch_id: str, headers: dict[str, str] | None = None) -> Response:
         detail = self._etc_batch_detail_payload(batch_id)
@@ -2220,10 +2919,31 @@ class Application:
         invoice_ids: list[str],
         headers: dict[str, str] | None = None,
     ) -> Response:
+        reconciliation_task = None
         try:
-            result = self._etc_service.create_oa_draft(invoice_ids, oa_client=self._build_etc_oa_client(headers))
+            invoices = self._etc_service.list_invoices_by_ids(invoice_ids)
+            import_batch_ids = [
+                str(getattr(invoice, "import_batch_id", "") or "")
+                for invoice in invoices
+                if str(getattr(invoice, "import_batch_id", "") or "").strip()
+            ]
+            reconciliation_task = self._etc_reconciliation_task_service.find_task_for_import_batch_ids(import_batch_ids)
+            result = self._etc_service.create_oa_draft(
+                invoice_ids,
+                oa_client=self._build_etc_oa_client(headers),
+                reconciliation_task=reconciliation_task,
+            )
+            if reconciliation_task is not None:
+                self._etc_reconciliation_task_service.record_oa_draft_created(
+                    task_id=str(getattr(reconciliation_task, "task_id")),
+                    oa_draft_batch_id=result.batch_id,
+                    etc_batch_id=result.etc_batch_id,
+                    actor="system",
+                )
         except EtcInvoiceNotFoundError as error:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_invoice_not_found", "message": str(error)})
+        except ValueError as error:
+            return self._reconciliation_error_response(error)
         except EtcOAClientError as error:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
@@ -2259,8 +2979,17 @@ class Application:
     def _handle_api_etc_batch_confirm_submitted(self, batch_id: str) -> Response:
         try:
             batch = self._etc_service.confirm_submitted(batch_id)
+            task = self._etc_reconciliation_task_service.find_task_for_oa_batch_id(str(getattr(batch, "id", "")))
+            if task is not None:
+                self._etc_reconciliation_task_service.record_oa_submitted_confirmed(
+                    task_id=str(getattr(task, "task_id")),
+                    oa_draft_batch_id=str(getattr(batch, "id", "")),
+                    actor="system",
+                )
         except EtcBatchNotFoundError as error:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_batch_not_found", "message": str(error)})
+        except ValueError as error:
+            return self._reconciliation_error_response(error)
         except EtcDraftRequestError as error:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
@@ -3903,7 +4632,7 @@ class Application:
                 "Content-Disposition": _build_content_disposition(filename),
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Headers": "Content-Type",
-                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, OPTIONS",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
             },
         )
 
@@ -4498,6 +5227,406 @@ class Application:
             },
         )
 
+    def _handle_api_no_oa_bank_batches(self, query: dict[str, list[str]]) -> Response:
+        self._refresh_no_oa_bank_batches()
+        filters = {
+            "month": query.get("month", [""])[0],
+            "type": query.get("type", [""])[0],
+            "status": query.get("status", [""])[0],
+            "account_key": query.get("account_key", [""])[0],
+        }
+        batches = self._no_oa_bank_batch_service.list_batches(filters)
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "summary": self._no_oa_bank_batch_summary(batches),
+                "batches": batches,
+            },
+        )
+
+    def _handle_api_no_oa_bank_batch_detail(self, batch_id: str) -> Response:
+        bank_rows, categories_by_transaction_id = self._refresh_no_oa_bank_batches()
+        rows_by_id = {str(row.get("id")): row for row in bank_rows if str(row.get("id") or "").strip()}
+        try:
+            batch = self._no_oa_bank_batch_service.get_batch(batch_id)
+        except KeyError:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "unknown_no_oa_bank_batch", "message": "免OA流水批次不存在。"},
+            )
+        row_ids = [str(row_id) for row_id in list(batch.get("row_ids") or []) if str(row_id).strip()]
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "batch": batch,
+                "rows": [rows_by_id[row_id] for row_id in row_ids if row_id in rows_by_id],
+                "categories_by_transaction_id": {
+                    row_id: categories_by_transaction_id.get(row_id, {})
+                    for row_id in row_ids
+                },
+            },
+        )
+
+    def _handle_api_no_oa_bank_batch_submit(
+        self,
+        batch_id: str,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session = self._no_oa_bank_batch_mutation_session(headers)
+        if isinstance(session, Response):
+            return session
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        actor = str(payload.get("actor") or session.identity.username or session.identity.user_id or "web_finance_user")
+        try:
+            result = self._submit_no_oa_bank_batch(
+                batch_id,
+                actor=actor,
+                expected_version=self._optional_int(payload.get("expected_version")),
+                note=str(payload.get("note") or "").strip() or None,
+            )
+        except KeyError:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "unknown_no_oa_bank_batch", "message": "免OA流水批次不存在。"},
+            )
+        except ValueError as exc:
+            return self._no_oa_bank_batch_value_error_response(exc)
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _handle_api_no_oa_bank_batch_withdraw(
+        self,
+        batch_id: str,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session = self._no_oa_bank_batch_mutation_session(headers)
+        if isinstance(session, Response):
+            return session
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        actor = str(payload.get("actor") or session.identity.username or session.identity.user_id or "web_finance_user")
+        try:
+            result = self._withdraw_no_oa_bank_batch(
+                batch_id,
+                actor=actor,
+                expected_version=self._optional_int(payload.get("expected_version")),
+                reason=str(payload.get("reason") or payload.get("note") or "").strip() or None,
+            )
+        except KeyError:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "unknown_no_oa_bank_batch", "message": "免OA流水批次不存在。"},
+            )
+        except ValueError as exc:
+            return self._no_oa_bank_batch_value_error_response(exc)
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _handle_api_no_oa_bank_batches_bulk_submit(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session = self._no_oa_bank_batch_mutation_session(headers)
+        if isinstance(session, Response):
+            return session
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        raw_batches = payload.get("batches")
+        if not isinstance(raw_batches, list):
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_no_oa_bank_batch_request", "message": "batches must be an array."},
+            )
+        actor = str(payload.get("actor") or session.identity.username or session.identity.user_id or "web_finance_user")
+        results: list[dict[str, object]] = []
+        affected_months: set[str] = set()
+        changed_case_ids: list[str] = []
+        for item in raw_batches:
+            if not isinstance(item, dict):
+                results.append({"status": "failed", "error": "invalid_no_oa_bank_batch_request"})
+                continue
+            item_batch_id = str(item.get("batch_id") or "").strip()
+            if not item_batch_id:
+                results.append({"status": "failed", "error": "invalid_no_oa_bank_batch_request"})
+                continue
+            try:
+                result = self._submit_no_oa_bank_batch(
+                    item_batch_id,
+                    actor=actor,
+                    expected_version=self._optional_int(item.get("expected_version")),
+                    note=str(item.get("note") or payload.get("note") or "").strip() or None,
+                    persist=False,
+                )
+            except KeyError:
+                results.append({"batch_id": item_batch_id, "status": "failed", "error": "unknown_no_oa_bank_batch"})
+                continue
+            except ValueError as exc:
+                results.append({"batch_id": item_batch_id, "status": "failed", "error": self._no_oa_bank_batch_error_code(exc)})
+                continue
+            result_batch = dict(result.get("batch") or {})
+            result_relation = dict(result.get("pair_relation") or {})
+            results.append({"batch_id": item_batch_id, "status": "submitted", "batch": result_batch})
+            affected_months.update(str(month) for month in list(result.get("affected_months") or []) if str(month).strip())
+            changed_case_id = str(result_relation.get("case_id") or result_batch.get("relation_case_id") or "").strip()
+            if changed_case_id:
+                changed_case_ids.append(changed_case_id)
+
+        workbench_rebuild_queued = self._after_no_oa_bank_batch_mutation(
+            sorted(affected_months),
+            changed_case_ids=changed_case_ids,
+            persist=True,
+        )
+        submitted_count = sum(1 for result in results if result.get("status") == "submitted")
+        failed_count = sum(1 for result in results if result.get("status") == "failed")
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "summary": {"submitted": submitted_count, "failed": failed_count},
+                "results": results,
+                "affected_months": sorted(affected_months),
+                "workbench_rebuild_queued": workbench_rebuild_queued,
+            },
+        )
+
+    def _submit_no_oa_bank_batch(
+        self,
+        batch_id: str,
+        *,
+        actor: str,
+        expected_version: int | None,
+        note: str | None,
+        persist: bool = True,
+    ) -> dict[str, object]:
+        self._refresh_no_oa_bank_batches()
+        batch = self._no_oa_bank_batch_service.submit_batch(
+            batch_id,
+            actor=actor,
+            expected_version=expected_version,
+            note=note,
+        )
+        relation_case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
+        relation = self._pair_relation_snapshot_by_case_id(relation_case_id)
+        affected_months = self._no_oa_bank_batch_affected_months(batch)
+        workbench_rebuild_queued = self._after_no_oa_bank_batch_mutation(
+            affected_months,
+            changed_case_ids=[relation_case_id] if relation_case_id else [],
+            persist=persist,
+        )
+        return {
+            "batch": batch,
+            "pair_relation": relation or {},
+            "affected_months": affected_months,
+            "workbench_rebuild_queued": workbench_rebuild_queued,
+            "results": [{"batch_id": batch.get("batch_id"), "status": "submitted"}],
+        }
+
+    def _withdraw_no_oa_bank_batch(
+        self,
+        batch_id: str,
+        *,
+        actor: str,
+        expected_version: int | None,
+        reason: str | None,
+    ) -> dict[str, object]:
+        batch = self._no_oa_bank_batch_service.withdraw_batch(
+            batch_id,
+            actor=actor,
+            expected_version=expected_version,
+            reason=reason,
+        )
+        relation_case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
+        relation = self._pair_relation_snapshot_by_case_id(relation_case_id)
+        affected_months = self._no_oa_bank_batch_affected_months(batch)
+        workbench_rebuild_queued = self._after_no_oa_bank_batch_mutation(
+            affected_months,
+            changed_case_ids=[relation_case_id] if relation_case_id else [],
+            persist=True,
+        )
+        return {
+            "batch": batch,
+            "pair_relation": relation or {},
+            "affected_months": affected_months,
+            "workbench_rebuild_queued": workbench_rebuild_queued,
+            "results": [{"batch_id": batch.get("batch_id"), "status": "withdrawn"}],
+        }
+
+    def _refresh_no_oa_bank_batches(self) -> tuple[list[dict[str, object]], dict[str, dict[str, object]]]:
+        bank_rows = self._no_oa_bank_transaction_rows()
+        categories_by_transaction_id = self._bank_transaction_effective_category_provider.bulk_get_for_rows(bank_rows)
+        self._no_oa_bank_batch_service.build_batches(
+            bank_rows,
+            categories_by_transaction_id,
+            self._workbench_pair_relation_service.list_active_relations(),
+            self._workbench_matching_source_versions(),
+        )
+        return bank_rows, categories_by_transaction_id
+
+    def _no_oa_bank_transaction_rows(self) -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
+        for transaction in list(self._import_service.list_transactions()):
+            payload = self._serialize_value(transaction)
+            if not isinstance(payload, dict):
+                continue
+            transaction_id = str(payload.get("id") or "").strip()
+            if not transaction_id:
+                continue
+            row = dict(payload)
+            row["id"] = transaction_id
+            row["type"] = "bank"
+            row["bank_name"] = str(
+                row.get("bank_name")
+                or row.get("imported_bank_name")
+                or row.get("bank_short_name")
+                or row.get("account_bank")
+                or ""
+            ).strip()
+            account_no = str(row.get("account_no") or row.get("account_number") or "").strip()
+            account_last4 = str(row.get("account_last4") or row.get("imported_bank_last4") or "").strip()
+            if not account_last4:
+                digits = "".join(ch for ch in account_no if ch.isdigit())
+                account_last4 = digits[-4:] if digits else ""
+            row["account_last4"] = account_last4
+            row["account_key"] = str(row.get("account_key") or f"{row['bank_name']}:{account_last4}").strip(":")
+            row["counterparty_name"] = str(row.get("counterparty_name") or row.get("counterparty_name_raw") or "").strip()
+            amount = row.get("amount") or "0.00"
+            direction = str(row.get("txn_direction") or row.get("direction") or "").strip().lower()
+            if direction in {"outflow", "expense", "支", "出"}:
+                row["direction"] = "expense"
+                row["direction_label"] = "支"
+                row["debit_amount"] = row.get("debit_amount") or amount
+                row["credit_amount"] = row.get("credit_amount") or "0.00"
+            elif direction in {"inflow", "income", "收", "进"}:
+                row["direction"] = "income"
+                row["direction_label"] = "收"
+                row["debit_amount"] = row.get("debit_amount") or "0.00"
+                row["credit_amount"] = row.get("credit_amount") or amount
+            if "purpose" not in row:
+                row["purpose"] = row.get("usage") or row.get("use") or ""
+            rows.append(row)
+        categories_by_transaction_id = self._bank_transaction_effective_category_provider.bulk_get_for_rows(rows)
+        for row in rows:
+            transaction_id = str(row.get("id") or "").strip()
+            category = categories_by_transaction_id.get(transaction_id, {})
+            if category:
+                row["category_code"] = category.get("category_code")
+                row["category_label"] = category.get("category_label")
+                row["category_path"] = list(category.get("category_path") or [])
+                row["category_source"] = category.get("category_source") or category.get("source")
+        return rows
+
+    @staticmethod
+    def _no_oa_bank_batch_summary(batches: list[dict[str, object]]) -> dict[str, object]:
+        counts: dict[str, int] = {"draft": 0, "submitted": 0, "withdrawn": 0, "conflict": 0, "stale": 0}
+        total_amount = Decimal("0.00")
+        for batch in batches:
+            status = str(batch.get("status") or "").strip()
+            if status in counts:
+                counts[status] += 1
+            try:
+                total_amount += Decimal(str(batch.get("total_amount") or "0").replace(",", ""))
+            except Exception:
+                continue
+        return {
+            "total": len(batches),
+            **counts,
+            "draft_count": counts["draft"],
+            "submitted_count": counts["submitted"],
+            "withdrawn_count": counts["withdrawn"],
+            "conflict_count": counts["conflict"],
+            "stale_count": counts["stale"],
+            "total_amount": f"{total_amount:.2f}",
+        }
+
+    def _no_oa_bank_batch_affected_months(self, batch: dict[str, object]) -> list[str]:
+        months = {
+            str(batch.get("scope_month") or "").strip(),
+            *self._bank_transaction_category_affected_months(
+                [str(row_id) for row_id in list(batch.get("row_ids") or []) if str(row_id).strip()]
+            ),
+        }
+        return sorted(month for month in months if SEARCH_MONTH_RE.match(month))
+
+    def _after_no_oa_bank_batch_mutation(
+        self,
+        affected_months: list[str],
+        *,
+        changed_case_ids: list[str],
+        persist: bool,
+    ) -> bool:
+        normalized_months = [
+            str(month).strip()
+            for month in list(affected_months or [])
+            if SEARCH_MONTH_RE.match(str(month).strip())
+        ]
+        scope_keys = ["all", *normalized_months]
+        read_model_scope_keys = self._invalidate_workbench_read_model_scopes(
+            scope_keys,
+            schedule_cost_statistics_warmup=False,
+        )
+        self._search_service.clear_cache()
+        if persist:
+            if changed_case_ids:
+                self._persist_workbench_pair_relations(changed_case_ids=changed_case_ids)
+            self._persist_no_oa_bank_batches_best_effort(operation="no_oa_bank_batch_updated")
+            self._persist_workbench_read_models_best_effort(
+                snapshot=self._workbench_read_model_service.snapshot(),
+                changed_scope_keys=read_model_scope_keys,
+                operation="no_oa_bank_batch_updated",
+            )
+        return bool(normalized_months)
+
+    def _persist_no_oa_bank_batches_best_effort(self, *, operation: str) -> None:
+        if self._state_store is None:
+            return
+        try:
+            self._state_store.save_no_oa_bank_batches(self._no_oa_bank_batch_service.snapshot())
+        except Exception as exc:
+            self._emit_workbench_persistence_warning(operation=operation, detail=str(exc))
+
+    def _pair_relation_snapshot_by_case_id(self, case_id: str) -> dict[str, object] | None:
+        normalized_case_id = str(case_id or "").strip()
+        if not normalized_case_id:
+            return None
+        pair_relations = self._workbench_pair_relation_service.snapshot().get("pair_relations", {})
+        relation = pair_relations.get(normalized_case_id) if isinstance(pair_relations, dict) else None
+        return dict(relation) if isinstance(relation, dict) else None
+
+    def _no_oa_bank_batch_mutation_session(self, headers: dict[str, str] | None) -> OARequestSession | Response:
+        session = resolve_oa_request_session(
+            headers,
+            identity_service=self._oa_identity_service,
+            access_control_service=self._access_control_service,
+        )
+        if not session.can_mutate_data:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "permission_denied", "message": "当前账户没有提交免OA流水批次的权限。"},
+            )
+        return session
+
+    @staticmethod
+    def _optional_int(value: object) -> int | None:
+        if value in (None, ""):
+            return None
+        return int(value)
+
+    def _no_oa_bank_batch_value_error_response(self, exc: ValueError) -> Response:
+        error_code = self._no_oa_bank_batch_error_code(exc)
+        status = HTTPStatus.CONFLICT if error_code == "no_oa_bank_batch_version_conflict" else HTTPStatus.BAD_REQUEST
+        return self._json_response(status, {"error": error_code, "message": str(exc)})
+
+    @staticmethod
+    def _no_oa_bank_batch_error_code(exc: ValueError) -> str:
+        message = str(exc).strip()
+        if message == "no_oa_bank_batch_version_conflict":
+            return message
+        return message or "invalid_no_oa_bank_batch_request"
+
     def _handle_api_turnover_ledger(self, query: dict[str, list[str]]) -> Response:
         try:
             payload = self._turnover_ledger_api_routes.list_ledger(
@@ -4545,7 +5674,7 @@ class Application:
                 "Content-Disposition": _build_content_disposition(filename),
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Headers": "Content-Type",
-                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, OPTIONS",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
             },
         )
 
@@ -6334,7 +7463,7 @@ class Application:
                 "Content-Disposition": f'attachment; filename="{batch_id}.json"',
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Headers": "Content-Type",
-                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, OPTIONS",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
             },
         )
 
@@ -7254,6 +8383,7 @@ class Application:
                 "workbench_overrides": self._workbench_override_service.snapshot(),
                 "workbench_exception_cases": self._workbench_exception_case_service.snapshot(),
                 "workbench_pair_relations": self._workbench_pair_relation_service.snapshot(),
+                "no_oa_bank_batches": self._no_oa_bank_batch_service.snapshot(),
                 "workbench_read_models": self._workbench_read_model_service.snapshot(),
                 "workbench_candidate_matches": self._workbench_candidate_match_service.snapshot(),
                 "workbench_matching_dirty_scopes": self._workbench_matching_dirty_scope_service.snapshot(),
@@ -7531,6 +8661,11 @@ class Application:
                 read_model_scope_key,
                 source_versions=read_model_source_versions,
             )
+            if not is_version_fresh and self._can_use_legacy_workbench_read_model_without_source_versions(
+                cached_read_model,
+                read_model_source_versions,
+            ):
+                is_version_fresh = True
             if (
                 ensure_candidate_matches
                 and isinstance(cached_payload, dict)
@@ -7594,6 +8729,25 @@ class Application:
                 operation="get_or_build_read_model",
             )
         return read_model
+
+    @staticmethod
+    def _can_use_legacy_workbench_read_model_without_source_versions(
+        read_model: dict[str, object],
+        current_source_versions: dict[str, object],
+    ) -> bool:
+        persisted_versions = read_model.get("source_versions")
+        if isinstance(persisted_versions, dict) and persisted_versions:
+            return False
+        empty_turnover_snapshot_version = WorkbenchReadModelService.snapshot_version(
+            {
+                "schema_version": TURNOVER_RELATION_SCHEMA_VERSION,
+                "relations": [],
+            }
+        )
+        return (
+            current_source_versions.get("turnover_relation_snapshot_version")
+            == empty_turnover_snapshot_version
+        )
 
     def _ensure_workbench_candidate_matches_for_scope(self, month: str, *, reason: str) -> None:
         source_versions = self._workbench_matching_source_versions()
@@ -7667,8 +8821,10 @@ class Application:
 
     def _append_etc_invoice_summary_rows(self, payload: dict[str, object]) -> None:
         summary_rows_by_external_batch_id = self._etc_invoice_summary_rows_by_external_batch_id()
-        if not summary_rows_by_external_batch_id:
+        supplement_rows_by_external_batch_id = self._etc_supplement_summary_rows_by_external_batch_id()
+        if not summary_rows_by_external_batch_id and not supplement_rows_by_external_batch_id:
             return
+        appended_external_batch_ids: set[str] = set()
         for section in ("paired", "open"):
             section_payload = payload.get(section)
             if not isinstance(section_payload, dict):
@@ -7685,13 +8841,53 @@ class Application:
                 if not external_batch_id:
                     continue
                 summary_row = summary_rows_by_external_batch_id.get(external_batch_id)
-                if summary_row is None:
-                    continue
-                row = self._serialize_value(summary_row)
-                case_id = self._case_id_for_group(group)
-                if case_id:
-                    row["case_id"] = case_id
-                invoice_rows.append(row)
+                supplement_rows = supplement_rows_by_external_batch_id.get(external_batch_id, [])
+                if summary_row is not None:
+                    row = self._serialize_value(summary_row)
+                    case_id = self._case_id_for_group(group)
+                    if case_id:
+                        row["case_id"] = case_id
+                    invoice_rows.append(row)
+                    appended_external_batch_ids.add(external_batch_id)
+                for supplement_row in supplement_rows:
+                    if any(str(existing.get("id", "")) == str(supplement_row.get("id", "")) for existing in invoice_rows if isinstance(existing, dict)):
+                        continue
+                    row = self._serialize_value(supplement_row)
+                    case_id = self._case_id_for_group(group)
+                    if case_id:
+                        row["case_id"] = case_id
+                    invoice_rows.append(row)
+                    appended_external_batch_ids.add(external_batch_id)
+        missing_external_batch_ids = set(supplement_rows_by_external_batch_id) - appended_external_batch_ids
+        if not missing_external_batch_ids:
+            return
+        open_section = payload.setdefault("open", {"groups": []})
+        if not isinstance(open_section, dict):
+            return
+        groups = open_section.setdefault("groups", [])
+        if not isinstance(groups, list):
+            return
+        for external_batch_id in sorted(missing_external_batch_ids):
+            invoice_rows = []
+            summary_row = summary_rows_by_external_batch_id.get(external_batch_id)
+            if summary_row is not None:
+                invoice_rows.append(self._serialize_value(summary_row))
+            invoice_rows.extend(
+                self._serialize_value(row)
+                for row in supplement_rows_by_external_batch_id.get(external_batch_id, [])
+            )
+            if not invoice_rows:
+                continue
+            groups.append(
+                {
+                    "group_id": f"etc-batch:{external_batch_id}",
+                    "case_id": None,
+                    "bank_rows": [],
+                    "oa_rows": [],
+                    "invoice_rows": invoice_rows,
+                    "display_tags": ["ETC批量提交"],
+                }
+            )
 
     def _etc_invoice_summary_rows_by_external_batch_id(self) -> dict[str, dict[str, object]]:
         batches_by_internal_id = {batch.id: batch for batch in self._etc_service.list_batches()}
@@ -7712,6 +8908,24 @@ class Application:
             for external_batch_id, invoices in invoices_by_external_batch_id.items()
             if invoices
         }
+
+    def _etc_supplement_summary_rows_by_external_batch_id(self) -> dict[str, list[dict[str, object]]]:
+        rows: dict[str, list[dict[str, object]]] = {}
+        for batch in self._etc_service.list_batches(status="submitted"):
+            external_batch_id = str(getattr(batch, "etc_batch_id", "") or "").strip()
+            if not external_batch_id:
+                continue
+            supplement_items = [
+                item for item in list(getattr(batch, "supplement_items", []) or [])
+                if isinstance(item, dict)
+            ]
+            if not supplement_items:
+                continue
+            rows[external_batch_id] = [
+                self._build_etc_supplement_summary_row(external_batch_id, batch, item, index)
+                for index, item in enumerate(supplement_items, start=1)
+            ]
+        return rows
 
     def _build_etc_invoice_summary_row(self, external_batch_id: str, invoices: list[object]) -> dict[str, object]:
         sorted_invoices = sorted(
@@ -7783,6 +8997,62 @@ class Application:
                 "ETC发票合计": self._format_money(total_amount),
                 "开票日期范围": issue_range or "—",
                 "发票清单": "\n".join(invoice_lines) if invoice_lines else "—",
+            },
+        }
+
+    def _build_etc_supplement_summary_row(
+        self,
+        external_batch_id: str,
+        batch: object,
+        supplement: dict[str, object],
+        index: int,
+    ) -> dict[str, object]:
+        amount = self._decimal_from_value(supplement.get("amount")) or Decimal("0.00")
+        source_name = str(supplement.get("sourceName") or supplement.get("source_name") or f"补充凭证{index}")
+        paid_at = str(supplement.get("paidAt") or supplement.get("paid_at") or getattr(batch, "passage_end_date", "") or "")
+        tags = [
+            str(tag).strip()
+            for tag in list(supplement.get("tags") or ["ETC补充凭证"])
+            if str(tag).strip()
+        ]
+        if "ETC补充凭证" not in tags:
+            tags.append("ETC补充凭证")
+        row_id = f"{self._etc_invoice_summary_row_id(external_batch_id)}-supplement-{index}"
+        return {
+            "id": row_id,
+            "type": "invoice",
+            "case_id": None,
+            "source_kind": "etc_supplement_evidence",
+            "seller_tax_no": "ETC补充凭证",
+            "seller_name": str(supplement.get("merchantName") or supplement.get("merchant_name") or "ETC补充凭证"),
+            "buyer_tax_no": external_batch_id,
+            "buyer_name": "ETC批次补充凭证",
+            "invoice_code": external_batch_id,
+            "invoice_no": source_name,
+            "digital_invoice_no": source_name,
+            "issue_date": paid_at[:10] if len(paid_at) >= 10 else "—",
+            "amount": self._format_money(amount),
+            "tax_rate": "—",
+            "tax_amount": "—",
+            "total_with_tax": self._format_money(amount),
+            "invoice_type": "补充凭证",
+            "invoice_bank_relation": {"code": "etc_supplement_evidence", "label": "ETC补充凭证", "tone": "warning"},
+            "tags": tags,
+            "etc_batch_id": external_batch_id,
+            "etc_invoice_count": 0,
+            "available_actions": ["detail"],
+            "summary_fields": {
+                "ETC批次": external_batch_id,
+                "补充凭证": source_name,
+                "补充金额": self._format_money(amount),
+                "标签": "、".join(tags),
+            },
+            "detail_fields": {
+                "ETC批次": external_batch_id,
+                "补充凭证": source_name,
+                "补充金额": self._format_money(amount),
+                "标签": "、".join(tags),
+                "存储路径": str(supplement.get("storedPath") or supplement.get("stored_path") or "—"),
             },
         }
 
@@ -8387,8 +9657,11 @@ class Application:
             if str(candidate.get("rule_code") or "") == CASH_TURNOVER_DETECTED:
                 self._apply_cash_turnover_candidate_metadata(candidate, rows_by_id)
                 continue
+            extends_existing_active_case = False
             if any(self._row_has_active_pair_relation(rows_by_id.get(row_id)) for row_id in row_ids):
-                continue
+                if not self._candidate_can_extend_existing_active_case(candidate, row_ids, rows_by_id):
+                    continue
+                extends_existing_active_case = True
             if any(row_id in claimed_row_ids for row_id in row_ids):
                 continue
             applicable_row_ids = [row_id for row_id in row_ids if isinstance(rows_by_id.get(row_id), dict)]
@@ -8405,7 +9678,8 @@ class Application:
                     continue
                 row["case_id"] = case_id
                 relation_field = self._workbench_query_service.relation_field_name(str(row.get("type") or ""))
-                row[relation_field] = self._serialize_value(relation)
+                if not (extends_existing_active_case and self._row_has_active_pair_relation(row)):
+                    row[relation_field] = self._serialize_value(relation)
                 if str(candidate.get("rule_code") or "") == OA_INVOICE_OFFSET_AUTO_MATCH_MODE:
                     tags = [
                         str(tag).strip()
@@ -8419,6 +9693,43 @@ class Application:
             claimed_row_ids.update(row_ids)
         return result
 
+    def _candidate_can_extend_existing_active_case(
+        self,
+        candidate: dict[str, object],
+        row_ids: list[str],
+        rows_by_id: dict[str, dict[str, object]],
+    ) -> bool:
+        if not Application._candidate_is_determined(candidate):
+            return False
+        rule_code = str(candidate.get("rule_code") or "").strip()
+        candidate_type = str(candidate.get("candidate_type") or "").strip()
+        if rule_code != "oa_bank_exact_amount" or candidate_type != "oa_bank":
+            return False
+        if not candidate.get("oa_row_ids") or not candidate.get("bank_row_ids"):
+            return False
+        existing_case_ids = {
+            case_id
+            for row_id in row_ids
+            if isinstance(row := rows_by_id.get(row_id), dict)
+            and (case_id := str(row.get("case_id") or "").strip())
+        }
+        if len(existing_case_ids) != 1:
+            return False
+        existing_case_id = next(iter(existing_case_ids))
+        if existing_case_id.startswith("candidate:"):
+            return False
+        has_active_pair_relation = False
+        for row_id in row_ids:
+            row = rows_by_id.get(row_id)
+            if not isinstance(row, dict):
+                continue
+            if not self._row_has_active_pair_relation(row):
+                continue
+            has_active_pair_relation = True
+            if str(row.get("case_id") or "").strip() != existing_case_id:
+                return False
+        return has_active_pair_relation
+
     @staticmethod
     def _candidate_can_apply_to_rows(candidate: dict[str, object], row_ids: list[str]) -> bool:
         unique_row_ids = {str(row_id).strip() for row_id in row_ids if str(row_id).strip()}
@@ -8430,8 +9741,8 @@ class Application:
     def _candidate_is_determined(candidate: dict[str, object]) -> bool:
         return str(candidate.get("status") or "").strip() in {"auto_closed", "incomplete"}
 
-    @staticmethod
     def _candidate_application_case_id(
+        self,
         candidate: dict[str, object],
         row_ids: list[str],
         rows_by_id: dict[str, dict[str, object]],
@@ -8447,6 +9758,8 @@ class Application:
         if existing_case_ids:
             case_id = next(iter(existing_case_ids))
             if Application._candidate_can_extend_existing_case(candidate, case_id):
+                return case_id
+            if self._candidate_can_extend_existing_active_case(candidate, row_ids, rows_by_id):
                 return case_id
             return ""
         return str(candidate.get("candidate_key") or candidate.get("candidate_id") or "").strip()
@@ -8725,6 +10038,7 @@ class Application:
         linked_relation = self._pair_relation_display_payload(
             relation_mode=relation_mode,
             row_type=str(payload.get("type", "")),
+            special_metadata=relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else None,
         )
         payload[relation_field] = self._serialize_value(linked_relation)
         self._workbench_override_service._sync_summary_relation(payload, str(linked_relation.get("label", "")))
@@ -8732,6 +10046,9 @@ class Application:
             self._apply_oa_invoice_offset_pair_metadata(payload)
         if relation_mode == "internal_transfer_pair" and str(payload.get("type")) == "bank":
             self._apply_internal_transfer_pair_metadata(payload, relation)
+        if relation_mode == NO_OA_BANK_BATCH_RELATION_MODE:
+            payload["relation_mode"] = NO_OA_BANK_BATCH_RELATION_MODE
+            self._apply_no_oa_bank_batch_pair_metadata(payload, relation)
         self._apply_cash_special_pair_metadata(payload, relation)
         payload["available_actions"] = ["detail"]
         self._apply_cash_special_available_actions(payload, relation)
@@ -8920,7 +10237,13 @@ class Application:
         if invalidate_cost_statistics:
             self._invalidate_cost_statistics_read_models()
 
-    def _invalidate_workbench_read_model_scopes(self, scope_keys: list[str]) -> list[str]:
+    def _invalidate_workbench_read_model_scopes(
+        self,
+        scope_keys: list[str],
+        *,
+        invalidate_cost_statistics: bool = True,
+        schedule_cost_statistics_warmup: bool = True,
+    ) -> list[str]:
         normalized_scope_keys = {
             str(scope_key).strip()
             for scope_key in list(scope_keys or [])
@@ -8929,10 +10252,12 @@ class Application:
         expanded_scope_keys = self._expand_workbench_read_model_scope_keys_for_base_scopes(list(normalized_scope_keys))
         for scope_key in expanded_scope_keys:
             self._workbench_read_model_service.delete_read_model(scope_key)
-        self._invalidate_cost_statistics_read_model_scopes(
-            list(normalized_scope_keys),
-            reason="workbench_scope_invalidated",
-        )
+        if invalidate_cost_statistics:
+            self._invalidate_cost_statistics_read_model_scopes(
+                list(normalized_scope_keys),
+                reason="workbench_scope_invalidated",
+                schedule_warmup=schedule_cost_statistics_warmup,
+            )
         return expanded_scope_keys
 
     def _invalidate_cost_statistics_read_models(self, *, schedule_warmup: bool = True) -> list[str]:
@@ -8958,6 +10283,7 @@ class Application:
         scope_keys: list[str],
         *,
         reason: str = "",
+        schedule_warmup: bool = True,
     ) -> list[str]:
         read_model_service = self._cost_statistics_read_model_service
         if read_model_service is None:
@@ -8985,10 +10311,11 @@ class Application:
             changed_scope_keys=deleted_scope_keys,
             operation=reason or "invalidate_cost_statistics_read_model_scopes",
         )
-        self._schedule_cost_statistics_cache_warmup(
-            warmup_months,
-            reason=reason or "cost_statistics_scope_invalidated",
-        )
+        if schedule_warmup and deleted_scope_keys:
+            self._schedule_cost_statistics_cache_warmup(
+                warmup_months,
+                reason=reason or "cost_statistics_scope_invalidated",
+            )
         return deleted_scope_keys
 
     @staticmethod
@@ -9027,28 +10354,111 @@ class Application:
                 return scope_key
         return str(self._cost_statistics_read_model_service.scope_key(month, project_scope))
 
-    def _schedule_cost_statistics_cache_warmup(self, months: list[str], reason: str):
+    def _recover_interrupted_cost_statistics_cache_warmup_jobs(self) -> None:
+        list_attention_jobs = getattr(self._background_job_service, "list_attention_jobs", None)
+        if not callable(list_attention_jobs):
+            return
+        try:
+            attention_jobs = list_attention_jobs("system", include_system=True)
+        except Exception:
+            return
+        for job in attention_jobs:
+            if getattr(job, "type", None) != "cost_statistics_cache_warmup":
+                continue
+            if getattr(job, "error", None) != "interrupted_by_restart":
+                continue
+            target_scope_keys = self._retry_cost_statistics_warmup_scope_keys(job)
+            if not target_scope_keys:
+                continue
+            existing_job = self._find_reusable_cost_statistics_warmup_job(
+                target_scope_keys,
+                exclude_job_id=getattr(job, "job_id", None),
+            )
+            recovery_job = existing_job or self._schedule_cost_statistics_cache_warmup(
+                [],
+                reason="startup_recovery",
+                target_scope_keys=target_scope_keys,
+            )
+            if recovery_job is None:
+                continue
+            self._close_replaced_cost_statistics_warmup_job(job, "system", recovery_job)
+
+    def _find_reusable_cost_statistics_warmup_job(self, target_scope_keys: list[str], *, exclude_job_id: str | None = None):
+        normalized_target_scope_keys = set(self._normalize_cost_statistics_scope_keys(target_scope_keys))
+        if not normalized_target_scope_keys:
+            return None
+        for job in self._background_job_service.list_active_jobs("system", include_system=True):
+            if getattr(job, "type", None) != "cost_statistics_cache_warmup":
+                continue
+            if exclude_job_id and getattr(job, "job_id", None) == exclude_job_id:
+                continue
+            job_scope_keys = set(self._cost_statistics_job_target_scope_keys(job))
+            if job_scope_keys == normalized_target_scope_keys:
+                return job
+        return None
+
+    def _cost_statistics_job_target_scope_keys(self, job) -> list[str]:
+        result_summary = job.result_summary if isinstance(job.result_summary, dict) else {}
+        target_scope_keys = self._result_summary_scope_keys(result_summary, "target_scope_keys")
+        if target_scope_keys:
+            return self._normalize_cost_statistics_scope_keys(target_scope_keys)
+        affected_scope_keys = [
+            str(scope_key).strip()
+            for scope_key in list(getattr(job, "affected_scopes", []) or [])
+            if str(scope_key).strip()
+        ]
+        if affected_scope_keys:
+            return self._normalize_cost_statistics_scope_keys(affected_scope_keys)
+        months = self._retry_cost_statistics_warmup_months(job)
+        return [
+            target["scope_key"]
+            for target in self._cost_statistics_warmup_targets(months=months, project_scopes=["active", "all"])
+        ]
+
+    def _close_replaced_cost_statistics_warmup_job(self, old_job, owner_user_id: str, replacement_job) -> None:
+        if replacement_job is None:
+            self._background_job_service.acknowledge_job(old_job.job_id, owner_user_id)
+            return
+        supersede_job = getattr(self._background_job_service, "supersede_job", None)
+        if callable(supersede_job):
+            supersede_job(
+                old_job.job_id,
+                owner_user_id,
+                superseded_by_job_id=replacement_job.job_id,
+            )
+            return
+        self._background_job_service.acknowledge_job(old_job.job_id, owner_user_id)
+
+    def _schedule_cost_statistics_cache_warmup(
+        self,
+        months: list[str],
+        reason: str,
+        *,
+        target_scope_keys: list[str] | None = None,
+    ):
         read_model_service = self._cost_statistics_read_model_service
         if read_model_service is None:
             return None
-        normalized_months = {
-            str(month).strip()
-            for month in list(months or [])
-            if str(month).strip()
-        }
-        if not normalized_months:
-            return None
-        ordered_months = sorted((month for month in normalized_months if month != "all"), reverse=True)
-        if "all" in normalized_months:
-            ordered_months.append("all")
-        deduped_months = list(dict.fromkeys(ordered_months))
         project_scopes = ["active", "all"]
-        affected_scope_keys = [
-            self._cost_statistics_read_model_scope_key(month, project_scope)
-            for month in deduped_months
-            for project_scope in project_scopes
-        ]
-        idempotency_key = f"cost_statistics_cache_warmup:{reason}:{','.join(deduped_months)}"
+        targets = self._cost_statistics_warmup_targets(
+            months=months,
+            project_scopes=project_scopes,
+            target_scope_keys=target_scope_keys,
+        )
+        if not targets:
+            return None
+        affected_scope_keys = [target["scope_key"] for target in targets]
+        existing_job = self._find_reusable_cost_statistics_warmup_job(affected_scope_keys)
+        if existing_job is not None:
+            return existing_job
+        deduped_months = list(dict.fromkeys([target["month"] for target in targets]))
+        idempotency_key = f"cost_statistics_cache_warmup:{','.join(affected_scope_keys)}"
+        initial_result_summary = self._cost_statistics_warmup_result_summary(
+            target_scope_keys=affected_scope_keys,
+            warmed_scope_keys=[],
+            failed_scope_keys=[],
+            remaining_scope_keys=affected_scope_keys,
+        )
         job, created = self._background_job_service.create_or_get_idempotent_job_with_created(
             job_type="cost_statistics_cache_warmup",
             label="预热成本统计缓存",
@@ -9059,8 +10469,13 @@ class Application:
             current=0,
             total=len(affected_scope_keys),
             message="成本统计缓存预热任务已创建。",
-            result_summary={"warmed": 0, "failed": 0},
-            source={"reason": reason, "months": deduped_months, "project_scopes": project_scopes},
+            result_summary=initial_result_summary,
+            source={
+                "reason": reason,
+                "months": deduped_months,
+                "project_scopes": project_scopes,
+                "target_scope_keys": affected_scope_keys,
+            },
             affected_scopes=affected_scope_keys,
             affected_months=deduped_months,
         )
@@ -9070,8 +10485,7 @@ class Application:
             job,
             lambda running_job: self._run_cost_statistics_cache_warmup_job(
                 running_job,
-                months=deduped_months,
-                project_scopes=project_scopes,
+                targets=targets,
             ),
         )
         return job
@@ -9080,29 +10494,47 @@ class Application:
         self,
         running_job,
         *,
-        months: list[str],
-        project_scopes: list[str],
+        months: list[str] | None = None,
+        project_scopes: list[str] | None = None,
+        targets: list[dict[str, str]] | None = None,
     ) -> dict[str, object]:
         read_model_service = self._cost_statistics_read_model_service
         if read_model_service is None:
-            return {"warmed": 0, "failed": 0}
-        targets = [
-            (month, project_scope)
-            for month in list(months or [])
-            for project_scope in list(project_scopes or [])
-        ]
-        total = len(targets)
+            return self._cost_statistics_warmup_result_summary(
+                target_scope_keys=[],
+                warmed_scope_keys=[],
+                failed_scope_keys=[],
+                remaining_scope_keys=[],
+            )
+        resolved_targets = (
+            list(targets or [])
+            if targets is not None
+            else self._cost_statistics_warmup_targets(
+                months=months or [],
+                project_scopes=project_scopes or ["active", "all"],
+            )
+        )
+        target_scope_keys = [target["scope_key"] for target in resolved_targets]
+        total = len(resolved_targets)
         warmed_scope_keys: list[str] = []
         failed_scope_keys: list[str] = []
-        for index, (month, project_scope) in enumerate(targets, start=1):
-            scope_key = self._cost_statistics_read_model_scope_key(month, project_scope)
+        for index, target in enumerate(resolved_targets, start=1):
+            month = target["month"]
+            project_scope = target["project_scope"]
+            scope_key = target["scope_key"]
+            remaining_scope_keys = target_scope_keys[index - 1 :]
             self._background_job_service.update_progress(
                 running_job.job_id,
                 phase="build_cost_statistics_cache",
                 message=f"正在预热成本统计缓存 {index}/{max(total, 1)}。",
                 current=index - 1,
                 total=total,
-                result_summary={"warmed": len(warmed_scope_keys), "failed": len(failed_scope_keys)},
+                result_summary=self._cost_statistics_warmup_result_summary(
+                    target_scope_keys=target_scope_keys,
+                    warmed_scope_keys=warmed_scope_keys,
+                    failed_scope_keys=failed_scope_keys,
+                    remaining_scope_keys=remaining_scope_keys,
+                ),
             )
             try:
                 payload = self._cost_statistics_service.get_explorer(
@@ -9132,9 +10564,28 @@ class Application:
                 operation="cost_statistics_cache_warmup",
             )
 
+            remaining_scope_keys = target_scope_keys[index:]
+            self._background_job_service.update_progress(
+                running_job.job_id,
+                phase="build_cost_statistics_cache",
+                message=f"正在预热成本统计缓存 {index}/{max(total, 1)}。",
+                current=index,
+                total=total,
+                result_summary=self._cost_statistics_warmup_result_summary(
+                    target_scope_keys=target_scope_keys,
+                    warmed_scope_keys=warmed_scope_keys,
+                    failed_scope_keys=failed_scope_keys,
+                    remaining_scope_keys=remaining_scope_keys,
+                ),
+            )
+
         result_summary = {
-            "warmed": len(warmed_scope_keys),
-            "failed": len(failed_scope_keys),
+            **self._cost_statistics_warmup_result_summary(
+                target_scope_keys=target_scope_keys,
+                warmed_scope_keys=warmed_scope_keys,
+                failed_scope_keys=failed_scope_keys,
+                remaining_scope_keys=[],
+            ),
         }
         message = "成本统计缓存预热完成。" if not failed_scope_keys else "成本统计缓存预热部分完成。"
         self._background_job_service.succeed_job(
@@ -9144,6 +10595,89 @@ class Application:
             status="partial_success" if failed_scope_keys else "succeeded",
         )
         return result_summary
+
+    def _cost_statistics_warmup_targets(
+        self,
+        *,
+        months: list[str],
+        project_scopes: list[str],
+        target_scope_keys: list[str] | None = None,
+    ) -> list[dict[str, str]]:
+        if target_scope_keys is not None:
+            targets: list[dict[str, str]] = []
+            for scope_key in self._normalize_cost_statistics_scope_keys(target_scope_keys):
+                parsed = self._parse_cost_statistics_scope_key(scope_key)
+                if parsed is None:
+                    continue
+                project_scope, month = parsed
+                targets.append({"month": month, "project_scope": project_scope, "scope_key": scope_key})
+            return targets
+
+        normalized_months = {
+            str(month).strip()
+            for month in list(months or [])
+            if str(month).strip()
+        }
+        ordered_months = sorted((month for month in normalized_months if month != "all"), reverse=True)
+        if "all" in normalized_months:
+            ordered_months.append("all")
+        deduped_months = list(dict.fromkeys(ordered_months))
+        normalized_project_scopes = [
+            str(project_scope).strip()
+            for project_scope in list(project_scopes or [])
+            if str(project_scope).strip()
+        ]
+        targets = []
+        for month in deduped_months:
+            for project_scope in normalized_project_scopes:
+                scope_key = self._cost_statistics_read_model_scope_key(month, project_scope)
+                targets.append({"month": month, "project_scope": project_scope, "scope_key": scope_key})
+        return targets
+
+    def _normalize_cost_statistics_scope_keys(self, scope_keys: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for raw_scope_key in list(scope_keys or []):
+            scope_key = str(raw_scope_key or "").strip()
+            parsed = self._parse_cost_statistics_scope_key(scope_key)
+            if parsed is None:
+                continue
+            project_scope, month = parsed
+            resolved_scope_key = self._cost_statistics_read_model_scope_key(month, project_scope)
+            if resolved_scope_key not in normalized:
+                normalized.append(resolved_scope_key)
+        return normalized
+
+    @staticmethod
+    def _parse_cost_statistics_scope_key(scope_key: str) -> tuple[str, str] | None:
+        raw_scope_key = str(scope_key or "").strip()
+        if ":" not in raw_scope_key:
+            return None
+        project_scope, month = raw_scope_key.split(":", 1)
+        project_scope = project_scope.strip()
+        month = month.strip()
+        if project_scope not in {"active", "all"}:
+            return None
+        if month != "all" and not SEARCH_MONTH_RE.match(month):
+            return None
+        return project_scope, month
+
+    @staticmethod
+    def _cost_statistics_warmup_result_summary(
+        *,
+        target_scope_keys: list[str],
+        warmed_scope_keys: list[str],
+        failed_scope_keys: list[str],
+        remaining_scope_keys: list[str],
+    ) -> dict[str, object]:
+        return {
+            "target_scope_keys": list(target_scope_keys),
+            "warmed_scope_keys": list(warmed_scope_keys),
+            "failed_scope_keys": list(failed_scope_keys),
+            "remaining_scope_keys": list(remaining_scope_keys),
+            "warmed": len(warmed_scope_keys),
+            "failed": len(failed_scope_keys),
+            "total": len(target_scope_keys),
+        }
 
     def _invalidate_tax_offset_read_models(self) -> list[str]:
         self._tax_offset_service.clear_month_cache()
@@ -9975,6 +11509,8 @@ class Application:
         if row_type == "invoice":
             if str(row.get("source_kind", "")) == "etc_invoice" or "ETC" in tags:
                 add("ETC")
+            elif str(row.get("source_kind", "")) == "etc_supplement_evidence":
+                add("ETC补充凭证")
             elif str(row.get("source_kind", "")) == "oa_attachment_invoice":
                 add("OA附件")
             else:
@@ -10003,6 +11539,15 @@ class Application:
             add("还清个人暂借款")
         special_metadata = relation.get("special_metadata") if isinstance(relation, dict) else None
         special_type = str(special_metadata.get("special_type") or "") if isinstance(special_metadata, dict) else ""
+        if relation_mode == NO_OA_BANK_BATCH_RELATION_MODE:
+            for tag in list(relation.get("display_tags") or []) if isinstance(relation, dict) else []:
+                add(str(tag).strip())
+            if isinstance(special_metadata, dict):
+                for tag in list(special_metadata.get("display_tags") or []):
+                    add(str(tag).strip())
+                batch_label = str(special_metadata.get("batch_label") or "").strip()
+                if batch_label:
+                    add(batch_label)
         if special_type == CASH_PASS_THROUGH_MODE:
             add(CASH_TURNOVER_TAG)
             add("过账")
@@ -10010,7 +11555,7 @@ class Application:
             add(CASH_TURNOVER_TAG)
             add("买票")
         for tag in tags:
-            if tag in {"ETC", "ETC批量提交", "已关联ETC发票", "冲", "内部往来", "工资", "非税", CASH_TURNOVER_TAG, "过账", "买票"}:
+            if tag in {"ETC", "ETC批量提交", "已关联ETC发票", "ETC补充凭证", "冲", "内部往来", "工资", "非税", CASH_TURNOVER_TAG, "过账", "买票"}:
                 add(tag)
         if any(str(row.get(key, "")).find("非税") >= 0 for key in ("summary", "remark", "reason", "purpose")):
             add("非税")
@@ -10241,74 +11786,11 @@ class Application:
     def _sync_live_auto_pair_relations(self) -> None:
         if not hasattr(self._live_workbench_service, "list_auto_pair_candidates"):
             return
-        desired_relations: dict[str, dict[str, object]] = {}
-        for result in self._live_workbench_service.list_auto_pair_candidates("all"):
-            row_ids = [str(row_id).strip() for row_id in list(result.transaction_ids or []) if str(row_id).strip()]
-            if not row_ids:
-                continue
-            if self._auto_pair_conflicts_with_manual_relation(row_ids):
-                continue
-            desired_relations[str(result.id)] = {
-                "case_id": str(result.id),
-                "row_ids": row_ids,
-                "row_types": ["bank"] * len(row_ids),
-                "relation_mode": str(result.rule_code),
-                "month_scope": self._month_scope_for_auto_relation(row_ids),
-            }
-
-        active_auto_relations = {
-            str(relation.get("case_id")): relation
-            for relation in self._workbench_pair_relation_service.list_active_relations()
-            if str(relation.get("relation_mode")) in {"salary_personal_auto_match", "internal_transfer_pair"}
-        }
-        changed = False
-
-        for case_id, desired_relation in desired_relations.items():
-            existing_relation = active_auto_relations.get(case_id)
-            if (
-                isinstance(existing_relation, dict)
-                and list(existing_relation.get("row_ids") or []) == desired_relation["row_ids"]
-                and str(existing_relation.get("relation_mode")) == str(desired_relation["relation_mode"])
-                and str(existing_relation.get("month_scope")) == str(desired_relation["month_scope"])
-                and str(existing_relation.get("status")) == "active"
-            ):
-                continue
-
-            self._workbench_pair_relation_service.create_active_relation(
-                case_id=case_id,
-                row_ids=list(desired_relation["row_ids"]),
-                row_types=list(desired_relation["row_types"]),
-                relation_mode=str(desired_relation["relation_mode"]),
-                created_by="system_auto_match",
-                month_scope=str(desired_relation["month_scope"]),
-            )
-            changed = True
-
-        for case_id in set(active_auto_relations).difference(desired_relations):
-            self._workbench_pair_relation_service.cancel_relation(case_id)
-            changed = True
-
-        if changed:
-            self._search_service.clear_cache()
-            self._invalidate_workbench_read_models()
-            if self._state_store is not None:
-                changed_case_ids = list(desired_relations.keys())
-                changed_case_ids.extend(set(active_auto_relations).difference(desired_relations))
-                changed_scope_keys = {"all"}
-                changed_scope_keys.update(
-                    str(relation["month_scope"])
-                    for relation in desired_relations.values()
-                    if relation.get("month_scope")
-                )
-                self._state_store.save_workbench_pair_relations(
-                    self._workbench_pair_relation_service.snapshot(),
-                    changed_case_ids=changed_case_ids,
-                )
-                self._persist_workbench_read_models_best_effort(
-                    snapshot=self._workbench_read_model_service.snapshot(),
-                    changed_scope_keys=list(changed_scope_keys),
-                    operation="sync_live_auto_pair_relations",
-                )
+        # Salary and internal-transfer detector output remains available as evidence,
+        # but closed relations for the no-OA scope are now created only by
+        # NoOaBankBatchService after an explicit batch submit. Existing historical
+        # salary/internal active relations are intentionally left untouched.
+        return
 
     def _auto_pair_conflicts_with_manual_relation(self, row_ids: list[str]) -> bool:
         for row_id in row_ids:
@@ -10330,7 +11812,21 @@ class Application:
         return "all"
 
     @staticmethod
-    def _pair_relation_display_payload(*, relation_mode: str, row_type: str = "") -> dict[str, str]:
+    def _pair_relation_display_payload(
+        *,
+        relation_mode: str,
+        row_type: str = "",
+        special_metadata: dict[str, object] | None = None,
+    ) -> dict[str, str]:
+        if relation_mode == NO_OA_BANK_BATCH_RELATION_MODE:
+            batch_label = ""
+            if isinstance(special_metadata, dict):
+                batch_label = str(special_metadata.get("batch_label") or "").strip()
+            return {
+                "code": NO_OA_BANK_BATCH_RELATION_MODE,
+                "label": f"已匹配：{batch_label}" if batch_label else "已匹配：免OA流水",
+                "tone": "success",
+            }
         if relation_mode == "internal_transfer_pair":
             return {"code": "internal_transfer_pair", "label": "已匹配：内部往来款", "tone": "success"}
         if relation_mode == "salary_personal_auto_match":
@@ -10385,6 +11881,41 @@ class Application:
                     fields["成本统计"] = "不计入"
                 elif cost_policy == "include_ticket_cost_only":
                     fields["成本统计"] = f"仅计入买票成本 {special_metadata.get('ticket_cost_amount') or '0.00'}"
+
+    @staticmethod
+    def _apply_no_oa_bank_batch_pair_metadata(payload: dict[str, object], relation: dict[str, object]) -> None:
+        special_metadata = relation.get("special_metadata")
+        if not isinstance(special_metadata, dict):
+            special_metadata = {}
+        payload["special_metadata"] = dict(special_metadata)
+
+        display_tags = [
+            str(tag).strip()
+            for tag in list(relation.get("display_tags") or special_metadata.get("display_tags") or [])
+            if str(tag).strip()
+        ]
+        batch_label = str(special_metadata.get("batch_label") or "").strip()
+        if not display_tags:
+            display_tags = ["免OA"]
+            if batch_label:
+                display_tags.append(batch_label)
+
+        tags = [str(tag).strip() for tag in list(payload.get("tags") or []) if str(tag).strip()]
+        for tag in display_tags:
+            if tag not in tags:
+                tags.append(tag)
+        payload["tags"] = tags
+        payload["display_tags"] = display_tags
+
+        cost_policy = str(special_metadata.get("cost_policy") or "").strip()
+        if cost_policy == "exclude_all":
+            payload["cost_excluded"] = True
+        for fields_key in ("summary_fields", "detail_fields"):
+            fields = payload.get(fields_key)
+            if isinstance(fields, dict):
+                fields["免OA批次"] = batch_label or "免OA流水"
+                if cost_policy == "exclude_all":
+                    fields["成本统计"] = "不计入"
 
     @staticmethod
     def _apply_cash_special_available_actions(payload: dict[str, object], relation: dict[str, object]) -> None:
@@ -10576,6 +12107,166 @@ class Application:
         return Response(status_code=int(status), body=json.dumps(normalized_payload, ensure_ascii=False))
 
     @staticmethod
+    def _etc_reconciliation_task_payload(task: object) -> dict[str, object]:
+        return {
+            "taskId": getattr(task, "task_id", ""),
+            "status": getattr(getattr(task, "status", ""), "value", getattr(task, "status", "")),
+            "version": getattr(task, "version", 0),
+            "title": getattr(task, "title", ""),
+            "periodStart": getattr(task, "period_start", None),
+            "periodEnd": getattr(task, "period_end", None),
+            "statementPeriodStart": getattr(task, "statement_period_start", None),
+            "statementPeriodEnd": getattr(task, "statement_period_end", None),
+            "approvedDelta": getattr(task, "approved_delta", None),
+            "approvedDeltaNote": getattr(task, "approved_delta_note", None),
+            "cardLast4": getattr(task, "card_last4", None),
+            "oaTotalAmount": getattr(task, "oa_total_amount", None),
+            "etcInvoiceAmount": getattr(task, "etc_invoice_amount", None),
+            "supplementAmount": getattr(task, "supplement_amount", None),
+            "etcInvoiceCount": getattr(task, "etc_invoice_count", 0),
+            "supplementCount": getattr(task, "supplement_count", 0),
+            "canConfirm": Application._etc_reconciliation_task_can_confirm(task),
+            "vehiclePlates": list(getattr(task, "vehicle_plates", []) or []),
+            "confirmedItemSetHash": getattr(task, "confirmed_item_set_hash", None),
+            "importBatchId": getattr(task, "import_batch_id", None),
+            "etcBatchId": getattr(task, "etc_batch_id", None),
+            "oaDraftBatchId": getattr(task, "oa_draft_batch_id", None),
+            "oaDraftStatus": getattr(task, "oa_draft_status", None),
+            "submittedConfirmedAt": getattr(task, "submitted_confirmed_at", None),
+            "sourceFiles": Application._etc_source_file_payloads(task),
+            "creditCardItems": [Application._serialize_value(item) for item in getattr(task, "credit_card_items", [])],
+            "ticketRootItems": [Application._serialize_value(item) for item in getattr(task, "ticket_root_items", [])],
+            "supplementEvidences": [Application._serialize_value(item) for item in getattr(task, "supplement_evidences", [])],
+            "expectedEtcInvoiceRequirements": [
+                Application._serialize_value(item) for item in getattr(task, "expected_etc_invoice_requirements", [])
+            ],
+            "parseIssues": Application._etc_parse_issue_payloads(task),
+            "auditEvents": [Application._serialize_value(item) for item in getattr(task, "audit_events", [])],
+        }
+
+    @staticmethod
+    def _etc_source_file_payloads(task: object) -> list[dict[str, object]]:
+        blocking_file_ids = {
+            getattr(issue, "file_id", "")
+            for result in getattr(task, "parse_results", []) or []
+            for issue in getattr(result, "issues", []) or []
+            if getattr(getattr(issue, "severity", ""), "value", getattr(issue, "severity", "")) == "blocking"
+        }
+        return [
+            {
+                "fileId": getattr(source_file, "file_id", ""),
+                "taskId": getattr(source_file, "task_id", ""),
+                "sourceKind": getattr(getattr(source_file, "source_kind", ""), "value", getattr(source_file, "source_kind", "")),
+                "originalName": getattr(source_file, "original_name", ""),
+                "contentType": getattr(source_file, "content_type", ""),
+                "sizeBytes": getattr(source_file, "size_bytes", 0),
+                "sha256": getattr(source_file, "sha256", ""),
+                "storedPath": getattr(source_file, "stored_path", ""),
+                "createdBy": getattr(source_file, "created_by", ""),
+                "createdAt": getattr(source_file, "created_at", None),
+                "hasBlockingIssue": getattr(source_file, "file_id", "") in blocking_file_ids,
+            }
+            for source_file in getattr(task, "source_files", []) or []
+        ]
+
+    @staticmethod
+    def _etc_parse_issue_payloads(task: object) -> list[dict[str, object]]:
+        source_files = {
+            getattr(source_file, "file_id", ""): source_file
+            for source_file in getattr(task, "source_files", []) or []
+        }
+        payloads: list[dict[str, object]] = []
+        for result in getattr(task, "parse_results", []) or []:
+            for issue in getattr(result, "issues", []) or []:
+                source_file = source_files.get(getattr(issue, "file_id", ""))
+                payloads.append(
+                    {
+                        "issueId": getattr(issue, "issue_id", ""),
+                        "fileId": getattr(issue, "file_id", ""),
+                        "sourceKind": (
+                            getattr(getattr(source_file, "source_kind", ""), "value", getattr(source_file, "source_kind", ""))
+                            if source_file is not None
+                            else None
+                        ),
+                        "originalName": getattr(source_file, "original_name", None) if source_file is not None else None,
+                        "severity": getattr(getattr(issue, "severity", ""), "value", getattr(issue, "severity", "")),
+                        "message": getattr(issue, "message", ""),
+                        "sourcePage": getattr(issue, "source_page", None),
+                        "sourceLine": getattr(issue, "source_line", None),
+                        "extractionMethod": getattr(issue, "extraction_method", None),
+                        "fieldName": getattr(issue, "field_name", None),
+                    }
+                )
+        return payloads
+    @staticmethod
+    def _etc_reconciliation_task_can_confirm(task: object) -> bool:
+        status = getattr(getattr(task, "status", ""), "value", getattr(task, "status", ""))
+        if status in {"ready_for_import", "importing", "imported", "closed"}:
+            return False
+        credit_card_items = list(getattr(task, "credit_card_items", []) or [])
+        if not credit_card_items:
+            return False
+        final_resolutions = {"included_etc", "covered_by_supplement", "manual_confirmed"}
+        if not any(str(getattr(item, "manual_resolution", "") or "") in final_resolutions for item in credit_card_items):
+            return False
+        for item in credit_card_items:
+            manual_resolution = str(getattr(item, "manual_resolution", "") or "unresolved")
+            if (bool(getattr(item, "is_etc_candidate", False)) or manual_resolution != "unresolved") and manual_resolution == "unresolved":
+                return False
+            if manual_resolution == "included_etc" and not Application._etc_task_card_has_linked_etc_evidence(task, str(getattr(item, "item_id", ""))):
+                return False
+            if manual_resolution == "covered_by_supplement" and not Application._etc_task_card_has_linked_supplement(task, str(getattr(item, "item_id", ""))):
+                return False
+            if manual_resolution in {"excluded_non_etc", "excluded_error"} and not str(getattr(item, "manual_resolution_reason", "") or "").strip():
+                return False
+            if manual_resolution == "manual_confirmed" and not str(getattr(item, "review_note", "") or "").strip():
+                return False
+        return True
+
+    @staticmethod
+    def _etc_task_card_has_linked_etc_evidence(task: object, card_id: str) -> bool:
+        for ticket in getattr(task, "ticket_root_items", []) or []:
+            if bool(getattr(ticket, "removed", False)):
+                continue
+            if card_id in list(getattr(ticket, "linked_credit_card_item_ids", []) or []):
+                return True
+        evidence_by_id = {
+            str(getattr(evidence, "evidence_id", "")): evidence
+            for evidence in getattr(task, "supplement_evidences", []) or []
+        }
+        for reconciled in getattr(task, "reconciled_items", []) or []:
+            if str(getattr(reconciled, "credit_card_item_id", "")) != card_id:
+                continue
+            for evidence_id in list(getattr(reconciled, "supplement_evidence_ids", []) or []):
+                evidence = evidence_by_id.get(str(evidence_id))
+                evidence_kind = str(getattr(evidence, "evidence_kind", "") or "").strip().lower() if evidence is not None else ""
+                if evidence_kind in {"etc", "etc_invoice", "etc-invoice"} and bool(getattr(evidence, "include_in_etc_zip_check", False)):
+                    return True
+        return False
+
+    @staticmethod
+    def _etc_task_card_has_linked_supplement(task: object, card_id: str) -> bool:
+        evidence_ids = {
+            str(getattr(evidence, "evidence_id", ""))
+            for evidence in getattr(task, "supplement_evidences", []) or []
+        }
+        return any(
+            str(getattr(reconciled, "credit_card_item_id", "")) == card_id
+            and any(str(evidence_id) in evidence_ids for evidence_id in list(getattr(reconciled, "supplement_evidence_ids", []) or []))
+            for reconciled in getattr(task, "reconciled_items", []) or []
+        )
+
+    @staticmethod
+    def _normalize_route_path(route_path: str) -> str:
+        normalized = str(route_path or "").strip() or "/"
+        for prefix in ("/fin-ops-api",):
+            if normalized == prefix:
+                return "/"
+            if normalized.startswith(f"{prefix}/"):
+                return normalized.removeprefix(prefix) or "/"
+        return normalized
+
+    @staticmethod
     def _serialize_value(value: object) -> object:
         if is_dataclass(value):
             return {key: Application._serialize_value(val) for key, val in asdict(value).items()}
@@ -10590,6 +12281,33 @@ class Application:
         if isinstance(value, Enum):
             return value.value
         return value
+
+
+def _is_ticket_root_clipboard_source(source_file: object) -> bool:
+    if str(getattr(getattr(source_file, "source_kind", ""), "value", getattr(source_file, "source_kind", ""))) != SourceFileKind.TICKET_ROOT.value:
+        return False
+    content_type = str(getattr(source_file, "content_type", "") or "").lower()
+    original_name = str(getattr(source_file, "original_name", "") or "")
+    return content_type.startswith("text/plain") or original_name.startswith("票根网手工粘贴-")
+
+
+def _has_ticket_root_clipboard_source(task: object) -> bool:
+    return any(_is_ticket_root_clipboard_source(source_file) for source_file in getattr(task, "source_files", []) or [])
+
+
+def _has_ticket_root_file_source(task: object) -> bool:
+    return any(
+        str(getattr(getattr(source_file, "source_kind", ""), "value", getattr(source_file, "source_kind", ""))) == SourceFileKind.TICKET_ROOT.value
+        and not _is_ticket_root_clipboard_source(source_file)
+        for source_file in getattr(task, "source_files", []) or []
+    )
+
+
+def _ticket_root_clipboard_source_name(text: str, *, index: int) -> str:
+    parser = TicketRootClipboardTextParser()
+    plate = parser.extract_plate(text) or "未知车牌"
+    month = parser.extract_month(text) or f"{index}"
+    return f"票根网手工粘贴-{plate}-{month}-{index}.txt"
 
 
 def build_application(*, data_dir: Path | None = None) -> Application:
