@@ -58,3 +58,5 @@
 - 用 repository 替代整包 snapshot。
 - 对高频查询建立明确索引和 `EXPLAIN ANALYZE` 验证。
 - 将 read model 重建放入后台任务。
+
+详细重构计划见 `backend-refactor/README.md`。

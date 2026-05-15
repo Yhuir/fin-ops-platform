@@ -22,3 +22,11 @@
 - 定期演练恢复。
 - 对关键集合启用恢复点策略。
 - 把导入文件和附件迁到可独立备份的对象存储。
+
+## 后端重构相关
+
+Axum/PostgreSQL 重构前后的备份策略见：
+
+- `backend-refactor/mongo-backup.md`
+- `backend-refactor/postgresql-provisioning.md`
+- `backend-refactor/mongo-to-postgresql-migration.md`

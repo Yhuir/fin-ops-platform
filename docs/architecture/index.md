@@ -11,6 +11,10 @@
 - `oa-integration.md`：OA 页面壳体、登录复用、菜单权限和部署路径。
 - `persistence-and-read-models.md`：当前持久化、read model、缓存失效和性能演进。
 - `deployment.md`：部署形态、环境、反向代理和发布边界。
+- `backend-refactor/README.md`：Axum + PostgreSQL 后端重构文档入口。
+- `backend-refactor/target-architecture.md`：目标生产架构、组件边界和技术选型。
+- `backend-refactor/migration-roadmap.md`：分阶段迁移路线、验收标准和回滚口径。
+- `backend-refactor/data-model-and-read-models.md`：PostgreSQL 事实表、分区、搜索表、读模型和索引计划。
 
 ## 历史资料
 
