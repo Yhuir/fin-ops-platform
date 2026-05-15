@@ -185,6 +185,7 @@ class ApplicationStateStore:
         self._oa_sync_state_path = root / "oa_sync_state.pkl"
         self._tax_certified_imports_path = root / "tax_certified_imports.pkl"
         self._etc_state_path = root / "etc" / "etc_state.pkl"
+        self._etc_invoice_file_root = root / "etc" / "invoice_attachments"
         self._etc_reconciliation_state_path = root / "etc_reconciliation" / "tasks.pkl"
         self._etc_reconciliation_file_root = root / "etc_reconciliation" / "files"
         self._historical_etc_repair_root = root / "historical_etc_repair"
@@ -648,6 +649,71 @@ class ApplicationStateStore:
         if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
             raise RuntimeError("Local ETC reconciliation file access is disabled in FIN_OPS_STORAGE_MODE=mongo_only.")
         return Path(stored_file_path).read_bytes()
+
+    def store_etc_invoice_file(self, *, invoice_number: str, file_name: str, content: bytes) -> str:
+        sanitized_name = self._sanitize_name(file_name)
+        content_bytes = bytes(content or b"")
+        normalized_invoice_number = self._sanitize_name(invoice_number)
+        if self._mongo_file_bucket is not None:
+            gridfs_id = f"etc_invoice:{normalized_invoice_number}:{sanitized_name}"
+            try:
+                self._mongo_file_bucket.delete(gridfs_id)
+            except Exception:
+                pass
+            self._mongo_file_bucket.upload_from_stream_with_id(
+                gridfs_id,
+                sanitized_name,
+                BytesIO(content_bytes),
+                metadata={
+                    "invoice_number": invoice_number,
+                    "file_name": file_name,
+                    "stored_at": datetime.now(UTC),
+                    "purpose": "etc_invoice_attachment",
+                },
+            )
+            return self._build_gridfs_ref(gridfs_id, sanitized_name)
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo GridFS is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        invoice_dir = self._etc_invoice_file_root / normalized_invoice_number
+        invoice_dir.mkdir(parents=True, exist_ok=True)
+        target_path = invoice_dir / sanitized_name
+        target_path.write_bytes(content_bytes)
+        return str(target_path)
+
+    def read_etc_invoice_file(self, stored_file_path: str) -> bytes:
+        if self._is_gridfs_ref(stored_file_path):
+            if self._mongo_file_bucket is None:
+                raise RuntimeError("Mongo GridFS is not configured for stored ETC invoice file access.")
+            stream = self._mongo_file_bucket.open_download_stream(self._parse_gridfs_ref(stored_file_path))
+            return stream.read()
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Local ETC invoice file access is disabled in FIN_OPS_STORAGE_MODE=mongo_only.")
+        return Path(stored_file_path).read_bytes()
+
+    def etc_invoice_file_exists(self, stored_file_path: str) -> bool:
+        if self._is_gridfs_ref(stored_file_path):
+            if self._mongo_file_bucket is None:
+                return False
+            try:
+                self._mongo_file_bucket.open_download_stream(self._parse_gridfs_ref(stored_file_path)).close()
+            except Exception:
+                return False
+            return True
+        return Path(stored_file_path).exists()
+
+    def delete_etc_invoice_file(self, stored_file_path: str) -> None:
+        if self._is_gridfs_ref(stored_file_path):
+            if self._mongo_file_bucket is None:
+                return
+            try:
+                self._mongo_file_bucket.delete(self._parse_gridfs_ref(stored_file_path))
+            except Exception:
+                pass
+            return
+        if self._storage_mode != MONGO_ONLY_STORAGE_MODE:
+            path = Path(stored_file_path)
+            if path.exists():
+                path.unlink()
 
     def save_historical_etc_repair_bundle(
         self,

@@ -207,12 +207,27 @@ class MemoryEtcStateStore:
     def __init__(self, data_dir: Path) -> None:
         self.data_dir = data_dir
         self.saved_snapshot: dict[str, object] | None = None
+        self.files: dict[str, bytes] = {}
 
     def load_etc_state(self) -> dict[str, object]:
         return dict(self.saved_snapshot or {})
 
     def save_etc_state(self, snapshot: dict[str, object]) -> None:
         self.saved_snapshot = dict(snapshot)
+
+    def store_etc_invoice_file(self, *, invoice_number: str, file_name: str, content: bytes) -> str:
+        ref = f"memory://etc_invoice/{invoice_number}/{file_name}"
+        self.files[ref] = bytes(content)
+        return ref
+
+    def read_etc_invoice_file(self, stored_file_path: str) -> bytes:
+        return self.files[stored_file_path]
+
+    def etc_invoice_file_exists(self, stored_file_path: str) -> bool:
+        return stored_file_path in self.files
+
+    def delete_etc_invoice_file(self, stored_file_path: str) -> None:
+        self.files.pop(stored_file_path, None)
 
 
 class FakeHTTPResponse:
@@ -294,6 +309,23 @@ class EtcServiceTests(unittest.TestCase):
         self.assertIsNotNone(store.saved_snapshot)
         self.assertEqual(total, 1)
         self.assertEqual(invoices[0].invoice_number, "ETC001")
+
+    def test_state_store_invoice_attachments_survive_service_reload_for_oa_draft(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = MemoryEtcStateStore(Path(temp_dir))
+            service = EtcService(state_store=store)
+            service.import_zips([UploadedEtcZipFile("invoices.zip", etc_zip(["ETC001"]))])
+
+            fake_oa = FakeEtcOAClient()
+            reloaded = EtcService(state_store=store, oa_client=fake_oa)
+            draft = reloaded.create_oa_draft(["etc_invoice_0001"])
+            invoices, _total, _counts = reloaded.list_invoices(page=1, page_size=20)
+
+        self.assertEqual(draft.oa_draft_id, "oa-draft-001")
+        self.assertEqual(len(fake_oa.uploads), 1)
+        self.assertTrue(Path(fake_oa.uploads[0]).name.endswith(".pdf"))
+        self.assertTrue(str(invoices[0].pdf_file_path).startswith("memory://"))
+        self.assertTrue(str(invoices[0].xml_file_path).startswith("memory://"))
 
     def test_preview_valid_zip_reports_imported_without_persisting_records(self) -> None:
         with TemporaryDirectory() as temp_dir:

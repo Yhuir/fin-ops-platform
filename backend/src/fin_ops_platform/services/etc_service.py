@@ -12,6 +12,7 @@ import mimetypes
 import os
 import pickle
 import re
+from tempfile import TemporaryDirectory
 from typing import Any, Callable, Protocol
 import xml.etree.ElementTree as ET
 from urllib.error import HTTPError, URLError
@@ -553,6 +554,8 @@ class EtcService:
         self._import_sessions: dict[str, EtcImportSession] = {}
         self._canonical_invoice_key_exists: Callable[[str], bool] | None = None
         self._hydrate(self._load_snapshot())
+        if self._migrate_local_invoice_files_to_state_store():
+            self._persist()
 
     def set_canonical_invoice_key_exists(self, callback: Callable[[str], bool] | None) -> None:
         self._canonical_invoice_key_exists = callback
@@ -1492,10 +1495,70 @@ class EtcService:
         import_batch.updated_at = datetime.now(UTC)
 
     @staticmethod
-    def _stored_invoice_file_exists(path: str | None) -> bool:
-        return bool(path and Path(path).exists())
+    def _is_external_file_ref(path: str | None) -> bool:
+        return bool(path and "://" in path)
+
+    def _stored_invoice_file_exists(self, path: str | None) -> bool:
+        if not path:
+            return False
+        if self._is_external_file_ref(path):
+            exists = getattr(self._state_store, "etc_invoice_file_exists", None)
+            return bool(callable(exists) and exists(path))
+        return Path(path).exists()
+
+    def _read_stored_invoice_file(self, path: str) -> bytes:
+        if self._is_external_file_ref(path):
+            reader = getattr(self._state_store, "read_etc_invoice_file", None)
+            if not callable(reader):
+                raise EtcDraftRequestError("ETC invoice attachment storage is not readable.")
+            return bytes(reader(path))
+        return Path(path).read_bytes()
+
+    def _delete_stored_invoice_file(self, path: str) -> None:
+        if self._is_external_file_ref(path):
+            deleter = getattr(self._state_store, "delete_etc_invoice_file", None)
+            if callable(deleter):
+                deleter(path)
+            return
+        file_path = Path(path)
+        if file_path.exists():
+            file_path.unlink()
+
+    def _migrate_local_invoice_files_to_state_store(self) -> bool:
+        if self._state_store is None or not hasattr(self._state_store, "store_etc_invoice_file"):
+            return False
+        changed = False
+        for invoice in self._invoices.values():
+            for path_field, hash_field, file_name in (
+                ("xml_file_path", "xml_file_hash", "invoice.xml"),
+                ("pdf_file_path", "pdf_file_hash", "invoice.pdf"),
+            ):
+                current_path = getattr(invoice, path_field)
+                if not current_path or self._is_external_file_ref(current_path):
+                    continue
+                local_path = Path(current_path)
+                if not local_path.exists() or not local_path.is_file():
+                    continue
+                content = local_path.read_bytes()
+                stored_path = self._state_store.store_etc_invoice_file(
+                    invoice_number=invoice.invoice_number,
+                    file_name=file_name,
+                    content=content,
+                )
+                setattr(invoice, path_field, str(stored_path))
+                setattr(invoice, hash_field, hashlib.sha256(content).hexdigest())
+                invoice.updated_at = datetime.now(UTC)
+                changed = True
+        return changed
 
     def _store_invoice_file(self, parsed: ParsedEtcXml, file_name: str, content: bytes) -> tuple[str, str]:
+        if self._state_store is not None and hasattr(self._state_store, "store_etc_invoice_file"):
+            stored_path = self._state_store.store_etc_invoice_file(
+                invoice_number=parsed.invoice_number,
+                file_name=file_name,
+                content=content,
+            )
+            return str(stored_path), hashlib.sha256(content).hexdigest()
         month = parsed.issue_date[:7] if parsed.issue_date else "unknown"
         year, month_part = (month.split("-", 1) + ["unknown"])[:2] if "-" in month else ("unknown", "unknown")
         invoice_dir = self._invoice_file_root / _safe_path_part(year) / _safe_path_part(month_part) / _safe_path_part(parsed.invoice_number)
@@ -1667,9 +1730,10 @@ class EtcService:
         for raw_path in (invoice.xml_file_path, invoice.pdf_file_path):
             if not raw_path:
                 continue
+            self._delete_stored_invoice_file(raw_path)
+            if self._is_external_file_ref(raw_path):
+                continue
             path = Path(raw_path)
-            if path.exists():
-                path.unlink()
             parent = path.parent
             try:
                 if parent != self._invoice_file_root and parent.exists() and not any(parent.iterdir()):
@@ -1727,29 +1791,37 @@ class EtcService:
         reconciliation_task: object | None = None,
     ) -> list[EtcUploadedAttachment]:
         attachments: list[EtcUploadedAttachment] = []
-        for invoice in invoices:
-            assert invoice.pdf_file_path is not None
-            pdf_path = Path(invoice.pdf_file_path)
-            attachment_url = oa_client.upload_attachment(pdf_path)
-            attachments.append(
-                EtcUploadedAttachment(
-                    name=f"{invoice.invoice_number}.pdf",
-                    url=attachment_url,
-                    size=pdf_path.stat().st_size,
+        with TemporaryDirectory(prefix="fin-ops-etc-oa-") as temp_dir:
+            temp_root = Path(temp_dir)
+            for invoice in invoices:
+                assert invoice.pdf_file_path is not None
+                attachment_name = f"{invoice.invoice_number}.pdf"
+                if self._is_external_file_ref(invoice.pdf_file_path):
+                    content = self._read_stored_invoice_file(invoice.pdf_file_path)
+                    pdf_path = temp_root / attachment_name
+                    pdf_path.write_bytes(content)
+                else:
+                    pdf_path = Path(invoice.pdf_file_path)
+                attachment_url = oa_client.upload_attachment(pdf_path)
+                attachments.append(
+                    EtcUploadedAttachment(
+                        name=attachment_name,
+                        url=attachment_url,
+                        size=pdf_path.stat().st_size,
+                    )
                 )
-            )
-        for supplement in list(getattr(reconciliation_task, "submission_supplement_attachments", []) or []):
-            stored_path = Path(str(getattr(supplement, "stored_path", "") or ""))
-            if not stored_path.exists() or not stored_path.is_file():
-                raise EtcOAClientError(f"ETC supplement attachment file is missing: {stored_path.name or stored_path}")
-            attachment_url = oa_client.upload_attachment(stored_path)
-            attachments.append(
-                EtcUploadedAttachment(
-                    name=str(getattr(supplement, "original_name", "") or stored_path.name),
-                    url=attachment_url,
-                    size=stored_path.stat().st_size,
+            for supplement in list(getattr(reconciliation_task, "submission_supplement_attachments", []) or []):
+                stored_path = Path(str(getattr(supplement, "stored_path", "") or ""))
+                if not stored_path.exists() or not stored_path.is_file():
+                    raise EtcOAClientError(f"ETC supplement attachment file is missing: {stored_path.name or stored_path}")
+                attachment_url = oa_client.upload_attachment(stored_path)
+                attachments.append(
+                    EtcUploadedAttachment(
+                        name=str(getattr(supplement, "original_name", "") or stored_path.name),
+                        url=attachment_url,
+                        size=stored_path.stat().st_size,
+                    )
                 )
-            )
         return attachments
 
     def _build_oa_draft_payload(self, batch: EtcBatch, attachments: list[EtcUploadedAttachment]) -> dict[str, object]:

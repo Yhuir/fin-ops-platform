@@ -2690,15 +2690,22 @@ class Application:
             },
         )
 
-    @staticmethod
-    def _serialize_etc_invoice(invoice: object) -> dict[str, object]:
+    def _serialize_etc_invoice(self, invoice: object) -> dict[str, object]:
         payload = Application._serialize_value(invoice)
         if not isinstance(payload, dict):
             return {}
         pdf_path = payload.get("pdf_file_path")
         xml_path = payload.get("xml_file_path")
-        payload["has_pdf"] = bool(isinstance(pdf_path, str) and pdf_path and Path(pdf_path).exists())
-        payload["has_xml"] = bool(isinstance(xml_path, str) and xml_path and Path(xml_path).exists())
+        payload["has_pdf"] = bool(
+            isinstance(pdf_path, str)
+            and pdf_path
+            and self._etc_service._stored_invoice_file_exists(pdf_path)
+        )
+        payload["has_xml"] = bool(
+            isinstance(xml_path, str)
+            and xml_path
+            and self._etc_service._stored_invoice_file_exists(xml_path)
+        )
         return payload
 
     def _handle_api_etc_batches(
