@@ -231,7 +231,7 @@ VITE_APP_BASE_PATH=/fin-ops/
 
 ## OA 菜单配置
 
-OA 菜单仍然按 Prompt 29 的口径配置：
+OA 菜单按当前同域 iframe 口径配置：
 
 - 名称：`财务运营平台`
 - 路径：`https://www.yn-sourcing.com/fin-ops/?embedded=oa`
@@ -433,7 +433,9 @@ cd web && npm run build
 
 ## 相关文档
 
-- `docs/architecture/OA 集成当前 app 技术方案.md`
-- `docs/dev/oa-menu-iframe-integration.md`
-- `docs/superpowers/specs/2026-04-03-oa-shell-auth-visibility-design.md`
-- `docs/superpowers/plans/2026-04-03-oa-shell-auth-visibility.md`
+- `ARCHITECTURE.md`
+- `docs/architecture/oa-integration.md`
+- `docs/architecture/deployment.md`
+- `docs/product-specs/oa-integration.md`
+- `docs/archive/legacy-dev/oa-menu-iframe-integration.md`
+- `docs/operations/deployment.md`
