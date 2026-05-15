@@ -194,6 +194,73 @@ class SearchServiceTests(unittest.TestCase):
         self.assertEqual(serial_payload["bank_results"][0]["matched_field"], "企业流水号")
         self.assertEqual(last4_payload["bank_results"][0]["matched_field"], "支付账户")
 
+    def test_grouped_search_indexes_collapsed_bank_rows_and_returns_group_context(self) -> None:
+        original_bank_row = {
+            **self.bank_row,
+            "id": "bk-collapsed-001",
+            "case_id": "no_oa_batch_fee_search",
+            "remark": "折叠明细唯一备注",
+            "detail_fields": {"企业流水号": "NO-OA-COLLAPSED-SERIAL"},
+            "invoice_relation": {"code": "no_oa_bank_batch", "label": "已匹配：手续费", "tone": "success"},
+        }
+        summary_row = {
+            "id": "no_oa_summary:no_oa_batch_fee_search",
+            "type": "bank",
+            "source_kind": "no_oa_bank_batch_summary",
+            "label": "免OA · 手续费",
+            "amount": "58,000.00",
+            "counterparty_name": "建设银行 8106",
+            "trade_time": "2026-03",
+            "invoice_relation": {"code": "no_oa_bank_batch", "label": "已匹配：手续费", "tone": "success"},
+            "special_metadata": {
+                "source_batch_id": "no_oa_batch_fee_search",
+                "batch_type": "fee",
+                "batch_label": "手续费",
+                "row_count": 1,
+                "total_amount": "58,000.00",
+                "withdrawable": True,
+            },
+        }
+        grouped_payloads = {
+            "2026-03": {
+                "month": "2026-03",
+                "summary": {},
+                "paired": {
+                    "groups": [
+                        {
+                            "group_id": "case:no_oa_batch_fee_search",
+                            "group_type": "manual_confirmed",
+                            "match_confidence": "high",
+                            "reason": "existing_case_group",
+                            "relation_mode": "no_oa_bank_batch",
+                            "display_mode": "collapsed_summary",
+                            "default_collapsed": True,
+                            "summary_row": summary_row,
+                            "oa_rows": [],
+                            "bank_rows": [summary_row],
+                            "invoice_rows": [],
+                            "collapsed_rows": {"bank": [original_bank_row]},
+                        }
+                    ]
+                },
+                "open": {"groups": []},
+            }
+        }
+        service = SearchService(
+            known_months_loader=lambda: ["2026-03"],
+            grouped_workbench_loader=lambda month: grouped_payloads[month],
+        )
+
+        payload = service.search(q="NO-OA-COLLAPSED-SERIAL", month="2026-03", scope="bank")
+
+        self.assertEqual(payload["summary"]["bank"], 1)
+        self.assertEqual([result["row_id"] for result in payload["bank_results"]], ["bk-collapsed-001"])
+        result = payload["bank_results"][0]
+        self.assertNotEqual(result["row_id"], summary_row["id"])
+        self.assertEqual(result["zone_hint"], "paired")
+        self.assertEqual(result["group_id"], "case:no_oa_batch_fee_search")
+        self.assertEqual(result["jump_target"]["group_id"], "case:no_oa_batch_fee_search")
+
     def test_search_matches_invoice_rows_by_invoice_number_company_and_tax_no(self) -> None:
         invoice_no_payload = self.service.search(q="INV-001", month="2026-03", scope="invoice")
         company_payload = self.service.search(q="建设科技有限公司", month="2026-03", scope="invoice")

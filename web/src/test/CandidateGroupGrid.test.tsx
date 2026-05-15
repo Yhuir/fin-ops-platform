@@ -1,10 +1,12 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 
+import CandidateGroupGrid from "../components/workbench/CandidateGroupGrid";
 import CandidateGroupCell from "../components/workbench/CandidateGroupCell";
 import WorkbenchRecordCard from "../components/workbench/WorkbenchRecordCard";
+import { createEmptyWorkbenchZoneDisplayState } from "../features/workbench/groupDisplayModel";
 import { getWorkbenchColumns, getWorkbenchPaneGridStyle } from "../features/workbench/tableConfig";
-import type { WorkbenchRecord } from "../features/workbench/types";
+import type { WorkbenchCandidateGroup, WorkbenchRecord } from "../features/workbench/types";
 import { installMockApiFetch } from "./apiMock";
 import { renderWorkbenchPage } from "./renderHelpers";
 
@@ -78,6 +80,220 @@ describe("Workbench candidate grouping layout", () => {
     } as WorkbenchRecord;
   }
 
+  function createNoOaBankRecord(id: string, counterparty: string, amount: string, note: string): WorkbenchRecord {
+    return {
+      id,
+      recordType: "bank",
+      sourceKind: id.includes("summary") ? "no_oa_bank_batch_summary" : undefined,
+      label: id.includes("summary") ? "免OA批次" : "支取",
+      status: "免OA批次",
+      statusCode: "no_oa_bank_batch",
+      statusTone: "success",
+      exceptionHandled: false,
+      amount,
+      counterparty,
+      tableValues: {
+        transactionTime: "2026-03-08 09:00:00",
+        direction: "支出",
+        amount,
+        debitAmount: amount,
+        creditAmount: "--",
+        counterparty,
+        paymentAccount: "建设银行 8106",
+        invoiceRelationStatus: "免OA批次",
+        paymentOrReceiptTime: "2026-03-08 09:00:00",
+        note,
+        loanRepaymentDate: "--",
+      },
+      detailFields: [],
+      actionVariant: id.includes("summary") ? "bank-review" : "detail-only",
+      availableActions: id.includes("summary") ? ["detail", "withdraw_no_oa_batch"] : ["detail"],
+      specialMetadata: id.includes("summary")
+        ? { source_batch_id: "NOOA-202603-FEE", batch_version: 7 }
+        : undefined,
+    };
+  }
+
+  function createNoOaCollapsedGroup(): WorkbenchCandidateGroup {
+    const summary = createNoOaBankRecord("nooa-summary-NOOA-202603-FEE", "免OA手续费批次", "30.00", "2 条手续费");
+    return {
+      id: "no-oa-bank-batch:NOOA-202603-FEE",
+      groupType: "manual_confirmed",
+      matchConfidence: "high",
+      reason: "免OA手续费批次",
+      relationMode: "no_oa_bank_batch",
+      displayMode: "collapsed_summary",
+      defaultCollapsed: true,
+      summaryRow: summary,
+      rows: {
+        oa: [],
+        bank: [summary],
+        invoice: [],
+      },
+      collapsedRows: {
+        bank: [
+          createNoOaBankRecord("bk-nooa-fee-001", "建设银行手续费", "10.00", "摘要：账户管理费"),
+          createNoOaBankRecord("bk-nooa-fee-002", "网银服务费", "20.00", "摘要：企业网银年费"),
+        ],
+      },
+    };
+  }
+
+  function renderNoOaGrid(group: WorkbenchCandidateGroup = createNoOaCollapsedGroup()) {
+    return render(
+      <CandidateGroupGrid
+        canMutateData
+        displayState={createEmptyWorkbenchZoneDisplayState()}
+        getRowState={() => "idle"}
+        groups={[group]}
+        onClearPaneSearch={() => undefined}
+        onClosePaneSearch={() => undefined}
+        onColumnFilterChange={() => undefined}
+        onOpenDetail={() => undefined}
+        onPaneSearchQueryChange={() => undefined}
+        onPaneTimeFilterChange={() => undefined}
+        onReorderPaneColumns={() => undefined}
+        onRowAction={() => undefined}
+        onSelectRow={() => undefined}
+        onTogglePaneSearch={() => undefined}
+        onTogglePaneSort={() => undefined}
+        panes={[
+          { id: "oa", title: "OA", rows: [] },
+          { id: "bank", title: "银行流水", rows: group.rows.bank },
+          { id: "invoice", title: "进销项发票", rows: [] },
+        ]}
+        rowTemplateColumns="1fr 1fr 1fr"
+        zoneId="paired"
+      />,
+    );
+  }
+
+  function buildNoOaWorkbenchPayload() {
+    return {
+      month: "all",
+      oa_status: { code: "ready", message: "OA 已同步" },
+      summary: {
+        oa_count: 0,
+        bank_count: 3,
+        invoice_count: 0,
+        paired_count: 1,
+        open_count: 0,
+        exception_count: 0,
+      },
+      invoice_inventory: {},
+      paired: {
+        groups: [
+          {
+            group_id: "no-oa-bank-batch:NOOA-202603-FEE",
+            group_type: "manual_confirmed",
+            match_confidence: "high",
+            reason: "免OA手续费批次",
+            relation_mode: "no_oa_bank_batch",
+            display_mode: "collapsed_summary",
+            default_collapsed: true,
+            oa_rows: [],
+            bank_rows: [
+              {
+                id: "nooa-summary-NOOA-202603-FEE",
+                type: "bank",
+                source_kind: "no_oa_bank_batch_summary",
+                trade_time: "2026-03",
+                direction: "支出",
+                debit_amount: "30.00",
+                credit_amount: "",
+                counterparty_name: "免OA手续费批次",
+                payment_account_label: "建设银行 8106",
+                invoice_relation: { code: "no_oa_bank_batch", label: "免OA批次", tone: "success" },
+                available_actions: ["detail", "withdraw_no_oa_batch"],
+                special_metadata: {
+                  source_batch_id: "NOOA-202603-FEE",
+                  batch_version: 7,
+                },
+              },
+            ],
+            invoice_rows: [],
+            collapsed_rows: {
+              bank: [
+                {
+                  id: "bk-nooa-fee-001",
+                  type: "bank",
+                  trade_time: "2026-03-08 09:00:00",
+                  direction: "支出",
+                  debit_amount: "10.00",
+                  credit_amount: "",
+                  counterparty_name: "建设银行手续费",
+                  payment_account_label: "建设银行 8106",
+                  invoice_relation: { code: "no_oa_bank_batch", label: "免OA批次", tone: "success" },
+                  bank_text_fields: [{ label: "摘要", value: "账户管理费" }],
+                  available_actions: ["detail"],
+                },
+              ],
+            },
+          },
+        ],
+      },
+      open: { groups: [] },
+    };
+  }
+
+  function mockWorkbenchPageFetch() {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/api/workbench") {
+        return new Response(JSON.stringify(buildNoOaWorkbenchPayload()), { status: 200 });
+      }
+      if (url.pathname === "/api/workbench/ignored") {
+        return new Response(JSON.stringify({ month: url.searchParams.get("month") ?? "all", rows: [] }), { status: 200 });
+      }
+      if (url.pathname === "/api/workbench/settings") {
+        return new Response(
+          JSON.stringify({
+            projects: { active: [], completed: [], completed_project_ids: [] },
+            bank_account_mappings: [],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.pathname === "/api/oa-sync/status") {
+        return new Response(
+          JSON.stringify({
+            status: "synced",
+            message: "OA 已同步",
+            dirty_scopes: [],
+            changed_scopes: [],
+            last_seen_change_at: null,
+            last_synced_at: "2026-04-01T12:00:00+08:00",
+            lag_seconds: 0,
+            failed_event_count: 0,
+            version: 0,
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.pathname === "/api/no-oa-bank-batches/NOOA-202603-FEE/withdraw") {
+        expect(init?.method).toBe("POST");
+        expect(JSON.parse(String(init?.body))).toEqual({
+          expected_version: 7,
+          reason: "由关联台撤回免OA批次",
+        });
+        return new Response(
+          JSON.stringify({
+            batch: null,
+            affected_months: ["2026-03"],
+            workbench_rebuild_queued: true,
+            results: [],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.pathname === "/api/workbench/actions/cancel-link") {
+        throw new Error("ordinary cancel-link must not be called for no-OA summaries");
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    });
+    return fetchMock;
+  }
+
   function getZoneGroupOrder(zone: HTMLElement) {
     return Array.from(zone.querySelectorAll<HTMLElement>(".candidate-grid-body > [data-testid^='candidate-group-']")).map(
       (element) => element.getAttribute("data-testid") ?? "",
@@ -128,6 +344,149 @@ describe("Workbench candidate grouping layout", () => {
     expect(within(groupRow).getAllByText("智能工厂设备商").length).toBeGreaterThan(0);
     expect(within(groupRow).getAllByText("58,000.00").length).toBeGreaterThan(0);
     expect(within(groupRow).getByText("进")).toBeInTheDocument();
+  });
+
+  test("renders no-OA summary rows collapsed by default and expands to original bank detail rows", () => {
+    renderNoOaGrid();
+    const bankCell = screen.getByTestId("candidate-scroll-paired-no-oa-bank-batch:NOOA-202603-FEE-bank");
+
+    expect(screen.getByText("免OA手续费批次")).toBeInTheDocument();
+    expect(screen.queryByText("建设银行手续费")).not.toBeInTheDocument();
+    expect(screen.queryByText("网银服务费")).not.toBeInTheDocument();
+    const expandButton = screen.getByRole("button", { name: "展开免OA批次明细，2 条" });
+    expect(expandButton).toHaveTextContent("展开 2 条明细");
+    expect(expandButton).toHaveClass("candidate-group-collapse-control");
+    expect(bankCell).not.toContainElement(expandButton);
+    expect(within(bankCell).getAllByRole("row")).toHaveLength(1);
+
+    fireEvent.click(expandButton);
+
+    expect(screen.getByText("建设银行手续费")).toBeInTheDocument();
+    expect(screen.getByText("网银服务费")).toBeInTheDocument();
+    expect(screen.queryByText("免OA手续费批次")).not.toBeInTheDocument();
+    expect(within(bankCell).getAllByRole("row")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "收起免OA批次明细" })).toBeInTheDocument();
+  });
+
+  test("renders submitted salary and internal-transfer batches as collapsed no-OA summaries", () => {
+    const salarySummary = createNoOaBankRecord("nooa-summary-NOOA-202603-SALARY", "免OA工资批次", "80,000.00", "4 条工资");
+    const internalSummary = createNoOaBankRecord(
+      "nooa-summary-NOOA-202603-INTERNAL",
+      "免OA内部往来款批次",
+      "125,000.00",
+      "1 条内部往来款",
+    );
+
+    render(
+      <CandidateGroupGrid
+        canMutateData
+        displayState={createEmptyWorkbenchZoneDisplayState()}
+        getRowState={() => "idle"}
+        groups={[
+          {
+            id: "no-oa-bank-batch:NOOA-202603-SALARY",
+            groupType: "manual_confirmed",
+            matchConfidence: "high",
+            reason: "免OA工资批次",
+            relationMode: "no_oa_bank_batch",
+            displayMode: "collapsed_summary",
+            defaultCollapsed: true,
+            rows: { oa: [], bank: [salarySummary], invoice: [] },
+            collapsedRows: {
+              bank: [createNoOaBankRecord("bk-nooa-salary-001", "员工工资", "80,000.00", "摘要：工资")],
+            },
+          },
+          {
+            id: "no-oa-bank-batch:NOOA-202603-INTERNAL",
+            groupType: "manual_confirmed",
+            matchConfidence: "high",
+            reason: "免OA内部往来款批次",
+            relationMode: "no_oa_bank_batch",
+            displayMode: "collapsed_summary",
+            defaultCollapsed: true,
+            rows: { oa: [], bank: [internalSummary], invoice: [] },
+            collapsedRows: {
+              bank: [createNoOaBankRecord("bk-nooa-internal-001", "内部往来款", "125,000.00", "摘要：内部往来款")],
+            },
+          },
+        ]}
+        onClearPaneSearch={() => undefined}
+        onClosePaneSearch={() => undefined}
+        onColumnFilterChange={() => undefined}
+        onOpenDetail={() => undefined}
+        onPaneSearchQueryChange={() => undefined}
+        onPaneTimeFilterChange={() => undefined}
+        onReorderPaneColumns={() => undefined}
+        onRowAction={() => undefined}
+        onSelectRow={() => undefined}
+        onTogglePaneSearch={() => undefined}
+        onTogglePaneSort={() => undefined}
+        panes={[
+          { id: "oa", title: "OA", rows: [] },
+          { id: "bank", title: "银行流水", rows: [salarySummary, internalSummary] },
+          { id: "invoice", title: "进销项发票", rows: [] },
+        ]}
+        rowTemplateColumns="1fr 1fr 1fr"
+        zoneId="paired"
+      />,
+    );
+
+    expect(screen.getByText("免OA工资批次")).toBeInTheDocument();
+    expect(screen.getByText("免OA内部往来款批次")).toBeInTheDocument();
+    expect(screen.queryByText("已匹配：工资")).not.toBeInTheDocument();
+    expect(screen.queryByText("已匹配：内部往来款")).not.toBeInTheDocument();
+    expect(screen.queryByText("员工工资")).not.toBeInTheDocument();
+    expect(screen.queryByText("内部往来款")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "展开免OA批次明细，1 条" })).toHaveLength(2);
+  });
+
+  test("withdraws no-OA summaries through the no-OA batch API instead of ordinary cancel-link", async () => {
+    const fetchMock = mockWorkbenchPageFetch();
+    const relationListener = vi.fn();
+    window.addEventListener("workbenchRelationUpdated", relationListener);
+
+    try {
+      renderWorkbenchPage();
+
+      const pairedZone = await screen.findByTestId("zone-paired");
+      const groupRow = await screen.findByTestId("candidate-group-paired-no-oa-bank-batch:NOOA-202603-FEE");
+      fireEvent.click(within(groupRow).getByRole("row", { name: /免OA手续费批次.*30\.00/ }));
+      fireEvent.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));
+
+      await waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledWith(
+          "/api/no-oa-bank-batches/NOOA-202603-FEE/withdraw",
+          expect.objectContaining({ method: "POST" }),
+        );
+      });
+      expect(fetchMock).not.toHaveBeenCalledWith(
+        "/api/workbench/actions/cancel-link",
+        expect.anything(),
+      );
+      expect(relationListener).toHaveBeenCalled();
+      expect((relationListener.mock.calls[0][0] as CustomEvent).detail).toEqual({ affectedMonths: ["2026-03"] });
+    } finally {
+      window.removeEventListener("workbenchRelationUpdated", relationListener);
+    }
+  });
+
+  test("refreshes the workbench when bank transaction categories are updated", async () => {
+    const fetchMock = mockWorkbenchPageFetch();
+
+    renderWorkbenchPage();
+    await screen.findByTestId("candidate-group-paired-no-oa-bank-batch:NOOA-202603-FEE");
+    const initialWorkbenchRequests = fetchMock.mock.calls.filter(([input]) =>
+      String(input).startsWith("/api/workbench?"),
+    ).length;
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("bankTransactionCategoryUpdated", { detail: { affectedMonths: ["2026-03"] } }));
+    });
+
+    await waitFor(() => {
+      const workbenchRequests = fetchMock.mock.calls.filter(([input]) => String(input).startsWith("/api/workbench?")).length;
+      expect(workbenchRequests).toBeGreaterThan(initialWorkbenchRequests);
+    });
   });
 
   test("renders bank note column from structured bank text fields", () => {

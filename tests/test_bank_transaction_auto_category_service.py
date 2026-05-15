@@ -39,6 +39,23 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
         self.assertEqual(suggestion["confidence"], "high")
         self.assertEqual(suggestion["rule_version"], BANK_TRANSACTION_AUTO_CATEGORY_RULE_VERSION)
 
+    def test_plain_service_fee_text_is_not_bank_fee(self) -> None:
+        suggestions = self.service.suggest_for_rows(
+            [
+                {
+                    "id": "txn-service-fee",
+                    "summary": "服务费",
+                    "remark": "",
+                    "counterparty_name": "昆明市盘龙区精正空调设备维修服务部",
+                    "debit_amount": "10000.00",
+                    "credit_amount": "",
+                    "pay_receive_time": "2026-04-23 17:33:58",
+                }
+            ]
+        )
+
+        self.assertNotIn("txn-service-fee", suggestions)
+
     def test_detects_salary_by_reusing_workbench_special_rule_detector(self) -> None:
         suggestions = self.service.suggest_for_rows(
             [

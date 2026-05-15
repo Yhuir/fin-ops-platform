@@ -1,6 +1,10 @@
 import unittest
 
 from fin_ops_platform.services.workbench_candidate_match_service import WorkbenchCandidateMatchService
+from fin_ops_platform.services.no_oa_managed_rule_policy import (
+    managed_no_oa_batch_type_for_mode,
+    workbench_mode_may_auto_close,
+)
 from fin_ops_platform.services.workbench_matching_rules import MAX_SUM_MATCH_CANDIDATES, WorkbenchMatchingRules
 
 
@@ -709,7 +713,7 @@ class WorkbenchMatchingRulesTests(unittest.TestCase):
             [],
         )
 
-    def test_salary_personal_auto_match(self) -> None:
+    def test_salary_personal_auto_match_is_recognized_but_not_auto_closed(self) -> None:
         candidates = self.rules.generate_candidates(
             "2026-05",
             oa_rows=[],
@@ -718,11 +722,15 @@ class WorkbenchMatchingRulesTests(unittest.TestCase):
         )
 
         candidate = find_candidate(candidates, "salary_personal_auto_match")
-        self.assertEqual(candidate["status"], "auto_closed")
+        self.assertFalse(workbench_mode_may_auto_close("salary_personal_auto_match"))
+        self.assertEqual(managed_no_oa_batch_type_for_mode("salary_personal_auto_match"), "salary")
+        self.assertNotEqual(candidate["status"], "auto_closed")
         self.assertEqual(candidate["confidence"], "high")
         self.assertEqual(candidate["bank_row_ids"], ["bank-salary"])
+        self.assertTrue(candidate["special_metadata"]["no_oa_managed"])
+        self.assertEqual(candidate["special_metadata"]["managed_batch_type"], "salary")
 
-    def test_internal_transfer_pair_matches_opposite_bank_directions_within_window(self) -> None:
+    def test_internal_transfer_pair_is_recognized_but_not_auto_closed(self) -> None:
         candidates = self.rules.generate_candidates(
             "2026-05",
             oa_rows=[],
@@ -750,9 +758,13 @@ class WorkbenchMatchingRulesTests(unittest.TestCase):
         )
 
         candidate = find_candidate(candidates, "internal_transfer_pair")
-        self.assertEqual(candidate["status"], "auto_closed")
+        self.assertFalse(workbench_mode_may_auto_close("internal_transfer_pair"))
+        self.assertEqual(managed_no_oa_batch_type_for_mode("internal_transfer_pair"), "internal_transfer")
+        self.assertNotEqual(candidate["status"], "auto_closed")
         self.assertEqual(candidate["confidence"], "high")
         self.assertCountEqual(candidate["bank_row_ids"], ["bank-out", "bank-in"])
+        self.assertTrue(candidate["special_metadata"]["no_oa_managed"])
+        self.assertEqual(candidate["special_metadata"]["managed_batch_type"], "internal_transfer")
 
     def test_oa_invoice_offset_auto_match_uses_configured_applicant_and_attachment_link(self) -> None:
         candidates = self.rules.generate_candidates(
@@ -804,7 +816,7 @@ class WorkbenchMatchingRulesTests(unittest.TestCase):
         self.assertTrue(any(candidate["bank_row_ids"] == ["bank-unmatched"] for candidate in no_confident))
         self.assertTrue(any(candidate["invoice_row_ids"] == ["invoice-unmatched"] for candidate in no_confident))
 
-    def test_conflicting_auto_closed_candidates_are_marked_conflict(self) -> None:
+    def test_no_oa_managed_salary_candidate_does_not_join_auto_closed_conflicts(self) -> None:
         candidates = self.rules.generate_candidates(
             "2026-05",
             oa_rows=[],
@@ -818,8 +830,10 @@ class WorkbenchMatchingRulesTests(unittest.TestCase):
             if candidate["rule_code"] in {"exact_counterparty_amount_one_to_one", "salary_personal_auto_match"}
         ]
         self.assertEqual(len(auto_claiming_candidates), 2)
-        self.assertTrue(all(candidate["status"] == "conflict" for candidate in auto_claiming_candidates))
-        self.assertTrue(all(candidate["conflict_candidate_keys"] for candidate in auto_claiming_candidates))
+        by_rule_code = {candidate["rule_code"]: candidate for candidate in auto_claiming_candidates}
+        self.assertEqual(by_rule_code["exact_counterparty_amount_one_to_one"]["status"], "auto_closed")
+        self.assertNotEqual(by_rule_code["salary_personal_auto_match"]["status"], "auto_closed")
+        self.assertEqual(by_rule_code["salary_personal_auto_match"]["conflict_candidate_keys"], [])
 
     def test_every_candidate_can_be_upserted(self) -> None:
         candidates = self.rules.generate_candidates(

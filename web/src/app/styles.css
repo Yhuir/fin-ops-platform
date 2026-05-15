@@ -1980,6 +1980,14 @@ body.column-layout-dragging {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
 }
 
+.candidate-group-collapse-control {
+  position: absolute;
+  top: 6px;
+  left: 10px;
+  z-index: 3;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
 .candidate-group-row-tone-0 {
   --candidate-group-band: var(--ops-row-band-a, #fbfcff);
   --candidate-group-border: var(--ops-row-border-a, #d9e2ef);
@@ -7311,6 +7319,43 @@ body.column-layout-dragging {
   text-overflow: clip;
 }
 
+.bank-relation-chip-row {
+  flex-wrap: wrap;
+  gap: 4px;
+  align-content: flex-start;
+}
+
+.bank-details-page .bank-relation-tag {
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 24px;
+  height: auto;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.bank-details-page .bank-relation-tag .MuiChip-label {
+  min-width: 0;
+  padding-inline: 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bank-details-page .bank-relation-tag-has {
+  border-color: #8fd99b;
+  background: #effaf1;
+  color: #0e6027;
+}
+
+.bank-details-page .bank-relation-tag-none {
+  border-color: #ffd2a6;
+  background: #fff4e5;
+  color: #8a4600;
+}
+
 .bank-details-page .bank-source-chip .MuiChip-label,
 .bank-details-page .direction-tag .MuiChip-label {
   overflow: hidden;
@@ -7731,8 +7776,9 @@ body.column-layout-dragging {
 }
 
 .etc-upload-blocks {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 220px);
+  align-items: start;
   gap: 10px;
 }
 
@@ -7743,17 +7789,28 @@ body.column-layout-dragging {
 }
 
 .etc-ticket-root-import-panel {
-  flex: 1 1 320px;
-  min-width: min(100%, 320px);
+  min-width: 0;
   padding: 10px;
   border: 1px solid #dbe3ef;
   border-radius: 8px;
   background: #f9fbfe;
 }
 
+.etc-upload-actions {
+  align-self: start;
+  display: grid;
+  gap: 8px;
+}
+
+.etc-upload-actions .etc-upload-button {
+  width: 100%;
+  min-height: 36px;
+  justify-content: flex-start;
+}
+
 .etc-ticket-root-paste-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 8px;
 }
 
@@ -7762,8 +7819,8 @@ body.column-layout-dragging {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px;
   align-items: center;
-  min-height: 76px;
-  padding: 8px;
+  min-height: 56px;
+  padding: 6px;
   border-radius: 8px;
   background: #ffffff;
 }
@@ -7771,16 +7828,53 @@ body.column-layout-dragging {
 .etc-ticket-root-paste-open.MuiButton-root {
   justify-content: flex-start;
   min-width: 0;
-  min-height: 56px;
-  padding: 6px 8px;
+  min-height: 44px;
+  padding: 4px 6px;
   color: #243b53;
   text-align: left;
   text-transform: none;
 }
 
-.etc-ticket-root-paste-open .MuiTypography-root {
+.etc-ticket-root-paste-main,
+.etc-ticket-root-paste-summary {
+  min-width: 0;
+}
+
+.etc-ticket-root-paste-summary {
+  overflow: hidden;
+}
+
+.etc-ticket-root-paste-index {
+  flex: 0 0 auto;
+}
+
+.etc-ticket-root-paste-plate,
+.etc-ticket-root-paste-meta,
+.etc-ticket-root-paste-filename {
   max-width: 100%;
-  overflow-wrap: anywhere;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.etc-ticket-root-paste-plate {
+  flex: 1 1 auto;
+}
+
+.etc-ticket-root-paste-meta {
+  flex: 0 1 auto;
+}
+
+.etc-ticket-root-paste-filename {
+  display: block;
+  font-size: 0.72rem;
+}
+
+@media (max-width: 900px) {
+  .etc-upload-blocks {
+    grid-template-columns: 1fr;
+  }
 }
 
 .etc-manual-review-panel {
@@ -7819,8 +7913,17 @@ body.column-layout-dragging {
   border-color: #e2e8f0;
 }
 
+.etc-invoice-table-container {
+  width: 100%;
+  max-height: 460px;
+  overflow-x: hidden;
+  border: 1px solid #d5dde8;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
 .etc-reconciliation-table-block {
-  --etc-reconciliation-row-height: 96px;
+  --etc-reconciliation-row-height: 32px;
   display: grid;
   gap: 8px;
   min-width: 0;
@@ -7843,21 +7946,22 @@ body.column-layout-dragging {
 
 .etc-reconciliation-table .MuiTableCell-root {
   height: var(--etc-reconciliation-row-height);
-  padding: 8px 10px;
+  padding: 2px 6px;
   border-color: #e2e8f0;
   color: #243b53;
   vertical-align: middle;
+  font-size: 0.78rem;
 }
 
 .etc-reconciliation-table .MuiTableCell-head {
   height: auto;
-  min-height: 38px;
-  padding-top: 8px;
-  padding-bottom: 8px;
+  min-height: 32px;
+  padding-top: 5px;
+  padding-bottom: 5px;
   background: #f4f7fb;
   color: #243b53;
   font-weight: 800;
-  line-height: 1.3;
+  line-height: 1.2;
 }
 
 .etc-reconciliation-table-side-heading {
@@ -7884,32 +7988,24 @@ body.column-layout-dragging {
   cursor: pointer;
 }
 
-.etc-reconciliation-card-cell[data-highlight="missing"] {
-  box-shadow: inset 4px 0 0 #f97316;
+.etc-reconciliation-select-column {
+  width: 44px;
 }
 
-.etc-reconciliation-evidence-side-cell[data-highlight="extra"] {
-  box-shadow: inset -4px 0 0 #f97316;
-}
-
-.etc-reconciliation-card-cell[data-highlight="matched"],
-.etc-reconciliation-evidence-side-cell[data-highlight="matched"],
-.etc-reconciliation-card-cell[data-highlight="manual"],
-.etc-reconciliation-card-cell[data-highlight="covered"],
-.etc-reconciliation-evidence-side-cell[data-highlight="covered"] {
-  box-shadow: inset 4px 0 0 #22c55e;
+.etc-reconciliation-select-column .MuiCheckbox-root {
+  padding: 2px;
 }
 
 .etc-reconciliation-date-column {
-  width: 16%;
+  width: 15%;
 }
 
 .etc-reconciliation-description-column {
-  width: 26%;
+  width: 25%;
 }
 
 .etc-reconciliation-amount-column {
-  width: 14%;
+  width: 12%;
 }
 
 .etc-reconciliation-time-column {
@@ -7939,14 +8035,19 @@ body.column-layout-dragging {
   display: grid;
   gap: 1px;
   color: #243b53;
-  font-size: 0.78rem;
-  line-height: 1.2;
+  font-size: 0.72rem;
+  line-height: 0.98;
   text-align: center;
 }
 
-.etc-reconciliation-date-label {
-  color: #6b7c93;
-  font-size: 0.7rem;
+.etc-reconciliation-date-pairs {
+  gap: 2px !important;
+}
+
+.etc-reconciliation-description-cell {
+  width: 100%;
+  min-width: 0;
+  justify-content: center;
 }
 
 .etc-reconciliation-description {
@@ -7955,10 +8056,28 @@ body.column-layout-dragging {
   min-width: 0;
   overflow: hidden;
   color: #1f2f46;
-  line-height: 1.45;
+  font-size: 0.72rem;
+  line-height: 1.1;
   overflow-wrap: anywhere;
-  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
+}
+
+.etc-reconciliation-description--collapsed {
+  -webkit-line-clamp: 1;
+}
+
+.etc-reconciliation-description--expanded {
+  display: inline;
+  overflow: visible;
+  white-space: normal;
+}
+
+.etc-reconciliation-description-toggle.MuiButton-root {
+  flex: 0 0 auto;
+  min-width: 34px;
+  padding: 0 2px;
+  font-size: 0.68rem;
+  line-height: 1;
 }
 
 .etc-reconciliation-chip-line {
@@ -7969,7 +8088,8 @@ body.column-layout-dragging {
 .etc-reconciliation-chip-line .MuiChip-root {
   max-width: 100%;
   height: auto;
-  min-height: 24px;
+  min-height: 20px;
+  font-size: 0.7rem;
 }
 
 .etc-reconciliation-chip-line .MuiChip-label {
@@ -7982,14 +8102,15 @@ body.column-layout-dragging {
 .etc-reconciliation-money {
   font-weight: 800;
   color: #1f2f46;
-  line-height: 1.2;
+  font-size: 0.8rem;
+  line-height: 1.1;
 }
 
 .etc-reconciliation-empty {
   color: #6b7c93;
   display: inline-flex;
   width: 100%;
-  min-height: 40px;
+  min-height: 24px;
   align-items: center;
   justify-content: center;
   text-align: center;

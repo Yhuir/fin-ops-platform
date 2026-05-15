@@ -62,17 +62,25 @@ export function buildWorkbenchDisplayGroups(
 
   const searchContext = resolveWorkbenchSearchContext(state);
   const sortDirection = state.sortByPane[activePaneId];
-  const hasPaneCriteria = workbenchPaneIds.some((paneId) => paneHasWorkbenchRowCriteria(state, paneId));
+  const hasPaneRowCriteria = workbenchPaneIds.some((paneId) => paneHasWorkbenchRowCriteria(state, paneId));
 
-  const displayGroups = !searchContext && !hasPaneCriteria
+  const displayGroups = !searchContext && !hasPaneRowCriteria
     ? groups
     : groups.flatMap((group) => {
       if (searchContext && !groupMatchesSearchContext(group, searchContext.normalizedQuery)) {
         return [];
       }
 
+      if (!searchContext && hasPaneRowCriteria && !groupMatchesPaneRowCriteria(group, state)) {
+        return [];
+      }
+
+      if (isCollapsedSummaryGroup(group)) {
+        return [group];
+      }
+
       const filteredGroup = applyPaneCriteriaToGroup(group, state);
-      if (!searchContext && !groupHasRowsInCriteriaPanes(filteredGroup, state)) {
+      if (!searchContext && hasPaneRowCriteria && !groupHasRowsInCriteriaPanes(filteredGroup, state)) {
         return [];
       }
 
@@ -94,6 +102,18 @@ export function buildWorkbenchPaneRows(groups: WorkbenchCandidateGroup[]): Workb
   };
 }
 
+export function countWorkbenchGroupRows(group: WorkbenchCandidateGroup): number {
+  return workbenchPaneIds.reduce((total, paneId) => {
+    const collapsedPaneRows = group.collapsedRows?.[paneId] ?? [];
+    const paneRows = collapsedPaneRows.length > 0 ? collapsedPaneRows : group.rows[paneId];
+    return total + paneRows.length;
+  }, 0);
+}
+
+export function countWorkbenchGroupsRows(groups: WorkbenchCandidateGroup[]): number {
+  return groups.reduce((total, group) => total + countWorkbenchGroupRows(group), 0);
+}
+
 export function collectWorkbenchFilterOptions(
   groups: WorkbenchCandidateGroup[],
   paneId: WorkbenchRecordType,
@@ -106,7 +126,7 @@ export function collectWorkbenchFilterOptions(
   const values = new Set<string>();
 
   groups.forEach((group) => {
-    group.rows[paneId].forEach((row) => {
+    getWorkbenchGroupPaneRowsForCriteria(group, paneId).forEach((row) => {
       const value = row.tableValues[columnKey];
       if (!value || value === "--" || value === "—") {
         return;
@@ -125,7 +145,7 @@ export function collectWorkbenchTimeFilterYears(
   const years = new Set<string>();
 
   groups.forEach((group) => {
-    group.rows[paneId].forEach((row) => {
+    getWorkbenchGroupPaneRowsForCriteria(group, paneId).forEach((row) => {
       const timeValue = resolveWorkbenchRowSortValue(row, paneId);
       if (!timeValue || timeValue.length < 4) {
         return;
@@ -173,7 +193,31 @@ function resolveWorkbenchSearchContext(state: WorkbenchZoneDisplayState) {
 }
 
 function groupMatchesSearchContext(group: WorkbenchCandidateGroup, normalizedQuery: string) {
-  return workbenchPaneIds.some((paneId) => group.rows[paneId].some((row) => matchesWorkbenchRowText(row, normalizedQuery)));
+  return workbenchPaneIds.some((paneId) =>
+    getWorkbenchGroupPaneRowsForCriteria(group, paneId).some((row) => matchesWorkbenchRowText(row, normalizedQuery)),
+  );
+}
+
+function groupMatchesPaneRowCriteria(group: WorkbenchCandidateGroup, state: WorkbenchZoneDisplayState) {
+  if (!workbenchPaneIds.some((paneId) => paneHasWorkbenchRowCriteria(state, paneId))) {
+    return true;
+  }
+
+  return workbenchPaneIds.some((paneId) => {
+    if (!paneHasWorkbenchRowCriteria(state, paneId)) {
+      return false;
+    }
+
+    const paneFilters = state.filtersByPaneAndColumn[paneId] ?? {};
+    const paneTimeFilter = state.timeFilterByPane[paneId] ?? { mode: "none" };
+    return getWorkbenchGroupPaneRowsForCriteria(group, paneId).some((row) =>
+      matchesWorkbenchRow(row, paneId, "", paneFilters, paneTimeFilter),
+    );
+  });
+}
+
+function isCollapsedSummaryGroup(group: WorkbenchCandidateGroup) {
+  return group.displayMode === "collapsed_summary";
 }
 
 function applyPaneCriteriaToGroup(
@@ -240,7 +284,7 @@ function collectBankAmountFilterOptions(groups: WorkbenchCandidateGroup[]) {
   const accountValues = new Set<string>();
 
   groups.forEach((group) => {
-    group.rows.bank.forEach((row) => {
+    getWorkbenchGroupPaneRowsForCriteria(group, "bank").forEach((row) => {
       const direction = row.tableValues.direction;
       if (direction && direction !== "--" && direction !== "—") {
         directionValues.add(direction);
@@ -255,6 +299,13 @@ function collectBankAmountFilterOptions(groups: WorkbenchCandidateGroup[]) {
   const orderedDirections = ["支出", "收入"].filter((value) => directionValues.has(value));
   const orderedAccounts = Array.from(accountValues).sort((left, right) => left.localeCompare(right, "zh-CN"));
   return [...orderedDirections, ...orderedAccounts];
+}
+
+function getWorkbenchGroupPaneRowsForCriteria(group: WorkbenchCandidateGroup, paneId: WorkbenchRecordType) {
+  return [
+    ...group.rows[paneId],
+    ...(group.collapsedRows?.[paneId] ?? []),
+  ];
 }
 
 function resolveBankAmountFilterValues(row: WorkbenchRecord) {

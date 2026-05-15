@@ -106,17 +106,35 @@ class EtcReconciliationTaskService:
             if task.status == EtcReconciliationTaskStatus.READY_FOR_IMPORT
         ]
 
-    def delete_task(self, *, task_id: str, expected_version: int, actor: str) -> dict[str, object]:
+    def delete_task(
+        self,
+        *,
+        task_id: str,
+        expected_version: int,
+        actor: str,
+        import_cleanup_confirmed: bool = False,
+    ) -> dict[str, object]:
         task = self._tasks[task_id]
         self._assert_expected_version(task, expected_version)
-        if task.status not in {EtcReconciliationTaskStatus.DRAFT, EtcReconciliationTaskStatus.REVIEWING}:
-            raise ValueError("invalid_reconciliation_task_status")
         if (
-            str(task.import_batch_id or "").strip()
-            or str(task.oa_draft_batch_id or "").strip()
+            str(task.oa_draft_batch_id or "").strip()
+            or str(task.etc_batch_id or "").strip()
             or task.submitted_confirmed_at is not None
         ):
             raise ValueError("reconciliation_task_has_submission_link")
+        if task.status not in {
+            EtcReconciliationTaskStatus.DRAFT,
+            EtcReconciliationTaskStatus.REVIEWING,
+            EtcReconciliationTaskStatus.READY_FOR_IMPORT,
+            EtcReconciliationTaskStatus.IMPORTED,
+        }:
+            raise ValueError("invalid_reconciliation_task_status")
+        if (
+            task.status == EtcReconciliationTaskStatus.IMPORTED
+            and str(task.import_batch_id or "").strip()
+            and not import_cleanup_confirmed
+        ):
+            raise ValueError("reconciliation_task_import_cleanup_required")
 
         self._delete_task_uploads(task)
         self._tasks.pop(task_id, None)
@@ -317,11 +335,23 @@ class EtcReconciliationTaskService:
             ticket_id = _required_text(payload, "ticketItemId")
             card = self._card_item(task, item_id)
             ticket = self._ticket_item(task, ticket_id)
+            previous_card_ids = [card_id for card_id in ticket.linked_credit_card_item_ids if card_id != card.item_id]
+            for previous_card_id in previous_card_ids:
+                previous_card = self._card_item(task, previous_card_id)
+                if previous_card.manual_resolution == "included_etc":
+                    self._replace_card(
+                        task,
+                        replace(
+                            previous_card,
+                            manual_resolution="unresolved",
+                            manual_resolution_reason=None,
+                            review_note=None,
+                        ),
+                    )
             self._replace_card(task, replace(card, manual_resolution="included_etc"))
-            linked = list(dict.fromkeys([*ticket.linked_credit_card_item_ids, card.item_id]))
-            self._replace_ticket(task, replace(ticket, linked_credit_card_item_ids=linked))
+            self._replace_ticket(task, replace(ticket, linked_credit_card_item_ids=[card.item_id]))
             event_type = "item_linked"
-            affected = [card.item_id, ticket.item_id]
+            affected = [*previous_card_ids, card.item_id, ticket.item_id]
         elif action == "unlink_ticket":
             ticket_id = _required_text(payload, "ticketItemId")
             card = self._card_item(task, item_id)
@@ -417,6 +447,7 @@ class EtcReconciliationTaskService:
         actor: str,
         approved_delta: Decimal | str | None = None,
         approved_delta_note: str | None = None,
+        confirmed_credit_card_item_ids: list[str] | None = None,
     ) -> EtcReconciliationTask:
         task = self._tasks[task_id]
         self._assert_expected_version(task, expected_version)
@@ -433,23 +464,37 @@ class EtcReconciliationTaskService:
         if not task.credit_card_items:
             raise ValueError("credit_card_statement_required")
 
-        candidate_items = [item for item in task.credit_card_items if item.is_etc_candidate]
+        selected_card_ids = self._normalize_confirmed_credit_card_item_ids(
+            task,
+            confirmed_credit_card_item_ids,
+        )
+        if selected_card_ids is not None:
+            self._promote_selected_cards_for_confirmation(
+                task,
+                selected_card_ids=selected_card_ids,
+            )
+        items_to_validate = [
+            item for item in task.credit_card_items
+            if selected_card_ids is None or item.item_id in selected_card_ids
+        ]
         final_items = [
             item
-            for item in task.credit_card_items
+            for item in items_to_validate
             if item.manual_resolution in {"included_etc", "covered_by_supplement", "manual_confirmed"}
         ]
         if not final_items:
             raise ValueError("no_confirmable_credit_card_items")
         unresolved = [
             item
-            for item in task.credit_card_items
+            for item in items_to_validate
             if (item.is_etc_candidate or item.manual_resolution != "unresolved")
             and item.manual_resolution == "unresolved"
         ]
         if unresolved:
             raise ValueError("manual_resolution_required")
-        for item in task.credit_card_items:
+        if selected_card_ids is not None and len(final_items) != len(selected_card_ids):
+            raise ValueError("selected_reconciliation_item_not_pairable")
+        for item in items_to_validate:
             if item.manual_resolution == "included_etc" and not self._card_has_linked_etc_evidence(task, item.item_id):
                 raise ValueError("linked_etc_evidence_required")
             if item.manual_resolution in {"excluded_non_etc", "excluded_error"} and not (item.manual_resolution_reason or "").strip():
@@ -457,9 +502,12 @@ class EtcReconciliationTaskService:
             if item.manual_resolution == "manual_confirmed" and not (item.review_note or "").strip():
                 raise ValueError("review_note_required")
 
-        requirements = self._build_expected_requirements(task)
+        requirements = self._build_expected_requirements(task, selected_card_ids=selected_card_ids)
         task.expected_etc_invoice_requirements = requirements
-        task.submission_supplement_attachments = self._build_submission_supplement_attachments(task)
+        task.submission_supplement_attachments = self._build_submission_supplement_attachments(
+            task,
+            selected_card_ids=selected_card_ids,
+        )
         final_dates = sorted(item.transaction_date for item in final_items if item.transaction_date)
         task.period_start = final_dates[0] if final_dates else None
         task.period_end = final_dates[-1] if final_dates else None
@@ -475,6 +523,7 @@ class EtcReconciliationTaskService:
             for reconciled in task.reconciled_items
             for evidence_id in reconciled.supplement_evidence_ids
             if evidence_id in non_etc_supplement_ids
+            and (selected_card_ids is None or reconciled.credit_card_item_id in selected_card_ids)
         }
         task.supplement_count = len(linked_non_etc_ids)
         task.supplement_amount = _sum_money(
@@ -489,7 +538,7 @@ class EtcReconciliationTaskService:
         delta = (task.oa_total_amount or Decimal("0.00")) - expected_total
         if delta != Decimal("0.00") and (task.approved_delta != delta or not (task.approved_delta_note or "").strip()):
             raise ValueError("approved_delta_note_required")
-        task.confirmed_item_set_hash = self._confirmed_item_set_hash(task)
+        task.confirmed_item_set_hash = self._confirmed_item_set_hash(task, selected_card_ids=selected_card_ids)
         before_status = task.status.value
         task.status = EtcReconciliationTaskStatus.READY_FOR_IMPORT
         task.confirmed_by = actor
@@ -624,6 +673,47 @@ class EtcReconciliationTaskService:
                 actor=actor,
                 before_status=before_status,
                 after_status=task.status.value,
+            )
+        )
+        self._persist()
+        return _copy_task(task)
+
+    def remove_imported_invoices(
+        self,
+        *,
+        task_id: str,
+        expected_version: int,
+        import_batch_id: str,
+        actor: str,
+    ) -> EtcReconciliationTask:
+        task = self._tasks[task_id]
+        self._assert_expected_version(task, expected_version)
+        normalized_import_batch_id = str(import_batch_id or "").strip()
+        if task.status != EtcReconciliationTaskStatus.IMPORTED:
+            raise ValueError("invalid_reconciliation_task_status")
+        if not normalized_import_batch_id or str(task.import_batch_id or "").strip() != normalized_import_batch_id:
+            raise ValueError("reconciliation_task_import_batch_required")
+        if (
+            str(task.oa_draft_batch_id or "").strip()
+            or str(task.etc_batch_id or "").strip()
+            or task.submitted_confirmed_at is not None
+        ):
+            raise ValueError("reconciliation_task_has_submission_link")
+
+        before_status = task.status.value
+        task.status = EtcReconciliationTaskStatus.READY_FOR_IMPORT
+        task.import_batch_id = None
+        task.etc_batch_id = None
+        task.zip_preview_generation += 1
+        self._touch(task)
+        task.audit_events.append(
+            self._new_audit_event(
+                task_id=task_id,
+                event_type="imported_invoices_removed",
+                actor=actor,
+                before_status=before_status,
+                after_status=task.status.value,
+                affected_item_ids=[normalized_import_batch_id],
             )
         )
         self._persist()
@@ -1017,7 +1107,59 @@ class EtcReconciliationTaskService:
         existing.reviewed_by = actor
         existing.reviewed_at = datetime.now(UTC)
 
-    def _build_expected_requirements(self, task: EtcReconciliationTask) -> list[ExpectedEtcInvoiceRequirement]:
+    def _normalize_confirmed_credit_card_item_ids(
+        self,
+        task: EtcReconciliationTask,
+        confirmed_credit_card_item_ids: list[str] | None,
+    ) -> set[str] | None:
+        if confirmed_credit_card_item_ids is None:
+            return None
+        selected_ids = [
+            str(item_id).strip()
+            for item_id in confirmed_credit_card_item_ids
+            if str(item_id).strip()
+        ]
+        if not selected_ids:
+            raise ValueError("confirmed_credit_card_items_required")
+        known_ids = {item.item_id for item in task.credit_card_items}
+        unknown_ids = [item_id for item_id in selected_ids if item_id not in known_ids]
+        if unknown_ids:
+            raise ValueError("unknown_credit_card_item")
+        return set(dict.fromkeys(selected_ids))
+
+    def _promote_selected_cards_for_confirmation(
+        self,
+        task: EtcReconciliationTask,
+        *,
+        selected_card_ids: set[str],
+    ) -> None:
+        for card in list(task.credit_card_items):
+            if card.item_id not in selected_card_ids or card.manual_resolution != "unresolved":
+                continue
+            if self._card_has_linked_etc_evidence(task, card.item_id):
+                self._replace_card(task, replace(card, manual_resolution="included_etc"))
+                continue
+            if self._card_has_linked_non_etc_submission_supplement(task, card.item_id):
+                self._replace_card(task, replace(card, manual_resolution="covered_by_supplement"))
+                continue
+            raise ValueError("selected_reconciliation_item_not_pairable")
+
+    def _card_has_linked_non_etc_submission_supplement(self, task: EtcReconciliationTask, card_id: str) -> bool:
+        for reconciled in task.reconciled_items:
+            if reconciled.credit_card_item_id != card_id:
+                continue
+            for evidence_id in reconciled.supplement_evidence_ids:
+                evidence = self._supplement_evidence(task, evidence_id)
+                if not _is_etc_evidence_kind(evidence.evidence_kind) and evidence.include_in_oa_submission:
+                    return True
+        return False
+
+    def _build_expected_requirements(
+        self,
+        task: EtcReconciliationTask,
+        *,
+        selected_card_ids: set[str] | None = None,
+    ) -> list[ExpectedEtcInvoiceRequirement]:
         requirements: list[ExpectedEtcInvoiceRequirement] = []
         cards = {item.item_id: item for item in task.credit_card_items}
         requirement_index = 0
@@ -1025,11 +1167,16 @@ class EtcReconciliationTaskService:
             if ticket.removed:
                 continue
             for card_id in ticket.linked_credit_card_item_ids:
+                if selected_card_ids is not None and card_id not in selected_card_ids:
+                    continue
                 card = cards.get(card_id)
                 if card is None or card.manual_resolution != "included_etc":
                     continue
                 requirement_index += 1
                 tx_date = date.fromisoformat(card.transaction_date)
+                ticket_date = _parse_iso_date_prefix(ticket.transaction_at) or tx_date
+                window_start = min(tx_date - timedelta(days=1), ticket_date)
+                window_end = max(tx_date + timedelta(days=1), ticket_date)
                 requirements.append(
                     ExpectedEtcInvoiceRequirement(
                         requirement_id=f"{task.task_id}-REQ-{requirement_index:04d}",
@@ -1038,13 +1185,15 @@ class EtcReconciliationTaskService:
                         ticket_root_item_id=ticket.item_id,
                         vehicle_plate=ticket.vehicle_plate,
                         transaction_at=ticket.transaction_at,
-                        date_window_start=(tx_date - timedelta(days=1)).isoformat(),
-                        date_window_end=(tx_date + timedelta(days=1)).isoformat(),
+                        date_window_start=window_start.isoformat(),
+                        date_window_end=window_end.isoformat(),
                         amount=card.settlement_amount.quantize(Decimal("0.01")),
                         invoice_count=ticket.invoice_count,
                     )
                 )
         for reconciled in task.reconciled_items:
+            if selected_card_ids is not None and reconciled.credit_card_item_id not in selected_card_ids:
+                continue
             card = cards.get(reconciled.credit_card_item_id)
             if card is None or card.manual_resolution != "covered_by_supplement":
                 continue
@@ -1088,13 +1237,19 @@ class EtcReconciliationTaskService:
                     return True
         return False
 
-    def _build_submission_supplement_attachments(self, task: EtcReconciliationTask) -> list[SubmissionSupplementAttachment]:
+    def _build_submission_supplement_attachments(
+        self,
+        task: EtcReconciliationTask,
+        *,
+        selected_card_ids: set[str] | None = None,
+    ) -> list[SubmissionSupplementAttachment]:
         files = {file.file_id: file for file in task.source_files}
         attachments: list[SubmissionSupplementAttachment] = []
         linked_ids = {
             evidence_id
             for reconciled in task.reconciled_items
             for evidence_id in reconciled.supplement_evidence_ids
+            if selected_card_ids is None or reconciled.credit_card_item_id in selected_card_ids
         }
         for evidence in task.supplement_evidences:
             if evidence.evidence_id not in linked_ids or _is_etc_evidence_kind(evidence.evidence_kind):
@@ -1118,7 +1273,11 @@ class EtcReconciliationTaskService:
         return attachments
 
     @staticmethod
-    def _confirmed_item_set_hash(task: EtcReconciliationTask) -> str:
+    def _confirmed_item_set_hash(
+        task: EtcReconciliationTask,
+        *,
+        selected_card_ids: set[str] | None = None,
+    ) -> str:
         payload = {
             "cards": [
                 {
@@ -1130,6 +1289,7 @@ class EtcReconciliationTaskService:
                 }
                 for item in sorted(task.credit_card_items, key=lambda value: value.item_id)
                 if item.manual_resolution != "unresolved"
+                and (selected_card_ids is None or item.item_id in selected_card_ids)
             ],
             "requirements": [
                 {
@@ -1327,6 +1487,15 @@ def _decimal_or_zero(value: Decimal | str | None) -> Decimal:
     if value in (None, ""):
         return Decimal("0.00")
     return Decimal(str(value)).quantize(Decimal("0.01"))
+
+
+def _parse_iso_date_prefix(value: str | None) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
 
 
 def _first_text(*values: object) -> str | None:

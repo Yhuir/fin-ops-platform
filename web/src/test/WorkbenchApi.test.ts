@@ -131,6 +131,303 @@ describe("workbench api bank amount mapping", () => {
     });
   });
 
+  test("maps no-OA collapsed summary groups and preserves collapsed bank detail rows", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "2026-03",
+          summary: {
+            oa_count: 0,
+            bank_count: 3,
+            invoice_count: 0,
+            paired_count: 1,
+            open_count: 0,
+            exception_count: 0,
+          },
+          paired: {
+            groups: [
+              {
+                group_id: "no-oa-bank-batch:NOOA-202603-FEE",
+                group_type: "manual_confirmed",
+                match_confidence: "high",
+                reason: "免OA手续费批次",
+                relation_mode: "no_oa_bank_batch",
+                display_mode: "collapsed_summary",
+                default_collapsed: true,
+                summary_row: {
+                  id: "nooa-summary-NOOA-202603-FEE",
+                  type: "bank",
+                  source_kind: "no_oa_bank_batch_summary",
+                  trade_time: "2026-03",
+                  direction: "支出",
+                  debit_amount: "30.00",
+                  credit_amount: "",
+                  counterparty_name: "免OA手续费批次",
+                  payment_account_label: "建设银行 8106",
+                  invoice_relation: { code: "no_oa_bank_batch", label: "免OA批次", tone: "success" },
+                  available_actions: ["detail", "withdraw_no_oa_batch"],
+                  special_metadata: {
+                    source_batch_id: "NOOA-202603-FEE",
+                    batch_version: 7,
+                  },
+                },
+                oa_rows: [],
+                bank_rows: [
+                  {
+                    id: "nooa-summary-NOOA-202603-FEE",
+                    type: "bank",
+                    source_kind: "no_oa_bank_batch_summary",
+                    trade_time: "2026-03",
+                    direction: "支出",
+                    debit_amount: "30.00",
+                    credit_amount: "",
+                    counterparty_name: "免OA手续费批次",
+                    payment_account_label: "建设银行 8106",
+                    invoice_relation: { code: "no_oa_bank_batch", label: "免OA批次", tone: "success" },
+                    available_actions: ["detail", "withdraw_no_oa_batch"],
+                    special_metadata: {
+                      source_batch_id: "NOOA-202603-FEE",
+                      batch_version: 7,
+                    },
+                  },
+                ],
+                invoice_rows: [],
+                collapsed_rows: {
+                  bank: [
+                    {
+                      id: "bk-nooa-fee-001",
+                      type: "bank",
+                      trade_time: "2026-03-08 09:00:00",
+                      direction: "支出",
+                      debit_amount: "10.00",
+                      credit_amount: "",
+                      counterparty_name: "建设银行手续费",
+                      payment_account_label: "建设银行 8106",
+                      invoice_relation: { code: "no_oa_bank_batch", label: "免OA批次", tone: "success" },
+                      bank_text_fields: [{ label: "摘要", value: "账户管理费" }],
+                      available_actions: ["detail"],
+                    },
+                    {
+                      id: "bk-nooa-fee-002",
+                      type: "bank",
+                      trade_time: "2026-03-09 09:00:00",
+                      direction: "支出",
+                      debit_amount: "20.00",
+                      credit_amount: "",
+                      counterparty_name: "网银服务费",
+                      payment_account_label: "建设银行 8106",
+                      invoice_relation: { code: "no_oa_bank_batch", label: "免OA批次", tone: "success" },
+                      bank_text_fields: [{ label: "摘要", value: "企业网银年费" }],
+                      available_actions: ["detail"],
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          open: { groups: [] },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const payload = await fetchWorkbench("2026-03");
+    const group = payload.paired.groups[0];
+
+    expect(group.relationMode).toBe("no_oa_bank_batch");
+    expect(group.displayMode).toBe("collapsed_summary");
+    expect(group.defaultCollapsed).toBe(true);
+    expect(group.summaryRow?.sourceKind).toBe("no_oa_bank_batch_summary");
+    expect(group.summaryRow?.id).toBe("nooa-summary-NOOA-202603-FEE");
+    expect(group.rows.bank.map((row) => row.id)).toEqual(["nooa-summary-NOOA-202603-FEE"]);
+    expect(group.collapsedRows?.bank.map((row) => row.id)).toEqual(["bk-nooa-fee-001", "bk-nooa-fee-002"]);
+    expect(group.collapsedRows?.bank.map((row) => row.id)).not.toContain("nooa-summary-NOOA-202603-FEE");
+    expect(group.collapsedRows?.bank[1].tableValues.note).toBe("摘要：企业网银年费");
+    expect(payload.summary.pairedCount).toBe(2);
+  });
+
+  test("keeps groups searchable when the hit is inside collapsed no-OA bank detail rows", () => {
+    const state = createEmptyWorkbenchZoneDisplayState();
+    state.activePaneId = "bank";
+    state.searchQueryByPane.bank = "企业网银年费";
+
+    const displayGroups = buildWorkbenchDisplayGroups(
+      [
+        {
+          id: "nooa-group",
+          groupType: "manual_confirmed",
+          matchConfidence: "high",
+          reason: "免OA批次",
+          relationMode: "no_oa_bank_batch",
+          displayMode: "collapsed_summary",
+          defaultCollapsed: true,
+          rows: {
+            oa: [],
+            bank: [createWorkbenchRow("bank", "nooa-summary", "免OA手续费批次")],
+            invoice: [],
+          },
+          collapsedRows: {
+            bank: [
+              {
+                ...createWorkbenchRow("bank", "nooa-detail", "网银服务费"),
+                tableValues: {
+                  ...createWorkbenchRow("bank", "nooa-detail", "网银服务费").tableValues,
+                  note: "摘要：企业网银年费",
+                  amount: "20.00",
+                },
+              },
+            ],
+          },
+        },
+      ],
+      state,
+    );
+
+    expect(displayGroups.map((group) => group.id)).toEqual(["nooa-group"]);
+    expect(displayGroups).toHaveLength(1);
+    expect(displayGroups[0].rows.bank.map((row) => row.id)).toEqual(["nooa-summary"]);
+    expect(displayGroups[0].collapsedRows?.bank?.map((row) => row.id)).toEqual(["nooa-detail"]);
+  });
+
+  test("keeps collapsed no-OA detail filter hits as one summary row", () => {
+    const state = createEmptyWorkbenchZoneDisplayState();
+    state.activePaneId = "bank";
+    state.filtersByPaneAndColumn.bank = {
+      paymentAccount: ["民生银行 0933"],
+    };
+
+    const displayGroups = buildWorkbenchDisplayGroups(
+      [
+        {
+          id: "nooa-salary-group",
+          groupType: "manual_confirmed",
+          matchConfidence: "high",
+          reason: "免OA工资批次",
+          relationMode: "no_oa_bank_batch",
+          displayMode: "collapsed_summary",
+          defaultCollapsed: true,
+          rows: {
+            oa: [],
+            bank: [createWorkbenchRow("bank", "nooa-salary-summary", "免OA工资批次")],
+            invoice: [],
+          },
+          collapsedRows: {
+            bank: [
+              {
+                ...createWorkbenchRow("bank", "nooa-salary-detail", "员工工资"),
+                tableValues: {
+                  ...createWorkbenchRow("bank", "nooa-salary-detail", "员工工资").tableValues,
+                  paymentAccount: "民生银行 0933",
+                  note: "工资发放",
+                },
+              },
+            ],
+          },
+        },
+      ],
+      state,
+    );
+
+    expect(displayGroups.map((group) => group.id)).toEqual(["nooa-salary-group"]);
+    expect(displayGroups[0].rows.bank.map((row) => row.id)).toEqual(["nooa-salary-summary"]);
+  });
+
+  test("maps submitted salary and internal-transfer no-OA results without old auto-pair modes", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "2026-03",
+          summary: {
+            oa_count: 0,
+            bank_count: 5,
+            invoice_count: 0,
+            paired_count: 2,
+            open_count: 0,
+            exception_count: 0,
+          },
+          paired: {
+            groups: [
+              {
+                group_id: "no-oa-bank-batch:NOOA-202603-SALARY",
+                group_type: "manual_confirmed",
+                match_confidence: "high",
+                reason: "免OA工资批次",
+                relation_mode: "no_oa_bank_batch",
+                display_mode: "collapsed_summary",
+                default_collapsed: true,
+                oa_rows: [],
+                bank_rows: [
+                  {
+                    id: "nooa-summary-NOOA-202603-SALARY",
+                    type: "bank",
+                    source_kind: "no_oa_bank_batch_summary",
+                    trade_time: "2026-03",
+                    direction: "支出",
+                    debit_amount: "80,000.00",
+                    credit_amount: "",
+                    counterparty_name: "免OA工资批次",
+                    payment_account_label: "民生银行 0933",
+                    invoice_relation: { code: "no_oa_bank_batch", label: "免OA批次", tone: "success" },
+                    available_actions: ["detail", "withdraw_no_oa_batch"],
+                    special_metadata: { source_batch_id: "NOOA-202603-SALARY", batch_type: "salary" },
+                  },
+                ],
+                invoice_rows: [],
+                collapsed_rows: { bank: [] },
+              },
+              {
+                group_id: "no-oa-bank-batch:NOOA-202603-INTERNAL",
+                group_type: "manual_confirmed",
+                match_confidence: "high",
+                reason: "免OA内部往来款批次",
+                relation_mode: "no_oa_bank_batch",
+                display_mode: "collapsed_summary",
+                default_collapsed: true,
+                oa_rows: [],
+                bank_rows: [
+                  {
+                    id: "nooa-summary-NOOA-202603-INTERNAL",
+                    type: "bank",
+                    source_kind: "no_oa_bank_batch_summary",
+                    trade_time: "2026-03",
+                    direction: "收入",
+                    debit_amount: "",
+                    credit_amount: "125,000.00",
+                    counterparty_name: "免OA内部往来款批次",
+                    payment_account_label: "建设银行 8106",
+                    invoice_relation: { code: "no_oa_bank_batch", label: "免OA批次", tone: "success" },
+                    available_actions: ["detail", "withdraw_no_oa_batch"],
+                    special_metadata: { source_batch_id: "NOOA-202603-INTERNAL", batch_type: "internal_transfer" },
+                  },
+                ],
+                invoice_rows: [],
+                collapsed_rows: { bank: [] },
+              },
+            ],
+          },
+          open: { groups: [] },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const payload = await fetchWorkbench("2026-03");
+
+    expect(payload.paired.groups).toHaveLength(2);
+    expect(payload.paired.groups.map((group) => group.relationMode)).toEqual([
+      "no_oa_bank_batch",
+      "no_oa_bank_batch",
+    ]);
+    expect(payload.paired.groups.map((group) => group.groupType)).toEqual(["manual_confirmed", "manual_confirmed"]);
+    expect(payload.paired.groups.map((group) => group.displayMode)).toEqual(["collapsed_summary", "collapsed_summary"]);
+    expect(payload.paired.groups.map((group) => group.rows.bank[0].sourceKind)).toEqual([
+      "no_oa_bank_batch_summary",
+      "no_oa_bank_batch_summary",
+    ]);
+    expect(payload.paired.groups.map((group) => group.relationMode)).not.toContain("salary_personal_auto_match");
+    expect(payload.paired.groups.map((group) => group.relationMode)).not.toContain("internal_transfer_pair");
+  });
+
   test("defaults invoice inventory stats when older workbench payloads omit them", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(

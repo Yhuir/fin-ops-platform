@@ -2,12 +2,17 @@ import AddOutlinedIcon from "@mui/icons-material/AddOutlined";
 import ArrowForwardOutlinedIcon from "@mui/icons-material/ArrowForwardOutlined";
 import DeleteOutlineOutlinedIcon from "@mui/icons-material/DeleteOutlineOutlined";
 import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
+import ExpandLessOutlinedIcon from "@mui/icons-material/ExpandLessOutlined";
+import ExpandMoreOutlinedIcon from "@mui/icons-material/ExpandMoreOutlined";
+import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined";
 import UndoOutlinedIcon from "@mui/icons-material/UndoOutlined";
 import UploadFileOutlinedIcon from "@mui/icons-material/UploadFileOutlined";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import Checkbox from "@mui/material/Checkbox";
 import Chip from "@mui/material/Chip";
+import Collapse from "@mui/material/Collapse";
 import Divider from "@mui/material/Divider";
 import IconButton from "@mui/material/IconButton";
 import List from "@mui/material/List";
@@ -27,8 +32,7 @@ import ToggleButton from "@mui/material/ToggleButton";
 import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
-import { DataGrid, type GridColDef } from "@mui/x-data-grid";
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from "react";
 import { Link as RouterLink } from "react-router-dom";
 
 import AppDialog from "../components/common/AppDialog";
@@ -42,12 +46,14 @@ import {
   createEtcOaDraftForBatch,
   deleteEtcBatch,
   deleteEtcReconciliationTask,
+  deleteEtcReconciliationTaskImportedInvoices,
   deleteEtcReconciliationSourceFile,
   fetchEtcBatchDetail,
   fetchEtcBatches,
   fetchEtcReconciliationTasks,
   markEtcBatchNotSubmitted,
   patchEtcReconciliationItem,
+  refreshEtcReconciliationMatches,
   reopenEtcReconciliationTask,
   uploadEtcCreditCardStatement,
   uploadEtcSupplementEvidences,
@@ -82,6 +88,14 @@ function formatMoney(value: string | number) {
   return parsed.toFixed(2);
 }
 
+function sumInvoiceTotalAmount(items: EtcInvoice[]) {
+  const totalCents = items.reduce((sum, item) => {
+    const parsed = Number(item.totalAmount);
+    return Number.isFinite(parsed) ? sum + Math.round(parsed * 100) : sum;
+  }, 0);
+  return (totalCents / 100).toFixed(2);
+}
+
 function formatDateRange(startDate: string | null, endDate: string | null) {
   if (!startDate && !endDate) {
     return "-";
@@ -97,14 +111,14 @@ function formatDateRange(startDate: string | null, endDate: string | null) {
 
 function splitDateParts(value: string | null | undefined) {
   if (!value) {
-    return { year: "-", rest: "-" };
+    return "-";
   }
   const [datePart] = value.split("T");
   const [year, month, day] = datePart.split("-");
   if (!year || !month || !day) {
-    return { year: datePart || "-", rest: "-" };
+    return datePart || "-";
   }
-  return { year, rest: `${month}-${day}` };
+  return `${year}-${month}-${day}`;
 }
 
 function splitDateTimeParts(value: string | null | undefined) {
@@ -133,6 +147,29 @@ function formatShortDateRange(startDate: string | null, endDate: string | null) 
     return start || end;
   }
   return `${start}-${end}`;
+}
+
+function datePart(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+  const [date] = value.trim().split(/[T\s]/);
+  return date || null;
+}
+
+function ticketRootSourceSummary(items: EtcTicketRootItem[]) {
+  const plates = Array.from(new Set(items.map((item) => item.vehiclePlate).filter(Boolean)));
+  const dates = items.map((item) => datePart(item.transactionAt)).filter((item): item is string => Boolean(item)).sort();
+  const totalAmount = items.reduce((sum, item) => {
+    const parsed = Number(item.amount);
+    return Number.isFinite(parsed) ? sum + parsed : sum;
+  }, 0);
+  return {
+    parsedCount: items.length,
+    plateLabel: plates.length > 0 ? plates.join(" / ") : "未识别车牌",
+    totalAmount: totalAmount.toFixed(2),
+    dateRange: formatDateRange(dates[0] ?? null, dates[dates.length - 1] ?? null),
+  };
 }
 
 function attachmentLabel(invoice: EtcInvoice) {
@@ -180,12 +217,19 @@ function sourceKindLabel(sourceKind: string) {
 }
 
 function isManualTicketRootSource(sourceFile: EtcSourceFile) {
-  return sourceFile.sourceKind === "ticket_root"
-    && ((sourceFile.contentType ?? "").toLowerCase().startsWith("text/plain") || sourceFile.originalName.startsWith("票根网手工粘贴-"));
+  return sourceFile.sourceKind === "ticket_root" && sourceFile.originalName.startsWith("票根网手工粘贴-");
 }
 
-function isFileTicketRootSource(sourceFile: EtcSourceFile) {
-  return sourceFile.sourceKind === "ticket_root" && !isManualTicketRootSource(sourceFile);
+function isTextFileTicketRootSource(sourceFile: EtcSourceFile) {
+  return sourceFile.sourceKind === "ticket_root"
+    && (sourceFile.contentType ?? "").toLowerCase().startsWith("text/plain")
+    && !isManualTicketRootSource(sourceFile);
+}
+
+function isDocumentTicketRootSource(sourceFile: EtcSourceFile) {
+  return sourceFile.sourceKind === "ticket_root"
+    && !isManualTicketRootSource(sourceFile)
+    && !isTextFileTicketRootSource(sourceFile);
 }
 
 function parseIssueContextLabel(issue: Pick<EtcReconciliationTask["parseIssues"][number], "sourcePage" | "sourceLine" | "extractionMethod">) {
@@ -272,11 +316,12 @@ type EvidenceRow = {
   fallbackTimeLabel: string;
   plateOrMerchant: string;
   amount: string;
+  invoiceCount: number;
   highlight: string;
   tags: string[];
 };
 
-type TicketRootImportMode = "clipboard" | "file";
+type TicketRootImportMode = "clipboard" | "textFile" | "file";
 
 type TicketRootPasteBlock = {
   clientId: string;
@@ -299,49 +344,93 @@ type ReconciliationRow = {
   evidenceHighlight: string;
 };
 
+type ReconciliationSelectionSummary = {
+  creditCardItemIds: string[];
+  oaTotalAmount: string;
+  periodStart: string | null;
+  periodEnd: string | null;
+  etcInvoiceCount: number;
+  supplementCount: number;
+};
+
 type DeleteTarget =
   | { kind: "batch"; item: EtcBatchSummary }
   | { kind: "task"; item: EtcReconciliationTask }
   | { kind: "sourceFile"; task: EtcReconciliationTask; item: EtcSourceFile };
 
-const invoiceColumns: GridColDef<EtcInvoice>[] = [
-  { field: "invoiceNumber", headerName: "发票号码", minWidth: 150, flex: 1.2 },
-  { field: "issueDate", headerName: "开票日期", minWidth: 112, flex: 0.8 },
-  {
-    field: "passageDate",
-    headerName: "通行日期",
-    minWidth: 180,
-    flex: 1.1,
-    valueGetter: (_value, row) => formatDateRange(row.passageStartDate, row.passageEndDate),
-  },
-  { field: "plateNumber", headerName: "车牌", minWidth: 112, flex: 0.7 },
-  { field: "sellerName", headerName: "销方", minWidth: 180, flex: 1.2 },
-  {
-    field: "totalAmount",
-    headerName: "金额",
-    type: "number",
-    minWidth: 100,
-    align: "right",
-    headerAlign: "right",
-    valueFormatter: (value) => formatMoney(value),
-  },
-  {
-    field: "taxAmount",
-    headerName: "税额",
-    type: "number",
-    minWidth: 92,
-    align: "right",
-    headerAlign: "right",
-    valueFormatter: (value) => formatMoney(value),
-  },
-  {
-    field: "attachments",
-    headerName: "附件状态",
-    minWidth: 118,
-    flex: 0.7,
-    valueGetter: (_value, row) => attachmentLabel(row),
-  },
-];
+const DESCRIPTION_EXPANSION_UNITS = 12;
+
+function estimatedDescriptionUnits(text: string) {
+  return Array.from(text).reduce((sum, char) => sum + (char.charCodeAt(0) > 255 ? 1 : 0.55), 0);
+}
+
+function ReconciliationDescriptionCell({
+  cardId,
+  description,
+  expanded,
+  onToggle,
+}: {
+  cardId: string;
+  description: string;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const textRef = useRef<HTMLSpanElement | null>(null);
+  const [measuredOverflow, setMeasuredOverflow] = useState(false);
+  const text = description || "-";
+
+  useEffect(() => {
+    const element = textRef.current;
+    if (!element) {
+      return undefined;
+    }
+
+    const measure = () => {
+      setMeasuredOverflow(element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1);
+    };
+
+    measure();
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(measure);
+      observer.observe(element);
+      return () => observer.disconnect();
+    }
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [text, expanded]);
+
+  const canExpand = expanded || measuredOverflow || estimatedDescriptionUnits(text) > DESCRIPTION_EXPANSION_UNITS;
+
+  return (
+    <Stack className="etc-reconciliation-description-cell" direction="row" spacing={0.5} alignItems="center">
+      <Tooltip title={text} describeChild placement="top">
+        <Typography
+          ref={textRef}
+          component="span"
+          data-testid={`etc-reconciliation-description-${cardId}`}
+          className={`etc-reconciliation-description ${expanded ? "etc-reconciliation-description--expanded" : "etc-reconciliation-description--collapsed"}`}
+        >
+          {text}
+        </Typography>
+      </Tooltip>
+      {canExpand ? (
+        <Button
+          type="button"
+          size="small"
+          variant="text"
+          className="etc-reconciliation-description-toggle"
+          aria-label={`${expanded ? "收起" : "展开"}交易描述 ${cardId}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggle();
+          }}
+        >
+          {expanded ? "收起" : "展开"}
+        </Button>
+      ) : null}
+    </Stack>
+  );
+}
 
 export default function EtcTicketManagementPage() {
   const { jobs } = useBackgroundJobProgress();
@@ -353,18 +442,27 @@ export default function EtcTicketManagementPage() {
   const [batches, setBatches] = useState<EtcBatchSummary[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState("");
   const [batchDetail, setBatchDetail] = useState<EtcBatchDetail | null>(null);
+  const [taskImportBatchDetail, setTaskImportBatchDetail] = useState<EtcBatchDetail | null>(null);
   const [reconciliationTasks, setReconciliationTasks] = useState<EtcReconciliationTask[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState("");
   const [selectedCardItemId, setSelectedCardItemId] = useState("");
   const [selectedEvidenceRowId, setSelectedEvidenceRowId] = useState("");
+  const [selectedReconciliationRowIds, setSelectedReconciliationRowIds] = useState<Set<string>>(() => new Set());
+  const [expandedDescriptionRowIds, setExpandedDescriptionRowIds] = useState<Set<string>>(() => new Set());
   const [reviewNote, setReviewNote] = useState("");
   const [loading, setLoading] = useState(false);
   const [taskLoading, setTaskLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [taskImportDetailLoading, setTaskImportDetailLoading] = useState(false);
+  const [taskImportDetailError, setTaskImportDetailError] = useState<string | null>(null);
   const [taskActionLoading, setTaskActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [taskPanelExpanded, setTaskPanelExpanded] = useState(true);
+  const [batchDetailPanelExpanded, setBatchDetailPanelExpanded] = useState(true);
   const [revokeDialogOpen, setRevokeDialogOpen] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [removeImportedInvoicesDialogOpen, setRemoveImportedInvoicesDialogOpen] = useState(false);
+  const [removeImportedInvoicesSubmitting, setRemoveImportedInvoicesSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const [draftCreating, setDraftCreating] = useState(false);
@@ -486,12 +584,88 @@ export default function EtcTicketManagementPage() {
     () => reconciliationTasks.find((task) => task.taskId === selectedTaskId) ?? null,
     [reconciliationTasks, selectedTaskId],
   );
+  const taskImportBatchIds = useMemo(() => {
+    const ids = new Set<string>();
+    reconciliationTasks.forEach((task) => {
+      if (task.etcBatchId) {
+        ids.add(task.etcBatchId);
+      }
+      if (task.importBatchId) {
+        ids.add(task.importBatchId);
+      }
+    });
+    return ids;
+  }, [reconciliationTasks]);
+  const visibleBatches = useMemo(
+    () => batches.filter((batch) =>
+      !taskImportBatchIds.has(batch.id)
+      && !taskImportBatchIds.has(batch.etcBatchId)
+      && !taskImportBatchIds.has(batch.externalBatchId)
+    ),
+    [batches, taskImportBatchIds],
+  );
+  const selectedTaskImportBatchId = selectedTask?.importBatchId || "";
+  const taskImportInvoiceItems = taskImportBatchDetail?.invoiceItems ?? [];
+  const importedInvoiceCount = taskImportBatchDetail
+    ? (taskImportBatchDetail.invoiceCount > 0 ? taskImportBatchDetail.invoiceCount : taskImportInvoiceItems.length)
+    : (selectedTask?.importedInvoiceCount ?? 0);
+  const importedInvoiceAmount = taskImportBatchDetail
+    ? (Number(taskImportBatchDetail.totalAmount) > 0 || taskImportInvoiceItems.length === 0
+      ? taskImportBatchDetail.totalAmount
+      : sumInvoiceTotalAmount(taskImportInvoiceItems))
+    : (selectedTask?.importedInvoiceAmount || "0.00");
+  const canRemoveImportedInvoices = Boolean(selectedTask && selectedTaskImportBatchId && importedInvoiceCount > 0);
+
+  useEffect(() => {
+    if (!selectedTaskImportBatchId) {
+      setTaskImportBatchDetail(null);
+      setTaskImportDetailError(null);
+      setTaskImportDetailLoading(false);
+      return undefined;
+    }
+    const controller = new AbortController();
+    setTaskImportBatchDetail(null);
+    setTaskImportDetailError(null);
+    setTaskImportDetailLoading(true);
+    void fetchEtcBatchDetail(selectedTaskImportBatchId, controller.signal)
+      .then((detail) => {
+        if (!controller.signal.aborted) {
+          setTaskImportBatchDetail(detail);
+        }
+      })
+      .catch((caught) => {
+        if (!(caught instanceof DOMException && caught.name === "AbortError")) {
+          setTaskImportDetailError(caught instanceof Error ? caught.message : "已导入ETC发票加载失败。");
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setTaskImportDetailLoading(false);
+        }
+      });
+    return () => controller.abort();
+  }, [selectedTaskImportBatchId]);
+
+  useEffect(() => {
+    if (batches.length === 0) {
+      return;
+    }
+    if (visibleBatches.some((batch) => batch.id === selectedBatchId)) {
+      return;
+    }
+    setBatchDetail(null);
+    setSelectedBatchId(visibleBatches[0]?.id ?? "");
+  }, [batches.length, selectedBatchId, visibleBatches]);
   const ticketRootManualSources = useMemo(
     () => (selectedTask?.sourceFiles ?? []).filter(isManualTicketRootSource),
     [selectedTask],
   );
-  const ticketRootFileSources = useMemo(
-    () => (selectedTask?.sourceFiles ?? []).filter(isFileTicketRootSource),
+  const ticketRootTextFileSources = useMemo(
+    () => (selectedTask?.sourceFiles ?? []).filter(isTextFileTicketRootSource),
+    [selectedTask],
+  );
+  const ticketRootDocumentSources = useMemo(
+    () => (selectedTask?.sourceFiles ?? []).filter(isDocumentTicketRootSource),
     [selectedTask],
   );
   const ticketRootItemsBySourceFileId = useMemo(() => {
@@ -506,12 +680,25 @@ export default function EtcTicketManagementPage() {
     }
     return itemsBySource;
   }, [selectedTask]);
+  const ticketRootSourceSummaryBySourceFileId = useMemo(() => {
+    const summaries = new Map<string, ReturnType<typeof ticketRootSourceSummary>>();
+    for (const sourceFile of selectedTask?.sourceFiles ?? []) {
+      if (sourceFile.sourceKind !== "ticket_root") {
+        continue;
+      }
+      summaries.set(sourceFile.fileId, ticketRootSourceSummary(ticketRootItemsBySourceFileId.get(sourceFile.fileId) ?? []));
+    }
+    return summaries;
+  }, [selectedTask, ticketRootItemsBySourceFileId]);
   const hasTicketRootManualSource = ticketRootManualSources.length > 0;
-  const hasTicketRootFileSource = ticketRootFileSources.length > 0;
+  const hasTicketRootTextFileSource = ticketRootTextFileSources.length > 0;
+  const hasTicketRootDocumentSource = ticketRootDocumentSources.length > 0;
 
   useEffect(() => {
     setSelectedCardItemId("");
     setSelectedEvidenceRowId("");
+    setSelectedReconciliationRowIds(new Set());
+    setExpandedDescriptionRowIds(new Set());
     setReviewNote("");
   }, [selectedTaskId]);
 
@@ -533,16 +720,45 @@ export default function EtcTicketManagementPage() {
       );
       return;
     }
-    if (ticketRootFileSources.length > 0) {
+    if (ticketRootTextFileSources.length > 0) {
+      setTicketRootImportMode("textFile");
+      setTicketRootPasteBlocks([{ clientId: "paste-1", text: "" }]);
+      return;
+    }
+    if (ticketRootDocumentSources.length > 0) {
       setTicketRootImportMode("file");
       setTicketRootPasteBlocks([{ clientId: "paste-1", text: "" }]);
       return;
     }
     setTicketRootPasteBlocks((current) => (current.length > 0 ? current : [{ clientId: "paste-1", text: "" }]));
-  }, [selectedTask?.taskId, ticketRootManualSources, ticketRootFileSources, selectedTask]);
+  }, [selectedTask?.taskId, ticketRootManualSources, ticketRootTextFileSources, ticketRootDocumentSources, selectedTask]);
 
   const invoiceRows = batchDetail?.invoiceItems ?? [];
-  const canDeleteTask = (task: EtcReconciliationTask) => ["draft", "reviewing"].includes(task.status);
+  const taskHasSubmissionLink = (task: EtcReconciliationTask) =>
+    Boolean(task.oaDraftBatchId?.trim() || task.etcBatchId?.trim() || task.submittedConfirmedAt?.trim());
+  const canDeleteTask = (task: EtcReconciliationTask) =>
+    ["draft", "reviewing", "ready_for_import", "imported"].includes(task.status) && !taskHasSubmissionLink(task);
+  const deleteTaskDisabledReason = (task: EtcReconciliationTask) => {
+    if (taskHasSubmissionLink(task)) {
+      return "已进入OA/提交链路，不能删除";
+    }
+    if (task.status === "importing") {
+      return "导入中，不能删除";
+    }
+    if (task.status === "closed") {
+      return "已关闭任务不能删除";
+    }
+    return "当前状态不能删除";
+  };
+  const deleteTaskDescription = (task: EtcReconciliationTask) => {
+    if (task.status === "imported") {
+      return "将删除该对账任务及其未进入 OA 链路的数据，并一并删除已导入 ETC 发票。用户需要重新导入时只能重新建/导。";
+    }
+    if (task.status === "ready_for_import") {
+      return "将删除该对账任务及其未进入 OA 链路的数据。请确认相关上传文件、核对结果和待导入数据不再需要。";
+    }
+    return "将删除该对账任务、上传源文件和核对结果。已进入 OA/提交链路的数据不会被允许删除。";
+  };
   const canDeleteBatch = (batch: EtcBatchSummary) => batch.status === "unsubmitted";
   const evidenceRows = useMemo<EvidenceRow[]>(() => {
     const ticketRows = (selectedTask?.ticketRootItems ?? []).map((item: EtcTicketRootItem) => ({
@@ -552,6 +768,7 @@ export default function EtcTicketManagementPage() {
       fallbackTimeLabel: "-",
       plateOrMerchant: item.vehiclePlate || "未记录车牌",
       amount: item.amount,
+      invoiceCount: item.invoiceCount,
       highlight: recommendationHighlight(item.recommendationStatus),
       tags: [],
     }));
@@ -562,6 +779,7 @@ export default function EtcTicketManagementPage() {
       fallbackTimeLabel: item.sourceName || "补充凭证",
       plateOrMerchant: item.merchantName || "补充凭证",
       amount: item.amount,
+      invoiceCount: 0,
       highlight: "covered",
       tags: item.tags,
     }));
@@ -613,10 +831,87 @@ export default function EtcTicketManagementPage() {
 
     return rows;
   }, [evidenceRows, selectedTask]);
-  const canSubmitCurrentBatch = activeStatus === "unsubmitted" && Boolean(selectedBatchId) && !detailLoading;
+  const visibleReconciliationRowIds = useMemo(
+    () => reconciliationRows.map((row) => row.id),
+    [reconciliationRows],
+  );
+  const pairedReconciliationRowIds = useMemo(
+    () => reconciliationRows
+      .filter((row) =>
+        Boolean(row.card)
+        && Boolean(row.evidence)
+        && ["matched", "manual", "covered"].includes(row.highlight)
+      )
+      .map((row) => row.id),
+    [reconciliationRows],
+  );
+  const selectedReconciliationSummary = useMemo<ReconciliationSelectionSummary>(() => {
+    const creditCardItemIds: string[] = [];
+    const seenCardIds = new Set<string>();
+    const selectedDates: string[] = [];
+    let totalAmount = 0;
+    let etcInvoiceCount = 0;
+    let supplementCount = 0;
+
+    for (const row of reconciliationRows) {
+      if (!selectedReconciliationRowIds.has(row.id) || !row.card || !row.evidence) {
+        continue;
+      }
+      if (seenCardIds.has(row.card.itemId)) {
+        continue;
+      }
+      seenCardIds.add(row.card.itemId);
+      creditCardItemIds.push(row.card.itemId);
+
+      const parsedAmount = Number(row.card.settlementAmount);
+      if (Number.isFinite(parsedAmount)) {
+        totalAmount += parsedAmount;
+      }
+      const transactionDate = datePart(row.card.transactionDate);
+      if (transactionDate) {
+        selectedDates.push(transactionDate);
+      }
+      if (row.evidence.source === "ticket") {
+        etcInvoiceCount += row.evidence.invoiceCount || 1;
+      } else {
+        supplementCount += 1;
+      }
+    }
+
+    selectedDates.sort();
+    return {
+      creditCardItemIds,
+      oaTotalAmount: totalAmount.toFixed(2),
+      periodStart: selectedDates[0] ?? null,
+      periodEnd: selectedDates[selectedDates.length - 1] ?? null,
+      etcInvoiceCount,
+      supplementCount,
+    };
+  }, [reconciliationRows, selectedReconciliationRowIds]);
+  const selectedConfirmedCreditCardItemIds = selectedReconciliationSummary.creditCardItemIds;
+  const selectedTaskImportBatchSelected = Boolean(selectedTask && selectedTaskImportBatchId);
+  const selectedTaskImportBatchCanSubmit = Boolean(
+    selectedTask
+    && selectedTaskImportBatchId
+    && taskImportBatchDetail
+    && taskImportBatchDetail.status === "unsubmitted"
+    && importedInvoiceCount > 0
+    && !taskImportDetailLoading,
+  );
+  const currentOaDraftBatchId = selectedTaskImportBatchSelected ? selectedTaskImportBatchId : selectedBatchId;
+  const currentOaDraftBatchLabel = selectedTaskImportBatchSelected
+    ? (taskImportBatchDetail?.externalBatchId || taskImportBatchDetail?.etcBatchId || selectedTaskImportBatchId)
+    : (selectedBatch?.externalBatchId || selectedBatch?.etcBatchId || "");
+  const currentOaDraftDescription = selectedTaskImportBatchSelected
+    ? `将为当前 ETC 对账任务下已导入的 ${importedInvoiceCount} 张发票创建 OA 支付申请草稿，发票合计 ${importedInvoiceAmount}。`
+    : "将为当前 ETC 批次创建 OA 支付申请草稿。";
+  const canSubmitCurrentBatch = activeStatus === "unsubmitted"
+    && (selectedTaskImportBatchSelected
+      ? selectedTaskImportBatchCanSubmit
+      : Boolean(currentOaDraftBatchId) && !detailLoading);
   const canRevokeCurrentBatch = activeStatus === "submitted" && Boolean(selectedBatchId) && !detailLoading;
   const taskIsMutable = Boolean(selectedTask && ["draft", "reviewing"].includes(selectedTask.status));
-  const canConfirmSelectedTask = Boolean(selectedTask?.canConfirm);
+  const canConfirmSelectedTask = taskIsMutable && selectedConfirmedCreditCardItemIds.length > 0;
   const selectedCardItem = useMemo(
     () => selectedTask?.creditCardItems.find((item) => item.itemId === selectedCardItemId) ?? null,
     [selectedCardItemId, selectedTask],
@@ -633,6 +928,18 @@ export default function EtcTicketManagementPage() {
       item.linkedCreditCardItemIds.includes(selectedCardItem.itemId)
     ) ?? null;
   }, [selectedCardItem, selectedTask]);
+
+  useEffect(() => {
+    const visibleIds = new Set(visibleReconciliationRowIds);
+    setSelectedReconciliationRowIds((current) => {
+      const next = new Set([...current].filter((rowId) => visibleIds.has(rowId)));
+      return next.size === current.size ? current : next;
+    });
+    setExpandedDescriptionRowIds((current) => {
+      const next = new Set([...current].filter((rowId) => visibleIds.has(rowId)));
+      return next.size === current.size ? current : next;
+    });
+  }, [visibleReconciliationRowIds]);
 
   const mergeReconciliationTask = useCallback((task: EtcReconciliationTask) => {
     setReconciliationTasks((current) => {
@@ -685,6 +992,49 @@ export default function EtcTicketManagementPage() {
     await runTaskAction(() => uploadEtcTicketRootFiles(selectedTask.taskId, files, selectedTask.version));
   };
 
+  const handleRefreshReconciliationMatches = async () => {
+    if (!selectedTask) {
+      return;
+    }
+    await runTaskAction(() => refreshEtcReconciliationMatches(selectedTask.taskId));
+  };
+
+  const handleToggleReconciliationRow = (rowId: string) => {
+    setSelectedReconciliationRowIds((current) => {
+      const next = new Set(current);
+      if (next.has(rowId)) {
+        next.delete(rowId);
+      } else {
+        next.add(rowId);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllReconciliationRows = () => {
+    setSelectedReconciliationRowIds(new Set(visibleReconciliationRowIds));
+  };
+
+  const handleSelectPairedReconciliationRows = () => {
+    setSelectedReconciliationRowIds(new Set(pairedReconciliationRowIds));
+  };
+
+  const handleClearReconciliationSelection = () => {
+    setSelectedReconciliationRowIds(new Set());
+  };
+
+  const handleToggleDescriptionExpansion = (rowId: string) => {
+    setExpandedDescriptionRowIds((current) => {
+      const next = new Set(current);
+      if (next.has(rowId)) {
+        next.delete(rowId);
+      } else {
+        next.add(rowId);
+      }
+      return next;
+    });
+  };
+
   const handleTicketRootImportModeChange = (_event: MouseEvent<HTMLElement>, nextMode: TicketRootImportMode | null) => {
     if (!nextMode) {
       return;
@@ -696,7 +1046,7 @@ export default function EtcTicketManagementPage() {
   };
 
   const openTicketRootTextDialog = (block: TicketRootPasteBlock) => {
-    if (!taskIsMutable || hasTicketRootFileSource) {
+    if (!taskIsMutable || hasTicketRootTextFileSource || hasTicketRootDocumentSource) {
       return;
     }
     setTicketRootTextDialog({ clientId: block.clientId, text: block.text });
@@ -742,13 +1092,6 @@ export default function EtcTicketManagementPage() {
       return;
     }
     await runTaskAction(() => uploadEtcSupplementEvidences(selectedTask.taskId, files, selectedTask.version, { evidenceKind: "non_etc_invoice" }));
-  };
-
-  const handleUploadEtcSupplementInvoices = async (files: File[]) => {
-    if (!selectedTask || files.length === 0) {
-      return;
-    }
-    await runTaskAction(() => uploadEtcSupplementEvidences(selectedTask.taskId, files, selectedTask.version, { evidenceKind: "etc_invoice" }));
   };
 
   const patchSelectedCard = async (payload: Parameters<typeof patchEtcReconciliationItem>[3]) => {
@@ -821,7 +1164,15 @@ export default function EtcTicketManagementPage() {
     if (!selectedTask) {
       return;
     }
-    await runTaskAction(() => confirmEtcReconciliationTask(selectedTask.taskId, selectedTask.version));
+    if (selectedConfirmedCreditCardItemIds.length === 0) {
+      setActionError("请先选择要确认的配对项。");
+      return;
+    }
+    await runTaskAction(() => confirmEtcReconciliationTask(
+      selectedTask.taskId,
+      selectedTask.version,
+      { confirmedCreditCardItemIds: selectedConfirmedCreditCardItemIds },
+    ));
   };
 
   const handleReopenReconciliationTask = async () => {
@@ -829,6 +1180,31 @@ export default function EtcTicketManagementPage() {
       return;
     }
     await runTaskAction(() => reopenEtcReconciliationTask(selectedTask.taskId, selectedTask.version));
+  };
+
+  const handleRemoveImportedInvoices = async () => {
+    if (!selectedTask || !selectedTaskImportBatchId) {
+      return;
+    }
+    const removedBatchId = selectedTaskImportBatchId;
+    setRemoveImportedInvoicesSubmitting(true);
+    setActionError(null);
+    try {
+      const task = await deleteEtcReconciliationTaskImportedInvoices(selectedTask.taskId, selectedTask.version);
+      setTaskImportBatchDetail(null);
+      setTaskImportDetailError(null);
+      setBatches((current) => current.filter((batch) =>
+        batch.id !== removedBatchId
+        && batch.etcBatchId !== removedBatchId
+        && batch.externalBatchId !== removedBatchId
+      ));
+      mergeReconciliationTask(task);
+      setRemoveImportedInvoicesDialogOpen(false);
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : "已导入ETC发票移除失败。");
+    } finally {
+      setRemoveImportedInvoicesSubmitting(false);
+    }
   };
 
   const openDeleteTaskDialog = (task: EtcReconciliationTask, event: MouseEvent<HTMLButtonElement>) => {
@@ -867,9 +1243,24 @@ export default function EtcTicketManagementPage() {
     try {
       if (deleteTarget.kind === "task") {
         const taskId = deleteTarget.item.taskId;
+        const wasSelectedTask = selectedTaskId === taskId;
+        const removedBatchId = deleteTarget.item.etcBatchId || deleteTarget.item.importBatchId || "";
         await deleteEtcReconciliationTask(taskId, deleteTarget.item.version);
-        setSelectedTaskId((current) => (current === taskId ? "" : current));
-        await loadReconciliationTasks();
+        setReconciliationTasks((current) => current.filter((task) => task.taskId !== taskId));
+        setTaskImportBatchDetail(null);
+        setTaskImportDetailError(null);
+        setTaskImportDetailLoading(false);
+        if (removedBatchId) {
+          setBatches((current) => current.filter((batch) =>
+            batch.id !== removedBatchId
+            && batch.etcBatchId !== removedBatchId
+            && batch.externalBatchId !== removedBatchId
+          ));
+        }
+        if (wasSelectedTask) {
+          setSelectedTaskId("");
+        }
+        void loadReconciliationTasks();
       } else if (deleteTarget.kind === "sourceFile") {
         const task = await deleteEtcReconciliationSourceFile(
           deleteTarget.task.taskId,
@@ -895,7 +1286,7 @@ export default function EtcTicketManagementPage() {
   };
 
   const handleCreateDraft = async () => {
-    if (!selectedBatchId) {
+    if (!currentOaDraftBatchId) {
       return;
     }
     setActionError(null);
@@ -905,7 +1296,7 @@ export default function EtcTicketManagementPage() {
       draftWindow.opener = null;
     }
     try {
-      const result = await createEtcOaDraftForBatch(selectedBatchId);
+      const result = await createEtcOaDraftForBatch(currentOaDraftBatchId);
       setDraftResult(result);
       if (!result.oaDraftUrl) {
         throw new Error("OA 草稿地址为空，请在 OA 系统中手动查找刚创建的草稿。");
@@ -939,6 +1330,7 @@ export default function EtcTicketManagementPage() {
     setCreateDialogOpen(false);
     setDraftResult(null);
     await loadBatches();
+    await loadReconciliationTasks();
   };
 
   const handleRevoke = async () => {
@@ -956,20 +1348,10 @@ export default function EtcTicketManagementPage() {
       return <span className="etc-reconciliation-empty">-</span>;
     }
     const transactionDate = splitDateParts(card.transactionDate);
-    const postingDate = splitDateParts(card.postingDate);
     return (
-      <Stack className="etc-reconciliation-date-pairs" spacing={0.75}>
-        <Box className="etc-reconciliation-date-pair">
-          <span className="etc-reconciliation-date-label">交易</span>
-          <span>{transactionDate.year}</span>
-          <span>{transactionDate.rest}</span>
-        </Box>
-        <Box className="etc-reconciliation-date-pair">
-          <span className="etc-reconciliation-date-label">记账</span>
-          <span>{postingDate.year}</span>
-          <span>{postingDate.rest}</span>
-        </Box>
-      </Stack>
+      <Box className="etc-reconciliation-date-pair" data-testid={`etc-card-date-transaction-${card.itemId}`}>
+        <span>{transactionDate}</span>
+      </Box>
     );
   };
 
@@ -978,11 +1360,12 @@ export default function EtcTicketManagementPage() {
       return <span className="etc-reconciliation-empty">未配对信用卡项</span>;
     }
     return (
-      <Tooltip title={card.description || "-"} describeChild placement="top">
-        <Typography component="span" className="etc-reconciliation-description">
-          {card.description || "-"}
-        </Typography>
-      </Tooltip>
+      <ReconciliationDescriptionCell
+        cardId={card.itemId}
+        description={card.description || "-"}
+        expanded={expandedDescriptionRowIds.has(card.itemId)}
+        onToggle={() => handleToggleDescriptionExpansion(card.itemId)}
+      />
     );
   };
 
@@ -1033,6 +1416,75 @@ export default function EtcTicketManagementPage() {
       </Stack>
     );
   };
+
+  const renderEtcInvoiceTable = (
+    rows: EtcInvoice[],
+    {
+      ariaLabel,
+      emptyText,
+      loadingText,
+      tableKey,
+    }: { ariaLabel: string; emptyText: string; loadingText: string; tableKey: string },
+  ) => (
+    <TableContainer className="etc-invoice-table-container">
+      <Table
+        key={tableKey}
+        aria-label={ariaLabel}
+        size="small"
+        stickyHeader
+        sx={{
+          tableLayout: "fixed",
+          width: "100%",
+          "& .MuiTableCell-root": {
+            borderColor: "#e2e8f0",
+            color: "#243b53",
+            overflowWrap: "anywhere",
+          },
+          "& .MuiTableCell-head": {
+            backgroundColor: "#f4f7fb",
+            fontWeight: 800,
+          },
+        }}
+      >
+        <TableHead>
+          <TableRow>
+            <TableCell sx={{ width: "17%" }}>发票号码</TableCell>
+            <TableCell sx={{ width: "12%" }}>开票日期</TableCell>
+            <TableCell sx={{ width: "15%" }}>通行日期</TableCell>
+            <TableCell sx={{ width: "12%" }}>车牌</TableCell>
+            <TableCell sx={{ width: "18%" }}>销方</TableCell>
+            <TableCell sx={{ width: "9%" }} align="right">金额</TableCell>
+            <TableCell sx={{ width: "8%" }} align="right">税额</TableCell>
+            <TableCell sx={{ width: "9%" }}>附件状态</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {rows.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={8} align="center">
+                <Typography color="text.secondary" variant="body2">
+                  {loadingText || emptyText}
+                </Typography>
+              </TableCell>
+            </TableRow>
+          ) : (
+            rows.map((invoice) => (
+              <TableRow key={invoice.id}>
+                <TableCell>{invoice.invoiceNumber}</TableCell>
+                <TableCell>{invoice.issueDate}</TableCell>
+                <TableCell>{formatDateRange(invoice.passageStartDate, invoice.passageEndDate)}</TableCell>
+                <TableCell>{invoice.plateNumber || "-"}</TableCell>
+                <TableCell>{invoice.sellerName || "-"}</TableCell>
+                <TableCell align="right">{formatMoney(invoice.totalAmount)}</TableCell>
+                <TableCell align="right">{formatMoney(invoice.taxAmount)}</TableCell>
+                <TableCell>{attachmentLabel(invoice)}</TableCell>
+              </TableRow>
+            ))
+          )}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
 
   return (
     <Box data-testid="etc-ticket-management-page">
@@ -1110,7 +1562,7 @@ export default function EtcTicketManagementPage() {
                   <Typography component="h2" variant="h6" fontWeight={800}>
                     批次列表
                   </Typography>
-                  <Chip label={`${batches.length} 批`} size="small" variant="outlined" />
+                  <Chip label={`${visibleBatches.length} 批`} size="small" variant="outlined" />
                 </Stack>
                 {activeStatus === "unsubmitted" ? (
                   <Button
@@ -1145,13 +1597,13 @@ export default function EtcTicketManagementPage() {
                           data-testid={`etc-reconciliation-task-row-${task.taskId}`}
                           disablePadding
                           secondaryAction={
-                            <Tooltip title={deletable ? "删除对账任务" : "已确认/已导入任务不能删除"}>
+                            <Tooltip title={deletable ? "删除对账任务" : deleteTaskDisabledReason(task)}>
                               <span>
                                 <IconButton
                                   edge="end"
                                   size="small"
                                   color="error"
-                                  aria-label={deletable ? `删除对账任务 ${taskTitle}` : "已确认/已导入任务不能删除"}
+                                  aria-label={deletable ? `删除对账任务 ${taskTitle}` : deleteTaskDisabledReason(task)}
                                   disabled={!deletable || deleteSubmitting}
                                   onClick={(event) => openDeleteTaskDialog(task, event)}
                                 >
@@ -1193,9 +1645,9 @@ export default function EtcTicketManagementPage() {
                 </Box>
               ) : null}
               {loading ? <StatePanel tone="loading" compact>正在加载ETC批次。</StatePanel> : null}
-              {!loading && batches.length === 0 ? <StatePanel tone="empty" compact>当前筛选下没有ETC批次。</StatePanel> : null}
+              {!loading && visibleBatches.length === 0 ? <StatePanel tone="empty" compact>当前筛选下没有ETC批次。</StatePanel> : null}
               <List className="etc-batch-list" aria-label="ETC批次列表" disablePadding>
-                {batches.map((batch) => {
+                {visibleBatches.map((batch) => {
                   const deletable = canDeleteBatch(batch);
                   const batchTitle = batch.externalBatchId || batch.etcBatchId;
                   return (
@@ -1288,11 +1740,23 @@ export default function EtcTicketManagementPage() {
                       >
                         确认对账
                       </Button>
+                      <Button
+                        type="button"
+                        variant="outlined"
+                        aria-expanded={taskPanelExpanded}
+                        aria-controls="etc-reconciliation-task-content"
+                        startIcon={taskPanelExpanded ? <ExpandLessOutlinedIcon /> : <ExpandMoreOutlinedIcon />}
+                        onClick={() => setTaskPanelExpanded((current) => !current)}
+                      >
+                        {taskPanelExpanded ? "折叠ETC对账任务" : "展开ETC对账任务"}
+                      </Button>
                     </Stack>
                   </Stack>
 
-                  {selectedTask ? (
-                    <>
+                  <Collapse in={taskPanelExpanded} timeout="auto" unmountOnExit>
+                    <Box id="etc-reconciliation-task-content">
+                      {selectedTask ? (
+                        <Stack spacing={2}>
                       <Box className="etc-upload-blocks" aria-label="ETC对账文件上传">
                         <Box className="etc-ticket-root-import-panel">
                           <Stack spacing={1}>
@@ -1307,45 +1771,34 @@ export default function EtcTicketManagementPage() {
                                 onChange={handleTicketRootImportModeChange}
                                 aria-label="票根网导入方式"
                               >
-                                <ToggleButton value="clipboard" disabled={!taskIsMutable || hasTicketRootFileSource}>
+                                <ToggleButton value="clipboard" disabled={!taskIsMutable || hasTicketRootTextFileSource || hasTicketRootDocumentSource}>
                                   手工输入
                                 </ToggleButton>
-                                <ToggleButton value="file" disabled={!taskIsMutable || hasTicketRootManualSource}>
+                                <ToggleButton value="textFile" disabled={!taskIsMutable || hasTicketRootManualSource || hasTicketRootDocumentSource}>
+                                  TXT文件
+                                </ToggleButton>
+                                <ToggleButton value="file" disabled={!taskIsMutable || hasTicketRootManualSource || hasTicketRootTextFileSource}>
                                   PDF/JPG
                                 </ToggleButton>
                               </ToggleButtonGroup>
                             </Stack>
-                            {hasTicketRootFileSource ? (
+                            {hasTicketRootDocumentSource ? (
                               <Typography variant="caption" color="text.secondary">已有 PDF/JPG 源文件，删除后可切换。</Typography>
+                            ) : null}
+                            {hasTicketRootTextFileSource ? (
+                              <Typography variant="caption" color="text.secondary">已有 TXT 源文件，删除后可切换。</Typography>
                             ) : null}
                             {hasTicketRootManualSource ? (
                               <Typography variant="caption" color="text.secondary">已有手工粘贴源，删除后可切换。</Typography>
                             ) : null}
-                            {ticketRootImportMode === "file" ? (
-                              <UploadBlock
-                                label="票根网 PDF/JPG"
-                                accept=".pdf,.jpg,.jpeg,image/jpeg,application/pdf"
-                                multiple
-                                disabled={!taskIsMutable || taskActionLoading || hasTicketRootManualSource}
-                                onFiles={handleUploadTicketRootFiles}
-                              />
-                            ) : (
+                            {ticketRootImportMode === "clipboard" ? (
                               <Stack spacing={1}>
-                                <UploadBlock
-                                  label="票根网 PDF/JPG"
-                                  accept=".pdf,.jpg,.jpeg,image/jpeg,application/pdf"
-                                  multiple
-                                  disabled
-                                  onFiles={handleUploadTicketRootFiles}
-                                />
                                 <Box className="etc-ticket-root-paste-grid">
                                   {ticketRootPasteBlocks.map((block, index) => {
                                     const sourceItems = block.sourceFileId ? ticketRootItemsBySourceFileId.get(block.sourceFileId) ?? [] : [];
-                                    const parsedCount = sourceItems.length;
-                                    const sourcePlates = Array.from(new Set(sourceItems.map((item) => item.vehiclePlate).filter(Boolean)));
-                                    const sourcePlateLabel = sourcePlates.length > 0 ? sourcePlates.join(" / ") : "未识别车牌";
+                                    const sourceSummary = block.sourceFileId ? ticketRootSourceSummary(sourceItems) : null;
                                     const summary = block.sourceFileId
-                                      ? `${sourcePlateLabel} / 已解析 ${parsedCount} 条`
+                                      ? `${sourceSummary?.plateLabel ?? "未识别车牌"} / 已解析 ${sourceSummary?.parsedCount ?? 0} 条`
                                       : block.text.trim()
                                         ? "待提交"
                                         : "点击粘贴票根网文本";
@@ -1355,20 +1808,39 @@ export default function EtcTicketManagementPage() {
                                           type="button"
                                           className="etc-ticket-root-paste-open"
                                           aria-label={block.sourceFileId || block.text.trim() ? `编辑票根网文本 ${index + 1}` : "点击粘贴票根网文本"}
-                                          disabled={!taskIsMutable || taskActionLoading || hasTicketRootFileSource}
+                                          disabled={!taskIsMutable || taskActionLoading || hasTicketRootTextFileSource || hasTicketRootDocumentSource}
                                           onClick={() => openTicketRootTextDialog(block)}
                                         >
-                                          <Stack spacing={0.5} alignItems="flex-start">
-                                            <Typography component="span" variant="caption" color="text.secondary">
-                                              #{index + 1}
-                                            </Typography>
-                                            <Typography component="span" fontWeight={800}>
-                                              {summary}
-                                            </Typography>
-                                            {block.originalName ? (
-                                              <Typography component="span" variant="caption" color="text.secondary">
-                                                {block.originalName}
+                                          <Stack className="etc-ticket-root-paste-main" spacing={0.25} alignItems="stretch">
+                                            <Stack className="etc-ticket-root-paste-summary" direction="row" spacing={0.75} alignItems="center">
+                                              <Typography component="span" variant="caption" color="text.secondary" className="etc-ticket-root-paste-index">
+                                                #{index + 1}
                                               </Typography>
+                                              {sourceSummary ? (
+                                                <>
+                                                  <Typography component="span" fontWeight={800} className="etc-ticket-root-paste-plate" title={sourceSummary.plateLabel}>
+                                                    {sourceSummary.plateLabel}
+                                                  </Typography>
+                                                  <Chip component="span" label={`已解析 ${sourceSummary.parsedCount} 条`} size="small" variant="outlined" />
+                                                  <Typography component="span" variant="caption" color="text.secondary" className="etc-ticket-root-paste-meta">
+                                                    金额合计 {sourceSummary.totalAmount}
+                                                  </Typography>
+                                                  <Typography component="span" variant="caption" color="text.secondary" className="etc-ticket-root-paste-meta" title={sourceSummary.dateRange}>
+                                                    日期 {sourceSummary.dateRange}
+                                                  </Typography>
+                                                </>
+                                              ) : (
+                                                <Typography component="span" fontWeight={800} className="etc-ticket-root-paste-plate">
+                                                  {summary}
+                                                </Typography>
+                                              )}
+                                            </Stack>
+                                            {block.originalName ? (
+                                              <Tooltip title={block.originalName}>
+                                                <Typography component="span" variant="caption" color="text.secondary" className="etc-ticket-root-paste-filename">
+                                                  {block.originalName}
+                                                </Typography>
+                                              </Tooltip>
                                             ) : null}
                                           </Stack>
                                         </Button>
@@ -1378,7 +1850,7 @@ export default function EtcTicketManagementPage() {
                                               <IconButton
                                                 size="small"
                                                 aria-label={`编辑票根网文本 ${index + 1}`}
-                                                disabled={!taskIsMutable || taskActionLoading || hasTicketRootFileSource}
+                                                disabled={!taskIsMutable || taskActionLoading || hasTicketRootTextFileSource || hasTicketRootDocumentSource}
                                                 onClick={() => openTicketRootTextDialog(block)}
                                               >
                                                 <EditOutlinedIcon fontSize="small" />
@@ -1408,49 +1880,58 @@ export default function EtcTicketManagementPage() {
                                   variant="outlined"
                                   size="small"
                                   startIcon={<AddOutlinedIcon />}
-                                  disabled={!taskIsMutable || taskActionLoading || hasTicketRootFileSource}
+                                  disabled={!taskIsMutable || taskActionLoading || hasTicketRootTextFileSource || hasTicketRootDocumentSource}
                                   onClick={handleAddTicketRootPasteBlock}
                                 >
                                   增加粘贴框
                                 </Button>
                               </Stack>
-                            )}
+                            ) : null}
                           </Stack>
                         </Box>
-                        <UploadBlock
-                          label="信用卡账单 PDF"
-                          accept=".pdf,application/pdf"
-                          disabled={!taskIsMutable || taskActionLoading}
-                          onFiles={handleUploadCreditCardStatement}
-                        />
-                        <UploadBlock
-                          label="补充凭证"
-                          accept=".pdf,.jpg,.jpeg,image/jpeg,application/pdf"
-                          multiple
-                          disabled={!taskIsMutable || taskActionLoading}
-                          onFiles={handleUploadSupplementEvidences}
-                        />
-                        <UploadBlock
-                          label="补ETC发票"
-                          accept=".pdf,.jpg,.jpeg,image/jpeg,application/pdf"
-                          multiple
-                          disabled={!taskIsMutable || taskActionLoading}
-                          onFiles={handleUploadEtcSupplementInvoices}
-                        />
+                        <Box className="etc-upload-actions" aria-label="ETC导入动作">
+                          <UploadBlock
+                            label="信用卡账单 PDF"
+                            accept=".pdf,application/pdf"
+                            disabled={!taskIsMutable || taskActionLoading}
+                            onFiles={handleUploadCreditCardStatement}
+                          />
+                          <UploadBlock
+                            label="补充凭证"
+                            accept=".pdf,.jpg,.jpeg,image/jpeg,application/pdf"
+                            multiple
+                            disabled={!taskIsMutable || taskActionLoading}
+                            onFiles={handleUploadSupplementEvidences}
+                          />
+                          <UploadBlock
+                            label="票根网 TXT"
+                            accept=".txt,text/plain"
+                            multiple
+                            disabled={!taskIsMutable || taskActionLoading || ticketRootImportMode !== "textFile" || hasTicketRootManualSource || hasTicketRootDocumentSource}
+                            onFiles={handleUploadTicketRootFiles}
+                          />
+                          <UploadBlock
+                            label="票根网 PDF/JPG"
+                            accept=".pdf,.jpg,.jpeg,image/jpeg,application/pdf"
+                            multiple
+                            disabled={!taskIsMutable || taskActionLoading || ticketRootImportMode !== "file" || hasTicketRootManualSource || hasTicketRootTextFileSource}
+                            onFiles={handleUploadTicketRootFiles}
+                          />
+                        </Box>
                       </Box>
 
-                      <Box className="etc-reconciliation-metrics" aria-label="对账任务指标">
+                      <Box className="etc-reconciliation-metrics" aria-label="本次确认预览">
                         <Box>
                           <Typography variant="caption" color="text.secondary">金额</Typography>
-                          <Typography fontWeight={800}>{formatMoney(selectedTask.oaTotalAmount)}</Typography>
+                          <Typography fontWeight={800}>{formatMoney(selectedReconciliationSummary.oaTotalAmount)}</Typography>
                         </Box>
                         <Box>
                           <Typography variant="caption" color="text.secondary">任务范围</Typography>
-                          <Typography fontWeight={800}>{formatDateRange(selectedTask.periodStart, selectedTask.periodEnd)}</Typography>
+                          <Typography fontWeight={800}>{formatDateRange(selectedReconciliationSummary.periodStart, selectedReconciliationSummary.periodEnd)}</Typography>
                         </Box>
                         <Box>
                           <Typography variant="caption" color="text.secondary">数量</Typography>
-                          <Typography fontWeight={800}>{taskCountText(selectedTask)}</Typography>
+                          <Typography fontWeight={800}>{taskCountText(selectedReconciliationSummary)}</Typography>
                         </Box>
                       </Box>
 
@@ -1466,43 +1947,53 @@ export default function EtcTicketManagementPage() {
                             <StatePanel tone="empty" compact>暂无上传文件。</StatePanel>
                           ) : (
                             <List disablePadding aria-label="已上传文件列表">
-                              {selectedTask.sourceFiles.map((sourceFile) => (
-                                <ListItem
-                                  key={sourceFile.fileId}
-                                  disablePadding
-                                  secondaryAction={
-                                    <Tooltip title={taskIsMutable ? "删除源文件" : "已确认/已导入任务不能删除源文件"}>
-                                      <span>
-                                        <IconButton
-                                          edge="end"
-                                          size="small"
-                                          color="error"
-                                          aria-label={taskIsMutable ? `删除源文件 ${sourceFile.originalName}` : "已确认/已导入任务不能删除源文件"}
-                                          disabled={!taskIsMutable || taskActionLoading || deleteSubmitting}
-                                          onClick={(event) => openDeleteSourceFileDialog(sourceFile, event)}
-                                        >
-                                          <DeleteOutlineOutlinedIcon fontSize="small" />
-                                        </IconButton>
-                                      </span>
-                                    </Tooltip>
-                                  }
-                                >
-                                  <ListItemText
-                                    primaryTypographyProps={{ component: "div" }}
-                                    secondaryTypographyProps={{ component: "div" }}
-                                    primary={
-                                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                                        <Typography component="span" fontWeight={800}>
-                                          {sourceFile.originalName || sourceFile.fileId}
-                                        </Typography>
-                                        <Chip label={sourceKindLabel(sourceFile.sourceKind)} size="small" variant="outlined" />
-                                        {sourceFile.hasBlockingIssue ? <Chip label="blocking" size="small" color="error" /> : null}
-                                      </Stack>
+                              {selectedTask.sourceFiles.map((sourceFile) => {
+                                const sourceSummary = ticketRootSourceSummaryBySourceFileId.get(sourceFile.fileId);
+                                return (
+                                  <ListItem
+                                    key={sourceFile.fileId}
+                                    disablePadding
+                                    secondaryAction={
+                                      <Tooltip title={taskIsMutable ? "删除源文件" : "已确认/已导入任务不能删除源文件"}>
+                                        <span>
+                                          <IconButton
+                                            edge="end"
+                                            size="small"
+                                            color="error"
+                                            aria-label={taskIsMutable ? `删除源文件 ${sourceFile.originalName}` : "已确认/已导入任务不能删除源文件"}
+                                            disabled={!taskIsMutable || taskActionLoading || deleteSubmitting}
+                                            onClick={(event) => openDeleteSourceFileDialog(sourceFile, event)}
+                                          >
+                                            <DeleteOutlineOutlinedIcon fontSize="small" />
+                                          </IconButton>
+                                        </span>
+                                      </Tooltip>
                                     }
-                                    secondary={sourceFile.fileId}
-                                  />
-                                </ListItem>
-                              ))}
+                                  >
+                                    <ListItemText
+                                      primaryTypographyProps={{ component: "div" }}
+                                      secondaryTypographyProps={{ component: "div" }}
+                                      primary={
+                                        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                                          <Typography component="span" fontWeight={800}>
+                                            {sourceFile.originalName || sourceFile.fileId}
+                                          </Typography>
+                                          <Chip label={sourceKindLabel(sourceFile.sourceKind)} size="small" variant="outlined" />
+                                          {sourceSummary ? (
+                                            <>
+                                              <Chip label={`${sourceSummary.plateLabel} / 已解析 ${sourceSummary.parsedCount} 条`} size="small" variant="outlined" />
+                                              <Chip label={`金额合计 ${sourceSummary.totalAmount}`} size="small" variant="outlined" />
+                                              <Chip label={`日期 ${sourceSummary.dateRange}`} size="small" variant="outlined" />
+                                            </>
+                                          ) : null}
+                                          {sourceFile.hasBlockingIssue ? <Chip label="blocking" size="small" color="error" /> : null}
+                                        </Stack>
+                                      }
+                                      secondary={sourceFile.fileId}
+                                    />
+                                  </ListItem>
+                                );
+                              })}
                             </List>
                           )}
                         </Stack>
@@ -1635,12 +2126,56 @@ export default function EtcTicketManagementPage() {
                         </Stack>
                       ) : null}
 
-                      <Box className="etc-reconciliation-table-block">
+                      <Box
+                        className="etc-reconciliation-table-block"
+                        style={{ "--etc-reconciliation-row-height": "32px" } as CSSProperties}
+                      >
                         <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
                           <Typography component="h3" variant="subtitle1" fontWeight={800}>
                             双侧核对
                           </Typography>
                           <Chip label={`${reconciliationRows.length} 行`} size="small" variant="outlined" />
+                          <Button
+                            type="button"
+                            size="small"
+                            variant="outlined"
+                            disabled={reconciliationRows.length === 0}
+                            onClick={handleSelectAllReconciliationRows}
+                          >
+                            全选
+                          </Button>
+                          <Button
+                            type="button"
+                            size="small"
+                            variant="outlined"
+                            disabled={pairedReconciliationRowIds.length === 0}
+                            onClick={handleSelectPairedReconciliationRows}
+                          >
+                            全选配对项
+                          </Button>
+                          <Button
+                            type="button"
+                            size="small"
+                            variant="outlined"
+                            disabled={selectedReconciliationRowIds.size === 0}
+                            onClick={handleClearReconciliationSelection}
+                          >
+                            清空
+                          </Button>
+                          <Tooltip title="重新计算匹配">
+                            <span>
+                              <Button
+                                type="button"
+                                size="small"
+                                variant="outlined"
+                                startIcon={<RefreshOutlinedIcon />}
+                                disabled={!selectedTask || taskActionLoading}
+                                onClick={handleRefreshReconciliationMatches}
+                              >
+                                刷新匹配
+                              </Button>
+                            </span>
+                          </Tooltip>
                         </Stack>
                         <TableContainer className="etc-reconciliation-table-container">
                           <Table
@@ -1650,6 +2185,7 @@ export default function EtcTicketManagementPage() {
                           >
                             <TableHead>
                               <TableRow>
+                                <TableCell className="etc-reconciliation-select-column" aria-label="选择列" />
                                 <TableCell className="etc-reconciliation-table-side-heading" colSpan={3} align="center">
                                   信用卡侧
                                 </TableCell>
@@ -1658,7 +2194,8 @@ export default function EtcTicketManagementPage() {
                                 </TableCell>
                               </TableRow>
                               <TableRow>
-                                <TableCell className="etc-reconciliation-date-column">交易日/银行记账日</TableCell>
+                                <TableCell className="etc-reconciliation-select-column" align="center">选择</TableCell>
+                                <TableCell className="etc-reconciliation-date-column">交易日</TableCell>
                                 <TableCell className="etc-reconciliation-description-column">交易描述</TableCell>
                                 <TableCell className="etc-reconciliation-amount-column" align="center">金额</TableCell>
                                 <TableCell className="etc-reconciliation-time-column etc-reconciliation-divider">交易时间</TableCell>
@@ -1673,6 +2210,15 @@ export default function EtcTicketManagementPage() {
                                   data-testid={`etc-reconciliation-row-${row.id}`}
                                   data-highlight={row.highlight || undefined}
                                 >
+                                  <TableCell className="etc-reconciliation-select-column" align="center">
+                                    <Checkbox
+                                      size="small"
+                                      checked={selectedReconciliationRowIds.has(row.id)}
+                                      onChange={() => handleToggleReconciliationRow(row.id)}
+                                      onClick={(event) => event.stopPropagation()}
+                                      slotProps={{ input: { "aria-label": `选择核对行 ${row.id}` } }}
+                                    />
+                                  </TableCell>
                                   <TableCell
                                     className="etc-reconciliation-card-cell etc-reconciliation-date-column"
                                     data-highlight={row.cardHighlight || undefined}
@@ -1718,18 +2264,84 @@ export default function EtcTicketManagementPage() {
                           </Table>
                         </TableContainer>
                       </Box>
-                    </>
+                      <Box component="section" className="etc-task-imported-invoices" aria-label="已导入ETC发票">
+                        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                          <Typography component="h3" variant="subtitle1" fontWeight={800}>
+                            已导入ETC发票
+                          </Typography>
+                          {taskImportBatchDetail ? (
+                            <Chip label={`${importedInvoiceCount} 张`} size="small" variant="outlined" />
+                          ) : null}
+                          {taskImportBatchDetail ? (
+                            <Chip label={`合计 ${importedInvoiceAmount}`} size="small" color="success" variant="outlined" />
+                          ) : null}
+                          {canRemoveImportedInvoices ? (
+                            <Button
+                              type="button"
+                              size="small"
+                              variant="outlined"
+                              color="warning"
+                              startIcon={<DeleteOutlineOutlinedIcon />}
+                              disabled={removeImportedInvoicesSubmitting || taskActionLoading}
+                              onClick={() => setRemoveImportedInvoicesDialogOpen(true)}
+                            >
+                              移除已导入的发票
+                            </Button>
+                          ) : null}
+                        </Stack>
+                        {!selectedTaskImportBatchId ? (
+                          <StatePanel tone="info" compact>确认对账后，请到 ETC 发票导入页导入 zip。</StatePanel>
+                        ) : taskImportDetailError ? (
+                          <StatePanel tone="error" compact>{taskImportDetailError}</StatePanel>
+                        ) : (
+                          renderEtcInvoiceTable(
+                            taskImportBatchDetail?.invoiceItems ?? [],
+                            {
+                              ariaLabel: "已导入ETC发票明细",
+                              emptyText: "暂无已导入ETC发票明细。",
+                              loadingText: taskImportDetailLoading ? "正在加载已导入ETC发票。" : "",
+                              tableKey: selectedTaskImportBatchId,
+                            },
+                          )
+                        )}
+                      </Box>
+                    </Stack>
                   ) : (
                     <StatePanel tone="empty">暂无可展示的ETC对账任务。</StatePanel>
                   )}
+                    </Box>
+                  </Collapse>
                 </Stack>
               </Paper>
 
               <Paper className="etc-batch-detail-panel" variant="outlined" component="section" aria-label="ETC批次详情">
-              {!selectedBatch ? (
-                <StatePanel tone="empty">请选择左侧批次。</StatePanel>
-              ) : (
                 <Stack spacing={2}>
+                  <Stack className="etc-detail-heading" direction="row" alignItems="center" justifyContent="space-between" spacing={1.5}>
+                    <Box>
+                      <Typography component="h2" variant="h6" fontWeight={800}>
+                        ETC批次详情
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                        {selectedBatch ? selectedBatch.externalBatchId || selectedBatch.etcBatchId : "请选择左侧批次。"}
+                      </Typography>
+                    </Box>
+                    <Button
+                      type="button"
+                      variant="outlined"
+                      aria-expanded={batchDetailPanelExpanded}
+                      aria-controls="etc-batch-detail-content"
+                      startIcon={batchDetailPanelExpanded ? <ExpandLessOutlinedIcon /> : <ExpandMoreOutlinedIcon />}
+                      onClick={() => setBatchDetailPanelExpanded((current) => !current)}
+                    >
+                      {batchDetailPanelExpanded ? "折叠ETC批次详情" : "展开ETC批次详情"}
+                    </Button>
+                  </Stack>
+                  <Collapse in={batchDetailPanelExpanded} timeout="auto" unmountOnExit>
+                    <Box id="etc-batch-detail-content">
+                      {!selectedBatch ? (
+                        <StatePanel tone="empty">请选择左侧批次。</StatePanel>
+                      ) : (
+                        <Stack spacing={2}>
                   <Stack className="etc-detail-heading" direction={{ xs: "column", md: "row" }} alignItems={{ xs: "stretch", md: "flex-start" }} spacing={1.5}>
                     <Box>
                       <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
@@ -1794,33 +2406,21 @@ export default function EtcTicketManagementPage() {
 
                   <Divider />
 
-                  {detailLoading ? <StatePanel tone="loading" compact>正在加载批次明细。</StatePanel> : null}
-                  <Box className="etc-invoice-grid" sx={{ height: 460, width: "100%" }}>
-                    <DataGrid
-                      key={selectedBatchId}
-                      aria-label="ETC发票明细"
-                      columns={invoiceColumns}
-                      rows={invoiceRows}
-                      loading={detailLoading}
-                      disableRowSelectionOnClick
-                      hideFooter={invoiceRows.length <= 100}
-                      pageSizeOptions={[25, 50, 100]}
-                      initialState={{ pagination: { paginationModel: { page: 0, pageSize: 25 } } }}
-                      sx={{
-                        height: "100%",
-                        borderColor: "#d5dde8",
-                        "& .MuiDataGrid-columnHeaders": {
-                          backgroundColor: "#f4f7fb",
-                        },
-                        "& .MuiDataGrid-columnHeaderTitle": {
-                          color: "#243b53",
-                          fontWeight: 800,
-                        },
-                      }}
-                    />
-                  </Box>
+                          {detailLoading ? <StatePanel tone="loading" compact>正在加载批次明细。</StatePanel> : null}
+                          {renderEtcInvoiceTable(
+                            invoiceRows,
+                            {
+                              ariaLabel: "ETC发票明细",
+                              emptyText: "暂无发票明细。",
+                              loadingText: detailLoading ? "正在加载批次明细。" : "",
+                              tableKey: selectedBatchId,
+                            },
+                          )}
+                        </Stack>
+                      )}
+                    </Box>
+                  </Collapse>
                 </Stack>
-              )}
               </Paper>
             </Stack>
           </Box>
@@ -1858,7 +2458,7 @@ export default function EtcTicketManagementPage() {
           open={Boolean(deleteTarget)}
           title={deleteTarget?.kind === "task" ? "删除对账任务" : deleteTarget?.kind === "sourceFile" ? "删除源文件" : "删除ETC批次"}
           description={deleteTarget?.kind === "task"
-            ? "将删除该对账任务及其未进入提交链路的上传文件。此操作不会删除已导入或已提交的数据。"
+            ? deleteTaskDescription(deleteTarget.item)
             : deleteTarget?.kind === "sourceFile"
               ? "将删除该上传源文件及其解析结果、解析错误和解析产物。"
               : "将删除该未提交 ETC 批次。已提交或已关联 OA 的批次不会被允许删除。"}
@@ -1881,6 +2481,11 @@ export default function EtcTicketManagementPage() {
               <Typography>任务：{formatTaskTitle(deleteTarget.item)}</Typography>
               <Typography>期间：{formatDateRange(deleteTarget.item.periodStart, deleteTarget.item.periodEnd)}</Typography>
               <Typography>数量：{taskCountText(deleteTarget.item)}</Typography>
+              {deleteTarget.item.status === "imported" || deleteTarget.item.hasImportedInvoices ? (
+                <Typography color="warning.main">
+                  将一并删除该任务下已导入的 ETC 发票；如需恢复，需要重新创建/确认任务并重新导入 zip。
+                </Typography>
+              ) : null}
               <Typography>版本：v{deleteTarget.item.version}</Typography>
             </Stack>
           ) : deleteTarget?.kind === "sourceFile" ? (
@@ -1896,6 +2501,46 @@ export default function EtcTicketManagementPage() {
               <Typography>通行期间：{formatDateRange(deleteTarget.item.passageStartDate, deleteTarget.item.passageEndDate)}</Typography>
               <Typography>数量：{deleteTarget.item.displayCountText || taskCountText({ etcInvoiceCount: deleteTarget.item.etcInvoiceCount, supplementCount: deleteTarget.item.supplementCount })}</Typography>
               <Typography>金额：{formatMoney(deleteTarget.item.totalAmount)} 元</Typography>
+            </Stack>
+          ) : null}
+        </AppDialog>
+
+        <AppDialog
+          open={removeImportedInvoicesDialogOpen}
+          title="移除已导入发票"
+          description="将清空该对账任务下已导入的 ETC 发票关联，任务可重新进入 ETC 发票导入流程。"
+          onClose={() => {
+            if (!removeImportedInvoicesSubmitting) {
+              setRemoveImportedInvoicesDialogOpen(false);
+            }
+          }}
+          actions={
+            <>
+              <Button
+                type="button"
+                onClick={() => setRemoveImportedInvoicesDialogOpen(false)}
+                disabled={removeImportedInvoicesSubmitting}
+              >
+                取消
+              </Button>
+              <Button
+                type="button"
+                variant="contained"
+                color="warning"
+                onClick={() => void handleRemoveImportedInvoices()}
+                disabled={removeImportedInvoicesSubmitting}
+              >
+                {removeImportedInvoicesSubmitting ? "正在移除..." : "确认移除"}
+              </Button>
+            </>
+          }
+        >
+          {selectedTask ? (
+            <Stack spacing={1}>
+              <Typography>任务：{formatTaskTitle(selectedTask)}</Typography>
+              <Typography>期间：{formatDateRange(selectedTask.periodStart, selectedTask.periodEnd)}</Typography>
+              <Typography>已导入发票：{importedInvoiceCount} 张</Typography>
+              <Typography>版本：v{selectedTask.version}</Typography>
             </Stack>
           ) : null}
         </AppDialog>
@@ -1940,8 +2585,8 @@ export default function EtcTicketManagementPage() {
             </Stack>
           ) : (
             <Stack spacing={1}>
-              <Typography>将为当前 ETC 批次创建 OA 支付申请草稿。</Typography>
-              <Typography>当前批次：{selectedBatch?.externalBatchId || selectedBatch?.etcBatchId || "-"}</Typography>
+              <Typography>{currentOaDraftDescription}</Typography>
+              <Typography>当前批次：{currentOaDraftBatchLabel || "-"}</Typography>
             </Stack>
           )}
         </AppDialog>

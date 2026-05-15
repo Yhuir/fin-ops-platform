@@ -118,6 +118,7 @@ class SearchService:
                             zone_hint=str(indexed_row["zone_hint"]),
                             matched_field=matched_field,
                             project_names=list(indexed_row["project_names"]),
+                            group_id=str(indexed_row.get("group_id") or ""),
                         )
                     )
                     if len(grouped_results[row_type]) >= resolved_limit:
@@ -213,6 +214,7 @@ class SearchService:
                                 month=month,
                                 zone_hint=self._zone_hint(section, row),
                                 project_names=project_names,
+                                group_id=None,
                             )
                         )
 
@@ -242,9 +244,7 @@ class SearchService:
                     continue
                 group_project_names = self._project_names_from_group(group)
                 for row_type in ("oa", "bank", "invoice"):
-                    rows = group.get(f"{row_type}_rows", [])
-                    if not isinstance(rows, list):
-                        continue
+                    rows = self._group_rows_for_index(group, row_type)
                     for row in rows:
                         if not isinstance(row, dict):
                             continue
@@ -254,6 +254,7 @@ class SearchService:
                                 month=month,
                                 zone_hint=self._zone_hint(section, row),
                                 project_names=self._row_project_names(row, group_project_names),
+                                group_id=str(group.get("group_id") or "") or None,
                             )
                         )
 
@@ -269,10 +270,24 @@ class SearchService:
                     month=month,
                     zone_hint="ignored",
                     project_names=self._row_project_names(row, []),
+                    group_id=None,
                 )
             )
 
         return index
+
+    @staticmethod
+    def _group_rows_for_index(group: dict[str, Any], row_type: str) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        visible_rows = group.get(f"{row_type}_rows", [])
+        if isinstance(visible_rows, list):
+            rows.extend(row for row in visible_rows if isinstance(row, dict))
+        collapsed_rows = group.get("collapsed_rows")
+        if isinstance(collapsed_rows, dict):
+            rows_for_type = collapsed_rows.get(row_type, [])
+            if isinstance(rows_for_type, list):
+                rows.extend(row for row in rows_for_type if isinstance(row, dict))
+        return rows
 
     def _index_row(
         self,
@@ -281,6 +296,7 @@ class SearchService:
         month: str,
         zone_hint: str,
         project_names: list[str],
+        group_id: str | None,
     ) -> dict[str, Any]:
         normalized_fields = [
             (field_name, normalized_value)
@@ -291,6 +307,7 @@ class SearchService:
             "row": deepcopy(row),
             "month": month,
             "zone_hint": zone_hint,
+            "group_id": group_id or "",
             "project_names": list(project_names),
             "project_names_normalized": {
                 normalized_name
@@ -470,10 +487,11 @@ class SearchService:
         zone_hint: str,
         matched_field: str,
         project_names: list[str],
+        group_id: str = "",
     ) -> dict[str, Any]:
         row_type = str(row.get("type"))
         title, primary_meta, secondary_meta = self._display_payload(row=row, project_names=project_names)
-        return {
+        payload = {
             "row_id": str(row.get("id", "")),
             "record_type": row_type,
             "month": month,
@@ -490,6 +508,10 @@ class SearchService:
                 "zone_hint": zone_hint,
             },
         }
+        if group_id:
+            payload["group_id"] = group_id
+            payload["jump_target"]["group_id"] = group_id
+        return payload
 
     @staticmethod
     def _display_payload(row: dict[str, Any], *, project_names: list[str]) -> tuple[str, list[str], list[str]]:

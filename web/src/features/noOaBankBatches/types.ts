@@ -15,6 +15,21 @@ export type NoOaBankBatchStatus =
   | "stale";
 
 export type NoOaBankBatchStatusFilter = "all" | NoOaBankBatchStatus;
+export type NoOaBankBatchStatusBucket = "unsubmitted" | "submitted" | "withdrawn" | "all";
+
+export type NoOaBankBatchCountMap = Record<string, number>;
+
+export type NoOaBankBatchSummaryCategory = {
+  code: NoOaBankBatchType | string;
+  label: string;
+  total: number;
+  draft: number;
+  submitted: number;
+  withdrawn: number;
+  conflict: number;
+  stale: number;
+  totalAmount: string;
+};
 
 export type NoOaBankBatch = {
   batchId: string;
@@ -25,6 +40,7 @@ export type NoOaBankBatch = {
   bankName: string;
   accountLast4: string;
   status: NoOaBankBatchStatus | string;
+  statusBucket: NoOaBankBatchStatusBucket | string;
   rowCount: number;
   totalAmount: string;
   submittedBy: string;
@@ -32,6 +48,11 @@ export type NoOaBankBatch = {
   withdrawnBy: string;
   withdrawnAt: string | null;
   conflictReason: string;
+  blockedReason: string;
+  tagCounts: NoOaBankBatchCountMap;
+  directionCounts: NoOaBankBatchCountMap;
+  canSubmit: boolean;
+  canWithdraw: boolean;
   version: number | null;
 };
 
@@ -40,13 +61,16 @@ export type NoOaBankBatchSummary = {
   submittedCount: number;
   withdrawnCount: number;
   conflictCount: number;
+  staleCount: number;
   totalAmount: string;
+  categories: NoOaBankBatchSummaryCategory[];
 };
 
 export type NoOaBankBatchesRequest = {
   month?: string | null;
   type?: NoOaBankBatchTypeFilter;
   status?: NoOaBankBatchStatusFilter;
+  bucket?: NoOaBankBatchStatusBucket;
   accountKey?: string | null;
   signal?: AbortSignal;
 };
@@ -68,12 +92,16 @@ export type NoOaBankBatchDetailRow = {
   summary: string;
   purpose: string;
   remark: string;
+  categoryCode: string;
+  categoryLabel: string;
   categorySource: string;
 };
 
 export type NoOaBankBatchDetail = {
   batch: NoOaBankBatch;
   rows: NoOaBankBatchDetailRow[];
+  tagCounts: NoOaBankBatchCountMap;
+  directionCounts: NoOaBankBatchCountMap;
 };
 
 export type SubmitNoOaBankBatchRequest = {

@@ -1,14 +1,16 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach } from "vitest";
+import { afterEach, vi } from "vitest";
 
 import { installMockApiFetch } from "./apiMock";
 import { renderAppAt } from "./renderHelpers";
+import * as etcApi from "../features/etc/api";
 
 const INVOICE_DRAFT_STORAGE_KEY = "finops:pageSession:v1:101:imports.invoice:previewSession";
 
 afterEach(() => {
   window.sessionStorage.clear();
+  vi.restoreAllMocks();
 });
 
 function getUploadInput(...labels: string[]) {
@@ -381,6 +383,36 @@ describe("Import pages", () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/etc/import/preview")).toBe(false);
   });
 
+  test("ETC invoice import explains unavailable reconciliation tasks when no task is ready", async () => {
+    installMockApiFetch();
+    vi.spyOn(etcApi, "fetchReadyEtcReconciliationTasks").mockResolvedValue({
+      items: [],
+      unavailableItems: [
+        {
+          taskId: "etc_task_reviewing_001",
+          status: "reviewing",
+          version: 9,
+          title: "新建ETC对账批次",
+          periodStart: "2026-03-28",
+          periodEnd: "2026-04-27",
+          oaTotalAmount: "",
+          etcInvoiceCount: 0,
+          supplementCount: 0,
+          vehiclePlates: ["云ADA0381"],
+          importBlockers: [{ code: "not_confirmed", message: "请先在 ETC 对账页确认对账。" }],
+        },
+      ],
+    });
+
+    renderAppAt("/imports/etc-invoices");
+
+    expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
+    expect(await screen.findByText("已找到 1 个 ETC 对账任务，但当前不可导入：")).toBeInTheDocument();
+    expect(screen.getByText("新建ETC对账批次 / reviewing")).toBeInTheDocument();
+    expect(screen.getByText("请先在 ETC 对账页确认对账。")).toBeInTheDocument();
+    expect(screen.getByLabelText("ETC对账任务")).toBeDisabled();
+  });
+
   test("ETC invoice import previews zip files with the ETC API and skips generic preview", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
@@ -432,6 +464,38 @@ describe("Import pages", () => {
     expect(screen.getByLabelText("审计汇总 已存在 1")).toBeInTheDocument();
     expect(screen.getByLabelText("审计汇总 可导入 1")).toBeInTheDocument();
     expect(screen.getByText("将导入 1 条唯一记录，跳过 2 条重复，1 条需复核。")).toBeInTheDocument();
+  });
+
+  test("ETC invoice import preview lists missing reconciliation task items", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({
+      etcImportBlockingIssues: [
+        {
+          error: "missing_required_etc_invoice",
+          requirementId: "REQ-0011",
+          transactionAt: "2026-04-27 12:22:09",
+          transactionDate: "2026-04-27",
+          amount: "126.35",
+          vehiclePlate: "云ADA0381",
+          invoiceCount: 1,
+        },
+      ],
+    });
+
+    renderAppAt("/imports/etc-invoices");
+
+    expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
+    await selectReadyEtcTask(user);
+    await user.upload(getUploadInput("上传ETC zip", "上传文件"), [
+      new File(["zip-a"], "etc-2026-04.zip", { type: "application/zip" }),
+    ]);
+    await user.click(screen.getByRole("button", { name: "开始预览" }));
+
+    expect(await screen.findByText("ETC对账任务缺失项")).toBeInTheDocument();
+    expect(screen.getByText("2026-04-27 12:22:09")).toBeInTheDocument();
+    expect(screen.getByText("126.35")).toBeInTheDocument();
+    expect(screen.getByText("云ADA0381")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "确认导入" })).toBeDisabled();
   });
 
   test("ETC import confirm maps preview_stale to the refresh preview message", async () => {

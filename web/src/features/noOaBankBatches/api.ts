@@ -5,6 +5,7 @@ import type {
   NoOaBankBatchMutationResult,
   NoOaBankBatchesRequest,
   NoOaBankBatchesResponse,
+  NoOaBankBatchCountMap,
   NoOaBankBatchSummary,
   SubmitNoOaBankBatchesRequest,
   SubmitNoOaBankBatchRequest,
@@ -27,6 +28,8 @@ type ApiNoOaBankBatch = {
   account_last4?: string | null;
   accountLast4?: string | null;
   status?: string | null;
+  status_bucket?: string | null;
+  statusBucket?: string | null;
   row_count?: number | null;
   rowCount?: number | null;
   total_amount?: string | null;
@@ -41,6 +44,16 @@ type ApiNoOaBankBatch = {
   withdrawnAt?: string | null;
   conflict_reason?: string | null;
   conflictReason?: string | null;
+  blocked_reason?: string | null;
+  blockedReason?: string | null;
+  tag_counts?: Record<string, unknown> | null;
+  tagCounts?: Record<string, unknown> | null;
+  direction_counts?: Record<string, unknown> | null;
+  directionCounts?: Record<string, unknown> | null;
+  can_submit?: boolean | null;
+  canSubmit?: boolean | null;
+  can_withdraw?: boolean | null;
+  canWithdraw?: boolean | null;
   version?: number | null;
 };
 
@@ -53,6 +66,22 @@ type ApiNoOaBankBatchSummary = {
   withdrawnCount?: number | null;
   conflict_count?: number | null;
   conflictCount?: number | null;
+  stale_count?: number | null;
+  staleCount?: number | null;
+  total_amount?: string | null;
+  totalAmount?: string | null;
+  categories?: ApiNoOaBankBatchSummaryCategory[];
+};
+
+type ApiNoOaBankBatchSummaryCategory = {
+  code?: string | null;
+  label?: string | null;
+  total?: number | null;
+  draft?: number | null;
+  submitted?: number | null;
+  withdrawn?: number | null;
+  conflict?: number | null;
+  stale?: number | null;
   total_amount?: string | null;
   totalAmount?: string | null;
 };
@@ -78,6 +107,10 @@ type ApiNoOaBankBatchDetailRow = {
   purpose?: string | null;
   remark?: string | null;
   note?: string | null;
+  category_code?: string | null;
+  categoryCode?: string | null;
+  category_label?: string | null;
+  categoryLabel?: string | null;
   category_source?: string | null;
   categorySource?: string | null;
 };
@@ -85,6 +118,10 @@ type ApiNoOaBankBatchDetailRow = {
 type ApiNoOaBankBatchDetail = {
   batch?: ApiNoOaBankBatch;
   rows?: ApiNoOaBankBatchDetailRow[];
+  tag_counts?: Record<string, unknown> | null;
+  tagCounts?: Record<string, unknown> | null;
+  direction_counts?: Record<string, unknown> | null;
+  directionCounts?: Record<string, unknown> | null;
 };
 
 type ApiNoOaBankBatchMutationResult = {
@@ -154,6 +191,17 @@ function stringList(value: string[] | undefined) {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
 }
 
+function countMap(value: Record<string, unknown> | null | undefined): NoOaBankBatchCountMap {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([key, rawCount]) => [key, Number(rawCount)])
+      .filter(([key, count]) => Boolean(key) && Number.isFinite(count)),
+  ) as NoOaBankBatchCountMap;
+}
+
 function mapBatch(batch: ApiNoOaBankBatch = {}): NoOaBankBatch {
   return {
     batchId: text(batch.batch_id ?? batch.batchId),
@@ -164,6 +212,7 @@ function mapBatch(batch: ApiNoOaBankBatch = {}): NoOaBankBatch {
     bankName: text(batch.bank_name ?? batch.bankName),
     accountLast4: text(batch.account_last4 ?? batch.accountLast4),
     status: text(batch.status),
+    statusBucket: text(batch.status_bucket ?? batch.statusBucket),
     rowCount: numberValue(batch.row_count ?? batch.rowCount),
     totalAmount: text(batch.total_amount ?? batch.totalAmount, "0.00"),
     submittedBy: text(batch.submitted_by ?? batch.submittedBy),
@@ -171,6 +220,11 @@ function mapBatch(batch: ApiNoOaBankBatch = {}): NoOaBankBatch {
     withdrawnBy: text(batch.withdrawn_by ?? batch.withdrawnBy),
     withdrawnAt: text(batch.withdrawn_at ?? batch.withdrawnAt) || null,
     conflictReason: text(batch.conflict_reason ?? batch.conflictReason),
+    blockedReason: text(batch.blocked_reason ?? batch.blockedReason),
+    tagCounts: countMap(batch.tag_counts ?? batch.tagCounts),
+    directionCounts: countMap(batch.direction_counts ?? batch.directionCounts),
+    canSubmit: Boolean(batch.can_submit ?? batch.canSubmit),
+    canWithdraw: Boolean(batch.can_withdraw ?? batch.canWithdraw),
     version: nullableNumberValue(batch.version),
   };
 }
@@ -181,7 +235,23 @@ function mapSummary(summary: ApiNoOaBankBatchSummary = {}): NoOaBankBatchSummary
     submittedCount: numberValue(summary.submitted_count ?? summary.submittedCount),
     withdrawnCount: numberValue(summary.withdrawn_count ?? summary.withdrawnCount),
     conflictCount: numberValue(summary.conflict_count ?? summary.conflictCount),
+    staleCount: numberValue(summary.stale_count ?? summary.staleCount),
     totalAmount: text(summary.total_amount ?? summary.totalAmount, "0.00"),
+    categories: Array.isArray(summary.categories) ? summary.categories.map(mapSummaryCategory) : [],
+  };
+}
+
+function mapSummaryCategory(category: ApiNoOaBankBatchSummaryCategory) {
+  return {
+    code: text(category.code),
+    label: text(category.label),
+    total: numberValue(category.total),
+    draft: numberValue(category.draft),
+    submitted: numberValue(category.submitted),
+    withdrawn: numberValue(category.withdrawn),
+    conflict: numberValue(category.conflict),
+    stale: numberValue(category.stale),
+    totalAmount: text(category.total_amount ?? category.totalAmount, "0.00"),
   };
 }
 
@@ -196,6 +266,8 @@ function mapDetailRow(row: ApiNoOaBankBatchDetailRow = {}): NoOaBankBatchDetailR
     summary: text(row.summary),
     purpose: text(row.purpose),
     remark: text(row.remark ?? row.note),
+    categoryCode: text(row.category_code ?? row.categoryCode),
+    categoryLabel: text(row.category_label ?? row.categoryLabel),
     categorySource: text(row.category_source ?? row.categorySource),
   };
 }
@@ -213,6 +285,7 @@ export async function fetchNoOaBankBatches({
   month,
   type,
   status,
+  bucket,
   accountKey,
   signal,
 }: NoOaBankBatchesRequest = {}): Promise<NoOaBankBatchesResponse> {
@@ -225,6 +298,9 @@ export async function fetchNoOaBankBatches({
   }
   if (status && status !== "all") {
     params.set("status", status);
+  }
+  if (bucket && bucket !== "all") {
+    params.set("bucket", bucket);
   }
   if (accountKey) {
     params.set("account_key", accountKey);
@@ -248,6 +324,8 @@ export async function fetchNoOaBankBatchDetail(batchId: string, signal?: AbortSi
   return {
     batch: mapBatch(payload.batch),
     rows: Array.isArray(payload.rows) ? payload.rows.map(mapDetailRow) : [],
+    tagCounts: countMap(payload.tag_counts ?? payload.tagCounts ?? payload.batch?.tag_counts ?? payload.batch?.tagCounts),
+    directionCounts: countMap(payload.direction_counts ?? payload.directionCounts ?? payload.batch?.direction_counts ?? payload.batch?.directionCounts),
   };
 }
 

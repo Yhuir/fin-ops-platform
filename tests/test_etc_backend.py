@@ -26,7 +26,7 @@ from fin_ops_platform.services.etc_service import (
     parse_etc_xml,
 )
 from fin_ops_platform.services.etc_document_parsers import CcbCreditCardStatementParser, SupplementEvidenceParser, TicketRootPdfTextParser
-from fin_ops_platform.services.etc_reconciliation_models import SourceFileKind
+from fin_ops_platform.services.etc_reconciliation_models import FileParseResult, SourceFileKind
 from fin_ops_platform.services.historical_etc_repair_service import (
     HistoricalEtcRepairBatchSpec,
     HistoricalEtcRepairService,
@@ -74,6 +74,8 @@ TICKET_ROOT_CLIPBOARD_TEXT = """
 云南小喜村站
 发票数量：2
 """
+
+REAL_TICKET_ROOT_TXT_A516HJ_PATH = Path("/Users/yu/Desktop/sy/财务运营平台/票根网/4月/云A516HJ/云A516HJ")
 
 
 def etc_xml(
@@ -308,6 +310,29 @@ class EtcServiceTests(unittest.TestCase):
         self.assertEqual(len(preview["items"]), 2)
         self.assertEqual(total, 0)
         self.assertEqual(invoices, [])
+
+    def test_preview_parses_ticket_root_invoice_package_with_root_xml_and_pdf(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir))
+
+            preview = service.preview_import_zips(
+                [
+                    UploadedEtcZipFile(
+                        "ticket-root.zip",
+                        zip_bytes(
+                            {
+                                "single-invoice.xml": etc_xml("ETC001"),
+                                "single-invoice.pdf": fake_pdf("ETC001"),
+                                "single-invoice.ofd": b"ofd",
+                            }
+                        ),
+                    )
+                ]
+            )
+
+        self.assertEqual(preview["summary"]["imported"], 1)
+        self.assertEqual(preview["audit"]["original_count"], 1)
+        self.assertEqual(preview["items"][0]["invoiceNumber"], "ETC001")
 
     def test_preview_audit_reports_duplicate_xml_inside_zip(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -1020,6 +1045,30 @@ class EtcApiTests(unittest.TestCase):
         )
         return task_id, json.loads(draft_response.body)
 
+    def _import_supplement_reconciliation_zip(self, app) -> tuple[str, str]:
+        task_id = self._create_ready_reconciliation_task_with_supplement(app)
+        body, headers = multipart(
+            {
+                "etc.zip": zip_bytes(
+                    {
+                        "xml/ETC001.xml": etc_xml("ETC001", issue_date="2026-02-25", total_amount="13.07"),
+                        "pdf/ETC001.pdf": fake_pdf("ETC001"),
+                    }
+                )
+            },
+            fields={"task_id": task_id},
+        )
+        preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+        preview_payload = json.loads(preview_response.body)
+        confirm_response = app.handle_request(
+            "POST",
+            "/api/etc/import/confirm",
+            json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+        )
+        self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
+        task = app._etc_reconciliation_task_service.get_task(task_id)
+        return task_id, str(task.import_batch_id or "")
+
     def test_reconciliation_task_routes_create_list_ready_and_get_without_route_swallowing(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -1040,6 +1089,69 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(json.loads(detail_response.body)["taskId"], created["taskId"])
         self.assertEqual(ready_response.status_code, 200)
         self.assertEqual(json.loads(ready_response.body)["tasks"], [])
+
+    def test_ready_for_import_lists_unavailable_unconfirmed_tasks_with_blocker(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task = app._etc_reconciliation_task_service.create_task(title="2026-02 ETC", created_by="alice")
+
+            response = app.handle_request("GET", "/api/etc/reconciliation-tasks/ready-for-import")
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["tasks"], [])
+        self.assertEqual([item["taskId"] for item in payload["unavailableTasks"]], [task.task_id])
+        self.assertEqual(payload["unavailableTasks"][0]["status"], "draft")
+        self.assertEqual(
+            payload["unavailableTasks"][0]["importBlockers"],
+            [
+                {
+                    "code": "not_confirmed",
+                    "message": "请先在 ETC 对账页确认对账。",
+                }
+            ],
+        )
+
+    def test_reconciliation_confirm_route_accepts_selected_credit_card_item_ids(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task = app._etc_reconciliation_task_service.create_task(title="ETC", created_by="alice")
+            task = app._etc_reconciliation_task_service.apply_parse_result(
+                task_id=task.task_id,
+                parse_result=CcbCreditCardStatementParser().parse_text(file_id="CARD-1", text=CCB_STATEMENT_TEXT),
+                actor="alice",
+            )
+            task = app._etc_reconciliation_task_service.apply_parse_result(
+                task_id=task.task_id,
+                parse_result=TicketRootPdfTextParser().parse_text(file_id="TICKET-1", text=TICKET_ROOT_TEXT),
+                actor="alice",
+            )
+            selected_card = next(item for item in task.credit_card_items if item.settlement_amount == Decimal("25.00"))
+            task = app._etc_reconciliation_task_service.patch_item(
+                task_id=task.task_id,
+                item_id=selected_card.item_id,
+                expected_version=task.version,
+                actor="alice",
+                payload={"action": "link_ticket", "ticketItemId": task.ticket_root_items[0].item_id},
+            )
+
+            response = app.handle_request(
+                "POST",
+                f"/api/etc/reconciliation-tasks/{task.task_id}/confirm",
+                json.dumps({
+                    "expectedVersion": task.version,
+                    "confirmedCreditCardItemIds": [selected_card.item_id],
+                }),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["status"], "ready_for_import")
+        self.assertEqual(payload["oaTotalAmount"], "25.00")
+        self.assertEqual(
+            [item["credit_card_item_id"] for item in payload["expectedEtcInvoiceRequirements"]],
+            [selected_card.item_id],
+        )
 
     def test_created_reconciliation_task_payload_is_fresh_and_includes_source_files(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -1119,6 +1231,54 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(issue["sourceLine"], None)
         self.assertEqual(issue["extractionMethod"], "pdf_text")
         self.assertEqual(issue["fieldName"], "vehicle_plate")
+
+    def test_refresh_reconciliation_matches_route_recalculates_and_returns_task(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task = app._etc_reconciliation_task_service.create_task(title="ETC", created_by="alice")
+            task = app._etc_reconciliation_task_service.apply_parse_result(
+                task_id=task.task_id,
+                parse_result=CcbCreditCardStatementParser().parse_text(file_id=f"{task.task_id}-CARD", text=CCB_STATEMENT_TEXT),
+                actor="alice",
+            )
+            task = app._etc_reconciliation_task_service.apply_parse_result(
+                task_id=task.task_id,
+                parse_result=TicketRootPdfTextParser().parse_text(file_id=f"{task.task_id}-TICKET", text=TICKET_ROOT_TEXT),
+                actor="alice",
+            )
+            live_task = app._etc_reconciliation_task_service._tasks[task.task_id]
+            card_id = live_task.credit_card_items[0].item_id
+            live_task.ticket_root_items[0].linked_credit_card_item_ids = []
+            live_task.ticket_root_items[0].recommendation_status = "unmatched"
+
+            response = app.handle_request("POST", f"/api/etc/reconciliation-tasks/{task.task_id}/refresh-matches")
+            prefixed_response = app.handle_request(
+                "POST",
+                f"/fin-ops-api/api/etc/reconciliation-tasks/{task.task_id}/refresh-matches",
+            )
+            payload = json.loads(response.body)
+            prefixed_payload = json.loads(prefixed_response.body)
+            readiness = app.readiness_summary()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["taskId"], task.task_id)
+        self.assertEqual(payload["ticketRootItems"][0]["linked_credit_card_item_ids"], [card_id])
+        self.assertEqual(payload["ticketRootItems"][0]["recommendation_status"], "suggested_match")
+        self.assertEqual(prefixed_response.status_code, 200)
+        self.assertEqual(prefixed_payload["taskId"], task.task_id)
+        self.assertIn(
+            "/api/etc/reconciliation-tasks/{task_id}/refresh-matches",
+            readiness["entrypoints"],
+        )
+
+    def test_refresh_reconciliation_matches_route_returns_404_for_unknown_task(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            response = app.handle_request("POST", "/api/etc/reconciliation-tasks/missing-task/refresh-matches")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(json.loads(response.body)["error"], "unknown_reconciliation_task")
 
     def test_reconciliation_task_payload_is_not_confirmable_with_stale_included_etc_resolution(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -1280,6 +1440,83 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(payload["error"], "ticket_root_source_mode_conflict")
         self.assertIn("已有票根网 PDF/JPG 源文件", payload["message"])
 
+    def test_ticket_root_text_route_rejects_existing_txt_ticket_root_source(self) -> None:
+        if not REAL_TICKET_ROOT_TXT_A516HJ_PATH.exists():
+            self.skipTest(f"missing local ticket root sample: {REAL_TICKET_ROOT_TXT_A516HJ_PATH}")
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task = app._etc_reconciliation_task_service.create_task(title="ETC", created_by="alice")
+            app._etc_reconciliation_task_service.store_uploaded_source_file(
+                task_id=task.task_id,
+                source_kind=SourceFileKind.TICKET_ROOT,
+                original_name="云A516HJ",
+                content_type="text/plain; charset=utf-8",
+                content=REAL_TICKET_ROOT_TXT_A516HJ_PATH.read_bytes(),
+                created_by="alice",
+            )
+            task = app._etc_reconciliation_task_service.get_task(task.task_id)
+
+            response = app.handle_request(
+                "POST",
+                f"/api/etc/reconciliation-tasks/{task.task_id}/ticket-root-texts",
+                json.dumps({"expectedVersion": task.version, "entries": [{"clientId": "paste-1", "text": TICKET_ROOT_CLIPBOARD_TEXT}]}),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(payload["error"], "ticket_root_source_mode_conflict")
+        self.assertIn("TXT", payload["message"])
+        self.assertIn("删除已有票根来源后才能切换导入方式", payload["message"])
+
+    def test_ticket_root_upload_route_imports_txt_without_extension_with_clipboard_parser(self) -> None:
+        if not REAL_TICKET_ROOT_TXT_A516HJ_PATH.exists():
+            self.skipTest(f"missing local ticket root sample: {REAL_TICKET_ROOT_TXT_A516HJ_PATH}")
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            created = json.loads(app.handle_request(
+                "POST",
+                "/api/etc/reconciliation-tasks",
+                json.dumps({"title": "ETC", "createdBy": "alice"}),
+            ).body)
+            body, headers = multipart(
+                {"云A516HJ": REAL_TICKET_ROOT_TXT_A516HJ_PATH.read_bytes()},
+                fields={"expectedVersion": str(created["version"])},
+            )
+
+            with patch(
+                "fin_ops_platform.app.server.TicketRootDocumentParser.parse_file",
+                return_value=FileParseResult(file_id="DOC-UNEXPECTED", parser_code="ticket_root_document_v1"),
+            ) as document_parse:
+                response = app.handle_request(
+                    "POST",
+                    f"/api/etc/reconciliation-tasks/{created['taskId']}/ticket-root-files",
+                    body=body,
+                    headers=headers,
+                )
+            payload = json.loads(response.body)
+
+        document_parse.assert_not_called()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["sourceFiles"][0]["originalName"], "云A516HJ")
+        self.assertEqual(payload["sourceFiles"][0]["contentType"], "text/plain; charset=utf-8")
+        self.assertEqual(len(payload["ticketRootItems"]), 11)
+        self.assertEqual({item["extraction_method"] for item in payload["ticketRootItems"]}, {"clipboard_text"})
+        self.assertIn(
+            ("2026-04-02 13:30:29", "57.95", "云A516HJ"),
+            {
+                (item["transaction_at"], item["amount"], item["vehicle_plate"])
+                for item in payload["ticketRootItems"]
+            },
+        )
+        self.assertIn(
+            ("2026-04-02 11:25:48", "88.86", "云A516HJ"),
+            {
+                (item["transaction_at"], item["amount"], item["vehicle_plate"])
+                for item in payload["ticketRootItems"]
+            },
+        )
+        self.assertEqual(payload["parseIssues"], [])
+
     def test_ticket_root_upload_route_rejects_existing_clipboard_text_source(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -1309,6 +1546,72 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(payload["error"], "ticket_root_source_mode_conflict")
         self.assertIn("已有手工粘贴票根网源", payload["message"])
+
+    def test_ticket_root_upload_route_rejects_existing_txt_ticket_root_source_before_pdf_upload(self) -> None:
+        if not REAL_TICKET_ROOT_TXT_A516HJ_PATH.exists():
+            self.skipTest(f"missing local ticket root sample: {REAL_TICKET_ROOT_TXT_A516HJ_PATH}")
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task = app._etc_reconciliation_task_service.create_task(title="ETC", created_by="alice")
+            app._etc_reconciliation_task_service.store_uploaded_source_file(
+                task_id=task.task_id,
+                source_kind=SourceFileKind.TICKET_ROOT,
+                original_name="云A516HJ",
+                content_type="text/plain; charset=utf-8",
+                content=REAL_TICKET_ROOT_TXT_A516HJ_PATH.read_bytes(),
+                created_by="alice",
+            )
+            task = app._etc_reconciliation_task_service.get_task(task.task_id)
+            body, headers = multipart(
+                {"ticket.pdf": b"%PDF-1.4\n%%EOF\n"},
+                fields={"expectedVersion": str(task.version)},
+            )
+
+            response = app.handle_request(
+                "POST",
+                f"/api/etc/reconciliation-tasks/{task.task_id}/ticket-root-files",
+                body=body,
+                headers=headers,
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(payload["error"], "ticket_root_source_mode_conflict")
+        self.assertIn("TXT", payload["message"])
+        self.assertIn("删除已有票根来源后才能切换导入方式", payload["message"])
+
+    def test_ticket_root_upload_route_rejects_existing_pdf_ticket_root_source_before_txt_upload(self) -> None:
+        if not REAL_TICKET_ROOT_TXT_A516HJ_PATH.exists():
+            self.skipTest(f"missing local ticket root sample: {REAL_TICKET_ROOT_TXT_A516HJ_PATH}")
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task = app._etc_reconciliation_task_service.create_task(title="ETC", created_by="alice")
+            app._etc_reconciliation_task_service.store_uploaded_source_file(
+                task_id=task.task_id,
+                source_kind=SourceFileKind.TICKET_ROOT,
+                original_name="ticket.pdf",
+                content_type="application/pdf",
+                content=b"%PDF-1.4\n%%EOF",
+                created_by="alice",
+            )
+            task = app._etc_reconciliation_task_service.get_task(task.task_id)
+            body, headers = multipart(
+                {"云A516HJ": REAL_TICKET_ROOT_TXT_A516HJ_PATH.read_bytes()},
+                fields={"expectedVersion": str(task.version)},
+            )
+
+            response = app.handle_request(
+                "POST",
+                f"/api/etc/reconciliation-tasks/{task.task_id}/ticket-root-files",
+                body=body,
+                headers=headers,
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(payload["error"], "ticket_root_source_mode_conflict")
+        self.assertIn("PDF/JPG", payload["message"])
+        self.assertIn("删除已有票根来源后才能切换导入方式", payload["message"])
 
     def test_credit_card_statement_uploaded_to_ticket_root_route_returns_wrong_slot_message(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -1416,6 +1719,88 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(deleted.status_code, 200)
         self.assertEqual(json.loads(deleted.body), {"deleted": True, "taskId": created["taskId"], "kind": "reconciliation_task"})
         self.assertEqual(missing.status_code, 404)
+
+    def test_delete_ready_for_import_reconciliation_task(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task_id = self._create_ready_reconciliation_task(app)
+            task = app._etc_reconciliation_task_service.get_task(task_id)
+
+            response = app.handle_request(
+                "DELETE",
+                f"/api/etc/reconciliation-tasks/{task_id}",
+                body=json.dumps({"expectedVersion": task.version}),
+            )
+            missing = app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.body), {"deleted": True, "taskId": task_id, "kind": "reconciliation_task"})
+        self.assertEqual(missing.status_code, 404)
+
+    def test_delete_imported_reconciliation_task_cascades_imported_invoices(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task_id, _preview_response, preview_payload = self._preview_task_zip(app, ["ETC001"])
+            confirm_response = app.handle_request(
+                "POST",
+                "/api/etc/import/confirm",
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+            )
+            self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
+            imported_task = app._etc_reconciliation_task_service.get_task(task_id)
+
+            stale_response = app.handle_request(
+                "DELETE",
+                f"/api/etc/reconciliation-tasks/{task_id}",
+                body=json.dumps({"expectedVersion": imported_task.version - 1}),
+            )
+            response = app.handle_request(
+                "DELETE",
+                f"/api/etc/reconciliation-tasks/{task_id}",
+                body=json.dumps({"expectedVersion": imported_task.version}),
+            )
+            missing = app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}")
+            invoices = json.loads(app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20").body)
+            batches = json.loads(app.handle_request("GET", "/api/etc/batches?status=unsubmitted").body)
+
+        self.assertEqual(stale_response.status_code, 409)
+        self.assertEqual(json.loads(stale_response.body)["error"], "task_version_conflict")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.body), {"deleted": True, "taskId": task_id, "kind": "reconciliation_task"})
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(invoices["total"], 0)
+        self.assertEqual(batches["items"], [])
+        self.assertEqual(app._etc_service.list_import_batches(), [])
+        self.assertEqual(app._import_service.list_invoices(), [])
+
+    def test_delete_imported_reconciliation_task_tolerates_missing_import_batch_container(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task_id, _preview_response, preview_payload = self._preview_task_zip(app, ["ETC001"])
+            confirm_response = app.handle_request(
+                "POST",
+                "/api/etc/import/confirm",
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+            )
+            self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
+            imported_task = app._etc_reconciliation_task_service.get_task(task_id)
+            import_batch_id = str(imported_task.import_batch_id or "")
+            app._etc_service._import_batches.pop(import_batch_id)
+
+            response = app.handle_request(
+                "DELETE",
+                f"/api/etc/reconciliation-tasks/{task_id}",
+                body=json.dumps({"expectedVersion": imported_task.version}),
+            )
+            payload = json.loads(response.body)
+            invoices = json.loads(app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20").body)
+            missing = app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload, {"deleted": True, "taskId": task_id, "kind": "reconciliation_task"})
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(invoices["total"], 0)
+        self.assertEqual(app._import_service.list_invoices(), [])
 
     def test_delete_etc_batch_route_deletes_unsubmitted_and_rejects_submitted(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -1547,6 +1932,12 @@ class EtcApiTests(unittest.TestCase):
             {item["invoiceNumber"]: item["filterStatus"] for item in preview_payload["reconciliationFilter"]["items"]},
             {"ETC001": "included", "EXTRA": "excluded_extra_zip_invoice"},
         )
+        self.assertEqual(
+            {item["invoiceNumber"]: item["filterStatus"] for item in preview_payload["items"]},
+            {"ETC001": "included", "EXTRA": "excluded_extra_zip_invoice"},
+        )
+        self.assertEqual(preview_payload["audit"]["original_count"], 2)
+        self.assertEqual(preview_payload["importAudit"]["original_count"], 1)
         self.assertEqual(confirm_response.status_code, 202)
         self.assertEqual(retry_confirm_response.status_code, 202)
         self.assertEqual(
@@ -1558,6 +1949,190 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(invoices["items"][0]["invoice_number"], "ETC001")
         self.assertEqual(task.status.value, "imported")
         self.assertEqual(ready["tasks"], [])
+
+    def test_task_aware_etc_import_does_not_create_independent_batch_list_item(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task_id, preview_response, preview_payload = self._preview_task_zip(app, ["ETC001"])
+
+            confirm_response = app.handle_request(
+                "POST",
+                "/api/etc/import/confirm",
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+            )
+            completed_job = self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
+            task_payload = json.loads(app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}").body)
+            batch_list = json.loads(app.handle_request("GET", "/api/etc/batches").body)
+
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(completed_job["status"], "succeeded")
+        self.assertEqual(task_payload["status"], "imported")
+        self.assertIsNotNone(task_payload["importBatchId"])
+        self.assertTrue(task_payload["hasImportedInvoices"])
+        self.assertEqual(task_payload["importedInvoiceCount"], 1)
+        self.assertEqual(task_payload["importedInvoiceAmount"], "13.07")
+        self.assertEqual(batch_list["items"], [])
+        self.assertEqual(batch_list["counts"]["unsubmitted"], 0)
+
+    def test_remove_reconciliation_task_imported_invoices_allows_reimport(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task_id, _preview_response, preview_payload = self._preview_task_zip(app, ["ETC001"])
+            confirm_response = app.handle_request(
+                "POST",
+                "/api/etc/import/confirm",
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+            )
+            self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
+            imported_task = app._etc_reconciliation_task_service.get_task(task_id)
+
+            stale_remove_response = app.handle_request(
+                "DELETE",
+                f"/api/etc/reconciliation-tasks/{task_id}/imported-invoices",
+                json.dumps({"expectedVersion": imported_task.version - 1, "actor": "alice"}),
+            )
+            remove_response = app.handle_request(
+                "DELETE",
+                f"/api/etc/reconciliation-tasks/{task_id}/imported-invoices",
+                json.dumps({"expectedVersion": imported_task.version, "actor": "alice"}),
+            )
+            removed_payload = json.loads(remove_response.body)
+            invoices_after_remove = json.loads(app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20").body)
+            canonical_etc_after_remove = [
+                invoice
+                for invoice in app._import_service.list_invoices()
+                if getattr(invoice, "etc_import_batch_id", None)
+            ]
+            reimport_body, reimport_headers = multipart(
+                {
+                    "etc.zip": zip_bytes(
+                        {
+                            "xml/ETC001.xml": etc_xml("ETC001", issue_date="2026-02-27", total_amount="13.07"),
+                            "pdf/ETC001.pdf": fake_pdf("ETC001"),
+                        }
+                    )
+                },
+                fields={"task_id": task_id},
+            )
+            reimport_preview_response = app.handle_request(
+                "POST",
+                "/api/etc/import/preview",
+                body=reimport_body,
+                headers=reimport_headers,
+            )
+            reimport_preview = json.loads(reimport_preview_response.body)
+            reimport_confirm_response = app.handle_request(
+                "POST",
+                "/api/etc/import/confirm",
+                json.dumps({"sessionId": reimport_preview["sessionId"], "taskId": task_id}),
+            )
+            reimport_job = self._wait_for_job(app, json.loads(reimport_confirm_response.body)["job"]["job_id"])
+            final_task_payload = json.loads(app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}").body)
+            final_invoices = json.loads(app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20").body)
+
+        self.assertEqual(stale_remove_response.status_code, 409)
+        self.assertEqual(json.loads(stale_remove_response.body)["error"], "task_version_conflict")
+        self.assertEqual(remove_response.status_code, 200)
+        self.assertEqual(removed_payload["status"], "ready_for_import")
+        self.assertIsNone(removed_payload["importBatchId"])
+        self.assertFalse(removed_payload["hasImportedInvoices"])
+        self.assertEqual(removed_payload["importedInvoiceCount"], 0)
+        self.assertEqual(invoices_after_remove["total"], 0)
+        self.assertEqual(canonical_etc_after_remove, [])
+        self.assertEqual(reimport_preview_response.status_code, 200)
+        self.assertEqual(reimport_preview["summary"]["imported"], 1)
+        self.assertEqual(reimport_confirm_response.status_code, 202)
+        self.assertEqual(reimport_job["status"], "succeeded")
+        self.assertEqual(final_task_payload["status"], "imported")
+        self.assertTrue(final_task_payload["hasImportedInvoices"])
+        self.assertEqual(final_invoices["total"], 1)
+
+    def test_task_aware_etc_import_confirm_imports_sum_matched_invoices_only(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task = app._etc_reconciliation_task_service.create_task(title="ETC", created_by="alice")
+            statement_text = """
+中国建设银行信用卡账单
+2026-04-08 2026-04-09 3632 云南高速通行费 CNY 71.25 71.25
+"""
+            task = app._etc_reconciliation_task_service.apply_parse_result(
+                task_id=task.task_id,
+                parse_result=CcbCreditCardStatementParser().parse_text(file_id=f"{task.task_id}-CARD", text=statement_text),
+                actor="alice",
+            )
+            ticket_text = """
+票根网通行明细
+车牌号 云ADA0381
+交易时间 2026-04-08 18:57:17
+入口站 昆明南站
+出口站 小喜村站
+金额 71.25
+发票张数 2
+"""
+            task = app._etc_reconciliation_task_service.apply_parse_result(
+                task_id=task.task_id,
+                parse_result=TicketRootPdfTextParser().parse_text(file_id=f"{task.task_id}-TICKET", text=ticket_text),
+                actor="alice",
+            )
+            card = task.credit_card_items[0]
+            ticket = task.ticket_root_items[0]
+            task = app._etc_reconciliation_task_service.patch_item(
+                task_id=task.task_id,
+                item_id=card.item_id,
+                expected_version=task.version,
+                actor="alice",
+                payload={"action": "link_ticket", "ticketItemId": ticket.item_id},
+            )
+            task = app._etc_reconciliation_task_service.patch_item(
+                task_id=task.task_id,
+                item_id=card.item_id,
+                expected_version=task.version,
+                actor="alice",
+                payload={"action": "set_manual_resolution", "manualResolution": "included_etc"},
+            )
+            confirmed = app._etc_reconciliation_task_service.confirm_task(
+                task_id=task.task_id,
+                expected_version=task.version,
+                actor="alice",
+            )
+            body, headers = multipart(
+                {
+                    "etc.zip": zip_bytes(
+                        {
+                            "xml/ETC2950.xml": etc_xml("ETC2950", issue_date="2026-04-08", total_amount="29.50"),
+                            "pdf/ETC2950.pdf": fake_pdf("ETC2950"),
+                            "xml/ETC4175.xml": etc_xml("ETC4175", issue_date="2026-04-08", total_amount="41.75"),
+                            "pdf/ETC4175.pdf": fake_pdf("ETC4175"),
+                            "xml/EXTRA.xml": etc_xml("EXTRA", issue_date="2026-04-08", total_amount="999.99"),
+                            "pdf/EXTRA.pdf": fake_pdf("EXTRA"),
+                        }
+                    )
+                },
+                fields={"task_id": confirmed.task_id},
+            )
+
+            preview_response = app.handle_request("POST", "/api/etc/import/preview", body=body, headers=headers)
+            preview_payload = json.loads(preview_response.body)
+            confirm_response = app.handle_request(
+                "POST",
+                "/api/etc/import/confirm",
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": confirmed.task_id}),
+            )
+            completed_job = self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
+            invoices = json.loads(app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20").body)
+
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(preview_payload["reconciliationFilter"]["allowedInvoiceNumbers"], ["ETC2950", "ETC4175"])
+        self.assertEqual(preview_payload["summary"]["imported"], 2)
+        self.assertEqual(preview_payload["audit"]["original_count"], 3)
+        self.assertEqual(preview_payload["importAudit"]["original_count"], 2)
+        self.assertEqual(
+            {item["invoiceNumber"]: item["filterStatus"] for item in preview_payload["reconciliationFilter"]["items"]},
+            {"ETC2950": "included", "ETC4175": "included", "EXTRA": "excluded_extra_zip_invoice"},
+        )
+        self.assertEqual(completed_job["status"], "succeeded")
+        self.assertEqual(invoices["total"], 2)
+        self.assertEqual({item["invoice_number"] for item in invoices["items"]}, {"ETC2950", "ETC4175"})
 
     def test_etc_import_preview_requires_ready_task_even_when_no_tasks_exist(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -2089,6 +2664,26 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(draft_payload["oaDraftId"], "oa-draft-001")
         self.assertEqual(len(fake_oa.uploads), 2)
         self.assertEqual(Path(fake_oa.uploads[1]).name, "ETC-RECON-FILE-000001_supplement-ride.pdf")
+        payload = fake_oa.draft_payloads[0]["payload"]
+        self.assertEqual(payload["data"]["amount"], "101.07")
+        uploaded_names = [item["name"] for item in payload["data"]["field101"]["list"]]
+        self.assertEqual(uploaded_names, ["ETC001.pdf", "supplement-ride.pdf"])
+
+    def test_reconciliation_import_batch_route_creates_oa_draft(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            fake_oa = FakeEtcOAClient()
+            app._etc_service.oa_client = fake_oa
+
+            task_id, import_batch_id = self._import_supplement_reconciliation_zip(app)
+            draft_response = app.handle_request("POST", f"/api/etc/batches/{import_batch_id}/draft")
+            draft_payload = json.loads(draft_response.body)
+            task_payload = json.loads(app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}").body)
+
+        self.assertEqual(draft_response.status_code, 200)
+        self.assertEqual(draft_payload["oaDraftId"], "oa-draft-001")
+        self.assertEqual(task_payload["oaDraftBatchId"], draft_payload["batchId"])
+        self.assertEqual(task_payload["etcBatchId"], draft_payload["etcBatchId"])
         payload = fake_oa.draft_payloads[0]["payload"]
         self.assertEqual(payload["data"]["amount"], "101.07")
         uploaded_names = [item["name"] for item in payload["data"]["field101"]["list"]]

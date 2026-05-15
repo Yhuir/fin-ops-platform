@@ -59,6 +59,11 @@ AMOUNT_RE = re.compile(r"(?:交易金额|金额|收费金额|合计|￥|¥)\s*[:
 INVOICE_COUNT_RE = re.compile(r"(?:发票张数|发票数量|张数)\s*[:：]?\s*(\d+)")
 ENTRY_RE = re.compile(r"(?:入口站|入口)\s*[:：]?\s*([^\s]+)")
 EXIT_RE = re.compile(r"(?:出口站|出口)\s*[:：]?\s*([^\s]+)")
+TRIP_TRANSACTION_AMOUNT_RE = re.compile(
+    r"交易时间\s*[:：]?\s*\d{4}[-/]\d{2}[-/]\d{2}\s*\d{2}:\d{2}(?::\d{2})?.*?"
+    r"交易金额\s*[:：]?\s*[￥¥]?\s*[0-9]+(?:\.[0-9]{1,2})?",
+    re.S,
+)
 STATION_LINE_RE = re.compile(r"^[\u4e00-\u9fffA-Za-z0-9（）()·\-]{2,30}站$")
 STATION_ARROW_RE = re.compile(
     r"(?P<entry>[\u4e00-\u9fffA-Za-z0-9（）()·\-]{2,30}站)\s*(?:->|→|至|到|-)\s*"
@@ -701,7 +706,17 @@ def _is_invoice_application_without_ticket_details(text: str) -> bool:
         return False
     if not any(marker in normalized for marker in INVOICE_APPLICATION_MARKERS):
         return False
-    return not _has_ticket_detail_structure(normalized)
+    return not _has_ticket_trip_page_structure(normalized)
+
+
+def _has_ticket_trip_page_structure(text: str) -> bool:
+    normalized = str(text or "")
+    if "入口收费站/出口收费站" in normalized:
+        return True
+    entry_station, exit_station = _extract_ticket_stations(normalized)
+    if entry_station or exit_station:
+        return True
+    return bool(TRIP_TRANSACTION_AMOUNT_RE.search(normalized))
 
 
 def _normalize_ticket_datetime(value: str) -> str:

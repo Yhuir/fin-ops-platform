@@ -14,7 +14,13 @@ from types import SimpleNamespace
 
 from pymongo.errors import ServerSelectionTimeoutError
 
-from fin_ops_platform.app.server import Application, WORKBENCH_READ_MODEL_SCHEMA_VERSION, _build_handler_factory, build_application
+from fin_ops_platform.app.server import (
+    Application,
+    SYSTEM_AUTO_PAIR_RELATION_MODES,
+    WORKBENCH_READ_MODEL_SCHEMA_VERSION,
+    _build_handler_factory,
+    build_application,
+)
 from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
@@ -50,6 +56,13 @@ class MemoryAttachmentInvoiceCache:
 
     def save_oa_attachment_invoice_cache_entry(self, cache_key: str, payload: dict[str, object]) -> None:
         self.entries[cache_key] = dict(payload)
+
+
+class WorkbenchSystemAutoPairModePolicyTests(unittest.TestCase):
+    def test_salary_and_internal_transfer_are_not_system_auto_pair_relation_modes(self) -> None:
+        self.assertNotIn("salary_personal_auto_match", SYSTEM_AUTO_PAIR_RELATION_MODES)
+        self.assertNotIn("internal_transfer_pair", SYSTEM_AUTO_PAIR_RELATION_MODES)
+        self.assertIn("oa_invoice_offset_auto_match", SYSTEM_AUTO_PAIR_RELATION_MODES)
 
 
 class StaticMongoWorkbenchOAAdapter(MongoOAAdapter):
@@ -184,6 +197,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         app: Application,
         *,
         trade_time: str = "2026-04-03 09:00:00",
+        counterparty_name: str = "供应商A",
         summary: str = "付款",
         remark: str = "货款",
     ) -> str:
@@ -198,7 +212,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     "txn_date": trade_time[:10],
                     "trade_time": trade_time,
                     "pay_receive_time": trade_time,
-                    "counterparty_name": "供应商A",
+                    "counterparty_name": counterparty_name,
                     "debit_amount": "100.00",
                     "credit_amount": "",
                     "summary": summary,
@@ -578,6 +592,218 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(row["category_label"], "手续费")
         self.assertEqual(row["category_source"], "auto")
         self.assertEqual(payload["category_counts"]["fee"], 1)
+
+    def test_bank_details_api_passes_keyword_to_server_side_transaction_search(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._create_imported_bank_transaction(
+                app,
+                trade_time="2026-04-03 09:00:00",
+                counterparty_name="普通供应商A",
+                summary="普通付款",
+                remark="普通用途",
+            )
+            self._create_imported_bank_transaction(
+                app,
+                trade_time="2026-04-02 09:00:00",
+                counterparty_name="普通供应商B",
+                summary="普通付款",
+                remark="普通用途",
+            )
+            target_id = self._create_imported_bank_transaction(
+                app,
+                trade_time="2026-04-01 09:00:00",
+                counterparty_name="跨页目标供应商",
+                summary="网银手续费",
+                remark="跨页目标用途",
+            )
+
+            response = app.handle_request(
+                "GET",
+                "/api/bank-details/transactions"
+                "?account_key=%E5%B7%A5%E5%95%86%E9%93%B6%E8%A1%8C%3A6386"
+                "&date_from=2026-04-01"
+                "&date_to=2026-04-30"
+                "&page=1"
+                "&page_size=2"
+                "&keyword=%E8%B7%A8%E9%A1%B5%E7%9B%AE%E6%A0%87",
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual([row["id"] for row in payload["rows"]], [target_id])
+        self.assertEqual(payload["pagination"]["total"], 1)
+        self.assertEqual(payload["category_counts"]["fee"], 1)
+        self.assertEqual(payload["category_counts"]["uncategorized"], 0)
+
+    def test_bank_details_api_projects_workbench_relation_tags(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_id = self._create_imported_bank_transaction(
+                app,
+                trade_time="2026-05-02 09:00:00",
+                summary="付款",
+                remark="项目款",
+            )
+            row_ids = ["oa-bank-details-001", transaction_id, "iv-bank-details-001"]
+
+            confirm_response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/confirm-link",
+                json.dumps(
+                    {
+                        "month": "2026-05",
+                        "row_ids": row_ids,
+                        "case_id": "CASE-BANK-DETAILS",
+                        "note": "测试银行明细关联标签",
+                    }
+                ),
+            )
+            linked_response = app.handle_request(
+                "GET",
+                "/api/bank-details/transactions?account_key=%E5%B7%A5%E5%95%86%E9%93%B6%E8%A1%8C%3A6386",
+            )
+            cancel_response = app.handle_request(
+                "POST",
+                "/api/workbench/actions/cancel-link",
+                json.dumps({"month": "2026-05", "row_id": transaction_id, "comment": "取消测试关联"}),
+            )
+            unlinked_response = app.handle_request(
+                "GET",
+                "/api/bank-details/transactions?account_key=%E5%B7%A5%E5%95%86%E9%93%B6%E8%A1%8C%3A6386",
+            )
+
+        self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
+        confirm_payload = json.loads(confirm_response.body)
+        self.assertIn("affected_months", confirm_payload)
+        self.assertIn("2026-05", confirm_payload["affected_months"])
+
+        self.assertEqual(linked_response.status_code, 200, linked_response.body)
+        linked_payload = json.loads(linked_response.body)
+        linked_row = next(row for row in linked_payload["rows"] if row["id"] == transaction_id)
+        self.assertEqual(linked_row["oa_relation_tag"], "有oa")
+        self.assertEqual(linked_row["invoice_relation_tag"], "有发票")
+        self.assertEqual(linked_row["relation_tags"], ["有oa", "有发票"])
+        self.assertEqual(linked_row["relation_case_id"], "CASE-BANK-DETAILS")
+
+        self.assertEqual(cancel_response.status_code, 200, cancel_response.body)
+        cancel_payload = json.loads(cancel_response.body)
+        self.assertIn("affected_months", cancel_payload)
+        self.assertIn("2026-05", cancel_payload["affected_months"])
+
+        self.assertEqual(unlinked_response.status_code, 200, unlinked_response.body)
+        unlinked_payload = json.loads(unlinked_response.body)
+        unlinked_row = next(row for row in unlinked_payload["rows"] if row["id"] == transaction_id)
+        self.assertEqual(unlinked_row["oa_relation_tag"], "无oa")
+        self.assertEqual(unlinked_row["invoice_relation_tag"], "无发票")
+        self.assertEqual(unlinked_row["relation_tags"], ["无oa", "无发票"])
+        self.assertNotIn("relation_case_id", unlinked_row)
+
+    def test_bank_details_api_projects_candidate_oa_without_invoice_tags_across_months(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_id = self._create_imported_bank_transaction(
+                app,
+                trade_time="2026-03-12 10:16:38",
+                summary="电子转账",
+                remark="汽油费",
+            )
+            candidate = app._workbench_candidate_match_service.upsert_candidate(
+                {
+                    "scope_month": "2026-02",
+                    "candidate_type": "oa_bank",
+                    "status": "incomplete",
+                    "confidence": "medium",
+                    "rule_code": "oa_bank_exact_amount",
+                    "row_ids": ["oa-pay-fuel-001", transaction_id],
+                    "oa_row_ids": ["oa-pay-fuel-001"],
+                    "bank_row_ids": [transaction_id],
+                    "invoice_row_ids": [],
+                    "amount": "1500.00",
+                    "amount_delta": "0.00",
+                    "explanation": "OA and bank matched; invoice evidence is missing.",
+                    "conflict_candidate_keys": [],
+                    "generated_at": "2026-05-07T00:00:00+00:00",
+                    "source_versions": {},
+                }
+            )
+
+            response = app.handle_request(
+                "GET",
+                "/api/bank-details/transactions?date_from=2026-03-12&date_to=2026-03-12&page_size=500",
+            )
+
+        self.assertEqual(response.status_code, 200, response.body)
+        payload = json.loads(response.body)
+        row = next(row for row in payload["rows"] if row["id"] == transaction_id)
+        self.assertEqual(row["oa_relation_tag"], "有oa")
+        self.assertEqual(row["invoice_relation_tag"], "无发票")
+        self.assertEqual(row["relation_tags"], ["有oa", "无发票"])
+        self.assertEqual(row["relation_case_id"], candidate["candidate_key"])
+
+    def test_bank_details_api_projects_attached_workbench_group_oa_without_invoice_tags(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_id = self._create_imported_bank_transaction(
+                app,
+                trade_time="2026-03-12 10:16:38",
+                summary="电子转账",
+                remark="汽油费",
+            )
+            candidate_case_id = "candidate:fuel-oa-bank"
+            raw_payload = {
+                "month": "all",
+                "summary": {},
+                "paired": {"oa": [], "bank": [], "invoice": []},
+                "open": {
+                    "oa": [
+                        {
+                            "id": "oa-pay-fuel-001",
+                            "type": "oa",
+                            "case_id": None,
+                            "apply_type": "支付申请",
+                            "amount": "100.00",
+                            "counterparty_name": "供应商A",
+                            "oa_bank_relation": {
+                                "code": "pending_match",
+                                "label": "待找流水与发票",
+                                "tone": "warn",
+                            },
+                        }
+                    ],
+                    "bank": [
+                        {
+                            "id": transaction_id,
+                            "type": "bank",
+                            "case_id": candidate_case_id,
+                            "debit_amount": "100.00",
+                            "credit_amount": "",
+                            "counterparty_name": "供应商A",
+                            "trade_time": "2026-03-12 10:16:38",
+                            "invoice_relation": {
+                                "code": "suggested_match",
+                                "label": "待人工确认",
+                                "tone": "warn",
+                            },
+                        }
+                    ],
+                    "invoice": [],
+                },
+            }
+
+            with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+                response = app.handle_request(
+                    "GET",
+                    "/api/bank-details/transactions?date_from=2026-03-12&date_to=2026-03-12&page_size=500",
+                )
+
+        self.assertEqual(response.status_code, 200, response.body)
+        payload = json.loads(response.body)
+        row = next(row for row in payload["rows"] if row["id"] == transaction_id)
+        self.assertEqual(row["oa_relation_tag"], "有oa")
+        self.assertEqual(row["invoice_relation_tag"], "无发票")
+        self.assertEqual(row["relation_tags"], ["有oa", "无发票"])
+        self.assertEqual(row["relation_case_id"], candidate_case_id)
 
     def test_patch_manual_clear_immediately_suppresses_auto_in_bank_details_api(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2760,6 +2986,54 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(auto_results[0].rule_code, "salary_personal_auto_match")
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id(salary_row_id))
 
+    def test_get_api_workbench_ignores_stale_auto_closed_salary_candidate_match(self) -> None:
+        app = build_application()
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="stale-salary-candidate.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220003",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-02-28",
+                    "trade_time": "2026-02-28 17:08:00",
+                    "pay_receive_time": "2026-02-28 17:08:00",
+                    "counterparty_name": "李四",
+                    "debit_amount": "9.00",
+                    "credit_amount": "",
+                    "summary": "2月工资发放",
+                    "remark": "工资",
+                }
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+        salary_row_id = app._import_service.list_transactions()[0].id
+        app._workbench_candidate_match_service.upsert_candidate(
+            {
+                "scope_month": "2026-02",
+                "candidate_type": "bank",
+                "status": "auto_closed",
+                "confidence": "high",
+                "rule_code": "salary_personal_auto_match",
+                "row_ids": [salary_row_id],
+                "bank_row_ids": [salary_row_id],
+                "amount": "9.00",
+                "amount_delta": "0.00",
+                "explanation": "stale legacy salary auto close",
+            }
+        )
+        app._invalidate_workbench_read_models()
+
+        response = app.handle_request("GET", "/api/workbench?month=2026-02")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        open_bank_rows = flatten_groups(payload["open"]["groups"], "bank")
+        self.assertEqual([row["id"] for row in open_bank_rows], [salary_row_id])
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id(salary_row_id))
+
     def test_get_api_workbench_exposes_invoice_identity_fields_for_live_invoice_rows(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(
@@ -2834,6 +3108,64 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(auto_results[0].rule_code, "internal_transfer_pair")
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id(internal_transfer_row_ids[0]))
 
+    def test_get_api_workbench_ignores_stale_auto_closed_internal_transfer_candidate_match(self) -> None:
+        app = build_application()
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="stale-internal-transfer-candidate.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220001",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-02-03",
+                    "trade_time": "2026-02-03 09:15:00",
+                    "pay_receive_time": "2026-02-03 09:15:00",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "debit_amount": "50000.00",
+                    "credit_amount": "",
+                    "summary": "内部往来支出",
+                },
+                {
+                    "account_no": "62220002",
+                    "account_name": "云南溯源科技有限公司招商银行一般户",
+                    "txn_date": "2026-02-03",
+                    "trade_time": "2026-02-03 10:02:00",
+                    "pay_receive_time": "2026-02-03 10:02:00",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "debit_amount": "",
+                    "credit_amount": "50000.00",
+                    "summary": "内部往来收入",
+                },
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+        internal_transfer_row_ids = [transaction.id for transaction in app._import_service.list_transactions()]
+        app._workbench_candidate_match_service.upsert_candidate(
+            {
+                "scope_month": "2026-02",
+                "candidate_type": "bank",
+                "status": "auto_closed",
+                "confidence": "high",
+                "rule_code": "internal_transfer_pair",
+                "row_ids": internal_transfer_row_ids,
+                "bank_row_ids": internal_transfer_row_ids,
+                "amount": "50000.00",
+                "amount_delta": "0.00",
+                "explanation": "stale legacy internal transfer auto close",
+            }
+        )
+        app._invalidate_workbench_read_models()
+
+        response = app.handle_request("GET", "/api/workbench?month=2026-02")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        open_bank_rows = flatten_groups(payload["open"]["groups"], "bank")
+        self.assertCountEqual([row["id"] for row in open_bank_rows], internal_transfer_row_ids)
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id(internal_transfer_row_ids[0]))
+
     def test_workbench_matching_rows_preserve_bank_identity_fields_for_internal_transfer_rules(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(
@@ -2882,7 +3214,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertCountEqual([row.get("account_no") for row in imported_rows], ["39610188000598826", "53001905038050548106"])
         self.assertTrue(all(row.get("account_name") == "云南溯源科技有限公司" for row in imported_rows))
 
-    def test_stale_single_row_candidate_does_not_override_active_internal_transfer_relation(self) -> None:
+    def test_stale_single_row_candidate_does_not_auto_pair_no_oa_internal_transfer_rows(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
@@ -2956,9 +3288,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         ]
 
         self.assertEqual(response.status_code, 200)
-        self.assertCountEqual([row["id"] for row in paired_bank_rows], bank_row_ids)
-        self.assertEqual(open_bank_rows, [])
-        self.assertTrue(all(row["invoice_relation"]["code"] == "internal_transfer_pair" for row in paired_bank_rows))
+        self.assertEqual(paired_bank_rows, [])
+        self.assertCountEqual([row["id"] for row in open_bank_rows], bank_row_ids)
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id(bank_row_ids[0]))
 
     def test_get_api_workbench_ignored_prefers_cached_read_model_when_available(self) -> None:
         app = build_application()
@@ -5673,6 +6005,8 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             json.dumps({"month": "2026-05", "row_ids": full_row_ids, "note": "撤回最近一次关联"}),
         )
         self.assertEqual(withdraw_response.status_code, 200)
+        withdraw_payload = json.loads(withdraw_response.body)
+        self.assertIn("2026-05", withdraw_payload["affected_months"])
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id("bk-o-202605-001"))
         restored = app._workbench_pair_relation_service.get_active_relation_by_row_id("oa-o-202605-001")
         assert restored is not None

@@ -1,6 +1,7 @@
 export type WorkbenchRecordType = "oa" | "bank" | "invoice";
 
 export type WorkbenchSourceKind =
+  | "no_oa_bank_batch_summary"
   | "etc_invoice_summary"
   | "etc_invoice"
   | "oa_attachment_invoice"
@@ -128,12 +129,21 @@ export type WorkbenchMatchConfidence = "high" | "medium" | "low";
 
 export type WorkbenchGroupType = "auto_closed" | "manual_confirmed" | "candidate";
 
+export type WorkbenchRelationMode = "no_oa_bank_batch" | (string & {});
+
+export type WorkbenchDisplayMode = "collapsed_summary" | "normal" | (string & {});
+
 export type WorkbenchCandidateGroup = {
   id: string;
   groupType: WorkbenchGroupType;
   matchConfidence: WorkbenchMatchConfidence;
   reason: string;
+  relationMode?: WorkbenchRelationMode;
+  displayMode?: WorkbenchDisplayMode;
+  defaultCollapsed?: boolean;
+  summaryRow?: WorkbenchRecord;
   rows: WorkbenchPaneRows;
+  collapsedRows?: Partial<WorkbenchPaneRows>;
   canWithdraw?: boolean;
   specialMetadata?: Record<string, unknown>;
 };

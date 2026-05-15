@@ -17,6 +17,7 @@ import type {
   WorkbenchPaneRows,
   WorkbenchRecord,
   WorkbenchRecordType,
+  WorkbenchRelationMode,
   WorkbenchRelationPreview,
   WorkbenchProjectSetting,
   WorkbenchSettings,
@@ -31,6 +32,7 @@ import type {
   WorkbenchInvoiceInventory,
   WorkbenchSourceKind,
 } from "./types";
+import { countWorkbenchGroupsRows } from "./groupDisplayModel";
 
 export type WorkbenchBootstrapProgress = {
   label: string;
@@ -224,6 +226,11 @@ type ApiWorkbenchGroup = {
   group_type: "auto_closed" | "manual_confirmed" | "candidate" | "source_linked";
   match_confidence: "high" | "medium" | "low";
   reason: string;
+  relation_mode?: string | null;
+  display_mode?: string | null;
+  default_collapsed?: boolean | null;
+  summary_row?: ApiWorkbenchRow | null;
+  collapsed_rows?: Partial<Record<WorkbenchRecordType, ApiWorkbenchRow[]>> | null;
   oa_rows: ApiWorkbenchRow[];
   bank_rows: ApiWorkbenchRow[];
   invoice_rows: ApiWorkbenchRow[];
@@ -270,6 +277,10 @@ type ApiWorkbenchActionResult = {
   exception_case_id?: string;
   exception_case_ids?: string[];
   updated_rows?: Array<{ id: string }>;
+  affectedMonths?: unknown[];
+  affected_months?: unknown[];
+  changedScopes?: unknown[];
+  changed_scopes?: unknown[];
   message: string;
 };
 
@@ -574,9 +585,31 @@ function rowRelation(row: ApiWorkbenchRow) {
   return row.invoice_bank_relation;
 }
 
-function rowActionVariant(row: ApiWorkbenchRow): WorkbenchActionVariant {
+function isNoOaSummaryRow(row: ApiWorkbenchRow) {
+  return row.source_kind === "no_oa_bank_batch_summary";
+}
+
+function hasNoOaSourceBatchId(row: ApiWorkbenchRow) {
+  const sourceBatchId = row.special_metadata?.source_batch_id;
+  return typeof sourceBatchId === "string" && sourceBatchId.trim().length > 0;
+}
+
+function normalizeRowAvailableActions(row: ApiWorkbenchRow) {
+  const actions = row.available_actions ?? [];
+  if (!isNoOaSummaryRow(row)) {
+    return actions;
+  }
+  if (!hasNoOaSourceBatchId(row)) {
+    return actions.filter((action) => action === "detail");
+  }
+  return actions.includes("withdraw_no_oa_batch")
+    ? actions
+    : [...actions, "withdraw_no_oa_batch"];
+}
+
+function rowActionVariant(row: ApiWorkbenchRow, availableActions: string[]): WorkbenchActionVariant {
   if (row.type === "bank") {
-    if (!row.available_actions || row.available_actions.length === 0 || row.available_actions.every((action) => action === "detail")) {
+    if (availableActions.length === 0 || availableActions.every((action) => action === "detail")) {
       return "detail-only";
     }
     return "bank-review";
@@ -590,6 +623,9 @@ function rowActionVariant(row: ApiWorkbenchRow): WorkbenchActionVariant {
 function rowLabel(row: ApiWorkbenchRow) {
   if (row.type === "oa") {
     return toDisplayValue(row.apply_type, "OA");
+  }
+  if (row.source_kind === "no_oa_bank_batch_summary") {
+    return "免OA批次";
   }
   if (row.type === "bank") {
     return row.debit_amount ? "支取" : "收入";
@@ -782,6 +818,7 @@ function resolveBankAmount(row: ApiWorkbenchRow) {
 }
 
 function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
+  const availableActions = normalizeRowAvailableActions(row);
   return {
     id: row.id,
     caseId: row.case_id ?? undefined,
@@ -797,8 +834,8 @@ function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
     counterparty: rowCounterparty(row),
     tableValues: mapTableValues(row),
     detailFields: mapDetailFields(row.detail_fields),
-    actionVariant: rowActionVariant(row),
-    availableActions: row.available_actions ?? [],
+    actionVariant: rowActionVariant(row, availableActions),
+    availableActions,
     tags: Array.isArray(row.tags) ? row.tags.map((tag) => String(tag).trim()).filter(Boolean) : [],
     categoryCode: toDisplayValue(row.category_code, "") || undefined,
     categoryLabel: toDisplayValue(row.category_label, "") || undefined,
@@ -818,21 +855,40 @@ function mapPaneRows(panes: Record<WorkbenchRecordType, ApiWorkbenchRow[]>): Wor
 }
 
 function mapGroup(group: ApiWorkbenchGroup): WorkbenchCandidateGroup {
+  const summaryRow = group.summary_row ? mapRow(group.summary_row) : undefined;
+  const collapsedRows = group.collapsed_rows && typeof group.collapsed_rows === "object"
+    ? {
+      oa: (group.collapsed_rows.oa ?? []).map(mapRow),
+      bank: (group.collapsed_rows.bank ?? []).map(mapRow),
+      invoice: (group.collapsed_rows.invoice ?? []).map(mapRow),
+    }
+    : undefined;
   return {
     id: group.group_id,
     groupType: group.group_type === "source_linked" ? "candidate" : group.group_type,
     matchConfidence: group.match_confidence,
     reason: group.reason,
+    relationMode: typeof group.relation_mode === "string" && group.relation_mode.trim()
+      ? group.relation_mode.trim() as WorkbenchRelationMode
+      : undefined,
+    displayMode: typeof group.display_mode === "string" && group.display_mode.trim()
+      ? group.display_mode.trim()
+      : undefined,
+    defaultCollapsed: group.default_collapsed === true ? true : undefined,
+    summaryRow,
     rows: {
       oa: group.oa_rows.map(mapRow),
       bank: group.bank_rows.map(mapRow),
       invoice: group.invoice_rows.map(mapRow),
     },
+    collapsedRows,
     specialMetadata: group.special_metadata && typeof group.special_metadata === "object" ? group.special_metadata : undefined,
     canWithdraw: Boolean(
       group.can_withdraw
-      || [...group.oa_rows, ...group.bank_rows, ...group.invoice_rows].some((row) =>
-        row.available_actions?.includes("withdraw_link") || row.available_actions?.includes("cancel_link")),
+      || [...group.oa_rows, ...group.bank_rows, ...group.invoice_rows].some((row) => {
+        const actions = normalizeRowAvailableActions(row);
+        return actions.includes("withdraw_link") || actions.includes("cancel_link") || actions.includes("withdraw_no_oa_batch");
+      }),
     ),
   };
 }
@@ -993,12 +1049,15 @@ function mapWorkbenchExceptionApplyResult(
   };
 }
 
-function mapSummary(summary: ApiWorkbenchPayload["summary"]): WorkbenchSummary {
+function mapSummary(
+  summary: ApiWorkbenchPayload["summary"],
+  pairedGroups: WorkbenchCandidateGroup[],
+): WorkbenchSummary {
   return {
     oaCount: summary.oa_count,
     bankCount: summary.bank_count,
     invoiceCount: summary.invoice_count,
-    pairedCount: summary.paired_count,
+    pairedCount: countWorkbenchGroupsRows(pairedGroups),
     openCount: summary.open_count,
     exceptionCount: summary.exception_count,
     totalCount: summary.oa_count + summary.bank_count + summary.invoice_count,
@@ -1334,16 +1393,19 @@ export async function fetchWorkbenchWithProgress(
     });
   }
 
+  const pairedGroups = payload.paired.groups.map(mapGroup);
+  const openGroups = payload.open.groups.map(mapGroup);
+
   return {
     month: payload.month,
     oaStatus: mapOaStatus(payload.oa_status),
-    summary: mapSummary(payload.summary),
+    summary: mapSummary(payload.summary, pairedGroups),
     invoiceInventory: mapInvoiceInventory(payload.invoice_inventory),
     paired: {
-      groups: payload.paired.groups.map(mapGroup),
+      groups: pairedGroups,
     },
     open: {
-      groups: payload.open.groups.map(mapGroup),
+      groups: openGroups,
     },
   };
 }

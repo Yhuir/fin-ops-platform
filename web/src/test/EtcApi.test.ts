@@ -8,6 +8,8 @@ import {
   createEtcOaDraft,
   deleteEtcBatch,
   deleteEtcReconciliationTask,
+  deleteEtcReconciliationTaskImportedInvoices,
+  fetchEtcBatchDetail,
   fetchEtcReconciliationTask,
   fetchEtcReconciliationTasks,
   fetchReadyEtcReconciliationTasks,
@@ -15,6 +17,7 @@ import {
   markEtcBatchNotSubmitted,
   patchEtcReconciliationItem,
   previewEtcZipFiles,
+  refreshEtcReconciliationMatches,
   reopenEtcReconciliationTask,
   revokeEtcSubmittedInvoices,
   uploadEtcCreditCardStatement,
@@ -119,6 +122,7 @@ describe("etc api", () => {
     await revokeEtcSubmittedInvoices(["etc-inv-002"]);
     await deleteEtcBatch("etc_batch_001");
     await deleteEtcReconciliationTask("etc-recon-task-001", 3);
+    await deleteEtcReconciliationTaskImportedInvoices("etc-recon-task-001", 4);
 
     expect(draftResult.oaDraftUrl).toBe("https://oa.example.test/draft/001");
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -161,6 +165,15 @@ describe("etc api", () => {
         method: "DELETE",
         credentials: "include",
         body: JSON.stringify({ expectedVersion: 3 }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      7,
+      "/api/etc/reconciliation-tasks/etc-recon-task-001/imported-invoices",
+      expect.objectContaining({
+        method: "DELETE",
+        credentials: "include",
+        body: JSON.stringify({ expectedVersion: 4 }),
       }),
     );
     fetchMock.mock.calls.forEach(([, init]) => {
@@ -473,6 +486,25 @@ describe("etc api", () => {
       if (url === "/api/etc/reconciliation-tasks/etc-recon-task-001/source-files/file-ticket-bad") {
         return new Response(JSON.stringify({ ...taskPayload, version: 4, sourceFiles: [taskPayload.sourceFiles[0]], parseIssues: [] }), { status: 200 });
       }
+      if (url === "/api/etc/reconciliation-tasks/etc-recon-task-001/imported-invoices") {
+        return new Response(JSON.stringify({ ...taskPayload, version: 4, status: "ready_for_import", etcBatchId: "", importBatchId: "" }), { status: 200 });
+      }
+      if (url === "/api/etc/reconciliation-tasks/etc-recon-task-001/refresh-matches") {
+        return new Response(
+          JSON.stringify({
+            ...taskPayload,
+            version: 4,
+            ticketRootItems: [
+              {
+                ...taskPayload.ticketRootItems[0],
+                linked_credit_card_item_ids: ["card-item-001"],
+                recommendation_status: "suggested_match",
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
       if (
         url === "/api/etc/reconciliation-tasks/etc-recon-task-001/credit-card-statement"
         || url === "/api/etc/reconciliation-tasks/etc-recon-task-001/ticket-root-files"
@@ -515,6 +547,11 @@ describe("etc api", () => {
     });
     expect((await createEtcReconciliationTask({ title: "2026-02 ETC" })).taskId).toBe("etc-recon-task-002");
     expect((await fetchEtcReconciliationTask("etc-recon-task-001")).taskId).toBe("etc-recon-task-001");
+    expect(await refreshEtcReconciliationMatches("etc-recon-task-001")).toMatchObject({
+      taskId: "etc-recon-task-001",
+      version: 4,
+      ticketRootItems: [{ itemId: "ticket-item-001", linkedCreditCardItemIds: ["card-item-001"] }],
+    });
 
     const deletedFileTask = await (etcApi as Record<string, (...args: unknown[]) => Promise<unknown>>).deleteEtcReconciliationSourceFile(
       "etc-recon-task-001",
@@ -527,12 +564,21 @@ describe("etc api", () => {
       sourceFiles: [{ fileId: "file-ticket-ok" }],
       parseIssues: [],
     });
+    await expect(deleteEtcReconciliationTaskImportedInvoices("etc-recon-task-001", 3)).resolves.toMatchObject({
+      taskId: "etc-recon-task-001",
+      version: 4,
+      status: "ready_for_import",
+      etcBatchId: "",
+      importBatchId: "",
+    });
     await uploadEtcCreditCardStatement("etc-recon-task-001", new File(["statement"], "statement.pdf"), 3);
     await uploadEtcTicketRootFiles("etc-recon-task-001", [new File(["ticket"], "ticket.jpg")], 3);
     await uploadEtcTicketRootTexts("etc-recon-task-001", [{ clientId: "paste-1", text: "车牌号：云ADA0381" }], 3);
     await uploadEtcSupplementEvidences("etc-recon-task-001", [new File(["supplement"], "parking.pdf")], 3, { evidenceKind: "non_etc_invoice" });
     await patchEtcReconciliationItem("etc-recon-task-001", "card-item-001", 3, { action: "set_manual_resolution", manualResolution: "included_etc" });
-    await confirmEtcReconciliationTask("etc-recon-task-001", 3);
+    await confirmEtcReconciliationTask("etc-recon-task-001", 3, {
+      confirmedCreditCardItemIds: ["card-item-001", "card-item-002"],
+    });
     await reopenEtcReconciliationTask("etc-recon-task-001", 3);
 
     const creditUpload = fetchMock.mock.calls.find(([url]) => url === "/api/etc/reconciliation-tasks/etc-recon-task-001/credit-card-statement")?.[1] as RequestInit;
@@ -548,12 +594,37 @@ describe("etc api", () => {
     expect((supplementUpload.body as FormData).get("evidenceKind")).toBe("non_etc_invoice");
 
     expect(fetchMock).toHaveBeenCalledWith(
+      "/api/etc/reconciliation-tasks/etc-recon-task-001/confirm",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          expectedVersion: 3,
+          confirmedCreditCardItemIds: ["card-item-001", "card-item-002"],
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
       "/api/etc/reconciliation-tasks/etc-recon-task-001/source-files/file-ticket-bad",
       expect.objectContaining({
         method: "DELETE",
         body: JSON.stringify({ expectedVersion: 3 }),
       }),
     );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/etc/reconciliation-tasks/etc-recon-task-001/imported-invoices",
+      expect.objectContaining({
+        method: "DELETE",
+        body: JSON.stringify({ expectedVersion: 3 }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/etc/reconciliation-tasks/etc-recon-task-001/refresh-matches",
+      expect.objectContaining({
+        method: "POST",
+      }),
+    );
+    const refreshRequest = fetchMock.mock.calls.find(([url]) => url === "/api/etc/reconciliation-tasks/etc-recon-task-001/refresh-matches")?.[1] as RequestInit;
+    expect(refreshRequest.body).toBeUndefined();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/etc/reconciliation-tasks/etc-recon-task-001/items/card-item-001",
       expect.objectContaining({
@@ -563,7 +634,13 @@ describe("etc api", () => {
     );
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/etc/reconciliation-tasks/etc-recon-task-001/confirm",
-      expect.objectContaining({ method: "POST", body: JSON.stringify({ expectedVersion: 3 }) }),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          expectedVersion: 3,
+          confirmedCreditCardItemIds: ["card-item-001", "card-item-002"],
+        }),
+      }),
     );
   });
 
@@ -585,6 +662,21 @@ describe("etc api", () => {
               vehiclePlates: ["云ADA0381"],
             },
           ],
+          unavailableTasks: [
+            {
+              taskId: "etc_task_reviewing_001",
+              status: "reviewing",
+              version: 3,
+              title: "2026-04 ETC 对账",
+              periodStart: "2026-04-01",
+              periodEnd: "2026-04-30",
+              oaTotalAmount: "90.00",
+              etcInvoiceCount: 0,
+              supplementCount: 0,
+              vehiclePlates: ["云A516HJ"],
+              importBlockers: [{ code: "not_confirmed", message: "请先在 ETC 对账页确认对账。" }],
+            },
+          ],
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
@@ -597,20 +689,99 @@ describe("etc api", () => {
       "/api/etc/reconciliation-tasks/ready-for-import",
       expect.objectContaining({ method: "GET", credentials: "include" }),
     );
-    expect(result).toEqual([
-      {
-        taskId: "etc_task_ready_001",
-        status: "ready_for_import",
-        version: 7,
-        title: "2026-03 ETC 对账",
-        periodStart: "2026-03-01",
-        periodEnd: "2026-03-31",
-        oaTotalAmount: "108.40",
-        etcInvoiceCount: 8,
-        supplementCount: 1,
-        vehiclePlates: ["云ADA0381"],
-      },
+    expect(result).toEqual({
+      items: [
+        {
+          taskId: "etc_task_ready_001",
+          status: "ready_for_import",
+          version: 7,
+          title: "2026-03 ETC 对账",
+          periodStart: "2026-03-01",
+          periodEnd: "2026-03-31",
+          oaTotalAmount: "108.40",
+          etcInvoiceCount: 8,
+          supplementCount: 1,
+          vehiclePlates: ["云ADA0381"],
+        },
+      ],
+      unavailableItems: [
+        {
+          taskId: "etc_task_reviewing_001",
+          status: "reviewing",
+          version: 3,
+          title: "2026-04 ETC 对账",
+          periodStart: "2026-04-01",
+          periodEnd: "2026-04-30",
+          oaTotalAmount: "90.00",
+          etcInvoiceCount: 0,
+          supplementCount: 0,
+          vehiclePlates: ["云A516HJ"],
+          importBlockers: [{ code: "not_confirmed", message: "请先在 ETC 对账页确认对账。" }],
+        },
+      ],
+    });
+  });
+
+  test("maps ETC batch detail summary fields from nested backend payload", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          batch: {
+            id: "etc_import_batch_0004",
+          },
+          summary: {
+            id: "etc_import_batch_0004",
+            batch_id: "etc_import_batch_0004",
+            etc_batch_id: "etc_import_batch_0004",
+            external_batch_id: "etc_import_batch_0004",
+            status: "unsubmitted",
+            source_type: "etc_import",
+            invoice_count: 36,
+            total_amount: "1673.30",
+            tax_amount: "48.74",
+            passage_start_date: "2026-03-27",
+            passage_end_date: "2026-04-27",
+            plate_count: 3,
+            plate_summary: [
+              { plate_number: "云ADA0381", invoice_count: 30, total_amount: "1334.49" },
+            ],
+          },
+          invoiceItems: [
+            {
+              id: "etc_invoice_0001",
+              invoice_number: "26537911970300092160",
+              issue_date: "2026-03-27",
+              passage_start_date: "2026-03-27",
+              passage_end_date: "2026-03-27",
+              plate_number: "云A361HX",
+              seller_name: "云南昆玉高速公路开发有限公司",
+              buyer_name: "云南溯源科技有限公司",
+              amount_without_tax: "22.82",
+              tax_amount: "0.68",
+              total_amount: "23.50",
+              status: "unsubmitted",
+              has_pdf: true,
+              has_xml: true,
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    global.fetch = fetchMock as typeof fetch;
+
+    const detail = await fetchEtcBatchDetail("etc_import_batch_0004");
+
+    expect(detail.id).toBe("etc_import_batch_0004");
+    expect(detail.invoiceCount).toBe(36);
+    expect(detail.totalAmount).toBe("1673.30");
+    expect(detail.taxAmount).toBe("48.74");
+    expect(detail.passageStartDate).toBe("2026-03-27");
+    expect(detail.passageEndDate).toBe("2026-04-27");
+    expect(detail.plateSummary).toEqual([
+      { plateNumber: "云ADA0381", invoiceCount: 30, totalAmount: "1334.49" },
     ]);
+    expect(detail.invoiceItems).toHaveLength(1);
   });
 
   test("maps stale reconciliation task preview errors to a re-preview message", async () => {

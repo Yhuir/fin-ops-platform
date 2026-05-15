@@ -903,7 +903,180 @@ class WorkbenchCandidateGroupingService:
         processed_summary = self._group_processed_exception_summary(group)
         if processed_summary:
             payload["processed_exception_summary"] = processed_summary
+        if section == "paired" and self._should_collapse_no_oa_bank_batch_group(group):
+            self._apply_no_oa_bank_batch_collapsed_summary(payload)
         return payload
+
+    def _should_collapse_no_oa_bank_batch_group(self, group: CandidateGroup) -> bool:
+        if group.oa_rows or group.invoice_rows or not group.bank_rows:
+            return False
+        if any(self._relation_code(row) != NO_OA_BANK_BATCH_RELATION_MODE for row in group.bank_rows):
+            return False
+        source_batch_ids = {
+            source_batch_id
+            for row in group.bank_rows
+            if (source_batch_id := self._no_oa_source_batch_id(row))
+        }
+        return len(source_batch_ids) == 1 and len(source_batch_ids) == len(
+            {self._no_oa_source_batch_id(row) for row in group.bank_rows}
+        )
+
+    def _apply_no_oa_bank_batch_collapsed_summary(self, payload: dict[str, Any]) -> None:
+        bank_rows = [row for row in list(payload.get("bank_rows") or []) if isinstance(row, dict)]
+        summary_row = self._no_oa_bank_batch_summary_row(bank_rows)
+        payload["relation_mode"] = NO_OA_BANK_BATCH_RELATION_MODE
+        payload["display_mode"] = "collapsed_summary"
+        payload["default_collapsed"] = True
+        payload["summary_row"] = summary_row
+        payload["collapsed_rows"] = {"bank": bank_rows}
+        payload["bank_rows"] = [deepcopy(summary_row)]
+
+    def _no_oa_bank_batch_summary_row(self, bank_rows: list[dict[str, Any]]) -> dict[str, Any]:
+        first_row = bank_rows[0]
+        metadata = self._no_oa_summary_metadata(bank_rows)
+        source_batch_id = str(metadata.get("source_batch_id") or "")
+        batch_label = str(metadata.get("batch_label") or "免OA流水")
+        total_amount = str(metadata.get("total_amount") or "0.00")
+        account_label = self._first_non_empty(
+            first_row.get("payment_account_label"),
+            first_row.get("counterparty_name"),
+            self._summary_field_value(first_row, "支付账户"),
+            self._summary_field_value(first_row, "收款账户"),
+        )
+        trade_month = self._first_non_empty(
+            self._month(first_row),
+            self._month_from_value(first_row.get("trade_time")),
+            self._month_from_value(first_row.get("pay_receive_time")),
+        )
+        display_tags = self._no_oa_display_tags(bank_rows, batch_label)
+        relation_payload = {
+            "code": NO_OA_BANK_BATCH_RELATION_MODE,
+            "label": f"已匹配：{batch_label}" if batch_label else "已匹配：免OA流水",
+            "tone": "success",
+        }
+        actions = ["detail"]
+        if source_batch_id and bool(metadata.get("withdrawable")):
+            actions.append("withdraw_no_oa_batch")
+        return {
+            "id": f"no_oa_summary:{source_batch_id or self._string_value(first_row.get('case_id')) or 'unknown'}",
+            "type": "bank",
+            "source_kind": "no_oa_bank_batch_summary",
+            "label": f"免OA · {batch_label}" if batch_label else "免OA流水",
+            "amount": total_amount,
+            "debit_amount": total_amount,
+            "credit_amount": "",
+            "counterparty_name": account_label or "免OA流水",
+            "trade_time": trade_month or "",
+            "tags": display_tags,
+            "display_tags": display_tags,
+            "invoice_relation": relation_payload,
+            "special_metadata": metadata,
+            "available_actions": actions,
+        }
+
+    def _no_oa_summary_metadata(self, bank_rows: list[dict[str, Any]]) -> dict[str, Any]:
+        metadata_by_key: dict[str, Any] = {}
+        for row in bank_rows:
+            row_metadata = row.get("special_metadata")
+            if not isinstance(row_metadata, dict):
+                continue
+            for key in (
+                "source_batch_id",
+                "batch_version",
+                "batch_type",
+                "batch_label",
+                "withdrawable",
+                "cost_policy",
+                "relation_mode",
+                "display_tags",
+                "total_amount",
+            ):
+                if key in metadata_by_key or key not in row_metadata:
+                    continue
+                metadata_by_key[key] = deepcopy(row_metadata[key])
+
+        metadata_by_key["source_batch_id"] = str(metadata_by_key.get("source_batch_id") or "")
+        metadata_by_key["batch_type"] = str(metadata_by_key.get("batch_type") or "")
+        metadata_by_key["batch_label"] = str(metadata_by_key.get("batch_label") or "")
+        metadata_by_key["row_count"] = len(bank_rows)
+        metadata_by_key["total_amount"] = self._format_decimal_amount(
+            self._no_oa_summary_total_amount(bank_rows, metadata_by_key)
+        )
+        if "withdrawable" in metadata_by_key:
+            metadata_by_key["withdrawable"] = bool(metadata_by_key["withdrawable"])
+        else:
+            metadata_by_key["withdrawable"] = bool(metadata_by_key["source_batch_id"])
+        return metadata_by_key
+
+    def _no_oa_summary_total_amount(self, bank_rows: list[dict[str, Any]], metadata: dict[str, Any]) -> Decimal:
+        metadata_total = self._amount_from_value(metadata.get("total_amount"))
+        if metadata_total is not None:
+            return metadata_total
+        if str(metadata.get("batch_type") or "") == "internal_transfer":
+            income_total = sum(
+                (
+                    amount
+                    for row in bank_rows
+                    if self._direction(row) == "inflow" and (amount := self._amount(row)) is not None
+                ),
+                ZERO,
+            )
+            expense_total = sum(
+                (
+                    amount
+                    for row in bank_rows
+                    if self._direction(row) == "outflow" and (amount := self._amount(row)) is not None
+                ),
+                ZERO,
+            )
+            return max(income_total, expense_total)
+        return self._bank_rows_total_amount(bank_rows)
+
+    def _bank_rows_total_amount(self, bank_rows: list[dict[str, Any]]) -> Decimal:
+        amounts = [amount for row in bank_rows if (amount := self._amount(row)) is not None]
+        return sum(amounts, ZERO) if amounts else ZERO
+
+    def _no_oa_display_tags(self, bank_rows: list[dict[str, Any]], batch_label: str) -> list[str]:
+        tags: list[str] = []
+        seen: set[str] = set()
+
+        def add(value: Any) -> None:
+            text = str(value or "").strip()
+            if text and text not in seen:
+                seen.add(text)
+                tags.append(text)
+
+        for row in bank_rows:
+            for tag in list(row.get("display_tags") or row.get("tags") or []):
+                add(tag)
+        add("免OA")
+        add(batch_label)
+        return tags
+
+    def _no_oa_source_batch_id(self, row: dict[str, Any]) -> str:
+        metadata = row.get("special_metadata")
+        if not isinstance(metadata, dict):
+            return ""
+        return str(metadata.get("source_batch_id") or "").strip()
+
+    @staticmethod
+    def _summary_field_value(row: dict[str, Any], field_name: str) -> str:
+        summary_fields = row.get("summary_fields")
+        if not isinstance(summary_fields, dict):
+            return ""
+        return str(summary_fields.get(field_name) or "").strip()
+
+    @staticmethod
+    def _first_non_empty(*values: Any) -> str:
+        for value in values:
+            text = str(value or "").strip()
+            if text:
+                return text
+        return ""
+
+    @staticmethod
+    def _format_decimal_amount(amount: Decimal) -> str:
+        return str(amount.quantize(CENT))
 
     def _serialize_row_for_group(self, row: dict[str, Any], group: CandidateGroup, *, section: str) -> dict[str, Any]:
         payload = deepcopy(row)

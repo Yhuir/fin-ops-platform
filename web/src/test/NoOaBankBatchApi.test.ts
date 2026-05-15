@@ -22,7 +22,12 @@ describe("no OA bank batch API", () => {
           submittedCount: 2,
           withdrawn_count: 3,
           conflictCount: 4,
+          stale_count: 5,
           total_amount: "12345.67",
+          categories: [
+            { code: "fee", label: "手续费", total: 1, draft: 1, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, total_amount: "88.00" },
+            { code: "bonus", label: "奖金", total: 0, draft: 0, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, total_amount: "0.00" },
+          ],
         },
         batches: [
           {
@@ -34,6 +39,7 @@ describe("no OA bank batch API", () => {
             bank_name: "建设银行",
             account_last4: "8106",
             status: "draft",
+            status_bucket: "unsubmitted",
             row_count: 12,
             total_amount: "88.00",
             submitted_by: "",
@@ -41,6 +47,11 @@ describe("no OA bank batch API", () => {
             withdrawn_by: "",
             withdrawn_at: null,
             conflict_reason: "",
+            blocked_reason: "",
+            tag_counts: { fee: 12 },
+            direction_counts: { expense: 12 },
+            can_submit: true,
+            can_withdraw: false,
             version: 7,
           },
           {
@@ -58,6 +69,11 @@ describe("no OA bank batch API", () => {
             submittedAt: "2026-05-10T09:30:00",
             withdrawnBy: "",
             withdrawnAt: null,
+            blockedReason: "已提交批次不可重复提交",
+            tagCounts: { salary: 4 },
+            directionCounts: { expense: 4 },
+            canSubmit: false,
+            canWithdraw: true,
             version: 2,
           },
         ],
@@ -67,12 +83,12 @@ describe("no OA bank batch API", () => {
     const payload = await fetchNoOaBankBatches({
       month: "2026-05",
       type: "all",
-      status: "all",
+      bucket: "unsubmitted",
       accountKey: "ccb:8106",
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/no-oa-bank-batches?month=2026-05&account_key=ccb%3A8106",
+      "/api/no-oa-bank-batches?month=2026-05&bucket=unsubmitted&account_key=ccb%3A8106",
       expect.objectContaining({ method: "GET" }),
     );
     expect(payload.summary).toEqual({
@@ -80,7 +96,12 @@ describe("no OA bank batch API", () => {
       submittedCount: 2,
       withdrawnCount: 3,
       conflictCount: 4,
+      staleCount: 5,
       totalAmount: "12345.67",
+      categories: [
+        { code: "fee", label: "手续费", total: 1, draft: 1, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, totalAmount: "88.00" },
+        { code: "bonus", label: "奖金", total: 0, draft: 0, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, totalAmount: "0.00" },
+      ],
     });
     expect(payload.batches).toEqual([
       expect.objectContaining({
@@ -92,8 +113,14 @@ describe("no OA bank batch API", () => {
         bankName: "建设银行",
         accountLast4: "8106",
         status: "draft",
+        statusBucket: "unsubmitted",
         rowCount: 12,
         totalAmount: "88.00",
+        tagCounts: { fee: 12 },
+        directionCounts: { expense: 12 },
+        canSubmit: true,
+        canWithdraw: false,
+        blockedReason: "",
         version: 7,
       }),
       expect.objectContaining({
@@ -102,6 +129,8 @@ describe("no OA bank batch API", () => {
         batchLabel: "工资",
         submittedBy: "finance-user",
         submittedAt: "2026-05-10T09:30:00",
+        canSubmit: false,
+        canWithdraw: true,
       }),
     ]);
   });
@@ -121,8 +150,14 @@ describe("no OA bank batch API", () => {
           status: "draft",
           row_count: 1,
           total_amount: "8.80",
+          tag_counts: { fee: 1 },
+          direction_counts: { expense: 1 },
+          can_submit: true,
+          can_withdraw: false,
           version: 1,
         },
+        tag_counts: { fee: 1 },
+        direction_counts: { expense: 1 },
         rows: [
           {
             transaction_id: "bank-row-001",
@@ -134,6 +169,8 @@ describe("no OA bank batch API", () => {
             summary: "网银手续费",
             purpose: "结算",
             remark: "月结",
+            category_code: "fee",
+            category_label: "手续费",
             category_source: "auto",
           },
         ],
@@ -156,7 +193,11 @@ describe("no OA bank batch API", () => {
       purpose: "结算",
       remark: "月结",
       categorySource: "auto",
+      categoryCode: "fee",
+      categoryLabel: "手续费",
     });
+    expect(detail.tagCounts).toEqual({ fee: 1 });
+    expect(detail.directionCounts).toEqual({ expense: 1 });
   });
 
   test("submits, withdraws, and bulk submits with expected version payloads", async () => {

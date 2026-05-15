@@ -1,8 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import KeyboardArrowDownOutlinedIcon from "@mui/icons-material/KeyboardArrowDownOutlined";
-import KeyboardArrowRightOutlinedIcon from "@mui/icons-material/KeyboardArrowRightOutlined";
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
 import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined";
-import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -12,12 +9,8 @@ import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
-import FormControl from "@mui/material/FormControl";
-import IconButton from "@mui/material/IconButton";
-import InputLabel from "@mui/material/InputLabel";
-import MenuItem from "@mui/material/MenuItem";
+import Divider from "@mui/material/Divider";
 import Paper from "@mui/material/Paper";
-import Select, { type SelectChangeEvent } from "@mui/material/Select";
 import Snackbar from "@mui/material/Snackbar";
 import Stack from "@mui/material/Stack";
 import Table from "@mui/material/Table";
@@ -27,6 +20,8 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
+import ToggleButton from "@mui/material/ToggleButton";
+import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Typography from "@mui/material/Typography";
 
 import PageScaffold from "../components/common/PageScaffold";
@@ -40,29 +35,20 @@ import {
 } from "../features/noOaBankBatches/api";
 import type {
   NoOaBankBatch,
+  NoOaBankBatchCountMap,
   NoOaBankBatchDetail,
   NoOaBankBatchesResponse,
+  NoOaBankBatchType,
   NoOaBankBatchStatus,
-  NoOaBankBatchStatusFilter,
-  NoOaBankBatchTypeFilter,
+  NoOaBankBatchStatusBucket,
 } from "../features/noOaBankBatches/types";
 
-const BATCH_TYPES: Array<{ value: NoOaBankBatchTypeFilter; label: string }> = [
-  { value: "all", label: "全部" },
+const NO_OA_CATEGORIES: Array<{ value: NoOaBankBatchType; label: string }> = [
   { value: "fee", label: "手续费" },
   { value: "salary", label: "工资" },
   { value: "holiday_bonus", label: "过节费" },
   { value: "bonus", label: "奖金" },
   { value: "internal_transfer", label: "内部往来款" },
-];
-
-const BATCH_STATUSES: Array<{ value: NoOaBankBatchStatusFilter; label: string }> = [
-  { value: "all", label: "全部" },
-  { value: "draft", label: "待提交" },
-  { value: "submitted", label: "已提交" },
-  { value: "withdrawn", label: "已撤回" },
-  { value: "conflict", label: "冲突" },
-  { value: "stale", label: "需刷新确认" },
 ];
 
 const EMPTY_BATCHES: NoOaBankBatchesResponse = {
@@ -71,7 +57,9 @@ const EMPTY_BATCHES: NoOaBankBatchesResponse = {
     submittedCount: 0,
     withdrawnCount: 0,
     conflictCount: 0,
+    staleCount: 0,
     totalAmount: "0.00",
+    categories: [],
   },
   batches: [],
 };
@@ -81,7 +69,15 @@ const STATUS_META: Record<NoOaBankBatchStatus, { label: string; color: "default"
   submitted: { label: "已提交", color: "success" },
   withdrawn: { label: "已撤回", color: "default" },
   conflict: { label: "冲突", color: "error" },
-  stale: { label: "需刷新确认", color: "primary" },
+  stale: { label: "需复核", color: "primary" },
+};
+
+const TAG_LABELS: Record<string, string> = {
+  fee: "手续费",
+  salary: "工资",
+  holiday_bonus: "过节费",
+  bonus: "奖金",
+  internal_transfer: "内部往来款",
 };
 
 function currentMonth() {
@@ -109,16 +105,8 @@ function formatMoney(value: string | number | null | undefined) {
 }
 
 function accountLabel(batch: NoOaBankBatch) {
-  const suffix = batch.accountLast4 ? batch.accountLast4 : "";
-  return `${batch.bankName || "多账户"}${suffix}`;
-}
-
-function groupKey(batch: NoOaBankBatch) {
-  return `${batch.bankName || "多账户"} / ${batch.scopeMonth || "-"}`;
-}
-
-function statusLabel(status: string) {
-  return STATUS_META[status as NoOaBankBatchStatus]?.label ?? status;
+  const account = batch.accountLast4 ? `${batch.bankName || "多账户"}${batch.accountLast4}` : batch.bankName || "多账户";
+  return account || "多账户";
 }
 
 function sourceLabel(source: string) {
@@ -139,25 +127,25 @@ function formatDateTime(value: string | null) {
 }
 
 function canSubmit(batch: NoOaBankBatch) {
-  return batch.status === "draft";
+  return batch.canSubmit || batch.status === "draft";
 }
 
-function SummaryCard({ label, value, helper }: { label: string; value: string | number; helper?: string }) {
-  return (
-    <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 1, minHeight: 88 }}>
-      <Typography color="text.secondary" fontWeight={800} variant="body2">
-        {label}
-      </Typography>
-      <Typography fontWeight={900} sx={{ mt: 0.75 }} variant="h6">
-        {value}
-      </Typography>
-      {helper ? (
-        <Typography color="text.secondary" variant="caption">
-          {helper}
-        </Typography>
-      ) : null}
-    </Paper>
-  );
+function canWithdraw(batch: NoOaBankBatch) {
+  return batch.canWithdraw || batch.status === "submitted";
+}
+
+function statusBucketFor(batch: NoOaBankBatch): NoOaBankBatchStatusBucket {
+  if (batch.statusBucket === "submitted" || batch.status === "submitted") {
+    return "submitted";
+  }
+  if (batch.statusBucket === "withdrawn" || batch.status === "withdrawn") {
+    return "withdrawn";
+  }
+  return "unsubmitted";
+}
+
+function blockedReason(batch: NoOaBankBatch) {
+  return batch.blockedReason || batch.conflictReason || (batch.status === "stale" ? "源流水或分类已变化，需要复核后处理" : "");
 }
 
 function BatchStatusChip({ status }: { status: string }) {
@@ -165,82 +153,36 @@ function BatchStatusChip({ status }: { status: string }) {
   return <Chip color={meta.color} label={meta.label} size="small" />;
 }
 
-function DetailRows({ detail, loading, error }: { detail: NoOaBankBatchDetail | null; loading: boolean; error: string | null }) {
-  if (loading) {
-    return (
-      <TableRow>
-        <TableCell colSpan={9}>
-          <StatePanel compact tone="loading" title="明细加载中" />
-        </TableCell>
-      </TableRow>
-    );
+function formatCounts(counts: NoOaBankBatchCountMap, fallbackType: string, fallbackCount: number) {
+  const entries = Object.entries(counts);
+  if (entries.length === 0 && fallbackType) {
+    return `${TAG_LABELS[fallbackType] ?? fallbackType} ${fallbackCount}`;
   }
-  if (error) {
-    return (
-      <TableRow>
-        <TableCell colSpan={9}>
-          <StatePanel compact tone="error" title={error} />
-        </TableCell>
-      </TableRow>
-    );
+  return entries.map(([code, count]) => `${TAG_LABELS[code] ?? code} ${count}`).join(" · ");
+}
+
+function formatDirectionCounts(counts: NoOaBankBatchCountMap) {
+  const income = counts.income ?? 0;
+  const expense = counts.expense ?? 0;
+  if (!income && !expense) {
+    return "";
   }
-  if (!detail || detail.rows.length === 0) {
-    return (
-      <TableRow>
-        <TableCell colSpan={9}>
-          <StatePanel compact tone="empty" title="暂无批次明细" />
-        </TableCell>
-      </TableRow>
-    );
-  }
-  return (
-    <TableRow>
-      <TableCell colSpan={9} sx={{ bgcolor: "action.hover", p: 1.5 }}>
-        <Table size="small" aria-label="批次明细">
-          <TableHead>
-            <TableRow>
-              <TableCell>交易时间</TableCell>
-              <TableCell>对方户名</TableCell>
-              <TableCell>收/支</TableCell>
-              <TableCell align="right">金额</TableCell>
-              <TableCell>摘要/用途/备注</TableCell>
-              <TableCell>分类来源</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {detail.rows.map((row) => (
-              <TableRow key={row.transactionId || `${row.tradeTime}-${row.amount}`}>
-                <TableCell>{row.tradeTime || "-"}</TableCell>
-                <TableCell>{row.counterpartyName || "-"}</TableCell>
-                <TableCell>{row.directionLabel || (row.direction === "income" ? "收" : row.direction === "expense" ? "支" : "-")}</TableCell>
-                <TableCell align="right">{formatMoney(row.amount)}</TableCell>
-                <TableCell>
-                  <Stack spacing={0.25}>
-                    <Typography variant="body2">{row.summary || "-"}</Typography>
-                    <Typography color="text.secondary" variant="caption">
-                      {[row.purpose, row.remark].filter(Boolean).join(" / ") || "-"}
-                    </Typography>
-                  </Stack>
-                </TableCell>
-                <TableCell>{sourceLabel(row.categorySource)}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableCell>
-    </TableRow>
-  );
+  return `收入 ${income} / 支出 ${expense}`;
+}
+
+function mutationEventDetail(result: { affectedMonths?: string[] }) {
+  return { affectedMonths: result.affectedMonths ?? [] };
 }
 
 export default function NoOaBankBatchPage() {
   const [month, setMonth] = useState(currentMonth);
-  const [type, setType] = useState<NoOaBankBatchTypeFilter>("all");
-  const [status, setStatus] = useState<NoOaBankBatchStatusFilter>("all");
+  const [selectedCategory, setSelectedCategory] = useState<NoOaBankBatchType>("fee");
+  const [bucket, setBucket] = useState<NoOaBankBatchStatusBucket>("unsubmitted");
   const [accountKey, setAccountKey] = useState("");
   const [payload, setPayload] = useState<NoOaBankBatchesResponse>(EMPTY_BATCHES);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [expandedBatchId, setExpandedBatchId] = useState<string | null>(null);
+  const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
   const [details, setDetails] = useState<Record<string, NoOaBankBatchDetail>>({});
   const [detailLoadingBatchId, setDetailLoadingBatchId] = useState<string | null>(null);
   const [detailErrors, setDetailErrors] = useState<Record<string, string>>({});
@@ -250,14 +192,54 @@ export default function NoOaBankBatchPage() {
   const [withdrawReason, setWithdrawReason] = useState("");
   const [snackbar, setSnackbar] = useState<{ severity: "success" | "warning" | "error"; message: string } | null>(null);
 
-  const groupedBatches = useMemo(() => {
-    const groups = new Map<string, NoOaBankBatch[]>();
-    for (const batch of payload.batches) {
-      const key = groupKey(batch);
-      groups.set(key, [...(groups.get(key) ?? []), batch]);
-    }
-    return Array.from(groups.entries()).map(([key, batches]) => ({ key, batches }));
-  }, [payload.batches]);
+  const visibleBucketBatches = useMemo(
+    () => payload.batches.filter((batch) => statusBucketFor(batch) === bucket),
+    [bucket, payload.batches],
+  );
+
+  const noOaCategories = useMemo(() => {
+    const categories = payload.summary.categories
+      .map((category) => ({
+        value: category.code as NoOaBankBatchType,
+        label: category.label || TAG_LABELS[category.code] || category.code,
+      }))
+      .filter((category) => category.value && category.label);
+    return categories.length > 0 ? categories : NO_OA_CATEGORIES;
+  }, [payload.summary.categories]);
+
+  const categoryCounts = useMemo(() => {
+    const counts = new Map<NoOaBankBatchType, number>();
+    noOaCategories.forEach((category) => counts.set(category.value, 0));
+    visibleBucketBatches.forEach((batch) => {
+      noOaCategories.forEach((category) => {
+        const explicitCount = batch.tagCounts[category.value];
+        if (typeof explicitCount === "number") {
+          counts.set(category.value, (counts.get(category.value) ?? 0) + explicitCount);
+          return;
+        }
+        if (batch.batchType === category.value) {
+          counts.set(category.value, (counts.get(category.value) ?? 0) + batch.rowCount);
+        }
+      });
+    });
+    return counts;
+  }, [noOaCategories, visibleBucketBatches]);
+
+  const visibleBatches = useMemo(
+    () => visibleBucketBatches.filter((batch) => batch.batchType === selectedCategory || (batch.tagCounts[selectedCategory] ?? 0) > 0),
+    [selectedCategory, visibleBucketBatches],
+  );
+
+  const selectedCategoryMeta = noOaCategories.find((category) => category.value === selectedCategory) ?? noOaCategories[0];
+  const selectedCategoryCount = categoryCounts.get(selectedCategory) ?? 0;
+  const unsubmittedCount = payload.summary.draftCount + payload.summary.conflictCount + payload.summary.staleCount;
+
+  const selectedBatch = useMemo(
+    () => visibleBatches.find((batch) => batch.batchId === selectedBatchId) ?? null,
+    [selectedBatchId, visibleBatches],
+  );
+
+  const selectedDetail = selectedBatch ? details[selectedBatch.batchId] ?? null : null;
 
   const selectedDraftBatches = useMemo(
     () => payload.batches.filter((batch) => selectedBatchIds.has(batch.batchId) && canSubmit(batch)),
@@ -269,15 +251,19 @@ export default function NoOaBankBatchPage() {
     setError(null);
     fetchNoOaBankBatches({
       month,
-      type,
-      status,
+      bucket,
       accountKey: accountKey.trim(),
       signal,
     })
       .then((nextPayload) => {
         setPayload(nextPayload);
+        const nextVisible = nextPayload.batches.filter((batch) => (
+          statusBucketFor(batch) === bucket
+          && (batch.batchType === selectedCategory || (batch.tagCounts[selectedCategory] ?? 0) > 0)
+        ));
+        setSelectedBatchId((current) => (current && nextVisible.some((batch) => batch.batchId === current) ? current : nextVisible[0]?.batchId ?? null));
         setSelectedBatchIds((current) => {
-          const available = new Set(nextPayload.batches.map((batch) => batch.batchId));
+          const available = new Set(nextPayload.batches.filter(canSubmit).map((batch) => batch.batchId));
           return new Set(Array.from(current).filter((batchId) => available.has(batchId)));
         });
       })
@@ -288,16 +274,10 @@ export default function NoOaBankBatchPage() {
         setError(caught instanceof Error ? caught.message : "免OA流水批次加载失败");
       })
       .finally(() => setLoading(false));
-  }, [accountKey, month, status, type]);
+  }, [accountKey, bucket, month, selectedCategory]);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    loadBatches(controller.signal);
-    return () => controller.abort();
-  }, [loadBatches]);
-
-  const loadDetail = useCallback((batchId: string) => {
-    if (details[batchId]) {
+  const loadDetail = useCallback((batchId: string, force = false) => {
+    if (!force && details[batchId]) {
       return;
     }
     setDetailLoadingBatchId(batchId);
@@ -315,13 +295,28 @@ export default function NoOaBankBatchPage() {
       .finally(() => setDetailLoadingBatchId(null));
   }, [details]);
 
-  const handleToggleExpand = (batch: NoOaBankBatch) => {
-    const nextBatchId = expandedBatchId === batch.batchId ? null : batch.batchId;
-    setExpandedBatchId(nextBatchId);
-    if (nextBatchId) {
-      loadDetail(nextBatchId);
+  useEffect(() => {
+    const controller = new AbortController();
+    setSelectedBatchId(null);
+    setSelectedBatchIds(new Set());
+    loadBatches(controller.signal);
+    return () => controller.abort();
+  }, [loadBatches]);
+
+  useEffect(() => {
+    if (selectedBatchId) {
+      loadDetail(selectedBatchId);
     }
-  };
+  }, [loadDetail, selectedBatchId]);
+
+  useEffect(() => {
+    const handleCategoryUpdated = () => {
+      setDetails({});
+      loadBatches();
+    };
+    window.addEventListener("bankTransactionCategoryUpdated", handleCategoryUpdated);
+    return () => window.removeEventListener("bankTransactionCategoryUpdated", handleCategoryUpdated);
+  }, [loadBatches]);
 
   const handleSelectBatch = (batch: NoOaBankBatch, checked: boolean) => {
     setSelectedBatchIds((current) => {
@@ -335,8 +330,9 @@ export default function NoOaBankBatchPage() {
     });
   };
 
-  const handleMutationComplete = (message: string) => {
-    window.dispatchEvent(new CustomEvent("workbenchRelationUpdated"));
+  const handleMutationComplete = (message: string, result: { affectedMonths?: string[] }) => {
+    window.dispatchEvent(new CustomEvent("workbenchRelationUpdated", { detail: mutationEventDetail(result) }));
+    setDetails({});
     setSnackbar({ severity: "success", message });
     loadBatches();
   };
@@ -347,12 +343,12 @@ export default function NoOaBankBatchPage() {
     }
     setMutating(true);
     try {
-      await submitNoOaBankBatch({
+      const result = await submitNoOaBankBatch({
         batchId: batch.batchId,
         expectedVersion: batch.version,
         note: "",
       });
-      handleMutationComplete("批次已提交");
+      handleMutationComplete("批次已提交", result);
     } catch (caught) {
       setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "提交批次失败" });
     } finally {
@@ -386,8 +382,9 @@ export default function NoOaBankBatchPage() {
         return new Set([...previous].filter((batchId) => failedBatchIds.has(batchId)));
       });
       if (submittedCount > 0) {
-        window.dispatchEvent(new CustomEvent("workbenchRelationUpdated"));
+        window.dispatchEvent(new CustomEvent("workbenchRelationUpdated", { detail: mutationEventDetail(result) }));
       }
+      setDetails({});
       if (failedResults.length === 0) {
         setSnackbar({ severity: "success", message: "选中批次已提交" });
       } else if (submittedCount > 0) {
@@ -409,14 +406,14 @@ export default function NoOaBankBatchPage() {
     }
     setMutating(true);
     try {
-      await withdrawNoOaBankBatch({
+      const result = await withdrawNoOaBankBatch({
         batchId: withdrawTarget.batchId,
         expectedVersion: withdrawTarget.version,
         reason: withdrawReason.trim(),
       });
       setWithdrawTarget(null);
       setWithdrawReason("");
-      handleMutationComplete("批次已撤回");
+      handleMutationComplete("批次已撤回", result);
     } catch (caught) {
       setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "撤回批次失败" });
     } finally {
@@ -424,8 +421,21 @@ export default function NoOaBankBatchPage() {
     }
   };
 
-  const handleTypeChange = (event: SelectChangeEvent) => setType(event.target.value as NoOaBankBatchTypeFilter);
-  const handleStatusChange = (event: SelectChangeEvent) => setStatus(event.target.value as NoOaBankBatchStatusFilter);
+  const handleBucketChange = (_event: MouseEvent<HTMLElement>, nextBucket: NoOaBankBatchStatusBucket | null) => {
+    if (!nextBucket) {
+      return;
+    }
+    setBucket(nextBucket);
+  };
+
+  const handleCategoryChange = (nextCategory: NoOaBankBatchType) => {
+    setSelectedCategory(nextCategory);
+    const nextVisible = visibleBucketBatches.filter((batch) => batch.batchType === nextCategory || (batch.tagCounts[nextCategory] ?? 0) > 0);
+    setSelectedBatchId(nextVisible[0]?.batchId ?? null);
+  };
+
+  const selectedTagCounts = selectedDetail?.tagCounts ?? selectedBatch?.tagCounts ?? {};
+  const selectedDirectionCounts = selectedDetail?.directionCounts ?? selectedBatch?.directionCounts ?? {};
 
   return (
     <PageScaffold
@@ -434,7 +444,10 @@ export default function NoOaBankBatchPage() {
       actions={(
         <Button
           disabled={loading}
-          onClick={() => loadBatches()}
+          onClick={() => {
+            setDetails({});
+            loadBatches();
+          }}
           startIcon={<RefreshOutlinedIcon />}
           variant="outlined"
         >
@@ -443,7 +456,18 @@ export default function NoOaBankBatchPage() {
       )}
     >
       <Paper variant="outlined" sx={{ p: 2, borderRadius: 1 }}>
-        <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+        <Stack alignItems={{ xs: "stretch", lg: "center" }} direction={{ xs: "column", lg: "row" }} spacing={1.5}>
+          <ToggleButtonGroup
+            aria-label="批次状态"
+            color="primary"
+            exclusive
+            onChange={handleBucketChange}
+            size="small"
+            value={bucket}
+          >
+            <ToggleButton value="unsubmitted">未提交 {unsubmittedCount}</ToggleButton>
+            <ToggleButton value="submitted">已提交 {payload.summary.submittedCount}</ToggleButton>
+          </ToggleButtonGroup>
           <TextField
             InputLabelProps={{ shrink: true }}
             label="月份"
@@ -452,26 +476,6 @@ export default function NoOaBankBatchPage() {
             type="month"
             value={month}
           />
-          <FormControl size="small" sx={{ minWidth: 160 }}>
-            <InputLabel id="no-oa-type-label">类型</InputLabel>
-            <Select label="类型" labelId="no-oa-type-label" onChange={handleTypeChange} value={type}>
-              {BATCH_TYPES.map((item) => (
-                <MenuItem key={item.value} value={item.value}>
-                  {item.label}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 160 }}>
-            <InputLabel id="no-oa-status-label">状态</InputLabel>
-            <Select label="状态" labelId="no-oa-status-label" onChange={handleStatusChange} value={status}>
-              {BATCH_STATUSES.map((item) => (
-                <MenuItem key={item.value} value={item.value}>
-                  {item.label}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
           <TextField
             label="银行账户"
             onChange={(event) => setAccountKey(event.target.value)}
@@ -482,167 +486,219 @@ export default function NoOaBankBatchPage() {
         </Stack>
       </Paper>
 
+      {error ? <StatePanel tone="error" title={error} /> : null}
+
       <Box
         sx={{
           display: "grid",
           gap: 1.5,
-          gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", lg: "repeat(5, minmax(0, 1fr))" },
+          gridTemplateColumns: { xs: "1fr", lg: "280px minmax(0, 1fr)" },
+          alignItems: "start",
         }}
       >
-        <SummaryCard label="待提交批次" value={payload.summary.draftCount} />
-        <SummaryCard label="已提交批次" value={payload.summary.submittedCount} />
-        <SummaryCard label="已撤回批次" value={payload.summary.withdrawnCount} />
-        <SummaryCard label="冲突批次" value={payload.summary.conflictCount} />
-        <SummaryCard helper="当前筛选范围" label="金额合计" value={formatMoney(payload.summary.totalAmount)} />
-      </Box>
+        <Paper aria-label="免OA分类" role="region" variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
+          <Stack spacing={0.5} sx={{ px: 2, py: 1.5 }}>
+            <Typography fontWeight={900}>免OA分类</Typography>
+            <Typography color="text.secondary" variant="caption">固定显示全部免OA标签</Typography>
+          </Stack>
+          <Divider />
+          <Stack divider={<Divider flexItem />}>
+            {noOaCategories.map((category) => {
+              const count = categoryCounts.get(category.value) ?? 0;
+              const selected = selectedCategory === category.value;
+              return (
+                <Box
+                  aria-label={`${category.label} ${count} 条`}
+                  aria-pressed={selected}
+                  key={category.value}
+                  onClick={() => handleCategoryChange(category.value)}
+                  role="button"
+                  sx={{
+                    bgcolor: selected ? "action.selected" : "background.paper",
+                    borderLeft: selected ? 4 : 0,
+                    borderColor: "primary.main",
+                    cursor: "pointer",
+                    px: 2,
+                    py: 1.5,
+                  }}
+                  tabIndex={0}
+                >
+                  <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1}>
+                    <Typography fontWeight={900}>{category.label}</Typography>
+                    <Chip label={`${count} 条`} size="small" variant={selected ? "filled" : "outlined"} />
+                  </Stack>
+                </Box>
+              );
+            })}
+          </Stack>
+        </Paper>
 
-      {error ? <StatePanel tone="error" title={error} /> : null}
-
-      <Paper variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
-        <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1.5} sx={{ px: 2, py: 1.5 }}>
-          <Typography fontWeight={900}>批次列表</Typography>
-          <Button disabled={selectedDraftBatches.length === 0 || mutating} onClick={handleBulkSubmit} variant="contained">
-            批量提交选中
-          </Button>
-        </Stack>
-        <TableContainer>
-          <Table size="small" aria-label="免OA流水批量处理表格">
-            <TableHead>
-              <TableRow>
-                <TableCell width={88}>选择</TableCell>
-                <TableCell>批次类型</TableCell>
-                <TableCell>银行账户</TableCell>
-                <TableCell>月份</TableCell>
-                <TableCell align="right">流水数</TableCell>
-                <TableCell align="right">金额</TableCell>
-                <TableCell>状态</TableCell>
-                <TableCell>提交信息</TableCell>
-                <TableCell align="right">操作</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={9}>
-                    <StatePanel compact tone="loading" title="批次加载中" />
-                  </TableCell>
-                </TableRow>
-              ) : null}
-              {!loading && payload.batches.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={9}>
-                    <StatePanel compact tone="empty" title="暂无免OA流水批次" />
-                  </TableCell>
-                </TableRow>
-              ) : null}
-              {groupedBatches.map((group) => (
-                <Fragment key={group.key}>
-                  <TableRow sx={{ bgcolor: "background.default" }}>
-                    <TableCell colSpan={9}>
-                      <Typography fontWeight={900}>{group.key}</Typography>
-                    </TableCell>
-                  </TableRow>
-                  {group.batches.map((batch) => {
-                    const expanded = expandedBatchId === batch.batchId;
-                    return (
-                      <Fragment key={batch.batchId}>
-                        <TableRow hover>
-                          <TableCell>
-                            <Stack alignItems="center" direction="row" spacing={0.5}>
-                              <IconButton
-                                aria-label={`${expanded ? "收起" : "展开"} ${batch.batchLabel} ${accountLabel(batch)} ${batch.scopeMonth} 明细`}
-                                onClick={() => handleToggleExpand(batch)}
-                                size="small"
-                              >
-                                {expanded ? <KeyboardArrowDownOutlinedIcon fontSize="small" /> : <KeyboardArrowRightOutlinedIcon fontSize="small" />}
-                              </IconButton>
-                              <Checkbox
-                                checked={selectedBatchIds.has(batch.batchId)}
-                                disabled={!canSubmit(batch)}
-                                inputProps={{
-                                  "aria-label": `选择 ${batch.batchLabel} ${accountLabel(batch)} ${batch.scopeMonth}`,
-                                }}
-                                onChange={(event) => handleSelectBatch(batch, event.target.checked)}
-                                size="small"
-                              />
-                            </Stack>
-                          </TableCell>
-                          <TableCell>{batch.batchLabel || batch.batchType}</TableCell>
-                          <TableCell>{accountLabel(batch)}</TableCell>
-                          <TableCell>{batch.scopeMonth}</TableCell>
-                          <TableCell align="right">{batch.rowCount}</TableCell>
-                          <TableCell align="right">{formatMoney(batch.totalAmount)}</TableCell>
-                          <TableCell>
-                            <Stack alignItems="flex-start" spacing={0.5}>
-                              <BatchStatusChip status={batch.status} />
-                              {batch.conflictReason ? (
-                                <Typography color="error" variant="caption">
-                                  {batch.conflictReason}
-                                </Typography>
-                              ) : null}
-                            </Stack>
-                          </TableCell>
-                          <TableCell>
-                            {batch.status === "submitted" ? (
-                              <Stack spacing={0.25}>
-                                <Typography variant="body2">{batch.submittedBy || "-"}</Typography>
-                                <Typography color="text.secondary" variant="caption">
-                                  {formatDateTime(batch.submittedAt)}
-                                </Typography>
-                              </Stack>
-                            ) : batch.status === "withdrawn" ? (
-                              <Stack spacing={0.25}>
-                                <Typography variant="body2">{batch.withdrawnBy || "-"}</Typography>
-                                <Typography color="text.secondary" variant="caption">
-                                  {formatDateTime(batch.withdrawnAt)}
-                                </Typography>
-                              </Stack>
-                            ) : (
-                              <Typography color="text.secondary" variant="body2">
-                                -
-                              </Typography>
-                            )}
-                          </TableCell>
-                          <TableCell align="right">
-                            <Stack direction="row" justifyContent="flex-end" spacing={1}>
-                              <Button
-                                onClick={() => {
-                                  setExpandedBatchId(batch.batchId);
-                                  loadDetail(batch.batchId);
-                                }}
-                                size="small"
-                                startIcon={<VisibilityOutlinedIcon />}
-                              >
-                                查看详情
-                              </Button>
-                              {batch.status === "submitted" ? (
-                                <Button disabled={mutating} onClick={() => setWithdrawTarget(batch)} size="small" variant="outlined">
-                                  撤回批次
-                                </Button>
-                              ) : (
-                                <Button disabled={!canSubmit(batch) || mutating} onClick={() => handleSubmitBatch(batch)} size="small" variant="contained">
-                                  提交批次
-                                </Button>
-                              )}
-                            </Stack>
-                          </TableCell>
-                        </TableRow>
-                        {expanded ? (
-                          <DetailRows
-                            detail={details[batch.batchId] ?? null}
-                            error={detailErrors[batch.batchId] || null}
-                            loading={detailLoadingBatchId === batch.batchId}
+        <Paper aria-label="免OA批次与明细" role="region" variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
+          <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1.5} sx={{ px: 2, py: 1.5 }}>
+            <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
+              <Typography component="h2" variant="h6" fontWeight={900}>
+                {selectedCategoryMeta.label} {selectedCategoryCount} 条
+              </Typography>
+              <Chip label={`${visibleBatches.length} 批`} size="small" variant="outlined" />
+            </Stack>
+            <Button disabled={selectedDraftBatches.length === 0 || mutating} onClick={handleBulkSubmit} size="small" variant="contained">
+              批量提交选中
+            </Button>
+          </Stack>
+          <Divider />
+          <Stack divider={<Divider flexItem />} sx={{ maxHeight: { lg: "30vh" }, overflow: "auto" }}>
+            {loading ? <StatePanel compact tone="loading" title="批次加载中" /> : null}
+            {!loading && visibleBatches.length === 0 ? <StatePanel compact tone="empty" title={`当前状态下暂无${selectedCategoryMeta.label}批次`} /> : null}
+            {!loading
+              ? visibleBatches.map((batch) => {
+                const selected = selectedBatchId === batch.batchId;
+                const reason = blockedReason(batch);
+                const isSubmitReady = canSubmit(batch);
+                return (
+                  <Box
+                    aria-label={`${batch.batchLabel || batch.batchType} ${accountLabel(batch)} ${batch.scopeMonth} ${formatMoney(batch.totalAmount)} ${reason}`}
+                    key={batch.batchId}
+                    onClick={() => setSelectedBatchId(batch.batchId)}
+                    role="button"
+                    sx={{
+                      bgcolor: selected ? "action.selected" : "background.paper",
+                      borderLeft: selected ? 4 : 0,
+                      borderColor: "primary.main",
+                      cursor: "pointer",
+                      p: 1.5,
+                    }}
+                    tabIndex={0}
+                  >
+                    <Stack spacing={1}>
+                      <Stack alignItems="flex-start" direction="row" justifyContent="space-between" spacing={1}>
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <Checkbox
+                            checked={selectedBatchIds.has(batch.batchId)}
+                            disabled={!isSubmitReady}
+                            inputProps={{
+                              "aria-label": `选择 ${batch.batchLabel} ${accountLabel(batch)} ${batch.scopeMonth}`,
+                            }}
+                            onChange={(event) => handleSelectBatch(batch, event.target.checked)}
+                            onClick={(event) => event.stopPropagation()}
+                            size="small"
                           />
+                          <Box>
+                            <Typography fontWeight={900}>{batch.batchLabel || batch.batchType}</Typography>
+                            <Typography color="text.secondary" variant="caption">
+                              {batch.scopeMonth} · {accountLabel(batch)}
+                            </Typography>
+                          </Box>
+                        </Stack>
+                        <BatchStatusChip status={batch.status} />
+                      </Stack>
+                      <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
+                        <Typography variant="body2">流水 {batch.rowCount}</Typography>
+                        <Typography variant="body2">金额 {formatMoney(batch.totalAmount)}</Typography>
+                      </Stack>
+                      {reason ? (
+                        <Typography color={batch.status === "conflict" ? "error" : "text.secondary"} variant="caption">
+                          {reason}
+                        </Typography>
+                      ) : null}
+                      {batch.status === "submitted" ? (
+                        <Typography color="text.secondary" variant="caption">
+                          {batch.submittedBy || "-"} · {formatDateTime(batch.submittedAt)}
+                        </Typography>
+                      ) : null}
+                      <Stack direction="row" spacing={1}>
+                        {isSubmitReady ? (
+                          <Button disabled={mutating} onClick={(event) => {
+                            event.stopPropagation();
+                            handleSubmitBatch(batch);
+                          }} size="small" variant="contained">
+                            提交批次
+                          </Button>
                         ) : null}
-                      </Fragment>
-                    );
-                  })}
-                </Fragment>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Paper>
+                        {canWithdraw(batch) ? (
+                          <Button disabled={mutating} onClick={(event) => {
+                            event.stopPropagation();
+                            setWithdrawTarget(batch);
+                          }} size="small" variant="outlined">
+                            撤回批次
+                          </Button>
+                        ) : null}
+                      </Stack>
+                    </Stack>
+                  </Box>
+                );
+              })
+              : null}
+          </Stack>
+          <Divider />
+          <Box aria-label="批次明细" role="region">
+            {selectedBatch ? (
+              <>
+              <Stack spacing={1} sx={{ px: 2, py: 1.5 }}>
+                <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1}>
+                  <Typography fontWeight={900}>
+                    {selectedBatch.batchLabel || selectedBatch.batchType} · {selectedBatch.rowCount} 条 · 合计 {formatMoney(selectedBatch.totalAmount)}
+                  </Typography>
+                  <BatchStatusChip status={selectedBatch.status} />
+                </Stack>
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                  <Chip label={formatCounts(selectedTagCounts, selectedBatch.batchType, selectedBatch.rowCount)} size="small" />
+                  {selectedBatch.batchType === "internal_transfer" && formatDirectionCounts(selectedDirectionCounts) ? (
+                    <Chip label={formatDirectionCounts(selectedDirectionCounts)} size="small" variant="outlined" />
+                  ) : null}
+                </Stack>
+              </Stack>
+              <Divider />
+              {detailErrors[selectedBatch.batchId] ? (
+                <StatePanel compact tone="error" title={detailErrors[selectedBatch.batchId]} />
+              ) : null}
+              {detailLoadingBatchId === selectedBatch.batchId && !selectedDetail ? (
+                <StatePanel compact tone="loading" title="明细加载中" />
+              ) : null}
+              {selectedDetail && selectedDetail.rows.length === 0 ? (
+                <StatePanel compact tone="empty" title="暂无批次明细" />
+              ) : null}
+              {selectedDetail && selectedDetail.rows.length > 0 ? (
+                <TableContainer sx={{ maxHeight: { lg: "60vh" } }}>
+                  <Table stickyHeader size="small" aria-label="批次明细表格">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>交易时间</TableCell>
+                        <TableCell>对方户名</TableCell>
+                        <TableCell>收/支</TableCell>
+                        <TableCell align="right">金额</TableCell>
+                        <TableCell>摘要/用途/备注</TableCell>
+                        <TableCell>分类来源</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {selectedDetail.rows.map((row) => (
+                        <TableRow key={row.transactionId || `${row.tradeTime}-${row.amount}`}>
+                          <TableCell>{row.tradeTime || "-"}</TableCell>
+                          <TableCell>{row.counterpartyName || "-"}</TableCell>
+                          <TableCell>{row.directionLabel || (row.direction === "income" ? "收" : row.direction === "expense" ? "支" : "-")}</TableCell>
+                          <TableCell align="right">{formatMoney(row.amount)}</TableCell>
+                          <TableCell>
+                            <Stack spacing={0.25}>
+                              <Typography variant="body2">{row.summary || "-"}</Typography>
+                              <Typography color="text.secondary" variant="caption">
+                                {[row.purpose, row.remark].filter(Boolean).join(" / ") || "-"}
+                              </Typography>
+                            </Stack>
+                          </TableCell>
+                          <TableCell>{sourceLabel(row.categorySource)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              ) : null}
+              </>
+            ) : (
+              <StatePanel compact tone="empty" title="请选择批次查看明细" />
+            )}
+          </Box>
+        </Paper>
+      </Box>
 
       <Dialog fullWidth maxWidth="xs" onClose={() => setWithdrawTarget(null)} open={Boolean(withdrawTarget)}>
         <DialogTitle>撤回批次</DialogTitle>

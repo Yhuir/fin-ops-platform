@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 
@@ -128,6 +128,8 @@ describe("Bank details page", () => {
     expect(within(grid).getByText("2026-05-01 10:30:00")).toHaveClass("MuiChip-label");
     expect(within(grid).getByText("2026-05-01 10:30:00").closest(".bank-trade-time-chip")).toHaveClass("bank-trade-time-chip-full");
     expect(within(grid).getByText("2026-05-01 10:30:00").closest(".bank-trade-time-chip")).toHaveClass("bank-chip-auto-size");
+    expect(within(grid).getByText("有oa").closest(".bank-relation-tag")).toHaveClass("bank-relation-tag-has");
+    expect(within(grid).getByText("无发票").closest(".bank-relation-tag")).toHaveClass("bank-relation-tag-none");
     expect(within(grid).getByText("收").closest(".direction-tag")).toHaveClass("bank-direction-tag-centered");
     expect(within(grid).getByText("收").closest(".direction-tag")).toHaveClass("bank-chip-auto-size");
     expect(within(grid).getByText("工商银行 6386")).toHaveClass("MuiChip-label");
@@ -402,6 +404,58 @@ describe("Bank details page", () => {
       expect(transactionRequest?.searchParams.get("date_from")).toBe("2026-04-01");
       expect(transactionRequest?.searchParams.get("page")).toBe("1");
       expect(transactionRequest?.searchParams.get("page_size")).toBe("100");
+    });
+  });
+
+  test("searches current account and date range on the server before pagination", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("云南溯源科技有限公司");
+
+    await user.click(within(page).getByRole("button", { name: /工商银行 6386/ }));
+    await user.click(within(page).getByLabelText("下一页"));
+    await waitFor(() => {
+      const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
+      expect(transactionRequest?.searchParams.get("account_key")).toBe("icbc:6386");
+      expect(transactionRequest?.searchParams.get("page")).toBe("2");
+    });
+
+    await user.type(within(page).getByPlaceholderText("搜索流水"), "跨页目标");
+
+    await waitFor(() => {
+      const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
+      expect(transactionRequest?.searchParams.get("account_key")).toBe("icbc:6386");
+      expect(transactionRequest?.searchParams.get("date_from")).toBe("2026-01-01");
+      expect(transactionRequest?.searchParams.get("date_to")).toBe("2026-12-31");
+      expect(transactionRequest?.searchParams.get("keyword")).toBe("跨页目标");
+      expect(transactionRequest?.searchParams.get("page")).toBe("1");
+      expect(transactionRequest?.searchParams.get("page_size")).toBe("100");
+    });
+    expect(await within(page).findByText("跨页目标供应商")).toBeInTheDocument();
+    expect(within(page).getByText("1-1 / 1")).toBeInTheDocument();
+    expect(within(page).getByText("手续费 1")).toBeInTheDocument();
+    expect(within(page).queryByText("工资 1")).not.toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: /工商银行 6386.*299 条/ })).toBeInTheDocument();
+  });
+
+  test("refetches bank detail data when workbench relation updates without local tag patching", async () => {
+    const fetchMock = installMockApiFetch();
+    renderBankDetailsPage();
+
+    await screen.findByText("云南溯源科技有限公司");
+    const initialAccountRequests = requestUrls(fetchMock, "/api/bank-details/accounts").length;
+    const initialTransactionRequests = requestUrls(fetchMock, "/api/bank-details/transactions").length;
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("workbenchRelationUpdated"));
+    });
+
+    await waitFor(() => {
+      expect(requestUrls(fetchMock, "/api/bank-details/accounts").length).toBeGreaterThan(initialAccountRequests);
+      expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
     });
   });
 

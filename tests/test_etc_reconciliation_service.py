@@ -16,7 +16,9 @@ from fin_ops_platform.services.etc_document_parsers import (
     TicketRootPdfTextParser,
 )
 from fin_ops_platform.services.etc_reconciliation_models import (
+    EtcReconciliationTask,
     EtcReconciliationTaskStatus,
+    ExpectedEtcInvoiceRequirement,
     ParseIssueSeverity,
     SourceFileKind,
 )
@@ -29,6 +31,24 @@ from fin_ops_platform.services.etc_reconciliation_zip_filter import (
 from fin_ops_platform.services.etc_service import UploadedEtcZipFile
 from fin_ops_platform.services.state_store import ApplicationStateStore
 
+
+REAL_TICKET_ROOT_TXT_SAMPLES = {
+    "a516hj": (
+        Path("/Users/yu/Desktop/sy/财务运营平台/票根网/4月/云A516HJ/云A516HJ"),
+        "云A516HJ",
+        11,
+    ),
+    "ada0381": (
+        Path("/Users/yu/Desktop/sy/财务运营平台/票根网/4月/云ADA0381/云a0381"),
+        "云ADA0381",
+        48,
+    ),
+    "a361hx": (
+        Path("/Users/yu/Desktop/sy/财务运营平台/票根网/4月/云A361HX/云A361HX"),
+        "云A361HX",
+        2,
+    ),
+}
 
 CCB_STATEMENT_TEXT = """
 中国建设银行信用卡账单
@@ -160,14 +180,17 @@ def etc_xml(
     invoice_number: str,
     *,
     issue_date: str = "2026-03-03",
+    request_time: str | None = None,
     plate_number: str = "云ADA0381",
     total_amount: str = "25.00",
 ) -> bytes:
     amount_without_tax = (Decimal(total_amount) - Decimal("0.75")).quantize(Decimal("0.01"))
+    request_time_xml = f"<RequestTime>{request_time}</RequestTime>" if request_time else ""
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <Invoice>
   <InvoiceNumber>{invoice_number}</InvoiceNumber>
   <IssueDate>{issue_date}</IssueDate>
+  {request_time_xml}
   <PassageStartDate>{issue_date}</PassageStartDate>
   <PassageEndDate>{issue_date}</PassageEndDate>
   <PlateNumber>{plate_number}</PlateNumber>
@@ -193,6 +216,37 @@ def etc_zip(invoice_numbers: list[str], *, include_pdf: bool = True) -> bytes:
         if include_pdf:
             entries[f"pdf/{invoice_number}.pdf"] = fake_pdf(invoice_number)
     return zip_bytes(entries)
+
+
+def ready_task_with_requirement(
+    *,
+    amount: str,
+    transaction_at: str,
+    invoice_count: int,
+    plate: str = "云ADA0381",
+    requirement_id: str = "TASK-REQ-0001",
+) -> EtcReconciliationTask:
+    return EtcReconciliationTask(
+        task_id="TASK",
+        status=EtcReconciliationTaskStatus.READY_FOR_IMPORT,
+        version=3,
+        title="ETC",
+        confirmed_item_set_hash="confirmed-hash",
+        expected_etc_invoice_requirements=[
+            ExpectedEtcInvoiceRequirement(
+                requirement_id=requirement_id,
+                task_id="TASK",
+                credit_card_item_id="CARD-1",
+                ticket_root_item_id="TICKET-1",
+                vehicle_plate=plate,
+                transaction_at=transaction_at,
+                date_window_start=transaction_at[:10],
+                date_window_end=transaction_at[:10],
+                amount=Decimal(amount),
+                invoice_count=invoice_count,
+            )
+        ],
+    )
 
 
 class EtcReconciliationServiceTests(unittest.TestCase):
@@ -258,6 +312,37 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         )
         self.assertTrue(all(item.extraction_method == "clipboard_text" for item in result.ticket_root_items))
 
+    def test_ticket_root_clipboard_text_parser_reads_real_txt_file_samples(self) -> None:
+        parser = TicketRootClipboardTextParser()
+        for sample_key, (sample_path, expected_plate, expected_count) in REAL_TICKET_ROOT_TXT_SAMPLES.items():
+            if not sample_path.exists():
+                self.skipTest(f"missing local ticket root sample: {sample_path}")
+            with self.subTest(sample=sample_key):
+                result = parser.parse_text(file_id=f"TXT-{sample_key}", text=sample_path.read_text(encoding="utf-8"))
+
+                self.assertEqual(result.issues, [])
+                self.assertEqual(len(result.ticket_root_items), expected_count)
+                self.assertEqual({item.vehicle_plate for item in result.ticket_root_items}, {expected_plate})
+
+        a516_result = parser.parse_text(
+            file_id="TXT-a516hj-key-records",
+            text=REAL_TICKET_ROOT_TXT_SAMPLES["a516hj"][0].read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            ("2026-04-02 13:30:29", Decimal("57.95"), "云A516HJ"),
+            {
+                (item.transaction_at, item.amount, item.vehicle_plate)
+                for item in a516_result.ticket_root_items
+            },
+        )
+        self.assertIn(
+            ("2026-04-02 11:25:48", Decimal("88.86"), "云A516HJ"),
+            {
+                (item.transaction_at, item.amount, item.vehicle_plate)
+                for item in a516_result.ticket_root_items
+            },
+        )
+
     def test_ticket_root_clipboard_text_parser_blocks_missing_plate(self) -> None:
         text = TICKET_ROOT_CLIPBOARD_TEXT.replace("车牌号：云ADA0381", "")
 
@@ -281,6 +366,27 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         result = TicketRootClipboardTextParser().parse_text(
             file_id="PASTE-1",
             text="收费公路通行费电子发票服务平台\n按开票记录查看\n开票记录\n开票完成\n车牌号：云ADA0381",
+        )
+
+        self.assertEqual(result.ticket_root_items, [])
+        self.assertEqual(result.issues[0].severity, ParseIssueSeverity.BLOCKING)
+        self.assertEqual(result.issues[0].message, "请切换到按行程查看后复制粘贴。")
+
+    def test_ticket_root_clipboard_text_parser_blocks_invoice_record_page_with_trip_nav(self) -> None:
+        result = TicketRootClipboardTextParser().parse_text(
+            file_id="PASTE-INVOICE-RECORDS",
+            text="""
+收费公路通行费电子发票服务平台
+按开票记录查看 按行程查看
+返回卡列表
+路网中心ETC：记账卡 990100**********4908    车牌号：云ADA0381
+开票记录
+开票完成
+开票申请时间：2026-03-31 17:19:57
+开票金额：￥9.50
+消费发票申请
+发票数量：1张
+""",
         )
 
         self.assertEqual(result.ticket_root_items, [])
@@ -641,7 +747,45 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             service.get_task(task_id)
 
-    def test_delete_ready_task_is_rejected(self) -> None:
+    def test_delete_ready_task_removes_task_and_uploaded_files(self) -> None:
+        service, task_id = self._parsed_task()
+        task = service.refresh_matches(task_id=task_id)
+        uploaded = service.store_uploaded_source_file(
+            task_id=task_id,
+            source_kind=SourceFileKind.SUPPLEMENT_EVIDENCE,
+            original_name="supplement.txt",
+            content_type="text/plain",
+            content=b"supplement",
+            created_by="alice",
+        )
+        card = next(item for item in task.credit_card_items if item.settlement_amount == Decimal("25.00"))
+        ticket = task.ticket_root_items[0]
+        task = service.get_task(task_id)
+        task = service.patch_item(
+            task_id=task_id,
+            item_id=card.item_id,
+            expected_version=task.version,
+            actor="alice",
+            payload={"action": "link_ticket", "ticketItemId": ticket.item_id},
+        )
+        other_card = next(item for item in task.credit_card_items if item.settlement_amount == Decimal("23.00"))
+        task = service.patch_item(
+            task_id=task_id,
+            item_id=other_card.item_id,
+            expected_version=task.version,
+            actor="alice",
+            payload={"action": "exclude_card", "manualResolution": "excluded_non_etc", "reason": "非本次报销"},
+        )
+        ready = service.confirm_task(task_id=task_id, expected_version=task.version, actor="alice")
+
+        result = service.delete_task(task_id=task_id, expected_version=ready.version, actor="alice")
+
+        self.assertEqual(result, {"deleted": True, "taskId": task_id, "kind": "reconciliation_task"})
+        with self.assertRaises(KeyError):
+            service.get_task(task_id)
+        self.assertFalse(Path(uploaded.stored_path).exists())
+
+    def test_delete_imported_task_requires_cleanup_confirmation_and_deletes_after_cleanup(self) -> None:
         service, task_id = self._parsed_task()
         task = service.refresh_matches(task_id=task_id)
         card = next(item for item in task.credit_card_items if item.settlement_amount == Decimal("25.00"))
@@ -662,9 +806,93 @@ class EtcReconciliationServiceTests(unittest.TestCase):
             payload={"action": "exclude_card", "manualResolution": "excluded_non_etc", "reason": "非本次报销"},
         )
         ready = service.confirm_task(task_id=task_id, expected_version=task.version, actor="alice")
+        imported = service.mark_imported(
+            task_id=task_id,
+            task_version=ready.version,
+            confirmed_item_set_hash=ready.confirmed_item_set_hash or "",
+            import_batch_id="import-batch-1",
+            actor="alice",
+        )
+
+        with self.assertRaisesRegex(ValueError, "reconciliation_task_import_cleanup_required"):
+            service.delete_task(task_id=task_id, expected_version=imported.version, actor="alice")
+
+        result = service.delete_task(
+            task_id=task_id,
+            expected_version=imported.version,
+            actor="alice",
+            import_cleanup_confirmed=True,
+        )
+
+        self.assertEqual(result, {"deleted": True, "taskId": task_id, "kind": "reconciliation_task"})
+        with self.assertRaises(KeyError):
+            service.get_task(task_id)
+
+    def test_delete_task_rejects_importing_closed_and_submission_links(self) -> None:
+        service, task_id = self._parsed_task()
+        task = service.refresh_matches(task_id=task_id)
+        card = next(item for item in task.credit_card_items if item.settlement_amount == Decimal("25.00"))
+        ticket = task.ticket_root_items[0]
+        task = service.patch_item(
+            task_id=task_id,
+            item_id=card.item_id,
+            expected_version=task.version,
+            actor="alice",
+            payload={"action": "link_ticket", "ticketItemId": ticket.item_id},
+        )
+        other_card = next(item for item in task.credit_card_items if item.settlement_amount == Decimal("23.00"))
+        task = service.patch_item(
+            task_id=task_id,
+            item_id=other_card.item_id,
+            expected_version=task.version,
+            actor="alice",
+            payload={"action": "exclude_card", "manualResolution": "excluded_non_etc", "reason": "非本次报销"},
+        )
+        ready = service.confirm_task(task_id=task_id, expected_version=task.version, actor="alice")
+        importing = service.begin_import(
+            task_id=task_id,
+            task_version=ready.version,
+            confirmed_item_set_hash=ready.confirmed_item_set_hash or "",
+            import_session_id="session-1",
+            actor="alice",
+        )
 
         with self.assertRaisesRegex(ValueError, "invalid_reconciliation_task_status"):
-            service.delete_task(task_id=task_id, expected_version=ready.version, actor="alice")
+            service.delete_task(task_id=task_id, expected_version=importing.version, actor="alice")
+
+        recovered_service = EtcReconciliationTaskService.from_snapshot(service.snapshot(), data_dir=Path(self.temp_dir.name))
+        recovered_ready = recovered_service.get_task(task_id)
+        imported = recovered_service.mark_imported(
+            task_id=task_id,
+            task_version=recovered_ready.version,
+            confirmed_item_set_hash=recovered_ready.confirmed_item_set_hash or "",
+            import_batch_id="import-batch-1",
+            actor="alice",
+        )
+        linked = recovered_service.record_oa_draft_created(
+            task_id=task_id,
+            oa_draft_batch_id="oa-draft-1",
+            etc_batch_id="etc-submission-1",
+            actor="alice",
+        )
+
+        with self.assertRaisesRegex(ValueError, "reconciliation_task_has_submission_link"):
+            recovered_service.delete_task(
+                task_id=task_id,
+                expected_version=linked.version,
+                actor="alice",
+                import_cleanup_confirmed=True,
+            )
+
+        recovered_service.record_oa_submitted_confirmed(task_id=task_id, oa_draft_batch_id="oa-draft-1", actor="alice")
+        closed = recovered_service.get_task(task_id)
+        with self.assertRaisesRegex(ValueError, "reconciliation_task_has_submission_link"):
+            recovered_service.delete_task(
+                task_id=task_id,
+                expected_version=closed.version,
+                actor="alice",
+                import_cleanup_confirmed=True,
+            )
 
     def test_matching_marks_unique_multiple_missing_and_extra_candidates(self) -> None:
         multi_ticket_text = TICKET_ROOT_TEXT + """
@@ -729,25 +957,25 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertEqual(ticket.recommendation_status, "suggested_match")
         self.assertEqual(ticket.linked_credit_card_item_ids, [card.item_id])
 
-    def test_matching_keeps_repeated_amount_ambiguous_without_random_link(self) -> None:
+    def test_matching_links_repeated_amount_by_stable_one_to_one_order(self) -> None:
         service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))
-        task = service.create_task(title="2026-04 ambiguous ETC", created_by="alice")
+        task = service.create_task(title="2026-04 stable repeated ETC", created_by="alice")
         statement_text = """
 中国建设银行信用卡账单
 交易日 入账日 卡号 摘要 币种 交易金额 入账金额
-2026-04-08 2026-04-09 8514 高速通行费-1 CNY 71.25 71.25
-2026-04-08 2026-04-09 8514 高速通行费-2 CNY 71.25 71.25
+2026-04-08 2026-04-09 8514 高速通行费-晚 CNY 71.25 71.25
+2026-04-08 2026-04-09 8514 高速通行费-早 CNY 71.25 71.25
 """
         ticket_text = """
 票根网通行明细
 车牌号 云ADA0381
-交易时间 2026-04-08 11:13:41
+交易时间 2026-04-08 18:57:17
 入口站 昆明南站
 出口站 九龙池站
 金额 71.25
 发票张数 1
 车牌号 云ADA0381
-交易时间 2026-04-08 18:57:17
+交易时间 2026-04-08 11:13:41
 入口站 昆明南站
 出口站 九龙池站
 金额 71.25
@@ -764,9 +992,316 @@ class EtcReconciliationServiceTests(unittest.TestCase):
             actor="alice",
         )
 
-        self.assertEqual({item.recommendation_status for item in task.credit_card_items}, {"needs_review"})
-        self.assertEqual({item.recommendation_status for item in task.ticket_root_items}, {"needs_review"})
-        self.assertEqual([item.linked_credit_card_item_ids for item in task.ticket_root_items], [[], []])
+        self.assertEqual([item.recommendation_status for item in task.credit_card_items], ["suggested_match", "suggested_match"])
+        self.assertEqual([item.recommendation_status for item in task.ticket_root_items], ["suggested_match", "suggested_match"])
+        self.assertEqual(
+            {item.transaction_at: item.linked_credit_card_item_ids for item in task.ticket_root_items},
+            {
+                "2026-04-08 11:13:41": [task.credit_card_items[0].item_id],
+                "2026-04-08 18:57:17": [task.credit_card_items[1].item_id],
+            },
+        )
+
+    def test_matching_links_repeated_amount_batches_and_keeps_real_gaps(self) -> None:
+        service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))
+        task = service.create_task(title="2026-04 production ETC", created_by="alice")
+        statement_text = """
+中国建设银行信用卡账单
+交易日 入账日 卡号 摘要 币种 交易金额 入账金额
+2026-04-08 2026-04-09 8514 高速通行费71A CNY 71.25 71.25
+2026-04-08 2026-04-09 8514 高速通行费71B CNY 71.25 71.25
+2026-04-08 2026-04-09 8514 高速通行费23A CNY 23.50 23.50
+2026-04-08 2026-04-09 8514 高速通行费23B CNY 23.50 23.50
+2026-04-08 2026-04-09 8514 高速通行费9A CNY 9.50 9.50
+2026-04-08 2026-04-09 8514 高速通行费9B CNY 9.50 9.50
+2026-04-09 2026-04-09 8514 高速通行费缺票 CNY 57.95 57.95
+2026-04-02 2026-04-02 8514 高速通行费跨窗 CNY 88.86 88.86
+"""
+        ticket_text = """
+票根网通行明细
+车牌号 云ADA0381
+交易时间 2026-04-08 18:57:17
+入口站 A
+出口站 B
+金额 71.25
+发票张数 1
+车牌号 云ADA0381
+交易时间 2026-04-08 11:13:41
+入口站 B
+出口站 A
+金额 71.25
+发票张数 1
+车牌号 云ADA0381
+交易时间 2026-04-08 12:00:00
+入口站 C
+出口站 D
+金额 23.50
+发票张数 1
+车牌号 云ADA0381
+交易时间 2026-04-08 13:00:00
+入口站 D
+出口站 C
+金额 23.50
+发票张数 1
+车牌号 云ADA0381
+交易时间 2026-04-08 14:00:00
+入口站 E
+出口站 F
+金额 9.50
+发票张数 1
+车牌号 云ADA0381
+交易时间 2026-04-08 15:00:00
+入口站 F
+出口站 E
+金额 9.50
+发票张数 1
+车牌号 云ADA0381
+交易时间 2026-03-09 08:00:00
+入口站 G
+出口站 H
+金额 88.86
+发票张数 1
+车牌号 云ADA0381
+交易时间 2026-04-23 08:00:00
+入口站 H
+出口站 G
+金额 88.86
+发票张数 1
+"""
+        service.apply_parse_result(
+            task_id=task.task_id,
+            parse_result=CcbCreditCardStatementParser().parse_text(file_id="CARD-PRODUCTION", text=statement_text),
+            actor="alice",
+        )
+        task = service.apply_parse_result(
+            task_id=task.task_id,
+            parse_result=TicketRootPdfTextParser().parse_text(file_id="TICKET-PRODUCTION", text=ticket_text),
+            actor="alice",
+        )
+
+        statuses = {item.description: item.recommendation_status for item in task.credit_card_items}
+        linked_by_ticket_time = {item.transaction_at: item.linked_credit_card_item_ids for item in task.ticket_root_items}
+
+        for amount in (Decimal("71.25"), Decimal("23.50"), Decimal("9.50")):
+            cards = [item for item in task.credit_card_items if item.settlement_amount == amount]
+            tickets = [item for item in task.ticket_root_items if item.amount == amount]
+            self.assertEqual([item.recommendation_status for item in cards], ["suggested_match", "suggested_match"])
+            self.assertEqual([item.recommendation_status for item in tickets], ["suggested_match", "suggested_match"])
+            self.assertEqual(sorted(len(item.linked_credit_card_item_ids) for item in tickets), [1, 1])
+            self.assertEqual(
+                sorted(card_id for item in tickets for card_id in item.linked_credit_card_item_ids),
+                sorted(item.item_id for item in cards),
+            )
+        self.assertEqual(statuses["高速通行费缺票"], "missing_ticket")
+        self.assertEqual(statuses["高速通行费跨窗"], "missing_ticket")
+        self.assertEqual(linked_by_ticket_time["2026-03-09 08:00:00"], [])
+        self.assertEqual(linked_by_ticket_time["2026-04-23 08:00:00"], [])
+
+    def test_matching_uses_description_business_date_as_primary_anchor(self) -> None:
+        service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))
+        task = service.create_task(title="2026-03 business date ETC", created_by="alice")
+        statement_text = """
+中国建设银行信用卡账单
+交易日 入账日 卡号 摘要 币种 交易金额 入账金额
+2026-03-29 2026-03-29 8514 20260327高速通行费云南 CNY 21.52 21.52
+"""
+        ticket_text = """
+票根网通行明细
+车牌号 云ADA0381
+交易时间 2026-03-27 10:30:00
+入口站 昆明南站
+出口站 九龙池站
+金额 21.52
+发票张数 1
+"""
+        service.apply_parse_result(
+            task_id=task.task_id,
+            parse_result=CcbCreditCardStatementParser().parse_text(file_id="CARD-BUSINESS-DATE", text=statement_text),
+            actor="alice",
+        )
+        task = service.apply_parse_result(
+            task_id=task.task_id,
+            parse_result=TicketRootPdfTextParser().parse_text(file_id="TICKET-BUSINESS-DATE", text=ticket_text),
+            actor="alice",
+        )
+
+        self.assertEqual(task.credit_card_items[0].recommendation_status, "suggested_match")
+        self.assertEqual(task.ticket_root_items[0].recommendation_status, "suggested_match")
+        self.assertEqual(task.ticket_root_items[0].linked_credit_card_item_ids, [task.credit_card_items[0].item_id])
+
+    def test_matching_locks_explicit_business_date_before_fallback_window(self) -> None:
+        service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))
+        task = service.create_task(title="2026-03 business date exact ETC", created_by="alice")
+        statement_text = """
+中国建设银行信用卡账单
+交易日 入账日 卡号 摘要 币种 交易金额 入账金额
+2026-03-28 2026-03-28 8514 20260327高速通行费云南昆明南站云 CNY 23.50 23.50
+"""
+        ticket_text = """
+票根网通行明细
+车牌号 云A361HX
+交易时间 2026-03-27 16:29:49
+入口站 昆明南站
+出口站 通站站
+金额 23.50
+发票张数 1
+车牌号 云A516HJ
+交易时间 2026-03-26 16:37:53
+入口站 通站站
+出口站 昆明南站
+金额 23.50
+发票张数 1
+"""
+        service.apply_parse_result(
+            task_id=task.task_id,
+            parse_result=CcbCreditCardStatementParser().parse_text(file_id="CARD-BUSINESS-DATE-EXACT", text=statement_text),
+            actor="alice",
+        )
+        task = service.apply_parse_result(
+            task_id=task.task_id,
+            parse_result=TicketRootPdfTextParser().parse_text(file_id="TICKET-BUSINESS-DATE-EXACT", text=ticket_text),
+            actor="alice",
+        )
+
+        self.assertEqual(task.credit_card_items[0].recommendation_status, "suggested_match")
+        linked_by_time = {item.transaction_at: item.linked_credit_card_item_ids for item in task.ticket_root_items}
+        status_by_time = {item.transaction_at: item.recommendation_status for item in task.ticket_root_items}
+        self.assertEqual(linked_by_time["2026-03-27 16:29:49"], [task.credit_card_items[0].item_id])
+        self.assertEqual(status_by_time["2026-03-27 16:29:49"], "suggested_match")
+        self.assertEqual(linked_by_time["2026-03-26 16:37:53"], [])
+        self.assertEqual(status_by_time["2026-03-26 16:37:53"], "extra_ticket")
+
+    def test_matching_does_not_consume_one_ticket_more_than_once(self) -> None:
+        service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))
+        task = service.create_task(title="2026-04 duplicate guard ETC", created_by="alice")
+        statement_text = """
+中国建设银行信用卡账单
+交易日 入账日 卡号 摘要 币种 交易金额 入账金额
+2026-04-08 2026-04-09 8514 高速通行费-A CNY 71.25 71.25
+2026-04-08 2026-04-09 8514 高速通行费-B CNY 71.25 71.25
+"""
+        ticket_text = """
+票根网通行明细
+车牌号 云ADA0381
+交易时间 2026-04-08 11:13:41
+入口站 昆明南站
+出口站 九龙池站
+金额 71.25
+发票张数 1
+"""
+        service.apply_parse_result(
+            task_id=task.task_id,
+            parse_result=CcbCreditCardStatementParser().parse_text(file_id="CARD-DUPLICATE-GUARD", text=statement_text),
+            actor="alice",
+        )
+        task = service.apply_parse_result(
+            task_id=task.task_id,
+            parse_result=TicketRootPdfTextParser().parse_text(file_id="TICKET-DUPLICATE-GUARD", text=ticket_text),
+            actor="alice",
+        )
+
+        self.assertEqual(task.ticket_root_items[0].linked_credit_card_item_ids, [task.credit_card_items[0].item_id])
+        self.assertEqual(task.credit_card_items[0].recommendation_status, "suggested_match")
+        self.assertEqual(task.credit_card_items[1].recommendation_status, "needs_review")
+
+    def test_matching_finds_large_repeated_amount_set_without_greedy_loss(self) -> None:
+        service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))
+        task = service.create_task(title="2026-04 large duplicate ETC", created_by="alice")
+        statement_rows = [
+            f"2026-04-{day:02d} 2026-04-30 8514 高速通行费-{day:02d} CNY 12.34 12.34"
+            for day in range(1, 19)
+        ]
+        ticket_rows = [
+            f"""
+车牌号 云ADA0381
+交易时间 2026-04-{day:02d} 08:00:00
+入口站 昆明南站
+出口站 九龙池站
+金额 12.34
+发票张数 1
+"""
+            for day in range(1, 19)
+        ]
+        statement_text = "\n".join(
+            [
+                "中国建设银行信用卡账单",
+                "交易日 入账日 卡号 摘要 币种 交易金额 入账金额",
+                *statement_rows,
+            ]
+        )
+        ticket_text = "票根网通行明细\n" + "\n".join(ticket_rows)
+        service.apply_parse_result(
+            task_id=task.task_id,
+            parse_result=CcbCreditCardStatementParser().parse_text(file_id="CARD-LARGE-DUPLICATE", text=statement_text),
+            actor="alice",
+        )
+        task = service.apply_parse_result(
+            task_id=task.task_id,
+            parse_result=TicketRootPdfTextParser().parse_text(file_id="TICKET-LARGE-DUPLICATE", text=ticket_text),
+            actor="alice",
+        )
+
+        self.assertEqual(len(task.credit_card_items), 18)
+        self.assertEqual(len(task.ticket_root_items), 18)
+        self.assertEqual({item.recommendation_status for item in task.credit_card_items}, {"suggested_match"})
+        self.assertEqual({item.recommendation_status for item in task.ticket_root_items}, {"suggested_match"})
+        self.assertEqual(sorted(len(item.linked_credit_card_item_ids) for item in task.ticket_root_items), [1] * 18)
+        self.assertEqual(
+            sorted(card_id for item in task.ticket_root_items for card_id in item.linked_credit_card_item_ids),
+            sorted(item.item_id for item in task.credit_card_items),
+        )
+
+    def test_manual_link_replaces_previous_ticket_consumer(self) -> None:
+        service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))
+        task = service.create_task(title="2026-04 manual duplicate guard ETC", created_by="alice")
+        statement_text = """
+中国建设银行信用卡账单
+交易日 入账日 卡号 摘要 币种 交易金额 入账金额
+2026-04-08 2026-04-09 8514 高速通行费-A CNY 71.25 71.25
+2026-04-08 2026-04-09 8514 高速通行费-B CNY 71.25 71.25
+"""
+        ticket_text = """
+票根网通行明细
+车牌号 云ADA0381
+交易时间 2026-04-08 11:13:41
+入口站 昆明南站
+出口站 九龙池站
+金额 71.25
+发票张数 1
+"""
+        service.apply_parse_result(
+            task_id=task.task_id,
+            parse_result=CcbCreditCardStatementParser().parse_text(file_id="CARD-MANUAL-DUPLICATE", text=statement_text),
+            actor="alice",
+        )
+        task = service.apply_parse_result(
+            task_id=task.task_id,
+            parse_result=TicketRootPdfTextParser().parse_text(file_id="TICKET-MANUAL-DUPLICATE", text=ticket_text),
+            actor="alice",
+        )
+        ticket = task.ticket_root_items[0]
+        first_card, second_card = task.credit_card_items
+
+        task = service.patch_item(
+            task_id=task.task_id,
+            item_id=first_card.item_id,
+            expected_version=task.version,
+            actor="alice",
+            payload={"action": "link_ticket", "ticketItemId": ticket.item_id},
+        )
+        task = service.patch_item(
+            task_id=task.task_id,
+            item_id=second_card.item_id,
+            expected_version=task.version,
+            actor="alice",
+            payload={"action": "link_ticket", "ticketItemId": ticket.item_id},
+        )
+
+        linked_ticket = task.ticket_root_items[0]
+        cards_by_id = {item.item_id: item for item in task.credit_card_items}
+        self.assertEqual(linked_ticket.linked_credit_card_item_ids, [second_card.item_id])
+        self.assertEqual(cards_by_id[first_card.item_id].manual_resolution, "unresolved")
+        self.assertEqual(cards_by_id[second_card.item_id].manual_resolution, "included_etc")
 
     def test_matching_links_repeated_amount_when_posting_windows_disambiguate(self) -> None:
         service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))
@@ -891,6 +1426,39 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertEqual(confirmed.supplement_amount, Decimal("0.00"))
         self.assertEqual(len(confirmed.expected_etc_invoice_requirements), 1)
         self.assertTrue(confirmed.confirmed_item_set_hash)
+
+    def test_confirm_with_selected_card_ids_uses_only_selected_requirements_and_amounts(self) -> None:
+        service, task_id = self._parsed_task()
+        task = service.refresh_matches(task_id=task_id)
+        card_by_amount = {item.settlement_amount: item for item in task.credit_card_items}
+        selected_card = card_by_amount[Decimal("25.00")]
+        unselected_missing_card = card_by_amount[Decimal("23.00")]
+        ticket = task.ticket_root_items[0]
+        task = service.patch_item(
+            task_id=task_id,
+            item_id=selected_card.item_id,
+            expected_version=task.version,
+            actor="alice",
+            payload={"action": "link_ticket", "ticketItemId": ticket.item_id},
+        )
+
+        confirmed = service.confirm_task(
+            task_id=task_id,
+            expected_version=task.version,
+            actor="alice",
+            confirmed_credit_card_item_ids=[selected_card.item_id],
+        )
+
+        self.assertEqual(confirmed.status, EtcReconciliationTaskStatus.READY_FOR_IMPORT)
+        self.assertEqual(confirmed.oa_total_amount, Decimal("25.00"))
+        self.assertEqual(confirmed.etc_invoice_amount, Decimal("25.00"))
+        self.assertEqual(confirmed.supplement_amount, Decimal("0.00"))
+        self.assertEqual(confirmed.supplement_count, 0)
+        self.assertEqual(
+            [item.credit_card_item_id for item in confirmed.expected_etc_invoice_requirements],
+            [selected_card.item_id],
+        )
+        self.assertNotIn(unselected_missing_card.item_id, confirmed.confirmed_item_set_hash or "")
 
     def test_included_etc_requires_linked_ticket_or_etc_supplement_evidence(self) -> None:
         service, task_id = self._parsed_task()
@@ -1177,6 +1745,374 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "missing_required_etc_invoice"):
             validate_etc_zip_confirm_for_task(task=confirmed, preview=missing)
+
+    def test_zip_preview_matches_requirement_to_two_invoice_amount_sum(self) -> None:
+        task = ready_task_with_requirement(amount="71.25", transaction_at="2026-04-08 18:57:17", invoice_count=2)
+
+        preview = preview_etc_zip_for_task(
+            task=task,
+            uploads=[
+                UploadedEtcZipFile(
+                    "ticket-root.zip",
+                    zip_bytes(
+                        {
+                            "package/xml/ETC2950.xml": etc_xml("ETC2950", issue_date="2026-04-08", total_amount="29.50"),
+                            "package/pdf/ETC2950.pdf": fake_pdf("ETC2950"),
+                            "package/xml/ETC4175.xml": etc_xml("ETC4175", issue_date="2026-04-08", total_amount="41.75"),
+                            "package/pdf/ETC4175.pdf": fake_pdf("ETC4175"),
+                            "package/xml/EXTRA.xml": etc_xml("EXTRA", issue_date="2026-04-08", total_amount="99.99"),
+                            "package/pdf/EXTRA.pdf": fake_pdf("EXTRA"),
+                        }
+                    ),
+                )
+            ],
+        )
+
+        self.assertEqual(preview.blocking_issues, [])
+        self.assertEqual(preview.allowed_invoice_numbers, ["ETC2950", "ETC4175"])
+        self.assertEqual(
+            {item.invoice_number: item.filter_status for item in preview.items},
+            {"ETC2950": "included", "ETC4175": "included", "EXTRA": "excluded_extra_zip_invoice"},
+        )
+        self.assertEqual(
+            {item.invoice_number: item.requirement_id for item in preview.items if item.filter_status == "included"},
+            {"ETC2950": "TASK-REQ-0001", "ETC4175": "TASK-REQ-0001"},
+        )
+
+    def test_zip_preview_matches_requirement_to_four_invoice_amount_sum(self) -> None:
+        task = ready_task_with_requirement(amount="42.39", transaction_at="2026-04-03 18:14:27", invoice_count=4)
+
+        preview = preview_etc_zip_for_task(
+            task=task,
+            uploads=[
+                UploadedEtcZipFile(
+                    "ticket-root.zip",
+                    zip_bytes(
+                        {
+                            "april/xml/ETC1201.xml": etc_xml("ETC1201", issue_date="2026-04-03", total_amount="12.01"),
+                            "april/xml/ETC1708.xml": etc_xml("ETC1708", issue_date="2026-04-03", total_amount="17.08"),
+                            "april/xml/ETC0023.xml": etc_xml("ETC0023", issue_date="2026-04-03", total_amount="0.23"),
+                            "april/xml/ETC1307.xml": etc_xml("ETC1307", issue_date="2026-04-03", total_amount="13.07"),
+                            "april/xml/EXTRA.xml": etc_xml("EXTRA", issue_date="2026-04-03", total_amount="50.00"),
+                        }
+                    ),
+                )
+            ],
+        )
+
+        self.assertEqual(preview.blocking_issues, [])
+        self.assertEqual(preview.allowed_invoice_numbers, ["ETC0023", "ETC1201", "ETC1307", "ETC1708"])
+        included = [item for item in preview.items if item.filter_status == "included"]
+        self.assertEqual({item.invoice_number for item in included}, {"ETC1201", "ETC1708", "ETC0023", "ETC1307"})
+        self.assertTrue(all(item.requirement_id == "TASK-REQ-0001" for item in included))
+
+    def test_zip_preview_deduplicates_repeated_invoice_number_before_matching(self) -> None:
+        task = ready_task_with_requirement(amount="71.25", transaction_at="2026-04-08 18:57:17", invoice_count=2)
+
+        preview = preview_etc_zip_for_task(
+            task=task,
+            uploads=[
+                UploadedEtcZipFile(
+                    "ticket-root.zip",
+                    zip_bytes(
+                        {
+                            "package/xml/ETC2950.xml": etc_xml("ETC2950", issue_date="2026-04-08", total_amount="29.50"),
+                            "package/xml/copy-ETC2950.xml": etc_xml("ETC2950", issue_date="2026-04-08", total_amount="29.50"),
+                            "package/xml/ETC4175.xml": etc_xml("ETC4175", issue_date="2026-04-08", total_amount="41.75"),
+                        }
+                    ),
+                )
+            ],
+        )
+
+        self.assertEqual(preview.blocking_issues, [])
+        self.assertEqual(preview.allowed_invoice_numbers, ["ETC2950", "ETC4175"])
+        self.assertEqual([item.invoice_number for item in preview.items].count("ETC2950"), 2)
+        self.assertTrue(all(issue["error"] != "ambiguous_etc_invoice_match" for issue in preview.blocking_issues))
+
+    def test_zip_preview_blocks_multiple_distinct_exact_invoice_candidates(self) -> None:
+        task = ready_task_with_requirement(amount="25.00", transaction_at="2026-03-03 17:06:18", invoice_count=1)
+
+        preview = preview_etc_zip_for_task(
+            task=task,
+            uploads=[
+                UploadedEtcZipFile(
+                    "ticket-root.zip",
+                    zip_bytes(
+                        {
+                            "package/xml/ETC-A.xml": etc_xml("ETC-A", issue_date="2026-03-03", total_amount="25.00"),
+                            "package/xml/ETC-B.xml": etc_xml("ETC-B", issue_date="2026-03-03", total_amount="25.00"),
+                        }
+                    ),
+                )
+            ],
+        )
+
+        self.assertEqual(preview.allowed_invoice_numbers, [])
+        self.assertTrue(any(issue["error"] == "ambiguous_etc_invoice_match" for issue in preview.blocking_issues))
+        self.assertEqual(
+            {item.invoice_number: item.filter_status for item in preview.items},
+            {"ETC-A": "ambiguous_zip_match", "ETC-B": "ambiguous_zip_match"},
+        )
+
+    def test_zip_preview_requires_combination_length_to_match_invoice_count(self) -> None:
+        task = ready_task_with_requirement(amount="42.39", transaction_at="2026-04-03 18:14:27", invoice_count=4)
+
+        preview = preview_etc_zip_for_task(
+            task=task,
+            uploads=[
+                UploadedEtcZipFile(
+                    "ticket-root.zip",
+                    zip_bytes(
+                        {
+                            "package/xml/ETC2000.xml": etc_xml("ETC2000", issue_date="2026-04-03", total_amount="20.00"),
+                            "package/xml/ETC2239.xml": etc_xml("ETC2239", issue_date="2026-04-03", total_amount="22.39"),
+                        }
+                    ),
+                )
+            ],
+        )
+
+        self.assertEqual(preview.allowed_invoice_numbers, [])
+        missing_issue = next(issue for issue in preview.blocking_issues if issue["error"] == "missing_required_etc_invoice")
+        self.assertEqual(missing_issue["requirementId"], "TASK-REQ-0001")
+        self.assertEqual(missing_issue["transactionAt"], "2026-04-03 18:14:27")
+        self.assertEqual(missing_issue["transactionDate"], "2026-04-03")
+        self.assertEqual(missing_issue["amount"], "42.39")
+        self.assertEqual(missing_issue["vehiclePlate"], "云ADA0381")
+        self.assertEqual(missing_issue["invoiceCount"], 4)
+
+    def test_confirmed_requirement_zip_window_includes_linked_ticket_transaction_date(self) -> None:
+        service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))
+        task = service.create_task(title="ETC", created_by="alice")
+        statement_text = """
+中国建设银行信用卡账单
+2026-03-29 2026-03-29 3632 20260327高速通行费云南昆明南站云 CNY 23.50 23.50
+"""
+        task = service.apply_parse_result(
+            task_id=task.task_id,
+            parse_result=CcbCreditCardStatementParser().parse_text(file_id="CARD", text=statement_text),
+            actor="alice",
+        )
+        ticket_text = """
+票根网通行明细
+车牌号 云ADA0381
+交易时间 2026-03-27 16:29:49
+入口站 昆明南站
+出口站 九龙池站
+金额 23.50
+发票张数 1
+"""
+        task = service.apply_parse_result(
+            task_id=task.task_id,
+            parse_result=TicketRootPdfTextParser().parse_text(file_id="TICKET", text=ticket_text),
+            actor="alice",
+        )
+        card = task.credit_card_items[0]
+        ticket = task.ticket_root_items[0]
+        task = service.patch_item(
+            task_id=task.task_id,
+            item_id=card.item_id,
+            expected_version=task.version,
+            actor="alice",
+            payload={"action": "link_ticket", "ticketItemId": ticket.item_id},
+        )
+        task = service.patch_item(
+            task_id=task.task_id,
+            item_id=card.item_id,
+            expected_version=task.version,
+            actor="alice",
+            payload={"action": "set_manual_resolution", "manualResolution": "included_etc"},
+        )
+        confirmed = service.confirm_task(task_id=task.task_id, expected_version=task.version, actor="alice")
+
+        preview = preview_etc_zip_for_task(
+            task=confirmed,
+            uploads=[
+                UploadedEtcZipFile(
+                    "etc.zip",
+                    zip_bytes({"xml/ETC2350.xml": etc_xml("ETC2350", issue_date="2026-03-27", total_amount="23.50")}),
+                )
+            ],
+        )
+
+        self.assertEqual(preview.blocking_issues, [])
+        self.assertEqual(preview.allowed_invoice_numbers, ["ETC2350"])
+
+    def test_zip_preview_uses_global_assignment_when_exact_match_would_starve_later_requirement(self) -> None:
+        task = ready_task_with_requirement(amount="30.00", transaction_at="2026-04-08 18:00:00", invoice_count=2)
+        task.expected_etc_invoice_requirements.append(
+            ExpectedEtcInvoiceRequirement(
+                requirement_id="TASK-REQ-0002",
+                task_id="TASK",
+                credit_card_item_id="CARD-2",
+                ticket_root_item_id="TICKET-2",
+                vehicle_plate="云ADA0381",
+                transaction_at="2026-04-08 18:05:00",
+                date_window_start="2026-04-08",
+                date_window_end="2026-04-08",
+                amount=Decimal("30.00"),
+                invoice_count=1,
+            )
+        )
+
+        preview = preview_etc_zip_for_task(
+            task=task,
+            uploads=[
+                UploadedEtcZipFile(
+                    "ticket-root.zip",
+                    zip_bytes(
+                        {
+                            "package/xml/ETC1000.xml": etc_xml("ETC1000", issue_date="2026-04-08", total_amount="10.00"),
+                            "package/xml/ETC2000.xml": etc_xml("ETC2000", issue_date="2026-04-08", total_amount="20.00"),
+                            "package/xml/ETC3000.xml": etc_xml("ETC3000", issue_date="2026-04-08", total_amount="30.00"),
+                        }
+                    ),
+                )
+            ],
+        )
+
+        self.assertEqual(preview.blocking_issues, [])
+        self.assertEqual(preview.allowed_invoice_numbers, ["ETC1000", "ETC2000", "ETC3000"])
+        included_by_requirement = {
+            requirement_id: {
+                item.invoice_number
+                for item in preview.items
+                if item.requirement_id == requirement_id and item.filter_status == "included"
+            }
+            for requirement_id in {"TASK-REQ-0001", "TASK-REQ-0002"}
+        }
+        self.assertEqual(included_by_requirement["TASK-REQ-0001"], {"ETC1000", "ETC2000"})
+        self.assertEqual(included_by_requirement["TASK-REQ-0002"], {"ETC3000"})
+
+    def test_zip_preview_matches_single_invoice_package_to_multiple_requirements(self) -> None:
+        task = ready_task_with_requirement(
+            amount="57.95",
+            transaction_at="2026-04-02 13:30:29",
+            invoice_count=2,
+            plate="云A516HJ",
+        )
+        task.expected_etc_invoice_requirements.append(
+            ExpectedEtcInvoiceRequirement(
+                requirement_id="TASK-REQ-0002",
+                task_id="TASK",
+                credit_card_item_id="CARD-2",
+                ticket_root_item_id="TICKET-2",
+                vehicle_plate="云A516HJ",
+                transaction_at="2026-04-02 11:25:48",
+                date_window_start="2026-04-02",
+                date_window_end="2026-04-02",
+                amount=Decimal("88.86"),
+                invoice_count=1,
+            )
+        )
+
+        preview = preview_etc_zip_for_task(
+            task=task,
+            uploads=[
+                UploadedEtcZipFile(
+                    "ticket-root.zip",
+                    zip_bytes(
+                        {
+                            "20260407_通行费电子发票_2张.zip/invoice.zip/xml/ETC14638.xml": etc_xml(
+                                "ETC14638",
+                                issue_date="2026-04-02",
+                                plate_number="云A516HJ",
+                                total_amount="146.38",
+                            ),
+                            "20260407_通行费电子发票_2张.zip/invoice.zip/xml/ETC0043.xml": etc_xml(
+                                "ETC0043",
+                                issue_date="2026-04-02",
+                                plate_number="云A516HJ",
+                                total_amount="0.43",
+                            ),
+                            "extra/xml/EXTRA.xml": etc_xml(
+                                "EXTRA",
+                                issue_date="2026-04-02",
+                                plate_number="云A516HJ",
+                                total_amount="99.99",
+                            ),
+                        }
+                    ),
+                )
+            ],
+        )
+
+        self.assertEqual(preview.blocking_issues, [])
+        self.assertEqual(preview.allowed_invoice_numbers, ["ETC0043", "ETC14638"])
+        included = [item for item in preview.items if item.filter_status == "included"]
+        self.assertEqual({item.invoice_number for item in included}, {"ETC14638", "ETC0043"})
+        self.assertEqual({item.requirement_id for item in included}, {"TASK-REQ-0001+TASK-REQ-0002"})
+
+    def test_zip_preview_disambiguates_same_day_duplicate_amount_by_invoice_request_time(self) -> None:
+        task = ready_task_with_requirement(
+            amount="71.25",
+            transaction_at="2026-04-08 18:57:17",
+            invoice_count=2,
+        )
+        task.expected_etc_invoice_requirements.append(
+            ExpectedEtcInvoiceRequirement(
+                requirement_id="TASK-REQ-0002",
+                task_id="TASK",
+                credit_card_item_id="CARD-2",
+                ticket_root_item_id="TICKET-2",
+                vehicle_plate="云ADA0381",
+                transaction_at="2026-04-08 11:13:41",
+                date_window_start="2026-04-07",
+                date_window_end="2026-04-09",
+                amount=Decimal("71.25"),
+                invoice_count=2,
+            )
+        )
+
+        preview = preview_etc_zip_for_task(
+            task=task,
+            uploads=[
+                UploadedEtcZipFile(
+                    "ticket-root.zip",
+                    zip_bytes(
+                        {
+                            "20260408_通行费电子发票_2张.zip/invoice.zip/xml/ETC2950-A.xml": etc_xml(
+                                "ETC2950-A",
+                                issue_date="2026-04-08",
+                                request_time="2026-04-08 16:27:04",
+                                total_amount="29.50",
+                            ),
+                            "20260408_通行费电子发票_2张.zip/invoice.zip/xml/ETC4175-A.xml": etc_xml(
+                                "ETC4175-A",
+                                issue_date="2026-04-08",
+                                request_time="2026-04-08 16:27:04",
+                                total_amount="41.75",
+                            ),
+                            "20260410_通行费电子发票_2张.zip/invoice.zip/xml/ETC2935-B.xml": etc_xml(
+                                "ETC2935-B",
+                                issue_date="2026-04-08",
+                                request_time="2026-04-10 16:26:33",
+                                total_amount="29.35",
+                            ),
+                            "20260410_通行费电子发票_2张.zip/invoice.zip/xml/ETC4190-B.xml": etc_xml(
+                                "ETC4190-B",
+                                issue_date="2026-04-08",
+                                request_time="2026-04-10 16:26:32",
+                                total_amount="41.90",
+                            ),
+                        }
+                    ),
+                )
+            ],
+        )
+
+        self.assertEqual(preview.blocking_issues, [])
+        included_by_requirement = {
+            requirement_id: {
+                item.invoice_number
+                for item in preview.items
+                if item.requirement_id == requirement_id and item.filter_status == "included"
+            }
+            for requirement_id in {"TASK-REQ-0001", "TASK-REQ-0002"}
+        }
+        self.assertEqual(included_by_requirement["TASK-REQ-0001"], {"ETC2935-B", "ETC4190-B"})
+        self.assertEqual(included_by_requirement["TASK-REQ-0002"], {"ETC2950-A", "ETC4175-A"})
 
     def test_zip_preview_blocks_single_invoice_allocated_to_multiple_requirements(self) -> None:
         duplicate_ticket_text = TICKET_ROOT_TEXT + """

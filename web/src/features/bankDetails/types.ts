@@ -52,6 +52,10 @@ export type BankTransactionCategoryCode =
 
 export type BankTransactionCategoryCounts = Record<string, number> & { uncategorized: number };
 
+export type OaRelationTag = "有oa" | "无oa";
+
+export type InvoiceRelationTag = "有发票" | "无发票";
+
 export type BankDetailTransaction = {
   id: string;
   tradeTime: string;
@@ -79,6 +83,10 @@ export type BankDetailTransaction = {
   effectiveCategoryLabel: string | null;
   effectiveCategoryPath: string[];
   effectiveCategorySource: string;
+  oaRelationTag: OaRelationTag;
+  invoiceRelationTag: InvoiceRelationTag;
+  relationTags: string[];
+  relationCaseId: string | null;
 };
 
 export type BankDetailTransactionsResponse = {
@@ -98,6 +106,7 @@ export type BankDetailTransactionsRequest = {
   accountKey?: string | null;
   dateFrom?: string | null;
   dateTo?: string | null;
+  keyword?: string | null;
   page?: number;
   pageSize?: number;
   signal?: AbortSignal;

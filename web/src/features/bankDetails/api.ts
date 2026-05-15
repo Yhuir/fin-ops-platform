@@ -7,6 +7,8 @@ import type {
   BankDetailTransactionsResponse,
   BankTransactionCategoryCode,
   BankTransactionCategoryCounts,
+  InvoiceRelationTag,
+  OaRelationTag,
   SaveBankTransactionCategoriesRequest,
   SaveBankTransactionCategoriesResponse,
 } from "./types";
@@ -56,6 +58,10 @@ type ApiBankDetailTransaction = {
   effective_category_label?: string | null;
   effective_category_path?: string[];
   effective_category_source?: string | null;
+  oa_relation_tag?: string | null;
+  invoice_relation_tag?: string | null;
+  relation_tags?: string[];
+  relation_case_id?: string | null;
 };
 
 type ApiBankDetailTransactionsResponse = {
@@ -128,7 +134,20 @@ function mapAccount(account: ApiBankDetailAccount): BankDetailAccount {
   };
 }
 
+function normalizeOaRelationTag(value: unknown): OaRelationTag {
+  return value === "有oa" ? "有oa" : "无oa";
+}
+
+function normalizeInvoiceRelationTag(value: unknown): InvoiceRelationTag {
+  return value === "有发票" ? "有发票" : "无发票";
+}
+
 function mapTransaction(row: ApiBankDetailTransaction): BankDetailTransaction {
+  const relationTags = Array.isArray(row.relation_tags)
+    ? row.relation_tags.map(String).map((tag) => tag.trim()).filter(Boolean)
+    : [];
+  const oaRelationTag = normalizeOaRelationTag(row.oa_relation_tag ?? relationTags[0]);
+  const invoiceRelationTag = normalizeInvoiceRelationTag(row.invoice_relation_tag ?? relationTags[1]);
   return {
     id: row.id,
     tradeTime: row.trade_time,
@@ -156,6 +175,12 @@ function mapTransaction(row: ApiBankDetailTransaction): BankDetailTransaction {
     effectiveCategoryLabel: row.effective_category_label ?? null,
     effectiveCategoryPath: Array.isArray(row.effective_category_path) ? row.effective_category_path.map(String).filter(Boolean) : [],
     effectiveCategorySource: row.effective_category_source ?? "",
+    oaRelationTag,
+    invoiceRelationTag,
+    relationTags: [oaRelationTag, invoiceRelationTag],
+    relationCaseId: typeof row.relation_case_id === "string" && row.relation_case_id.trim()
+      ? row.relation_case_id.trim()
+      : null,
   };
 }
 
@@ -199,6 +224,7 @@ export async function fetchBankDetailTransactions({
   accountKey,
   dateFrom,
   dateTo,
+  keyword,
   page,
   pageSize,
   signal,
@@ -212,6 +238,10 @@ export async function fetchBankDetailTransactions({
   }
   if (dateTo) {
     params.set("date_to", dateTo);
+  }
+  const normalizedKeyword = keyword?.trim();
+  if (normalizedKeyword) {
+    params.set("keyword", normalizedKeyword);
   }
   if (page) {
     params.set("page", String(page));

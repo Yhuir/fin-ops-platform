@@ -121,6 +121,28 @@ export type EtcImportItem = {
   fileName: string;
   status: EtcImportItemStatus | string;
   reason: string;
+  filterStatus?: string;
+  requirementId?: string | null;
+};
+
+export type EtcReconciliationBlockingIssue = {
+  error: string;
+  requirementId: string;
+  transactionAt?: string;
+  transactionDate?: string;
+  amount?: string;
+  vehiclePlate?: string | null;
+  invoiceCount?: number | null;
+  dateWindowStart?: string;
+  dateWindowEnd?: string;
+};
+
+export type EtcReconciliationFilterPreview = {
+  taskId: string;
+  taskVersion: number;
+  confirmedItemSetHash: string;
+  allowedInvoiceNumbers: string[];
+  blockingIssues: EtcReconciliationBlockingIssue[];
 };
 
 export type EtcImportPreviewResult = {
@@ -130,6 +152,8 @@ export type EtcImportPreviewResult = {
   attachmentsCompleted: number;
   failed: number;
   audit?: ImportPreviewAuditCounts;
+  importAudit?: ImportPreviewAuditCounts;
+  reconciliationFilter?: EtcReconciliationFilterPreview;
   items: EtcImportItem[];
 };
 
@@ -257,6 +281,14 @@ export type EtcReconciliationTask = {
   canConfirm: boolean;
   vehiclePlates: string[];
   confirmedItemSetHash: string;
+  importBatchId: string;
+  etcBatchId: string;
+  hasImportedInvoices: boolean;
+  importedInvoiceCount: number;
+  importedInvoiceAmount: string;
+  oaDraftBatchId: string;
+  oaDraftStatus: string;
+  submittedConfirmedAt: string;
   creditCardItems: EtcCreditCardItem[];
   ticketRootItems: EtcTicketRootItem[];
   supplementEvidences: EtcSupplementEvidence[];
@@ -277,6 +309,20 @@ export type EtcReconciliationTaskSummary = Pick<
   | "supplementCount"
   | "vehiclePlates"
 >;
+
+export type EtcImportBlocker = {
+  code: string;
+  message: string;
+};
+
+export type EtcUnavailableReconciliationTaskSummary = EtcReconciliationTaskSummary & {
+  importBlockers: EtcImportBlocker[];
+};
+
+export type EtcReadyReconciliationTasksPayload = {
+  items: EtcReconciliationTaskSummary[];
+  unavailableItems: EtcUnavailableReconciliationTaskSummary[];
+};
 
 export type EtcReconciliationTaskListPayload = {
   items: EtcReconciliationTask[];

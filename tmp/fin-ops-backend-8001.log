@@ -1,0 +1,21 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/yu/Desktop/fin-ops-platform/backend/src/fin_ops_platform/app/main.py", line 35, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "/Users/yu/Desktop/fin-ops-platform/backend/src/fin_ops_platform/app/main.py", line 30, in main
+    run_http_server(args.host, args.port, app)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/yu/Desktop/fin-ops-platform/backend/src/fin_ops_platform/app/server.py", line 12677, in run_http_server
+    server = ThreadingHTTPServer((host, port), handler_factory)
+  File "/opt/miniconda3/lib/python3.13/socketserver.py", line 457, in __init__
+    self.server_bind()
+    ~~~~~~~~~~~~~~~~^^
+  File "/opt/miniconda3/lib/python3.13/http/server.py", line 136, in server_bind
+    socketserver.TCPServer.server_bind(self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/opt/miniconda3/lib/python3.13/socketserver.py", line 478, in server_bind
+    self.socket.bind(self.server_address)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+OSError: [Errno 48] Address already in use

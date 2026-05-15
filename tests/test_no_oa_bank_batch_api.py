@@ -54,8 +54,8 @@ class NoOaBankBatchApiTests(unittest.TestCase):
             app._bank_transaction_category_service.apply_updates(updates, actor="tester")
         return app
 
-    def _list_batches(self, app):
-        response = app.handle_request("GET", "/api/no-oa-bank-batches")
+    def _list_batches(self, app, query: str = ""):
+        response = app.handle_request("GET", f"/api/no-oa-bank-batches{query}")
         self.assertEqual(response.status_code, 200, response.body)
         return json.loads(response.body)
 
@@ -73,6 +73,39 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["draft"], 1)
         self.assertEqual(payload["batches"][0]["row_count"], 2)
         self.assertEqual(payload["batches"][0]["total_amount"], "5.50")
+        self.assertEqual(payload["batches"][0]["status_bucket"], "unsubmitted")
+        self.assertEqual(payload["batches"][0]["tag_counts"], {"fee": 2})
+        self.assertEqual(payload["batches"][0]["direction_counts"], {"income": 0, "expense": 2})
+        self.assertTrue(payload["batches"][0]["can_submit"])
+        self.assertFalse(payload["batches"][0]["can_withdraw"])
+        self.assertEqual(payload["batches"][0]["blocked_reason"], "")
+
+    def test_list_summary_always_returns_fixed_five_no_oa_categories(self) -> None:
+        app = self._app_with_transactions(
+            [
+                bank_transaction("bank-202603-fee-1", amount="3.00"),
+                bank_transaction("bank-202604-salary-1", amount="1000.00", trade_time="2026-04-10T09:00:00"),
+            ],
+            categories={"bank-202603-fee-1": "fee", "bank-202604-salary-1": "salary"},
+        )
+
+        payload = self._list_batches(app)
+
+        categories = payload["summary"]["categories"]
+        self.assertEqual(
+            [category["code"] for category in categories],
+            ["fee", "salary", "holiday_bonus", "bonus", "internal_transfer"],
+        )
+        self.assertEqual(
+            [category["label"] for category in categories],
+            ["手续费", "工资", "过节费", "奖金", "内部往来款"],
+        )
+        by_code = {category["code"]: category for category in categories}
+        self.assertEqual(by_code["fee"]["total"], 1)
+        self.assertEqual(by_code["salary"]["total"], 1)
+        self.assertEqual(by_code["bonus"]["total"], 0)
+        self.assertEqual(by_code["bonus"]["draft"], 0)
+        self.assertEqual(by_code["internal_transfer"]["total_amount"], "0.00")
 
     def test_detail_returns_batch_and_serialized_rows(self) -> None:
         app = self._app_with_transactions([bank_transaction("bank-202603-fee-1", amount="3.00")])
@@ -83,8 +116,62 @@ class NoOaBankBatchApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["batch"]["batch_id"], batch_id)
+        self.assertEqual(payload["tag_counts"], {"fee": 1})
+        self.assertEqual(payload["direction_counts"], {"income": 0, "expense": 1})
         self.assertEqual(payload["rows"][0]["id"], "bank-202603-fee-1")
         self.assertEqual(payload["rows"][0]["category_code"], "fee")
+        self.assertEqual(payload["rows"][0]["category_label"], "手续费")
+        self.assertEqual(payload["rows"][0]["category_source"], "manual")
+
+    def test_bucket_filter_returns_unsubmitted_and_submitted_after_category_drift(self) -> None:
+        app = self._app_with_transactions(
+            [
+                bank_transaction("bank-202603-fee-1", amount="3.00"),
+                bank_transaction(
+                    "bank-202604-salary-1",
+                    category_code="salary",
+                    amount="1000.00",
+                    trade_time="2026-04-10T09:00:00",
+                ),
+            ],
+            categories={"bank-202603-fee-1": "fee", "bank-202604-salary-1": "salary"},
+        )
+        batches = self._list_batches(app)["batches"]
+        fee_batch = next(batch for batch in batches if batch["batch_type"] == "fee")
+        salary_batch = next(batch for batch in batches if batch["batch_type"] == "salary")
+
+        submit_response = app.handle_request(
+            "POST",
+            f"/api/no-oa-bank-batches/{fee_batch['batch_id']}/submit",
+            body=json.dumps({"expected_version": fee_batch["version"]}),
+        )
+        submitted = json.loads(submit_response.body)["batch"]
+        submitted_payload = self._list_batches(app, "?bucket=submitted")
+        self.assertEqual([batch["batch_id"] for batch in submitted_payload["batches"]], [submitted["batch_id"]])
+        self.assertEqual(submitted_payload["summary"]["submitted_count"], 1)
+        self.assertEqual(submitted_payload["summary"]["draft_count"], 1)
+        app._bank_transaction_category_service.apply_updates(
+            [{"transaction_id": "bank-202603-fee-1", "category_code": "external_turnover"}],
+            actor="tester",
+        )
+        stale = self._list_batches(app, "?bucket=unsubmitted")["batches"][0]
+        withdraw_response = app.handle_request(
+            "POST",
+            f"/api/no-oa-bank-batches/{stale['batch_id']}/withdraw",
+            body=json.dumps({"expected_version": stale["version"], "reason": "测试"}),
+        )
+        self.assertEqual(withdraw_response.status_code, 400, withdraw_response.body)
+        self.assertEqual(json.loads(withdraw_response.body)["error"], "stale_no_oa_bank_batch_has_no_active_relation_to_withdraw")
+
+        unsubmitted = self._list_batches(app, "?bucket=unsubmitted")
+        withdrawn_payload = self._list_batches(app, "?bucket=withdrawn")
+        all_payload = self._list_batches(app, "?bucket=all")
+
+        self.assertEqual([batch["batch_id"] for batch in unsubmitted["batches"]], [submitted["batch_id"], salary_batch["batch_id"]])
+        self.assertEqual(withdrawn_payload["batches"], [])
+        self.assertEqual({batch["status_bucket"] for batch in all_payload["batches"]}, {"unsubmitted"})
+        self.assertEqual(withdrawn_payload["summary"]["withdrawn_count"], 0)
+        self.assertEqual(withdrawn_payload["summary"]["draft_count"], 1)
 
     def test_submit_persists_batch_and_pair_relation_and_invalidates_workbench(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -101,6 +188,8 @@ class NoOaBankBatchApiTests(unittest.TestCase):
 
             self.assertEqual(response.status_code, 200, response.body)
             self.assertEqual(payload["batch"]["status"], "submitted")
+            self.assertEqual(payload["batch"]["status_bucket"], "submitted")
+            self.assertTrue(payload["batch"]["can_withdraw"])
             self.assertEqual(payload["pair_relation"]["relation_mode"], "no_oa_bank_batch")
             self.assertEqual(payload["affected_months"], ["2026-03"])
             self.assertTrue(payload["workbench_rebuild_queued"])
@@ -130,6 +219,7 @@ class NoOaBankBatchApiTests(unittest.TestCase):
 
             self.assertEqual(response.status_code, 200, response.body)
             self.assertEqual(payload["batch"]["status"], "withdrawn")
+            self.assertEqual(payload["affected_months"], ["2026-03"])
             self.assertEqual(payload["pair_relation"]["status"], "cancelled")
             self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id(submitted["relation_case_id"]))
             self.assertEqual(app._state_store.load_no_oa_bank_batches()["batches"][submitted["batch_id"]]["status"], "withdrawn")
@@ -174,8 +264,39 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.body)
         self.assertEqual(payload["summary"]["submitted"], 1)
         self.assertEqual(payload["summary"]["failed"], 1)
+        self.assertEqual(payload["affected_months"], ["2026-03"])
         self.assertEqual([result["status"] for result in payload["results"]], ["submitted", "failed"])
         self.assertEqual(payload["results"][1]["error"], "no_oa_bank_batch_version_conflict")
+
+    def test_stale_batch_after_category_drift_clears_relation_and_is_not_withdrawable(self) -> None:
+        app = self._app_with_transactions([bank_transaction("bank-202603-fee-1", amount="3.00")])
+        batch = self._list_batches(app)["batches"][0]
+        submit_response = app.handle_request(
+            "POST",
+            f"/api/no-oa-bank-batches/{batch['batch_id']}/submit",
+            body=json.dumps({"expected_version": batch["version"]}),
+        )
+        submitted = json.loads(submit_response.body)["batch"]
+        app._bank_transaction_category_service.apply_updates(
+            [{"transaction_id": "bank-202603-fee-1", "category_code": "external_turnover"}],
+            actor="tester",
+        )
+
+        stale_payload = self._list_batches(app, "?bucket=unsubmitted")
+        stale = stale_payload["batches"][0]
+        response = app.handle_request(
+            "POST",
+            f"/api/no-oa-bank-batches/{stale['batch_id']}/withdraw",
+            body=json.dumps({"expected_version": stale["version"], "reason": "源分类变化"}),
+        )
+        payload = json.loads(response.body)
+
+        self.assertEqual(stale["batch_id"], submitted["batch_id"])
+        self.assertEqual(stale["status"], "stale")
+        self.assertFalse(stale["can_withdraw"])
+        self.assertEqual(response.status_code, 400, response.body)
+        self.assertEqual(payload["error"], "stale_no_oa_bank_batch_has_no_active_relation_to_withdraw")
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id(submitted["relation_case_id"]))
 
     def test_submit_version_conflict_returns_409(self) -> None:
         app = self._app_with_transactions([bank_transaction("bank-202603-fee-1", amount="3.00")])

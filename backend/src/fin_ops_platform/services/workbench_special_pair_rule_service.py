@@ -7,6 +7,10 @@ from typing import Any
 
 from fin_ops_platform.services.import_file_service import is_company_identity
 from fin_ops_platform.services.live_workbench_service import INTERNAL_TRANSFER_MATCH_WINDOW, clean_account_no
+from fin_ops_platform.services.no_oa_managed_rule_policy import (
+    managed_no_oa_batch_type_for_mode,
+    workbench_mode_may_auto_close,
+)
 from fin_ops_platform.services.workbench_special_rule_detectors import (
     CASH_COUNTERPARTY_KEYWORDS,
     CASH_FULL_TEXT_KEYWORDS,
@@ -72,6 +76,13 @@ class WorkbenchSpecialPairRuleService:
             "cost_policy": str(evaluation.get("cost_policy") or "").strip(),
             "evidence": evidence,
         }
+        managed_batch_type = managed_no_oa_batch_type_for_mode(rule_code)
+        if managed_batch_type is not None:
+            evidence["workbench_auto_close_allowed"] = False
+            evidence["managed_by"] = "no_oa_bank_batch"
+            special_metadata["no_oa_managed"] = True
+            special_metadata["managed_by"] = "no_oa_bank_batch"
+            special_metadata["managed_batch_type"] = managed_batch_type
         if str(evaluation.get("cost_policy") or "").strip() == "exclude_all":
             special_metadata["cost_excluded"] = True
         if rule_code == INTERNAL_TRANSFER_PAIR:
@@ -101,7 +112,7 @@ class WorkbenchSpecialPairRuleService:
                 {"id": row_id, "type": "invoice"}
                 for row_id in list(evaluation.get("invoice_row_ids") or [])
             ],
-            status=str(evaluation.get("status") or ""),
+            status=self._status_for_workbench_candidate(rule_code, str(evaluation.get("status") or "")),
             confidence=str(evaluation.get("confidence") or ""),
             amount=self._amount_from_value(evaluation.get("amount")) or ZERO,
             explanation=self._explanation_for_evaluation(evaluation),
@@ -109,6 +120,13 @@ class WorkbenchSpecialPairRuleService:
             tags=list(evaluation.get("display_tags") or []),
             special_metadata=special_metadata,
         )
+
+    @staticmethod
+    def _status_for_workbench_candidate(rule_code: str, status: str) -> str:
+        resolved_status = str(status or "").strip()
+        if resolved_status == "auto_closed" and not workbench_mode_may_auto_close(rule_code):
+            return "suppressed"
+        return resolved_status
 
     @staticmethod
     def _explanation_for_evaluation(evaluation: dict[str, Any]) -> str:
@@ -147,7 +165,7 @@ class WorkbenchSpecialPairRuleService:
                     scope_month,
                     rule_code=SALARY_PERSONAL_AUTO_MATCH,
                     rows=[bank_row],
-                    status="auto_closed",
+                    status=self._status_for_workbench_candidate(SALARY_PERSONAL_AUTO_MATCH, "auto_closed"),
                     confidence="high",
                     amount=amount,
                     explanation="Detected salary payment to an individual counterparty from bank summary or remark.",
@@ -156,6 +174,9 @@ class WorkbenchSpecialPairRuleService:
                     special_metadata={
                         "special_type": SALARY_PERSONAL_AUTO_MATCH,
                         "cost_policy": "normal",
+                        "no_oa_managed": True,
+                        "managed_by": "no_oa_bank_batch",
+                        "managed_batch_type": "salary",
                     },
                 )
             )
@@ -203,7 +224,7 @@ class WorkbenchSpecialPairRuleService:
                     scope_month,
                     rule_code=INTERNAL_TRANSFER_PAIR,
                     rows=[outflow, inflow],
-                    status="auto_closed",
+                    status=self._status_for_workbench_candidate(INTERNAL_TRANSFER_PAIR, "auto_closed"),
                     confidence="high",
                     amount=outflow_amount,
                     explanation="Detected equal internal transfer between different company bank accounts within the time window.",
@@ -213,6 +234,9 @@ class WorkbenchSpecialPairRuleService:
                         "special_type": INTERNAL_TRANSFER_PAIR,
                         "cost_policy": "exclude_all",
                         "match_window_hours": int(INTERNAL_TRANSFER_MATCH_WINDOW.total_seconds() // 3600),
+                        "no_oa_managed": True,
+                        "managed_by": "no_oa_bank_batch",
+                        "managed_batch_type": "internal_transfer",
                     },
                 )
             )

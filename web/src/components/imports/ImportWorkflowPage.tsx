@@ -40,7 +40,13 @@ import type {
   ImportRowDecision,
   ImportSessionPayload,
 } from "../../features/imports/types";
-import type { EtcImportItem, EtcImportPreviewResult, EtcReconciliationTaskSummary } from "../../features/etc/types";
+import type {
+  EtcImportItem,
+  EtcImportPreviewResult,
+  EtcReconciliationBlockingIssue,
+  EtcReconciliationTaskSummary,
+  EtcUnavailableReconciliationTaskSummary,
+} from "../../features/etc/types";
 import type { BankAccountMapping } from "../../features/workbench/types";
 import { useImportWorkflowDraft } from "../../contexts/ImportWorkflowDraftContext";
 import type { FileSelectionState } from "../../contexts/ImportWorkflowDraftContext";
@@ -78,6 +84,7 @@ type ImportPreviewDetailGridRow = ImportPreviewDetailRow & {
 type EtcPreviewRow = EtcImportItem & {
   id: string;
   statusLabel: string;
+  filterStatusLabel: string;
 };
 
 const WORKBENCH_VIEW_MONTH = "all";
@@ -103,6 +110,14 @@ const ETC_IMPORT_STATUS_LABELS: Record<string, string> = {
   duplicate_skipped: "重复跳过",
   attachment_completed: "附件补齐",
   failed: "异常",
+};
+
+const ETC_FILTER_STATUS_LABELS: Record<string, string> = {
+  included: "本次导入",
+  excluded_extra_zip_invoice: "不在任务内",
+  ambiguous_zip_match: "命中冲突",
+  duplicate_requirement_invoice_match: "重复命中",
+  not_in_reconciliation_preview: "未筛选",
 };
 
 const IMPORT_ROW_DECISION_LABELS: Record<string, string> = {
@@ -185,6 +200,13 @@ function etcStatusLabel(status: string) {
   return ETC_IMPORT_STATUS_LABELS[status] ?? status;
 }
 
+function etcFilterStatusLabel(status?: string) {
+  if (!status) {
+    return "--";
+  }
+  return ETC_FILTER_STATUS_LABELS[status] ?? status;
+}
+
 function importRowDecisionLabel(decision?: string | null) {
   if (!decision) {
     return "--";
@@ -213,6 +235,18 @@ function displayValue(value?: string | number | null) {
   return String(value);
 }
 
+function isMissingEtcRequirementIssue(issue: EtcReconciliationBlockingIssue) {
+  return issue.error === "missing_required_etc_invoice";
+}
+
+function formatMissingRequirementLine(issue: EtcReconciliationBlockingIssue) {
+  const transactionAt = displayValue(issue.transactionAt || issue.transactionDate);
+  const amount = displayValue(issue.amount);
+  const plate = displayValue(issue.vehiclePlate);
+  const invoiceCount = issue.invoiceCount ? ` / ${issue.invoiceCount} 张` : "";
+  return `${transactionAt} / ${amount} / ${plate}${invoiceCount}`;
+}
+
 function formatEtcRejectedMessage(count: number) {
   return `ETC发票导入仅支持 zip 文件，已拒绝 ${count} 个非 zip 文件。`;
 }
@@ -233,6 +267,28 @@ function buildEtcTaskOptionLabel(task: EtcReconciliationTaskSummary) {
   const plates = task.vehiclePlates.length > 0 ? ` / ${task.vehiclePlates.join("、")}` : "";
   const amount = task.oaTotalAmount ? ` / OA ${task.oaTotalAmount}` : "";
   return `${task.title || task.taskId} / ${period} / ETC票 ${task.etcInvoiceCount} + 补充凭证 ${task.supplementCount}${amount}${plates}`;
+}
+
+function buildUnavailableEtcTaskReason(task: EtcUnavailableReconciliationTaskSummary) {
+  const explicitMessages = task.importBlockers
+    .map((blocker) => blocker.message.trim())
+    .filter(Boolean);
+  if (explicitMessages.length > 0) {
+    return explicitMessages.join("；");
+  }
+  if (task.status === "reviewing" || task.status === "draft") {
+    return "任务尚未确认，请先在 ETC 对账页确认对账。";
+  }
+  if (task.status === "importing") {
+    return "任务正在导入中，请等待导入完成。";
+  }
+  if (task.status === "imported") {
+    return "任务已导入 ETC 发票；如需重导，请先在 ETC 对账页移除已导入发票。";
+  }
+  if (task.status === "closed") {
+    return "任务已关闭，不能导入。";
+  }
+  return "任务当前状态不可导入。";
 }
 
 function formatSelectedBankAccountLabel(file: Pick<ImportFilePreview, "selectedBankName" | "selectedBankLast4">) {
@@ -504,6 +560,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   } = draft;
   const [bankOptions, setBankOptions] = useState<BankAccountMapping[]>([]);
   const [readyEtcTasks, setReadyEtcTasks] = useState<EtcReconciliationTaskSummary[]>([]);
+  const [unavailableEtcTasks, setUnavailableEtcTasks] = useState<EtcUnavailableReconciliationTaskSummary[]>([]);
   const [readyEtcTasksLoading, setReadyEtcTasksLoading] = useState(mode === "etc_invoice");
   const [settingsLoading, setSettingsLoading] = useState(mode === "bank_transaction");
   const [conflictDialogOpen, setConflictDialogOpen] = useState(false);
@@ -548,17 +605,19 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     const controller = new AbortController();
     if (mode !== "etc_invoice") {
       setReadyEtcTasks([]);
+      setUnavailableEtcTasks([]);
       setReadyEtcTasksLoading(false);
       return () => controller.abort();
     }
 
     setReadyEtcTasksLoading(true);
     fetchReadyEtcReconciliationTasks(controller.signal)
-      .then((tasks) => {
+      .then((payload) => {
         if (controller.signal.aborted) {
           return;
         }
-        setReadyEtcTasks(tasks);
+        setReadyEtcTasks(payload.items);
+        setUnavailableEtcTasks(payload.unavailableItems);
       })
       .catch((error) => {
         if (!controller.signal.aborted) {
@@ -650,10 +709,19 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     () => previewPayload?.files.filter(canConfirmFile).map((file) => file.id) ?? [],
     [previewPayload],
   );
+  const etcBlockingIssues = useMemo(
+    () => etcPreviewPayload?.reconciliationFilter?.blockingIssues ?? [],
+    [etcPreviewPayload],
+  );
+  const missingEtcRequirementIssues = useMemo(
+    () => etcBlockingIssues.filter(isMissingEtcRequirementIssue),
+    [etcBlockingIssues],
+  );
   const canConfirm = confirmableFileIds.length > 0 && !isPreviewing && !isConfirming;
   const canConfirmEtc = Boolean(etcPreviewPayload?.sessionId)
     && Boolean(selectedEtcTaskId)
     && Boolean(selectedEtcTask)
+    && etcBlockingIssues.length === 0
     && !etcImported
     && !isPreviewing
     && !isConfirming;
@@ -677,8 +745,8 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   const previewAudit = useMemo(() => importSessionAudit(previewPayload), [previewPayload]);
   const etcPreviewAudit = useMemo(() => etcAudit(etcPreviewPayload), [etcPreviewPayload]);
   const confirmAuditMessage = useMemo(
-    () => formatConfirmAuditMessage(mode === "etc_invoice" ? etcPreviewAudit : previewAudit),
-    [etcPreviewAudit, mode, previewAudit],
+    () => formatConfirmAuditMessage(mode === "etc_invoice" ? (etcPreviewPayload?.importAudit ?? etcPreviewAudit) : previewAudit),
+    [etcPreviewAudit, etcPreviewPayload?.importAudit, mode, previewAudit],
   );
 
   const previewRows = useMemo<ImportFilePreviewRow[]>(() => (
@@ -715,6 +783,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       ...item,
       id: `${item.invoiceNumber || item.fileName || "etc"}-${index}`,
       statusLabel: etcStatusLabel(item.status),
+      filterStatusLabel: etcFilterStatusLabel(item.filterStatus),
     })) ?? []
   ), [etcPreviewPayload]);
 
@@ -754,6 +823,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     { field: "invoiceNumber", headerName: "发票号", flex: 1, minWidth: 180 },
     { field: "fileName", headerName: "文件", flex: 1.2, minWidth: 220 },
     { field: "statusLabel", headerName: "状态", width: 120 },
+    { field: "filterStatusLabel", headerName: "对账筛选", width: 130 },
     { field: "reason", headerName: "原因", flex: 1.6, minWidth: 260 },
   ], []);
 
@@ -1052,7 +1122,36 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
           {!settingsLoading && !canUseBankImport ? <Alert severity="warning">设置里还没有银行账户映射，请先在设置中维护银行。</Alert> : null}
           {mode === "etc_invoice" && readyEtcTasksLoading ? <Alert severity="info">正在加载可导入的 ETC 对账任务...</Alert> : null}
           {mode === "etc_invoice" && !readyEtcTasksLoading && readyEtcTasks.length === 0 ? (
-            <Alert severity="warning">当前没有已确认且可导入的 ETC 对账任务。导入页不能新建任务，请先在 ETC 对账页完成确认。</Alert>
+            <Alert severity="warning">
+              <Stack spacing={1}>
+                <Typography variant="body2" fontWeight={700}>
+                  当前没有已确认且可导入的 ETC 对账任务。导入页不能新建任务，请先在 ETC 对账页完成确认。
+                </Typography>
+                {unavailableEtcTasks.length > 0 ? (
+                  <Stack spacing={0.75}>
+                    <Typography variant="caption" color="text.secondary">
+                      已找到 {unavailableEtcTasks.length} 个 ETC 对账任务，但当前不可导入：
+                    </Typography>
+                    {unavailableEtcTasks.slice(0, 5).map((task) => (
+                      <Stack
+                        key={task.taskId}
+                        direction={{ xs: "column", sm: "row" }}
+                        spacing={0.75}
+                        sx={{ alignItems: { xs: "flex-start", sm: "center" } }}
+                      >
+                        <Chip size="small" label={`${task.title || task.taskId} / ${task.status}`} />
+                        <Typography variant="caption">{buildUnavailableEtcTaskReason(task)}</Typography>
+                      </Stack>
+                    ))}
+                    {unavailableEtcTasks.length > 5 ? (
+                      <Typography variant="caption" color="text.secondary">
+                        还有 {unavailableEtcTasks.length - 5} 个不可导入任务，请到 ETC 对账页处理。
+                      </Typography>
+                    ) : null}
+                  </Stack>
+                ) : null}
+              </Stack>
+            </Alert>
           ) : null}
           {mode === "etc_invoice" && !readyEtcTasksLoading && readyEtcTasks.length > 0 && !selectedEtcTask ? (
             <Alert severity="warning">请选择已确认的 ETC 对账任务后再预览 ETC zip。</Alert>
@@ -1254,11 +1353,40 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                     <AuditSummaryCards audit={etcPreviewAudit} />
                     {etcPreviewPayload ? (
                       <Stack direction="row" flexWrap="wrap" gap={1}>
-                        <Chip color="success" label={`新增 ${etcPreviewPayload.imported}`} />
-                        <Chip label={`重复跳过 ${etcPreviewPayload.duplicatesSkipped}`} />
-                        <Chip color="info" label={`附件补齐 ${etcPreviewPayload.attachmentsCompleted}`} />
+                        <Chip color="success" label={`本次导入新增 ${etcPreviewPayload.imported}`} />
+                        <Chip label={`本次重复跳过 ${etcPreviewPayload.duplicatesSkipped}`} />
+                        <Chip color="info" label={`本次附件补齐 ${etcPreviewPayload.attachmentsCompleted}`} />
                         <Chip color={etcPreviewPayload.failed > 0 ? "warning" : "default"} label={`异常 ${etcPreviewPayload.failed}`} />
                       </Stack>
+                    ) : null}
+                    {missingEtcRequirementIssues.length > 0 ? (
+                      <Alert severity="warning" aria-label="ETC对账任务缺失项">
+                        <Stack spacing={1}>
+                          <Typography fontWeight={800}>ETC对账任务缺失项</Typography>
+                          <Stack spacing={0.75}>
+                            {missingEtcRequirementIssues.map((issue) => (
+                              <Paper
+                                key={issue.requirementId || formatMissingRequirementLine(issue)}
+                                variant="outlined"
+                                sx={{ p: 1, borderColor: "#f59e0b", bgcolor: "#fff7ed" }}
+                              >
+                                <Stack direction="row" flexWrap="wrap" gap={1} alignItems="center">
+                                  <Chip size="small" color="warning" label={displayValue(issue.transactionAt || issue.transactionDate)} />
+                                  <Chip size="small" label={displayValue(issue.amount)} />
+                                  <Chip size="small" label={displayValue(issue.vehiclePlate)} />
+                                  {issue.invoiceCount ? <Chip size="small" label={`${issue.invoiceCount} 张`} /> : null}
+                                  <Typography variant="body2" color="text.secondary">
+                                    {issue.requirementId}
+                                  </Typography>
+                                </Stack>
+                              </Paper>
+                            ))}
+                          </Stack>
+                        </Stack>
+                      </Alert>
+                    ) : null}
+                    {etcBlockingIssues.length > 0 && missingEtcRequirementIssues.length === 0 ? (
+                      <Alert severity="warning">ETC 对账任务仍有 {etcBlockingIssues.length} 个阻塞项，请处理后重新预览。</Alert>
                     ) : null}
                     <Box sx={{ height: 420, width: "100%" }}>
                       <DataGrid

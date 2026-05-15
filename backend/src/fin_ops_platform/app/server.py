@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -45,6 +46,9 @@ from fin_ops_platform.services.app_health_service import AppHealthService
 from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
+from fin_ops_platform.services.bank_details_relation_tag_projection_service import (
+    BankDetailsRelationTagProjectionService,
+)
 from fin_ops_platform.services.bank_details_service import BankDetailsService
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_service import (
@@ -86,7 +90,7 @@ from fin_ops_platform.services.etc_document_parsers import (
     TicketRootClipboardTextParser,
     TicketRootDocumentParser,
 )
-from fin_ops_platform.services.etc_reconciliation_models import SourceFileKind
+from fin_ops_platform.services.etc_reconciliation_models import FileParseResult, ParseIssue, ParseIssueSeverity, SourceFileKind
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
 from fin_ops_platform.services.etc_reconciliation_zip_filter import (
     EtcZipFilterPreview,
@@ -108,6 +112,12 @@ from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, load_mong
 from fin_ops_platform.services.no_oa_bank_batch_service import (
     NO_OA_BANK_BATCH_RELATION_MODE,
     NoOaBankBatchService,
+)
+from fin_ops_platform.services.no_oa_managed_rule_policy import (
+    NO_OA_MANAGED_BATCH_TYPE_ORDER,
+    NO_OA_MANAGED_LABELS,
+    is_no_oa_managed_old_relation_mode,
+    workbench_mode_may_auto_close,
 )
 from fin_ops_platform.services.oa_identity_service import (
     OAIdentityConfigurationError,
@@ -176,8 +186,6 @@ CASH_TICKET_PURCHASE_MODE = "cash_ticket_purchase"
 PERSONAL_ADVANCE_REPAYMENT_MODE = "personal_advance_repayment_settlement"
 WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-11-oa-attachment-evidence-source-groups"
 SYSTEM_AUTO_PAIR_RELATION_MODES = {
-    "salary_personal_auto_match",
-    "internal_transfer_pair",
     OA_INVOICE_OFFSET_AUTO_MATCH_MODE,
 }
 
@@ -433,10 +441,17 @@ class Application:
             bank_account_resolver=bank_account_resolver,
             category_provider=self._bank_transaction_effective_category_provider,
         )
+        self._bank_details_relation_tag_projection_service = BankDetailsRelationTagProjectionService(
+            pair_relation_service=self._workbench_pair_relation_service,
+            candidate_match_service=self._workbench_candidate_match_service,
+            workbench_read_model_provider=lambda: self._get_or_build_workbench_read_model("all"),
+        )
         self._bank_details_service = BankDetailsService(
             self._import_service,
             category_service=self._bank_transaction_category_service,
             auto_category_service=self._bank_transaction_auto_category_service,
+            relation_tag_provider=self._bank_details_relation_tag_projection_service.relation_tag_for_transaction,
+            relation_tag_batch_provider=self._bank_details_relation_tag_projection_service.relation_tags_for_transactions,
         )
         self._turnover_ledger_extra_service = self._build_turnover_ledger_extra_service(
             persisted_state.get("turnover_ledger_extras")
@@ -677,6 +692,7 @@ class Application:
                 account_key=query.get("account_key", [None])[0],
                 date_from=query.get("date_from", [None])[0],
                 date_to=query.get("date_to", [None])[0],
+                keyword=query.get("keyword", [None])[0],
                 page=query.get("page", [None])[0],
                 page_size=query.get("page_size", [None])[0],
             )
@@ -1096,10 +1112,16 @@ class Application:
                 "/api/etc/reconciliation-tasks/{task_id}/ticket-root-files",
                 "/api/etc/reconciliation-tasks/{task_id}/credit-card-statement",
                 "/api/etc/reconciliation-tasks/{task_id}/supplement-evidences",
+                "/api/etc/reconciliation-tasks/{task_id}/refresh-matches",
                 "/api/etc/batches/{batch_id}",
                 "/api/etc/batches/draft",
                 "/api/etc/batches/{batch_id}/confirm-submitted",
                 "/api/etc/batches/{batch_id}/mark-not-submitted",
+                "/api/no-oa-bank-batches",
+                "/api/no-oa-bank-batches/submit",
+                "/api/no-oa-bank-batches/{batch_id}",
+                "/api/no-oa-bank-batches/{batch_id}/submit",
+                "/api/no-oa-bank-batches/{batch_id}/withdraw",
                 "/api/session/me",
                 "/api/workbench/ignored",
                 "/api/workbench/settings",
@@ -1162,6 +1184,7 @@ class Application:
                 "cost_statistics_foundation",
                 "cost_statistics_export",
                 "etc_invoice_management",
+                "no_oa_bank_batch_processing",
                 "background_job_foundation",
             ],
             "storage": {
@@ -1477,13 +1500,17 @@ class Application:
         )
 
     def _handle_api_etc_reconciliation_ready_for_import(self) -> Response:
+        ready_tasks = self._etc_reconciliation_task_service.list_ready_for_import_tasks()
+        unavailable_tasks = [
+            task
+            for task in self._etc_reconciliation_task_service.list_tasks()
+            if getattr(getattr(task, "status", ""), "value", getattr(task, "status", "")) != "ready_for_import"
+        ]
         return self._json_response(
             HTTPStatus.OK,
             {
-                "tasks": [
-                    self._etc_reconciliation_task_payload(task)
-                    for task in self._etc_reconciliation_task_service.list_ready_for_import_tasks()
-                ]
+                "tasks": [self._etc_reconciliation_task_payload(task) for task in ready_tasks],
+                "unavailableTasks": [self._etc_reconciliation_unavailable_task_payload(task) for task in unavailable_tasks],
             },
         )
 
@@ -1548,6 +1575,10 @@ class Application:
             return self._handle_api_etc_reconciliation_confirm(task_id, body)
         if method == "POST" and len(parts) == 2 and parts[1] == "reopen":
             return self._handle_api_etc_reconciliation_reopen(task_id, body)
+        if method == "POST" and len(parts) == 2 and parts[1] == "refresh-matches":
+            return self._handle_api_etc_reconciliation_refresh_matches(task_id)
+        if method == "DELETE" and len(parts) == 2 and parts[1] == "imported-invoices":
+            return self._handle_api_etc_reconciliation_imported_invoices_delete(task_id, body)
         return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task_route"})
 
     def _handle_api_etc_reconciliation_upload(
@@ -1569,38 +1600,61 @@ class Application:
             expected_version = self._expected_version_from_fields(fields)
             if task.version != expected_version:
                 raise ValueError("task_version_conflict")
-            if source_kind == SourceFileKind.TICKET_ROOT and _has_ticket_root_clipboard_source(task):
-                raise ValueError("ticket_root_source_mode_conflict")
+            ticket_root_upload_modes: list[str] = []
+            if source_kind == SourceFileKind.TICKET_ROOT:
+                for upload in files:
+                    wrong_slot_message = self._reconciliation_wrong_slot_message(
+                        expected_source_kind=source_kind,
+                        content=upload.content,
+                    )
+                    if wrong_slot_message:
+                        return self._json_response(
+                            HTTPStatus.BAD_REQUEST,
+                            {
+                                "error": "wrong_reconciliation_source_kind",
+                                "message": wrong_slot_message,
+                            },
+                        )
+                    ticket_root_upload_modes.append(_ticket_root_upload_source_mode(upload))
+                self._validate_ticket_root_upload_source_mode(task=task, upload_modes=ticket_root_upload_modes)
+            else:
+                ticket_root_upload_modes = []
         except KeyError:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
         except ValueError as error:
             return self._reconciliation_error_response(error)
         try:
-            for upload in files:
-                wrong_slot_message = self._reconciliation_wrong_slot_message(
-                    expected_source_kind=source_kind,
-                    content=upload.content,
+            for upload_index, upload in enumerate(files):
+                ticket_root_upload_mode = (
+                    ticket_root_upload_modes[upload_index]
+                    if source_kind == SourceFileKind.TICKET_ROOT and upload_index < len(ticket_root_upload_modes)
+                    else ""
                 )
-                if wrong_slot_message:
-                    return self._json_response(
-                        HTTPStatus.BAD_REQUEST,
-                        {
-                            "error": "wrong_reconciliation_source_kind",
-                            "message": wrong_slot_message,
-                        },
-                    )
+                content_type = (
+                    "text/plain; charset=utf-8"
+                    if source_kind == SourceFileKind.TICKET_ROOT and ticket_root_upload_mode == "text_file"
+                    else "application/octet-stream"
+                )
                 source_file = self._etc_reconciliation_task_service.store_uploaded_source_file(
                     task_id=task.task_id,
                     source_kind=source_kind,
                     original_name=upload.file_name,
-                    content_type="application/octet-stream",
+                    content_type=content_type,
                     content=upload.content,
                     created_by=actor,
                 )
                 if source_kind == SourceFileKind.CREDIT_CARD_STATEMENT:
                     parse_result = CcbCreditCardStatementParser().parse_pdf_bytes(file_id=source_file.file_id, content=upload.content)
                 elif source_kind == SourceFileKind.TICKET_ROOT:
-                    parse_result = TicketRootDocumentParser().parse_file(file_id=source_file.file_id, content=upload.content)
+                    if ticket_root_upload_mode == "text_file":
+                        decoded_text = _decode_utf8_text(upload.content) or ""
+                        parse_result = (
+                            TicketRootClipboardTextParser().parse_text(file_id=source_file.file_id, text=decoded_text)
+                            if _looks_like_ticket_root_clipboard_text(decoded_text)
+                            else _ticket_root_text_file_not_trip_result(source_file.file_id)
+                        )
+                    else:
+                        parse_result = TicketRootDocumentParser().parse_file(file_id=source_file.file_id, content=upload.content)
                 else:
                     parse_result = SupplementEvidenceParser().parse_text(
                         file_id=source_file.file_id,
@@ -1632,7 +1686,9 @@ class Application:
             expected_version = self._expected_version_from_payload(payload)
             if task.version != expected_version:
                 raise ValueError("task_version_conflict")
-            if _has_ticket_root_file_source(task):
+            if _has_ticket_root_text_file_source(task):
+                raise ValueError("ticket_root_source_mode_conflict_text_file")
+            if _has_ticket_root_document_source(task):
                 raise ValueError("ticket_root_source_mode_conflict_pdf")
         except KeyError:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
@@ -1722,12 +1778,19 @@ class Application:
             return error
         try:
             expected_version = self._expected_version_from_payload(payload)
+            confirmed_ids_payload = payload.get(
+                "confirmedCreditCardItemIds",
+                payload.get("confirmed_credit_card_item_ids"),
+            )
+            if confirmed_ids_payload is not None and not isinstance(confirmed_ids_payload, list):
+                raise ValueError("invalid_confirmed_credit_card_item_ids")
             task = self._etc_reconciliation_task_service.confirm_task(
                 task_id=task_id,
                 expected_version=expected_version,
                 actor=str(payload.get("actor") or "web_finance_user"),
                 approved_delta=payload.get("approvedDelta", payload.get("approved_delta")),
                 approved_delta_note=payload.get("approvedDeltaNote", payload.get("approved_delta_note")),
+                confirmed_credit_card_item_ids=confirmed_ids_payload,
             )
         except KeyError:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
@@ -1752,22 +1815,132 @@ class Application:
             return self._reconciliation_error_response(error)
         return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
 
-    def _handle_api_etc_reconciliation_task_delete(self, task_id: str, body: str | bytes | None) -> Response:
+    def _handle_api_etc_reconciliation_refresh_matches(self, task_id: str) -> Response:
+        try:
+            task = self._etc_reconciliation_task_service.refresh_matches(task_id=task_id)
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
+        return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
+
+    def _handle_api_etc_reconciliation_imported_invoices_delete(self, task_id: str, body: str | bytes | None) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
         try:
             expected_version = self._expected_version_from_payload(payload)
-            result = self._etc_reconciliation_task_service.delete_task(
-                task_id=task_id,
+            task = self._etc_reconciliation_task_service.get_task(task_id)
+            updated_task, delete_result, canonical_deleted, changed_months = self._remove_reconciliation_task_imported_invoices(
+                task=task,
                 expected_version=expected_version,
                 actor=str(payload.get("actor") or "web_finance_user"),
             )
         except KeyError:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
+        except EtcBatchNotFoundError as error:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_batch_not_found", "message": str(error)})
+        except EtcBatchDeleteError as error:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {"error": "etc_batch_delete_conflict", "message": str(error)},
+            )
         except ValueError as error:
             return self._reconciliation_error_response(error)
+        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_reconciliation_imported_invoices_removed")
+        self._persist_state()
+        response_payload = self._etc_reconciliation_task_payload(updated_task)
+        response_payload["removedImportBatch"] = delete_result
+        response_payload["removedCanonicalInvoiceCount"] = canonical_deleted
+        return self._json_response(HTTPStatus.OK, response_payload)
+
+    def _handle_api_etc_reconciliation_task_delete(self, task_id: str, body: str | bytes | None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        removed_import_batch: dict[str, object] | None = None
+        changed_months: list[str] = []
+        try:
+            expected_version = self._expected_version_from_payload(payload)
+            actor = str(payload.get("actor") or "web_finance_user")
+            task = self._etc_reconciliation_task_service.get_task(task_id)
+            if int(getattr(task, "version", 0) or 0) != expected_version:
+                raise ValueError("task_version_conflict")
+            task_status = getattr(getattr(task, "status", None), "value", getattr(task, "status", None))
+            if task_status == "imported" and str(getattr(task, "import_batch_id", "") or "").strip():
+                (
+                    removed_import_batch,
+                    _removed_canonical_invoice_count,
+                    changed_months,
+                ) = self._delete_reconciliation_task_import_batch_sources(task)
+            result = self._etc_reconciliation_task_service.delete_task(
+                task_id=task_id,
+                expected_version=expected_version,
+                actor=actor,
+                import_cleanup_confirmed=removed_import_batch is not None,
+            )
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
+        except EtcBatchNotFoundError as error:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_batch_not_found", "message": str(error)})
+        except EtcBatchDeleteError as error:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {"error": "etc_batch_delete_conflict", "message": str(error)},
+            )
+        except ValueError as error:
+            return self._reconciliation_error_response(error)
+        if removed_import_batch is not None:
+            self._refresh_after_etc_invoice_sync(changed_months, reason="etc_reconciliation_task_deleted")
+            self._persist_state()
         return self._json_response(HTTPStatus.OK, result)
+
+    def _remove_reconciliation_task_imported_invoices(
+        self,
+        *,
+        task: object,
+        expected_version: int,
+        actor: str,
+    ) -> tuple[object, dict[str, object], int, list[str]]:
+        if int(getattr(task, "version", 0) or 0) != expected_version:
+            raise ValueError("task_version_conflict")
+        import_batch_id = str(getattr(task, "import_batch_id", "") or "").strip()
+        if not import_batch_id:
+            raise ValueError("reconciliation_task_import_batch_required")
+        if (
+            str(getattr(task, "oa_draft_batch_id", "") or "").strip()
+            or str(getattr(task, "etc_batch_id", "") or "").strip()
+            or getattr(task, "submitted_confirmed_at", None) is not None
+        ):
+            raise ValueError("reconciliation_task_has_submission_link")
+        delete_result, canonical_deleted, changed_months = self._delete_reconciliation_task_import_batch_sources(task)
+        updated_task = self._etc_reconciliation_task_service.remove_imported_invoices(
+            task_id=str(getattr(task, "task_id", "")),
+            expected_version=expected_version,
+            import_batch_id=import_batch_id,
+            actor=actor,
+        )
+        return updated_task, delete_result, canonical_deleted, changed_months
+
+    def _delete_reconciliation_task_import_batch_sources(self, task: object) -> tuple[dict[str, object], int, list[str]]:
+        import_batch_id = str(getattr(task, "import_batch_id", "") or "").strip()
+        if not import_batch_id:
+            raise ValueError("reconciliation_task_import_batch_required")
+        if (
+            str(getattr(task, "oa_draft_batch_id", "") or "").strip()
+            or str(getattr(task, "etc_batch_id", "") or "").strip()
+            or getattr(task, "submitted_confirmed_at", None) is not None
+        ):
+            raise ValueError("reconciliation_task_has_submission_link")
+        import_batch = self._etc_import_batch_by_id(import_batch_id)
+        if import_batch is not None:
+            etc_invoices = self._etc_service.list_invoices_by_ids(
+                [str(invoice_id) for invoice_id in list(getattr(import_batch, "invoice_ids", []) or [])]
+            )
+        else:
+            etc_invoices = self._etc_service.list_invoices_by_import_batch_id(import_batch_id)
+        changed_months = self._etc_invoice_changed_months(etc_invoices)
+        delete_result = self._etc_service.delete_import_batch_sources(import_batch_id)
+        canonical_deleted = self._import_service.remove_etc_invoices_by_import_batch_id(import_batch_id)
+        return delete_result, canonical_deleted, changed_months
 
     @staticmethod
     def _expected_version_from_payload(payload: dict[str, object]) -> int:
@@ -1790,6 +1963,23 @@ class Application:
         except (TypeError, ValueError) as exc:
             raise ValueError("invalid_expected_version") from exc
 
+    @staticmethod
+    def _validate_ticket_root_upload_source_mode(*, task: object, upload_modes: list[str]) -> None:
+        unique_modes = {mode for mode in upload_modes if mode}
+        if len(unique_modes) > 1:
+            raise ValueError("ticket_root_source_mode_conflict_mixed_upload")
+        upload_mode = next(iter(unique_modes), "")
+        if upload_mode == "text_file":
+            if _has_ticket_root_manual_text_source(task):
+                raise ValueError("ticket_root_source_mode_conflict")
+            if _has_ticket_root_document_source(task):
+                raise ValueError("ticket_root_source_mode_conflict_pdf")
+        elif upload_mode == "document":
+            if _has_ticket_root_manual_text_source(task):
+                raise ValueError("ticket_root_source_mode_conflict")
+            if _has_ticket_root_text_file_source(task):
+                raise ValueError("ticket_root_source_mode_conflict_text_file")
+
     def _reconciliation_error_response(self, error: ValueError) -> Response:
         code = str(error) or "invalid_reconciliation_request"
         status = HTTPStatus.CONFLICT if code in {
@@ -1797,14 +1987,19 @@ class Application:
             "stale_reconciliation_task_preview",
             "invalid_reconciliation_task_status",
             "reconciliation_task_has_submission_link",
+            "reconciliation_task_import_cleanup_required",
             "ticket_root_source_mode_conflict",
             "ticket_root_source_mode_conflict_pdf",
+            "ticket_root_source_mode_conflict_text_file",
+            "ticket_root_source_mode_conflict_mixed_upload",
         } else HTTPStatus.BAD_REQUEST
         messages = {
-            "ticket_root_source_mode_conflict": "已有手工粘贴票根网源，请先删除已有手工粘贴源后再上传 PDF/JPG。",
-            "ticket_root_source_mode_conflict_pdf": "已有票根网 PDF/JPG 源文件，请先删除已有票根网源文件后再提交手工粘贴。",
+            "ticket_root_source_mode_conflict": "已有手工粘贴票根网源，请先删除已有票根来源后才能切换导入方式。",
+            "ticket_root_source_mode_conflict_pdf": "已有票根网 PDF/JPG 源文件，请先删除已有票根来源后才能切换导入方式。",
+            "ticket_root_source_mode_conflict_text_file": "已有票根网 TXT 源文件，请先删除已有票根来源后才能切换导入方式。",
+            "ticket_root_source_mode_conflict_mixed_upload": "票根网 TXT 文件和 PDF/JPG 不能同时上传，请先选择一种票根来源导入方式。",
         }
-        normalized_code = "ticket_root_source_mode_conflict" if code == "ticket_root_source_mode_conflict_pdf" else code
+        normalized_code = "ticket_root_source_mode_conflict" if code.startswith("ticket_root_source_mode_conflict") else code
         return self._json_response(status, {"error": normalized_code, "message": messages.get(code, code)})
 
     @staticmethod
@@ -2115,12 +2310,41 @@ class Application:
             allowed_invoice_numbers=reconciliation_preview.allowed_invoice_numbers,
         )
         payload = self._etc_service.preview_import_zips(filtered_uploads)
+        full_result, full_audit, full_file_audits = self._etc_service.inspect_import_zips(uploads)
+        payload["importAudit"] = payload.get("audit")
+        payload["importFiles"] = payload.get("files", [])
+        payload["audit"] = full_audit.to_payload()
+        payload["files"] = full_file_audits
+        payload["items"] = self._etc_import_preview_items_with_filter_status(
+            full_result.items,
+            reconciliation_preview,
+        )
         session_id = str(payload.get("sessionId") or "")
         if session_id:
             self._etc_reconciliation_import_previews[session_id] = reconciliation_preview
         payload["taskId"] = task_id
         payload["reconciliationFilter"] = reconciliation_preview.to_payload()
         return self._json_response(HTTPStatus.OK, payload)
+
+    @staticmethod
+    def _etc_import_preview_items_with_filter_status(items: list[Any], preview: EtcZipFilterPreview) -> list[dict[str, object]]:
+        filter_items_by_invoice = {
+            item.invoice_number: item
+            for item in preview.items
+            if item.invoice_number
+        }
+        decorated: list[dict[str, object]] = []
+        for item in items:
+            item_payload = item.to_payload()
+            invoice_number = str(item_payload.get("invoiceNumber") or "")
+            filter_item = filter_items_by_invoice.get(invoice_number)
+            filter_status = filter_item.filter_status if filter_item is not None else "not_in_reconciliation_preview"
+            item_payload["filterStatus"] = filter_status
+            item_payload["requirementId"] = filter_item.requirement_id if filter_item is not None else None
+            if filter_status != "included" and not item_payload.get("message"):
+                item_payload["message"] = _etc_zip_filter_status_message(filter_status)
+            decorated.append(item_payload)
+        return decorated
 
     def _handle_api_etc_import_confirm(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
         payload, error = self._load_json_body(body)
@@ -2367,6 +2591,19 @@ class Application:
             self._etc_service.list_invoices_by_numbers(invoice_numbers),
         )
 
+    @staticmethod
+    def _etc_invoice_changed_months(etc_invoices: list[object]) -> list[str]:
+        changed_months: set[str] = set()
+        for etc_invoice in etc_invoices:
+            for date_value in (
+                getattr(etc_invoice, "issue_date", None),
+                getattr(etc_invoice, "passage_start_date", None),
+                getattr(etc_invoice, "passage_end_date", None),
+            ):
+                if isinstance(date_value, str) and SEARCH_MONTH_RE.match(date_value[:7]):
+                    changed_months.add(date_value[:7])
+        return sorted(changed_months)
+
     def _canonical_invoice_key_exists_for_etc_import(self, canonical_key: str) -> bool:
         normalized_key = str(canonical_key or "").strip()
         if not normalized_key:
@@ -2557,6 +2794,7 @@ class Application:
             for batch in self._etc_service.list_import_batches()
             if not str(getattr(batch, "submission_batch_id", "") or "").strip()
             and int(getattr(batch, "invoice_count", 0) or 0) > 0
+            and not self._is_reconciliation_import_batch(batch)
         ]
         submitted_batches = self._etc_service.list_batches(status="submitted")
         return {"unsubmitted": len(import_batches), "submitted": len(submitted_batches)}
@@ -2584,6 +2822,8 @@ class Application:
                     items.append(detail)
         if include_unsubmitted:
             for import_batch in self._etc_service.list_import_batches():
+                if self._is_reconciliation_import_batch(import_batch):
+                    continue
                 if str(getattr(import_batch, "submission_batch_id", "") or "").strip():
                     continue
                 if int(getattr(import_batch, "invoice_count", 0) or 0) <= 0:
@@ -2598,6 +2838,21 @@ class Application:
             key=lambda item: str(item.get("summary", {}).get("created_at", "") if isinstance(item.get("summary"), dict) else ""),
             reverse=True,
         )
+
+    def _etc_import_batch_by_id(self, batch_id: str) -> object | None:
+        normalized_batch_id = str(batch_id or "").strip()
+        if not normalized_batch_id:
+            return None
+        for import_batch in self._etc_service.list_import_batches():
+            if str(getattr(import_batch, "id", "") or "") == normalized_batch_id:
+                return import_batch
+        return None
+
+    def _is_reconciliation_import_batch(self, import_batch: object) -> bool:
+        batch_id = str(getattr(import_batch, "id", "") or "").strip()
+        if not batch_id:
+            return False
+        return self._etc_reconciliation_task_service.find_task_for_import_batch_ids([batch_id]) is not None
 
     def _etc_batch_detail_payload(self, batch_id: str) -> dict[str, object] | None:
         try:
@@ -5122,6 +5377,7 @@ class Application:
         account_key: str | None,
         date_from: str | None,
         date_to: str | None,
+        keyword: str | None,
         page: str | None,
         page_size: str | None,
     ) -> Response:
@@ -5130,6 +5386,7 @@ class Application:
                 account_key=account_key,
                 date_from=date_from,
                 date_to=date_to,
+                keyword=keyword,
                 page=int(page or 1),
                 page_size=int(page_size or 100),
             )
@@ -5233,13 +5490,19 @@ class Application:
             "month": query.get("month", [""])[0],
             "type": query.get("type", [""])[0],
             "status": query.get("status", [""])[0],
+            "bucket": query.get("bucket", [""])[0],
             "account_key": query.get("account_key", [""])[0],
         }
+        summary_filters = {
+            "month": filters["month"],
+            "account_key": filters["account_key"],
+        }
+        summary_batches = self._no_oa_bank_batch_service.list_batches(summary_filters)
         batches = self._no_oa_bank_batch_service.list_batches(filters)
         return self._json_response(
             HTTPStatus.OK,
             {
-                "summary": self._no_oa_bank_batch_summary(batches),
+                "summary": self._no_oa_bank_batch_summary(summary_batches),
                 "batches": batches,
             },
         )
@@ -5255,11 +5518,14 @@ class Application:
                 {"error": "unknown_no_oa_bank_batch", "message": "免OA流水批次不存在。"},
             )
         row_ids = [str(row_id) for row_id in list(batch.get("row_ids") or []) if str(row_id).strip()]
+        rows = self._no_oa_bank_batch_detail_rows(row_ids, rows_by_id, categories_by_transaction_id)
         return self._json_response(
             HTTPStatus.OK,
             {
                 "batch": batch,
-                "rows": [rows_by_id[row_id] for row_id in row_ids if row_id in rows_by_id],
+                "rows": rows,
+                "tag_counts": batch.get("tag_counts") if isinstance(batch.get("tag_counts"), dict) else {},
+                "direction_counts": batch.get("direction_counts") if isinstance(batch.get("direction_counts"), dict) else {},
                 "categories_by_transaction_id": {
                     row_id: categories_by_transaction_id.get(row_id, {})
                     for row_id in row_ids
@@ -5464,6 +5730,21 @@ class Application:
             self._workbench_pair_relation_service.list_active_relations(),
             self._workbench_matching_source_versions(),
         )
+        migration_result = self._no_oa_bank_batch_service.last_legacy_migration_result()
+        if migration_result.get("changed"):
+            self._after_no_oa_bank_batch_mutation(
+                [
+                    str(month)
+                    for month in list(migration_result.get("affected_months") or [])
+                    if str(month).strip()
+                ],
+                changed_case_ids=[
+                    str(case_id)
+                    for case_id in list(migration_result.get("changed_case_ids") or [])
+                    if str(case_id).strip()
+                ],
+                persist=True,
+            )
         return bank_rows, categories_by_transaction_id
 
     def _no_oa_bank_transaction_rows(self) -> list[dict[str, object]]:
@@ -5520,17 +5801,68 @@ class Application:
         return rows
 
     @staticmethod
+    def _no_oa_bank_batch_detail_rows(
+        row_ids: list[str],
+        rows_by_id: dict[str, dict[str, object]],
+        categories_by_transaction_id: dict[str, dict[str, object]],
+    ) -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
+        for row_id in row_ids:
+            source_row = rows_by_id.get(row_id)
+            if not isinstance(source_row, dict):
+                continue
+            row = dict(source_row)
+            category = categories_by_transaction_id.get(row_id, {})
+            if isinstance(category, dict):
+                row["category_code"] = row.get("category_code") or category.get("category_code")
+                row["category_label"] = row.get("category_label") or category.get("category_label")
+                row["category_source"] = row.get("category_source") or category.get("category_source") or category.get("source")
+            row.setdefault("category_code", "")
+            row.setdefault("category_label", "")
+            row.setdefault("category_source", "")
+            rows.append(row)
+        return rows
+
+    @staticmethod
     def _no_oa_bank_batch_summary(batches: list[dict[str, object]]) -> dict[str, object]:
         counts: dict[str, int] = {"draft": 0, "submitted": 0, "withdrawn": 0, "conflict": 0, "stale": 0}
+        category_counts: dict[str, dict[str, object]] = {
+            batch_type: {
+                "code": batch_type,
+                "label": NO_OA_MANAGED_LABELS[batch_type],
+                "total": 0,
+                "draft": 0,
+                "submitted": 0,
+                "withdrawn": 0,
+                "conflict": 0,
+                "stale": 0,
+                "total_amount": Decimal("0.00"),
+            }
+            for batch_type in NO_OA_MANAGED_BATCH_TYPE_ORDER
+        }
         total_amount = Decimal("0.00")
         for batch in batches:
             status = str(batch.get("status") or "").strip()
             if status in counts:
                 counts[status] += 1
+            batch_type = str(batch.get("batch_type") or "").strip()
             try:
-                total_amount += Decimal(str(batch.get("total_amount") or "0").replace(",", ""))
+                amount = Decimal(str(batch.get("total_amount") or "0").replace(",", ""))
             except Exception:
+                amount = Decimal("0.00")
+            total_amount += amount
+            if batch_type in category_counts:
+                category = category_counts[batch_type]
+                category["total"] = int(category["total"]) + 1
+                if status in counts:
+                    category[status] = int(category[status]) + 1
+                category["total_amount"] = category["total_amount"] + amount
                 continue
+        categories = []
+        for batch_type in NO_OA_MANAGED_BATCH_TYPE_ORDER:
+            category = dict(category_counts[batch_type])
+            category["total_amount"] = f"{category['total_amount']:.2f}"
+            categories.append(category)
         return {
             "total": len(batches),
             **counts,
@@ -5540,6 +5872,7 @@ class Application:
             "conflict_count": counts["conflict"],
             "stale_count": counts["stale"],
             "total_amount": f"{total_amount:.2f}",
+            "categories": categories,
         }
 
     def _no_oa_bank_batch_affected_months(self, batch: dict[str, object]) -> list[str]:
@@ -6223,6 +6556,7 @@ class Application:
                 "month": month,
                 "case_id": resolved_case_id,
                 "affected_row_ids": row_ids,
+                "affected_months": changed_scope_keys,
                 "amount_check": amount_check,
                 "message": f"已确认 {len(row_ids)} 条记录关联。",
             },
@@ -6379,6 +6713,7 @@ class Application:
                 "month": month,
                 "case_id": str(active_relation.get("case_id") or ""),
                 "affected_row_ids": affected_row_ids,
+                "affected_months": changed_scope_keys,
                 "message": "已取消关联并回退为待处理。",
             },
         )
@@ -6453,6 +6788,7 @@ class Application:
                 "action": "withdraw_link",
                 "month": month,
                 "changed_scopes": changed_scope_keys,
+                "affected_months": changed_scope_keys,
                 "affected_row_ids": affected_row_ids,
                 "restored_relations": restored_relations,
             },
@@ -8449,6 +8785,14 @@ class Application:
         with self._workbench_pair_relation_persist_version_lock:
             self._workbench_pair_relation_persist_version += 1
             version = self._workbench_pair_relation_persist_version
+        if not self._workbench_persist_async_enabled():
+            self._persist_workbench_pair_relations_in_background(
+                version=version,
+                case_ids=normalized_case_ids,
+                request_id=request_id,
+                action_name=action_name,
+            )
+            return
         Thread(
             target=self._persist_workbench_pair_relations_in_background,
             kwargs={
@@ -8503,6 +8847,14 @@ class Application:
         with self._workbench_read_model_persist_version_lock:
             self._workbench_read_model_persist_version += 1
             version = self._workbench_read_model_persist_version
+        if not self._workbench_persist_async_enabled():
+            self._rebuild_workbench_read_models_in_background(
+                version=version,
+                scope_keys=normalized_scope_keys,
+                request_id=request_id,
+                action_name=action_name,
+            )
+            return
         Thread(
             target=self._rebuild_workbench_read_models_in_background,
             kwargs={
@@ -8513,6 +8865,13 @@ class Application:
             },
             daemon=True,
         ).start()
+
+    @staticmethod
+    def _workbench_persist_async_enabled() -> bool:
+        override = os.getenv("FIN_OPS_WORKBENCH_PERSIST_ASYNC")
+        if override is not None:
+            return override.strip().lower() not in {"0", "false", "no", "off"}
+        return "unittest" not in sys.modules
 
     def _rebuild_workbench_read_models_in_background(
         self,
@@ -9654,7 +10013,10 @@ class Application:
             ]
             if not row_ids:
                 continue
-            if str(candidate.get("rule_code") or "") == CASH_TURNOVER_DETECTED:
+            rule_code = str(candidate.get("rule_code") or "").strip()
+            if is_no_oa_managed_old_relation_mode(rule_code) and not workbench_mode_may_auto_close(rule_code):
+                continue
+            if rule_code == CASH_TURNOVER_DETECTED:
                 self._apply_cash_turnover_candidate_metadata(candidate, rows_by_id)
                 continue
             extends_existing_active_case = False
@@ -9680,7 +10042,7 @@ class Application:
                 relation_field = self._workbench_query_service.relation_field_name(str(row.get("type") or ""))
                 if not (extends_existing_active_case and self._row_has_active_pair_relation(row)):
                     row[relation_field] = self._serialize_value(relation)
-                if str(candidate.get("rule_code") or "") == OA_INVOICE_OFFSET_AUTO_MATCH_MODE:
+                if rule_code == OA_INVOICE_OFFSET_AUTO_MATCH_MODE:
                     tags = [
                         str(tag).strip()
                         for tag in list(row.get("tags") or [])
@@ -10035,10 +10397,15 @@ class Application:
         payload["case_id"] = str(relation.get("case_id", ""))
         relation_field = self._workbench_override_service.relation_field_name(str(payload["type"]))
         relation_mode = str(relation.get("relation_mode", ""))
+        relation_payload = (
+            self._relation_with_no_oa_bank_batch_metadata(relation)
+            if relation_mode == NO_OA_BANK_BATCH_RELATION_MODE
+            else relation
+        )
         linked_relation = self._pair_relation_display_payload(
             relation_mode=relation_mode,
             row_type=str(payload.get("type", "")),
-            special_metadata=relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else None,
+            special_metadata=relation_payload.get("special_metadata") if isinstance(relation_payload.get("special_metadata"), dict) else None,
         )
         payload[relation_field] = self._serialize_value(linked_relation)
         self._workbench_override_service._sync_summary_relation(payload, str(linked_relation.get("label", "")))
@@ -10048,12 +10415,39 @@ class Application:
             self._apply_internal_transfer_pair_metadata(payload, relation)
         if relation_mode == NO_OA_BANK_BATCH_RELATION_MODE:
             payload["relation_mode"] = NO_OA_BANK_BATCH_RELATION_MODE
-            self._apply_no_oa_bank_batch_pair_metadata(payload, relation)
+            self._apply_no_oa_bank_batch_pair_metadata(payload, relation_payload)
         self._apply_cash_special_pair_metadata(payload, relation)
         payload["available_actions"] = ["detail"]
         self._apply_cash_special_available_actions(payload, relation)
         payload["handled_exception"] = False
         return payload
+
+    def _relation_with_no_oa_bank_batch_metadata(self, relation: dict[str, object]) -> dict[str, object]:
+        special_metadata = relation.get("special_metadata")
+        if not isinstance(special_metadata, dict):
+            return relation
+        source_batch_id = str(special_metadata.get("source_batch_id") or "").strip()
+        if not source_batch_id:
+            return relation
+        try:
+            batch = self._no_oa_bank_batch_service.get_batch(source_batch_id)
+        except KeyError:
+            return relation
+        enriched_relation = dict(relation)
+        enriched_metadata = dict(special_metadata)
+        for metadata_key, batch_key in (
+            ("batch_version", "version"),
+            ("batch_type", "batch_type"),
+            ("batch_label", "batch_label"),
+            ("row_count", "row_count"),
+            ("total_amount", "total_amount"),
+            ("withdrawable", "can_withdraw"),
+        ):
+            value = batch.get(batch_key)
+            if value not in (None, ""):
+                enriched_metadata[metadata_key] = value
+        enriched_relation["special_metadata"] = enriched_metadata
+        return enriched_relation
 
     def _execute_derived_data_lifecycle_event(
         self,
@@ -11484,7 +11878,11 @@ class Application:
             if tag and tag not in visible:
                 visible.append(tag)
 
-        relation_mode = str(relation.get("relation_mode")) if isinstance(relation, dict) else ""
+        relation_mode = (
+            str(relation.get("relation_mode"))
+            if isinstance(relation, dict)
+            else str(group.get("relation_mode") or "")
+        )
         has_oa = bool(group.get("oa_rows"))
         has_bank = bool(group.get("bank_rows"))
         has_invoice = bool(group.get("invoice_rows"))
@@ -11537,10 +11935,12 @@ class Application:
             add("工资")
         if relation_mode == PERSONAL_ADVANCE_REPAYMENT_MODE:
             add("还清个人暂借款")
-        special_metadata = relation.get("special_metadata") if isinstance(relation, dict) else None
+        special_metadata = relation.get("special_metadata") if isinstance(relation, dict) else row.get("special_metadata")
         special_type = str(special_metadata.get("special_type") or "") if isinstance(special_metadata, dict) else ""
         if relation_mode == NO_OA_BANK_BATCH_RELATION_MODE:
             for tag in list(relation.get("display_tags") or []) if isinstance(relation, dict) else []:
+                add(str(tag).strip())
+            for tag in list(group.get("display_tags") or []):
                 add(str(tag).strip())
             if isinstance(special_metadata, dict):
                 for tag in list(special_metadata.get("display_tags") or []):
@@ -12106,8 +12506,8 @@ class Application:
         normalized_payload = Application._serialize_value(payload)
         return Response(status_code=int(status), body=json.dumps(normalized_payload, ensure_ascii=False))
 
-    @staticmethod
-    def _etc_reconciliation_task_payload(task: object) -> dict[str, object]:
+    def _etc_reconciliation_task_payload(self, task: object) -> dict[str, object]:
+        imported_summary = self._etc_reconciliation_imported_invoice_summary(task)
         return {
             "taskId": getattr(task, "task_id", ""),
             "status": getattr(getattr(task, "status", ""), "value", getattr(task, "status", "")),
@@ -12130,6 +12530,9 @@ class Application:
             "confirmedItemSetHash": getattr(task, "confirmed_item_set_hash", None),
             "importBatchId": getattr(task, "import_batch_id", None),
             "etcBatchId": getattr(task, "etc_batch_id", None),
+            "hasImportedInvoices": imported_summary["hasImportedInvoices"],
+            "importedInvoiceCount": imported_summary["importedInvoiceCount"],
+            "importedInvoiceAmount": imported_summary["importedInvoiceAmount"],
             "oaDraftBatchId": getattr(task, "oa_draft_batch_id", None),
             "oaDraftStatus": getattr(task, "oa_draft_status", None),
             "submittedConfirmedAt": getattr(task, "submitted_confirmed_at", None),
@@ -12142,6 +12545,71 @@ class Application:
             ],
             "parseIssues": Application._etc_parse_issue_payloads(task),
             "auditEvents": [Application._serialize_value(item) for item in getattr(task, "audit_events", [])],
+        }
+
+    def _etc_reconciliation_unavailable_task_payload(self, task: object) -> dict[str, object]:
+        payload = self._etc_reconciliation_task_payload(task)
+        payload["importBlockers"] = Application._etc_reconciliation_import_blockers(task)
+        return payload
+
+    @staticmethod
+    def _etc_reconciliation_import_blockers(task: object) -> list[dict[str, str]]:
+        status = getattr(getattr(task, "status", ""), "value", getattr(task, "status", ""))
+        if status in {"draft", "reviewing"}:
+            return [
+                {
+                    "code": "not_confirmed",
+                    "message": "请先在 ETC 对账页确认对账。",
+                }
+            ]
+        if status == "importing":
+            return [
+                {
+                    "code": "import_in_progress",
+                    "message": "ETC 发票正在导入中，请稍后再试。",
+                }
+            ]
+        if status == "imported":
+            return [
+                {
+                    "code": "already_imported",
+                    "message": "该 ETC 对账任务已导入。如需重导，请先移除已导入 ETC 发票。",
+                }
+            ]
+        if status == "closed":
+            return [
+                {
+                    "code": "closed",
+                    "message": "该 ETC 对账任务已关闭，不能再次导入。",
+                }
+            ]
+        return [
+            {
+                "code": "not_ready_for_import",
+                "message": "该 ETC 对账任务当前不可导入。",
+            }
+        ]
+
+    def _etc_reconciliation_imported_invoice_summary(self, task: object) -> dict[str, object]:
+        import_batch_id = str(getattr(task, "import_batch_id", "") or "").strip()
+        if not import_batch_id:
+            return {
+                "hasImportedInvoices": False,
+                "importedInvoiceCount": 0,
+                "importedInvoiceAmount": Decimal("0.00"),
+            }
+        import_batch = self._etc_import_batch_by_id(import_batch_id)
+        if import_batch is None:
+            return {
+                "hasImportedInvoices": False,
+                "importedInvoiceCount": 0,
+                "importedInvoiceAmount": Decimal("0.00"),
+            }
+        invoice_count = int(getattr(import_batch, "invoice_count", 0) or 0)
+        return {
+            "hasImportedInvoices": invoice_count > 0,
+            "importedInvoiceCount": invoice_count,
+            "importedInvoiceAmount": getattr(import_batch, "total_amount", Decimal("0.00")),
         }
 
     @staticmethod
@@ -12283,23 +12751,110 @@ class Application:
         return value
 
 
-def _is_ticket_root_clipboard_source(source_file: object) -> bool:
+def _is_ticket_root_source(source_file: object) -> bool:
     if str(getattr(getattr(source_file, "source_kind", ""), "value", getattr(source_file, "source_kind", ""))) != SourceFileKind.TICKET_ROOT.value:
         return False
-    content_type = str(getattr(source_file, "content_type", "") or "").lower()
+    return True
+
+
+def _is_ticket_root_manual_text_source(source_file: object) -> bool:
+    if not _is_ticket_root_source(source_file):
+        return False
     original_name = str(getattr(source_file, "original_name", "") or "")
-    return content_type.startswith("text/plain") or original_name.startswith("票根网手工粘贴-")
+    return original_name.startswith("票根网手工粘贴-")
+
+
+def _is_ticket_root_text_file_source(source_file: object) -> bool:
+    if not _is_ticket_root_source(source_file) or _is_ticket_root_manual_text_source(source_file):
+        return False
+    content_type = str(getattr(source_file, "content_type", "") or "").lower()
+    return content_type.startswith("text/plain")
+
+
+def _is_ticket_root_document_source(source_file: object) -> bool:
+    return (
+        _is_ticket_root_source(source_file)
+        and not _is_ticket_root_manual_text_source(source_file)
+        and not _is_ticket_root_text_file_source(source_file)
+    )
+
+
+def _is_ticket_root_clipboard_source(source_file: object) -> bool:
+    return _is_ticket_root_manual_text_source(source_file)
 
 
 def _has_ticket_root_clipboard_source(task: object) -> bool:
-    return any(_is_ticket_root_clipboard_source(source_file) for source_file in getattr(task, "source_files", []) or [])
+    return _has_ticket_root_manual_text_source(task)
+
+
+def _has_ticket_root_manual_text_source(task: object) -> bool:
+    return any(_is_ticket_root_manual_text_source(source_file) for source_file in getattr(task, "source_files", []) or [])
+
+
+def _has_ticket_root_text_file_source(task: object) -> bool:
+    return any(_is_ticket_root_text_file_source(source_file) for source_file in getattr(task, "source_files", []) or [])
+
+
+def _has_ticket_root_text_source(task: object) -> bool:
+    return _has_ticket_root_manual_text_source(task) or _has_ticket_root_text_file_source(task)
 
 
 def _has_ticket_root_file_source(task: object) -> bool:
-    return any(
-        str(getattr(getattr(source_file, "source_kind", ""), "value", getattr(source_file, "source_kind", ""))) == SourceFileKind.TICKET_ROOT.value
-        and not _is_ticket_root_clipboard_source(source_file)
-        for source_file in getattr(task, "source_files", []) or []
+    return _has_ticket_root_document_source(task)
+
+
+def _has_ticket_root_document_source(task: object) -> bool:
+    return any(_is_ticket_root_document_source(source_file) for source_file in getattr(task, "source_files", []) or [])
+
+
+def _ticket_root_upload_source_mode(upload: UploadedImportFile) -> str:
+    decoded_text = _decode_utf8_text(upload.content)
+    if decoded_text is None:
+        return "document"
+    lower_name = str(upload.file_name or "").strip().lower()
+    if lower_name.endswith((".txt", ".text")):
+        return "text_file"
+    if _looks_like_ticket_root_clipboard_text(decoded_text):
+        return "text_file"
+    return "document"
+
+
+def _decode_utf8_text(content: bytes) -> str | None:
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if "\x00" in text or not text.strip():
+        return None
+    return text
+
+
+def _looks_like_ticket_root_clipboard_text(text: str) -> bool:
+    normalized = str(text or "")
+    if not normalized.strip():
+        return False
+    has_ticket_root_context = any(marker in normalized for marker in ("票根网", "收费公路通行费电子发票服务平台", "我的ETC"))
+    has_plate = "车牌号" in normalized
+    has_trip_amount_row = bool(re.search(r"交易时间\s*[:：]?\s*\d{4}[-/]\d{2}[-/]\d{2}.*?交易金额\s*[:：]?", normalized, flags=re.S))
+    has_station_header = "入口收费站/出口收费站" in normalized
+    return has_ticket_root_context and has_plate and (has_trip_amount_row or has_station_header)
+
+
+def _ticket_root_text_file_not_trip_result(file_id: str) -> FileParseResult:
+    issue_id = hashlib.sha256(f"{file_id}|ticket_root_text_file_not_trip".encode("utf-8")).hexdigest()[:32]
+    return FileParseResult(
+        file_id=file_id,
+        parser_code=TicketRootClipboardTextParser.parser_code,
+        issues=[
+            ParseIssue(
+                issue_id=issue_id,
+                file_id=file_id,
+                severity=ParseIssueSeverity.BLOCKING,
+                message="请上传票根网按行程查看复制文本文件。",
+                extraction_method=TicketRootClipboardTextParser.extraction_method,
+                field_name="ticket_root_text",
+            )
+        ],
     )
 
 
@@ -12308,6 +12863,16 @@ def _ticket_root_clipboard_source_name(text: str, *, index: int) -> str:
     plate = parser.extract_plate(text) or "未知车牌"
     month = parser.extract_month(text) or f"{index}"
     return f"票根网手工粘贴-{plate}-{month}-{index}.txt"
+
+
+def _etc_zip_filter_status_message(filter_status: str) -> str:
+    labels = {
+        "excluded_extra_zip_invoice": "zip 中存在，但不属于当前已确认 ETC 对账任务。",
+        "ambiguous_zip_match": "zip 中有多张发票命中同一对账需求，需要人工处理后再导入。",
+        "duplicate_requirement_invoice_match": "同一张发票命中多个对账需求，需要人工处理后再导入。",
+        "not_in_reconciliation_preview": "未进入本次 ETC 对账任务筛选结果。",
+    }
+    return labels.get(filter_status, "")
 
 
 def build_application(*, data_dir: Path | None = None) -> Application:

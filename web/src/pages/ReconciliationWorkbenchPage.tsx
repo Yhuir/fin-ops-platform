@@ -31,9 +31,11 @@ import {
   unignoreWorkbenchRow,
   withdrawWorkbenchLink,
 } from "../features/workbench/api";
+import { fetchNoOaBankBatchDetail, withdrawNoOaBankBatch } from "../features/noOaBankBatches/api";
 import {
   buildWorkbenchDisplayGroups,
   buildWorkbenchPaneRows,
+  countWorkbenchGroupsRows,
   createEmptyWorkbenchZoneDisplayState,
   resolveWorkbenchActivePane,
   type WorkbenchPaneTimeFilter,
@@ -137,6 +139,63 @@ const READONLY_ACTION_MESSAGE = "当前账号仅支持查看和导出，不能�
 const WORKBENCH_VIEW_MONTH = "all";
 const OA_SYNC_POLL_INTERVAL_MS = 3_000;
 const OA_SYNC_REFRESH_DEBOUNCE_MS = 120;
+
+function isNoOaSummaryRow(row: WorkbenchRecord) {
+  return row.sourceKind === "no_oa_bank_batch_summary";
+}
+
+function readStringMetadata(metadata: Record<string, unknown> | undefined, key: string) {
+  const value = metadata?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readNumberMetadata(metadata: Record<string, unknown> | undefined, key: string) {
+  const value = metadata?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function eventAffectedMonths(event: Event) {
+  const detail = event instanceof CustomEvent && event.detail && typeof event.detail === "object"
+    ? event.detail as { affectedMonths?: unknown; affected_months?: unknown }
+    : {};
+  const rawMonths = Array.isArray(detail.affectedMonths)
+    ? detail.affectedMonths
+    : Array.isArray(detail.affected_months)
+      ? detail.affected_months
+      : [];
+  return rawMonths.map((month) => String(month).trim()).filter(Boolean);
+}
+
+function cleanWorkbenchScopeList(value: unknown) {
+  return Array.isArray(value)
+    ? value.map((scope) => String(scope).trim()).filter(Boolean)
+    : [];
+}
+
+function actionAffectedMonths(result: {
+  affectedMonths?: unknown[];
+  affected_months?: unknown[];
+  changedScopes?: unknown[];
+  changed_scopes?: unknown[];
+}) {
+  const affectedMonths = cleanWorkbenchScopeList(result.affectedMonths);
+  if (affectedMonths.length > 0) {
+    return affectedMonths;
+  }
+  const affectedSnakeMonths = cleanWorkbenchScopeList(result.affected_months);
+  if (affectedSnakeMonths.length > 0) {
+    return affectedSnakeMonths;
+  }
+  const changedScopes = cleanWorkbenchScopeList(result.changedScopes);
+  if (changedScopes.length > 0) {
+    return changedScopes;
+  }
+  const changedSnakeScopes = cleanWorkbenchScopeList(result.changed_scopes);
+  if (changedSnakeScopes.length > 0) {
+    return changedSnakeScopes;
+  }
+  return [WORKBENCH_VIEW_MONTH];
+}
 
 export default function ReconciliationWorkbenchPage() {
   const { currentMonth } = useMonth();
@@ -502,6 +561,37 @@ export default function ReconciliationWorkbenchPage() {
     setWorkbenchData((current) => (current ? updateWorkbenchAfterUnignoreRow(current, row) : current));
   }, []);
 
+  const withdrawNoOaSummaryRow = useCallback(async (row: WorkbenchRecord) => {
+    const sourceBatchId = readStringMetadata(row.specialMetadata, "source_batch_id");
+    if (!sourceBatchId) {
+      throw new Error("免OA批次来源缺失，无法撤回。");
+    }
+
+    let expectedVersion = readNumberMetadata(row.specialMetadata, "batch_version");
+    if (expectedVersion === null) {
+      const detail = await fetchNoOaBankBatchDetail(sourceBatchId);
+      expectedVersion = typeof detail.batch.version === "number" ? detail.batch.version : null;
+    }
+    if (expectedVersion === null) {
+      throw new Error("免OA批次版本缺失，无法撤回。");
+    }
+
+    const result = await withdrawNoOaBankBatch({
+      batchId: sourceBatchId,
+      expectedVersion,
+      reason: "由关联台撤回免OA批次",
+    });
+    const affectedMonths = result.affectedMonths.length > 0
+      ? result.affectedMonths
+      : readStringMetadata(row.specialMetadata, "scope_month")
+        ? [readStringMetadata(row.specialMetadata, "scope_month") as string]
+        : [];
+    window.dispatchEvent(new CustomEvent("workbenchRelationUpdated", { detail: { affectedMonths } }));
+    clearPairedSelection();
+    refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
+    return "已撤回免OA批次。";
+  }, [clearPairedSelection, refreshWorkbenchDataInBackground]);
+
   async function loadWorkbenchAuxiliaryData(month: string, signal?: AbortSignal) {
     try {
       const [ignoredRows, settings] = await Promise.all([
@@ -620,13 +710,27 @@ export default function ReconciliationWorkbenchPage() {
     const handleRelationUpdated = () => {
       refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
     };
+    const handleBankCategoryUpdated = (event: Event) => {
+      const affectedMonths = eventAffectedMonths(event);
+      if (
+        affectedMonths.length === 0
+        || WORKBENCH_VIEW_MONTH === "all"
+        || affectedMonths.includes("all")
+        || affectedMonths.includes(WORKBENCH_VIEW_MONTH)
+        || affectedMonths.includes(currentMonth)
+      ) {
+        refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
+      }
+    };
     window.addEventListener("turnoverRelationUpdated", handleRelationUpdated);
     window.addEventListener("workbenchRelationUpdated", handleRelationUpdated);
+    window.addEventListener("bankTransactionCategoryUpdated", handleBankCategoryUpdated);
     return () => {
       window.removeEventListener("turnoverRelationUpdated", handleRelationUpdated);
       window.removeEventListener("workbenchRelationUpdated", handleRelationUpdated);
+      window.removeEventListener("bankTransactionCategoryUpdated", handleBankCategoryUpdated);
     };
-  }, [refreshWorkbenchDataInBackground]);
+  }, [currentMonth, refreshWorkbenchDataInBackground]);
 
   useEffect(() => {
     document.body.classList.toggle("workbench-focus-mode", expandedZoneId !== null);
@@ -1020,6 +1124,13 @@ export default function ReconciliationWorkbenchPage() {
     }
 
     if (action === "unlink") {
+      if (isNoOaSummaryRow(row)) {
+        await runBlockingAction({
+          loadingMessage: "正在撤回免OA批次...",
+          action: () => withdrawNoOaSummaryRow(row),
+        });
+        return;
+      }
       const rowIds = collectCaseRowIds(row);
       const rowsById = new Map(allRows.map((candidate) => [candidate.id, candidate]));
       await openWithdrawPreview(rowIds.map((rowId) => rowsById.get(rowId)).filter((candidate): candidate is WorkbenchRecord => Boolean(candidate)));
@@ -1047,6 +1158,7 @@ export default function ReconciliationWorkbenchPage() {
     applyLocalIgnoreRow,
     refreshWorkbenchDataInBackground,
     runBlockingAction,
+    withdrawNoOaSummaryRow,
     allRows,
   ]);
 
@@ -1147,6 +1259,9 @@ export default function ReconciliationWorkbenchPage() {
           });
           clearOpenSelection();
           applyLocalConfirmLink(rowIds, caseId);
+          window.dispatchEvent(new CustomEvent("workbenchRelationUpdated", {
+            detail: { affectedMonths: actionAffectedMonths(result) },
+          }));
           refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
           return result.message;
         },
@@ -1165,6 +1280,9 @@ export default function ReconciliationWorkbenchPage() {
         clearPairedSelection();
         clearOpenSelection();
         applyLocalWithdrawLink(rowIds, preview.after.groups);
+        window.dispatchEvent(new CustomEvent("workbenchRelationUpdated", {
+          detail: { affectedMonths: actionAffectedMonths(result) },
+        }));
         return result.message;
       },
     });
@@ -1248,6 +1366,21 @@ export default function ReconciliationWorkbenchPage() {
 
     if (selectedGroups.length === 0) {
       openActionResultDialog("请先选择已配对记录。");
+      return;
+    }
+    const selectedNoOaSummaryRows = selectedGroups
+      .flatMap((group) => group.rows.bank)
+      .filter((row) => selectedRowIds.has(row.id) && isNoOaSummaryRow(row));
+    if (selectedNoOaSummaryRows.length > 0) {
+      await runBlockingAction({
+        loadingMessage: "正在撤回免OA批次...",
+        action: async () => {
+          for (const row of selectedNoOaSummaryRows) {
+            await withdrawNoOaSummaryRow(row);
+          }
+          return selectedNoOaSummaryRows.length === 1 ? "已撤回免OA批次。" : `已撤回 ${selectedNoOaSummaryRows.length} 个免OA批次。`;
+        },
+      });
       return;
     }
     await openWithdrawPreview(
@@ -1991,7 +2124,7 @@ function rebuildWorkbenchSummary(data: WorkbenchData): WorkbenchData {
       oaCount: allRows.filter((row) => row.recordType === "oa").length,
       bankCount: allRows.filter((row) => row.recordType === "bank").length,
       invoiceCount: allRows.filter((row) => row.recordType === "invoice").length,
-      pairedCount: pairedRows.length,
+      pairedCount: countWorkbenchGroupsRows(data.paired.groups),
       openCount: visibleOpenRows.length,
       exceptionCount: exceptionRows.length,
       totalCount: allRows.length,

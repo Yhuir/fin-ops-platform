@@ -19,7 +19,7 @@ _TEXT_RULES: tuple[dict[str, Any], ...] = (
     {
         "category_code": "fee",
         "rule_code": "fee_text_keyword",
-        "keywords": ("手续费", "服务费", "网银手续费", "转账手续费"),
+        "keywords": ("手续费", "网银手续费", "转账手续费", "账户管理费", "汇划费", "短信服务费"),
         "reason": "摘要、用途、备注或明细字段包含手续费相关关键词",
     },
     {

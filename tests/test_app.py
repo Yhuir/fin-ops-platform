@@ -34,12 +34,18 @@ class AppTests(unittest.TestCase):
         self.assertIn("/api/cost-statistics", payload["entrypoints"])
         self.assertIn("/api/cost-statistics/export", payload["entrypoints"])
         self.assertIn("/api/search", payload["entrypoints"])
+        self.assertIn("/api/no-oa-bank-batches", payload["entrypoints"])
+        self.assertIn("/api/no-oa-bank-batches/submit", payload["entrypoints"])
+        self.assertIn("/api/no-oa-bank-batches/{batch_id}", payload["entrypoints"])
+        self.assertIn("/api/no-oa-bank-batches/{batch_id}/submit", payload["entrypoints"])
+        self.assertIn("/api/no-oa-bank-batches/{batch_id}/withdraw", payload["entrypoints"])
         self.assertIn("oa_session_foundation", payload["capabilities"])
         self.assertIn("project_costing_foundation", payload["capabilities"])
         self.assertIn("workbench_v2_backend_contracts", payload["capabilities"])
         self.assertIn("cost_statistics_foundation", payload["capabilities"])
         self.assertIn("cost_statistics_export", payload["capabilities"])
         self.assertIn("workbench_global_search_foundation", payload["capabilities"])
+        self.assertIn("no_oa_bank_batch_processing", payload["capabilities"])
 
 
 if __name__ == "__main__":

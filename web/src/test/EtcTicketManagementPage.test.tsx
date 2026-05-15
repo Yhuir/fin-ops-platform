@@ -113,6 +113,180 @@ describe("ETC ticket management page", () => {
     expect(within(page).queryByTestId("etc-reconciliation-task-row-etc-recon-task-001")).not.toBeInTheDocument();
   });
 
+  test("closes the task delete dialog after delete succeeds even when the follow-up task refresh hangs", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const task = {
+      taskId: "etc-recon-delete-refresh-hangs-001",
+      status: "reviewing",
+      version: 3,
+      title: "2026-02 ETC 对账",
+      periodStart: "2026-02-27",
+      periodEnd: "2026-02-28",
+      statementPeriodStart: "2026-02-01",
+      statementPeriodEnd: "2026-02-29",
+      approvedDelta: "0.00",
+      approvedDeltaNote: "",
+      cardLast4: "7788",
+      oaTotalAmount: "120.00",
+      etcInvoiceAmount: "90.00",
+      supplementAmount: "30.00",
+      etcInvoiceCount: 2,
+      supplementCount: 1,
+      canConfirm: false,
+      vehiclePlates: ["云ADA0381"],
+      confirmedItemSetHash: "",
+      importBatchId: "",
+      etcBatchId: "",
+      hasImportedInvoices: false,
+      importedInvoiceCount: 0,
+      importedInvoiceAmount: "0.00",
+      oaDraftBatchId: "",
+      oaDraftStatus: "",
+      submittedConfirmedAt: "",
+      creditCardItems: [],
+      ticketRootItems: [],
+      supplementEvidences: [],
+      sourceFiles: [],
+      parseIssues: [],
+    } as never;
+    let taskLoadCount = 0;
+    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockImplementation(() => {
+      taskLoadCount += 1;
+      if (taskLoadCount === 1) {
+        return Promise.resolve({ items: [task] });
+      }
+      return new Promise(() => undefined);
+    });
+    const deleteTask = vi.spyOn(etcApi, "deleteEtcReconciliationTask").mockResolvedValue(undefined);
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const row = await within(page).findByTestId("etc-reconciliation-task-row-etc-recon-delete-refresh-hangs-001");
+    await user.click(within(row).getByRole("button", { name: "删除对账任务 2026-02 ETC 对账" }));
+    const dialog = await screen.findByRole("dialog", { name: "删除对账任务" });
+    await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => {
+      expect(deleteTask).toHaveBeenCalledWith("etc-recon-delete-refresh-hangs-001", 3);
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "删除对账任务" })).not.toBeInTheDocument();
+    });
+    expect(within(page).queryByTestId("etc-reconciliation-task-row-etc-recon-delete-refresh-hangs-001")).not.toBeInTheDocument();
+    expect(screen.queryByText("正在删除...")).not.toBeInTheDocument();
+  });
+
+  test("deletes an imported reconciliation task with expected version and removes it from the list", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const importedTask = {
+      taskId: "etc-recon-imported-delete-001",
+      status: "imported",
+      version: 8,
+      title: "2026-03 ETC 已导入",
+      periodStart: "2026-03-01",
+      periodEnd: "2026-03-31",
+      statementPeriodStart: "2026-03-01",
+      statementPeriodEnd: "2026-03-31",
+      approvedDelta: "0.00",
+      approvedDeltaNote: "",
+      cardLast4: "7788",
+      oaTotalAmount: "30.00",
+      etcInvoiceAmount: "30.00",
+      supplementAmount: "0.00",
+      etcInvoiceCount: 1,
+      supplementCount: 0,
+      canConfirm: false,
+      vehiclePlates: ["云ADA0381"],
+      confirmedItemSetHash: "sha256:selected",
+      importBatchId: "import-session-delete-001",
+      etcBatchId: "",
+      hasImportedInvoices: true,
+      importedInvoiceCount: 1,
+      importedInvoiceAmount: "30.00",
+      oaDraftBatchId: "",
+      oaDraftStatus: "",
+      submittedConfirmedAt: "",
+      creditCardItems: [],
+      ticketRootItems: [],
+      supplementEvidences: [],
+      sourceFiles: [],
+      parseIssues: [],
+    };
+    vi.spyOn(etcApi, "fetchEtcReconciliationTasks")
+      .mockResolvedValueOnce({ items: [importedTask] } as never)
+      .mockResolvedValueOnce({ items: [] } as never);
+    vi.spyOn(etcApi, "fetchEtcBatchDetail").mockResolvedValue({
+      id: "import-session-delete-001",
+      etcBatchId: "ETC-2026-IMPORTED-DELETE",
+      externalBatchId: "ETC-2026-IMPORTED-DELETE",
+      status: "unsubmitted",
+      sourceType: "etc_zip",
+      invoiceCount: 1,
+      totalAmount: "30.00",
+      taxAmount: "1.80",
+      issueStartDate: "2026-03-03",
+      issueEndDate: "2026-03-03",
+      passageStartDate: "2026-03-03",
+      passageEndDate: "2026-03-03",
+      plateCount: 1,
+      plateSummary: [{ plateNumber: "云ADA0381", invoiceCount: 1, totalAmount: "30.00" }],
+      linkedOaRowId: "",
+      linkedOaCaseId: "",
+      linkedOaApplicant: "",
+      linkedOaApplyDate: "",
+      linkedOaAmount: "0.00",
+      amountDelta: "0.00",
+      etcInvoiceCount: 1,
+      supplementCount: 0,
+      supplementAmount: "0.00",
+      displayCountText: "ETC票 1 + 补充凭证 0",
+      note: "",
+      invoiceItems: [
+        {
+          id: "etc-inv-imported-delete-001",
+          invoiceNumber: "ETC-IMPORTED-DELETE-001",
+          issueDate: "2026-03-03",
+          passageStartDate: "2026-03-03",
+          passageEndDate: "2026-03-03",
+          plateNumber: "云ADA0381",
+          sellerName: "云南高速通行费",
+          buyerName: "云南溯源科技",
+          amountWithoutTax: "28.20",
+          taxAmount: "1.80",
+          totalAmount: "30.00",
+          status: "unsubmitted",
+          hasPdf: true,
+          hasXml: true,
+        },
+      ],
+    } as never);
+    const deleteTask = vi.spyOn(etcApi, "deleteEtcReconciliationTask").mockResolvedValue(undefined as never);
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const row = await within(page).findByTestId("etc-reconciliation-task-row-etc-recon-imported-delete-001");
+    await user.click(within(row).getByRole("button", { name: "删除对账任务 2026-03 ETC 已导入" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "删除对账任务" });
+    expect(dialog).toHaveTextContent("将删除该对账任务及其未进入 OA 链路的数据");
+    expect(dialog).toHaveTextContent("一并删除已导入 ETC 发票");
+    expect(dialog.textContent).toContain("重新导入时只能重新建/导");
+    await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => {
+      expect(deleteTask).toHaveBeenCalledWith("etc-recon-imported-delete-001", 8);
+    });
+    await waitFor(() => {
+      expect(within(page).queryByTestId("etc-reconciliation-task-row-etc-recon-imported-delete-001")).not.toBeInTheDocument();
+    });
+    expect(within(page).getByText("请选择左侧对账任务或新建批次。")).toBeInTheDocument();
+    expect(within(page).queryByRole("region", { name: "已导入ETC发票" })).not.toBeInTheDocument();
+  });
+
   test("shows the reconciliation workspace with upload blocks, statuses, supplements, and parse issues", async () => {
     installMockApiFetch();
     renderAppAt("/etc-tickets");
@@ -125,7 +299,7 @@ describe("ETC ticket management page", () => {
     expect(within(page).getByRole("button", { name: "票根网 PDF/JPG" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "信用卡账单 PDF" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "补充凭证" })).toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "补ETC发票" })).toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "补ETC发票" })).not.toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "确认对账" })).toBeDisabled();
 
     expect(within(page).getByText("信用卡侧")).toBeInTheDocument();
@@ -137,6 +311,59 @@ describe("ETC ticket management page", () => {
     expect(within(page).getByText(/票根网缺少车牌号/)).toBeInTheDocument();
 
     expect(within(page).getByRole("region", { name: "ETC批次详情" })).toBeInTheDocument();
+  });
+
+  test("keeps the three import buttons in a separate upload action rail", async () => {
+    installMockApiFetch();
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    await within(page).findByRole("button", { name: "信用卡账单 PDF" });
+    const uploadRegion = page.querySelector('[aria-label="ETC对账文件上传"]');
+    if (!(uploadRegion instanceof HTMLElement)) {
+      throw new Error("Expected upload region to render.");
+    }
+    const actionRail = uploadRegion.querySelector(".etc-upload-actions");
+
+    expect(actionRail).toBeInstanceOf(HTMLElement);
+    expect(within(actionRail as HTMLElement).getByRole("button", { name: "信用卡账单 PDF" })).toBeInTheDocument();
+    expect(within(actionRail as HTMLElement).getByRole("button", { name: "补充凭证" })).toBeInTheDocument();
+    expect(within(actionRail as HTMLElement).getByRole("button", { name: "票根网 PDF/JPG" })).toBeInTheDocument();
+    expect(within(actionRail as HTMLElement).queryByRole("button", { name: "补ETC发票" })).not.toBeInTheDocument();
+  });
+
+  test("uploads ticket-root TXT files through the ticket-root files endpoint", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    await within(page).findByRole("group", { name: "票根网导入方式" });
+    await user.click(within(page).getByRole("button", { name: "TXT文件" }));
+
+    const txtUploadButton = within(page).getByRole("button", { name: "票根网 TXT" });
+    expect(txtUploadButton).toBeEnabled();
+    expect(within(page).getByRole("button", { name: "票根网 PDF/JPG" })).toHaveAttribute("aria-disabled", "true");
+
+    const txtInput = txtUploadButton.querySelector('input[type="file"]');
+    if (!(txtInput instanceof HTMLInputElement)) {
+      throw new Error("Expected ticket-root TXT upload input to render.");
+    }
+    expect(txtInput).toHaveAttribute("accept", ".txt,text/plain");
+
+    const txtFile = new File(["车牌号：云A516HJ\n交易时间：2026-04-02 13:30:29交易金额：￥57.95"], "云A516HJ", { type: "text/plain" });
+    await user.upload(txtInput, txtFile);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/etc/reconciliation-tasks/etc-recon-task-001/ticket-root-files",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+    const request = fetchMock.mock.calls.find(([url]) => url === "/api/etc/reconciliation-tasks/etc-recon-task-001/ticket-root-files")?.[1] as RequestInit;
+    const formData = request.body as FormData;
+    expect(formData.get("expectedVersion")).toBe("3");
+    expect((formData.getAll("files") as File[])[0]).toMatchObject({ name: "云A516HJ", type: "text/plain" });
   });
 
   test("shows source file context, deletes a mutable source file, and fresh tasks do not inherit old issues", async () => {
@@ -384,7 +611,118 @@ describe("ETC ticket management page", () => {
     expect(within(page).getByText("已有手工粘贴源，删除后可切换。")).toBeInTheDocument();
   });
 
-  test("shows per manual ticket-root paste source counts and plates", async () => {
+  test("auto-selects TXT mode for text ticket-root files and shows each source summary", async () => {
+    installMockApiFetch();
+    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({
+      items: [
+        {
+          taskId: "etc-recon-task-txt-existing",
+          status: "reviewing",
+          version: 3,
+          title: "已有TXT",
+          periodStart: "2026-04-01",
+          periodEnd: "2026-04-30",
+          statementPeriodStart: "2026-04-01",
+          statementPeriodEnd: "2026-04-30",
+          approvedDelta: "0.00",
+          approvedDeltaNote: "",
+          cardLast4: "",
+          oaTotalAmount: "0.00",
+          etcInvoiceAmount: "0.00",
+          supplementAmount: "0.00",
+          etcInvoiceCount: 3,
+          supplementCount: 0,
+          canConfirm: false,
+          vehiclePlates: ["云A516HJ", "云ADA0381"],
+          confirmedItemSetHash: "",
+          creditCardItems: [],
+          ticketRootItems: [
+            {
+              itemId: "ticket-txt-1",
+              sourceFileId: "ticket-txt-source-1",
+              vehiclePlate: "云A516HJ",
+              transactionAt: "2026-04-02 13:30:29",
+              amount: "57.95",
+              entryStation: "云南沙桥站",
+              exitStation: "云南下关站",
+              invoiceCount: 2,
+              recommendationStatus: "unmatched",
+              linkedCreditCardItemIds: [],
+            },
+            {
+              itemId: "ticket-txt-2",
+              sourceFileId: "ticket-txt-source-1",
+              vehiclePlate: "云A516HJ",
+              transactionAt: "2026-04-02 11:25:48",
+              amount: "88.86",
+              entryStation: "云南昆明西站",
+              exitStation: "云南下关站",
+              invoiceCount: 2,
+              recommendationStatus: "unmatched",
+              linkedCreditCardItemIds: [],
+            },
+            {
+              itemId: "ticket-txt-3",
+              sourceFileId: "ticket-txt-source-2",
+              vehiclePlate: "云ADA0381",
+              transactionAt: "2026-04-08 18:57:17",
+              amount: "71.25",
+              entryStation: "云南弥勒南站",
+              exitStation: "云南小喜村站",
+              invoiceCount: 2,
+              recommendationStatus: "unmatched",
+              linkedCreditCardItemIds: [],
+            },
+          ],
+          supplementEvidences: [],
+          sourceFiles: [
+            {
+              fileId: "ticket-txt-source-1",
+              sourceKind: "ticket_root",
+              originalName: "云A516HJ",
+              contentType: "text/plain; charset=utf-8",
+              hasBlockingIssue: false,
+            },
+            {
+              fileId: "ticket-txt-source-2",
+              sourceKind: "ticket_root",
+              originalName: "云ADA0381.txt",
+              contentType: "text/plain",
+              hasBlockingIssue: false,
+            },
+          ],
+          parseIssues: [],
+        },
+      ],
+    } as never);
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    expect(await within(page).findByRole("button", { name: "TXT文件" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(page).getByRole("button", { name: "手工输入" })).toBeDisabled();
+    expect(within(page).getByRole("button", { name: "PDF/JPG" })).toBeDisabled();
+    expect(within(page).getByText("已有 TXT 源文件，删除后可切换。")).toBeInTheDocument();
+
+    const sourceList = within(page).getByRole("list", { name: "已上传文件列表" });
+    const firstSource = within(sourceList).getByText("云A516HJ").closest("li");
+    const secondSource = within(sourceList).getByText("云ADA0381.txt").closest("li");
+    if (!firstSource || !secondSource) {
+      throw new Error("Expected both ticket-root TXT source rows to render.");
+    }
+    expect(firstSource).toHaveTextContent("票根网");
+    expect(firstSource).toHaveTextContent("云A516HJ / 已解析 2 条");
+    expect(firstSource).toHaveTextContent("金额合计 146.81");
+    expect(firstSource).toHaveTextContent("日期 2026-04-02");
+
+    expect(secondSource).toHaveTextContent("票根网");
+    expect(secondSource).toHaveTextContent("云ADA0381 / 已解析 1 条");
+    expect(secondSource).toHaveTextContent("金额合计 71.25");
+    expect(secondSource).toHaveTextContent("日期 2026-04-08");
+    expect(within(page).queryByRole("button", { name: /编辑票根网文本/ })).not.toBeInTheDocument();
+  });
+
+  test("shows per manual ticket-root paste source audit summaries", async () => {
     installMockApiFetch();
     vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({
       items: [
@@ -472,8 +810,21 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByText("云A516HJ / 已解析 2 条")).toBeInTheDocument();
-    expect(within(page).getByText("云ADA0381 / 已解析 1 条")).toBeInTheDocument();
+    const sourceButtons = await within(page).findAllByRole("button", { name: /编辑票根网文本 [12]/ });
+    const firstSource = sourceButtons.find((button) => button.textContent?.includes("云A516HJ"));
+    const secondSource = sourceButtons.find((button) => button.textContent?.includes("云ADA0381"));
+    if (!firstSource || !secondSource) {
+      throw new Error("Expected both manual ticket-root source cards to be rendered.");
+    }
+    expect(firstSource).toHaveTextContent("云A516HJ");
+    expect(firstSource).toHaveTextContent("已解析 2 条");
+    expect(firstSource).toHaveTextContent("金额合计 204.93");
+    expect(firstSource).toHaveTextContent("日期 2026-04-02 至 2026-04-15");
+
+    expect(secondSource).toHaveTextContent("云ADA0381");
+    expect(secondSource).toHaveTextContent("已解析 1 条");
+    expect(secondSource).toHaveTextContent("金额合计 71.25");
+    expect(secondSource).toHaveTextContent("日期 2026-04-08");
     expect(within(page).queryByText("已解析 3 条")).not.toBeInTheDocument();
   });
 
@@ -531,8 +882,13 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     const table = await within(page).findByRole("table", { name: "ETC双侧核对明细" });
+    expect(within(page).getByRole("button", { name: "全选" })).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "全选配对项" })).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "清空" })).toBeInTheDocument();
 
-    expect(within(table).getByRole("columnheader", { name: "交易日/银行记账日" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "交易日" })).toBeInTheDocument();
+    expect(within(table).queryByRole("columnheader", { name: "交易日/银行记账日" })).not.toBeInTheDocument();
+    expect(within(table).queryByText("银行记账日")).not.toBeInTheDocument();
     expect(within(table).getByRole("columnheader", { name: "交易描述" })).toBeInTheDocument();
     expect(within(table).getByRole("columnheader", { name: "金额" })).toBeInTheDocument();
     expect(within(table).getByRole("columnheader", { name: "交易时间" })).toBeInTheDocument();
@@ -555,9 +911,14 @@ describe("ETC ticket management page", () => {
     expect(extraRow).toHaveAttribute("data-highlight", "extra");
     expect(within(extraRow).getByTestId("etc-reconciliation-evidence-cell-ticket-item-extra")).toHaveAttribute("data-highlight", "extra");
 
-    expect(within(table).getAllByText("2026").length).toBeGreaterThanOrEqual(1);
-    expect(within(table).getAllByText("02-27").length).toBeGreaterThanOrEqual(1);
-    expect(within(table).getAllByText("02-28").length).toBeGreaterThanOrEqual(1);
+    expect(within(suggestedPairRow).getByTestId("etc-card-date-transaction-card-item-suggested")).toHaveTextContent("2026-02-27");
+    expect(within(suggestedPairRow).queryByTestId("etc-card-date-posting-card-item-suggested")).not.toBeInTheDocument();
+    expect(within(suggestedPairRow).queryByText("2026-02-28")).not.toBeInTheDocument();
+    expect(within(suggestedPairRow).queryByText("2026-02")).not.toBeInTheDocument();
+    expect(within(suggestedPairRow).queryByText("交易")).not.toBeInTheDocument();
+    expect(within(suggestedPairRow).queryByText("记账")).not.toBeInTheDocument();
+    expect(within(table).queryByText("02-27")).not.toBeInTheDocument();
+    expect(within(table).queryByText("02-28")).not.toBeInTheDocument();
     expect(within(table).getByText("ETC补充凭证")).toBeInTheDocument();
     expect(within(table).queryByText("suggested")).not.toBeInTheDocument();
     expect(within(table).queryByText("系统建议")).not.toBeInTheDocument();
@@ -566,6 +927,588 @@ describe("ETC ticket management page", () => {
     expect(within(table).queryByText("人工已处理")).not.toBeInTheDocument();
     expect(within(table).queryByText(/昆明东/)).not.toBeInTheDocument();
     expect(within(table).queryByText(/玉溪北/)).not.toBeInTheDocument();
+
+    const compactBlock = page.querySelector(".etc-reconciliation-table-block");
+    if (!(compactBlock instanceof HTMLElement)) {
+      throw new Error("Expected reconciliation table block to render.");
+    }
+    expect(getComputedStyle(compactBlock).getPropertyValue("--etc-reconciliation-row-height").trim()).toBe("32px");
+    const bodyRowCount = table.querySelectorAll("tbody .etc-reconciliation-table-row").length;
+    expect(table.querySelectorAll(".etc-reconciliation-divider")).toHaveLength(2 + bodyRowCount);
+    expect(getComputedStyle(within(missingRow).getByTestId("etc-reconciliation-card-cell-card-item-missing")).boxShadow).not.toContain("inset");
+    expect(getComputedStyle(within(extraRow).getByTestId("etc-reconciliation-evidence-cell-ticket-item-extra")).boxShadow).not.toContain("inset");
+  });
+
+  test("keeps long reconciliation descriptions to one line until expanded", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const table = await within(page).findByRole("table", { name: "ETC双侧核对明细" });
+    const row = within(table).getByTestId("etc-reconciliation-row-card-item-suggested");
+    const description = within(row).getByTestId("etc-reconciliation-description-card-item-suggested");
+
+    expect(description).toHaveClass("etc-reconciliation-description--collapsed");
+    expect(within(row).getByRole("button", { name: "展开交易描述 card-item-suggested" })).toBeInTheDocument();
+
+    await user.click(within(row).getByRole("button", { name: "展开交易描述 card-item-suggested" }));
+
+    expect(description).toHaveClass("etc-reconciliation-description--expanded");
+    expect(within(row).getByRole("button", { name: "收起交易描述 card-item-suggested" })).toBeInTheDocument();
+  });
+
+  test("selects reconciliation rows locally with all, paired-only, and clear actions", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const table = await within(page).findByRole("table", { name: "ETC双侧核对明细" });
+    const rowCheckboxes = [
+      within(table).getByRole("checkbox", { name: "选择核对行 card-item-suggested" }),
+      within(table).getByRole("checkbox", { name: "选择核对行 card-item-missing" }),
+      within(table).getByRole("checkbox", { name: "选择核对行 card-item-covered" }),
+      within(table).getByRole("checkbox", { name: "选择核对行 right-ticket-item-extra" }),
+      within(table).getByRole("checkbox", { name: "选择核对行 right-supplement-001" }),
+    ];
+
+    rowCheckboxes.forEach((checkbox) => expect(checkbox).not.toBeChecked());
+
+    await user.click(rowCheckboxes[1]);
+    expect(rowCheckboxes[1]).toBeChecked();
+    expect(rowCheckboxes[0]).not.toBeChecked();
+
+    await user.click(within(page).getByRole("button", { name: "全选" }));
+    rowCheckboxes.forEach((checkbox) => expect(checkbox).toBeChecked());
+
+    await user.click(within(page).getByRole("button", { name: "清空" }));
+    rowCheckboxes.forEach((checkbox) => expect(checkbox).not.toBeChecked());
+
+    await user.click(within(page).getByRole("button", { name: "全选配对项" }));
+    expect(rowCheckboxes[0]).toBeChecked();
+    rowCheckboxes.slice(1).forEach((checkbox) => expect(checkbox).not.toBeChecked());
+  });
+
+  test("updates confirmation metrics from the checked paired rows", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const metrics = await within(page).findByLabelText("本次确认预览");
+
+    expect(metrics).toHaveTextContent("金额");
+    expect(metrics).toHaveTextContent("0.00");
+    expect(metrics).toHaveTextContent("任务范围");
+    expect(metrics).toHaveTextContent("-");
+    expect(metrics).toHaveTextContent("数量");
+    expect(metrics).toHaveTextContent("ETC票 0 + 补充凭证 0");
+
+    await user.click(within(page).getByRole("button", { name: "全选配对项" }));
+
+    expect(metrics).toHaveTextContent("30.00");
+    expect(metrics).toHaveTextContent("2026-02-27");
+    expect(metrics).toHaveTextContent("ETC票 1 + 补充凭证 0");
+
+    await user.click(within(page).getByRole("button", { name: "清空" }));
+
+    expect(metrics).toHaveTextContent("0.00");
+    expect(metrics).toHaveTextContent("-");
+    expect(metrics).toHaveTextContent("ETC票 0 + 补充凭证 0");
+  });
+
+  test("submits the checked card item ids when confirming reconciliation and blocks empty selection", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({
+      items: [
+        {
+          taskId: "etc-recon-task-001",
+          status: "reviewing",
+          version: 3,
+          title: "2026-02 ETC 对账",
+          periodStart: "2026-02-27",
+          periodEnd: "2026-02-28",
+          statementPeriodStart: "2026-02-01",
+          statementPeriodEnd: "2026-02-29",
+          approvedDelta: "0.00",
+          approvedDeltaNote: "",
+          cardLast4: "7788",
+          oaTotalAmount: "120.00",
+          etcInvoiceAmount: "90.00",
+          supplementAmount: "30.00",
+          etcInvoiceCount: 2,
+          supplementCount: 1,
+          canConfirm: false,
+          vehiclePlates: ["云ADA0381"],
+          confirmedItemSetHash: "",
+          sourceFiles: [],
+          parseIssues: [],
+          creditCardItems: [
+            {
+              itemId: "card-item-suggested",
+              transactionDate: "2026-02-27",
+              postingDate: "2026-02-28",
+              cardLast4: "7788",
+              description: "财付通-微信支付-贵州黔通智联",
+              amount: "30.00",
+              settlementAmount: "30.00",
+              isEtcCandidate: true,
+              candidateReason: "ETC关键词",
+              recommendationStatus: "suggested_match",
+              manualResolution: "unresolved",
+              manualResolutionReason: "",
+              reviewNote: "",
+            },
+            {
+              itemId: "card-item-covered",
+              transactionDate: "2026-02-28",
+              postingDate: "2026-02-29",
+              cardLast4: "7788",
+              description: "停车费补充凭证",
+              amount: "30.00",
+              settlementAmount: "30.00",
+              isEtcCandidate: false,
+              candidateReason: "",
+              recommendationStatus: "not_candidate",
+              manualResolution: "covered_by_supplement",
+              manualResolutionReason: "",
+              reviewNote: "",
+            },
+          ],
+          ticketRootItems: [
+            {
+              itemId: "ticket-item-001",
+              sourceFileId: "ticket-file-001",
+              vehiclePlate: "云ADA0381",
+              transactionAt: "2026-02-27T10:00:00",
+              amount: "30.00",
+              entryStation: "昆明东",
+              exitStation: "玉溪北",
+              invoiceCount: 1,
+              recommendationStatus: "suggested_match",
+              linkedCreditCardItemIds: ["card-item-suggested"],
+            },
+          ],
+          supplementEvidences: [
+            {
+              evidenceId: "supplement-001",
+              sourceName: "parking.pdf",
+              evidenceKind: "non_etc_invoice",
+              amount: "30.00",
+              paidAt: "2026-02-28",
+              merchantName: "停车场",
+              tags: ["ETC补充凭证"],
+              includeInEtcZipCheck: false,
+              includeInOaSubmission: true,
+              includeInWorkbench: true,
+            },
+          ],
+        },
+      ],
+    } as never);
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    await within(page).findByRole("table", { name: "ETC双侧核对明细" });
+    expect(within(page).getByRole("button", { name: "确认对账" })).toBeDisabled();
+
+    await user.click(within(page).getByRole("button", { name: "全选配对项" }));
+    expect(within(page).getByRole("button", { name: "确认对账" })).toBeEnabled();
+    await user.click(within(page).getByRole("button", { name: "确认对账" }));
+
+    await waitFor(() => {
+      const confirmRequest = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/api/etc/reconciliation-tasks/etc-recon-task-001/confirm"))?.[1] as RequestInit | undefined;
+      expect(confirmRequest).toBeDefined();
+      expect(JSON.parse(String(confirmRequest?.body))).toMatchObject({
+        expectedVersion: 3,
+        confirmedCreditCardItemIds: ["card-item-suggested"],
+      });
+    });
+  });
+
+  test("shows imported task invoices under the reconciliation task and collapses both task blocks", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const importedTask = {
+      taskId: "etc-recon-imported-001",
+      status: "imported",
+      version: 8,
+      title: "2026-03 ETC 已导入",
+      periodStart: "2026-03-01",
+      periodEnd: "2026-03-31",
+      statementPeriodStart: "2026-03-01",
+      statementPeriodEnd: "2026-03-31",
+      approvedDelta: "0.00",
+      approvedDeltaNote: "",
+      cardLast4: "7788",
+      oaTotalAmount: "30.00",
+      etcInvoiceAmount: "30.00",
+      supplementAmount: "0.00",
+      etcInvoiceCount: 1,
+      supplementCount: 0,
+      canConfirm: false,
+      vehiclePlates: ["云ADA0381"],
+      confirmedItemSetHash: "sha256:selected",
+      importBatchId: "import-session-001",
+      etcBatchId: "etc-batch-imported-001",
+      oaDraftBatchId: "",
+      oaDraftStatus: "",
+      submittedConfirmedAt: "",
+      creditCardItems: [],
+      ticketRootItems: [],
+      supplementEvidences: [],
+      sourceFiles: [],
+      parseIssues: [],
+    };
+    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({
+      items: [importedTask],
+    } as never);
+    vi.spyOn(etcApi, "fetchEtcBatchDetail").mockResolvedValue({
+      id: "etc-batch-imported-001",
+      etcBatchId: "ETC-2026-IMPORTED",
+      externalBatchId: "ETC-2026-IMPORTED",
+      status: "unsubmitted",
+      sourceType: "etc_zip",
+      invoiceCount: 1,
+      totalAmount: "30.00",
+      taxAmount: "1.80",
+      issueStartDate: "2026-03-03",
+      issueEndDate: "2026-03-03",
+      passageStartDate: "2026-03-03",
+      passageEndDate: "2026-03-03",
+      plateCount: 1,
+      plateSummary: [{ plateNumber: "云ADA0381", invoiceCount: 1, totalAmount: "30.00" }],
+      linkedOaRowId: "",
+      linkedOaCaseId: "",
+      linkedOaApplicant: "",
+      linkedOaApplyDate: "",
+      linkedOaAmount: "0.00",
+      amountDelta: "0.00",
+      etcInvoiceCount: 1,
+      supplementCount: 0,
+      supplementAmount: "0.00",
+      displayCountText: "ETC票 1 + 补充凭证 0",
+      note: "",
+      invoiceItems: [
+        {
+          id: "etc-inv-imported-001",
+          invoiceNumber: "ETC-IMPORTED-001",
+          issueDate: "2026-03-03",
+          passageStartDate: "2026-03-03",
+          passageEndDate: "2026-03-03",
+          plateNumber: "云ADA0381",
+          sellerName: "云南高速通行费",
+          buyerName: "云南溯源科技",
+          amountWithoutTax: "28.20",
+          taxAmount: "1.80",
+          totalAmount: "30.00",
+          status: "unsubmitted",
+          hasPdf: true,
+          hasXml: true,
+        },
+      ],
+    } as never);
+    vi.spyOn(etcApi, "deleteEtcReconciliationTaskImportedInvoices").mockResolvedValue({
+      ...importedTask,
+      status: "ready_for_import",
+      version: 9,
+      importBatchId: "",
+      etcBatchId: "",
+    } as never);
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    expect(await within(page).findByRole("heading", { name: "已导入ETC发票" })).toBeInTheDocument();
+    const importedInvoiceSection = within(page).getByRole("region", { name: "已导入ETC发票" });
+    expect(within(importedInvoiceSection).getByText("1 张")).toBeInTheDocument();
+    const removeButton = within(importedInvoiceSection).getByRole("button", { name: "移除已导入的发票" });
+    expect(removeButton).toBeEnabled();
+    expect(within(importedInvoiceSection).getByRole("table", { name: "已导入ETC发票明细" })).toBeInTheDocument();
+    expect(within(importedInvoiceSection).getByText("ETC-IMPORTED-001")).toBeInTheDocument();
+    expect(etcApi.fetchEtcBatchDetail).toHaveBeenCalledWith("import-session-001", expect.any(AbortSignal));
+
+    await user.click(removeButton);
+    const dialog = await screen.findByRole("dialog", { name: "移除已导入发票" });
+    expect(dialog).toHaveTextContent("2026-03 ETC 已导入");
+    expect(dialog).toHaveTextContent("1 张");
+    await user.click(within(dialog).getByRole("button", { name: "确认移除" }));
+
+    await waitFor(() => {
+      expect(etcApi.deleteEtcReconciliationTaskImportedInvoices).toHaveBeenCalledWith("etc-recon-imported-001", 8);
+    });
+    expect(within(importedInvoiceSection).queryByRole("button", { name: "移除已导入的发票" })).not.toBeInTheDocument();
+    expect(within(importedInvoiceSection).getByText("确认对账后，请到 ETC 发票导入页导入 zip。")).toBeInTheDocument();
+    expect(within(page).getByText("2026-03 ETC 已导入 / v9")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "移除已导入发票" })).not.toBeInTheDocument());
+
+    await user.click(within(page).getByRole("button", { name: "折叠ETC对账任务" }));
+    expect(within(page).queryByText("已导入ETC发票")).not.toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "展开ETC对账任务" })).toHaveAttribute("aria-expanded", "false");
+
+    expect(within(page).getByRole("region", { name: "ETC批次详情" })).toBeInTheDocument();
+    await user.click(within(page).getByRole("button", { name: "折叠ETC批次详情" }));
+    expect(within(page).queryByRole("table", { name: "ETC发票明细" })).not.toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "展开ETC批次详情" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("creates OA draft from the selected imported reconciliation task batch", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const openedWindow = {
+      closed: false,
+      close: vi.fn(),
+      location: { href: "about:blank" },
+      opener: {},
+    };
+    const openMock = vi.fn(() => openedWindow);
+    vi.stubGlobal("open", openMock);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({
+      items: [
+        {
+          taskId: "etc-recon-imported-submit-001",
+          status: "imported",
+          version: 11,
+          title: "2026-04 ETC 已导入",
+          periodStart: "2026-03-28",
+          periodEnd: "2026-04-27",
+          statementPeriodStart: "2026-03-28",
+          statementPeriodEnd: "2026-04-27",
+          approvedDelta: "0.00",
+          approvedDeltaNote: "",
+          cardLast4: "8514",
+          oaTotalAmount: "1673.30",
+          etcInvoiceAmount: "1673.30",
+          supplementAmount: "0.00",
+          etcInvoiceCount: 37,
+          supplementCount: 0,
+          canConfirm: false,
+          vehiclePlates: ["云ADA0381"],
+          confirmedItemSetHash: "sha256:selected",
+          importBatchId: "etc_import_batch_0004",
+          etcBatchId: "",
+          hasImportedInvoices: true,
+          importedInvoiceCount: 36,
+          importedInvoiceAmount: "1673.30",
+          oaDraftBatchId: "",
+          oaDraftStatus: "",
+          submittedConfirmedAt: "",
+          creditCardItems: [],
+          ticketRootItems: [],
+          supplementEvidences: [],
+          sourceFiles: [],
+          parseIssues: [],
+        },
+      ],
+    } as never);
+    vi.spyOn(etcApi, "fetchEtcBatchDetail").mockResolvedValue({
+      id: "etc_import_batch_0004",
+      etcBatchId: "etc_import_batch_0004",
+      externalBatchId: "etc_import_batch_0004",
+      status: "unsubmitted",
+      sourceType: "etc_import",
+      invoiceCount: 36,
+      totalAmount: "1673.30",
+      taxAmount: "48.74",
+      issueStartDate: "2026-03-28",
+      issueEndDate: "2026-04-27",
+      passageStartDate: "2026-03-28",
+      passageEndDate: "2026-04-27",
+      plateCount: 1,
+      plateSummary: [{ plateNumber: "云ADA0381", invoiceCount: 36, totalAmount: "1673.30" }],
+      linkedOaRowId: "",
+      linkedOaCaseId: "",
+      linkedOaApplicant: "",
+      linkedOaApplyDate: "",
+      linkedOaAmount: "0.00",
+      amountDelta: "0.00",
+      etcInvoiceCount: 37,
+      supplementCount: 0,
+      supplementAmount: "0.00",
+      displayCountText: "ETC票 37 + 补充凭证 0",
+      note: "",
+      invoiceItems: [
+        {
+          id: "etc-inv-imported-submit-001",
+          invoiceNumber: "ETC-IMPORTED-SUBMIT-001",
+          issueDate: "2026-04-27",
+          passageStartDate: "2026-04-27",
+          passageEndDate: "2026-04-27",
+          plateNumber: "云ADA0381",
+          sellerName: "云南高速通行费",
+          buyerName: "云南溯源科技",
+          amountWithoutTax: "1624.56",
+          taxAmount: "48.74",
+          totalAmount: "1673.30",
+          status: "unsubmitted",
+          hasPdf: true,
+          hasXml: true,
+        },
+      ],
+    } as never);
+    const createDraft = vi.spyOn(etcApi, "createEtcOaDraftForBatch").mockResolvedValue({
+      batchId: "etc_batch_submission_001",
+      etcBatchId: "ETC-2026-OA-001",
+      oaDraftId: "oa-draft-001",
+      oaDraftUrl: "https://oa.example.test/oa/#/normal/forms/form/2?formId=2&id=oa-draft-001",
+    });
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const importedInvoiceSection = await within(page).findByRole("region", { name: "已导入ETC发票" });
+    expect(within(importedInvoiceSection).getByText("36 张")).toBeInTheDocument();
+    expect(within(importedInvoiceSection).getByText("合计 1673.30")).toBeInTheDocument();
+
+    const submitButton = within(page).getByRole("button", { name: "提交OA支付申请" });
+    await waitFor(() => expect(submitButton).toBeEnabled());
+    await user.click(submitButton);
+
+    const dialog = await screen.findByRole("dialog", { name: "创建OA支付申请草稿" });
+    expect(dialog).toHaveTextContent("将为当前 ETC 对账任务下已导入的 36 张发票创建 OA 支付申请草稿，发票合计 1673.30。");
+    expect(dialog).toHaveTextContent("当前批次：etc_import_batch_0004");
+    await user.click(within(dialog).getByRole("button", { name: "确认创建草稿" }));
+
+    expect(openMock).toHaveBeenCalledWith("about:blank", "_blank");
+    await waitFor(() => expect(createDraft).toHaveBeenCalledWith("etc_import_batch_0004"));
+    await waitFor(() => expect(openedWindow.location.href).toContain("https://oa.example.test/oa/#/normal/forms/form/2"));
+  });
+
+  test("deletes an imported reconciliation task through confirmation", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const importedTask = {
+      taskId: "etc-recon-imported-delete-001",
+      status: "imported",
+      version: 8,
+      title: "2026-03 ETC 已导入",
+      periodStart: "2026-03-01",
+      periodEnd: "2026-03-31",
+      statementPeriodStart: "2026-03-01",
+      statementPeriodEnd: "2026-03-31",
+      approvedDelta: "0.00",
+      approvedDeltaNote: "",
+      cardLast4: "7788",
+      oaTotalAmount: "30.00",
+      etcInvoiceAmount: "30.00",
+      supplementAmount: "0.00",
+      etcInvoiceCount: 1,
+      supplementCount: 0,
+      canConfirm: false,
+      vehiclePlates: ["云ADA0381"],
+      confirmedItemSetHash: "sha256:selected",
+      importBatchId: "import-session-delete-001",
+      etcBatchId: "",
+      hasImportedInvoices: true,
+      importedInvoiceCount: 1,
+      importedInvoiceAmount: "30.00",
+      oaDraftBatchId: "",
+      oaDraftStatus: "",
+      submittedConfirmedAt: "",
+      creditCardItems: [],
+      ticketRootItems: [],
+      supplementEvidences: [],
+      sourceFiles: [],
+      parseIssues: [],
+    };
+    vi.spyOn(etcApi, "fetchEtcReconciliationTasks")
+      .mockResolvedValueOnce({ items: [importedTask] } as never)
+      .mockResolvedValue({ items: [] } as never);
+    vi.spyOn(etcApi, "fetchEtcBatchDetail").mockResolvedValue({
+      id: "import-session-delete-001",
+      etcBatchId: "import-session-delete-001",
+      externalBatchId: "import-session-delete-001",
+      status: "unsubmitted",
+      sourceType: "etc_zip",
+      invoiceCount: 1,
+      totalAmount: "30.00",
+      taxAmount: "1.80",
+      issueStartDate: "2026-03-03",
+      issueEndDate: "2026-03-03",
+      passageStartDate: "2026-03-03",
+      passageEndDate: "2026-03-03",
+      plateCount: 1,
+      plateSummary: [],
+      linkedOaRowId: "",
+      linkedOaCaseId: "",
+      linkedOaApplicant: "",
+      linkedOaApplyDate: "",
+      linkedOaAmount: "0.00",
+      amountDelta: "0.00",
+      etcInvoiceCount: 1,
+      supplementCount: 0,
+      supplementAmount: "0.00",
+      displayCountText: "ETC票 1 + 补充凭证 0",
+      note: "",
+      invoiceItems: [],
+    } as never);
+    vi.spyOn(etcApi, "deleteEtcReconciliationTask").mockResolvedValue(undefined);
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const deleteButton = await within(page).findByRole("button", { name: /删除对账任务 2026-03 ETC 已导入/ });
+    expect(deleteButton).toBeEnabled();
+    await user.click(deleteButton);
+    const dialog = await screen.findByRole("dialog", { name: "删除对账任务" });
+    expect(dialog).toHaveTextContent("将一并删除该任务下已导入的 ETC 发票");
+    await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => {
+      expect(etcApi.deleteEtcReconciliationTask).toHaveBeenCalledWith("etc-recon-imported-delete-001", 8);
+    });
+    await waitFor(() => {
+      expect(within(page).queryByTestId("etc-reconciliation-task-row-etc-recon-imported-delete-001")).not.toBeInTheDocument();
+    });
+  });
+
+  test("does not render a task imported invoice batch as a separate left-side batch", async () => {
+    installMockApiFetch();
+    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({
+      items: [
+        {
+          taskId: "etc-recon-task-imported-batch",
+          status: "imported",
+          version: 5,
+          title: "2026-03 ETC 对账",
+          periodStart: "2026-03-01",
+          periodEnd: "2026-03-31",
+          statementPeriodStart: "2026-03-01",
+          statementPeriodEnd: "2026-03-31",
+          approvedDelta: "0.00",
+          approvedDeltaNote: "",
+          cardLast4: "",
+          oaTotalAmount: "21.35",
+          etcInvoiceAmount: "21.35",
+          supplementAmount: "0.00",
+          etcInvoiceCount: 1,
+          supplementCount: 0,
+          canConfirm: false,
+          vehiclePlates: ["云A8H66Q"],
+          confirmedItemSetHash: "sha256:selected",
+          importBatchId: "",
+          etcBatchId: "etc-batch-unsubmitted-02",
+          oaDraftBatchId: "",
+          oaDraftStatus: "",
+          submittedConfirmedAt: "",
+          creditCardItems: [],
+          ticketRootItems: [],
+          supplementEvidences: [],
+          sourceFiles: [],
+          parseIssues: [],
+        },
+      ],
+    } as never);
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    expect(await within(page).findByTestId("etc-reconciliation-task-row-etc-recon-task-imported-batch")).toBeInTheDocument();
+    expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toBeInTheDocument();
+    expect(within(page).queryByTestId("etc-batch-row-etc-batch-unsubmitted-02")).not.toBeInTheDocument();
   });
 
   test("does not pair same-amount suggested rows without an explicit ticket link", async () => {
@@ -644,6 +1587,111 @@ describe("ETC ticket management page", () => {
     expect(ticketOnlyRow).not.toHaveTextContent("高速通行费-同金额未link");
   });
 
+  test("refreshes reconciliation matches from the task API and rerenders explicit links", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    const baseFetch = fetchMock.getMockImplementation();
+    const initialTask = {
+      taskId: "etc-recon-refresh-001",
+      status: "reviewing",
+      version: 4,
+      title: "刷新匹配",
+      periodStart: "2026-04-08",
+      periodEnd: "2026-04-08",
+      statementPeriodStart: "2026-04-01",
+      statementPeriodEnd: "2026-04-30",
+      approvedDelta: "0.00",
+      approvedDeltaNote: "",
+      cardLast4: "8514",
+      oaTotalAmount: "71.25",
+      etcInvoiceAmount: "0.00",
+      supplementAmount: "0.00",
+      etcInvoiceCount: 1,
+      supplementCount: 0,
+      canConfirm: false,
+      vehiclePlates: ["云ADA0381"],
+      confirmedItemSetHash: "",
+      sourceFiles: [],
+      parseIssues: [],
+      supplementEvidences: [],
+      creditCardItems: [
+        {
+          itemId: "card-refresh-001",
+          transactionDate: "2026-04-08",
+          postingDate: "2026-04-09",
+          cardLast4: "8514",
+          description: "高速通行费-刷新后配对",
+          amount: "71.25",
+          settlementAmount: "71.25",
+          isEtcCandidate: true,
+          candidateReason: "ETC关键词",
+          recommendationStatus: "suggested_match",
+          manualResolution: "unresolved",
+          manualResolutionReason: "",
+          reviewNote: "",
+        },
+      ],
+      ticketRootItems: [
+        {
+          itemId: "ticket-refresh-001",
+          vehiclePlate: "云ADA0381",
+          transactionAt: "2026-04-08T18:57:17",
+          amount: "71.25",
+          entryStation: "昆明南",
+          exitStation: "九龙池",
+          invoiceCount: 1,
+          recommendationStatus: "suggested_match",
+          linkedCreditCardItemIds: [],
+        },
+      ],
+    };
+    const refreshedTask = {
+      ...initialTask,
+      version: 5,
+      ticketRootItems: [
+        {
+          ...initialTask.ticketRootItems[0],
+          linkedCreditCardItemIds: ["card-refresh-001"],
+        },
+      ],
+    };
+
+    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [initialTask] } as never);
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (String(url).endsWith("/api/etc/reconciliation-tasks/etc-recon-refresh-001/refresh-matches")) {
+        return new Response(JSON.stringify(refreshedTask), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (!baseFetch) {
+        throw new Error(`Unhandled fetch ${String(url)}`);
+      }
+      return baseFetch(input, init);
+    });
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const table = await within(page).findByRole("table", { name: "ETC双侧核对明细" });
+    expect(within(table).getByTestId("etc-reconciliation-row-card-refresh-001")).toHaveAttribute("data-highlight", "missing");
+    expect(within(table).getByTestId("etc-reconciliation-row-right-ticket-refresh-001")).toHaveAttribute("data-highlight", "extra");
+
+    await user.click(within(page).getByRole("button", { name: "刷新匹配" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/etc/reconciliation-tasks/etc-recon-refresh-001/refresh-matches",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+    await waitFor(() => {
+      expect(within(table).getByTestId("etc-reconciliation-row-card-refresh-001")).toHaveAttribute("data-highlight", "matched");
+    });
+    expect(within(table).queryByTestId("etc-reconciliation-row-right-ticket-refresh-001")).not.toBeInTheDocument();
+  });
+
   test("manual reconciliation accepts a suggested ticket instead of directly marking an item included", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
@@ -685,12 +1733,14 @@ describe("ETC ticket management page", () => {
     expect(within(page).getByRole("button", { name: "已提交批次不能删除" })).toBeDisabled();
   });
 
-  test("clicking a batch updates the detail grid", async () => {
+  test("renders batch invoice details with a native table instead of DataGrid", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
+    expect(await within(page).findByRole("table", { name: "ETC发票明细" })).toBeInTheDocument();
+    expect(within(page).queryByRole("grid", { name: "ETC发票明细" })).not.toBeInTheDocument();
     expect(await within(page).findByText("ETC-2026-001")).toBeInTheDocument();
     expect(within(page).queryByText("ETC-2026-003")).not.toBeInTheDocument();
 
@@ -709,11 +1759,12 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     await within(page).findByRole("list", { name: "ETC批次列表" });
+    await within(page).findByRole("table", { name: "ETC双侧核对明细" });
 
     expect(within(page).queryByText("提交篮子")).not.toBeInTheDocument();
     expect(within(page).queryByText("加入提交篮子")).not.toBeInTheDocument();
     expect(within(page).queryByText("移回未提交")).not.toBeInTheDocument();
-    expect(within(page).queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(within(page).getAllByRole("checkbox", { name: /选择核对行/ })).toHaveLength(5);
   });
 
   test("creates OA draft through the selected batch endpoint and refreshes after confirmation", async () => {

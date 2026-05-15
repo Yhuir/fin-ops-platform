@@ -33,6 +33,7 @@ type MockApiOptions = {
   importConfirmPreviewStale?: boolean;
   etcImportConfirmPreviewStale?: boolean;
   etcImportConfirmStaleReconciliationTask?: boolean;
+  etcImportBlockingIssues?: Array<Record<string, unknown>>;
   readyEtcReconciliationTasks?: Array<Record<string, unknown>>;
   workbenchColumnLayouts?: {
     oa?: string[];
@@ -424,7 +425,7 @@ function createEtcInvoiceStore() {
       batches = batches.filter((item) => item.id !== batchId);
       return true;
     },
-    previewZip(fileNames: string[]) {
+    previewZip(fileNames: string[], blockingIssues: Array<Record<string, unknown>> = []) {
       return {
         sessionId: "etc_import_session_0001",
         imported: 1,
@@ -472,6 +473,14 @@ function createEtcInvoiceStore() {
             reason: "zip 内缺少可识别 XML",
           },
         ],
+        reconciliationFilter: {
+          taskId: "etc_task_ready_001",
+          taskVersion: 7,
+          confirmedItemSetHash: "sha256:mock",
+          allowedInvoiceNumbers: ["ETC-2026-005"],
+          items: [],
+          blockingIssues,
+        },
       };
     },
     confirmImport() {
@@ -718,7 +727,24 @@ function createEtcReconciliationTaskStore() {
       return { tasks: cloneJson(tasks) };
     },
     ready() {
-      return { tasks: cloneJson(tasks.filter((task) => task.status === "ready_for_import")) };
+      return {
+        tasks: cloneJson(tasks.filter((task) => task.status === "ready_for_import")),
+        unavailableTasks: cloneJson(
+          tasks
+            .filter((task) => task.status !== "ready_for_import")
+            .map((task) => ({
+              ...task,
+              importBlockers: [
+                {
+                  code: task.status === "imported" ? "already_imported" : "not_confirmed",
+                  message: task.status === "imported"
+                    ? "该 ETC 对账任务已导入。如需重导，请先移除已导入 ETC 发票。"
+                    : "请先在 ETC 对账页确认对账。",
+                },
+              ],
+            })),
+        ),
+      };
     },
     get(taskId: string) {
       const task = findTask(taskId);
@@ -732,11 +758,36 @@ function createEtcReconciliationTaskStore() {
       if (task.version !== expectedVersion) {
         return { ok: false, status: 409, body: { error: "task_version_conflict", message: "task_version_conflict" } };
       }
-      if (!["draft", "reviewing"].includes(task.status)) {
+      const hasSubmissionLink = Boolean(
+        String(task.oaDraftBatchId ?? task.oa_draft_batch_id ?? "").trim()
+        || String(task.etcBatchId ?? task.etc_batch_id ?? "").trim()
+        || String(task.submittedConfirmedAt ?? task.submitted_confirmed_at ?? "").trim(),
+      );
+      if (!["draft", "reviewing", "ready_for_import", "imported"].includes(String(task.status)) || hasSubmissionLink) {
         return { ok: false, status: 409, body: { error: "invalid_reconciliation_task_status", message: "invalid_reconciliation_task_status" } };
       }
       tasks = tasks.filter((item) => item.taskId !== taskId);
       return { ok: true, status: 200, body: { deleted: true, taskId, kind: "reconciliation_task" } };
+    },
+    clearImportedInvoices(taskId: string, expectedVersion: number) {
+      const task = findTask(taskId);
+      if (!task) {
+        return { ok: false, status: 404, body: { message: "ETC对账任务不存在。" } };
+      }
+      if (task.version !== expectedVersion) {
+        return { ok: false, status: 409, body: { error: "task_version_conflict", message: "task_version_conflict" } };
+      }
+      return {
+        ok: true,
+        status: 200,
+        body: bump(taskId, {
+          status: "ready_for_import",
+          importBatchId: "",
+          import_batch_id: "",
+          etcBatchId: "",
+          etc_batch_id: "",
+        }),
+      };
     },
     create(title: string) {
       const task = {
@@ -4374,7 +4425,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           },
         };
       }
-      latestEtcImportPreview = etcInvoiceStore.previewZip(fileNames);
+      latestEtcImportPreview = etcInvoiceStore.previewZip(fileNames, options.etcImportBlockingIssues ?? []);
       return { body: cloneJson(latestEtcImportPreview) };
     },
     "/api/etc/import/confirm": ({ jsonBody }) => {
@@ -4479,40 +4530,85 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const accountKey = url.searchParams.get("account_key");
       const dateFrom = url.searchParams.get("date_from");
       const dateTo = url.searchParams.get("date_to");
+      const keyword = (url.searchParams.get("keyword") ?? "").trim();
       const page = Number(url.searchParams.get("page") ?? "1");
       const pageSize = Number(url.searchParams.get("page_size") ?? "100");
       const isCurrentYear = dateFrom === "2026-01-01" && dateTo === "2026-12-31";
+      const visibleRow = {
+        id: `bank-detail-${String(page).padStart(3, "0")}`,
+        trade_time: "2026-05-01 10:30:00",
+        counterparty_name: "云南溯源科技有限公司",
+        direction: "income",
+        direction_label: "收",
+        amount: "20000.00",
+        balance: "130500.50",
+        summary: "项目回款",
+        purpose: "货款",
+        bank_name: "工商银行",
+        account_last4: "6386",
+        category_code: null,
+        category_label: null,
+        category_path: [],
+        category_source: "",
+        category_version: 1,
+        auto_category_code: "salary",
+        auto_category_label: "工资",
+        auto_category_path: ["自动识别", "工资"],
+        auto_category_source: "bank_transaction_auto_category_service",
+        auto_category_reason: "摘要命中工资规则",
+        auto_category_confidence: "high",
+        effective_category_code: "salary",
+        effective_category_label: "工资",
+        effective_category_path: ["自动识别", "工资"],
+        effective_category_source: "auto",
+        oa_relation_tag: "有oa",
+        invoice_relation_tag: "无发票",
+        relation_tags: ["有oa", "无发票"],
+        relation_case_id: "CASE-202605-001",
+      };
+      const hiddenTargetRow = {
+        ...visibleRow,
+        id: "bank-detail-search-target",
+        trade_time: "2026-03-01 10:30:00",
+        counterparty_name: "跨页目标供应商",
+        summary: "网银手续费",
+        purpose: "跨页目标用途",
+        auto_category_code: "fee",
+        auto_category_label: "手续费",
+        auto_category_path: ["自动识别", "手续费"],
+        auto_category_reason: "摘要命中手续费规则",
+        effective_category_code: "fee",
+        effective_category_label: "手续费",
+        effective_category_path: ["自动识别", "手续费"],
+      };
+      const searchDataset = [
+        visibleRow,
+        {
+          ...visibleRow,
+          id: "bank-detail-search-filler",
+          trade_time: "2026-04-01 10:30:00",
+          counterparty_name: "普通供应商",
+          summary: "普通付款",
+          purpose: "普通用途",
+          auto_category_code: null,
+          auto_category_label: null,
+          auto_category_path: [],
+          effective_category_code: null,
+          effective_category_label: null,
+          effective_category_path: [],
+          effective_category_source: "",
+        },
+        hiddenTargetRow,
+      ];
+      const matchedRows = keyword
+        ? searchDataset.filter((row) => Object.values(row).some((value) => (
+          Array.isArray(value)
+            ? value.join(" ").includes(keyword)
+            : String(value ?? "").includes(keyword)
+        )))
+        : null;
       const rows = !accountKey || accountKey === "icbc:6386"
-        ? [
-          {
-            id: `bank-detail-${String(page).padStart(3, "0")}`,
-            trade_time: "2026-05-01 10:30:00",
-            counterparty_name: "云南溯源科技有限公司",
-            direction: "income",
-            direction_label: "收",
-            amount: "20000.00",
-            balance: "130500.50",
-            summary: "项目回款",
-            purpose: "货款",
-            bank_name: "工商银行",
-            account_last4: "6386",
-            category_code: null,
-            category_label: null,
-            category_path: [],
-            category_source: "",
-            category_version: 1,
-            auto_category_code: "salary",
-            auto_category_label: "工资",
-            auto_category_path: ["自动识别", "工资"],
-            auto_category_source: "bank_transaction_auto_category_service",
-            auto_category_reason: "摘要命中工资规则",
-            auto_category_confidence: "high",
-            effective_category_code: "salary",
-            effective_category_label: "工资",
-            effective_category_path: ["自动识别", "工资"],
-            effective_category_source: "auto",
-          },
-        ]
+        ? (matchedRows ?? [visibleRow])
         : [];
       return {
         body: {
@@ -4520,20 +4616,31 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           date_from: dateFrom,
           date_to: dateTo,
           rows,
-          category_counts: {
-            borrow_in_company_pending_repayment: 2,
-            business_warranty_pending_collection: 1,
-            borrow_out_personal_pending_collection: 0,
-            salary: !accountKey || accountKey === "icbc:6386" ? 1 : 0,
-            fee: 0,
-            holiday_bonus: 0,
-            bonus: 0,
-            uncategorized: (!accountKey || accountKey === "icbc:6386") && isCurrentYear ? 295 : rows.length,
-          },
+          category_counts: keyword
+            ? {
+              borrow_in_company_pending_repayment: 0,
+              business_warranty_pending_collection: 0,
+              borrow_out_personal_pending_collection: 0,
+              salary: rows.filter((row) => row.effective_category_code === "salary").length,
+              fee: rows.filter((row) => row.effective_category_code === "fee").length,
+              holiday_bonus: 0,
+              bonus: 0,
+              uncategorized: rows.filter((row) => !row.effective_category_code).length,
+            }
+            : {
+              borrow_in_company_pending_repayment: 2,
+              business_warranty_pending_collection: 1,
+              borrow_out_personal_pending_collection: 0,
+              salary: !accountKey || accountKey === "icbc:6386" ? 1 : 0,
+              fee: 0,
+              holiday_bonus: 0,
+              bonus: 0,
+              uncategorized: (!accountKey || accountKey === "icbc:6386") && isCurrentYear ? 295 : rows.length,
+            },
           pagination: {
             page,
             page_size: pageSize,
-            total: (!accountKey || accountKey === "icbc:6386") && isCurrentYear ? 299 : rows.length,
+            total: keyword ? rows.length : (!accountKey || accountKey === "icbc:6386") && isCurrentYear ? 299 : rows.length,
           },
         },
       };
@@ -5022,6 +5129,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           month,
           affected_row_ids: rowIds,
           case_id: typeof jsonBody?.case_id === "string" ? jsonBody.case_id : undefined,
+          affected_months: Array.from(touchedMonths),
           message: `已确认 ${rowIds.length} 条记录关联。`,
         },
       };
@@ -5060,6 +5168,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           month,
           affected_row_ids: rowIds,
           restored_relations: [],
+          changed_scopes: Array.from(touchedMonths),
           message: "已撤回 1 组关联。",
         },
       };
@@ -5581,6 +5690,22 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       }
       if (!segment && method === "DELETE") {
         const result = etcReconciliationTaskStore.deleteTask(taskId, Number(jsonBody?.expectedVersion ?? jsonBody?.expected_version ?? 0));
+        return jsonResponse({ status: result.status, body: result.body });
+      }
+      if (method === "DELETE" && segment === "imported-invoices") {
+        const currentTask = etcReconciliationTaskStore.get(taskId);
+        const importedBatchId = String(
+          (currentTask as Record<string, unknown> | null)?.etcBatchId
+          ?? (currentTask as Record<string, unknown> | null)?.etc_batch_id
+          ?? "",
+        );
+        const result = etcReconciliationTaskStore.clearImportedInvoices(
+          taskId,
+          Number(jsonBody?.expectedVersion ?? jsonBody?.expected_version ?? 0),
+        );
+        if (result.ok && importedBatchId) {
+          etcInvoiceStore.deleteBatch(importedBatchId);
+        }
         return jsonResponse({ status: result.status, body: result.body });
       }
       if (method === "POST" && ["credit-card-statement", "ticket-root-files", "ticket-root-texts", "supplement-evidences"].includes(segment)) {

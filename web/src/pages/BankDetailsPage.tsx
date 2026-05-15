@@ -27,7 +27,6 @@ import {
   GridToolbarContainer,
   GridToolbarExport,
   GridToolbarFilterButton,
-  GridToolbarQuickFilter,
   type GridColDef,
   type GridLocaleText,
   type GridPaginationModel,
@@ -94,6 +93,24 @@ type CategorySummaryItem = {
   code: BankTransactionCategoryCode;
   label: string;
 };
+
+type BankDetailsGridToolbarProps = {
+  effectiveCategoryCounts: BankTransactionCategoryCounts;
+  dirtyCount: number;
+  visibleCategorySummary: CategorySummaryItem[];
+  searchKeyword: string;
+  onSearchKeywordChange: (value: string) => void;
+};
+
+declare module "@mui/x-data-grid" {
+  interface ToolbarPropsOverrides {
+    effectiveCategoryCounts?: BankTransactionCategoryCounts;
+    dirtyCount?: number;
+    visibleCategorySummary?: CategorySummaryItem[];
+    searchKeyword?: string;
+    onSearchKeywordChange?: (value: string) => void;
+  }
+}
 
 function formatDate(date: Date) {
   const year = date.getFullYear();
@@ -162,6 +179,46 @@ function formatPickerDate(value: Dayjs | null) {
   return value?.isValid() ? value.format("YYYY-MM-DD") : null;
 }
 
+function relationTagTone(tag: string) {
+  return tag.startsWith("有") ? "has" : "none";
+}
+
+function monthIndex(value: string) {
+  if (!/^\d{4}-\d{2}$/.test(value)) {
+    return null;
+  }
+  const [year, month] = value.split("-").map(Number);
+  return year * 12 + month;
+}
+
+function eventAffectedMonths(event: Event) {
+  if (!(event instanceof CustomEvent) || !event.detail || typeof event.detail !== "object") {
+    return null;
+  }
+  const detail = event.detail as { affectedMonths?: unknown; affected_months?: unknown };
+  const rawMonths = Array.isArray(detail.affectedMonths)
+    ? detail.affectedMonths
+    : Array.isArray(detail.affected_months)
+      ? detail.affected_months
+      : null;
+  return rawMonths?.map((month) => String(month).trim()).filter(Boolean) ?? null;
+}
+
+function affectedMonthsHitDateFilter(affectedMonths: string[] | null, dateFilter: BankDateFilter) {
+  if (!affectedMonths || affectedMonths.length === 0 || affectedMonths.includes("all")) {
+    return true;
+  }
+  const startMonth = monthIndex(dateFilter.dateFrom.slice(0, 7));
+  const endMonth = monthIndex(dateFilter.dateTo.slice(0, 7));
+  if (startMonth === null || endMonth === null) {
+    return true;
+  }
+  return affectedMonths.some((month) => {
+    const index = monthIndex(month);
+    return index === null || (index >= startMonth && index <= endMonth);
+  });
+}
+
 function isAbortLikeError(caught: unknown) {
   if (caught instanceof DOMException && caught.name === "AbortError") {
     return true;
@@ -189,6 +246,47 @@ function EmptyTransactionOverlay() {
     <Stack alignItems="center" justifyContent="center" sx={{ height: "100%", px: 2, textAlign: "center" }}>
       <Typography color="text.secondary">当前时间范围内没有流水。</Typography>
     </Stack>
+  );
+}
+
+function BankDetailsGridToolbar({
+  effectiveCategoryCounts = EMPTY_CATEGORY_COUNTS,
+  dirtyCount = 0,
+  visibleCategorySummary = [],
+  searchKeyword = "",
+  onSearchKeywordChange = () => undefined,
+}: Partial<BankDetailsGridToolbarProps>) {
+  return (
+    <GridToolbarContainer className="bank-grid-toolbar">
+      <Stack className="bank-grid-toolbar-content" spacing={1}>
+        <Stack className="bank-grid-category-summary" direction="row" gap={0.4}>
+          <BankCategoryTag categoryCode={null} compact label="未分类" count={effectiveCategoryCounts.uncategorized} />
+          <Chip className="bank-dirty-count-chip bank-chip-auto-size" label={`未保存 ${dirtyCount}`} size="small" color={dirtyCount > 0 ? "warning" : "default"} variant="outlined" />
+          {visibleCategorySummary.map((option) => (
+            <BankCategoryTag
+              key={option.code}
+              categoryCode={option.code}
+              compact
+              label={option.label}
+              count={effectiveCategoryCounts[option.code] ?? 0}
+            />
+          ))}
+        </Stack>
+        <Stack className="bank-grid-toolbar-actions" direction="row" spacing={0.5} alignItems="center">
+          <GridToolbarColumnsButton />
+          <GridToolbarFilterButton />
+          <GridToolbarExport printOptions={{ disableToolbarButton: true }} />
+          <TextField
+            className="bank-grid-search-field"
+            size="small"
+            placeholder="搜索流水"
+            value={searchKeyword}
+            onChange={(event) => onSearchKeywordChange(event.target.value)}
+            inputProps={{ "aria-label": "搜索流水" }}
+          />
+        </Stack>
+      </Stack>
+    </GridToolbarContainer>
   );
 }
 
@@ -265,8 +363,17 @@ const baseTransactionColumns: GridColDef<BankDetailTransaction>[] = [
         >
           {row.counterpartyName}
         </Typography>
-        <Stack direction="row" spacing={0.5} sx={{ minWidth: 0, maxWidth: "100%", overflow: "hidden" }}>
+        <Stack className="bank-relation-chip-row" direction="row" spacing={0.5} sx={{ minWidth: 0, maxWidth: "100%" }}>
           <Chip className="bank-trade-time-chip bank-trade-time-chip-full bank-chip-auto-size" label={row.tradeTime} size="small" variant="outlined" />
+          {row.relationTags.map((tag) => (
+            <Chip
+              key={`${row.id}-${tag}`}
+              className={`bank-relation-tag bank-relation-tag-${relationTagTone(tag)} bank-chip-auto-size`}
+              label={tag}
+              size="small"
+              variant="outlined"
+            />
+          ))}
         </Stack>
       </Stack>
     ),
@@ -385,6 +492,7 @@ export default function BankDetailsPage() {
     page: 0,
     pageSize: DEFAULT_PAGE_SIZE,
   });
+  const [searchKeyword, setSearchKeyword] = useState("");
   const [loading, setLoading] = useState(true);
   const [rowLoading, setRowLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -396,6 +504,7 @@ export default function BankDetailsPage() {
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
   const [snackbar, setSnackbar] = useState<{ severity: "success" | "error"; message: string } | null>(null);
   const [dateFilterAnchorEl, setDateFilterAnchorEl] = useState<HTMLElement | null>(null);
+  const [refreshToken, setRefreshToken] = useState(0);
 
   useEffect(() => {
     draftCategoryByRowIdRef.current = draftCategoryByRowId;
@@ -433,7 +542,7 @@ export default function BankDetailsPage() {
         }
       });
     return () => controller.abort();
-  }, [dateFilter.dateFrom, dateFilter.dateTo, setSelectedAccountKey]);
+  }, [dateFilter.dateFrom, dateFilter.dateTo, refreshToken, setSelectedAccountKey]);
 
   useEffect(() => {
     if (!selectedAccountKey) {
@@ -450,6 +559,7 @@ export default function BankDetailsPage() {
       accountKey,
       dateFrom: dateFilter.dateFrom,
       dateTo: dateFilter.dateTo,
+      keyword: searchKeyword,
       page: paginationModel.page + 1,
       pageSize: paginationModel.pageSize,
       signal: controller.signal,
@@ -489,7 +599,19 @@ export default function BankDetailsPage() {
         }
       });
     return () => controller.abort();
-  }, [dateFilter.dateFrom, dateFilter.dateTo, paginationModel.page, paginationModel.pageSize, selectedAccountKey]);
+  }, [dateFilter.dateFrom, dateFilter.dateTo, paginationModel.page, paginationModel.pageSize, refreshToken, searchKeyword, selectedAccountKey]);
+
+  useEffect(() => {
+    const handleWorkbenchRelationUpdated = (event: Event) => {
+      const affectedMonths = eventAffectedMonths(event);
+      if (!affectedMonthsHitDateFilter(affectedMonths, dateFilter)) {
+        return;
+      }
+      setRefreshToken((current) => current + 1);
+    };
+    window.addEventListener("workbenchRelationUpdated", handleWorkbenchRelationUpdated);
+    return () => window.removeEventListener("workbenchRelationUpdated", handleWorkbenchRelationUpdated);
+  }, [dateFilter]);
 
   const dirtyEntries = useMemo(
     () => Object.entries(draftCategoryByRowId).filter((entry): entry is [string, BankTransactionCategoryCode | null] => entry[1] !== undefined),
@@ -572,6 +694,11 @@ export default function BankDetailsPage() {
       resetToFirstPage();
       setSelectedAccountKey(accountKey);
     });
+  };
+
+  const handleSearchKeywordChange = (value: string) => {
+    resetToFirstPage();
+    setSearchKeyword(value);
   };
 
   const applyPreset = (preset: BankDateFilter["preset"]) => {
@@ -937,32 +1064,17 @@ export default function BankDetailsPage() {
                 getRowClassName={(params) => (params.indexRelativeToCurrentPage % 2 === 0 ? "bank-grid-row-even" : "bank-grid-row-odd")}
                 localeText={DATA_GRID_LOCALE_TEXT}
                 slots={{
-                  toolbar: () => (
-                    <GridToolbarContainer className="bank-grid-toolbar">
-                      <Stack className="bank-grid-toolbar-content" spacing={1}>
-                        <Stack className="bank-grid-category-summary" direction="row" gap={0.4}>
-                          <BankCategoryTag categoryCode={null} compact label="未分类" count={effectiveCategoryCounts.uncategorized} />
-                          <Chip className="bank-dirty-count-chip bank-chip-auto-size" label={`未保存 ${dirtyCount}`} size="small" color={dirtyCount > 0 ? "warning" : "default"} variant="outlined" />
-                          {visibleCategorySummary.map((option) => (
-                            <BankCategoryTag
-                              key={option.code}
-                              categoryCode={option.code}
-                              compact
-                              label={option.label}
-                              count={effectiveCategoryCounts[option.code] ?? 0}
-                            />
-                          ))}
-                        </Stack>
-                        <Stack className="bank-grid-toolbar-actions" direction="row" spacing={0.5} alignItems="center">
-                          <GridToolbarColumnsButton />
-                          <GridToolbarFilterButton />
-                          <GridToolbarExport printOptions={{ disableToolbarButton: true }} />
-                          <GridToolbarQuickFilter debounceMs={200} />
-                        </Stack>
-                      </Stack>
-                    </GridToolbarContainer>
-                  ),
+                  toolbar: BankDetailsGridToolbar,
                   noRowsOverlay: EmptyTransactionOverlay,
+                }}
+                slotProps={{
+                  toolbar: {
+                    effectiveCategoryCounts,
+                    dirtyCount,
+                    visibleCategorySummary,
+                    searchKeyword,
+                    onSearchKeywordChange: handleSearchKeywordChange,
+                  },
                 }}
                 sx={{
                   height: "100%",

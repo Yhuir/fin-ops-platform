@@ -481,6 +481,7 @@ class EtcOAFormFieldMapping:
 class ParsedEtcXml:
     invoice_number: str
     issue_date: str
+    issue_datetime: str | None
     passage_start_date: str | None
     passage_end_date: str | None
     plate_number: str | None
@@ -560,8 +561,7 @@ class EtcService:
         return self._process_import_zips(uploads, persist=True)
 
     def preview_import_zips(self, uploads: list[UploadedEtcZipFile]) -> dict[str, object]:
-        result = self._process_import_zips(uploads, persist=False)
-        audit, file_audits = self._calculate_import_preview_audit(uploads)
+        result, audit, file_audits = self.inspect_import_zips(uploads)
         session_id = uuid4().hex
         self._import_sessions[session_id] = EtcImportSession(
             session_id=session_id,
@@ -572,6 +572,14 @@ class EtcService:
             preview_files=file_audits,
         )
         return self._import_session_payload(session_id, result, audit=audit, files=file_audits)
+
+    def inspect_import_zips(
+        self,
+        uploads: list[UploadedEtcZipFile],
+    ) -> tuple[EtcImportResult, EtcImportPreviewAudit, list[dict[str, object]]]:
+        result = self._process_import_zips(uploads, persist=False)
+        audit, file_audits = self._calculate_import_preview_audit(uploads)
+        return result, audit, file_audits
 
     def confirm_import_session(self, session_id: str) -> EtcImportResult:
         session = self._import_sessions.get(session_id)
@@ -1207,6 +1215,49 @@ class EtcService:
             invoices.append(replace(self._get_invoice(invoice_id)))
         return invoices
 
+    def list_invoices_by_import_batch_id(self, import_batch_id: str) -> list[EtcInvoice]:
+        normalized_batch_id = str(import_batch_id or "").strip()
+        if not normalized_batch_id:
+            return []
+        return [
+            replace(invoice)
+            for invoice in self._invoices.values()
+            if str(getattr(invoice, "import_batch_id", "") or "").strip() == normalized_batch_id
+        ]
+
+    def delete_import_batch_sources(self, import_batch_id: str) -> dict[str, object]:
+        normalized_batch_id = str(import_batch_id or "").strip()
+        if not normalized_batch_id:
+            raise EtcBatchNotFoundError("ETC batch not found: empty batch id")
+
+        import_batch = self._import_batches.get(normalized_batch_id)
+        if import_batch is not None:
+            result = self._delete_import_batch(import_batch)
+            self._persist()
+            return result
+
+        invoices = [
+            invoice
+            for invoice in self._invoices.values()
+            if str(getattr(invoice, "import_batch_id", "") or "").strip() == normalized_batch_id
+        ]
+        for invoice in invoices:
+            if invoice.status != EtcInvoiceStatus.UNSUBMITTED:
+                raise EtcBatchDeleteError("import batch contains submitted invoices and cannot be deleted.")
+            if str(invoice.current_batch_id or "").strip():
+                raise EtcBatchDeleteError("import batch contains invoices assigned to an OA batch and cannot be deleted.")
+        for invoice in invoices:
+            self._delete_invoice_files(invoice)
+            self._invoice_numbers.pop(invoice.invoice_number, None)
+            self._invoices.pop(invoice.id, None)
+        self._persist()
+        return {
+            "deleted": True,
+            "batchId": normalized_batch_id,
+            "kind": "missing_import_batch",
+            "orphanInvoiceCount": len(invoices),
+        }
+
     def snapshot(self) -> dict[str, object]:
         return {
             "invoice_counter": self._invoice_counter,
@@ -1256,7 +1307,14 @@ class EtcService:
         with self._state_path.open("wb") as handle:
             pickle.dump(self.snapshot(), handle)
 
-    def _extract_archive_entries(self, source_name: str, content: bytes, *, depth: int = 0) -> list[_ArchiveEntry]:
+    def _extract_archive_entries(
+        self,
+        source_name: str,
+        content: bytes,
+        *,
+        depth: int = 0,
+        path_prefix: str = "",
+    ) -> list[_ArchiveEntry]:
         if depth > 8:
             raise BadZipFile("nested zip depth exceeds limit")
         entries: list[_ArchiveEntry] = []
@@ -1265,22 +1323,27 @@ class EtcService:
                 if info.is_dir():
                     continue
                 file_content = archive.read(info)
-                path = info.filename
+                path = f"{path_prefix}{info.filename}"
                 if path.lower().endswith(".zip"):
-                    entries.extend(self._extract_archive_entries(f"{source_name}/{path}", file_content, depth=depth + 1))
+                    entries.extend(
+                        self._extract_archive_entries(
+                            source_name,
+                            file_content,
+                            depth=depth + 1,
+                            path_prefix=f"{path}/",
+                        )
+                    )
                 else:
                     entries.append(_ArchiveEntry(source_name, path, file_content))
         return entries
 
     @staticmethod
     def _is_xml_entry(path: str) -> bool:
-        parts = [part.lower() for part in Path(path).parts]
-        return path.lower().endswith(".xml") and "xml" in parts
+        return path.lower().endswith(".xml") and not Path(path).name.startswith(".")
 
     @staticmethod
     def _is_pdf_entry(path: str) -> bool:
-        parts = [part.lower() for part in Path(path).parts]
-        return path.lower().endswith(".pdf") and "pdf" in parts
+        return path.lower().endswith(".pdf") and not Path(path).name.startswith(".")
 
     @staticmethod
     def _match_pdf_entry(invoice_number: str, xml_path: str, pdf_entries: list[_ArchiveEntry]) -> _ArchiveEntry | None:
@@ -2000,15 +2063,19 @@ def parse_etc_xml(content: bytes) -> ParsedEtcXml:
         text = (element.text or "").strip()
         if not text:
             continue
+        if normalized_name in {_normalize_field_name(alias) for alias in ("RequestTime", "IssueTime", "开票时间")}:
+            values.setdefault("issue_datetime", text)
         for field_name, aliases in FIELD_ALIASES.items():
             normalized_aliases = {_normalize_field_name(alias) for alias in aliases}
             if normalized_name in normalized_aliases and field_name not in values:
                 values[field_name] = text
     invoice_number = _required_text(values, "invoice_number")
-    issue_date = _normalize_date(_required_text(values, "issue_date"))
+    raw_issue_date = _required_text(values, "issue_date")
+    issue_date = _normalize_date(raw_issue_date)
     return ParsedEtcXml(
         invoice_number=invoice_number,
         issue_date=issue_date,
+        issue_datetime=_normalize_datetime(values.get("issue_datetime") or raw_issue_date),
         passage_start_date=_normalize_date(values["passage_start_date"]) if values.get("passage_start_date") else None,
         passage_end_date=_normalize_date(values["passage_end_date"]) if values.get("passage_end_date") else None,
         plate_number=values.get("plate_number"),
@@ -2082,6 +2149,20 @@ def _normalize_date(value: str) -> str:
     if re.match(r"^\d{8}$", text):
         return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
     return text
+
+
+def _normalize_datetime(value: str) -> str | None:
+    text = value.strip()
+    if not text:
+        return None
+    normalized = text.replace("/", "-")
+    if re.match(r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}", normalized):
+        return normalized[:19].replace("T", " ")
+    if re.match(r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}", normalized):
+        return f"{normalized[:16].replace('T', ' ')}:00"
+    if re.match(r"^\d{14}$", normalized):
+        return f"{normalized[:4]}-{normalized[4:6]}-{normalized[6:8]} {normalized[8:10]}:{normalized[10:12]}:{normalized[12:14]}"
+    return None
 
 
 def _local_name(tag: str) -> str:

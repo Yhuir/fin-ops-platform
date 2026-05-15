@@ -182,6 +182,8 @@ describe("Workbench row selection and detail modal", () => {
   test("open zone header confirm link opens preview before submit", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
+    const relationUpdatedListener = vi.fn();
+    window.addEventListener("workbenchRelationUpdated", relationUpdatedListener, { once: true });
     renderWorkbenchPage();
 
     const openOaRow = await screen.findByRole("row", {
@@ -259,6 +261,12 @@ describe("Workbench row selection and detail modal", () => {
         }),
       }),
     );
+    await waitFor(() => {
+      expect(relationUpdatedListener).toHaveBeenCalledWith(expect.objectContaining({
+        detail: { affectedMonths: ["2026-03"] },
+      }));
+    });
+    window.removeEventListener("workbenchRelationUpdated", relationUpdatedListener);
   });
 
   test("amount mismatch preview requires note before confirm submit", async () => {
@@ -553,6 +561,8 @@ describe("Workbench row selection and detail modal", () => {
   test("cancel link finishes the blocking modal after local state moves the group back to open", async () => {
     const user = userEvent.setup();
     installMockApiFetch({ actionDelayMs: 20, workbenchLoadDelayMs: 160 });
+    const relationUpdatedListener = vi.fn();
+    window.addEventListener("workbenchRelationUpdated", relationUpdatedListener, { once: true });
     renderWorkbenchPage();
 
     const pairedZone = await screen.findByTestId("zone-paired");
@@ -609,6 +619,12 @@ describe("Workbench row selection and detail modal", () => {
     expect(bankOnlyOpenGroup).toBeDefined();
     expect(within(bankOnlyOpenGroup!).queryByRole("row", { name: /赵华.*华东设备供应商/ })).not.toBeInTheDocument();
     expect(within(bankOnlyOpenGroup!).queryByRole("row", { name: /91310000MA1K8A001X.*华东设备供应商/ })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(relationUpdatedListener).toHaveBeenCalledWith(expect.objectContaining({
+        detail: { affectedMonths: ["2026-03"] },
+      }));
+    });
+    window.removeEventListener("workbenchRelationUpdated", relationUpdatedListener);
   });
 
   test("open zone enables withdraw link only for groups with history", async () => {

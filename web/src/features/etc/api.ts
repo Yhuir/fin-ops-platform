@@ -12,14 +12,18 @@ import type {
   EtcImportItem,
   EtcImportPreviewResult,
   EtcImportSummary,
+  EtcReconciliationBlockingIssue,
+  EtcReconciliationFilterPreview,
   EtcInvoice,
   EtcInvoiceListPayload,
   EtcInvoiceQuery,
   EtcOaDraftPayload,
   EtcPatchReconciliationItemPayload,
+  EtcReadyReconciliationTasksPayload,
   EtcReconciliationTask,
   EtcReconciliationTaskListPayload,
   EtcReconciliationTaskSummary,
+  EtcUnavailableReconciliationTaskSummary,
   EtcSourceFile,
   EtcTicketRootTextEntry,
 } from "./types";
@@ -128,6 +132,7 @@ type ApiEtcBatch = {
   invoice_items?: ApiEtcInvoice[];
   invoiceItems?: ApiEtcInvoice[];
   items?: ApiEtcInvoice[];
+  summary?: ApiEtcBatch | null;
 };
 
 type ApiEtcBatchPayload = {
@@ -164,7 +169,43 @@ type ApiEtcImportSummary = {
   attachments_completed?: number;
   failed?: number;
   audit?: ApiEtcImportAuditCounts | null;
+  importAudit?: ApiEtcImportAuditCounts | null;
+  import_audit?: ApiEtcImportAuditCounts | null;
+  reconciliationFilter?: ApiEtcReconciliationFilterPreview | null;
+  reconciliation_filter?: ApiEtcReconciliationFilterPreview | null;
   items?: ApiEtcImportItem[];
+};
+
+type ApiEtcReconciliationFilterPreview = {
+  taskId?: string;
+  task_id?: string;
+  taskVersion?: number;
+  task_version?: number;
+  confirmedItemSetHash?: string;
+  confirmed_item_set_hash?: string;
+  allowedInvoiceNumbers?: string[];
+  allowed_invoice_numbers?: string[];
+  blockingIssues?: ApiEtcReconciliationBlockingIssue[];
+  blocking_issues?: ApiEtcReconciliationBlockingIssue[];
+};
+
+type ApiEtcReconciliationBlockingIssue = {
+  error?: string;
+  requirementId?: string;
+  requirement_id?: string;
+  transactionAt?: string;
+  transaction_at?: string;
+  transactionDate?: string;
+  transaction_date?: string;
+  amount?: string | number;
+  vehiclePlate?: string | null;
+  vehicle_plate?: string | null;
+  invoiceCount?: number | null;
+  invoice_count?: number | null;
+  dateWindowStart?: string;
+  date_window_start?: string;
+  dateWindowEnd?: string;
+  date_window_end?: string;
 };
 
 type ApiEtcImportAuditCounts = {
@@ -191,6 +232,10 @@ type ApiEtcImportItem = {
   status?: string;
   reason?: string;
   message?: string;
+  filterStatus?: string;
+  filter_status?: string;
+  requirementId?: string | null;
+  requirement_id?: string | null;
 };
 
 type ApiEtcOaDraftPayload = {
@@ -241,6 +286,22 @@ type ApiEtcReconciliationTask = {
   vehicle_plates?: string[] | null;
   confirmedItemSetHash?: string | null;
   confirmed_item_set_hash?: string | null;
+  importBatchId?: string | null;
+  import_batch_id?: string | null;
+  etcBatchId?: string | null;
+  etc_batch_id?: string | null;
+  hasImportedInvoices?: boolean | null;
+  has_imported_invoices?: boolean | null;
+  importedInvoiceCount?: number | null;
+  imported_invoice_count?: number | null;
+  importedInvoiceAmount?: string | number | null;
+  imported_invoice_amount?: string | number | null;
+  oaDraftBatchId?: string | null;
+  oa_draft_batch_id?: string | null;
+  oaDraftStatus?: string | null;
+  oa_draft_status?: string | null;
+  submittedConfirmedAt?: string | null;
+  submitted_confirmed_at?: string | null;
   creditCardItems?: ApiEtcCreditCardItem[];
   credit_card_items?: ApiEtcCreditCardItem[];
   ticketRootItems?: ApiEtcTicketRootItem[];
@@ -251,6 +312,13 @@ type ApiEtcReconciliationTask = {
   source_files?: ApiEtcSourceFile[];
   parseIssues?: ApiEtcParseIssue[];
   parse_issues?: ApiEtcParseIssue[];
+  importBlockers?: ApiEtcImportBlocker[];
+  import_blockers?: ApiEtcImportBlocker[];
+};
+
+type ApiEtcImportBlocker = {
+  code?: string;
+  message?: string;
 };
 
 type ApiEtcCreditCardItem = {
@@ -361,7 +429,16 @@ type ApiEtcSourceFile = {
 
 type ApiEtcReconciliationTasksPayload = {
   tasks?: ApiEtcReconciliationTask[];
+  unavailableTasks?: ApiEtcReconciliationTask[];
+  unavailable_tasks?: ApiEtcReconciliationTask[];
 };
+
+type EtcRequestInit = RequestInit & {
+  timeoutMs?: number;
+};
+
+const DEFAULT_ETC_REQUEST_TIMEOUT_MS = 60_000;
+const FAST_ETC_MUTATION_TIMEOUT_MS = 15_000;
 
 function withAuthHeaders(headers?: HeadersInit) {
   const nextHeaders = new Headers(headers ?? undefined);
@@ -394,48 +471,90 @@ function htmlResponseError(url: string, response: Response, body: string) {
   return new Error(`ETC 接口返回了 HTML 页面：${response.status} ${url}。请检查 fin-ops 后端代理路径或服务器部署配置。${snippet ? ` 响应片段：${snippet}` : ""}`);
 }
 
-async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
+function requestTimeoutSignal(parentSignal: AbortSignal | null | undefined, timeoutMs: number) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeoutId = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  const abortFromParent = () => {
+    controller.abort(parentSignal?.reason);
+  };
+  if (parentSignal?.aborted) {
+    abortFromParent();
+  } else {
+    parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+  }
+  return {
+    signal: controller.signal,
+    get timedOut() {
+      return timedOut;
+    },
+    cleanup() {
+      window.clearTimeout(timeoutId);
+      parentSignal?.removeEventListener("abort", abortFromParent);
+    },
+  };
+}
+
+async function requestJson<T>(url: string, init: EtcRequestInit = {}): Promise<T> {
   let lastHtmlError: Error | null = null;
   const candidates = requestUrlCandidates(url);
-  for (const candidateUrl of candidates) {
-    const response = await fetch(candidateUrl, {
-      ...init,
-      headers: withAuthHeaders(init.headers),
-      credentials: init.credentials ?? "include",
-    });
-    const rawText = await response.text();
-    const trimmedText = rawText.trim();
-    let payload = {} as T;
-    if (trimmedText.length > 0) {
-      try {
-        payload = JSON.parse(trimmedText) as T;
-      } catch (error) {
-        const contentType = response.headers.get("Content-Type") ?? "";
-        const looksLikeHtml = trimmedText.startsWith("<") || contentType.toLowerCase().includes("text/html");
-        if (looksLikeHtml) {
-          lastHtmlError = htmlResponseError(candidateUrl, response, trimmedText);
-          continue;
+  const timeoutMs = Number.isFinite(init.timeoutMs) && Number(init.timeoutMs) > 0
+    ? Number(init.timeoutMs)
+    : DEFAULT_ETC_REQUEST_TIMEOUT_MS;
+  const requestSignal = requestTimeoutSignal(init.signal, timeoutMs);
+  const { timeoutMs: _timeoutMs, ...fetchInit } = init;
+  try {
+    for (const candidateUrl of candidates) {
+      const response = await fetch(candidateUrl, {
+        ...fetchInit,
+        signal: requestSignal.signal,
+        headers: withAuthHeaders(init.headers),
+        credentials: init.credentials ?? "include",
+      });
+      const rawText = await response.text();
+      const trimmedText = rawText.trim();
+      let payload = {} as T;
+      if (trimmedText.length > 0) {
+        try {
+          payload = JSON.parse(trimmedText) as T;
+        } catch (error) {
+          const contentType = response.headers.get("Content-Type") ?? "";
+          const looksLikeHtml = trimmedText.startsWith("<") || contentType.toLowerCase().includes("text/html");
+          if (looksLikeHtml) {
+            lastHtmlError = htmlResponseError(candidateUrl, response, trimmedText);
+            continue;
+          }
+          throw new Error("ETC 接口返回了无效 JSON。");
         }
-        throw new Error("ETC 接口返回了无效 JSON。");
       }
+      if (!response.ok) {
+        const errorPayload = payload as { message?: unknown; error?: unknown };
+        if (errorPayload.error === "preview_stale") {
+          throw new Error("预览后数据已变化，请重新预览后再确认。");
+        }
+        if (errorPayload.error === "stale_reconciliation_task_preview") {
+          throw new Error("对账任务已更新，请重新预览 ETC zip 后再确认导入。");
+        }
+        const message = typeof errorPayload.message === "string" ? errorPayload.message : "";
+        throw new Error(message || trimmedText || "ETC API request failed");
+      }
+      return payload;
     }
-    if (!response.ok) {
-      const errorPayload = payload as { message?: unknown; error?: unknown };
-      if (errorPayload.error === "preview_stale") {
-        throw new Error("预览后数据已变化，请重新预览后再确认。");
-      }
-      if (errorPayload.error === "stale_reconciliation_task_preview") {
-        throw new Error("对账任务已更新，请重新预览 ETC zip 后再确认导入。");
-      }
-      const message = typeof errorPayload.message === "string" ? errorPayload.message : "";
-      throw new Error(message || trimmedText || "ETC API request failed");
+    if (lastHtmlError) {
+      throw lastHtmlError;
     }
-    return payload;
+    throw new Error("ETC API request failed");
+  } catch (error) {
+    if (requestSignal.timedOut) {
+      throw new Error("ETC API 请求超时，请确认后端服务状态后重试。");
+    }
+    throw error;
+  } finally {
+    requestSignal.cleanup();
   }
-  if (lastHtmlError) {
-    throw lastHtmlError;
-  }
-  throw new Error("ETC API request failed");
 }
 
 function numberOrZero(value: unknown): number {
@@ -554,24 +673,67 @@ function mapBatchSummary(batch: ApiEtcBatch): EtcBatchSummary {
 }
 
 function mapBatchDetail(batch: ApiEtcBatch): EtcBatchDetail {
+  const summary = batch.summary && typeof batch.summary === "object" ? batch.summary : {};
+  const batchWithSummary = {
+    ...batch,
+    ...summary,
+  };
   return {
-    ...mapBatchSummary(batch),
+    ...mapBatchSummary(batchWithSummary),
     invoiceItems: (batch.invoiceItems ?? batch.invoice_items ?? batch.items ?? []).map(mapInvoice),
   };
 }
 
 function mapEtcImportItem(item: ApiEtcImportItem): EtcImportItem {
-  return {
+  const mapped: EtcImportItem = {
     invoiceNumber: item.invoiceNumber ?? item.invoice_number ?? "",
     fileName: item.fileName ?? item.file_name ?? "",
     status: item.status ?? "",
     reason: item.reason ?? item.message ?? "",
+  };
+  const filterStatus = item.filterStatus ?? item.filter_status;
+  if (filterStatus) {
+    mapped.filterStatus = filterStatus;
+  }
+  const requirementId = item.requirementId ?? item.requirement_id;
+  if (requirementId) {
+    mapped.requirementId = requirementId;
+  }
+  return mapped;
+}
+
+function mapEtcReconciliationBlockingIssue(issue: ApiEtcReconciliationBlockingIssue): EtcReconciliationBlockingIssue {
+  return {
+    error: issue.error ?? "",
+    requirementId: issue.requirementId ?? issue.requirement_id ?? "",
+    transactionAt: issue.transactionAt ?? issue.transaction_at ?? "",
+    transactionDate: issue.transactionDate ?? issue.transaction_date ?? "",
+    amount: stringOrEmpty(issue.amount),
+    vehiclePlate: issue.vehiclePlate ?? issue.vehicle_plate ?? null,
+    invoiceCount: issue.invoiceCount ?? issue.invoice_count ?? null,
+    dateWindowStart: issue.dateWindowStart ?? issue.date_window_start ?? "",
+    dateWindowEnd: issue.dateWindowEnd ?? issue.date_window_end ?? "",
+  };
+}
+
+function mapEtcReconciliationFilter(payload?: ApiEtcReconciliationFilterPreview | null): EtcReconciliationFilterPreview | undefined {
+  if (!payload) {
+    return undefined;
+  }
+  return {
+    taskId: payload.taskId ?? payload.task_id ?? "",
+    taskVersion: payload.taskVersion ?? payload.task_version ?? 0,
+    confirmedItemSetHash: payload.confirmedItemSetHash ?? payload.confirmed_item_set_hash ?? "",
+    allowedInvoiceNumbers: payload.allowedInvoiceNumbers ?? payload.allowed_invoice_numbers ?? [],
+    blockingIssues: (payload.blockingIssues ?? payload.blocking_issues ?? []).map(mapEtcReconciliationBlockingIssue),
   };
 }
 
 function mapEtcImportResult(payload: ApiEtcImportSummary): EtcImportPreviewResult {
   const summary = payload.summary ?? {};
   const audit = mapAuditCounts(payload.audit);
+  const importAudit = mapAuditCounts(payload.importAudit ?? payload.import_audit);
+  const reconciliationFilter = mapEtcReconciliationFilter(payload.reconciliationFilter ?? payload.reconciliation_filter);
   return {
     sessionId: payload.sessionId ?? payload.session_id ?? "",
     imported: payload.imported ?? summary.imported ?? 0,
@@ -584,6 +746,8 @@ function mapEtcImportResult(payload: ApiEtcImportSummary): EtcImportPreviewResul
       ?? 0,
     failed: payload.failed ?? summary.failed ?? 0,
     ...(audit ? { audit } : {}),
+    ...(importAudit ? { importAudit } : {}),
+    ...(reconciliationFilter ? { reconciliationFilter } : {}),
     items: (payload.items ?? []).map(mapEtcImportItem),
   };
 }
@@ -611,6 +775,17 @@ function mapEtcReconciliationTaskSummary(task: ApiEtcReconciliationTask): EtcRec
     etcInvoiceCount: task.etcInvoiceCount ?? task.etc_invoice_count ?? 0,
     supplementCount: task.supplementCount ?? task.supplement_count ?? 0,
     vehiclePlates: task.vehiclePlates ?? task.vehicle_plates ?? [],
+  };
+}
+
+function mapEtcUnavailableReconciliationTaskSummary(task: ApiEtcReconciliationTask): EtcUnavailableReconciliationTaskSummary {
+  const importBlockers = task.importBlockers ?? task.import_blockers ?? [];
+  return {
+    ...mapEtcReconciliationTaskSummary(task),
+    importBlockers: importBlockers.map((blocker) => ({
+      code: blocker.code ?? "",
+      message: blocker.message ?? "",
+    })).filter((blocker) => blocker.code || blocker.message),
   };
 }
 
@@ -699,6 +874,14 @@ function mapEtcReconciliationTask(task: ApiEtcReconciliationTask): EtcReconcilia
     supplementAmount: normalizeMoney(task.supplementAmount ?? task.supplement_amount),
     canConfirm: Boolean(task.canConfirm ?? task.can_confirm ?? task.confirmable),
     confirmedItemSetHash: task.confirmedItemSetHash ?? task.confirmed_item_set_hash ?? "",
+    importBatchId: task.importBatchId ?? task.import_batch_id ?? "",
+    etcBatchId: task.etcBatchId ?? task.etc_batch_id ?? "",
+    hasImportedInvoices: Boolean(task.hasImportedInvoices ?? task.has_imported_invoices),
+    importedInvoiceCount: task.importedInvoiceCount ?? task.imported_invoice_count ?? 0,
+    importedInvoiceAmount: normalizeMoney(task.importedInvoiceAmount ?? task.imported_invoice_amount),
+    oaDraftBatchId: task.oaDraftBatchId ?? task.oa_draft_batch_id ?? "",
+    oaDraftStatus: task.oaDraftStatus ?? task.oa_draft_status ?? "",
+    submittedConfirmedAt: task.submittedConfirmedAt ?? task.submitted_confirmed_at ?? "",
     creditCardItems: (task.creditCardItems ?? task.credit_card_items ?? []).map(mapCreditCardItem),
     ticketRootItems: (task.ticketRootItems ?? task.ticket_root_items ?? []).map(mapTicketRootItem),
     supplementEvidences: (task.supplementEvidences ?? task.supplement_evidences ?? []).map(mapSupplementEvidence),
@@ -707,18 +890,22 @@ function mapEtcReconciliationTask(task: ApiEtcReconciliationTask): EtcReconcilia
   };
 }
 
-export async function fetchReadyEtcReconciliationTasks(signal?: AbortSignal): Promise<EtcReconciliationTaskSummary[]> {
+export async function fetchReadyEtcReconciliationTasks(signal?: AbortSignal): Promise<EtcReadyReconciliationTasksPayload> {
   const payload = await requestJson<ApiEtcReconciliationTasksPayload>("/api/etc/reconciliation-tasks/ready-for-import", {
     method: "GET",
     signal,
   });
-  return (payload.tasks ?? []).map(mapEtcReconciliationTaskSummary);
+  return {
+    items: (payload.tasks ?? []).map(mapEtcReconciliationTaskSummary),
+    unavailableItems: (payload.unavailableTasks ?? payload.unavailable_tasks ?? []).map(mapEtcUnavailableReconciliationTaskSummary),
+  };
 }
 
 export async function fetchEtcReconciliationTasks(signal?: AbortSignal): Promise<EtcReconciliationTaskListPayload> {
   const payload = await requestJson<ApiEtcReconciliationTasksPayload>("/api/etc/reconciliation-tasks", {
     method: "GET",
     signal,
+    timeoutMs: 15_000,
   });
   return {
     items: (payload.tasks ?? []).map(mapEtcReconciliationTask),
@@ -741,6 +928,16 @@ export async function fetchEtcReconciliationTask(taskId: string, signal?: AbortS
     method: "GET",
     signal,
   });
+  return mapEtcReconciliationTask(task);
+}
+
+export async function refreshEtcReconciliationMatches(taskId: string): Promise<EtcReconciliationTask> {
+  const task = await requestJson<ApiEtcReconciliationTask>(
+    `/api/etc/reconciliation-tasks/${encodeURIComponent(taskId)}/refresh-matches`,
+    {
+      method: "POST",
+    },
+  );
   return mapEtcReconciliationTask(task);
 }
 
@@ -833,13 +1030,21 @@ export async function patchEtcReconciliationItem(
   return mapEtcReconciliationTask(task);
 }
 
-export async function confirmEtcReconciliationTask(taskId: string, expectedVersion: number): Promise<EtcReconciliationTask> {
+export async function confirmEtcReconciliationTask(
+  taskId: string,
+  expectedVersion: number,
+  options: { confirmedCreditCardItemIds?: string[] } = {},
+): Promise<EtcReconciliationTask> {
+  const body: { expectedVersion: number; confirmedCreditCardItemIds?: string[] } = { expectedVersion };
+  if (options.confirmedCreditCardItemIds) {
+    body.confirmedCreditCardItemIds = options.confirmedCreditCardItemIds;
+  }
   const task = await requestJson<ApiEtcReconciliationTask>(`/api/etc/reconciliation-tasks/${encodeURIComponent(taskId)}/confirm`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ expectedVersion }),
+    body: JSON.stringify(body),
   });
   return mapEtcReconciliationTask(task);
 }
@@ -862,7 +1067,25 @@ export async function deleteEtcReconciliationTask(taskId: string, expectedVersio
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ expectedVersion }),
+    timeoutMs: FAST_ETC_MUTATION_TIMEOUT_MS,
   });
+}
+
+export async function deleteEtcReconciliationTaskImportedInvoices(
+  taskId: string,
+  expectedVersion: number,
+): Promise<EtcReconciliationTask> {
+  const task = await requestJson<ApiEtcReconciliationTask>(
+    `/api/etc/reconciliation-tasks/${encodeURIComponent(taskId)}/imported-invoices`,
+    {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ expectedVersion }),
+    },
+  );
+  return mapEtcReconciliationTask(task);
 }
 
 export async function deleteEtcReconciliationSourceFile(

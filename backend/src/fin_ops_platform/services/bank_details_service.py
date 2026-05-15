@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Callable
 
 from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.services.bank_transaction_auto_category_service import (
@@ -24,10 +24,14 @@ class BankDetailsService:
         *,
         category_service: BankTransactionCategoryService | None = None,
         auto_category_service: BankTransactionAutoCategoryService | None = None,
+        relation_tag_provider: Callable[[str], dict[str, Any] | None] | None = None,
+        relation_tag_batch_provider: Callable[[list[str]], dict[str, dict[str, Any]]] | None = None,
     ) -> None:
         self._import_service = import_service
         self._category_service = category_service
         self._auto_category_service = auto_category_service
+        self._relation_tag_provider = relation_tag_provider
+        self._relation_tag_batch_provider = relation_tag_batch_provider
 
     def list_accounts(self, *, date_from: str | None = None, date_to: str | None = None) -> dict[str, Any]:
         transactions = self._transactions()
@@ -75,11 +79,13 @@ class BankDetailsService:
         account_key: str | None = None,
         date_from: str | None = None,
         date_to: str | None = None,
+        keyword: str | None = None,
         page: int = 1,
         page_size: int = 100,
     ) -> dict[str, Any]:
         normalized_page = max(int(page or 1), 1)
         normalized_page_size = min(max(int(page_size or 100), 1), 500)
+        normalized_keyword = self._normalize_keyword(keyword)
         context_payloads: list[dict[str, Any]] = []
         display_payloads: list[dict[str, Any]] = []
         for transaction in self._transactions():
@@ -91,10 +97,19 @@ class BankDetailsService:
                 continue
             display_payloads.append(payload)
         auto_categories = self._auto_category_payloads(context_payloads)
+        relation_tags_by_id = self._relation_tag_relations(
+            [str(payload.get("id") or "") for payload in display_payloads]
+        )
         rows = [
-            self._row_payload(payload, auto_category=auto_categories.get(str(payload.get("id") or "")))
+            self._row_payload(
+                payload,
+                auto_category=auto_categories.get(str(payload.get("id") or "")),
+                relation=relation_tags_by_id.get(str(payload.get("id") or "")),
+            )
             for payload in display_payloads
         ]
+        if normalized_keyword:
+            rows = [row for row in rows if self._row_matches_keyword(row, normalized_keyword)]
         rows.sort(key=lambda item: str(item.get("trade_time") or ""), reverse=True)
         total = len(rows)
         start = (normalized_page - 1) * normalized_page_size
@@ -152,6 +167,7 @@ class BankDetailsService:
         row: dict[str, Any],
         *,
         auto_category: dict[str, Any] | None = None,
+        relation: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         direction = self._direction(row)
         account = self._account_payload(row)
@@ -161,6 +177,7 @@ class BankDetailsService:
         effective_label = effective_category["effective_category_label"]
         effective_path = list(effective_category["effective_category_path"] or [])
         effective_source = effective_category["effective_category_source"]
+        relation_tags = self._relation_tag_payload(relation)
         return {
             "id": str(row.get("id") or ""),
             "trade_time": self._trade_time_text(row.get("trade_time") or row.get("txn_date")),
@@ -193,6 +210,7 @@ class BankDetailsService:
             "category_path": effective_path,
             "category_source": effective_source,
             "category_version": manual_category["category_version"],
+            **relation_tags,
         }
 
     def _category_payload(self, transaction_id: str) -> dict[str, Any]:
@@ -217,6 +235,51 @@ class BankDetailsService:
         payload["pay_receive_time"] = str(row.get("pay_receive_time") or row.get("trade_time") or row.get("txn_date") or "")
         return payload
 
+    def _relation_tag_relations(self, transaction_ids: list[str]) -> dict[str, dict[str, Any]]:
+        normalized_ids = [str(transaction_id).strip() for transaction_id in transaction_ids if str(transaction_id).strip()]
+        if not normalized_ids:
+            return {}
+        if self._relation_tag_batch_provider is not None:
+            try:
+                relations = self._relation_tag_batch_provider(normalized_ids)
+            except Exception:
+                return {}
+            return {
+                str(transaction_id).strip(): dict(relation)
+                for transaction_id, relation in dict(relations or {}).items()
+                if str(transaction_id).strip() and isinstance(relation, dict)
+            }
+        if self._relation_tag_provider is None:
+            return {}
+        relations: dict[str, dict[str, Any]] = {}
+        for transaction_id in normalized_ids:
+            try:
+                relation = self._relation_tag_provider(transaction_id)
+            except Exception:
+                continue
+            if isinstance(relation, dict):
+                relations[transaction_id] = dict(relation)
+        return relations
+
+    def _relation_tag_payload(self, relation: dict[str, Any] | None) -> dict[str, Any]:
+        row_types = set()
+        if isinstance(relation, dict):
+            row_types = {
+                str(row_type).strip()
+                for row_type in list(relation.get("row_types") or [])
+                if str(row_type).strip()
+            }
+        oa_relation_tag = "有oa" if "oa" in row_types else "无oa"
+        invoice_relation_tag = "有发票" if "invoice" in row_types else "无发票"
+        payload: dict[str, Any] = {
+            "oa_relation_tag": oa_relation_tag,
+            "invoice_relation_tag": invoice_relation_tag,
+            "relation_tags": [oa_relation_tag, invoice_relation_tag],
+        }
+        if isinstance(relation, dict) and str(relation.get("case_id") or "").strip():
+            payload["relation_case_id"] = str(relation.get("case_id") or "").strip()
+        return payload
+
     @staticmethod
     def _category_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
         counts = {key: 0 for key in BANK_TRANSACTION_CATEGORY_COUNT_KEYS}
@@ -228,6 +291,69 @@ class BankDetailsService:
             else:
                 counts["uncategorized"] += 1
         return counts
+
+    @classmethod
+    def _row_matches_keyword(cls, row: dict[str, Any], keyword: str) -> bool:
+        haystack = " ".join(cls._search_text_values(row)).lower()
+        return keyword.lower() in haystack
+
+    @classmethod
+    def _search_text_values(cls, row: dict[str, Any]) -> list[str]:
+        values: list[str] = []
+        for key in (
+            "counterparty_name",
+            "trade_time",
+            "direction_label",
+            "amount",
+            "balance",
+            "summary",
+            "purpose",
+            "bank_name",
+            "account_last4",
+            "manual_category_label",
+            "auto_category_label",
+            "effective_category_label",
+            "category_label",
+            "oa_relation_tag",
+            "invoice_relation_tag",
+        ):
+            cls._append_search_value(values, row.get(key))
+            if key in {"amount", "balance"}:
+                cls._append_search_value(values, cls._format_money_for_search(row.get(key)))
+        for key in (
+            "manual_category_path",
+            "auto_category_path",
+            "effective_category_path",
+            "category_path",
+            "relation_tags",
+        ):
+            cls._append_search_value(values, row.get(key))
+        return values
+
+    @classmethod
+    def _append_search_value(cls, values: list[str], value: Any) -> None:
+        if value is None:
+            return
+        if isinstance(value, (list, tuple, set)):
+            for item in value:
+                cls._append_search_value(values, item)
+            return
+        text = str(value).strip()
+        if text:
+            values.append(text)
+
+    @staticmethod
+    def _normalize_keyword(value: str | None) -> str:
+        return str(value or "").strip()
+
+    @staticmethod
+    def _format_money_for_search(value: Any) -> str:
+        if value in (None, ""):
+            return ""
+        try:
+            return f"{Decimal(str(value)):,.2f}"
+        except Exception:
+            return ""
 
     @staticmethod
     def _direction(row: dict[str, Any]) -> str:

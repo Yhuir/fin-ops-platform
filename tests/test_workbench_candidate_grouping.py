@@ -4,6 +4,196 @@ from fin_ops_platform.services.workbench_candidate_grouping import WorkbenchCand
 
 
 class WorkbenchCandidateGroupingTests(unittest.TestCase):
+    def test_no_oa_bank_batch_group_collapses_to_summary_and_preserves_bank_rows(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        batch_id = "no_oa_batch_fee_001"
+        payload = service.group_payload(
+            "2026-05",
+            oa_rows=[],
+            bank_rows=[
+                no_oa_bank_row(
+                    "bk-no-oa-fee-001",
+                    batch_id=batch_id,
+                    debit_amount="50.00",
+                    remark="手续费明细 A",
+                    batch_version=2,
+                ),
+                no_oa_bank_row(
+                    "bk-no-oa-fee-002",
+                    batch_id=batch_id,
+                    debit_amount="38.00",
+                    remark="手续费明细 B",
+                    batch_version=2,
+                ),
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 1)
+        group = payload["paired"]["groups"][0]
+        self.assertEqual(group["relation_mode"], "no_oa_bank_batch")
+        self.assertEqual(group["display_mode"], "collapsed_summary")
+        self.assertTrue(group["default_collapsed"])
+        summary_row_id = f"no_oa_summary:{batch_id}"
+        collapsed_bank_row_ids = [row["id"] for row in group["collapsed_rows"]["bank"]]
+        self.assertEqual([row["id"] for row in group["bank_rows"]], [summary_row_id])
+        self.assertCountEqual(
+            collapsed_bank_row_ids,
+            ["bk-no-oa-fee-001", "bk-no-oa-fee-002"],
+        )
+        self.assertNotIn(summary_row_id, collapsed_bank_row_ids)
+
+        summary_row = group["summary_row"]
+        self.assertEqual(summary_row["id"], summary_row_id)
+        self.assertEqual(summary_row["source_kind"], "no_oa_bank_batch_summary")
+        self.assertEqual(summary_row["amount"], "88.00")
+        self.assertIn("withdraw_no_oa_batch", summary_row["available_actions"])
+        metadata = summary_row["special_metadata"]
+        self.assertEqual(metadata["source_batch_id"], batch_id)
+        self.assertEqual(metadata["batch_version"], 2)
+        self.assertEqual(metadata["batch_type"], "fee")
+        self.assertEqual(metadata["batch_label"], "手续费")
+        self.assertEqual(metadata["row_count"], 2)
+        self.assertEqual(metadata["total_amount"], "88.00")
+        self.assertTrue(metadata["withdrawable"])
+
+    def test_internal_transfer_no_oa_summary_uses_business_amount_not_bank_row_sum(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        batch_id = "no_oa_batch_internal_001"
+        special_metadata = {
+            "source": "no_oa_bank_batch",
+            "source_batch_id": batch_id,
+            "batch_type": "internal_transfer",
+            "batch_label": "内部往来款",
+            "total_amount": "13000.00",
+            "withdrawable": True,
+            "relation_mode": "no_oa_bank_batch",
+            "display_tags": ["免OA", "内部往来款"],
+        }
+        payload = service.group_payload(
+            "2026-03",
+            oa_rows=[],
+            bank_rows=[
+                {
+                    "id": "bk-transfer-income",
+                    "type": "bank",
+                    "case_id": batch_id,
+                    "relation_mode": "no_oa_bank_batch",
+                    "trade_time": "2026-03-19 11:15:00",
+                    "debit_amount": "",
+                    "credit_amount": "13000.00",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "invoice_relation": {"code": "no_oa_bank_batch", "label": "已匹配：内部往来款", "tone": "success"},
+                    "display_tags": ["免OA", "内部往来款"],
+                    "special_metadata": special_metadata,
+                },
+                {
+                    "id": "bk-transfer-expense",
+                    "type": "bank",
+                    "case_id": batch_id,
+                    "relation_mode": "no_oa_bank_batch",
+                    "trade_time": "2026-03-19 11:16:00",
+                    "debit_amount": "13000.00",
+                    "credit_amount": "",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "invoice_relation": {"code": "no_oa_bank_batch", "label": "已匹配：内部往来款", "tone": "success"},
+                    "display_tags": ["免OA", "内部往来款"],
+                    "special_metadata": special_metadata,
+                },
+            ],
+            invoice_rows=[],
+        )
+
+        group = payload["paired"]["groups"][0]
+        self.assertEqual(group["display_mode"], "collapsed_summary")
+        self.assertEqual(group["summary_row"]["amount"], "13000.00")
+        self.assertEqual(group["summary_row"]["debit_amount"], "13000.00")
+        self.assertEqual(group["summary_row"]["special_metadata"]["total_amount"], "13000.00")
+        self.assertCountEqual(
+            [row["id"] for row in group["collapsed_rows"]["bank"]],
+            ["bk-transfer-income", "bk-transfer-expense"],
+        )
+
+    def test_mixed_no_oa_and_manual_relation_group_does_not_collapse(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-05",
+            oa_rows=[
+                {
+                    "id": "oa-manual-001",
+                    "type": "oa",
+                    "case_id": "CASE-MIXED-NO-OA",
+                    "amount": "20.00",
+                    "counterparty_name": "手工供应商",
+                    "oa_bank_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+                }
+            ],
+            bank_rows=[
+                no_oa_bank_row(
+                    "bk-no-oa-mixed-001",
+                    batch_id="no_oa_batch_mixed_001",
+                    case_id="CASE-MIXED-NO-OA",
+                    debit_amount="12.00",
+                    remark="免OA明细",
+                ),
+                {
+                    "id": "bk-manual-001",
+                    "type": "bank",
+                    "case_id": "CASE-MIXED-NO-OA",
+                    "debit_amount": "20.00",
+                    "credit_amount": "",
+                    "counterparty_name": "手工供应商",
+                    "invoice_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+                },
+            ],
+            invoice_rows=[
+                {
+                    "id": "iv-manual-001",
+                    "type": "invoice",
+                    "case_id": "CASE-MIXED-NO-OA",
+                    "amount": "20.00",
+                    "seller_name": "手工供应商",
+                    "invoice_bank_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+                }
+            ],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 1)
+        group = payload["paired"]["groups"][0]
+        self.assertNotEqual(group.get("display_mode"), "collapsed_summary")
+        self.assertNotIn("collapsed_rows", group)
+        self.assertCountEqual([row["id"] for row in group["bank_rows"]], ["bk-no-oa-mixed-001", "bk-manual-001"])
+
+    def test_no_oa_bank_rows_from_different_batches_do_not_collapse_together(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-05",
+            oa_rows=[],
+            bank_rows=[
+                no_oa_bank_row(
+                    "bk-no-oa-batch-a",
+                    batch_id="no_oa_batch_fee_a",
+                    case_id="CASE-NO-OA-DIFFERENT-BATCHES",
+                    debit_amount="12.00",
+                    remark="批次 A",
+                ),
+                no_oa_bank_row(
+                    "bk-no-oa-batch-b",
+                    batch_id="no_oa_batch_fee_b",
+                    case_id="CASE-NO-OA-DIFFERENT-BATCHES",
+                    debit_amount="13.00",
+                    remark="批次 B",
+                ),
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 1)
+        group = payload["paired"]["groups"][0]
+        self.assertNotEqual(group.get("display_mode"), "collapsed_summary")
+        self.assertNotIn("collapsed_rows", group)
+        self.assertCountEqual([row["id"] for row in group["bank_rows"]], ["bk-no-oa-batch-a", "bk-no-oa-batch-b"])
+
     def test_open_exception_case_stays_open_and_candidate_does_not_promote_it(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(
@@ -1707,6 +1897,46 @@ def flatten_groups(groups: list[dict[str, object]], row_type: str) -> list[dict[
         for group in groups
         for row in group[f"{row_type}_rows"]
     ]
+
+
+def no_oa_bank_row(
+    row_id: str,
+    *,
+    batch_id: str,
+    debit_amount: str,
+    remark: str,
+    batch_version: int | None = None,
+    case_id: str | None = None,
+) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "source": "no_oa_bank_batch",
+        "source_batch_id": batch_id,
+        "batch_type": "fee",
+        "batch_label": "手续费",
+        "withdrawable": True,
+        "relation_mode": "no_oa_bank_batch",
+        "display_tags": ["免OA", "手续费"],
+    }
+    if batch_version is not None:
+        metadata["batch_version"] = batch_version
+    return {
+        "id": row_id,
+        "type": "bank",
+        "case_id": case_id or batch_id,
+        "relation_mode": "no_oa_bank_batch",
+        "trade_time": "2026-05-03 10:00:00",
+        "debit_amount": debit_amount,
+        "credit_amount": "",
+        "counterparty_name": "建设银行",
+        "payment_account_label": "建设银行 8106",
+        "remark": remark,
+        "detail_fields": {"企业流水号": f"SERIAL-{row_id}"},
+        "bank_text_fields": {"备注": remark},
+        "invoice_relation": {"code": "no_oa_bank_batch", "label": "已匹配：手续费", "tone": "success"},
+        "tags": ["免OA", "手续费"],
+        "display_tags": ["免OA", "手续费"],
+        "special_metadata": metadata,
+    }
 
 
 def oa_row(

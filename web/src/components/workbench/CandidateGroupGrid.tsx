@@ -91,6 +91,7 @@ function CandidateGroupGrid({
 }: CandidateGroupGridProps) {
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [openFilterMenu, setOpenFilterMenu] = useState<{ paneId: WorkbenchRecordType; columnKey: string } | null>(null);
+  const [expandedCollapsedGroups, setExpandedCollapsedGroups] = useState<Set<string>>(() => new Set());
   const syncInFlightRef = useRef<Record<WorkbenchRecordType, boolean>>({
     oa: false,
     bank: false,
@@ -197,6 +198,19 @@ function CandidateGroupGrid({
     ));
   }, []);
 
+  const toggleCollapsedGroup = useCallback((groupId: string, paneId: WorkbenchRecordType) => {
+    const key = `${groupId}:${paneId}`;
+    setExpandedCollapsedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
   const clearDragClasses = useCallback(() => {
     const current = dragStateRef.current;
     current?.activeElement?.classList.remove("column-drag-active");
@@ -280,40 +294,74 @@ function CandidateGroupGrid({
   const gridBody = useMemo(() => (
     <div className="candidate-grid-body">
       {groups.length === 0 ? <div className="state-panel">当前区域暂无候选组。</div> : null}
-      {groups.map((group, index) => (
-        <div
-          key={group.id}
-          className={`candidate-group-row candidate-group-row-sheet candidate-group-row-tone-${index % 4}`}
-          data-testid={`candidate-group-${zoneId}-${group.id}`}
-          style={{ gridTemplateColumns: rowTemplateColumns }}
-        >
-          {panes.map((pane, paneIndex) => (
-            <Fragment key={`${group.id}-${pane.id}`}>
-              <div className="candidate-group-pane-slot candidate-group-pane-slot-sheet">
-                <CandidateGroupCell
-                  actionMode={actionMode}
-                  columnGridStyle={paneGridStyleByPane[pane.id as WorkbenchRecordType]}
-                  columns={columnsByPane[pane.id as WorkbenchRecordType]}
-                  getRowState={getRowState}
-                  highlightedRowId={highlightedRowId}
-                  searchQuery={displayState.searchQueryByPane[pane.id as WorkbenchRecordType]}
-                  onOpenDetail={onOpenDetail}
-                  onRowAction={onRowAction}
-                  onSelectRow={onSelectRow}
-                  paneId={pane.id as WorkbenchRecordType}
-                  records={group.rows[pane.id as WorkbenchRecordType]}
-                  scrollPaneId={pane.id as WorkbenchRecordType}
-                  scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${pane.id}`}
-                  showWorkflowActions={zoneId !== "open"}
-                  canMutateData={canMutateData}
-                  zoneId={zoneId}
-                />
-              </div>
-              {paneIndex < panes.length - 1 ? <div className="candidate-pane-grid-divider" aria-hidden="true" /> : null}
-            </Fragment>
-          ))}
-        </div>
-      ))}
+      {groups.map((group, index) => {
+        const collapseControls = panes.flatMap((pane) => {
+          const paneId = pane.id as WorkbenchRecordType;
+          const collapsedRows = group.collapsedRows?.[paneId] ?? [];
+          const isCollapsedSummary = group.displayMode === "collapsed_summary" && collapsedRows.length > 0;
+          if (!isCollapsedSummary) {
+            return [];
+          }
+          const collapseKey = `${group.id}:${paneId}`;
+          const isExpanded = expandedCollapsedGroups.has(collapseKey);
+          return [
+            <button
+              aria-expanded={isExpanded}
+              aria-label={isExpanded ? "收起免OA批次明细" : `展开免OA批次明细，${collapsedRows.length} 条`}
+              className="row-action-btn candidate-group-collapse-control"
+              key={collapseKey}
+              type="button"
+              onClick={() => toggleCollapsedGroup(group.id, paneId)}
+            >
+              {isExpanded ? "收起明细" : `展开 ${collapsedRows.length} 条明细`}
+            </button>,
+          ];
+        });
+
+        return (
+          <div
+            key={group.id}
+            className={`candidate-group-row candidate-group-row-sheet candidate-group-row-tone-${index % 4}`}
+            data-testid={`candidate-group-${zoneId}-${group.id}`}
+            style={{ gridTemplateColumns: rowTemplateColumns }}
+          >
+            {collapseControls}
+            {panes.map((pane, paneIndex) => {
+              const paneId = pane.id as WorkbenchRecordType;
+              const collapsedRows = group.collapsedRows?.[paneId] ?? [];
+              const isCollapsedSummary = group.displayMode === "collapsed_summary" && collapsedRows.length > 0;
+              const collapseKey = `${group.id}:${paneId}`;
+              const isExpanded = isCollapsedSummary && expandedCollapsedGroups.has(collapseKey);
+              const visibleRecords = isExpanded ? collapsedRows : group.rows[paneId];
+              return (
+                <Fragment key={`${group.id}-${pane.id}`}>
+                  <div className="candidate-group-pane-slot candidate-group-pane-slot-sheet">
+                    <CandidateGroupCell
+                      actionMode={actionMode}
+                      columnGridStyle={paneGridStyleByPane[paneId]}
+                      columns={columnsByPane[paneId]}
+                      getRowState={getRowState}
+                      highlightedRowId={highlightedRowId}
+                      searchQuery={displayState.searchQueryByPane[paneId]}
+                      onOpenDetail={onOpenDetail}
+                      onRowAction={onRowAction}
+                      onSelectRow={onSelectRow}
+                      paneId={paneId}
+                      records={visibleRecords}
+                      scrollPaneId={paneId}
+                      scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${pane.id}`}
+                      showWorkflowActions={zoneId !== "open"}
+                      canMutateData={canMutateData}
+                      zoneId={zoneId}
+                    />
+                  </div>
+                  {paneIndex < panes.length - 1 ? <div className="candidate-pane-grid-divider" aria-hidden="true" /> : null}
+                </Fragment>
+              );
+            })}
+          </div>
+        );
+      })}
       {groups.length > 0 ? (
         <div className="candidate-grid-body-filler" aria-hidden="true" style={{ gridTemplateColumns: rowTemplateColumns }}>
           {panes.map((pane, paneIndex) => (
@@ -329,6 +377,7 @@ function CandidateGroupGrid({
     actionMode,
     canMutateData,
     columnsByPane,
+    expandedCollapsedGroups,
     getRowState,
     groups,
     highlightedRowId,
@@ -338,6 +387,7 @@ function CandidateGroupGrid({
     paneGridStyleByPane,
     panes,
     rowTemplateColumns,
+    toggleCollapsedGroup,
     zoneId,
   ]);
 
