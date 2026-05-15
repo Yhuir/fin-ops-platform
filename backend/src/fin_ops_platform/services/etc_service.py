@@ -1504,6 +1504,54 @@ class EtcService:
         path.write_bytes(content)
         return str(path), hashlib.sha256(content).hexdigest()
 
+    def _canonical_invoice_file_candidates(self, invoice: EtcInvoice, file_name: str) -> list[Path]:
+        candidates: list[Path] = []
+        month = invoice.issue_date[:7] if invoice.issue_date else ""
+        if "-" in month:
+            year, month_part = (month.split("-", 1) + ["unknown"])[:2]
+            candidates.append(
+                self._invoice_file_root
+                / _safe_path_part(year)
+                / _safe_path_part(month_part)
+                / _safe_path_part(invoice.invoice_number)
+                / file_name
+            )
+        candidates.extend(
+            sorted(
+                self._invoice_file_root.glob(f"*/*/{_safe_path_part(invoice.invoice_number)}/{file_name}"),
+                key=lambda path: str(path),
+            )
+        )
+        unique_candidates: list[Path] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            key = str(candidate)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_candidates.append(candidate)
+        return unique_candidates
+
+    def _repair_invoice_attachment_paths(self, invoice: EtcInvoice) -> bool:
+        changed = False
+        attachment_fields = (
+            ("xml_file_path", "xml_file_hash", "invoice.xml"),
+            ("pdf_file_path", "pdf_file_hash", "invoice.pdf"),
+        )
+        for path_field, hash_field, file_name in attachment_fields:
+            current_path = getattr(invoice, path_field)
+            if self._stored_invoice_file_exists(current_path):
+                continue
+            for candidate in self._canonical_invoice_file_candidates(invoice, file_name):
+                if not candidate.exists() or not candidate.is_file():
+                    continue
+                setattr(invoice, path_field, str(candidate))
+                setattr(invoice, hash_field, hashlib.sha256(candidate.read_bytes()).hexdigest())
+                invoice.updated_at = datetime.now(UTC)
+                changed = True
+                break
+        return changed
+
     @staticmethod
     def _invoice_matches_keyword(invoice: EtcInvoice, keyword: str) -> bool:
         needle = keyword.lower()
@@ -1520,13 +1568,24 @@ class EtcService:
             raise EtcDraftRequestError("invoiceIds must not be empty.")
         invoices = [self._get_invoice(invoice_id) for invoice_id in invoice_ids]
         self._validate_complete_import_batches(invoices)
+        repaired = False
+        missing_attachments: list[str] = []
         for invoice in invoices:
+            repaired = self._repair_invoice_attachment_paths(invoice) or repaired
             if invoice.status != EtcInvoiceStatus.UNSUBMITTED:
                 raise EtcDraftRequestError(f"ETC invoice {invoice.invoice_number} is already submitted.")
-            if not invoice.xml_file_path or not invoice.pdf_file_path:
-                raise EtcDraftRequestError(f"ETC invoice {invoice.invoice_number} is missing PDF or XML attachment.")
-            if not Path(invoice.xml_file_path).exists() or not Path(invoice.pdf_file_path).exists():
-                raise EtcDraftRequestError(f"ETC invoice {invoice.invoice_number} attachment file is missing.")
+            missing_parts: list[str] = []
+            if not self._stored_invoice_file_exists(invoice.pdf_file_path):
+                missing_parts.append("PDF")
+            if not self._stored_invoice_file_exists(invoice.xml_file_path):
+                missing_parts.append("XML")
+            if missing_parts:
+                missing_attachments.append(f"{invoice.invoice_number} 缺少 {'/'.join(missing_parts)}")
+        if repaired:
+            self._persist()
+        if missing_attachments:
+            missing_text = "；".join(missing_attachments)
+            raise EtcDraftRequestError(f"ETC OA 草稿附件不完整：{missing_text}.")
         return invoices
 
     def _validate_complete_import_batches(self, invoices: list[EtcInvoice]) -> None:

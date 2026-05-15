@@ -753,6 +753,30 @@ class EtcServiceTests(unittest.TestCase):
         self.assertEqual({invoice.import_batch_id for invoice in invoices}, {import_batch.id})
         self.assertEqual(len(fake_oa.uploads), 2)
 
+    def test_draft_creation_repairs_stale_attachment_paths_from_canonical_storage(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            fake_oa = FakeEtcOAClient()
+            service = EtcService(data_dir=Path(temp_dir), oa_client=fake_oa)
+            service.import_zips([UploadedEtcZipFile("invoices.zip", etc_zip(["ETC001"]))])
+
+            invoice = service._invoices["etc_invoice_0001"]
+            original_pdf_path = invoice.pdf_file_path
+            original_xml_path = invoice.xml_file_path
+            invoice.pdf_file_path = str(Path(temp_dir) / "missing" / "invoice.pdf")
+            invoice.pdf_file_hash = None
+            invoice.xml_file_path = None
+            invoice.xml_file_hash = None
+
+            draft = service.create_oa_draft(["etc_invoice_0001"])
+            repaired_invoice = service._invoices["etc_invoice_0001"]
+
+        self.assertEqual(draft.oa_draft_id, "oa-draft-001")
+        self.assertEqual(repaired_invoice.pdf_file_path, original_pdf_path)
+        self.assertEqual(repaired_invoice.xml_file_path, original_xml_path)
+        self.assertTrue(repaired_invoice.pdf_file_hash)
+        self.assertTrue(repaired_invoice.xml_file_hash)
+        self.assertEqual(len(fake_oa.uploads), 1)
+
     def test_delete_import_batch_removes_unsubmitted_invoices(self) -> None:
         with TemporaryDirectory() as temp_dir:
             service = EtcService(data_dir=Path(temp_dir))
@@ -819,7 +843,7 @@ class EtcServiceTests(unittest.TestCase):
             service = EtcService(data_dir=Path(temp_dir), oa_client=fake_oa)
             service.import_zips([UploadedEtcZipFile("missing-pdf.zip", etc_zip(["ETC001"], include_pdf=False))])
 
-            with self.assertRaises(EtcDraftRequestError):
+            with self.assertRaisesRegex(EtcDraftRequestError, "ETC001 缺少 PDF"):
                 service.create_oa_draft(["etc_invoice_0001"])
 
             service.import_zips([UploadedEtcZipFile("complete.zip", etc_zip(["ETC001"], include_pdf=True))])
