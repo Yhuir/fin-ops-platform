@@ -7,7 +7,7 @@
 - PostgreSQL 成为财务主事实源。
 - MinIO/S3 成为文件主存储。
 - app Mongo 冻结归档，只作为回滚和审计参考。
-- OA Mongo 保持只读，通过同步任务进入 PostgreSQL。
+- OA Mongo 保持外部只读源，不备份、不导出、不修改；后续只通过既有只读同步逻辑把业务需要的数据归一化进入 PostgreSQL。
 
 ## 数据来源
 
@@ -40,6 +40,7 @@ MinIO/S3 文件对象
 - 完成 MinIO/S3 bucket、账号、版本化和生命周期策略。
 - 冻结或标记迁移窗口内的后台任务。
 - 记录当前应用 commit、配置摘要、Mongo collection count。
+- 明确本迁移只备份和迁移 app Mongo；不得对 OA 源数据库执行 `mongodump`、`mongorestore`、导出集合或任何写操作。
 
 ## 导出格式
 
@@ -238,5 +239,4 @@ MinIO/S3 迁移后发现文件异常：
 | 双写产生差异 | idempotency key、trace id、差异报表、补偿回放。 |
 | read model 口径变化 | 事实表对账和页面样本对比同时做。 |
 | PostgreSQL 大表锁 | expand/contract migration，避免生产长事务 DDL。 |
-| OA Mongo 同步中断 | 保留水位、retry、人工指定范围重放。 |
-
+| OA Mongo 同步中断 | 只通过既有只读同步逻辑保留水位、retry、人工指定范围重放；不得把 OA 源库纳入备份或迁移范围。 |

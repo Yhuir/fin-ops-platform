@@ -5,7 +5,8 @@
 在后端重构和 PostgreSQL 迁移前，必须先形成可恢复、可验证、可追溯的 Mongo 备份。备份对象包括：
 
 - App Mongo：当前系统状态、明细集合、GridFS 文件和 read model。
-- OA Mongo：外部只读源。原则上由 OA/DBA 按他们的生产策略备份；本系统迁移前只做只读快照或导出需要同步的集合。
+
+明确不备份、不导出、不修改 OA 源数据库。OA Mongo 是外部系统源库，本项目只通过既有只读同步逻辑读取业务需要的数据；OA 源库备份由 OA/DBA 按其自身生产策略负责，不纳入本迁移任务。
 
 ## 备份前检查
 
@@ -15,7 +16,6 @@
 | --- | --- |
 | app Mongo URI | 当前 `FIN_OPS_STORAGE_MODE=mongo_only` 使用的 app 状态库连接。 |
 | app 数据库名 | 当前约定为 `fin_ops_platform_app`，以实际环境为准。 |
-| OA Mongo URI | 只读连接，不应使用可写账号。 |
 | Mongo 版本 | 记录 server version 和 featureCompatibilityVersion。 |
 | Database Tools 版本 | `mongodump --version` 和 `mongorestore --version`。 |
 | 备份目录 | 独立磁盘或对象存储，不放在应用部署目录。 |
@@ -34,7 +34,7 @@ chmod 700 "$BACKUP_ROOT"
 使用 `mongodump --archive --gzip` 备份 app Mongo。GridFS 文件会随同数据库中的 GridFS collections 一起备份。
 
 ```bash
-export APP_MONGO_URI='mongodb://USER:PASSWORD@HOST:27017/fin_ops_platform_app?authSource=admin'
+export APP_MONGO_URI='mongodb://USER:***@HOST:27017/fin_ops_platform_app?authSource=admin'
 
 mongodump \
   --uri "$APP_MONGO_URI" \
@@ -68,28 +68,12 @@ mongosh "$APP_MONGO_URI" --quiet --eval 'printjson(db.stats())' \
   | tee "$BACKUP_ROOT/logs/app-mongo-db-stats.json"
 ```
 
-## OA Mongo 只读快照
-
-OA Mongo 是外部系统源库，优先要求 OA/DBA 提供同一时间点快照。若只能使用只读账号导出，本系统只导出迁移所需集合，不做写操作。
-
-```bash
-export OA_MONGO_URI='mongodb://READONLY_USER:PASSWORD@HOST:27017/OA_DB?authSource=admin'
-
-mongodump \
-  --uri "$OA_MONGO_URI" \
-  --archive="$BACKUP_ROOT/mongo/oa-mongo-readonly.archive.gz" \
-  --gzip \
-  2>&1 | tee "$BACKUP_ROOT/logs/oa-mongo-mongodump.log"
-```
-
-如果 OA 数据量过大，应改为 DBA 级备份或按业务集合导出，并记录 `--nsInclude` 范围。
-
 ## 恢复演练
 
 备份不经过恢复验证，不能算可用备份。必须恢复到 staging Mongo，不要恢复到生产库。
 
 ```bash
-export STAGING_APP_MONGO_URI='mongodb://USER:PASSWORD@STAGING_HOST:27017/fin_ops_platform_app_restore_test?authSource=admin'
+export STAGING_APP_MONGO_URI='mongodb://USER:***@STAGING_HOST:27017/fin_ops_platform_app_restore_test?authSource=admin'
 
 mongorestore \
   --uri "$STAGING_APP_MONGO_URI" \
@@ -138,11 +122,9 @@ for (const name of names) {
 
 - 冻结点全量备份：至少保留 180 天。
 - 每日增量或全量备份：至少保留 30 天。
-- OA 源库快照：按 OA 侧合规策略保留。
 - 恢复演练日志和 checksum：与备份同周期保留。
 
 ## 参考资料
 
 - MongoDB Database Tools `mongodump`：https://www.mongodb.com/docs/database-tools/mongodump/
 - MongoDB Database Tools `mongorestore`：https://www.mongodb.com/docs/database-tools/mongorestore/
-

@@ -15,6 +15,9 @@
 - `backend-refactor/target-architecture.md`：目标生产架构、组件边界和技术选型。
 - `backend-refactor/migration-roadmap.md`：分阶段迁移路线、验收标准和回滚口径。
 - `backend-refactor/data-model-and-read-models.md`：PostgreSQL 事实表、分区、搜索表、读模型和索引计划。
+- `backend-refactor/postgresql-schema-notes.md`：生产 PostgreSQL schema、分区、约束、权限和迁移分组建议。
+- `backend-refactor/outbox-and-jobs.md`：Outbox、NATS JetStream、Worker 状态机和任务可靠性设计。
+- `backend-refactor/read-models-and-search.md`：读模型增量重建、搜索索引表、缓存失效和一致性策略。
 
 ## 历史资料
 

@@ -1,0 +1,4 @@
+[workspace]
+members = ["crates/fin-ops-api"]
+resolver = "2"
+
