@@ -1,0 +1,149 @@
+{
+  "fixture_name": "tax_offset_read_model_rebuild_month",
+  "schema_version": "2026-05-tax-offset-month-v1",
+  "task": {
+    "event_type": "read_model.rebuild_requested",
+    "models": [
+      "tax_offset"
+    ],
+    "scope_keys": [
+      "2026-05"
+    ],
+    "months": [
+      "2026-05"
+    ],
+    "reason": "tax.import_confirmed",
+    "source_versions": {
+      "output_invoice_max_updated_at": "2026-05-16T08:30:00Z",
+      "input_invoice_max_updated_at": "2026-05-16T08:30:00Z",
+      "tax_certification_max_updated_at": "2026-05-16T08:30:00Z",
+      "oa_attachment_invoice_projection_version": "oa-attachment-invoice-v1",
+      "rules_version": "tax-offset-v1"
+    }
+  },
+  "expected_read_model": {
+    "scope_key": "2026-05",
+    "scope_type": "month",
+    "scope_month": "2026-05-01",
+    "cache_status": "ready",
+    "stale": false,
+    "output_count": 2,
+    "input_plan_count": 2,
+    "certified_count": 1,
+    "source_scope_keys": [
+      "invoice:output:2026-05",
+      "invoice:input:2026-05",
+      "tax_certification:2026-05",
+      "oa_attachment_invoice:2026-05"
+    ],
+    "payload": {
+      "month": "2026-05",
+      "output_items": [
+        {
+          "invoice_id": "output-invoice-001",
+          "invoice_no": "OUT-202605-001",
+          "issued_month": "2026-05",
+          "amount": "1000.00",
+          "tax_amount": "60.00",
+          "status": "issued"
+        },
+        {
+          "invoice_id": "output-invoice-002",
+          "invoice_no": "OUT-202605-002",
+          "issued_month": "2026-05",
+          "amount": "800.00",
+          "tax_amount": "48.00",
+          "status": "issued"
+        }
+      ],
+      "input_plan_items": [
+        {
+          "invoice_id": "input-invoice-001",
+          "invoice_no": "IN-202605-001",
+          "issued_month": "2026-05",
+          "amount": "500.00",
+          "tax_amount": "30.00",
+          "source": "imported_input_invoice"
+        },
+        {
+          "invoice_id": "oa-attachment-invoice-001",
+          "invoice_no": "OA-ATT-202605-001",
+          "issued_month": "2026-05",
+          "amount": "300.00",
+          "tax_amount": "18.00",
+          "source": "oa_attachment_invoice_projection"
+        }
+      ],
+      "certified_items": [
+        {
+          "certification_id": "tax-cert-001",
+          "invoice_id": "input-invoice-001",
+          "certified_month": "2026-05",
+          "certified_tax_amount": "30.00",
+          "status": "certified"
+        }
+      ]
+    }
+  },
+  "reconciliation_report": {
+    "must_block_on_difference": true,
+    "checks": [
+      {
+        "metric": "output_count_matches_payload",
+        "scope_key": "2026-05",
+        "expected_count": 2,
+        "actual_count": 2,
+        "status": "pass"
+      },
+      {
+        "metric": "input_plan_count_matches_payload",
+        "scope_key": "2026-05",
+        "expected_count": 2,
+        "actual_count": 2,
+        "status": "pass"
+      },
+      {
+        "metric": "certified_count_matches_payload",
+        "scope_key": "2026-05",
+        "expected_count": 1,
+        "actual_count": 1,
+        "status": "pass"
+      },
+      {
+        "metric": "input_tax_amount_matches_fact_sum",
+        "scope_key": "2026-05",
+        "expected_amount": "48.00",
+        "actual_amount": "48.00",
+        "diff_amount": "0.00",
+        "status": "pass"
+      }
+    ],
+    "blocking_difference_example": {
+      "model": "tax_offset",
+      "scope_key": "2026-05",
+      "month": "2026-05",
+      "metric": "certified_tax_amount_matches_fact_sum",
+      "expected_amount": "30.00",
+      "actual_amount": "0.00",
+      "diff_amount": "-30.00",
+      "legacy_id": "tax-cert-001",
+      "status": "fail"
+    }
+  },
+  "negative_contract_examples": [
+    {
+      "name": "missing_certified_items_array",
+      "payload": {
+        "output_items": [],
+        "input_plan_items": []
+      },
+      "expected_result": "fail_before_publish"
+    },
+    {
+      "name": "bank_import_does_not_invalidate_tax_offset",
+      "event_type": "import.batch_confirmed",
+      "import_kind": "bank_transactions",
+      "expected_rebuild_scope_keys": []
+    }
+  ]
+}

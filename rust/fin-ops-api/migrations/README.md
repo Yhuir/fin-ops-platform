@@ -13,6 +13,7 @@
 5. `0005_job_outbox.sql`：outbox、worker task、attempt、dead letter 和 heartbeat。
 6. `0006_staging_migration.sql`：Mongo 导出 manifest、legacy id map、导入解析和 OA sync staging。
 7. `0007_read_models_search.sql`：工作台读模型、搜索索引、成本和税金读模型。
+8. `0008_reconciliation_write_api_guards.sql`：高风险写 API 的幂等记录、`row_version` 和 active 核销行唯一约束。
 
 ## 运行方式
 

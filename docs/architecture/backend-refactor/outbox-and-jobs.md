@@ -344,14 +344,23 @@ Retry 和 dead-letter：
 
 ```json
 {
-  "model": "workbench",
+  "schema_version": "finops.read_model.rebuild_requested.v1",
+  "models": ["workbench"],
   "scope_keys": ["workbench:2026-05"],
   "months": ["2026-05"],
+  "scope_type": "month",
   "reason": "import.batch_confirmed",
-  "source_versions": {
-    "fact_version": "42",
-    "case_snapshot_version": "sha256"
+  "source": {
+    "aggregate_type": "import_batch",
+    "aggregate_id": "uuid",
+    "event_id": "uuid"
   },
+  "source_versions": {
+    "fact_updated_at": "2026-05-16T08:30:00Z",
+    "case_snapshot_version": "sha256",
+    "rules_version": "read-model-rules-v1"
+  },
+  "priority": "normal",
   "force": false
 }
 ```
@@ -359,17 +368,19 @@ Retry 和 dead-letter：
 输出：
 
 - 重建对应 read model 表。
-- 更新 `read_model.read_model_rebuild_runs` 或对应模型 metadata 的 `generated_at/source_versions/stale_reason`。
+- 更新对应模型 metadata 的 `generated_at/source_versions/stale_reason/rebuild_task_id`。
 - 必要时继续投递 `search.index_requested`。
 
 幂等键：
 
-- `read_model.rebuild:{model}:{scope_key}:{hash(source_versions)}:{reason}`。
+- `read_model.rebuild:{model}:{scope_key}:{hash(source_versions)}:{reason}`；多模型 payload 必须拆成单模型任务后分别生成。
 
 约束：
 
+- 详细 payload、`stale_reason`、`source_versions` 和 API stale 策略见 `docs/architecture/backend-refactor/read-models-and-search.md` 的 P2-08D。
 - 单月 scope 优先；`all` 汇总后台增量聚合，不能阻塞单月查询。
 - 同一 `model + scope_key` 同时只能有一个 running 任务。
+- Payload schema 不兼容、scope 无法解析或 `source_versions` 缺关键水位时进入 dead letter，不猜测兼容。
 
 ### 搜索索引 `search.index`
 
@@ -408,6 +419,67 @@ Publisher 恢复策略：
 - 重放 dead letter 必须创建新的 outbox event 或 worker task，保留原 `dead_letters.id`、原 payload、操作者和原因。
 - 重放成功后更新 `dead_letters.replay_status='replayed'`。
 - 不允许直接把旧 `dead_lettered` 任务改回 `queued` 而不生成新的 attempt/audit 记录。
+
+## P2-07C Python Worker 协议实现口径
+
+Python Worker 的协议和状态机落在 `backend/src/fin_ops_platform/services/worker_task_protocol.py`。该模块只定义 envelope 校验、attempt 生命周期和 repository 边界，不连接 PostgreSQL、不解释业务 payload、不直接写核销等高风险事实。
+
+核心对象：
+
+| 对象 | 职责 |
+| --- | --- |
+| `WorkerTaskEnvelope` | 校验 `finops.worker_task.v1` 顶层消息、UUID、创建时间、`source/scope/payload/retry` 对象结构。 |
+| `WorkerTaskRunner` | 执行通用状态机：加载任务、校验幂等键、创建 attempt、标记 running、调用 handler、按结果落状态。 |
+| `WorkerTaskContext` | 暴露 `heartbeat()`，由长任务在批次循环中周期调用。 |
+| `WorkerTaskRepository` | PostgreSQL adapter 边界；后续实现必须只读写 `job.worker_tasks`、`job.worker_attempts`、`job.worker_heartbeats`、`job.dead_letters`。 |
+
+Repository 方法和 SQL 口径：
+
+| 方法 | PostgreSQL 行为 |
+| --- | --- |
+| `load_task_for_update(task_id)` | `select ... from job.worker_tasks where id=$1 for update`；只允许 `queued/retrying` 进入执行。 |
+| `create_attempt(...)` | 在 handler 执行前插入 `job.worker_attempts(status='running')`，`attempt_no = worker_tasks.attempt_count + 1`，并保留 NATS stream/consumer/sequence。 |
+| `mark_task_running(...)` | 更新 `job.worker_tasks.status='running'`、`phase='running'`、`attempt_count`、`started_at`、`locked_by`、`locked_at`。 |
+| `record_heartbeat(...)` | 更新当前 `job.worker_attempts.heartbeat_at`，并 upsert `job.worker_heartbeats(worker_id, task_id, attempt_id, status='active')`。 |
+| `mark_succeeded(...)` | 同一事务更新 attempt 和 task 为 `succeeded`，写 `result_summary`、`finished_at`。 |
+| `mark_failed(...)` | 不可重试业务失败：attempt 和 task 都置 `failed`，写 `error_code/error_summary/error_detail`，NATS 应 ack。 |
+| `mark_retrying(...)` | 可重试失败且未耗尽次数：attempt 和 task 都置 `retrying`，写 `next_attempt_at` 和错误摘要，NATS 可 nak 或延迟重投。 |
+| `mark_dead_lettered(...)` | 重试耗尽或明确 dead letter：attempt 和 task 都置 `dead_lettered`，并插入 `job.dead_letters(source_kind='worker_task')`。 |
+| `record_nats_dead_letter(...)` | 消息找不到任务、schema 不兼容或幂等键不匹配时插入 `job.dead_letters(source_kind='nats_message')`，不新建业务任务。 |
+
+状态机约束：
+
+- Worker 不支持消息 schema 猜测兼容；版本不匹配直接进入 dead letter。
+- `task_id`、`task_type`、`idempotency_key` 必须和 PostgreSQL `job.worker_tasks` 一致。
+- 只要进入 handler，必须已经写入 `worker_attempts`，不得跳过 attempt 记录。
+- handler 返回成功摘要时只更新任务结果；业务写入必须通过具体任务服务边界完成。
+- `RetryableWorkerError` 在 `attempt_no < max_attempts` 时转 `retrying`，否则转 `dead_lettered`。
+- `PermanentWorkerError` 转 `failed`；`DeadLetterWorkerError` 转 `dead_lettered`。
+- 未捕获异常默认视为可重试，错误详情只保留异常类型，不记录堆栈和 secret。
+
+长任务 heartbeat：
+
+- 文件解析、read model 重建、搜索索引等 handler 必须在每个批次后调用 `context.heartbeat()`。
+- Worker 守护进程可以按固定间隔调用同一个 heartbeat 方法，但最终事实仍是 PostgreSQL 的 attempt 和 heartbeat 表。
+- `finops_worker_heartbeat_age_seconds` 的采集应以 `job.worker_heartbeats.heartbeat_at` 为准。
+
+失败重放：
+
+- 对 `source_kind='worker_task'` 的 dead letter，重放必须创建新的 `job.worker_tasks` 和新的 outbox event，新的 `idempotency_key` 应包含 replay 原因或 source version，原 dead letter 保持 open 直到新任务成功。
+- 对 `source_kind='nats_message'` 的 dead letter，先修复消息生产端或任务初始化缺口，再创建新的 outbox event；不得直接补写缺失任务后消费旧 NATS 消息。
+- 重放完成后更新原 `job.dead_letters.replay_status='replayed'`、`replayed_by`、`replayed_at`，并写审计事件。
+- 任何重放都不能把旧 `dead_lettered` 或 `failed` 任务原地改回 `queued`。
+
+## P2-07D Task Status 查询 API
+
+Axum 只读任务状态接口落在 `GET /api/tasks/{task_id}/status`，契约见 `docs/dev/api-contracts.md`。
+
+边界：
+
+- Route：`rust/fin-ops-api/crates/fin-ops-api/src/routes/task_status.rs` 只解析 UUID、调用 service、返回 JSON；不触发执行、重试、重放或切流。
+- Service：`rust/fin-ops-api/crates/fin-ops-api/src/services/task_status.rs` 负责前端 DTO、`short_label/message` 兼容字段和 `source/result_summary` 脱敏。
+- Repository：`rust/fin-ops-api/crates/fin-ops-api/src/repositories/task_status.rs` 只读 `job.worker_tasks` 和 `job.worker_attempts`；不读取 NATS、Redis 或 Python Worker 本地状态。
+- 错误响应只返回 `invalid_task_id`、`task_not_found`、`database_unavailable` 等公共错误码，不暴露 SQL、内部堆栈、`error_detail` 或 secret。
 
 ## 监控指标
 

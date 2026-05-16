@@ -27,19 +27,22 @@ impl Metrics {
     pub fn new() -> Result<Self, MetricsError> {
         let registry = Registry::new();
         let http_requests_total = IntCounterVec::new(
-            Opts::new("http_requests_total", "Total HTTP requests handled by the API."),
-            &["method", "path", "status"],
+            Opts::new(
+                "fin_ops_http_requests_total",
+                "Total HTTP requests handled by the API.",
+            ),
+            &["method", "route", "status"],
         )?;
         let http_request_duration_seconds = HistogramVec::new(
             HistogramOpts::new(
-                "http_request_duration_seconds",
+                "fin_ops_http_request_duration_seconds",
                 "HTTP request duration in seconds.",
             ),
-            &["method", "path", "status"],
+            &["method", "route", "status"],
         )?;
         let readiness_checks_total = IntCounterVec::new(
             Opts::new(
-                "readiness_checks_total",
+                "fin_ops_readiness_checks_total",
                 "Total dependency readiness checks by dependency and result.",
             ),
             &["dependency", "result"],
@@ -57,19 +60,13 @@ impl Metrics {
         })
     }
 
-    pub fn record_http_request(
-        &self,
-        method: &str,
-        path: &str,
-        status: u16,
-        elapsed: Duration,
-    ) {
+    pub fn record_http_request(&self, method: &str, route: &str, status: u16, elapsed: Duration) {
         let status = status.to_string();
         self.http_requests_total
-            .with_label_values(&[method, path, &status])
+            .with_label_values(&[method, route, &status])
             .inc();
         self.http_request_duration_seconds
-            .with_label_values(&[method, path, &status])
+            .with_label_values(&[method, route, &status])
             .observe(elapsed.as_secs_f64());
     }
 
@@ -88,4 +85,3 @@ impl Metrics {
         Ok(String::from_utf8(buffer)?)
     }
 }
-

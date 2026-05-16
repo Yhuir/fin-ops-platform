@@ -19,6 +19,14 @@
 先读取该文件和它引用的当前状态文档；不要重复执行已完成的 PostgreSQL 安装、app Mongo 备份和 0001-0007 migration 生成。
 ```
 
+## 复制现成模块 Prompt
+
+如果你要按 P0-P4 顺序逐个执行，优先使用：
+
+- `GOAL-PROMPTS.md`：完整 `/goal` prompt 清单，每个模块一条。
+
+推荐做法是每次只复制 `GOAL-PROMPTS.md` 中的一段 `/goal`，执行完成、验证通过后再复制下一段。
+
 ## 执行单个模块
 
 适合一次只做一个模块，例如只做 app Mongo 导出工具：
@@ -50,6 +58,12 @@
 /goal
 执行 /Users/yu/Desktop/fin-ops-platform/docs/exec-plans/active/backend-refactor-prompts/06c-data-migration-dry-run.md。
 执行前读取 00-current-state-and-gates.md。只做 dry-run 和报告，不切换生产 API，不冻结 app Mongo。
+```
+
+```text
+/goal
+执行 /Users/yu/Desktop/fin-ops-platform/docs/exec-plans/active/backend-refactor-prompts/06d-gridfs-minio-migration.md。
+执行前读取 00-current-state-and-gates.md。只设计和实现 app GridFS 到 MinIO/S3 的迁移与校验，不访问 OA 源库，不删除 GridFS。
 ```
 
 ## 必须附加的安全提示

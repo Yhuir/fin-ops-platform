@@ -9,7 +9,7 @@ use crate::config::ApiConfig;
 pub struct DependencyClients {
     pub redis: redis::RedisClientPlaceholder,
     pub nats: nats::NatsClientPlaceholder,
-    pub s3: s3::S3ClientPlaceholder,
+    pub s3: s3::S3Client,
 }
 
 impl DependencyClients {
@@ -17,8 +17,7 @@ impl DependencyClients {
         Self {
             redis: redis::RedisClientPlaceholder::from_config(&config.redis),
             nats: nats::NatsClientPlaceholder::from_config(&config.nats),
-            s3: s3::S3ClientPlaceholder::from_config(&config.s3),
+            s3: s3::S3Client::from_config(&config.s3),
         }
     }
 }
-

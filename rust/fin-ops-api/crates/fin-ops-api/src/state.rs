@@ -45,13 +45,20 @@ impl AppState {
 
     #[cfg(test)]
     pub fn for_tests(readiness_probe: Arc<dyn ReadinessProbe>) -> Self {
-        let config = ApiConfig::from_reader(|key| match key {
+        Self::for_tests_with_env(readiness_probe, |key| match key {
             "DATABASE_URL" => {
                 Some("postgres://fin_ops_api:***@127.0.0.1:5432/fin_ops_test".to_owned())
             }
             _ => None,
         })
-        .expect("test config should be valid");
+    }
+
+    #[cfg(test)]
+    pub fn for_tests_with_env(
+        readiness_probe: Arc<dyn ReadinessProbe>,
+        read_env: impl Fn(&'static str) -> Option<String>,
+    ) -> Self {
+        let config = ApiConfig::from_reader(read_env).expect("test config should be valid");
         let db = infra::postgres::build_pool(&config.database).expect("test database URL is valid");
 
         Self {

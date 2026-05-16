@@ -9,6 +9,7 @@
 - `00-goal-master-current-state.md`：推荐复制到 `/goal` 的完整总控 prompt。
 - `00-current-state-and-gates.md`：当前已完成事项、禁止重复事项、剩余任务和上线门禁。
 - `GOAL-USAGE.md`：如何用 `/goal` 执行这些 prompt。
+- `GOAL-PROMPTS.md`：按 P0-P4 拆好的可复制 `/goal` prompt 清单。
 
 除非你明确要重新做历史阶段，否则不要直接从旧版 `00-coordinator.md` 从头执行。
 
@@ -46,8 +47,8 @@
 | 6 | `08-read-models-and-search.md` | 落地 read model、搜索索引和增量重建。 |
 | 7 | `09-api-migration-batches.md` | 按批次迁移 API；优先执行 `09a`、`09b`、`09c`，最后执行 `09d`。 |
 | 8 | `10-observability-security-readiness.md` | 补齐观测、安全、备份、压测和上线门禁。 |
-| 9 | `11-cutover-and-rollback.md` | 制定切换和回滚。 |
-| 10 | `12-formal-migration-and-cutover-gates.md` | dry-run 通过后，执行正式迁移前的最终门禁和迁移批次控制。 |
+| 9 | `12-formal-migration-and-cutover-gates.md` | dry-run 通过后，执行正式迁移前的最终 go/no-go 门禁。 |
+| 10 | `11-cutover-and-rollback.md` | 仅在用户明确授权且所有门禁通过后，制定和执行切换回滚流程。 |
 
 ## 历史/已完成阶段 Prompt
 

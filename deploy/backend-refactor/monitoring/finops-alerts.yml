@@ -1,0 +1,241 @@
+groups:
+  - name: fin-ops-api
+    rules:
+      - alert: FinOpsApiUnavailable
+        expr: up{job="fin-ops-api"} == 0
+        for: 3m
+        labels:
+          severity: P0
+        annotations:
+          summary: fin-ops API metrics target unavailable
+
+      - alert: FinOpsApiHigh5xxRate
+        expr: |
+          sum(rate(fin_ops_http_requests_total{status=~"5.."}[5m]))
+          /
+          clamp_min(sum(rate(fin_ops_http_requests_total[5m])), 1)
+          > 0.02
+        for: 5m
+        labels:
+          severity: P1
+        annotations:
+          summary: fin-ops API 5xx rate is above 2 percent
+
+      - alert: FinOpsApiP95LatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, route) (rate(fin_ops_http_request_duration_seconds_bucket[10m]))
+          ) > 1
+        for: 10m
+        labels:
+          severity: P1
+        annotations:
+          summary: fin-ops API P95 latency is above one second
+
+      - alert: FinOpsApiPostgresReadinessFailures
+        expr: increase(fin_ops_readiness_checks_total{dependency="postgres",result="not_ready"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: P1
+        annotations:
+          summary: fin-ops API readiness checks report PostgreSQL not ready
+
+  - name: fin-ops-data-safety
+    rules:
+      - alert: FinOpsPostgresUnavailable
+        expr: |
+          min by (env) (up{job="fin-ops-postgres"}) == 0
+          or
+          min by (env) (fin_ops_postgres_up) == 0
+        for: 1m
+        labels:
+          severity: P0
+        annotations:
+          summary: PostgreSQL is unavailable
+
+      - alert: FinOpsPostgresBackupStale
+        expr: fin_ops_postgres_backup_age_seconds > 86400
+        for: 5m
+        labels:
+          severity: P0
+        annotations:
+          summary: PostgreSQL backup is older than 24 hours
+
+      - alert: FinOpsPostgresPitrDrillStale
+        expr: fin_ops_postgres_pitr_drill_age_seconds > 2592000
+        for: 5m
+        labels:
+          severity: P0
+        annotations:
+          summary: PostgreSQL PITR drill evidence is older than 30 days
+
+      - alert: FinOpsPostgresWalArchiveLagHigh
+        expr: fin_ops_postgres_wal_archive_lag_seconds > 900
+        for: 10m
+        labels:
+          severity: P1
+        annotations:
+          summary: PostgreSQL WAL archive lag is above 15 minutes
+
+      - alert: FinOpsMongoBackupStale
+        expr: fin_ops_mongo_backup_age_seconds > 86400
+        for: 5m
+        labels:
+          severity: P0
+        annotations:
+          summary: App Mongo backup is older than 24 hours
+
+      - alert: FinOpsObjectStoreErrorRateHigh
+        expr: |
+          sum(rate(fin_ops_object_store_upload_errors_total[5m]))
+          +
+          sum(rate(fin_ops_object_store_download_errors_total[5m]))
+          > 0
+        for: 5m
+        labels:
+          severity: P1
+        annotations:
+          summary: Object storage upload or download error rate is above one percent
+
+      - alert: FinOpsObjectChecksumMismatch
+        expr: increase(fin_ops_object_store_checksum_mismatch_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: P0
+        annotations:
+          summary: Object storage checksum mismatch detected
+
+  - name: fin-ops-async
+    rules:
+      - alert: FinOpsOutboxBacklogHigh
+        expr: sum(fin_ops_outbox_pending_events) by (env) > 1000
+        for: 15m
+        labels:
+          severity: P1
+        annotations:
+          summary: Outbox pending event backlog is above threshold
+
+      - alert: FinOpsNatsBacklogGrowing
+        expr: fin_ops_nats_consumer_pending_messages > 1000
+        for: 15m
+        labels:
+          severity: P1
+        annotations:
+          summary: NATS consumer backlog is above threshold
+
+      - alert: FinOpsWorkerFailureRateHigh
+        expr: |
+          sum(rate(fin_ops_worker_jobs_failed_total[5m])) by (env, job_type)
+          /
+          clamp_min(
+            sum(rate(fin_ops_worker_jobs_started_total[5m])) by (env, job_type),
+            1
+          )
+          > 0.05
+        for: 5m
+        labels:
+          severity: P1
+        annotations:
+          summary: Worker job failure rate is above five percent
+
+      - alert: FinOpsWorkerDeadLetters
+        expr: increase(fin_ops_worker_dead_letters_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: P1
+        annotations:
+          summary: Worker dead letter detected
+
+      - alert: FinOpsOutboxDeadLetters
+        expr: increase(fin_ops_outbox_dead_letters_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: P1
+        annotations:
+          summary: Outbox dead letter detected
+
+      - alert: FinOpsReadModelStale
+        expr: fin_ops_read_model_staleness_seconds > 600
+        for: 5m
+        labels:
+          severity: P1
+        annotations:
+          summary: Read model is stale for more than 10 minutes
+
+  - name: fin-ops-business
+    rules:
+      - alert: FinOpsReconciliationWriteFailures
+        expr: increase(fin_ops_reconciliation_write_failures_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: P1
+        annotations:
+          summary: Reconciliation write failures detected
+
+      - alert: FinOpsImportFailureRateHigh
+        expr: increase(fin_ops_import_failures_total[30m]) > 0
+        for: 30m
+        labels:
+          severity: P2
+        annotations:
+          summary: Import failures increased
+
+  - name: fin-ops-host
+    rules:
+      - alert: FinOpsHostDiskFreeLow
+        expr: |
+          (
+            node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}
+            /
+            node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}
+          ) < 0.15
+        for: 10m
+        labels:
+          severity: P1
+        annotations:
+          summary: Host disk free ratio is below 15 percent
+
+      - alert: FinOpsHostCpuSaturationHigh
+        expr: |
+          1 - avg by (env, instance) (
+            rate(node_cpu_seconds_total{mode="idle"}[5m])
+          ) > 0.90
+        for: 10m
+        labels:
+          severity: P1
+        annotations:
+          summary: Host CPU utilization is above 90 percent
+
+      - alert: FinOpsHostMemoryAvailableLow
+        expr: |
+          node_memory_MemAvailable_bytes
+          /
+          node_memory_MemTotal_bytes
+          < 0.10
+        for: 10m
+        labels:
+          severity: P1
+        annotations:
+          summary: Host available memory ratio is below 10 percent
+
+  - name: fin-ops-monitoring-evidence
+    rules:
+      - alert: FinOpsMonitoringCriticalMetricsMissing
+        expr: |
+          absent(fin_ops_http_requests_total)
+          or absent(fin_ops_http_request_duration_seconds_bucket)
+          or absent(fin_ops_readiness_checks_total)
+          or absent(fin_ops_postgres_backup_age_seconds)
+          or absent(fin_ops_postgres_pitr_drill_age_seconds)
+          or absent(fin_ops_postgres_wal_archive_lag_seconds)
+          or absent(fin_ops_outbox_pending_events)
+          or absent(fin_ops_worker_jobs_failed_total)
+          or absent(fin_ops_worker_dead_letters_total)
+          or absent(fin_ops_read_model_staleness_seconds)
+          or absent(fin_ops_object_store_checksum_mismatch_total)
+        for: 5m
+        labels:
+          severity: P1
+        annotations:
+          summary: Critical fin-ops monitoring metric is missing

@@ -1,0 +1,180 @@
+{
+  "fixture_name": "p3_09a_low_risk_read_apis",
+  "health": {
+    "request": {
+      "method": "GET",
+      "path": "/health"
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "service": "fin-ops-platform-api",
+        "version": "0.1.0",
+        "status": "ready",
+        "entrypoints": [
+          "/health",
+          "/healthz",
+          "/readyz",
+          "/metrics",
+          "/api/session/me",
+          "/api/workbench/settings",
+          "/api/app-metadata",
+          "/api/tasks/{task_id}/status"
+        ],
+        "capabilities": [
+          "oa_session_contract",
+          "settings_read_contract",
+          "app_metadata",
+          "task_status_read"
+        ],
+        "storage": {
+          "mode": "postgres",
+          "backend": "postgresql",
+          "database": null
+        },
+        "future_modules": [],
+        "seed_counts": {
+          "projects": 0,
+          "ledgers": 0,
+          "cases": 0,
+          "reminders": 0
+        }
+      }
+    }
+  },
+  "app_metadata": {
+    "request": {
+      "method": "GET",
+      "path": "/api/app-metadata"
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "service": "fin-ops-api",
+        "version": "0.1.0",
+        "api": "axum-postgresql",
+        "compatible_python_contracts": [
+          "/health",
+          "/api/session/me",
+          "/api/workbench/settings"
+        ],
+        "readonly": true
+      }
+    }
+  },
+  "session_me_without_oa_session": {
+    "request": {
+      "method": "GET",
+      "path": "/api/session/me"
+    },
+    "response": {
+      "status": 401,
+      "body": {
+        "error": "invalid_oa_session",
+        "message": "缺少 OA 登录态，请从 OA 系统进入。"
+      }
+    }
+  },
+  "session_me_without_identity_adapter": {
+    "request": {
+      "method": "GET",
+      "path": "/api/session/me",
+      "headers": {
+        "Authorization": "Bearer opaque-oa-token"
+      }
+    },
+    "response": {
+      "status": 503,
+      "body": {
+        "error": "oa_identity_unavailable",
+        "message": "OA 身份服务未配置。"
+      }
+    }
+  },
+  "workbench_settings": {
+    "request": {
+      "method": "GET",
+      "path": "/api/workbench/settings"
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "projects": {
+          "active": [],
+          "completed": [],
+          "completed_project_ids": []
+        },
+        "bank_account_mappings": [],
+        "access_control": {
+          "allowed_usernames": [
+            "YNSYLP005"
+          ],
+          "readonly_export_usernames": [],
+          "admin_usernames": [
+            "YNSYLP005"
+          ],
+          "full_access_usernames": []
+        },
+        "workbench_column_layouts": {
+          "oa": [
+            "applicant",
+            "projectName",
+            "amount",
+            "counterparty",
+            "reason"
+          ],
+          "bank": [
+            "counterparty",
+            "amount",
+            "loanRepaymentDate",
+            "note"
+          ],
+          "invoice": [
+            "sellerName",
+            "buyerName",
+            "issueDate",
+            "amount",
+            "grossAmount"
+          ]
+        },
+        "oa_retention": {
+          "cutoff_date": "2026-01-01"
+        },
+        "oa_import": {
+          "form_types": [
+            "payment_request",
+            "expense_claim"
+          ],
+          "statuses": [
+            "completed"
+          ],
+          "available_form_types": [
+            {
+              "id": "payment_request",
+              "label": "支付申请"
+            },
+            {
+              "id": "expense_claim",
+              "label": "日常报销"
+            }
+          ],
+          "available_statuses": [
+            {
+              "id": "completed",
+              "label": "已完成"
+            },
+            {
+              "id": "in_progress",
+              "label": "进行中"
+            }
+          ]
+        },
+        "oa_invoice_offset": {
+          "applicant_names": [
+            "周洁莹"
+          ]
+        }
+      }
+    }
+  }
+}

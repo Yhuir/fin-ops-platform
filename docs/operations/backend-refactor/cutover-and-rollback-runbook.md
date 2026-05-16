@@ -278,6 +278,8 @@ decision:
 
 以下只作为模板，执行前必须替换为已审批的环境、路由和变更单参数；模板不包含 secret。
 
+仓库内的 `deploy/rollback-route.sh` 和 `deploy/set-feature-flag.sh` 默认只执行 dry-run，并输出将要执行的 JSON 记录。即使传入 `--execute`，脚本也会在缺少 `FIN_OPS_CUTOVER_EXECUTE=1` 时拒绝执行。设置该环境变量只能发生在 P4-12 结论为 `GO`、用户明确授权生产切换、维护窗口和回滚路径均确认之后。
+
 ### 读路由回滚
 
 ```bash
@@ -289,7 +291,8 @@ export TARGET_BACKEND="python"
 ./deploy/rollback-route.sh \
   --change "$CHANGE_ID" \
   --route-group "$ROUTE_GROUP" \
-  --target "$TARGET_BACKEND"
+  --target "$TARGET_BACKEND" \
+  --dry-run
 ```
 
 ### 关闭影子读或双写
@@ -301,12 +304,14 @@ export CHANGE_ID="REPLACE_WITH_CHANGE_ID"
 ./deploy/set-feature-flag.sh \
   --change "$CHANGE_ID" \
   --flag "backend.shadow_read.enabled" \
-  --value "false"
+  --value "false" \
+  --dry-run
 
 ./deploy/set-feature-flag.sh \
   --change "$CHANGE_ID" \
   --flag "backend.dual_write.enabled" \
-  --value "false"
+  --value "false" \
+  --dry-run
 ```
 
 ### 重放 outbox 或差异补偿

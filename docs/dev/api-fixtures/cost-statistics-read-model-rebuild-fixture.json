@@ -1,0 +1,170 @@
+{
+  "fixture_name": "cost_statistics_read_model_rebuild_month",
+  "schema_version": "2026-05-cost-statistics-explorer-v1",
+  "task": {
+    "event_type": "read_model.rebuild_requested",
+    "models": [
+      "cost_statistics"
+    ],
+    "scope_keys": [
+      "active:2026-05",
+      "all:2026-05"
+    ],
+    "months": [
+      "2026-05"
+    ],
+    "reason": "import.batch_confirmed",
+    "source_versions": {
+      "bank_transactions_max_updated_at": "2026-05-16T08:30:00Z",
+      "reconciliation_cases_max_updated_at": "2026-05-16T08:30:00Z",
+      "project_settings_version": "project-scope-v1",
+      "rules_version": "cost-statistics-v1"
+    }
+  },
+  "expected_read_models": [
+    {
+      "scope_key": "active:2026-05",
+      "scope_type": "month",
+      "scope_month": "2026-05-01",
+      "project_scope": "active",
+      "cache_status": "ready",
+      "stale": false,
+      "entry_count": 2,
+      "source_scope_keys": [
+        "workbench:2026-05",
+        "search:2026-05"
+      ],
+      "payload": {
+        "month": "2026-05",
+        "project_scope": "active",
+        "summary": {
+          "transaction_count": 2,
+          "total_amount": "300.00",
+          "matched_amount": "120.00",
+          "unmatched_amount": "180.00"
+        },
+        "time_rows": [
+          {
+            "month": "2026-05",
+            "project_id": "project-alpha",
+            "project_name": "Alpha Project",
+            "category": "travel",
+            "transaction_count": 1,
+            "amount": "120.00"
+          },
+          {
+            "month": "2026-05",
+            "project_id": "project-beta",
+            "project_name": "Beta Project",
+            "category": "service",
+            "transaction_count": 1,
+            "amount": "180.00"
+          }
+        ]
+      }
+    },
+    {
+      "scope_key": "all:2026-05",
+      "scope_type": "month",
+      "scope_month": "2026-05-01",
+      "project_scope": "all",
+      "cache_status": "ready",
+      "stale": false,
+      "entry_count": 3,
+      "source_scope_keys": [
+        "workbench:2026-05",
+        "search:2026-05"
+      ],
+      "payload": {
+        "month": "2026-05",
+        "project_scope": "all",
+        "summary": {
+          "transaction_count": 3,
+          "total_amount": "450.00",
+          "matched_amount": "120.00",
+          "unmatched_amount": "330.00"
+        },
+        "time_rows": [
+          {
+            "month": "2026-05",
+            "project_id": "project-alpha",
+            "project_name": "Alpha Project",
+            "category": "travel",
+            "transaction_count": 1,
+            "amount": "120.00"
+          },
+          {
+            "month": "2026-05",
+            "project_id": "project-beta",
+            "project_name": "Beta Project",
+            "category": "service",
+            "transaction_count": 1,
+            "amount": "180.00"
+          },
+          {
+            "month": "2026-05",
+            "project_id": "archived-project",
+            "project_name": "Archived Project",
+            "category": "other",
+            "transaction_count": 1,
+            "amount": "150.00"
+          }
+        ]
+      }
+    }
+  ],
+  "expected_async_follow_up": {
+    "event_type": "read_model.rebuild_requested",
+    "models": [
+      "cost_statistics"
+    ],
+    "scope_keys": [
+      "active:all",
+      "all:all"
+    ],
+    "reason": "cost_statistics.month_scope_changed",
+    "priority": "low"
+  },
+  "reconciliation_report": {
+    "must_block_on_difference": true,
+    "checks": [
+      {
+        "metric": "entry_count_matches_payload_summary",
+        "scope_key": "active:2026-05",
+        "expected_count": 2,
+        "actual_count": 2,
+        "status": "pass"
+      },
+      {
+        "metric": "total_amount_matches_fact_sum",
+        "scope_key": "all:2026-05",
+        "expected_amount": "450.00",
+        "actual_amount": "450.00",
+        "diff_amount": "0.00",
+        "status": "pass"
+      },
+      {
+        "metric": "all_time_not_published_with_month_task",
+        "scope_key": "active:all",
+        "expected_status": "stale_or_queued",
+        "actual_status": "queued",
+        "status": "pass"
+      }
+    ],
+    "blocking_difference_example": {
+      "model": "cost_statistics",
+      "scope_key": "all:2026-05",
+      "month": "2026-05",
+      "project_scope": "all",
+      "metric": "total_amount_matches_fact_sum",
+      "expected_amount": "450.00",
+      "actual_amount": "449.99",
+      "diff_amount": "-0.01",
+      "source_scope_keys": [
+        "workbench:2026-05",
+        "search:2026-05"
+      ],
+      "status": "fail"
+    }
+  }
+}

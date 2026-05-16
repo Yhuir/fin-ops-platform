@@ -106,7 +106,10 @@ impl HealthService {
             "nats",
             state.dependencies.nats.configured(),
         ));
-        checks.push(optional_dependency_check("s3", state.dependencies.s3.configured()));
+        checks.push(optional_dependency_check(
+            "s3",
+            state.dependencies.s3.configured(),
+        ));
 
         let ready = checks
             .iter()
@@ -145,4 +148,3 @@ mod tests {
         assert!(report.is_ready());
     }
 }
-

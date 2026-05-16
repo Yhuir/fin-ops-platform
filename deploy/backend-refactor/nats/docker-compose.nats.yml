@@ -1,0 +1,28 @@
+services:
+  finops-nats:
+    image: nats:2.10-alpine
+    container_name: finops-nats
+    restart: unless-stopped
+    command: ["-c", "/etc/nats/nats.finops.conf"]
+    ports:
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
+    environment:
+      NATS_FINOPS_PUBLISHER_USER: "${NATS_FINOPS_PUBLISHER_USER:?set in deployment environment}"
+      NATS_FINOPS_PUBLISHER_PASSWORD: "${NATS_FINOPS_PUBLISHER_PASSWORD:?set in deployment environment}"
+      NATS_FINOPS_WORKER_USER: "${NATS_FINOPS_WORKER_USER:?set in deployment environment}"
+      NATS_FINOPS_WORKER_PASSWORD: "${NATS_FINOPS_WORKER_PASSWORD:?set in deployment environment}"
+      NATS_FINOPS_OPS_USER: "${NATS_FINOPS_OPS_USER:?set in deployment environment}"
+      NATS_FINOPS_OPS_PASSWORD: "${NATS_FINOPS_OPS_PASSWORD:?set in deployment environment}"
+    volumes:
+      - ./nats.finops.conf:/etc/nats/nats.finops.conf:ro
+      - finops-nats-jetstream:/data/jetstream
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8222/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+volumes:
+  finops-nats-jetstream:

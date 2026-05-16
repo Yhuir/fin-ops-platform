@@ -1,0 +1,167 @@
+{
+  "workbench": {
+    "month": "2026-05",
+    "oa_status": {
+      "code": "ready",
+      "message": "OA 已同步"
+    },
+    "summary": {
+      "oa_count": 0,
+      "bank_count": 1,
+      "invoice_count": 0,
+      "paired_count": 0,
+      "open_count": 1,
+      "exception_count": 0
+    },
+    "invoice_inventory": {
+      "system_total": 0,
+      "manual_import_total": 0,
+      "workbench_visible_total": 0,
+      "hidden_submitted_etc_total": 0,
+      "extra_etc_total": 0,
+      "etc_summary_batch_count": 0,
+      "oa_attachment_total": 0
+    },
+    "paired": {
+      "groups": []
+    },
+    "open": {
+      "groups": [
+        {
+          "group_id": "0196f550-cc6e-7000-8000-000000000333",
+          "group_type": "candidate",
+          "match_confidence": "low",
+          "reason": "未配对流水",
+          "oa_rows": [],
+          "bank_rows": [
+            {
+              "id": "0196f550-cc6e-7000-8000-000000000111",
+              "type": "bank",
+              "counterparty_name": "供应商",
+              "amount": "100.00",
+              "direction": "支出",
+              "invoice_relation": {
+                "code": "pending_invoice_match",
+                "label": "待关联发票",
+                "tone": "warn"
+              },
+              "available_actions": ["detail"],
+              "summary_fields": {},
+              "detail_fields": {}
+            }
+          ],
+          "invoice_rows": []
+        }
+      ]
+    },
+    "read_model_status": {
+      "scope_key": "workbench:2026-05",
+      "scope_type": "month",
+      "scope_month": "2026-05-01",
+      "schema_version": "2026-05-workbench-v1",
+      "stale": false,
+      "stale_reason": null,
+      "source_versions": {
+        "fact_updated_at": "2026-05-16T10:00:00Z"
+      },
+      "generated_at": "2026-05-16T10:05:00Z",
+      "updated_at": "2026-05-16T10:05:00Z",
+      "rebuild_task_id": null,
+      "api_strategy": "return_ready_snapshot"
+    }
+  },
+  "ignored": {
+    "month": "2026-05",
+    "rows": [],
+    "read_model_status": {
+      "scope_key": "workbench:2026-05",
+      "scope_type": "month",
+      "scope_month": "2026-05-01",
+      "schema_version": "2026-05-workbench-v1",
+      "stale": false,
+      "stale_reason": null,
+      "source_versions": {},
+      "generated_at": "2026-05-16T10:05:00Z",
+      "updated_at": "2026-05-16T10:05:00Z",
+      "rebuild_task_id": null,
+      "api_strategy": "return_ready_snapshot"
+    }
+  },
+  "row_detail": {
+    "row": {
+      "id": "0196f550-cc6e-7000-8000-000000000111",
+      "type": "bank",
+      "counterparty_name": "供应商",
+      "amount": "100.00",
+      "direction": "支出",
+      "summary_fields": {},
+      "detail_fields": {},
+      "read_model_status": {
+        "id": "0196f550-cc6e-7000-8000-000000000999",
+        "scope_month": "2026-05-01",
+        "row_id": "0196f550-cc6e-7000-8000-000000000111",
+        "row_type": "bank",
+        "zone_hint": "open",
+        "stale": false,
+        "stale_reason": null,
+        "source_versions": {},
+        "generated_at": "2026-05-16T10:05:00Z",
+        "updated_at": "2026-05-16T10:05:00Z",
+        "api_strategy": "return_ready_row"
+      }
+    }
+  },
+  "search": {
+    "query": "供应商",
+    "filters": {
+      "scope": "all",
+      "month": "2026-05",
+      "project_name": null,
+      "status": null,
+      "limit": 20
+    },
+    "summary": {
+      "total": 1,
+      "oa": 0,
+      "bank": 1,
+      "invoice": 0
+    },
+    "oa_results": [],
+    "bank_results": [
+      {
+        "row_id": "0196f550-cc6e-7000-8000-000000000111",
+        "record_type": "bank",
+        "month": "2026-05",
+        "zone_hint": "open",
+        "matched_field": "searchable_text",
+        "title": "供应商",
+        "primary_meta": "测试项目 / 100.00 / open",
+        "secondary_meta": "测试项目 / P001 / 2026-05",
+        "status_label": "未配对",
+        "jump_target": {
+          "route": "workbench",
+          "month": "2026-05",
+          "scope_month": "2026-05-01",
+          "entity_type": "bank_transaction",
+          "entity_id": "0196f550-cc6e-7000-8000-000000000111",
+          "record_type": "bank",
+          "row_id": "0196f550-cc6e-7000-8000-000000000111",
+          "zone_hint": "open",
+          "group_id": null
+        },
+        "entity_type": "bank_transaction",
+        "entity_id": "0196f550-cc6e-7000-8000-000000000111",
+        "source_kind": "app.bank_transactions",
+        "stale": false,
+        "stale_reason": null,
+        "generated_at": "2026-05-16T10:05:00Z",
+        "updated_at": "2026-05-16T10:05:00Z"
+      }
+    ],
+    "invoice_results": [],
+    "read_model_status": {
+      "stale_result_count": 0,
+      "api_strategy": "search_index_rows_only"
+    }
+  }
+}

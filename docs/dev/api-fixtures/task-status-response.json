@@ -1,0 +1,56 @@
+{
+  "task": {
+    "task_id": "22222222-2222-4222-8222-222222222222",
+    "type": "read_model.rebuild",
+    "label": "重建工作台",
+    "short_label": "正在重建工作台 3/10",
+    "owner_user_id": "33333333-3333-4333-8333-333333333333",
+    "visibility": "owner",
+    "status": "running",
+    "phase": "rebuilding",
+    "current": 3,
+    "total": 10,
+    "percent": 30,
+    "message": "后台任务正在执行。",
+    "result_summary": {
+      "rebuilt": 3
+    },
+    "error_code": null,
+    "error_summary": null,
+    "retryable": true,
+    "attempt_count": 1,
+    "max_attempts": 5,
+    "next_attempt_at": null,
+    "source": {
+      "session_id": "session-1"
+    },
+    "affected_scopes": [
+      "workbench:2026-05"
+    ],
+    "affected_months": [
+      "2026-05-01"
+    ],
+    "created_at": "2026-05-16T10:00:00Z",
+    "started_at": "2026-05-16T10:01:00Z",
+    "updated_at": "2026-05-16T10:02:00Z",
+    "finished_at": null,
+    "cancelled_at": null
+  },
+  "attempts": [
+    {
+      "attempt_id": "44444444-4444-4444-8444-444444444444",
+      "attempt_no": 1,
+      "worker_id": "worker-1",
+      "nats_stream": "FINOPS_JOBS",
+      "nats_consumer": "read-model-workers",
+      "nats_sequence": 42,
+      "started_at": "2026-05-16T10:01:00Z",
+      "heartbeat_at": "2026-05-16T10:02:00Z",
+      "finished_at": null,
+      "duration_ms": null,
+      "status": "running",
+      "error_code": null,
+      "error_summary": null
+    }
+  ]
+}

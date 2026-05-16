@@ -16,4 +16,3 @@ impl RedisClientPlaceholder {
         self.configured
     }
 }
-

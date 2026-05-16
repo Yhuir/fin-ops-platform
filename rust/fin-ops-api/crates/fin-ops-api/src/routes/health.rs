@@ -8,10 +8,8 @@ use axum::{
 use serde::Serialize;
 
 use crate::{
-    error::AppError,
-    observability::metrics::PROMETHEUS_CONTENT_TYPE,
-    services::health::HealthService,
-    state::AppState,
+    error::AppError, observability::metrics::PROMETHEUS_CONTENT_TYPE,
+    services::health::HealthService, state::AppState,
 };
 
 pub fn router() -> Router<AppState> {
@@ -125,10 +123,23 @@ mod tests {
         let state = AppState::for_tests(Arc::new(StaticReadinessProbe {
             check: DependencyCheck::ready("postgres", true),
         }));
-        let response = crate::build_router(state)
+        let app = crate::build_router(state);
+
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/healthz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let response = app
             .oneshot(
                 Request::builder()
                     .uri("/metrics")
+                    .header("x-fin-ops-internal-request", "1")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -146,4 +157,3 @@ mod tests {
         serde_json::from_slice(&bytes).unwrap()
     }
 }
-

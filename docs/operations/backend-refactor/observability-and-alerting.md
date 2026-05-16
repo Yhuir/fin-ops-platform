@@ -84,6 +84,7 @@ Prometheus 指标建议统一使用 `fin_ops_` 前缀。标签必须低基数，
 | `fin_ops_postgres_slow_queries_total` | counter | 超过慢查询阈值的查询数。 |
 | `fin_ops_postgres_deadlocks_total` | counter | deadlock 次数。 |
 | `fin_ops_postgres_backup_age_seconds` | gauge | 最近一次逻辑备份成功距今时间。 |
+| `fin_ops_postgres_pitr_drill_age_seconds` | gauge | 最近一次 PITR 或等价时间点恢复演练成功距今时间。 |
 | `fin_ops_postgres_wal_archive_lag_seconds` | gauge | WAL 归档滞后。 |
 | `fin_ops_postgres_table_bytes` | gauge | 表和索引容量趋势。 |
 | `fin_ops_postgres_migration_status` | gauge | migration 状态，成功为 1，失败为 0。 |
@@ -110,6 +111,14 @@ Prometheus 指标建议统一使用 `fin_ops_` 前缀。标签必须低基数，
 | `fin_ops_nats_ack_delay_seconds` | histogram | 消息 ack 延迟。 |
 | `fin_ops_nats_redelivered_messages_total` | counter | 重投递次数。 |
 | `fin_ops_nats_dead_letter_messages_total` | counter | dead letter 数。 |
+
+### Outbox
+
+| 指标 | 类型 | 说明 |
+| --- | --- | --- |
+| `fin_ops_outbox_pending_events` | gauge | 待发布、待重试或卡住的 outbox 事件数，按有限 `status` 聚合。 |
+| `fin_ops_outbox_publish_failures_total` | counter | outbox 发布失败次数。 |
+| `fin_ops_outbox_dead_letters_total` | counter | outbox 进入 dead-letter 的事件数。 |
 
 ### Worker
 
@@ -215,17 +224,31 @@ Prometheus 指标建议统一使用 `fin_ops_` 前缀。标签必须低基数，
 生产至少建立以下看板：
 
 1. `fin-ops-api-overview`
-   - API RPS、P50/P95/P99、4xx/5xx、in-flight、body reject、鉴权失败。
+   - API RPS、P50/P95/P99、4xx/5xx、readiness dependency failure、in-flight、body reject、鉴权失败。
 2. `fin-ops-database`
-   - PostgreSQL up、连接池、慢查询、deadlock、表/索引容量、backup age、WAL archive lag。
+   - PostgreSQL up、连接池、慢查询、deadlock、表/索引容量、backup age、PITR drill age、WAL archive lag。
 3. `fin-ops-async-workers`
-   - NATS backlog、ack delay、redelivery、dead letters、worker 成功/失败/重试、任务耗时。
+   - outbox backlog、NATS backlog、ack delay、redelivery、dead letters、worker 成功/失败/重试、任务耗时。
 4. `fin-ops-storage-and-backup`
    - MinIO/S3 上传下载错误、checksum mismatch、bucket versioning、App Mongo 备份和恢复演练状态。
 5. `fin-ops-read-model-oa-sync`
    - read model stale、dirty scopes、重建耗时和失败、OA sync lag、同步失败。
 6. `fin-ops-business-health`
    - 待核销金额、待核销条目、异常单、导入失败、审计事件、双写差异数。
+
+## 仓库落地文件
+
+P4-10 已补充可导入的监控草案；monitoring-alerts-h2 进一步对齐 Rust/Python 当前 metrics、Prometheus rules、Grafana dashboard 和 P0/P1 验证模板，作为 staging 验证入口：
+
+| 文件 | 用途 |
+| --- | --- |
+| `deploy/backend-refactor/monitoring/prometheus.finops.yml` | Prometheus scrape 起点，使用内网 target 占位，不含 secret。 |
+| `deploy/backend-refactor/monitoring/finops-alerts.yml` | P0/P1/P2 告警规则草案，覆盖 API 5xx/latency、PostgreSQL connectivity、backup/PITR/WAL、outbox、Worker、read model、对象存储和主机资源。 |
+| `deploy/backend-refactor/monitoring/grafana-dashboard-finops-overview.json` | Grafana overview dashboard 草案，引用当前 Rust metric、文档定义的 readiness metric 和 node exporter 标准 metric。 |
+| `deploy/backend-refactor/monitoring/README.md` | staging 接入步骤、边界和 P4-12 证据要求。 |
+| `docs/operations/backend-refactor/monitoring-alert-verification-report-template.md` | P0/P1 告警触发、owner、severity、GO/NO_GO 和 metric gap 记录模板。 |
+
+这些文件不是生产已接入证明。P4-12 需要额外提交 `monitoring-alert-verification-*.md` 或等价 JSON，记录 Prometheus rule 校验、P0/P1 人工触发或低风险模拟、值班升级路径和 dashboard 截图/链接。
 
 ## 健康检查
 
@@ -238,6 +261,120 @@ Axum 服务至少提供：
 | `/metrics` | Prometheus 指标，仅内网或受控采集访问。 |
 
 可选提供依赖细分健康状态，但不得泄露 secret、内网拓扑细节或完整错误堆栈给外部用户。
+
+## 当前落地状态
+
+本节记录截至 monitoring-alerts-h2 的代码和运维落地状态，避免把目标能力误判为已完成能力。
+
+| 能力 | 当前状态 | 生产前缺口 |
+| --- | --- | --- |
+| Axum JSON 日志 | 已有 `tracing_subscriber` JSON formatter。 | 需要接入集中日志系统，并验证 token、cookie、签名 URL 不进入日志样本。 |
+| Trace/request id | 已有 `x-request-id` 透传或自动生成，并写入请求完成日志。 | 需要在 worker、outbox publisher、NATS message header 和 audit event 中贯通同一 trace id。 |
+| API metrics | Rust `/metrics` 已输出 `fin_ops_http_requests_total`、`fin_ops_http_request_duration_seconds`、`fin_ops_readiness_checks_total`。 | 需要补 body reject、auth failure、idempotency conflict、业务写失败等指标。 |
+| Route label | HTTP 指标使用低基数 `route` label，UUID、数字 ID、月份应归一化。 | staging 中需要用真实 API 样本确认没有发票号、流水号、文件名等高基数字段进入 label。 |
+| Python app health | `AppHealthService` 返回健康 JSON payload，其中包含 dirty scope、background job 和 alert count。 | 目前不是 Prometheus exporter；如用于告警，需通过 exporter/textfile collector 转换为低基数 metric。 |
+| PostgreSQL metrics | 本文定义指标和告警。 | 需要接入 postgres exporter 或等价采集，并补 backup age、PITR drill age、WAL archive lag 数据源。 |
+| Outbox/Redis/NATS/MinIO metrics | 本文定义指标和告警。 | 需要接入对应 exporter 或 SDK 埋点，不得暴露管理端公网。 |
+| App Mongo 备份指标 | 本文定义备份成功时间、checksum、恢复演练指标。 | 需要由备份脚本输出 Prometheus textfile 或人工日报，再进入 Grafana。 |
+| 业务指标 | 本文定义待核销金额、异常单、导入失败数等指标。 | 需要从 PostgreSQL read model 或聚合任务生成，不能在请求路径扫描全量事实表。 |
+
+### Monitoring-alerts-h2 metric gaps
+
+下列 metric 目前不是 Rust API 已实现 metric，也不是 Python `AppHealthService` 直接暴露的 Prometheus metric。它们必须在 staging 通过 exporter、textfile collector 或 SDK 埋点接入；未接入前，`monitoring-alert-verification-*` 报告必须保持 `NO_GO`，不得用空面板或人工口头确认替代。
+
+| gap | required metric | GO 前要求 |
+| --- | --- | --- |
+| PostgreSQL backup/PITR/WAL | `fin_ops_postgres_backup_age_seconds`, `fin_ops_postgres_pitr_drill_age_seconds`, `fin_ops_postgres_wal_archive_lag_seconds` | 备份与 PITR 演练流程输出可采集 metric，并完成 P0/P1 触发验证。 |
+| Outbox backlog | `fin_ops_outbox_pending_events` | outbox repository 或 worker exporter 输出待发布/重试积压。 |
+| Worker failures/dead letters | `fin_ops_worker_jobs_failed_total`, `fin_ops_worker_dead_letters_total` | worker exporter 输出失败率和 dead-letter counter。 |
+| Read model stale | `fin_ops_read_model_staleness_seconds`, `fin_ops_read_model_dirty_scopes` | read model 重建状态输出 stale 秒数和 dirty scope 数。 |
+| Object storage errors/checksum | `fin_ops_object_store_upload_errors_total`, `fin_ops_object_store_download_errors_total`, `fin_ops_object_store_checksum_mismatch_total` | 对象存储 SDK 或迁移验证器输出错误与 checksum counter。 |
+| Host resources | `node_filesystem_avail_bytes`, `node_cpu_seconds_total`, `node_memory_MemAvailable_bytes` | node exporter 接入并确认低基数 `env`、`instance` 标签。 |
+
+## Prometheus 采集草案
+
+以下示例只使用内网主机名占位，不包含账号、密码或 token。生产应由部署系统注入真实 target，并通过网络策略限制 `/metrics` 访问来源。
+
+```yaml
+scrape_configs:
+  - job_name: fin-ops-api
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - fin-ops-api.internal:8080
+        labels:
+          env: prod
+          service: api
+
+  - job_name: fin-ops-worker
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - fin-ops-worker.internal:9100
+        labels:
+          env: prod
+          service: worker
+
+  - job_name: fin-ops-postgres
+    static_configs:
+      - targets:
+          - postgres-exporter.internal:9187
+        labels:
+          env: prod
+          service: postgres
+```
+
+采集验收：
+
+```bash
+curl -fsS http://fin-ops-api.internal:8080/healthz
+curl -fsS http://fin-ops-api.internal:8080/readyz
+curl -fsS http://fin-ops-api.internal:8080/metrics | grep -E 'fin_ops_http_requests_total|fin_ops_readiness_checks_total'
+```
+
+如果 `/metrics` 需要通过 Nginx 暴露给 Prometheus，必须单独限制来源网段；不要把 `/metrics` 暴露给公网用户。
+
+## 告警规则草案
+
+`deploy/backend-refactor/monitoring/finops-alerts.yml` 是当前可导入版本。上线前必须把 `for` 时间、阈值和值班路由按实际基线校准。
+
+| 覆盖面 | 告警 | severity | metric 状态 |
+| --- | --- | --- | --- |
+| API 5xx | `FinOpsApiHigh5xxRate` | P1 | Rust 已实现 `fin_ops_http_requests_total`。 |
+| API latency | `FinOpsApiP95LatencyHigh` | P1 | Rust 已实现 `fin_ops_http_request_duration_seconds` histogram。 |
+| PostgreSQL connectivity | `FinOpsPostgresUnavailable`, `FinOpsApiPostgresReadinessFailures` | P0/P1 | `up{job="fin-ops-postgres"}` 依赖 exporter；API readiness counter 已实现。 |
+| PostgreSQL backup/PITR/WAL | `FinOpsPostgresBackupStale`, `FinOpsPostgresPitrDrillStale`, `FinOpsPostgresWalArchiveLagHigh` | P0/P0/P1 | 仍需 backup/PITR/WAL exporter 或 textfile collector，未接入前 `NO_GO`。 |
+| Outbox backlog | `FinOpsOutboxBacklogHigh` | P1 | 仍需 outbox metric，未接入前 `NO_GO`。 |
+| Worker failures/dead letters | `FinOpsWorkerFailureRateHigh`, `FinOpsWorkerDeadLetters` | P1 | 仍需 worker metric，未接入前 `NO_GO`。 |
+| Read model stale | `FinOpsReadModelStale` | P1 | 仍需 read model stale metric，未接入前 `NO_GO`。 |
+| Object storage errors/checksum | `FinOpsObjectStoreErrorRateHigh`, `FinOpsObjectChecksumMismatch` | P1/P0 | 仍需对象存储错误和 checksum metric，未接入前 `NO_GO`。 |
+| Disk/CPU/memory | `FinOpsHostDiskFreeLow`, `FinOpsHostCpuSaturationHigh`, `FinOpsHostMemoryAvailableLow` | P1 | 依赖 node exporter 标准 metric。 |
+| Metric missing | `FinOpsMonitoringCriticalMetricsMissing` | P1 | 用于暴露关键 metric 未接入状态；触发时 readiness 仍为 `NO_GO`。 |
+
+规则约束：
+
+- `status`、`route`、`job_type`、`dependency` 等 label 必须是有限集合。
+- 告警 annotation 不写 request body、文件名、发票号、流水号、token 或完整错误堆栈。
+- P0/P1 告警必须对应 `production-readiness-checklist.md` 的阻断条件或回滚触发条件。
+
+## 压测和基线记录
+
+压测只允许在 staging 或授权的隔离环境执行，不压测 OA 源数据库，不绕过权限，不写生产数据。每次压测至少记录：
+
+| 字段 | 说明 |
+| --- | --- |
+| `env` | staging、dry-run 或隔离环境。 |
+| `api_commit`、`worker_commit`、`migration_version` | 被测版本。 |
+| `dataset` | 脱敏数据集或 dry-run 数据集标识。 |
+| `scenario` | 单月工作台、搜索、导入预览、核销写路径、read model rebuild 等。 |
+| `duration`、`rps`、`concurrency` | 压测时间、吞吐和并发。 |
+| `p50/p95/p99` | 延迟分位。 |
+| `error_rate` | 4xx/5xx 和业务错误率。 |
+| `db_pool_peak`、`slow_queries`、`deadlocks` | PostgreSQL 压力。 |
+| `nats_backlog`、`worker_retry`、`dead_letters` | 异步链路压力。 |
+| `go_no_go` | 是否满足上线门禁；差异和风险必须列出。 |
+
+P4-12 之前，压测报告缺失、P0/P1 告警未配置或 read model stale 无监控，均不得进入生产切换。
 
 ## 告警分级
 

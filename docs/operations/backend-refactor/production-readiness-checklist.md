@@ -9,6 +9,43 @@
 3. 任一阻断条件存在时，停止上线或停止进入下一切换阶段。
 4. 本检查表不授权生产切流；切流必须按 `cutover-and-rollback-runbook.md` 单独执行。
 
+## P4-10 当前结论
+
+截至 2026-05-16，本检查表只能作为 readiness 补强后的上线门禁模板，不能作为生产切换授权。当前结论为 `NO_GO`，原因如下：
+
+| 模块 | 当前状态 | 阻断说明 |
+| --- | --- | --- |
+| 迁移 dry-run | `migration-dry-run-report-20260516.md` 结论为 `NO_GO`。 | 缺少实际 06A manifest、06B staging import 报告、staging -> facts dry-run 和 count/hash/amount/month/status/file checksum 对账。 |
+| PostgreSQL 备份/PITR | provisioning 文档已有方案。 | 缺少 production/staging PITR 恢复演练记录和 backup age 指标接入证据。 |
+| MinIO/S3 文件迁移 | 已有 GridFS -> MinIO/S3 迁移工具和 manifest 规范草案。 | 缺少正式对象存储 bucket versioning 证据、抽样下载 checksum 通过记录。 |
+| NATS/Worker | 已有 JetStream runbook 和 worker task protocol。 | 需要 staging 验证 stream/consumer/backoff/DLQ、PostgreSQL dead letter 和人工重放闭环。 |
+| Read model | 已有增量重建和 stale 策略文档。 | 当前门禁仍要求 read model/search index 增量重建实现和验证，不允许请求路径全量重建。 |
+| 监控与告警 | 已补齐指标、告警、Grafana 和压测基线草案。 | 仍需在 staging 接入 exporter、验证 Prometheus 规则、绑定 P0/P1 值班升级路径。 |
+| 生产切换授权 | 未授权。 | 本文不执行切流，不冻结 app Mongo，不开放 PostgreSQL 公网。 |
+
+因此，P4-10 后允许进入的是“补齐监控/备份/安全验证证据”的执行阶段，不允许直接进入 P4-11 切换。
+
+## 可执行证据门禁
+
+仓库内提供只读门禁脚本，用于把 P4-10/P4-12/P4-11 的关键证据统一判定为 `GO` 或 `NO_GO`：
+
+```bash
+python3 scripts/tools/backend_refactor_readiness_gate.py --format markdown --fail-on-no-go
+```
+
+脚本只读取 `docs/operations/backend-refactor/` 下的证据文件，不连接生产系统、不冻结 app Mongo、不切换 API。当前缺少 PostgreSQL PITR、06A/06B/06C/06D dry-run、API shadow validation、监控告警验证、压测和回滚演练证据时，脚本必须返回 `NO_GO`。
+
+API shadow validation 必须以 `api-shadow-validation-report-YYYYMMDD.json` 或同名 Markdown 报告形式放在 `docs/operations/backend-refactor/`。门禁忽略 `*-template` 文件；JSON 报告只有在 `fixture_validation.status=GO`、结果非空、`summary.total/go/no_go/unexpected_diff_count/fixture_error_count` 与 `results[]` 一致且所有 endpoint 均无未解释 diff 时才计为 `GO`。工具生成的 Markdown `Gate: **GO**` 可作为通过标记，`Gate: **NO_GO**` 明确阻塞。
+
+P4-10 新增的监控草案位于：
+
+- `deploy/backend-refactor/monitoring/prometheus.finops.yml`
+- `deploy/backend-refactor/monitoring/finops-alerts.yml`
+- `deploy/backend-refactor/monitoring/grafana-dashboard-finops-overview.json`
+- `deploy/backend-refactor/monitoring/README.md`
+
+这些文件只能作为 staging 接入和验证起点；只有生成 `monitoring-alert-verification-*.md` 或等价 JSON 且结论为 `GO` 后，才可作为 P4-12 证据。
+
 ## 生产上线门禁
 
 ### 版本与配置
@@ -102,6 +139,8 @@
 - [ ] read model stale、dirty scopes、重建失败已有指标。
 - [ ] OA sync lag、同步失败、OA session 接口失败已有指标。
 - [ ] P0/P1 告警已绑定值班人和升级路径。
+- [ ] Grafana 看板至少覆盖 API、PostgreSQL、异步 Worker、对象存储/备份、read model/OA sync、业务健康六类。
+- [ ] 告警规则已经在 staging 用人工触发或低风险模拟方式验证，且不会泄露请求体、文件名、发票号、流水号、token 或完整错误堆栈。
 
 ### 性能与容量
 
@@ -110,6 +149,7 @@
 - [ ] 全局搜索、导出和导入确认不阻塞主请求线程。
 - [ ] PostgreSQL data、WAL、backup、logs 容量趋势已评估。
 - [ ] 当前单机服务资源压力有监控，内存和磁盘不足时有告警。
+- [ ] 压测期间没有访问 OA 源数据库，没有写生产数据，没有把 dry-run 结果标记为正式事实源。
 
 ### 切换与回滚
 
@@ -141,6 +181,129 @@
 | P0 告警未解除 | 继续切换会扩大故障面。 |
 | 回滚路径未演练或旧 Python/app Mongo 已被提前移除 | 没有有效退路。 |
 | 需要操作、备份、导出或修改 OA 源数据库才能上线 | 超出本项目授权边界。 |
+
+## 验证命令模板
+
+以下命令只作为 staging/受控环境的验收模板。真实 secret 必须来自密钥管理系统、受控 shell 环境或 `PGSERVICE` 等本地配置；不要把 URI、密码、token 写入命令记录或 git。
+
+### API 和指标
+
+```bash
+curl -fsS http://fin-ops-api.internal:8080/healthz
+curl -fsS http://fin-ops-api.internal:8080/readyz
+curl -fsS http://fin-ops-api.internal:8080/metrics \
+  | grep -E 'fin_ops_http_requests_total|fin_ops_http_request_duration_seconds|fin_ops_readiness_checks_total'
+```
+
+验收：
+
+- `/healthz` 在 PostgreSQL 不可用时仍只代表进程存活。
+- `/readyz` 能在 PostgreSQL 或 migration 状态不满足时返回不可接流量。
+- `/metrics` 只允许内网或 Prometheus 访问，HTTP route label 不包含 UUID、文件名、发票号或流水号。
+
+### PostgreSQL 暴露面和权限
+
+```bash
+PGSERVICE=fin_ops_readonly_staging psql -X -v ON_ERROR_STOP=1 -c "select current_user;"
+PGSERVICE=fin_ops_readonly_staging psql -X -v ON_ERROR_STOP=1 -c "show listen_addresses;"
+PGSERVICE=fin_ops_readonly_staging psql -X -v ON_ERROR_STOP=1 -c "select schemaname, tablename from pg_tables where schemaname in ('app','read_model','job','audit','staging') order by 1,2 limit 20;"
+```
+
+验收：
+
+- `listen_addresses` 不得为了应用访问而改成公网暴露。
+- readonly 账号只能读，不能写 `app`、`read_model`、`job`、`audit`、`staging`。
+- API、worker、migrator、readonly 账号分离，并能按审计追踪来源。
+
+### PostgreSQL 备份和恢复演练
+
+```bash
+PGSERVICE=fin_ops_readonly_staging pg_dump --format=custom --file=/secure-backup-path/fin_ops_staging.dump fin_ops
+pg_restore --list /secure-backup-path/fin_ops_staging.dump >/tmp/fin_ops_restore_list.txt
+```
+
+PITR 演练必须在隔离恢复实例执行，记录：
+
+```text
+base_backup_id:
+wal_archive_range:
+restore_target_time:
+restored_instance:
+migration_version:
+sample_count_checks:
+readiness_result:
+operator:
+approved_by:
+```
+
+验收：
+
+- 逻辑备份 checksum 可校验。
+- PITR 恢复到指定时间点后，migration 版本、关键表 count、read model 可重建性都有记录。
+- 恢复演练不能覆盖生产 PostgreSQL，也不能用旧 Mongo 全量覆盖 PostgreSQL。
+
+### NATS、Worker 和 dead letter
+
+```bash
+nats stream report
+nats consumer report FINOPS_JOBS
+PGSERVICE=fin_ops_readonly_staging psql -X -v ON_ERROR_STOP=1 -c "select status, count(*) from job.outbox_events group by status order by status;"
+PGSERVICE=fin_ops_readonly_staging psql -X -v ON_ERROR_STOP=1 -c "select status, count(*) from job.worker_tasks group by status order by status;"
+PGSERVICE=fin_ops_readonly_staging psql -X -v ON_ERROR_STOP=1 -c "select source_kind, replay_status, count(*) from job.dead_letters group by source_kind, replay_status order by source_kind, replay_status;"
+```
+
+验收：
+
+- NATS backlog、ack delay、redelivery 和 DLQ 能被监控。
+- PostgreSQL `job.outbox_events`、`job.worker_tasks`、`job.dead_letters` 是最终任务事实源。
+- 人工重放必须记录新 outbox/task id，不直接修改旧 NATS message。
+
+### 对象存储和文件校验
+
+```bash
+mc version
+mc stat "${MINIO_ALIAS}/${FIN_OPS_BUCKET}"
+mc version info "${MINIO_ALIAS}/${FIN_OPS_BUCKET}"
+```
+
+验收：
+
+- bucket versioning 或等价恢复策略已启用。
+- API/worker/readonly 审计用途账号权限拆分。
+- 上传后抽样下载 SHA-256 必须与 manifest 一致；任一 checksum mismatch 触发 P0 并阻断文件迁移。
+
+### 压测基线
+
+压测记录必须至少包含：
+
+```text
+env:
+dataset:
+api_commit:
+worker_commit:
+migration_version:
+scenario:
+duration:
+concurrency:
+rps:
+p50:
+p95:
+p99:
+error_rate:
+postgres_pool_peak:
+slow_queries:
+nats_backlog_peak:
+worker_retry_count:
+dead_letter_count:
+read_model_staleness_max:
+go_no_go:
+```
+
+验收：
+
+- 单月工作台和 search API 命中 read model/search index，不在请求路径全量重建。
+- 导入、文件处理、OA 同步、read model rebuild 走后台任务，不阻塞主请求线程。
+- 压测不得访问、备份、导出、恢复、修改或人工查询 OA 源数据库。
 
 ## 上线通过记录模板
 

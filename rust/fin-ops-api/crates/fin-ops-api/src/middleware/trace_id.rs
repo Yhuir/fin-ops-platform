@@ -29,7 +29,9 @@ pub async fn ensure_trace_id(mut request: Request, next: Next) -> Response {
 
     let mut response = next.run(request).await;
     if let Ok(header_value) = HeaderValue::from_str(&trace_id) {
-        response.headers_mut().insert(REQUEST_ID_HEADER, header_value);
+        response
+            .headers_mut()
+            .insert(REQUEST_ID_HEADER, header_value);
     }
 
     tracing::info!(
@@ -43,4 +45,3 @@ pub async fn ensure_trace_id(mut request: Request, next: Next) -> Response {
 
     response
 }
-

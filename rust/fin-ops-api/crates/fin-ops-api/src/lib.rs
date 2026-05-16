@@ -16,4 +16,3 @@ use crate::state::AppState;
 pub fn build_router(state: AppState) -> Router {
     routes::router(state)
 }
-

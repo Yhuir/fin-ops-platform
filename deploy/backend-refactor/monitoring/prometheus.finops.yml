@@ -1,0 +1,66 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - finops-alerts.yml
+
+scrape_configs:
+  - job_name: fin-ops-api
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - fin-ops-api.internal:8080
+        labels:
+          env: prod
+          service: api
+
+  - job_name: fin-ops-worker
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - fin-ops-worker.internal:9100
+        labels:
+          env: prod
+          service: worker
+
+  - job_name: fin-ops-postgres
+    static_configs:
+      - targets:
+          - postgres-exporter.internal:9187
+        labels:
+          env: prod
+          service: postgres
+
+  - job_name: fin-ops-redis
+    static_configs:
+      - targets:
+          - redis-exporter.internal:9121
+        labels:
+          env: prod
+          service: redis
+
+  - job_name: fin-ops-nats
+    static_configs:
+      - targets:
+          - nats-exporter.internal:7777
+        labels:
+          env: prod
+          service: nats
+
+  - job_name: fin-ops-minio
+    metrics_path: /minio/v2/metrics/cluster
+    static_configs:
+      - targets:
+          - minio.internal:9000
+        labels:
+          env: prod
+          service: object-store
+
+  - job_name: fin-ops-node
+    static_configs:
+      - targets:
+          - node-exporter.internal:9100
+        labels:
+          env: prod
+          service: host

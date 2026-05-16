@@ -1,0 +1,2632 @@
+{
+  "fixture_name": "prompt-g-route-level-inventory",
+  "description": "Generated route-level audit view for Prompt G. Source of truth is api-route-inventory.json; this file is kept in sync by tests.",
+  "source_inventory": "docs/dev/api-fixtures/api-route-inventory.json",
+  "shadow_fixture": "docs/dev/api-fixtures/business-api-shadow-validation.json",
+  "routes": [
+    {
+      "domain": "app-foundation-ops",
+      "route_type": "python",
+      "python_route": "GET /api/app-health",
+      "rust_routes": [
+        "GET /api/app-health"
+      ],
+      "frontend_refs": [
+        "web/src/features/appHealth/api.ts",
+        "web/src/features/backgroundJobs/api.ts",
+        "web/src/features/session/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "medium",
+      "owner": "platform-ops",
+      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "static_contract",
+        "oa_identity",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "app-health-json-snapshot"
+      ]
+    },
+    {
+      "domain": "app-foundation-ops",
+      "route_type": "python",
+      "python_route": "GET /api/app-health/stream",
+      "rust_routes": [
+        "GET /api/app-health/stream"
+      ],
+      "frontend_refs": [
+        "web/src/features/appHealth/api.ts",
+        "web/src/features/backgroundJobs/api.ts",
+        "web/src/features/session/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "medium",
+      "owner": "platform-ops",
+      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "static_contract",
+        "oa_identity",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "app-health-sse-stream-first-events"
+      ]
+    },
+    {
+      "domain": "app-foundation-ops",
+      "route_type": "python",
+      "python_route": "GET /api/background-jobs/active",
+      "rust_routes": [
+        "GET /api/background-jobs/active"
+      ],
+      "frontend_refs": [
+        "web/src/features/appHealth/api.ts",
+        "web/src/features/backgroundJobs/api.ts",
+        "web/src/features/session/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "medium",
+      "owner": "platform-ops",
+      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "static_contract",
+        "oa_identity",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "background-jobs-active"
+      ]
+    },
+    {
+      "domain": "app-foundation-ops",
+      "route_type": "python",
+      "python_route": "GET /api/background-jobs/{job_id}",
+      "rust_routes": [
+        "GET /api/background-jobs/{job_id}"
+      ],
+      "frontend_refs": [
+        "web/src/features/appHealth/api.ts",
+        "web/src/features/backgroundJobs/api.ts",
+        "web/src/features/session/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "medium",
+      "owner": "platform-ops",
+      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "static_contract",
+        "oa_identity",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "background-jobs-active",
+        "background-job-detail"
+      ]
+    },
+    {
+      "domain": "app-foundation-ops",
+      "route_type": "python",
+      "python_route": "POST /api/background-jobs/{job_id}/acknowledge",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/appHealth/api.ts",
+        "web/src/features/backgroundJobs/api.ts",
+        "web/src/features/session/api.ts"
+      ],
+      "migration_status": "pending_contract",
+      "risk": "medium",
+      "owner": "platform-ops",
+      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "static_contract",
+        "oa_identity",
+        "pending_contract"
+      ],
+      "blocker": "旧 Python 写入 acknowledged 状态和 acknowledged_at；当前 job.worker_tasks 状态机没有 acknowledged，需先冻结通知/ack 状态模型。",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "app-foundation-ops",
+      "route_type": "python",
+      "python_route": "POST /api/background-jobs/{job_id}/retry",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/appHealth/api.ts",
+        "web/src/features/backgroundJobs/api.ts",
+        "web/src/features/session/api.ts"
+      ],
+      "migration_status": "pending_contract",
+      "risk": "medium",
+      "owner": "platform-ops",
+      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "static_contract",
+        "oa_identity",
+        "pending_contract"
+      ],
+      "blocker": "旧 Python 会重放 file_import 或 cost_statistics_cache_warmup 副作用；需先冻结 retry job/outbox 和幂等语义。",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "app-foundation-ops",
+      "route_type": "python",
+      "python_route": "GET /api/session/me",
+      "rust_routes": [
+        "GET /api/session/me"
+      ],
+      "frontend_refs": [
+        "web/src/features/appHealth/api.ts",
+        "web/src/features/backgroundJobs/api.ts",
+        "web/src/features/session/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "medium",
+      "owner": "platform-ops",
+      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "static_contract",
+        "oa_identity",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "session-me-oa-identity-contract"
+      ]
+    },
+    {
+      "domain": "app-foundation-ops",
+      "route_type": "python",
+      "python_route": "GET /api/search",
+      "rust_routes": [
+        "GET /api/search"
+      ],
+      "frontend_refs": [
+        "web/src/features/appHealth/api.ts",
+        "web/src/features/backgroundJobs/api.ts",
+        "web/src/features/session/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "medium",
+      "owner": "platform-ops",
+      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "static_contract",
+        "oa_identity",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "search-empty-query-read-model"
+      ]
+    },
+    {
+      "domain": "app-foundation-ops",
+      "route_type": "rust_only",
+      "python_route": null,
+      "rust_routes": [
+        "GET /api/app-metadata"
+      ],
+      "frontend_refs": [
+        "web/src/features/appHealth/api.ts",
+        "web/src/features/backgroundJobs/api.ts",
+        "web/src/features/session/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "medium",
+      "owner": "platform-ops",
+      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "static_contract",
+        "oa_identity",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "app-metadata-readonly-contract"
+      ]
+    },
+    {
+      "domain": "app-foundation-ops",
+      "route_type": "rust_only",
+      "python_route": null,
+      "rust_routes": [
+        "GET /api/tasks/{task_id}/status"
+      ],
+      "frontend_refs": [
+        "web/src/features/appHealth/api.ts",
+        "web/src/features/backgroundJobs/api.ts",
+        "web/src/features/session/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "medium",
+      "owner": "platform-ops",
+      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "static_contract",
+        "oa_identity",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "task-status-worker-task-detail"
+      ]
+    },
+    {
+      "domain": "bank-details",
+      "route_type": "python",
+      "python_route": "GET /api/bank-details/accounts",
+      "rust_routes": [
+        "GET /api/bank-details/accounts"
+      ],
+      "frontend_refs": [
+        "web/src/features/bankDetails/api.ts",
+        "web/src/pages/BankDetailsPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "GET routes use PostgreSQL app.bank_transactions + app.bank_transaction_categories. Auto category and relation tag enrichment remain expected shadow diffs because no dedicated PostgreSQL/read_model source is frozen. PATCH requires audit/job/outbox and was not migrated.",
+      "source_categories": [
+        "postgres_facts",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "bank-detail-accounts-date-range"
+      ]
+    },
+    {
+      "domain": "bank-details",
+      "route_type": "python",
+      "python_route": "GET /api/bank-details/transactions",
+      "rust_routes": [
+        "GET /api/bank-details/transactions"
+      ],
+      "frontend_refs": [
+        "web/src/features/bankDetails/api.ts",
+        "web/src/pages/BankDetailsPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "GET routes use PostgreSQL app.bank_transactions + app.bank_transaction_categories. Auto category and relation tag enrichment remain expected shadow diffs because no dedicated PostgreSQL/read_model source is frozen. PATCH requires audit/job/outbox and was not migrated.",
+      "source_categories": [
+        "postgres_facts",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "bank-detail-transactions-paged"
+      ]
+    },
+    {
+      "domain": "bank-details",
+      "route_type": "python",
+      "python_route": "PATCH /api/bank-details/transactions/categories",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/bankDetails/api.ts",
+        "web/src/pages/BankDetailsPage.tsx"
+      ],
+      "migration_status": "pending_contract",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "GET routes use PostgreSQL app.bank_transactions + app.bank_transaction_categories. Auto category and relation tag enrichment remain expected shadow diffs because no dedicated PostgreSQL/read_model source is frozen. PATCH requires audit/job/outbox and was not migrated.",
+      "source_categories": [
+        "postgres_facts",
+        "pending_contract"
+      ],
+      "blocker": "分类写入需要 actor、audit、read-model invalidation 和 job/outbox 合同；本批只迁移 bank transaction facts 读取。",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "no-oa-bank-batches",
+      "route_type": "python",
+      "python_route": "GET /api/no-oa-bank-batches",
+      "rust_routes": [
+        "GET /api/no-oa-bank-batches"
+      ],
+      "frontend_refs": [
+        "web/src/features/noOaBankBatches/api.ts",
+        "web/src/pages/NoOaBankBatchPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "GET routes use PostgreSQL app.no_oa_bank_batches + app.bank_transactions; POST routes already existed in Axum workbench_writes and require existing dry-run/shadow validation before cutover.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox"
+      ],
+      "shadow_endpoint_ids": [
+        "no-oa-bank-batches-list-empty"
+      ]
+    },
+    {
+      "domain": "no-oa-bank-batches",
+      "route_type": "python",
+      "python_route": "GET /api/no-oa-bank-batches/{batch_id}",
+      "rust_routes": [
+        "GET /api/no-oa-bank-batches/{batch_id}"
+      ],
+      "frontend_refs": [
+        "web/src/features/noOaBankBatches/api.ts",
+        "web/src/pages/NoOaBankBatchPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "GET routes use PostgreSQL app.no_oa_bank_batches + app.bank_transactions; POST routes already existed in Axum workbench_writes and require existing dry-run/shadow validation before cutover.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox"
+      ],
+      "shadow_endpoint_ids": [
+        "no-oa-bank-batch-detail"
+      ]
+    },
+    {
+      "domain": "no-oa-bank-batches",
+      "route_type": "python",
+      "python_route": "POST /api/no-oa-bank-batches/{batch_id}/submit",
+      "rust_routes": [
+        "POST /api/no-oa-bank-batches/{batch_id}/submit"
+      ],
+      "frontend_refs": [
+        "web/src/features/noOaBankBatches/api.ts",
+        "web/src/pages/NoOaBankBatchPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "GET routes use PostgreSQL app.no_oa_bank_batches + app.bank_transactions; POST routes already existed in Axum workbench_writes and require existing dry-run/shadow validation before cutover.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox"
+      ],
+      "shadow_endpoint_ids": [
+        "no-oa-bank-batch-submit"
+      ]
+    },
+    {
+      "domain": "no-oa-bank-batches",
+      "route_type": "python",
+      "python_route": "POST /api/no-oa-bank-batches/{batch_id}/withdraw",
+      "rust_routes": [
+        "POST /api/no-oa-bank-batches/{batch_id}/withdraw"
+      ],
+      "frontend_refs": [
+        "web/src/features/noOaBankBatches/api.ts",
+        "web/src/pages/NoOaBankBatchPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "GET routes use PostgreSQL app.no_oa_bank_batches + app.bank_transactions; POST routes already existed in Axum workbench_writes and require existing dry-run/shadow validation before cutover.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox"
+      ],
+      "shadow_endpoint_ids": [
+        "no-oa-bank-batch-withdraw"
+      ]
+    },
+    {
+      "domain": "no-oa-bank-batches",
+      "route_type": "python",
+      "python_route": "POST /api/no-oa-bank-batches/submit",
+      "rust_routes": [
+        "POST /api/no-oa-bank-batches/submit"
+      ],
+      "frontend_refs": [
+        "web/src/features/noOaBankBatches/api.ts",
+        "web/src/pages/NoOaBankBatchPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "GET routes use PostgreSQL app.no_oa_bank_batches + app.bank_transactions; POST routes already existed in Axum workbench_writes and require existing dry-run/shadow validation before cutover.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox"
+      ],
+      "shadow_endpoint_ids": [
+        "no-oa-bank-batches-bulk-submit"
+      ]
+    },
+    {
+      "domain": "turnover-ledger",
+      "route_type": "python",
+      "python_route": "GET /api/turnover-ledger",
+      "rust_routes": [
+        "GET /api/turnover-ledger"
+      ],
+      "frontend_refs": [
+        "web/src/features/turnoverLedger/api.ts",
+        "web/src/pages/TurnoverLedgerPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "GET /api/turnover-ledger flat/grouped read-only views, GET /api/turnover-ledger/export-preview, and GET /api/turnover-ledger/relations/{relation_id} derive from PostgreSQL app.bank_transactions plus active app.bank_transaction_categories raw_payload.category_code using Python turnover category/export/detail rules; no app Mongo. Binary export, relation extra GET/PUT, confirm/withdraw, persisted manual relation state, and FIFO allocation lots remain pending contract.",
+      "source_categories": [
+        "postgres_facts",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "turnover-ledger-flat-readonly",
+        "turnover-ledger-grouped-readonly"
+      ]
+    },
+    {
+      "domain": "turnover-ledger",
+      "route_type": "python",
+      "python_route": "GET /api/turnover-ledger/export-preview",
+      "rust_routes": [
+        "GET /api/turnover-ledger/export-preview"
+      ],
+      "frontend_refs": [
+        "web/src/features/turnoverLedger/api.ts",
+        "web/src/pages/TurnoverLedgerPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "GET /api/turnover-ledger flat/grouped read-only views, GET /api/turnover-ledger/export-preview, and GET /api/turnover-ledger/relations/{relation_id} derive from PostgreSQL app.bank_transactions plus active app.bank_transaction_categories raw_payload.category_code using Python turnover category/export/detail rules; no app Mongo. Binary export, relation extra GET/PUT, confirm/withdraw, persisted manual relation state, and FIFO allocation lots remain pending contract.",
+      "source_categories": [
+        "postgres_facts",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "turnover-ledger-export-preview"
+      ]
+    },
+    {
+      "domain": "turnover-ledger",
+      "route_type": "python",
+      "python_route": "GET /api/turnover-ledger/export",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/turnoverLedger/api.ts",
+        "web/src/pages/TurnoverLedgerPage.tsx"
+      ],
+      "migration_status": "pending_contract",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "GET /api/turnover-ledger flat/grouped read-only views, GET /api/turnover-ledger/export-preview, and GET /api/turnover-ledger/relations/{relation_id} derive from PostgreSQL app.bank_transactions plus active app.bank_transaction_categories raw_payload.category_code using Python turnover category/export/detail rules; no app Mongo. Binary export, relation extra GET/PUT, confirm/withdraw, persisted manual relation state, and FIFO allocation lots remain pending contract.",
+      "source_categories": [
+        "postgres_facts",
+        "pending_contract"
+      ],
+      "blocker": "二进制 XLSX 导出需冻结 workbook 样式、Content-Disposition、全量分页和 extra/FIFO 字段；当前只迁移 JSON export-preview。",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "turnover-ledger",
+      "route_type": "python",
+      "python_route": "GET /api/turnover-ledger/relations/{relation_id}",
+      "rust_routes": [
+        "GET /api/turnover-ledger/relations/{relation_id}"
+      ],
+      "frontend_refs": [
+        "web/src/features/turnoverLedger/api.ts",
+        "web/src/pages/TurnoverLedgerPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "GET /api/turnover-ledger flat/grouped read-only views, GET /api/turnover-ledger/export-preview, and GET /api/turnover-ledger/relations/{relation_id} derive from PostgreSQL app.bank_transactions plus active app.bank_transaction_categories raw_payload.category_code using Python turnover category/export/detail rules; no app Mongo. Binary export, relation extra GET/PUT, confirm/withdraw, persisted manual relation state, and FIFO allocation lots remain pending contract.",
+      "source_categories": [
+        "postgres_facts",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "turnover-ledger-relation-detail"
+      ]
+    },
+    {
+      "domain": "turnover-ledger",
+      "route_type": "python",
+      "python_route": "GET /api/turnover-ledger/relations/{relation_id}/extra",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/turnoverLedger/api.ts",
+        "web/src/pages/TurnoverLedgerPage.tsx"
+      ],
+      "migration_status": "pending_contract",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "GET /api/turnover-ledger flat/grouped read-only views, GET /api/turnover-ledger/export-preview, and GET /api/turnover-ledger/relations/{relation_id} derive from PostgreSQL app.bank_transactions plus active app.bank_transaction_categories raw_payload.category_code using Python turnover category/export/detail rules; no app Mongo. Binary export, relation extra GET/PUT, confirm/withdraw, persisted manual relation state, and FIFO allocation lots remain pending contract.",
+      "source_categories": [
+        "postgres_facts",
+        "pending_contract"
+      ],
+      "blocker": "旧值来自 turnover extra snapshot/app state；无 PostgreSQL/read_model 事实源前不能只返回默认 extra 遮蔽差异。",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "turnover-ledger",
+      "route_type": "python",
+      "python_route": "PUT /api/turnover-ledger/relations/{relation_id}/extra",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/turnoverLedger/api.ts",
+        "web/src/pages/TurnoverLedgerPage.tsx"
+      ],
+      "migration_status": "pending_contract",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "GET /api/turnover-ledger flat/grouped read-only views, GET /api/turnover-ledger/export-preview, and GET /api/turnover-ledger/relations/{relation_id} derive from PostgreSQL app.bank_transactions plus active app.bank_transaction_categories raw_payload.category_code using Python turnover category/export/detail rules; no app Mongo. Binary export, relation extra GET/PUT, confirm/withdraw, persisted manual relation state, and FIFO allocation lots remain pending contract.",
+      "source_categories": [
+        "postgres_facts",
+        "pending_contract"
+      ],
+      "blocker": "extra 写入来自旧 extra snapshot，并需 actor/audit/read-model invalidation 合同。",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "turnover-ledger",
+      "route_type": "python",
+      "python_route": "POST /api/turnover-ledger/relations/confirm",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/turnoverLedger/api.ts",
+        "web/src/pages/TurnoverLedgerPage.tsx"
+      ],
+      "migration_status": "pending_contract",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "GET /api/turnover-ledger flat/grouped read-only views, GET /api/turnover-ledger/export-preview, and GET /api/turnover-ledger/relations/{relation_id} derive from PostgreSQL app.bank_transactions plus active app.bank_transaction_categories raw_payload.category_code using Python turnover category/export/detail rules; no app Mongo. Binary export, relation extra GET/PUT, confirm/withdraw, persisted manual relation state, and FIFO allocation lots remain pending contract.",
+      "source_categories": [
+        "postgres_facts",
+        "pending_contract"
+      ],
+      "blocker": "人工确认写入 relation state，需冻结 PostgreSQL relation facts、audit、幂等和 outbox 合同。",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "turnover-ledger",
+      "route_type": "python",
+      "python_route": "POST /api/turnover-ledger/relations/{relation_id}/withdraw",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/turnoverLedger/api.ts",
+        "web/src/pages/TurnoverLedgerPage.tsx"
+      ],
+      "migration_status": "pending_contract",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "GET /api/turnover-ledger flat/grouped read-only views, GET /api/turnover-ledger/export-preview, and GET /api/turnover-ledger/relations/{relation_id} derive from PostgreSQL app.bank_transactions plus active app.bank_transaction_categories raw_payload.category_code using Python turnover category/export/detail rules; no app Mongo. Binary export, relation extra GET/PUT, confirm/withdraw, persisted manual relation state, and FIFO allocation lots remain pending contract.",
+      "source_categories": [
+        "postgres_facts",
+        "pending_contract"
+      ],
+      "blocker": "撤回写入 relation state，需冻结 PostgreSQL relation facts、audit、幂等和 outbox 合同。",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "etc",
+      "route_type": "python",
+      "python_route": "POST /api/etc/import/preview",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/etc/api.ts",
+        "web/src/pages/EtcTicketManagementPage.tsx",
+        "web/src/components/imports/ImportWorkflowPage.tsx"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "tax-ops",
+      "source": "POST /api/etc/import is a static legacy removal contract returning 410. GET /api/etc/invoices and read-only batch list/detail read PostgreSQL app.invoices ETC columns/raw_payload only; batch summaries group import_batch_id/current_batch_id facts and do not read app Mongo. Import preview/confirm, reconciliation, OA draft write routes remain blocked on job/outbox/object-storage contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "object_storage",
+        "static_contract",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "ETC import preview parses uploaded files and creates legacy preview state; needs object-storage/job contract before Axum migration.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "etc",
+      "route_type": "python",
+      "python_route": "POST /api/etc/import",
+      "rust_routes": [
+        "POST /api/etc/import"
+      ],
+      "frontend_refs": [
+        "web/src/features/etc/api.ts",
+        "web/src/pages/EtcTicketManagementPage.tsx",
+        "web/src/components/imports/ImportWorkflowPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "tax-ops",
+      "source": "POST /api/etc/import is a static legacy removal contract returning 410. GET /api/etc/invoices and read-only batch list/detail read PostgreSQL app.invoices ETC columns/raw_payload only; batch summaries group import_batch_id/current_batch_id facts and do not read app Mongo. Import preview/confirm, reconciliation, OA draft write routes remain blocked on job/outbox/object-storage contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "object_storage",
+        "static_contract",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "etc-direct-import-removed-contract"
+      ]
+    },
+    {
+      "domain": "etc",
+      "route_type": "python",
+      "python_route": "POST /api/etc/import/confirm",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/etc/api.ts",
+        "web/src/pages/EtcTicketManagementPage.tsx",
+        "web/src/components/imports/ImportWorkflowPage.tsx"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "tax-ops",
+      "source": "POST /api/etc/import is a static legacy removal contract returning 410. GET /api/etc/invoices and read-only batch list/detail read PostgreSQL app.invoices ETC columns/raw_payload only; batch summaries group import_batch_id/current_batch_id facts and do not read app Mongo. Import preview/confirm, reconciliation, OA draft write routes remain blocked on job/outbox/object-storage contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "object_storage",
+        "static_contract",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "ETC import confirm persists parsed invoices and invalidates downstream state; needs audit/job/outbox and object-storage contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "etc",
+      "route_type": "python",
+      "python_route": "GET /api/etc/reconciliation-tasks/ready-for-import",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/etc/api.ts",
+        "web/src/pages/EtcTicketManagementPage.tsx",
+        "web/src/components/imports/ImportWorkflowPage.tsx"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "tax-ops",
+      "source": "POST /api/etc/import is a static legacy removal contract returning 410. GET /api/etc/invoices and read-only batch list/detail read PostgreSQL app.invoices ETC columns/raw_payload only; batch summaries group import_batch_id/current_batch_id facts and do not read app Mongo. Import preview/confirm, reconciliation, OA draft write routes remain blocked on job/outbox/object-storage contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "object_storage",
+        "static_contract",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "ETC reconciliation task state loads from legacy state store/local pickle; no independent PostgreSQL/read_model source is frozen.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "etc",
+      "route_type": "python",
+      "python_route": "GET /api/etc/reconciliation-tasks",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/etc/api.ts",
+        "web/src/pages/EtcTicketManagementPage.tsx",
+        "web/src/components/imports/ImportWorkflowPage.tsx"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "tax-ops",
+      "source": "POST /api/etc/import is a static legacy removal contract returning 410. GET /api/etc/invoices and read-only batch list/detail read PostgreSQL app.invoices ETC columns/raw_payload only; batch summaries group import_batch_id/current_batch_id facts and do not read app Mongo. Import preview/confirm, reconciliation, OA draft write routes remain blocked on job/outbox/object-storage contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "object_storage",
+        "static_contract",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "ETC reconciliation task list loads from legacy state store/local pickle; no independent PostgreSQL/read_model source is frozen.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "etc",
+      "route_type": "python",
+      "python_route": "POST /api/etc/reconciliation-tasks",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/etc/api.ts",
+        "web/src/pages/EtcTicketManagementPage.tsx",
+        "web/src/components/imports/ImportWorkflowPage.tsx"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "tax-ops",
+      "source": "POST /api/etc/import is a static legacy removal contract returning 410. GET /api/etc/invoices and read-only batch list/detail read PostgreSQL app.invoices ETC columns/raw_payload only; batch summaries group import_batch_id/current_batch_id facts and do not read app Mongo. Import preview/confirm, reconciliation, OA draft write routes remain blocked on job/outbox/object-storage contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "object_storage",
+        "static_contract",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "ETC reconciliation task creation writes legacy task/file state; needs job/object-storage/audit contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "etc",
+      "route_type": "python",
+      "python_route": "GET|DELETE /api/etc/reconciliation-tasks/{task_id}",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/etc/api.ts",
+        "web/src/pages/EtcTicketManagementPage.tsx",
+        "web/src/components/imports/ImportWorkflowPage.tsx"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "tax-ops",
+      "source": "POST /api/etc/import is a static legacy removal contract returning 410. GET /api/etc/invoices and read-only batch list/detail read PostgreSQL app.invoices ETC columns/raw_payload only; batch summaries group import_batch_id/current_batch_id facts and do not read app Mongo. Import preview/confirm, reconciliation, OA draft write routes remain blocked on job/outbox/object-storage contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "object_storage",
+        "static_contract",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "Task detail/delete reads or mutates legacy reconciliation task state; no independent PostgreSQL/read_model source and audit contract are frozen.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "etc",
+      "route_type": "python",
+      "python_route": "GET|PATCH|DELETE /api/etc/reconciliation-tasks/{task_id}/*",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/etc/api.ts",
+        "web/src/pages/EtcTicketManagementPage.tsx",
+        "web/src/components/imports/ImportWorkflowPage.tsx"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "tax-ops",
+      "source": "POST /api/etc/import is a static legacy removal contract returning 410. GET /api/etc/invoices and read-only batch list/detail read PostgreSQL app.invoices ETC columns/raw_payload only; batch summaries group import_batch_id/current_batch_id facts and do not read app Mongo. Import preview/confirm, reconciliation, OA draft write routes remain blocked on job/outbox/object-storage contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "object_storage",
+        "static_contract",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "Task detail, attachment and status operations read/write legacy reconciliation task state and files.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "etc",
+      "route_type": "python",
+      "python_route": "GET /api/etc/invoices",
+      "rust_routes": [
+        "GET /api/etc/invoices"
+      ],
+      "frontend_refs": [
+        "web/src/features/etc/api.ts",
+        "web/src/pages/EtcTicketManagementPage.tsx",
+        "web/src/components/imports/ImportWorkflowPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "tax-ops",
+      "source": "POST /api/etc/import is a static legacy removal contract returning 410. GET /api/etc/invoices and read-only batch list/detail read PostgreSQL app.invoices ETC columns/raw_payload only; batch summaries group import_batch_id/current_batch_id facts and do not read app Mongo. Import preview/confirm, reconciliation, OA draft write routes remain blocked on job/outbox/object-storage contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "object_storage",
+        "static_contract",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "etc-invoices-list"
+      ]
+    },
+    {
+      "domain": "etc",
+      "route_type": "python",
+      "python_route": "GET /api/etc/batches",
+      "rust_routes": [
+        "GET /api/etc/batches"
+      ],
+      "frontend_refs": [
+        "web/src/features/etc/api.ts",
+        "web/src/pages/EtcTicketManagementPage.tsx",
+        "web/src/components/imports/ImportWorkflowPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "tax-ops",
+      "source": "POST /api/etc/import is a static legacy removal contract returning 410. GET /api/etc/invoices and read-only batch list/detail read PostgreSQL app.invoices ETC columns/raw_payload only; batch summaries group import_batch_id/current_batch_id facts and do not read app Mongo. Import preview/confirm, reconciliation, OA draft write routes remain blocked on job/outbox/object-storage contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "object_storage",
+        "static_contract",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "etc-batches-list-readonly"
+      ]
+    },
+    {
+      "domain": "etc",
+      "route_type": "python",
+      "python_route": "GET /api/etc/batches/{batch_id}",
+      "rust_routes": [
+        "GET /api/etc/batches/{batch_id}"
+      ],
+      "frontend_refs": [
+        "web/src/features/etc/api.ts",
+        "web/src/pages/EtcTicketManagementPage.tsx",
+        "web/src/components/imports/ImportWorkflowPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "tax-ops",
+      "source": "POST /api/etc/import is a static legacy removal contract returning 410. GET /api/etc/invoices and read-only batch list/detail read PostgreSQL app.invoices ETC columns/raw_payload only; batch summaries group import_batch_id/current_batch_id facts and do not read app Mongo. Import preview/confirm, reconciliation, OA draft write routes remain blocked on job/outbox/object-storage contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "object_storage",
+        "static_contract",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "etc-batch-detail-readonly"
+      ]
+    },
+    {
+      "domain": "etc",
+      "route_type": "python",
+      "python_route": "POST /api/etc/batches/draft",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/etc/api.ts",
+        "web/src/pages/EtcTicketManagementPage.tsx",
+        "web/src/components/imports/ImportWorkflowPage.tsx"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "tax-ops",
+      "source": "POST /api/etc/import is a static legacy removal contract returning 410. GET /api/etc/invoices and read-only batch list/detail read PostgreSQL app.invoices ETC columns/raw_payload only; batch summaries group import_batch_id/current_batch_id facts and do not read app Mongo. Import preview/confirm, reconciliation, OA draft write routes remain blocked on job/outbox/object-storage contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "object_storage",
+        "static_contract",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "OA draft creation writes external/OA draft state; needs OA/job/outbox and audit contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "etc",
+      "route_type": "python",
+      "python_route": "POST /api/etc/batches/{batch_id}/draft",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/etc/api.ts",
+        "web/src/pages/EtcTicketManagementPage.tsx",
+        "web/src/components/imports/ImportWorkflowPage.tsx"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "tax-ops",
+      "source": "POST /api/etc/import is a static legacy removal contract returning 410. GET /api/etc/invoices and read-only batch list/detail read PostgreSQL app.invoices ETC columns/raw_payload only; batch summaries group import_batch_id/current_batch_id facts and do not read app Mongo. Import preview/confirm, reconciliation, OA draft write routes remain blocked on job/outbox/object-storage contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "object_storage",
+        "static_contract",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "OA draft creation for an existing batch writes external/OA draft state; needs OA/job/outbox and audit contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "etc",
+      "route_type": "python",
+      "python_route": "POST /api/etc/batches/{batch_id}/confirm-submitted",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/etc/api.ts",
+        "web/src/pages/EtcTicketManagementPage.tsx",
+        "web/src/components/imports/ImportWorkflowPage.tsx"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "tax-ops",
+      "source": "POST /api/etc/import is a static legacy removal contract returning 410. GET /api/etc/invoices and read-only batch list/detail read PostgreSQL app.invoices ETC columns/raw_payload only; batch summaries group import_batch_id/current_batch_id facts and do not read app Mongo. Import preview/confirm, reconciliation, OA draft write routes remain blocked on job/outbox/object-storage contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "object_storage",
+        "static_contract",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "Submitted-state mutation is a batch write path requiring actor, audit and fact-state transition contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "etc",
+      "route_type": "python",
+      "python_route": "POST /api/etc/batches/{batch_id}/mark-not-submitted",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/etc/api.ts",
+        "web/src/pages/EtcTicketManagementPage.tsx",
+        "web/src/components/imports/ImportWorkflowPage.tsx"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "tax-ops",
+      "source": "POST /api/etc/import is a static legacy removal contract returning 410. GET /api/etc/invoices and read-only batch list/detail read PostgreSQL app.invoices ETC columns/raw_payload only; batch summaries group import_batch_id/current_batch_id facts and do not read app Mongo. Import preview/confirm, reconciliation, OA draft write routes remain blocked on job/outbox/object-storage contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "object_storage",
+        "static_contract",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "Submitted-state rollback is a batch write path requiring actor, audit and fact-state transition contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "etc",
+      "route_type": "python",
+      "python_route": "DELETE /api/etc/batches/{batch_id}",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/etc/api.ts",
+        "web/src/pages/EtcTicketManagementPage.tsx",
+        "web/src/components/imports/ImportWorkflowPage.tsx"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "tax-ops",
+      "source": "POST /api/etc/import is a static legacy removal contract returning 410. GET /api/etc/invoices and read-only batch list/detail read PostgreSQL app.invoices ETC columns/raw_payload only; batch summaries group import_batch_id/current_batch_id facts and do not read app Mongo. Import preview/confirm, reconciliation, OA draft write routes remain blocked on job/outbox/object-storage contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "object_storage",
+        "static_contract",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "Batch deletion/cancellation is a write path requiring actor, audit and fact-state transition contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "etc",
+      "route_type": "python",
+      "python_route": "POST /api/etc/invoices/revoke-submitted",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/etc/api.ts",
+        "web/src/pages/EtcTicketManagementPage.tsx",
+        "web/src/components/imports/ImportWorkflowPage.tsx"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "tax-ops",
+      "source": "POST /api/etc/import is a static legacy removal contract returning 410. GET /api/etc/invoices and read-only batch list/detail read PostgreSQL app.invoices ETC columns/raw_payload only; batch summaries group import_batch_id/current_batch_id facts and do not read app Mongo. Import preview/confirm, reconciliation, OA draft write routes remain blocked on job/outbox/object-storage contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "object_storage",
+        "static_contract",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "Invoice submitted-state revoke mutates invoice facts and must be covered by audit/outbox/read-model invalidation.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "tax-offset",
+      "route_type": "python",
+      "python_route": "GET /api/tax-offset",
+      "rust_routes": [
+        "GET /api/tax-offset"
+      ],
+      "frontend_refs": [
+        "web/src/features/tax/api.ts",
+        "web/src/pages/TaxOffsetPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "medium",
+      "owner": "tax-ops",
+      "source": "Month GET and calculate use PostgreSQL read_model.tax_offset_read_models. Certified import list uses PostgreSQL app.invoice_certifications joined to app.invoices. Certified import preview/confirm remain on Python until write/audit/outbox contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "tax-offset-month-read-model"
+      ]
+    },
+    {
+      "domain": "tax-offset",
+      "route_type": "python",
+      "python_route": "POST /api/tax-offset/calculate",
+      "rust_routes": [
+        "POST /api/tax-offset/calculate"
+      ],
+      "frontend_refs": [
+        "web/src/features/tax/api.ts",
+        "web/src/pages/TaxOffsetPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "medium",
+      "owner": "tax-ops",
+      "source": "Month GET and calculate use PostgreSQL read_model.tax_offset_read_models. Certified import list uses PostgreSQL app.invoice_certifications joined to app.invoices. Certified import preview/confirm remain on Python until write/audit/outbox contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "tax-offset-calculate-read-model"
+      ]
+    },
+    {
+      "domain": "tax-offset",
+      "route_type": "python",
+      "python_route": "POST /api/tax-offset/certified-import/preview",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/tax/api.ts",
+        "web/src/pages/TaxOffsetPage.tsx"
+      ],
+      "migration_status": "pending_contract",
+      "risk": "medium",
+      "owner": "tax-ops",
+      "source": "Month GET and calculate use PostgreSQL read_model.tax_offset_read_models. Certified import list uses PostgreSQL app.invoice_certifications joined to app.invoices. Certified import preview/confirm remain on Python until write/audit/outbox contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "blocker": "Python parses multipart Excel files and persists tax_certified_import_sessions in legacy app state; needs PostgreSQL/object-storage preview-session contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "tax-offset",
+      "route_type": "python",
+      "python_route": "POST /api/tax-offset/certified-import/confirm",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/tax/api.ts",
+        "web/src/pages/TaxOffsetPage.tsx"
+      ],
+      "migration_status": "pending_contract",
+      "risk": "medium",
+      "owner": "tax-ops",
+      "source": "Month GET and calculate use PostgreSQL read_model.tax_offset_read_models. Certified import list uses PostgreSQL app.invoice_certifications joined to app.invoices. Certified import preview/confirm remain on Python until write/audit/outbox contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "blocker": "Python confirms a legacy preview session, writes certification records and invalidates read models; needs audit/outbox/idempotency contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "tax-offset",
+      "route_type": "python",
+      "python_route": "GET /api/tax-offset/certified-imports",
+      "rust_routes": [
+        "GET /api/tax-offset/certified-imports"
+      ],
+      "frontend_refs": [
+        "web/src/features/tax/api.ts",
+        "web/src/pages/TaxOffsetPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "medium",
+      "owner": "tax-ops",
+      "source": "Month GET and calculate use PostgreSQL read_model.tax_offset_read_models. Certified import list uses PostgreSQL app.invoice_certifications joined to app.invoices. Certified import preview/confirm remain on Python until write/audit/outbox contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "tax-certified-imports-month"
+      ]
+    },
+    {
+      "domain": "cost-statistics",
+      "route_type": "python",
+      "python_route": "GET /api/cost-statistics",
+      "rust_routes": [
+        "GET /api/cost-statistics"
+      ],
+      "frontend_refs": [
+        "web/src/features/cost-statistics/api.ts",
+        "web/src/pages/CostStatisticsPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "medium",
+      "owner": "cost-ops",
+      "source": "Main/explorer/project detail/export-preview reads use PostgreSQL read_model.cost_statistics_read_models. Transaction detail additionally uses app.bank_transactions to locate scope month and read_model.workbench_rows for summary/detail fields. Binary Excel export remains pending until exact workbook contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "cost-statistics-month-read-model"
+      ]
+    },
+    {
+      "domain": "cost-statistics",
+      "route_type": "python",
+      "python_route": "GET /api/cost-statistics/explorer",
+      "rust_routes": [
+        "GET /api/cost-statistics/explorer"
+      ],
+      "frontend_refs": [
+        "web/src/features/cost-statistics/api.ts",
+        "web/src/pages/CostStatisticsPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "medium",
+      "owner": "cost-ops",
+      "source": "Main/explorer/project detail/export-preview reads use PostgreSQL read_model.cost_statistics_read_models. Transaction detail additionally uses app.bank_transactions to locate scope month and read_model.workbench_rows for summary/detail fields. Binary Excel export remains pending until exact workbook contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "cost-statistics-explorer-read-model"
+      ]
+    },
+    {
+      "domain": "cost-statistics",
+      "route_type": "python",
+      "python_route": "GET /api/cost-statistics/export-preview",
+      "rust_routes": [
+        "GET /api/cost-statistics/export-preview"
+      ],
+      "frontend_refs": [
+        "web/src/features/cost-statistics/api.ts",
+        "web/src/pages/CostStatisticsPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "medium",
+      "owner": "cost-ops",
+      "source": "Main/explorer/project detail/export-preview reads use PostgreSQL read_model.cost_statistics_read_models. Transaction detail additionally uses app.bank_transactions to locate scope month and read_model.workbench_rows for summary/detail fields. Binary Excel export remains pending until exact workbook contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "cost-statistics-export-preview-time-read-model",
+        "cost-statistics-export-preview-project-aggregate-read-model",
+        "cost-statistics-export-preview-expense-type-read-model"
+      ]
+    },
+    {
+      "domain": "cost-statistics",
+      "route_type": "python",
+      "python_route": "GET /api/cost-statistics/export",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/cost-statistics/api.ts",
+        "web/src/pages/CostStatisticsPage.tsx"
+      ],
+      "migration_status": "pending_contract",
+      "risk": "medium",
+      "owner": "cost-ops",
+      "source": "Main/explorer/project detail/export-preview reads use PostgreSQL read_model.cost_statistics_read_models. Transaction detail additionally uses app.bank_transactions to locate scope month and read_model.workbench_rows for summary/detail fields. Binary Excel export remains pending until exact workbook contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "pending_contract"
+      ],
+      "blocker": "Binary XLSX export needs workbook style, detail inclusion flags, Content-Disposition and large-result behavior frozen separately; JSON export-preview is migrated.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "cost-statistics",
+      "route_type": "python",
+      "python_route": "GET /api/cost-statistics/projects/{project_name}",
+      "rust_routes": [
+        "GET /api/cost-statistics/projects/{project_name}"
+      ],
+      "frontend_refs": [
+        "web/src/features/cost-statistics/api.ts",
+        "web/src/pages/CostStatisticsPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "medium",
+      "owner": "cost-ops",
+      "source": "Main/explorer/project detail/export-preview reads use PostgreSQL read_model.cost_statistics_read_models. Transaction detail additionally uses app.bank_transactions to locate scope month and read_model.workbench_rows for summary/detail fields. Binary Excel export remains pending until exact workbook contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "cost-statistics-project-detail-read-model"
+      ]
+    },
+    {
+      "domain": "cost-statistics",
+      "route_type": "python",
+      "python_route": "GET /api/cost-statistics/transactions/{transaction_id}",
+      "rust_routes": [
+        "GET /api/cost-statistics/transactions/{transaction_id}"
+      ],
+      "frontend_refs": [
+        "web/src/features/cost-statistics/api.ts",
+        "web/src/pages/CostStatisticsPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "medium",
+      "owner": "cost-ops",
+      "source": "Main/explorer/project detail/export-preview reads use PostgreSQL read_model.cost_statistics_read_models. Transaction detail additionally uses app.bank_transactions to locate scope month and read_model.workbench_rows for summary/detail fields. Binary Excel export remains pending until exact workbook contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "cost-statistics-transaction-detail-read-model"
+      ]
+    },
+    {
+      "domain": "settings-project-sync-data-reset",
+      "route_type": "python",
+      "python_route": "GET /api/workbench/settings",
+      "rust_routes": [
+        "GET /api/workbench/settings"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts",
+        "web/src/pages/SettingsPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Settings read route is default projection only. Data-reset job status reads use PostgreSQL job.worker_tasks. Sync, mutations, job creation, and reset execution require PostgreSQL settings facts plus admin audit/job/outbox contract and were not migrated.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "static_contract",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "workbench-settings-read-contract"
+      ]
+    },
+    {
+      "domain": "settings-project-sync-data-reset",
+      "route_type": "python",
+      "python_route": "POST /api/workbench/settings",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts",
+        "web/src/pages/SettingsPage.tsx"
+      ],
+      "migration_status": "pending_contract",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Settings read route is default projection only. Data-reset job status reads use PostgreSQL job.worker_tasks. Sync, mutations, job creation, and reset execution require PostgreSQL settings facts plus admin audit/job/outbox contract and were not migrated.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "static_contract",
+        "pending_contract"
+      ],
+      "blocker": "Settings save mutates app settings and access-control state; needs PostgreSQL settings facts, audit and rollback contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "settings-project-sync-data-reset",
+      "route_type": "python",
+      "python_route": "POST /api/workbench/settings/projects/sync",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts",
+        "web/src/pages/SettingsPage.tsx"
+      ],
+      "migration_status": "pending_contract",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Settings read route is default projection only. Data-reset job status reads use PostgreSQL job.worker_tasks. Sync, mutations, job creation, and reset execution require PostgreSQL settings facts plus admin audit/job/outbox contract and were not migrated.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "static_contract",
+        "pending_contract"
+      ],
+      "blocker": "Project sync talks to OA/project sources and mutates settings projections; needs source contract and job/outbox boundary.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "settings-project-sync-data-reset",
+      "route_type": "python",
+      "python_route": "POST /api/workbench/settings/projects",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts",
+        "web/src/pages/SettingsPage.tsx"
+      ],
+      "migration_status": "pending_contract",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Settings read route is default projection only. Data-reset job status reads use PostgreSQL job.worker_tasks. Sync, mutations, job creation, and reset execution require PostgreSQL settings facts plus admin audit/job/outbox contract and were not migrated.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "static_contract",
+        "pending_contract"
+      ],
+      "blocker": "Project create/update is an admin write path requiring PostgreSQL settings facts, audit and rollback contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "settings-project-sync-data-reset",
+      "route_type": "python",
+      "python_route": "DELETE /api/workbench/settings/projects/{project_id}",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts",
+        "web/src/pages/SettingsPage.tsx"
+      ],
+      "migration_status": "pending_contract",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Settings read route is default projection only. Data-reset job status reads use PostgreSQL job.worker_tasks. Sync, mutations, job creation, and reset execution require PostgreSQL settings facts plus admin audit/job/outbox contract and were not migrated.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "static_contract",
+        "pending_contract"
+      ],
+      "blocker": "Project deletion is an admin write path requiring PostgreSQL settings facts, audit and rollback contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "settings-project-sync-data-reset",
+      "route_type": "python",
+      "python_route": "POST /api/workbench/settings/data-reset/jobs",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts",
+        "web/src/pages/SettingsPage.tsx"
+      ],
+      "migration_status": "pending_contract",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Settings read route is default projection only. Data-reset job status reads use PostgreSQL job.worker_tasks. Sync, mutations, job creation, and reset execution require PostgreSQL settings facts plus admin audit/job/outbox contract and were not migrated.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "static_contract",
+        "pending_contract"
+      ],
+      "blocker": "Data reset job creation schedules destructive admin work; needs job/outbox, permissions, backup and rollback evidence.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "settings-project-sync-data-reset",
+      "route_type": "python",
+      "python_route": "GET /api/workbench/settings/data-reset/jobs/active",
+      "rust_routes": [
+        "GET /api/workbench/settings/data-reset/jobs/active"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts",
+        "web/src/pages/SettingsPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Settings read route is default projection only. Data-reset job status reads use PostgreSQL job.worker_tasks. Sync, mutations, job creation, and reset execution require PostgreSQL settings facts plus admin audit/job/outbox contract and were not migrated.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "static_contract",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "settings-data-reset-active-job"
+      ]
+    },
+    {
+      "domain": "settings-project-sync-data-reset",
+      "route_type": "python",
+      "python_route": "GET /api/workbench/settings/data-reset/jobs/{job_id}",
+      "rust_routes": [
+        "GET /api/workbench/settings/data-reset/jobs/{job_id}"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts",
+        "web/src/pages/SettingsPage.tsx"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Settings read route is default projection only. Data-reset job status reads use PostgreSQL job.worker_tasks. Sync, mutations, job creation, and reset execution require PostgreSQL settings facts plus admin audit/job/outbox contract and were not migrated.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "static_contract",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "settings-data-reset-active-job",
+        "settings-data-reset-job-detail"
+      ]
+    },
+    {
+      "domain": "settings-project-sync-data-reset",
+      "route_type": "python",
+      "python_route": "POST /api/workbench/settings/data-reset",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts",
+        "web/src/pages/SettingsPage.tsx"
+      ],
+      "migration_status": "pending_contract",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Settings read route is default projection only. Data-reset job status reads use PostgreSQL job.worker_tasks. Sync, mutations, job creation, and reset execution require PostgreSQL settings facts plus admin audit/job/outbox contract and were not migrated.",
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "static_contract",
+        "pending_contract"
+      ],
+      "blocker": "Data reset execution is destructive admin work; needs backup, audit, idempotency and rollback contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "workbench-read-model-and-actions",
+      "route_type": "python",
+      "python_route": "GET /api/workbench",
+      "rust_routes": [
+        "GET /api/workbench"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "Workbench read routes use read_model.workbench_snapshots and read_model.workbench_rows. Workbench action routes already exposed by Axum build transactional PostgreSQL workbench write commands with actor, expected_version and idempotency_key, then rely on job/outbox/read-model invalidation; they must be shadowed only against isolated local/staging fixture data. Exception preview remains Python-only until its read_model preview contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "workbench-month-read-model"
+      ]
+    },
+    {
+      "domain": "workbench-read-model-and-actions",
+      "route_type": "python",
+      "python_route": "GET /api/workbench/ignored",
+      "rust_routes": [
+        "GET /api/workbench/ignored"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "Workbench read routes use read_model.workbench_snapshots and read_model.workbench_rows. Workbench action routes already exposed by Axum build transactional PostgreSQL workbench write commands with actor, expected_version and idempotency_key, then rely on job/outbox/read-model invalidation; they must be shadowed only against isolated local/staging fixture data. Exception preview remains Python-only until its read_model preview contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "workbench-ignored-read-model"
+      ]
+    },
+    {
+      "domain": "workbench-read-model-and-actions",
+      "route_type": "python",
+      "python_route": "GET /api/workbench/rows/{row_id}",
+      "rust_routes": [
+        "GET /api/workbench/rows/{row_id}"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "Workbench read routes use read_model.workbench_snapshots and read_model.workbench_rows. Workbench action routes already exposed by Axum build transactional PostgreSQL workbench write commands with actor, expected_version and idempotency_key, then rely on job/outbox/read-model invalidation; they must be shadowed only against isolated local/staging fixture data. Exception preview remains Python-only until its read_model preview contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "workbench-row-detail-read-model"
+      ]
+    },
+    {
+      "domain": "workbench-read-model-and-actions",
+      "route_type": "python",
+      "python_route": "POST /api/workbench/exception/preview",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "migration_status": "pending_contract",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "Workbench read routes use read_model.workbench_snapshots and read_model.workbench_rows. Workbench action routes already exposed by Axum build transactional PostgreSQL workbench write commands with actor, expected_version and idempotency_key, then rely on job/outbox/read-model invalidation; they must be shadowed only against isolated local/staging fixture data. Exception preview remains Python-only until its read_model preview contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "blocker": "Exception preview depends on legacy Python exception projection and matching candidate state; no independent PostgreSQL/read_model preview contract is frozen.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "workbench-read-model-and-actions",
+      "route_type": "python",
+      "python_route": "POST /api/workbench/exception/apply",
+      "rust_routes": [
+        "POST /api/workbench/exception/apply"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "Workbench read routes use read_model.workbench_snapshots and read_model.workbench_rows. Workbench action routes already exposed by Axum build transactional PostgreSQL workbench write commands with actor, expected_version and idempotency_key, then rely on job/outbox/read-model invalidation; they must be shadowed only against isolated local/staging fixture data. Exception preview remains Python-only until its read_model preview contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "workbench-exception-apply-write-command"
+      ]
+    },
+    {
+      "domain": "workbench-read-model-and-actions",
+      "route_type": "python",
+      "python_route": "POST /api/workbench/actions/confirm-link",
+      "rust_routes": [
+        "POST /api/workbench/actions/confirm-link"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "Workbench read routes use read_model.workbench_snapshots and read_model.workbench_rows. Workbench action routes already exposed by Axum build transactional PostgreSQL workbench write commands with actor, expected_version and idempotency_key, then rely on job/outbox/read-model invalidation; they must be shadowed only against isolated local/staging fixture data. Exception preview remains Python-only until its read_model preview contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "workbench-confirm-link-write-command"
+      ]
+    },
+    {
+      "domain": "workbench-read-model-and-actions",
+      "route_type": "python",
+      "python_route": "POST /api/workbench/actions/confirm-link/preview",
+      "rust_routes": [
+        "POST /api/workbench/actions/confirm-link/preview"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "Workbench read routes use read_model.workbench_snapshots and read_model.workbench_rows. Workbench action routes already exposed by Axum build transactional PostgreSQL workbench write commands with actor, expected_version and idempotency_key, then rely on job/outbox/read-model invalidation; they must be shadowed only against isolated local/staging fixture data. Exception preview remains Python-only until its read_model preview contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "workbench-confirm-link-preview-write-command"
+      ]
+    },
+    {
+      "domain": "workbench-read-model-and-actions",
+      "route_type": "python",
+      "python_route": "POST /api/workbench/actions/mark-exception",
+      "rust_routes": [
+        "POST /api/workbench/actions/mark-exception"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "Workbench read routes use read_model.workbench_snapshots and read_model.workbench_rows. Workbench action routes already exposed by Axum build transactional PostgreSQL workbench write commands with actor, expected_version and idempotency_key, then rely on job/outbox/read-model invalidation; they must be shadowed only against isolated local/staging fixture data. Exception preview remains Python-only until its read_model preview contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "workbench-mark-exception-write-command"
+      ]
+    },
+    {
+      "domain": "workbench-read-model-and-actions",
+      "route_type": "python",
+      "python_route": "POST /api/workbench/actions/cancel-link",
+      "rust_routes": [
+        "POST /api/workbench/actions/cancel-link"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "Workbench read routes use read_model.workbench_snapshots and read_model.workbench_rows. Workbench action routes already exposed by Axum build transactional PostgreSQL workbench write commands with actor, expected_version and idempotency_key, then rely on job/outbox/read-model invalidation; they must be shadowed only against isolated local/staging fixture data. Exception preview remains Python-only until its read_model preview contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "workbench-cancel-link-write-command"
+      ]
+    },
+    {
+      "domain": "workbench-read-model-and-actions",
+      "route_type": "python",
+      "python_route": "POST /api/workbench/actions/withdraw-link/preview",
+      "rust_routes": [
+        "POST /api/workbench/actions/withdraw-link/preview"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "Workbench read routes use read_model.workbench_snapshots and read_model.workbench_rows. Workbench action routes already exposed by Axum build transactional PostgreSQL workbench write commands with actor, expected_version and idempotency_key, then rely on job/outbox/read-model invalidation; they must be shadowed only against isolated local/staging fixture data. Exception preview remains Python-only until its read_model preview contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "workbench-withdraw-link-preview-write-command"
+      ]
+    },
+    {
+      "domain": "workbench-read-model-and-actions",
+      "route_type": "python",
+      "python_route": "POST /api/workbench/actions/withdraw-link",
+      "rust_routes": [
+        "POST /api/workbench/actions/withdraw-link"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "Workbench read routes use read_model.workbench_snapshots and read_model.workbench_rows. Workbench action routes already exposed by Axum build transactional PostgreSQL workbench write commands with actor, expected_version and idempotency_key, then rely on job/outbox/read-model invalidation; they must be shadowed only against isolated local/staging fixture data. Exception preview remains Python-only until its read_model preview contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "workbench-withdraw-link-write-command"
+      ]
+    },
+    {
+      "domain": "workbench-read-model-and-actions",
+      "route_type": "python",
+      "python_route": "POST /api/workbench/actions/confirm-cash-pass-through",
+      "rust_routes": [
+        "POST /api/workbench/actions/confirm-cash-pass-through"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "Workbench read routes use read_model.workbench_snapshots and read_model.workbench_rows. Workbench action routes already exposed by Axum build transactional PostgreSQL workbench write commands with actor, expected_version and idempotency_key, then rely on job/outbox/read-model invalidation; they must be shadowed only against isolated local/staging fixture data. Exception preview remains Python-only until its read_model preview contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "workbench-confirm-cash-pass-through-write-command"
+      ]
+    },
+    {
+      "domain": "workbench-read-model-and-actions",
+      "route_type": "python",
+      "python_route": "POST /api/workbench/actions/confirm-cash-ticket-purchase",
+      "rust_routes": [
+        "POST /api/workbench/actions/confirm-cash-ticket-purchase"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "Workbench read routes use read_model.workbench_snapshots and read_model.workbench_rows. Workbench action routes already exposed by Axum build transactional PostgreSQL workbench write commands with actor, expected_version and idempotency_key, then rely on job/outbox/read-model invalidation; they must be shadowed only against isolated local/staging fixture data. Exception preview remains Python-only until its read_model preview contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "workbench-confirm-cash-ticket-purchase-write-command"
+      ]
+    },
+    {
+      "domain": "workbench-read-model-and-actions",
+      "route_type": "python",
+      "python_route": "POST /api/workbench/actions/cancel-cash-special",
+      "rust_routes": [
+        "POST /api/workbench/actions/cancel-cash-special"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "Workbench read routes use read_model.workbench_snapshots and read_model.workbench_rows. Workbench action routes already exposed by Axum build transactional PostgreSQL workbench write commands with actor, expected_version and idempotency_key, then rely on job/outbox/read-model invalidation; they must be shadowed only against isolated local/staging fixture data. Exception preview remains Python-only until its read_model preview contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "workbench-cancel-cash-special-write-command"
+      ]
+    },
+    {
+      "domain": "workbench-read-model-and-actions",
+      "route_type": "python",
+      "python_route": "POST /api/workbench/actions/update-bank-exception",
+      "rust_routes": [
+        "POST /api/workbench/actions/update-bank-exception"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "Workbench read routes use read_model.workbench_snapshots and read_model.workbench_rows. Workbench action routes already exposed by Axum build transactional PostgreSQL workbench write commands with actor, expected_version and idempotency_key, then rely on job/outbox/read-model invalidation; they must be shadowed only against isolated local/staging fixture data. Exception preview remains Python-only until its read_model preview contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "workbench-bank-exception-update-write-command"
+      ]
+    },
+    {
+      "domain": "workbench-read-model-and-actions",
+      "route_type": "python",
+      "python_route": "POST /api/workbench/actions/oa-bank-exception",
+      "rust_routes": [
+        "POST /api/workbench/actions/oa-bank-exception"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "Workbench read routes use read_model.workbench_snapshots and read_model.workbench_rows. Workbench action routes already exposed by Axum build transactional PostgreSQL workbench write commands with actor, expected_version and idempotency_key, then rely on job/outbox/read-model invalidation; they must be shadowed only against isolated local/staging fixture data. Exception preview remains Python-only until its read_model preview contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "workbench-oa-bank-exception-write-command"
+      ]
+    },
+    {
+      "domain": "workbench-read-model-and-actions",
+      "route_type": "python",
+      "python_route": "POST /api/workbench/actions/confirm-personal-advance-repayment",
+      "rust_routes": [
+        "POST /api/workbench/actions/confirm-personal-advance-repayment"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "Workbench read routes use read_model.workbench_snapshots and read_model.workbench_rows. Workbench action routes already exposed by Axum build transactional PostgreSQL workbench write commands with actor, expected_version and idempotency_key, then rely on job/outbox/read-model invalidation; they must be shadowed only against isolated local/staging fixture data. Exception preview remains Python-only until its read_model preview contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "workbench-confirm-personal-advance-repayment-write-command"
+      ]
+    },
+    {
+      "domain": "workbench-read-model-and-actions",
+      "route_type": "python",
+      "python_route": "POST /api/workbench/actions/cancel-exception",
+      "rust_routes": [
+        "POST /api/workbench/actions/cancel-exception"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "Workbench read routes use read_model.workbench_snapshots and read_model.workbench_rows. Workbench action routes already exposed by Axum build transactional PostgreSQL workbench write commands with actor, expected_version and idempotency_key, then rely on job/outbox/read-model invalidation; they must be shadowed only against isolated local/staging fixture data. Exception preview remains Python-only until its read_model preview contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "workbench-cancel-exception-write-command"
+      ]
+    },
+    {
+      "domain": "workbench-read-model-and-actions",
+      "route_type": "python",
+      "python_route": "POST /api/workbench/actions/ignore-row",
+      "rust_routes": [
+        "POST /api/workbench/actions/ignore-row"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "Workbench read routes use read_model.workbench_snapshots and read_model.workbench_rows. Workbench action routes already exposed by Axum build transactional PostgreSQL workbench write commands with actor, expected_version and idempotency_key, then rely on job/outbox/read-model invalidation; they must be shadowed only against isolated local/staging fixture data. Exception preview remains Python-only until its read_model preview contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "workbench-ignore-row-write-command"
+      ]
+    },
+    {
+      "domain": "workbench-read-model-and-actions",
+      "route_type": "python",
+      "python_route": "POST /api/workbench/actions/unignore-row",
+      "rust_routes": [
+        "POST /api/workbench/actions/unignore-row"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "Workbench read routes use read_model.workbench_snapshots and read_model.workbench_rows. Workbench action routes already exposed by Axum build transactional PostgreSQL workbench write commands with actor, expected_version and idempotency_key, then rely on job/outbox/read-model invalidation; they must be shadowed only against isolated local/staging fixture data. Exception preview remains Python-only until its read_model preview contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "workbench-unignore-row-write-command"
+      ]
+    },
+    {
+      "domain": "workbench-read-model-and-actions",
+      "route_type": "rust_only",
+      "python_route": null,
+      "rust_routes": [
+        "GET /api/workbench/read-model/status"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "finance-ops",
+      "source": "Workbench read routes use read_model.workbench_snapshots and read_model.workbench_rows. Workbench action routes already exposed by Axum build transactional PostgreSQL workbench write commands with actor, expected_version and idempotency_key, then rely on job/outbox/read-model invalidation; they must be shadowed only against isolated local/staging fixture data. Exception preview remains Python-only until its read_model preview contract is frozen.",
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "workbench-read-model-status"
+      ]
+    },
+    {
+      "domain": "oa-sync-status",
+      "route_type": "python",
+      "python_route": "GET /api/oa-sync/status",
+      "rust_routes": [
+        "GET /api/oa-sync/status"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts",
+        "web/src/features/appHealth/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "medium",
+      "owner": "platform-ops",
+      "source": "PostgreSQL app.oa_sync_runs + app.oa_sync_watermarks.",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "shadow_endpoint_ids": [
+        "oa-sync-status"
+      ]
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "python",
+      "python_route": "GET|POST /projects",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "Legacy project routes remain Python state/source driven; PostgreSQL project facts and mutation contract are not frozen.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "python",
+      "python_route": "GET /projects/{project_id}",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "Legacy project detail route lacks frozen PostgreSQL fact/source contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "python",
+      "python_route": "POST /projects/assign",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "Project assignment is a write path requiring actor, audit and fact-state transition contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "python",
+      "python_route": "GET /ledgers",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "Legacy ledger list lacks frozen PostgreSQL fact/read-model contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "python",
+      "python_route": "GET /ledgers/{ledger_id}",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "Legacy ledger detail lacks frozen PostgreSQL fact/read-model contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "python",
+      "python_route": "POST /ledgers/{ledger_id}/status",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "Ledger status mutation needs actor, audit and fact-state transition contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "python",
+      "python_route": "GET /reminders",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "Legacy reminders lack frozen job/read-model fact contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "python",
+      "python_route": "GET /imports/templates",
+      "rust_routes": [
+        "GET /imports/templates"
+      ],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "import-templates-static-contract"
+      ]
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "python",
+      "python_route": "POST /reminders/run",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "Reminder execution is a job-producing write path requiring job/outbox contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "python",
+      "python_route": "POST /imports/preview",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "Legacy import preview parses files into Python session state; use migrated metadata/preflight routes until object-storage/job contract is frozen.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "python",
+      "python_route": "POST /imports/confirm",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "Legacy import confirm writes business facts and invalidates read models; needs audit/outbox/idempotency contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "python",
+      "python_route": "POST /imports/files/preview",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "File preview creates legacy file session state; needs object-storage/session fact contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "python",
+      "python_route": "POST /imports/files/confirm",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "File confirm writes business facts from legacy session state; needs audit/outbox/idempotency contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "python",
+      "python_route": "POST /imports/files/retry",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "File retry reuses legacy file session state and may enqueue follow-up matching work; needs job/outbox contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "python",
+      "python_route": "GET /imports/batches/{batch_id}",
+      "rust_routes": [
+        "GET /imports/batches/{batch_id}"
+      ],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "import-batch-detail-metadata"
+      ]
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "python",
+      "python_route": "GET /imports/batches/{batch_id}/download",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "Batch download is binary/object response behavior requiring object-storage and Content-Disposition contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "python",
+      "python_route": "POST /imports/batches/{batch_id}/revert",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "Batch revert mutates imported facts and read models; needs audit/outbox/idempotency and rollback contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "python",
+      "python_route": "GET /imports/files/sessions/{session_id}",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "Legacy file sessions remain Python state and have no PostgreSQL session fact contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "python",
+      "python_route": "POST /matching/run",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "Matching run is job-producing write path requiring job/outbox/read-model contract.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "python",
+      "python_route": "GET /matching/results",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "Matching results lack frozen PostgreSQL/read_model source separate from legacy Python state.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "python",
+      "python_route": "GET /matching/results/{result_id}",
+      "rust_routes": [],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "blocked_fact_source",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "blocker": "Matching result detail lacks frozen PostgreSQL/read_model source separate from legacy Python state.",
+      "shadow_endpoint_ids": []
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "rust_only",
+      "python_route": null,
+      "rust_routes": [
+        "GET /imports/batches"
+      ],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "import-batches-list-metadata"
+      ]
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "rust_only",
+      "python_route": null,
+      "rust_routes": [
+        "GET /imports/files/{file_id}"
+      ],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "import-file-detail-metadata"
+      ]
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "rust_only",
+      "python_route": null,
+      "rust_routes": [
+        "GET /api/files/objects/{file_object_id}"
+      ],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "file-object-metadata-access"
+      ]
+    },
+    {
+      "domain": "projects-ledgers-reminders-imports-matching-legacy",
+      "route_type": "rust_only",
+      "python_route": null,
+      "rust_routes": [
+        "POST /imports/files/upload-preflight"
+      ],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "migration_status": "migrated_shadow_required",
+      "risk": "high",
+      "owner": "platform-ops",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source_categories": [
+        "postgres_facts",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
+      "shadow_endpoint_ids": [
+        "import-file-upload-preflight"
+      ]
+    }
+  ]
+}

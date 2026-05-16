@@ -1,0 +1,121 @@
+{
+  "record_id": "cutover-execution-record-20260517",
+  "generated_at": "2026-05-17T07:11:51+08:00",
+  "operator": "Codex",
+  "branch": "refactor-backend",
+  "execution_status": "blocked_not_executed",
+  "blocking_gate": "formal-migration-go-no-go-20260517",
+  "readiness_gate_status": "NO_GO",
+  "authorization": {
+    "production_cutover_requested": false,
+    "production_cutover_obtained": false,
+    "authorization_source": "none"
+  },
+  "preconditions": {
+    "readiness_gate_go": false,
+    "maintenance_window_confirmed": false,
+    "rollback_path_confirmed": false,
+    "latest_app_mongo_freeze_point_backup_confirmed": false,
+    "latest_known_app_mongo_backup_evidence": "docs/operations/backend-refactor/app-mongo-backup-runbook.md"
+  },
+  "cutover_sequence": [
+    {
+      "order": 1,
+      "phase": "shadow_read",
+      "started_at": null,
+      "ended_at": null,
+      "metrics": "not_collected",
+      "owner": "not_assigned",
+      "rollback_point": "old Python/API routes unchanged",
+      "result": "blocked_not_executed"
+    },
+    {
+      "order": 2,
+      "phase": "small_scope_read_switch",
+      "started_at": null,
+      "ended_at": null,
+      "metrics": "not_collected",
+      "owner": "not_assigned",
+      "rollback_point": "old Python/API routes unchanged",
+      "result": "blocked_not_executed"
+    },
+    {
+      "order": 3,
+      "phase": "dual_write",
+      "started_at": null,
+      "ended_at": null,
+      "metrics": "not_collected",
+      "owner": "not_assigned",
+      "rollback_point": "dual write never enabled",
+      "result": "blocked_not_executed"
+    },
+    {
+      "order": 4,
+      "phase": "full_read_switch",
+      "started_at": null,
+      "ended_at": null,
+      "metrics": "not_collected",
+      "owner": "not_assigned",
+      "rollback_point": "API routes unchanged",
+      "result": "blocked_not_executed"
+    },
+    {
+      "order": 5,
+      "phase": "stop_old_writes",
+      "started_at": null,
+      "ended_at": null,
+      "metrics": "not_collected",
+      "owner": "not_assigned",
+      "rollback_point": "old writes unchanged",
+      "result": "blocked_not_executed"
+    },
+    {
+      "order": 6,
+      "phase": "archive_freeze_app_mongo",
+      "started_at": null,
+      "ended_at": null,
+      "metrics": "not_collected",
+      "owner": "not_assigned",
+      "rollback_point": "app Mongo unchanged",
+      "result": "blocked_not_executed"
+    }
+  ],
+  "production_actions": {
+    "cutover_commands_executed": false,
+    "shadow_read_enabled": false,
+    "small_scope_read_switch_executed": false,
+    "dual_write_enabled": false,
+    "full_read_switch_executed": false,
+    "old_writes_stopped": false,
+    "app_mongo_frozen": false,
+    "app_mongo_archived": false,
+    "app_mongo_deleted": false,
+    "oa_source_database_accessed": false,
+    "postgres_promoted_to_fact_source": false,
+    "old_mongo_overwrote_postgres": false
+  },
+  "observations": {
+    "api_route": "unchanged",
+    "traffic_metrics": "not_collected",
+    "error_rate": "not_collected",
+    "postgres_metrics": "not_collected",
+    "nats_worker_metrics": "not_collected",
+    "read_model_metrics": "not_collected",
+    "alerts": "not_collected"
+  },
+  "rollback_status": {
+    "read_route_rollback": "not_needed",
+    "dual_write_rollback": "not_needed",
+    "outbox_or_compensation_replay": "not_needed",
+    "file_restore": "not_needed",
+    "postgres_destructive_cleanup": "not_executed_not_allowed",
+    "app_mongo_restore": "not_needed"
+  },
+  "blocking_reasons": [
+    "Readiness gate is NO_GO with 9 blocking checks.",
+    "No explicit production cutover authorization was provided.",
+    "Maintenance window is not confirmed.",
+    "Rollback path is not confirmed by drill evidence.",
+    "Required PostgreSQL backup/PITR, migration dry-run, file checksum, API shadow, NATS/worker, read model, monitoring, and load test evidence is missing or failed."
+  ]
+}

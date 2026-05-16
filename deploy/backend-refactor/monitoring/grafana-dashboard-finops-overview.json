@@ -1,0 +1,221 @@
+{
+  "title": "fin-ops backend refactor overview",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "30s",
+  "tags": [
+    "fin-ops",
+    "backend-refactor",
+    "readiness"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "env",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(up, env)",
+        "refresh": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "API RPS",
+      "targets": [
+        {
+          "expr": "sum(rate(fin_ops_http_requests_total{env=\"$env\"}[5m])) by (route, status)",
+          "legendFormat": "{{route}} {{status}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "API 5xx Rate",
+      "targets": [
+        {
+          "expr": "sum(rate(fin_ops_http_requests_total{env=\"$env\",status=~\"5..\"}[5m])) / clamp_min(sum(rate(fin_ops_http_requests_total{env=\"$env\"}[5m])), 1)",
+          "legendFormat": "5xx ratio"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "API P95 Latency",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(fin_ops_http_request_duration_seconds_bucket{env=\"$env\"}[10m])))",
+          "legendFormat": "{{route}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Readiness Dependency Failures",
+      "targets": [
+        {
+          "expr": "sum(increase(fin_ops_readiness_checks_total{env=\"$env\",result=\"not_ready\"}[5m])) by (dependency)",
+          "legendFormat": "{{dependency}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "PostgreSQL Backup Age",
+      "targets": [
+        {
+          "expr": "max(fin_ops_postgres_backup_age_seconds{env=\"$env\"})",
+          "legendFormat": "seconds"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "PostgreSQL PITR and WAL Lag",
+      "targets": [
+        {
+          "expr": "max(fin_ops_postgres_pitr_drill_age_seconds{env=\"$env\"})",
+          "legendFormat": "pitr drill age"
+        },
+        {
+          "expr": "max(fin_ops_postgres_wal_archive_lag_seconds{env=\"$env\"})",
+          "legendFormat": "wal archive lag"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "App Mongo Backup Age",
+      "targets": [
+        {
+          "expr": "max(fin_ops_mongo_backup_age_seconds{env=\"$env\"})",
+          "legendFormat": "seconds"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Outbox and NATS Backlog",
+      "targets": [
+        {
+          "expr": "sum(fin_ops_outbox_pending_events{env=\"$env\"}) by (status)",
+          "legendFormat": "outbox {{status}}"
+        },
+        {
+          "expr": "sum(fin_ops_nats_consumer_pending_messages{env=\"$env\"}) by (consumer)",
+          "legendFormat": "nats {{consumer}}"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Worker Failures and Dead Letters",
+      "targets": [
+        {
+          "expr": "sum(rate(fin_ops_worker_jobs_failed_total{env=\"$env\"}[5m])) by (job_type)",
+          "legendFormat": "failed {{job_type}}"
+        },
+        {
+          "expr": "sum(increase(fin_ops_worker_dead_letters_total{env=\"$env\"}[10m])) by (job_type)",
+          "legendFormat": "dead letters {{job_type}}"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Read Model Staleness",
+      "targets": [
+        {
+          "expr": "max(fin_ops_read_model_staleness_seconds{env=\"$env\"}) by (scope)",
+          "legendFormat": "{{scope}}"
+        },
+        {
+          "expr": "sum(fin_ops_read_model_dirty_scopes{env=\"$env\"}) by (scope)",
+          "legendFormat": "dirty {{scope}}"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Object Store Errors",
+      "targets": [
+        {
+          "expr": "sum(rate(fin_ops_object_store_upload_errors_total{env=\"$env\"}[5m]))",
+          "legendFormat": "upload errors"
+        },
+        {
+          "expr": "sum(rate(fin_ops_object_store_download_errors_total{env=\"$env\"}[5m]))",
+          "legendFormat": "download errors"
+        },
+        {
+          "expr": "increase(fin_ops_object_store_checksum_mismatch_total{env=\"$env\"}[10m])",
+          "legendFormat": "checksum mismatch"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Host Disk",
+      "targets": [
+        {
+          "expr": "min(node_filesystem_avail_bytes{env=\"$env\",fstype!~\"tmpfs|overlay\"} / node_filesystem_size_bytes{env=\"$env\",fstype!~\"tmpfs|overlay\"}) by (instance, mountpoint)",
+          "legendFormat": "{{instance}} {{mountpoint}}"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Host CPU",
+      "targets": [
+        {
+          "expr": "1 - avg by (instance) (rate(node_cpu_seconds_total{env=\"$env\",mode=\"idle\"}[5m]))",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Host Memory",
+      "targets": [
+        {
+          "expr": "node_memory_MemAvailable_bytes{env=\"$env\"} / node_memory_MemTotal_bytes{env=\"$env\"}",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Business Health",
+      "targets": [
+        {
+          "expr": "fin_ops_unreconciled_items{env=\"$env\"}",
+          "legendFormat": "unreconciled items"
+        },
+        {
+          "expr": "fin_ops_exception_cases_open{env=\"$env\"}",
+          "legendFormat": "open exceptions"
+        },
+        {
+          "expr": "increase(fin_ops_reconciliation_write_failures_total{env=\"$env\"}[10m])",
+          "legendFormat": "write failures"
+        }
+      ]
+    }
+  ]
+}

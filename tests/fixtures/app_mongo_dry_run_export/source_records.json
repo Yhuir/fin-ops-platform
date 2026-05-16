@@ -1,0 +1,77 @@
+{
+  "bank_transactions": [
+    {
+      "legacy_collection": "bank_transactions",
+      "legacy_id": "txn-1",
+      "payload": {
+        "id": "txn-1",
+        "account_no": "62220001",
+        "account_name": "Main CNY Account",
+        "amount": "125.50",
+        "signed_amount": "125.50",
+        "counterparty_name_raw": "Acme Buyer",
+        "txn_direction": "inflow",
+        "txn_date": "2026-05-02",
+        "status": "pending",
+        "summary": "receipt"
+      }
+    }
+  ],
+  "invoices": [
+    {
+      "legacy_collection": "invoices",
+      "legacy_id": "inv-1",
+      "payload": {
+        "id": "inv-1",
+        "amount": "125.50",
+        "buyer_name": "Acme Buyer",
+        "invoice_date": "2026-05-01",
+        "invoice_no": "INV-001",
+        "invoice_type": "output",
+        "seller_name": "Fin Ops Ltd",
+        "signed_amount": "125.50",
+        "status": "pending",
+        "tax_amount": "7.53",
+        "total_with_tax": "133.03"
+      }
+    }
+  ],
+  "workbench_pair_relations": [
+    {
+      "legacy_collection": "workbench_pair_relations",
+      "legacy_id": "case-1",
+      "payload": {
+        "case_id": "case-1",
+        "amount": "125.50",
+        "created_by": "migration-test",
+        "row_ids": ["txn-1", "inv-1"],
+        "row_types": ["bank", "invoice"],
+        "status": "confirmed"
+      }
+    }
+  ],
+  "background_jobs": [
+    {
+      "legacy_collection": "background_jobs",
+      "legacy_id": "job-1",
+      "payload": {
+        "id": "job-1",
+        "job_type": "workbench_rebuild",
+        "label": "Workbench rebuild",
+        "status": "succeeded",
+        "total_count": 1,
+        "current_count": 1
+      }
+    }
+  ],
+  "gridfs-files-manifest": [
+    {
+      "legacy_collection": "import_file_blobs.files",
+      "legacy_id": "file-1",
+      "filename": "bank.xlsx",
+      "length": 42,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sample_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ]
+}

@@ -7,4 +7,3 @@ pub fn build_pool(config: &DatabaseConfig) -> Result<PgPool, sqlx::Error> {
         .max_connections(config.max_connections)
         .connect_lazy(&config.url)
 }
-

@@ -1,0 +1,70 @@
+{
+  "report": "api-shadow-validation-report-YYYYMMDD",
+  "status": "GO",
+  "python_base_url": "http://127.0.0.1:8001",
+  "axum_base_url": "http://127.0.0.1:8002",
+  "fixture": "docs/dev/api-fixtures/business-api-shadow-validation.json",
+  "fixture_validation": {
+    "status": "GO",
+    "fixture": "docs/dev/api-fixtures/business-api-shadow-validation.json",
+    "endpoint_count": 1,
+    "endpoint_ids": ["example-endpoint-id"],
+    "permission_failure_endpoint_ids": [],
+    "endpoint_errors": []
+  },
+  "generated_at": "YYYY-MM-DDTHH:MM:SSZ",
+  "filters": {
+    "endpoint_ids": [],
+    "risks": []
+  },
+  "redaction": {
+    "sensitive_value": "[REDACTED]",
+    "field_hints": [
+      "authorization",
+      "cookie",
+      "credential",
+      "non_json_body",
+      "password",
+      "presign",
+      "signed_url",
+      "raw_content",
+      "raw_file",
+      "secret",
+      "stack",
+      "token",
+      "traceback",
+      "url"
+    ]
+  },
+  "summary": {
+    "total": 1,
+    "go": 1,
+    "no_go": 0,
+    "unexpected_diff_count": 0,
+    "explained_diff_count": 0,
+    "permission_failure_cases": 0,
+    "permission_failure_required_count": 0,
+    "permission_failure_missing_count": 0,
+    "fixture_error_count": 0
+  },
+  "results": [
+    {
+      "endpoint_id": "example-endpoint-id",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/example",
+      "risk": "medium",
+      "owner": "platform-ops",
+      "source": "PostgreSQL/read_model/job/outbox/object storage/static contract source statement; no app Mongo read.",
+      "source_categories": ["job_outbox", "object_storage", "postgres_facts", "read_model", "static_contract"],
+      "status": "GO",
+      "python_status": 200,
+      "axum_status": 200,
+      "expected_status": 200,
+      "unexpected_diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diffs": [],
+      "explained_diffs": []
+    }
+  ]
+}

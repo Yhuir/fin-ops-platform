@@ -12,4 +12,3 @@ pub fn init(config: &ObservabilityConfig) -> Result<(), Box<dyn std::error::Erro
 
     Ok(())
 }
-
