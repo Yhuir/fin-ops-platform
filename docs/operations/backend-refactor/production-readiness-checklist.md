@@ -106,6 +106,8 @@
 ### 性能与容量
 
 - [ ] 关键接口在 staging 完成压测并记录 P50/P95/P99。
+- [ ] staging 压测基线报告已按 `load-test-baseline-report-template.md` 记录 start/end time、数据规模、请求数、并发、P50/P95/P99、错误率、DB pool、NATS/outbox backlog、worker lag、read_model stale_seconds 和 GO/NO_GO。
+- [ ] staging 压测只覆盖 `/healthz`、`/readyz`、单月工作台 read model、搜索、任务状态、导入元数据、成本/税金代表性读模型；未压测生产、未访问 OA 源数据库、未触发 live OA scan。
 - [ ] 单月工作台 read model 命中达到当前目标。
 - [ ] 全局搜索、导出和导入确认不阻塞主请求线程。
 - [ ] PostgreSQL data、WAL、backup、logs 容量趋势已评估。
@@ -136,6 +138,8 @@
 | 迁移对账存在无法解释的数量、金额或状态差异 | 业务事实不可信。 |
 | GridFS 到 MinIO/S3 出现 checksum mismatch | 文件迁移不可信。 |
 | read model 无法从事实表重建 | 切读后无法恢复页面口径。 |
+| staging 压测基线报告缺失、场景覆盖不完整或 GO/NO_GO 为 `NO_GO` | 性能与容量风险未闭环。 |
+| 压测需要访问生产、OA 源数据库或实时扫描 OA 源数据 | 超出授权边界且会污染基线。 |
 | 核销确认、撤回、异常处理缺失审计日志 | 关键财务操作不可追溯。 |
 | NATS dead letter、Worker 连续失败或 outbox 无法发布 | 异步链路不可靠。 |
 | P0 告警未解除 | 继续切换会扩大故障面。 |
