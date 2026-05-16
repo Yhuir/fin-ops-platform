@@ -32,13 +32,15 @@ def test_current_repository_readiness_gate_is_no_go() -> None:
 
     assert report["status"] == "NO_GO"
     checks = {item["check_id"]: item for item in report["checks"]}
-    assert checks["app_mongo_backup_restore"]["status"] == "passed"
 
     for check_id in (
+        "app_mongo_backup_restore",
         "postgres_backup_pitr",
         "migration_dry_run",
         "file_checksum",
         "api_shadow_validation",
+        "nats_worker_replay",
+        "read_model_rebuild",
         "monitoring_alerts",
         "load_test",
         "cutover_window_rollback",
@@ -84,9 +86,12 @@ def test_readiness_gate_passes_only_when_all_required_evidence_is_go(tmp_path: P
 """
     evidence_files = {
         "docs/operations/backend-refactor/app-mongo-backup-runbook.md": (
-            "collection count\nsummary total=50 diff=0\nchecksum ok\n"
+            "go/no-go | `GO`\ncollection count\nsummary total=50 diff=0\nchecksum ok\n"
         ),
         "docs/operations/backend-refactor/postgres-pitr-drill-20260516.md": go_report,
+        "docs/operations/backend-refactor/postgres-pitr-drill-20260516.json": (
+            '{"status": "GO", "summary": {"no_go": 0}}\n'
+        ),
         "docs/operations/backend-refactor/migration-dry-run-report-20260516.md": migration_go_report,
         "docs/operations/backend-refactor/gridfs-minio-migration-report-20260516.md": go_report,
         "docs/operations/backend-refactor/api-shadow-validation-report-20260516.md": (
@@ -97,7 +102,30 @@ def test_readiness_gate_passes_only_when_all_required_evidence_is_go(tmp_path: P
         ),
         "docs/operations/backend-refactor/nats-worker-validation-report-20260516.md": go_report,
         "docs/operations/backend-refactor/read-model-rebuild-validation-report-20260516.md": go_report,
-        "docs/operations/backend-refactor/monitoring-alert-verification-20260516.md": go_report,
+        "docs/operations/backend-refactor/monitoring-alert-verification-20260516.json": """
+{
+  "status": "GO",
+  "metric_gaps": [],
+  "alerts": [
+    {
+      "alert_name": "api_p0_5xx",
+      "trigger_method": "staging synthetic trigger",
+      "observed_state": "firing then resolved",
+      "owner": "platform-ops",
+      "severity": "P0",
+      "go_no_go": "GO"
+    },
+    {
+      "alert_name": "worker_p1_dead_letter",
+      "trigger_method": "staging synthetic trigger",
+      "observed_state": "firing then resolved",
+      "owner": "platform-ops",
+      "severity": "P1",
+      "go_no_go": "GO"
+    }
+  ]
+}
+""",
         "docs/operations/backend-refactor/load-test-baseline-20260516.md": go_report,
         "docs/operations/backend-refactor/rollback-drill-record-20260516.md": go_report,
     }
@@ -127,6 +155,21 @@ def test_app_mongo_backup_requires_restore_count_and_checksum(tmp_path: Path) ->
     assert report["checks"][0]["status"] == "failed"
 
 
+def test_app_mongo_backup_requires_machine_readable_go_marker(tmp_path: Path) -> None:
+    gate = load_gate_module()
+
+    write_evidence(
+        tmp_path,
+        "docs/operations/backend-refactor/app-mongo-backup-runbook.md",
+        "collection count\nsummary total=50 diff=0\nchecksum ok\n",
+    )
+
+    report = gate.evaluate(tmp_path, checks=(gate.DEFAULT_CHECKS[0],))
+
+    assert report["status"] == "NO_GO"
+    assert report["checks"][0]["status"] == "failed"
+
+
 def test_migration_dry_run_go_marker_still_fails_when_report_has_blockers(tmp_path: Path) -> None:
     gate = load_gate_module()
 
@@ -140,6 +183,61 @@ def test_migration_dry_run_go_marker_still_fails_when_report_has_blockers(tmp_pa
 
     assert report["status"] == "NO_GO"
     assert report["checks"][0]["status"] == "failed"
+
+
+def test_any_evidence_go_marker_fails_when_report_has_blockers(tmp_path: Path) -> None:
+    gate = load_gate_module()
+
+    write_evidence(
+        tmp_path,
+        "docs/operations/backend-refactor/gridfs-minio-migration-report-20260516.md",
+        "go/no-go | `GO`\nblocking: `true`\n",
+    )
+
+    report = gate.evaluate(tmp_path, checks=(gate.DEFAULT_CHECKS[3],))
+
+    assert report["status"] == "NO_GO"
+    assert report["checks"][0]["status"] == "failed"
+
+
+def test_json_and_markdown_evidence_must_agree_when_both_exist(tmp_path: Path) -> None:
+    gate = load_gate_module()
+
+    write_evidence(
+        tmp_path,
+        "docs/operations/backend-refactor/postgres-pitr-drill-20260516.md",
+        "go/no-go | `GO`\n",
+    )
+    write_evidence(
+        tmp_path,
+        "docs/operations/backend-refactor/postgres-pitr-drill-20260516.json",
+        '{"status": "NO_GO", "summary": {"no_go": 1}}\n',
+    )
+
+    report = gate.evaluate(tmp_path, checks=(gate.DEFAULT_CHECKS[1],))
+
+    assert report["status"] == "NO_GO"
+    assert report["checks"][0]["status"] == "failed"
+
+
+def test_partial_and_scoped_reports_are_ignored(tmp_path: Path) -> None:
+    gate = load_gate_module()
+
+    write_evidence(
+        tmp_path,
+        "docs/operations/backend-refactor/load-test-baseline-20260516-partial.md",
+        "go/no-go | `GO`\n",
+    )
+    write_evidence(
+        tmp_path,
+        "docs/operations/backend-refactor/load-test-baseline-20260516-scoped.json",
+        '{"status": "GO"}\n',
+    )
+
+    report = gate.evaluate(tmp_path, checks=(gate.DEFAULT_CHECKS[8],))
+
+    assert report["status"] == "NO_GO"
+    assert report["checks"][0]["status"] == "missing"
 
 
 def test_api_shadow_validation_accepts_paired_generated_json_and_markdown_go_report(

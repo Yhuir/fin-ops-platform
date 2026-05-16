@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -66,15 +67,21 @@ DEFAULT_CHECKS: tuple[EvidenceCheck, ...] = (
     EvidenceCheck(
         check_id="app_mongo_backup_restore",
         label="App Mongo backup, checksum and restore drill",
-        patterns=("docs/operations/backend-refactor/app-mongo-backup-runbook.md",),
-        required_text_all=("collection count", "diff=0", "checksum"),
+        patterns=(
+            "docs/operations/backend-refactor/app-mongo-backup-runbook.md",
+            "docs/operations/backend-refactor/app-mongo-backup-restore-report-*.md",
+            "docs/operations/backend-refactor/app-mongo-backup-restore-report-*.json",
+        ),
+        required_text_any=GO_MARKERS,
         blocking_prompt="docs/exec-plans/active/backend-refactor-prompts/02-app-mongo-backup.md",
+        required_text_all=("collection count", "diff=0", "checksum"),
     ),
     EvidenceCheck(
         "postgres_backup_pitr",
         "PostgreSQL backup and PITR or restore drill",
         (
             "docs/operations/backend-refactor/postgres-pitr-drill-*.md",
+            "docs/operations/backend-refactor/postgres-pitr-drill-*.json",
             "docs/operations/backend-refactor/postgres-backup-restore-drill-*.md",
             "docs/operations/backend-refactor/postgres-backup-restore-drill-*.json",
         ),
@@ -84,7 +91,10 @@ DEFAULT_CHECKS: tuple[EvidenceCheck, ...] = (
     EvidenceCheck(
         "migration_dry_run",
         "06C data dry-run reconciliation report",
-        ("docs/operations/backend-refactor/migration-dry-run-report-*.md",),
+        (
+            "docs/operations/backend-refactor/migration-dry-run-report-*.md",
+            "docs/operations/backend-refactor/migration-dry-run-report-*.json",
+        ),
         GO_MARKERS,
         "docs/exec-plans/active/backend-refactor-prompts/06c-data-migration-dry-run.md",
     ),
@@ -196,25 +206,23 @@ def evaluate_check(root: Path, check: EvidenceCheck) -> CheckResult:
     if not check.required_text_any and not check.required_text_all:
         return CheckResult(check.check_id, check.label, "passed", evidence, "evidence exists", None)
 
+    evidence_by_stem: dict[str, list[Path]] = {}
     for path in matches:
-        text = read_text(path)
-        structured_decision = read_structured_decision(path, text)
-        if check.check_id == "api_shadow_validation" and path.name.startswith("api-shadow-validation-report-"):
-            if path.suffix.lower() == ".json" and not api_shadow_json_evidence_is_complete(text):
-                structured_decision = "NO_GO"
-        any_marker_ok = not check.required_text_any or any(
-            marker in text for marker in check.required_text_any
-        ) or structured_decision == "GO"
-        all_markers_ok = all(marker in text for marker in check.required_text_all)
-        blocker_ok = not contains_blocker_evidence(text) if check.check_id == "migration_dry_run" else True
-        has_no_go = contains_no_go(text) or structured_decision == "NO_GO"
-        if any_marker_ok and all_markers_ok and not has_no_go and blocker_ok:
+        evidence_by_stem.setdefault(path.stem, []).append(path)
+
+    for stem, paths in sorted(evidence_by_stem.items()):
+        evaluations = [evaluate_evidence_file(path, check.required_text_any, check.required_text_all) for path in paths]
+        if any(not evaluation["usable"] and evaluation["decision"] == "NO_GO" for evaluation in evaluations):
+            continue
+        if len(paths) > 1 and not evidence_files_agree(evaluations):
+            continue
+        if all(evaluation["usable"] and evaluation["decision"] == "GO" for evaluation in evaluations):
             return CheckResult(
                 check.check_id,
                 check.label,
                 "passed",
                 evidence,
-                f"required marker found in {path.relative_to(root)}",
+                f"machine-readable GO evidence found for {stem}",
                 None,
             )
 
@@ -295,25 +303,23 @@ def evaluate_monitoring_alerts_check(
     matches: list[Path],
     evidence: list[str],
 ) -> CheckResult:
+    evidence_by_stem: dict[str, list[Path]] = {}
     for path in matches:
-        text = read_text(path)
-        if path.suffix.lower() == ".json":
-            if monitoring_alert_json_evidence_is_complete(text):
-                return CheckResult(
-                    check.check_id,
-                    check.label,
-                    "passed",
-                    evidence,
-                    f"structured monitoring alert evidence passed in {path.relative_to(root)}",
-                    None,
-                )
-        elif monitoring_alert_markdown_evidence_is_complete(text):
+        evidence_by_stem.setdefault(path.stem, []).append(path)
+
+    for stem, paths in sorted(evidence_by_stem.items()):
+        evaluations = [evaluate_monitoring_alert_evidence_file(path) for path in paths]
+        if any(not evaluation["usable"] and evaluation["decision"] == "NO_GO" for evaluation in evaluations):
+            continue
+        if len(paths) > 1 and not evidence_files_agree(evaluations):
+            continue
+        if all(evaluation["usable"] and evaluation["decision"] == "GO" for evaluation in evaluations):
             return CheckResult(
                 check.check_id,
                 check.label,
                 "passed",
                 evidence,
-                f"monitoring alert report passed in {path.relative_to(root)}",
+                f"monitoring alert evidence passed for {stem}",
                 None,
             )
 
@@ -325,6 +331,24 @@ def evaluate_monitoring_alerts_check(
         "monitoring evidence exists but lacks complete P0/P1 alert verification or has metric gaps",
         check.blocking_prompt,
     )
+
+
+def evaluate_monitoring_alert_evidence_file(path: Path) -> dict[str, object]:
+    text = read_text(path)
+    decision = read_evidence_decision(path, text)
+    blocked = contains_blocker_evidence(text)
+    if path.suffix.lower() == ".json":
+        complete = monitoring_alert_json_evidence_is_complete(text)
+    else:
+        complete = monitoring_alert_markdown_evidence_is_complete(text)
+    usable = decision == "GO" and complete and not blocked
+    if blocked or decision == "NO_GO":
+        decision = "NO_GO"
+    return {
+        "path": path,
+        "decision": decision,
+        "usable": usable,
+    }
 
 
 def monitoring_alert_json_evidence_is_complete(text: str) -> bool:
@@ -340,9 +364,7 @@ def monitoring_alert_json_evidence_is_complete(text: str) -> bool:
         return False
 
     metric_gaps = payload.get("metric_gaps", [])
-    if not isinstance(metric_gaps, list):
-        return False
-    if metric_gaps:
+    if not isinstance(metric_gaps, list) or metric_gaps:
         return False
 
     alerts = payload.get("alerts")
@@ -363,10 +385,7 @@ def monitoring_alert_json_evidence_is_complete(text: str) -> bool:
             return False
         if not required_fields <= set(alert):
             return False
-        normalized = {
-            key: str(alert.get(key) or "").strip()
-            for key in required_fields
-        }
+        normalized = {key: str(alert.get(key) or "").strip() for key in required_fields}
         if any(not value for value in normalized.values()):
             return False
         severity = normalized["severity"].upper()
@@ -379,7 +398,7 @@ def monitoring_alert_json_evidence_is_complete(text: str) -> bool:
 
 
 def monitoring_alert_markdown_evidence_is_complete(text: str) -> bool:
-    if contains_no_go(text):
+    if contains_no_go(text) or contains_blocker_evidence(text):
         return False
     lowered = text.lower()
     required_fragments = (
@@ -397,7 +416,7 @@ def monitoring_alert_markdown_evidence_is_complete(text: str) -> bool:
 def find_matches(root: Path, patterns: Iterable[str]) -> list[Path]:
     matches: list[Path] = []
     for pattern in patterns:
-        matches.extend(path for path in root.glob(pattern) if path.is_file() and not is_template(path))
+        matches.extend(path for path in root.glob(pattern) if path.is_file() and not is_ignored_report(path))
     return sorted(set(matches))
 
 
@@ -405,8 +424,46 @@ def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
-def is_template(path: Path) -> bool:
-    return path.stem.endswith("-template")
+def is_ignored_report(path: Path) -> bool:
+    ignored_markers = ("template", "partial", "scoped")
+    stem_parts = path.stem.lower().replace("_", "-").split("-")
+    return any(marker in stem_parts for marker in ignored_markers)
+
+
+def evaluate_evidence_file(
+    path: Path,
+    required_text_any: tuple[str, ...],
+    required_text_all: tuple[str, ...],
+) -> dict[str, object]:
+    text = read_text(path)
+    decision = read_evidence_decision(path, text)
+    required_any_ok = not required_text_any or any(marker in text for marker in required_text_any) or decision == "GO"
+    required_all_ok = all(marker in text for marker in required_text_all)
+    blocked = contains_blocker_evidence(text)
+    usable = decision == "GO" and required_any_ok and required_all_ok and not blocked
+    if blocked or decision == "NO_GO":
+        decision = "NO_GO"
+    return {
+        "path": path,
+        "decision": decision,
+        "usable": usable,
+    }
+
+
+def evidence_files_agree(evaluations: list[dict[str, object]]) -> bool:
+    decisions = {evaluation["decision"] for evaluation in evaluations}
+    return decisions == {"GO"}
+
+
+def read_evidence_decision(path: Path, text: str) -> str | None:
+    if contains_no_go(text):
+        return "NO_GO"
+    structured_decision = read_structured_decision(path, text)
+    if structured_decision is not None:
+        return structured_decision
+    if any(marker in text for marker in GO_MARKERS):
+        return "GO"
+    return None
 
 
 def read_structured_decision(path: Path, text: str) -> str | None:
@@ -697,14 +754,15 @@ def contains_no_go(text: str) -> bool:
 
 def contains_blocker_evidence(text: str) -> bool:
     normalized = text.lower()
-    if '"blocking": true' in normalized:
+    if re.search(r'"(?:blocking|has_blockers)"\s*:\s*true', normalized):
         return True
-    if "blocking: `true`" in normalized or "| blocking | `true`" in normalized:
+    if re.search(r'\b(?:blocking|has_blockers)\s*:\s*`?true`?', normalized):
         return True
-    if '"has_blockers": true' in normalized:
+    if re.search(r'\|\s*(?:blocking|has_blockers)\s*\|\s*`?true`?\s*\|', normalized):
         return True
-    if '"blocking_findings": 0' not in normalized and '"blocking_findings":' in normalized:
-        return True
+    for match in re.finditer(r'"?blocking_findings"?\s*:\s*`?(\d+)`?', normalized):
+        if int(match.group(1)) > 0:
+            return True
     return False
 
 
