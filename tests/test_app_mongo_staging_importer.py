@@ -12,18 +12,19 @@ from fin_ops_platform.services.app_mongo_staging_importer import (
 )
 
 
-def _write_export(export_dir: Path, *, counts: dict[str, int] | None = None) -> None:
+def _write_export(export_dir: Path, *, counts: dict[str, int] | None = None) -> dict[str, object]:
     export_dir.mkdir(parents=True)
     files = {
-        "bank_transactions": "bank_transactions.ndjson",
-        "invoices": "invoices.ndjson",
+        "bank_transactions": "collections/bank_transactions.ndjson",
+        "invoices": "collections/invoices.ndjson",
         "gridfs-files-manifest": "gridfs-files-manifest.ndjson",
     }
-    manifest = {
+    manifest: dict[str, object] = {
         "tool": "app-mongo-export-v1",
+        "schema_version": 1,
         "source": {"database": "fin_ops_platform_app"},
-        "started_at": "2026-05-16T00:00:00+00:00",
-        "finished_at": "2026-05-16T00:01:00+00:00",
+        "export_started_at": "2026-05-16T00:00:00+00:00",
+        "export_finished_at": "2026-05-16T00:01:00+00:00",
         "output": {"files": files},
         "record_counts": counts
         or {
@@ -34,7 +35,7 @@ def _write_export(export_dir: Path, *, counts: dict[str, int] | None = None) -> 
         "checksums": {},
     }
     rows = {
-        "bank_transactions.ndjson": [
+        "collections/bank_transactions.ndjson": [
             {
                 "legacy_collection": "bank_transactions",
                 "legacy_id": "txn-1",
@@ -48,7 +49,7 @@ def _write_export(export_dir: Path, *, counts: dict[str, int] | None = None) -> 
                 },
             }
         ],
-        "invoices.ndjson": [
+        "collections/invoices.ndjson": [
             {
                 "legacy_collection": "invoices",
                 "legacy_id": "inv-1",
@@ -65,15 +66,18 @@ def _write_export(export_dir: Path, *, counts: dict[str, int] | None = None) -> 
             {
                 "legacy_collection": "import_file_blobs.files",
                 "legacy_id": "file-1",
-                "filename": "bank.xlsx",
-                "length": 42,
-                "sha256": "abc",
-                "sample_sha256": "abc",
+                "payload": {
+                    "filename": "bank.xlsx",
+                    "length": 42,
+                    "sha256": "abc",
+                    "sample_sha256": "abc",
+                },
             }
         ],
     }
     for filename, payload_rows in rows.items():
         path = export_dir / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             "".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in payload_rows),
             encoding="utf-8",
@@ -83,6 +87,7 @@ def _write_export(export_dir: Path, *, counts: dict[str, int] | None = None) -> 
         for filename in rows
     }
     (export_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    return manifest
 
 
 class FakeCursor:
@@ -106,7 +111,25 @@ class FakeConnection:
 
 
 class AppMongoStagingImporterTests(unittest.TestCase):
-    def test_build_plan_uses_migration_run_id_as_manifest_id_and_creates_staging_rows(self) -> None:
+    def test_build_plan_generates_run_id_and_report_go_for_valid_manifest(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            export_dir = Path(temp_dir) / "export"
+            _write_export(export_dir)
+
+            plan = AppMongoStagingImportBuilder().build_plan(export_dir=export_dir)
+
+        self.assertFalse(plan.report.has_blocking_findings)
+        self.assertEqual(plan.report.decision["go_no_go"], "GO")
+        self.assertEqual(plan.manifest_record["id"], plan.migration_run_id)
+        self.assertEqual(plan.report.migration_run_id, plan.migration_run_id)
+        self.assertEqual(plan.report.expected_collection_counts["bank_transactions"], 1)
+        self.assertEqual(plan.report.actual_imported_counts["bank_transactions"], 1)
+        self.assertEqual(plan.report.failed_row_counts, {})
+        self.assertIn("started_at", plan.report.to_dict())
+        self.assertIn("finished_at", plan.report.to_dict())
+        self.assertEqual(len(plan.rows), 3)
+
+    def test_staging_rows_keep_source_location_hash_payload_and_import_status(self) -> None:
         with TemporaryDirectory() as temp_dir:
             export_dir = Path(temp_dir) / "export"
             _write_export(export_dir)
@@ -116,21 +139,21 @@ class AppMongoStagingImporterTests(unittest.TestCase):
                 migration_run_id="11111111-1111-4111-8111-111111111111",
             )
 
-        self.assertFalse(plan.report.has_blocking_findings)
-        self.assertEqual(plan.manifest_record["id"], "11111111-1111-4111-8111-111111111111")
-        self.assertEqual(plan.manifest_record["source_database"], "fin_ops_platform_app")
-        self.assertEqual(len(plan.rows), 3)
-        self.assertTrue(all(row["manifest_id"] == plan.manifest_record["id"] for row in plan.rows))
-        self.assertEqual(plan.rows[0]["status"], "parsed")
-        self.assertIsNot(plan.report.source_metrics, plan.report.actual_metrics)
-        self.assertEqual(plan.report.source_metrics["record_counts"]["bank_transactions"], 1)
-        self.assertEqual(plan.report.actual_metrics["record_counts"]["bank_transactions"], 1)
+        row = next(item for item in plan.rows if item["legacy_collection"] == "bank_transactions")
+        self.assertEqual(row["source_file"], "collections/bank_transactions.ndjson")
+        self.assertEqual(row["source_line"], 1)
+        self.assertEqual(row["import_status"], "parsed")
+        self.assertEqual(row["status"], "parsed")
+        self.assertEqual(row["row_hash"], row["payload_hash"])
+        self.assertEqual(row["raw_payload"]["legacy_id"], "txn-1")
+        self.assertEqual(row["payload"]["_staging_import"]["source_file"], "collections/bank_transactions.ndjson")
+        self.assertEqual(row["payload"]["_staging_import"]["source_line"], 1)
 
-    def test_invalid_ndjson_is_preserved_as_blocking_failure_with_row_location(self) -> None:
+    def test_invalid_ndjson_is_preserved_as_failed_staging_row_and_no_go(self) -> None:
         with TemporaryDirectory() as temp_dir:
             export_dir = Path(temp_dir) / "export"
             _write_export(export_dir, counts={"bank_transactions": 2, "invoices": 1, "gridfs-files-manifest": 1})
-            with (export_dir / "bank_transactions.ndjson").open("a", encoding="utf-8") as handle:
+            with (export_dir / "collections/bank_transactions.ndjson").open("a", encoding="utf-8") as handle:
                 handle.write("{bad json\n")
 
             plan = AppMongoStagingImportBuilder().build_plan(
@@ -139,9 +162,49 @@ class AppMongoStagingImporterTests(unittest.TestCase):
             )
 
         self.assertTrue(plan.report.has_blocking_findings)
-        finding = next(item for item in plan.report.findings if item["code"] == "NDJSON_PARSE_ERROR")
-        self.assertEqual(finding["object_type"], "bank_transactions")
-        self.assertEqual(finding["row_no"], 2)
+        self.assertEqual(plan.report.decision["go_no_go"], "NO_GO")
+        failed_row = next(row for row in plan.rows if row["status"] == "failed")
+        self.assertEqual(failed_row["legacy_collection"], "bank_transactions")
+        self.assertEqual(failed_row["source_line"], 2)
+        self.assertEqual(failed_row["error_code"], "NDJSON_PARSE_ERROR")
+        self.assertIn("raw_line", failed_row["raw_payload"])
+        self.assertEqual(plan.report.failed_row_counts["bank_transactions"], 1)
+        self.assertEqual(plan.report.actual_imported_counts["bank_transactions"], 1)
+
+    def test_manifest_checksum_validation_is_reported_by_input_file(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            export_dir = Path(temp_dir) / "export"
+            _write_export(export_dir)
+            with (export_dir / "collections/invoices.ndjson").open("a", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {"legacy_collection": "invoices", "legacy_id": "inv-2", "payload": {"amount": "2.00"}},
+                        sort_keys=True,
+                    )
+                    + "\n"
+                )
+
+            plan = AppMongoStagingImportBuilder().build_plan(export_dir=export_dir)
+
+        self.assertEqual(plan.report.decision["go_no_go"], "NO_GO")
+        validation = plan.report.input_file_hash_validation["collections/invoices.ndjson"]
+        self.assertFalse(validation["matched"])
+        self.assertIn("FILE_CHECKSUM_MISMATCH", {item["code"] for item in plan.report.findings})
+
+    def test_duplicate_legacy_id_marks_later_row_failed_to_avoid_staging_unique_conflict(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            export_dir = Path(temp_dir) / "export"
+            _write_export(export_dir, counts={"bank_transactions": 2, "invoices": 1, "gridfs-files-manifest": 1})
+            first_line = (export_dir / "collections/bank_transactions.ndjson").read_text(encoding="utf-8")
+            with (export_dir / "collections/bank_transactions.ndjson").open("a", encoding="utf-8") as handle:
+                handle.write(first_line)
+
+            plan = AppMongoStagingImportBuilder().build_plan(export_dir=export_dir)
+
+        self.assertTrue(plan.report.has_blocking_findings)
+        duplicate_row = next(row for row in plan.rows if row["error_code"] == "DUPLICATE_LEGACY_ID")
+        self.assertEqual(duplicate_row["status"], "failed")
+        self.assertTrue(duplicate_row["legacy_id"].startswith("__duplicate__:"))
 
     def test_metric_comparison_blocks_count_and_amount_differences(self) -> None:
         expected = {
@@ -171,32 +234,13 @@ class AppMongoStagingImporterTests(unittest.TestCase):
             _write_export(export_dir)
             records = (export_dir / "gridfs-files-manifest.ndjson").read_text(encoding="utf-8").splitlines()
             row = json.loads(records[0])
-            row["sample_sha256"] = "different"
+            row["payload"]["sample_sha256"] = "different"
             (export_dir / "gridfs-files-manifest.ndjson").write_text(json.dumps(row) + "\n", encoding="utf-8")
 
-            plan = AppMongoStagingImportBuilder().build_plan(
-                export_dir=export_dir,
-                migration_run_id="33333333-3333-4333-8333-333333333333",
-            )
+            plan = AppMongoStagingImportBuilder().build_plan(export_dir=export_dir)
 
         self.assertTrue(plan.report.has_blocking_findings)
         self.assertIn("FILE_CHECKSUM_MISMATCH", {item["code"] for item in plan.report.findings})
-
-    def test_duplicate_legacy_id_blocks_report(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            export_dir = Path(temp_dir) / "export"
-            _write_export(export_dir, counts={"bank_transactions": 2, "invoices": 1, "gridfs-files-manifest": 1})
-            first_line = (export_dir / "bank_transactions.ndjson").read_text(encoding="utf-8")
-            with (export_dir / "bank_transactions.ndjson").open("a", encoding="utf-8") as handle:
-                handle.write(first_line)
-
-            plan = AppMongoStagingImportBuilder().build_plan(
-                export_dir=export_dir,
-                migration_run_id="55555555-5555-4555-8555-555555555555",
-            )
-
-        self.assertTrue(plan.report.has_blocking_findings)
-        self.assertIn("DUPLICATE_LEGACY_ID", {item["code"] for item in plan.report.findings})
 
     def test_executor_writes_only_staging_manifest_and_import_rows(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -214,6 +258,9 @@ class AppMongoStagingImporterTests(unittest.TestCase):
         self.assertIn("staging.mongo_export_manifest", sql)
         self.assertIn("staging.mongo_import_rows", sql)
         self.assertNotIn(" app.", sql)
+        self.assertNotIn("read_model.", sql)
+        self.assertNotIn("job.", sql)
+        self.assertNotIn("audit.", sql)
         self.assertTrue(connection.committed)
 
 

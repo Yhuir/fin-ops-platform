@@ -7,7 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 
 IMPORT_TOOL_VERSION = "app-mongo-staging-import-v1"
@@ -50,13 +50,36 @@ TARGET_TABLE_BY_DATASET = {
 
 @dataclass(slots=True)
 class ValidationReport:
+    migration_run_id: str
+    manifest_id: str
+    started_at: str
+    finished_at: str | None = None
     findings: list[dict[str, Any]] = field(default_factory=list)
+    expected_collection_counts: dict[str, int] = field(default_factory=dict)
+    actual_imported_counts: dict[str, int] = field(default_factory=dict)
+    failed_row_counts: dict[str, int] = field(default_factory=dict)
+    input_file_hash_validation: dict[str, dict[str, Any]] = field(default_factory=dict)
     source_metrics: dict[str, Any] = field(default_factory=dict)
     actual_metrics: dict[str, Any] = field(default_factory=dict)
+    schema_notes: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def has_blocking_findings(self) -> bool:
         return any(item.get("severity") == "error" for item in self.findings)
+
+    @property
+    def decision(self) -> dict[str, str]:
+        if self.has_blocking_findings:
+            return {
+                "go_no_go": "NO_GO",
+                "reason": "Blocking findings exist.",
+                "required_action": "Fix source export, manifest, or staging import blocker and rerun.",
+            }
+        return {
+            "go_no_go": "GO",
+            "reason": "Manifest, file hashes, row parsing, and staging import plan validation passed.",
+            "required_action": "Proceed only to the separate 06C staging-to-facts dry-run gate.",
+        }
 
     def add_finding(
         self,
@@ -67,6 +90,7 @@ class ValidationReport:
         object_type: str | None = None,
         legacy_id: str | None = None,
         row_no: int | None = None,
+        source_file: str | None = None,
         dimension: str | None = None,
         expected: Any = None,
         actual: Any = None,
@@ -80,6 +104,7 @@ class ValidationReport:
             "object_type": object_type,
             "legacy_id": legacy_id,
             "row_no": row_no,
+            "source_file": source_file,
             "dimension": dimension,
             "expected": expected,
             "actual": actual,
@@ -90,60 +115,117 @@ class ValidationReport:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "tool": IMPORT_TOOL_VERSION,
+            "phase": "staging_import",
             "status": "failed" if self.has_blocking_findings else "passed",
             "blocking": self.has_blocking_findings,
-            "findings": self.findings,
+            "migration_run_id": self.migration_run_id,
+            "manifest_id": self.manifest_id,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "expected_collection_counts": self.expected_collection_counts,
+            "actual_imported_counts": self.actual_imported_counts,
+            "failed_row_counts": self.failed_row_counts,
+            "input_file_hash_validation": self.input_file_hash_validation,
             "source_metrics": self.source_metrics,
             "actual_metrics": self.actual_metrics,
+            "schema_notes": self.schema_notes,
+            "findings": self.findings,
+            "decision": self.decision,
         }
 
 
 @dataclass(slots=True)
 class StagingImportPlan:
+    migration_run_id: str
     manifest_record: dict[str, Any]
     rows: list[dict[str, Any]]
+    legacy_id_map_draft: list[dict[str, Any]]
     report: ValidationReport
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "tool": IMPORT_TOOL_VERSION,
+            "migration_run_id": self.migration_run_id,
             "manifest_record": self.manifest_record,
             "rows": self.rows,
+            "legacy_id_map_draft": self.legacy_id_map_draft,
             "report": self.report.to_dict(),
         }
 
 
 class AppMongoStagingImportBuilder:
     def build_plan(self, *, export_dir: Path, migration_run_id: str | None = None) -> StagingImportPlan:
+        started_at = datetime.now(UTC).isoformat()
+        manifest_id = self._coerce_migration_run_id(migration_run_id)
+        report = ValidationReport(migration_run_id=manifest_id, manifest_id=manifest_id, started_at=started_at)
         manifest_path = export_dir / "manifest.json"
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        manifest_id = str(migration_run_id or uuid4())
-        report = ValidationReport()
+        manifest = self._read_manifest(manifest_path=manifest_path, report=report)
         records_by_dataset = self._read_records(export_dir=export_dir, manifest=manifest, report=report)
+        rows = self._build_staging_rows(manifest_id=manifest_id, records_by_dataset=records_by_dataset, report=report)
         metrics = self._build_metric_snapshot(records_by_dataset, report=report)
         report.source_metrics = self._build_manifest_metric_snapshot(manifest)
         report.actual_metrics = metrics
-        self._validate_duplicate_legacy_ids(records_by_dataset=records_by_dataset, report=report)
-        self._validate_manifest_counts(manifest=manifest, metrics=metrics, report=report)
+        report.expected_collection_counts = report.source_metrics.get("record_counts", {})
+        report.actual_imported_counts = self._count_rows_by_status(rows, status="parsed")
+        report.failed_row_counts = self._count_rows_by_status(rows, status="failed")
+        self._validate_manifest_counts(manifest=manifest, records_by_dataset=records_by_dataset, rows=rows, report=report)
         self._validate_manifest_checksums(export_dir=export_dir, manifest=manifest, report=report)
         self._validate_file_checksum_samples(records_by_dataset.get("gridfs-files-manifest", []), report=report)
+        self._add_schema_notes(report)
 
         manifest_record = {
             "id": manifest_id,
             "source_database": str((manifest.get("source") or {}).get("database") or "unknown"),
             "export_name": export_dir.name,
-            "exported_at": manifest.get("finished_at") or manifest.get("started_at") or datetime.now(UTC).isoformat(),
-            "collection_count": len(records_by_dataset),
-            "document_count": sum(len(records) for records in records_by_dataset.values()),
-            "sha256_manifest": self.file_sha256(manifest_path),
-            "storage_uri": str(export_dir),
+            "exported_at": (
+                manifest.get("export_finished_at")
+                or manifest.get("finished_at")
+                or manifest.get("export_started_at")
+                or manifest.get("started_at")
+                or started_at
+            ),
+            "collection_count": len(report.expected_collection_counts),
+            "document_count": sum(report.expected_collection_counts.values()),
+            "sha256_manifest": self.file_sha256(manifest_path) if manifest_path.exists() else "",
+            "storage_uri": export_dir.name,
             "created_by": IMPORT_TOOL_VERSION,
         }
-        rows = self._build_staging_rows(
-            manifest_id=manifest_id,
-            records_by_dataset=records_by_dataset,
+        report.finished_at = datetime.now(UTC).isoformat()
+        legacy_id_map_draft = self._build_legacy_id_map_draft(migration_run_id=manifest_id, rows=rows)
+        return StagingImportPlan(
+            migration_run_id=manifest_id,
+            manifest_record=manifest_record,
+            rows=rows,
+            legacy_id_map_draft=legacy_id_map_draft,
+            report=report,
         )
-        return StagingImportPlan(manifest_record=manifest_record, rows=rows, report=report)
+
+    def _read_manifest(self, *, manifest_path: Path, report: ValidationReport) -> dict[str, Any]:
+        if not manifest_path.exists():
+            report.add_finding(
+                code="MISSING_MANIFEST",
+                message="manifest.json is required in the 06A export directory.",
+                source_file="manifest.json",
+            )
+            return {}
+        try:
+            parsed = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            report.add_finding(
+                code="INVALID_MANIFEST_JSON",
+                message=str(exc),
+                source_file="manifest.json",
+            )
+            return {}
+        if not isinstance(parsed, dict):
+            report.add_finding(
+                code="INVALID_MANIFEST",
+                message="manifest.json must contain a JSON object.",
+                source_file="manifest.json",
+            )
+            return {}
+        return parsed
 
     def _read_records(
         self,
@@ -158,16 +240,19 @@ class AppMongoStagingImportBuilder:
             return {}
 
         records_by_dataset: dict[str, list[dict[str, Any]]] = {}
-        for dataset, filename in sorted(files.items(), key=lambda item: str(item[0])):
-            path = export_dir / str(filename)
-            records_by_dataset[dataset] = []
+        for dataset, filename_value in sorted(files.items(), key=lambda item: str(item[0])):
+            dataset_name = str(dataset)
+            filename = str(filename_value)
+            path = export_dir / filename
+            records_by_dataset[dataset_name] = []
             if not path.exists():
-                expected_count = int((manifest.get("record_counts") or {}).get(dataset) or 0)
+                expected_count = int((manifest.get("record_counts") or {}).get(dataset_name) or 0)
                 if expected_count:
                     report.add_finding(
                         code="MISSING_EXPORT_FILE",
                         message=f"Expected export file is missing: {filename}",
-                        object_type=dataset,
+                        object_type=dataset_name,
+                        source_file=filename,
                         expected=expected_count,
                         actual=0,
                     )
@@ -182,48 +267,138 @@ class AppMongoStagingImportBuilder:
                         report.add_finding(
                             code="NDJSON_PARSE_ERROR",
                             message=str(exc),
-                            object_type=dataset,
+                            object_type=dataset_name,
                             row_no=row_no,
+                            source_file=filename,
+                        )
+                        records_by_dataset[dataset_name].append(
+                            self._failed_raw_record(
+                                dataset=dataset_name,
+                                filename=filename,
+                                row_no=row_no,
+                                raw_line=line.rstrip("\n"),
+                                error_code="NDJSON_PARSE_ERROR",
+                                error_summary=str(exc),
+                            )
                         )
                         continue
                     if not isinstance(parsed, dict):
                         report.add_finding(
                             code="NDJSON_ROW_NOT_OBJECT",
                             message="NDJSON row must be a JSON object.",
-                            object_type=dataset,
+                            object_type=dataset_name,
                             row_no=row_no,
+                            source_file=filename,
+                        )
+                        records_by_dataset[dataset_name].append(
+                            self._failed_raw_record(
+                                dataset=dataset_name,
+                                filename=filename,
+                                row_no=row_no,
+                                raw_line=line.rstrip("\n"),
+                                error_code="NDJSON_ROW_NOT_OBJECT",
+                                error_summary="NDJSON row must be a JSON object.",
+                            )
                         )
                         continue
-                    parsed["_row_no"] = row_no
-                    records_by_dataset[dataset].append(parsed)
+                    parsed["_source_file"] = filename
+                    parsed["_source_line"] = row_no
+                    records_by_dataset[dataset_name].append(parsed)
         return records_by_dataset
+
+    def _failed_raw_record(
+        self,
+        *,
+        dataset: str,
+        filename: str,
+        row_no: int,
+        raw_line: str,
+        error_code: str,
+        error_summary: str,
+    ) -> dict[str, Any]:
+        return {
+            "legacy_collection": dataset,
+            "legacy_id": f"__failed__:{filename}:{row_no}",
+            "payload": {"raw_line": raw_line},
+            "_source_file": filename,
+            "_source_line": row_no,
+            "_import_status": "failed",
+            "_error_code": error_code,
+            "_error_summary": error_summary,
+        }
 
     def _build_staging_rows(
         self,
         *,
         manifest_id: str,
         records_by_dataset: dict[str, list[dict[str, Any]]],
+        report: ValidationReport,
     ) -> list[dict[str, Any]]:
         staging_rows: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
         for dataset, records in sorted(records_by_dataset.items()):
             target_table = TARGET_TABLE_BY_DATASET.get(dataset)
             for record in records:
-                row_no = int(record.get("_row_no") or len(staging_rows) + 1)
-                payload = {
+                row_no = int(record.get("_source_line") or len(staging_rows) + 1)
+                source_file = str(record.get("_source_file") or "")
+                legacy_collection = str(record.get("legacy_collection") or dataset)
+                legacy_id = str(record.get("legacy_id") or f"{dataset}:{row_no}")
+                raw_payload = {
                     key: value
                     for key, value in record.items()
-                    if key != "_row_no"
+                    if not key.startswith("_")
                 }
+                if record.get("_import_status") == "failed" and isinstance(record.get("payload"), dict):
+                    raw_payload = dict(record["payload"])
+                status = str(record.get("_import_status") or "parsed")
+                error_code = record.get("_error_code")
+                error_summary = record.get("_error_summary")
+                if status != "failed":
+                    key = (legacy_collection, legacy_id)
+                    if key in seen:
+                        status = "failed"
+                        error_code = "DUPLICATE_LEGACY_ID"
+                        error_summary = "Duplicate legacy id in export dataset."
+                        report.add_finding(
+                            code="DUPLICATE_LEGACY_ID",
+                            message=error_summary,
+                            object_type=dataset,
+                            legacy_id=legacy_id,
+                            row_no=row_no,
+                            source_file=source_file,
+                        )
+                        legacy_id = f"__duplicate__:{legacy_collection}:{legacy_id}:{row_no}"
+                    else:
+                        seen.add(key)
+                payload = {
+                    **raw_payload,
+                    "_staging_import": {
+                        "source_file": source_file,
+                        "source_line": row_no,
+                        "import_status": status,
+                        "error_code": error_code,
+                        "error_summary": error_summary,
+                    },
+                }
+                row_hash = self.record_sha256(raw_payload)
                 staging_rows.append(
                     {
                         "manifest_id": manifest_id,
-                        "legacy_collection": str(record.get("legacy_collection") or dataset),
-                        "legacy_id": str(record.get("legacy_id") or f"{dataset}:{row_no}"),
+                        "legacy_collection": legacy_collection,
+                        "legacy_id": legacy_id,
                         "row_no": row_no,
                         "payload": payload,
-                        "payload_hash": self.record_sha256(payload),
+                        "raw_payload": raw_payload,
+                        "payload_hash": row_hash,
+                        "row_hash": row_hash,
                         "target_table": target_table,
-                        "status": "parsed",
+                        "status": status,
+                        "import_status": status,
+                        "source_file": source_file,
+                        "source_line": row_no,
+                        "error_code": error_code,
+                        "error_message": error_summary,
+                        "error_summary": error_summary,
                     }
                 )
         return staging_rows
@@ -242,8 +417,9 @@ class AppMongoStagingImportBuilder:
             "file_checksum_samples": [],
         }
         for dataset, records in sorted(records_by_dataset.items()):
-            snapshot["record_counts"][dataset] = len(records)
-            for record in records:
+            parsed_records = [record for record in records if record.get("_import_status") != "failed"]
+            snapshot["record_counts"][dataset] = len(parsed_records)
+            for record in parsed_records:
                 payload = record.get("payload") if isinstance(record.get("payload"), dict) else record
                 legacy_id = str(record.get("legacy_id") or "")
                 self._add_status(snapshot, dataset=dataset, payload=payload)
@@ -268,7 +444,152 @@ class AppMongoStagingImportBuilder:
             },
         }
 
-    def _add_status(self, snapshot: dict[str, Any], *, dataset: str, payload: dict[str, Any]) -> None:
+    def _validate_manifest_counts(
+        self,
+        *,
+        manifest: dict[str, Any],
+        records_by_dataset: dict[str, list[dict[str, Any]]],
+        rows: list[dict[str, Any]],
+        report: ValidationReport,
+    ) -> None:
+        expected_counts = manifest.get("record_counts") or {}
+        for dataset, expected in sorted(expected_counts.items()):
+            total_seen = len(records_by_dataset.get(str(dataset), []))
+            actual_imported = sum(
+                1
+                for row in rows
+                if row["source_file"] == self._filename_for_dataset(manifest, str(dataset)) and row["status"] == "parsed"
+            )
+            if int(expected or 0) != int(total_seen):
+                report.add_finding(
+                    code="COUNT_MISMATCH",
+                    message="Manifest record count does not match NDJSON physical row count.",
+                    object_type=str(dataset),
+                    expected=int(expected or 0),
+                    actual=int(total_seen),
+                )
+            if actual_imported + report.failed_row_counts.get(str(dataset), 0) != int(total_seen):
+                report.add_finding(
+                    code="STAGING_ROW_COUNT_MISMATCH",
+                    message="Parsed plus failed staging rows do not match observed source rows.",
+                    object_type=str(dataset),
+                    expected=int(total_seen),
+                    actual=actual_imported + report.failed_row_counts.get(str(dataset), 0),
+                )
+
+    def _validate_manifest_checksums(
+        self,
+        *,
+        export_dir: Path,
+        manifest: dict[str, Any],
+        report: ValidationReport,
+    ) -> None:
+        checksums = manifest.get("checksums") or {}
+        files = (manifest.get("output") or {}).get("files") or {}
+        for dataset, filename_value in sorted(files.items()):
+            filename = str(filename_value)
+            expected = checksums.get(filename)
+            path = export_dir / filename
+            if not path.exists():
+                continue
+            actual = self.file_sha256(path)
+            validation = {
+                "object_type": str(dataset),
+                "expected_sha256": str(expected) if expected else None,
+                "actual_sha256": actual,
+                "matched": bool(expected and str(expected) == actual),
+            }
+            report.input_file_hash_validation[filename] = validation
+            if not expected:
+                report.add_finding(
+                    code="FILE_CHECKSUM_MISSING",
+                    message="Manifest missing checksum for input file.",
+                    object_type=str(dataset),
+                    source_file=filename,
+                )
+            elif str(expected) != actual:
+                report.add_finding(
+                    code="FILE_CHECKSUM_MISMATCH",
+                    message="Manifest file checksum does not match file content.",
+                    object_type=str(dataset),
+                    source_file=filename,
+                    dimension=filename,
+                    expected=str(expected),
+                    actual=actual,
+                )
+
+    def _validate_file_checksum_samples(self, records: list[dict[str, Any]], *, report: ValidationReport) -> None:
+        for record in records:
+            if record.get("_import_status") == "failed":
+                continue
+            payload = record.get("payload") if isinstance(record.get("payload"), dict) else record
+            expected = payload.get("sha256") or payload.get("expected_sha256")
+            actual = payload.get("sample_sha256") or payload.get("actual_sha256")
+            if expected and actual and expected != actual:
+                report.add_finding(
+                    code="FILE_CHECKSUM_MISMATCH",
+                    message="File checksum sample mismatch.",
+                    object_type="gridfs-files-manifest",
+                    legacy_id=str(record.get("legacy_id") or ""),
+                    row_no=record.get("_source_line"),
+                    source_file=record.get("_source_file"),
+                    expected=expected,
+                    actual=actual,
+                )
+
+    def _build_legacy_id_map_draft(self, *, migration_run_id: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        draft = []
+        for row in rows:
+            if row["status"] != "parsed":
+                continue
+            draft.append(
+                {
+                    "migration_run_id": migration_run_id,
+                    "source_system": "app_mongo",
+                    "legacy_collection": row["legacy_collection"],
+                    "legacy_id": row["legacy_id"],
+                    "payload_hash": row["payload_hash"],
+                    "target_schema": None,
+                    "target_table": row["target_table"],
+                    "target_id": None,
+                    "status": "requires_06c_fact_mapping",
+                }
+            )
+        return draft
+
+    def _add_schema_notes(self, report: ValidationReport) -> None:
+        report.schema_notes.append(
+            {
+                "code": "LEGACY_ID_MAP_DEFERRED_TO_06C",
+                "message": (
+                    "staging.legacy_id_map target_schema, target_table, and target_id require facts mapping; "
+                    "06B emits legacy_id_map_draft but does not write the table."
+                ),
+            }
+        )
+
+    @staticmethod
+    def _coerce_migration_run_id(migration_run_id: str | None) -> str:
+        value = migration_run_id or str(uuid4())
+        return str(UUID(value))
+
+    @staticmethod
+    def _filename_for_dataset(manifest: dict[str, Any], dataset: str) -> str:
+        files = (manifest.get("output") or {}).get("files") or {}
+        return str(files.get(dataset) or "")
+
+    @staticmethod
+    def _count_rows_by_status(rows: list[dict[str, Any]], *, status: str) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for row in rows:
+            if row["status"] != status:
+                continue
+            key = str(row["legacy_collection"])
+            counts[key] = counts.get(key, 0) + 1
+        return counts
+
+    @staticmethod
+    def _add_status(snapshot: dict[str, Any], *, dataset: str, payload: dict[str, Any]) -> None:
         status = payload.get("status")
         if status in (None, ""):
             return
@@ -310,8 +631,8 @@ class AppMongoStagingImportBuilder:
             metric_key = f"{dataset}.{field_name}"
             snapshot["amount_totals"][metric_key] = snapshot["amount_totals"].get(metric_key, Decimal("0")) + amount
 
+    @staticmethod
     def _add_file_checksum_sample(
-        self,
         snapshot: dict[str, Any],
         *,
         dataset: str,
@@ -331,91 +652,6 @@ class AppMongoStagingImportBuilder:
                     "matched": bool(expected and actual and expected == actual),
                 }
             )
-
-    def _validate_manifest_counts(
-        self,
-        *,
-        manifest: dict[str, Any],
-        metrics: dict[str, Any],
-        report: ValidationReport,
-    ) -> None:
-        expected_counts = manifest.get("record_counts") or {}
-        for dataset, expected in sorted(expected_counts.items()):
-            actual = metrics["record_counts"].get(dataset, 0)
-            if int(expected or 0) != int(actual):
-                report.add_finding(
-                    code="COUNT_MISMATCH",
-                    message="Manifest record count does not match NDJSON row count.",
-                    object_type=dataset,
-                    expected=int(expected or 0),
-                    actual=int(actual),
-                )
-
-    def _validate_duplicate_legacy_ids(
-        self,
-        *,
-        records_by_dataset: dict[str, list[dict[str, Any]]],
-        report: ValidationReport,
-    ) -> None:
-        for dataset, records in sorted(records_by_dataset.items()):
-            seen: set[tuple[str, str]] = set()
-            for record in records:
-                key = (
-                    str(record.get("legacy_collection") or dataset),
-                    str(record.get("legacy_id") or ""),
-                )
-                if key[1] == "":
-                    continue
-                if key in seen:
-                    report.add_finding(
-                        code="DUPLICATE_LEGACY_ID",
-                        message="Duplicate legacy id in export dataset.",
-                        object_type=dataset,
-                        legacy_id=key[1],
-                        row_no=record.get("_row_no"),
-                    )
-                    continue
-                seen.add(key)
-
-    def _validate_manifest_checksums(
-        self,
-        *,
-        export_dir: Path,
-        manifest: dict[str, Any],
-        report: ValidationReport,
-    ) -> None:
-        checksums = manifest.get("checksums") or {}
-        files = (manifest.get("output") or {}).get("files") or {}
-        for dataset, filename in sorted(files.items()):
-            expected = checksums.get(filename)
-            path = export_dir / str(filename)
-            if not expected or not path.exists():
-                continue
-            actual = self.file_sha256(path)
-            if str(expected) != actual:
-                report.add_finding(
-                    code="FILE_CHECKSUM_MISMATCH",
-                    message="Manifest file checksum does not match file content.",
-                    object_type=str(dataset),
-                    dimension=str(filename),
-                    expected=str(expected),
-                    actual=actual,
-                )
-
-    def _validate_file_checksum_samples(self, records: list[dict[str, Any]], *, report: ValidationReport) -> None:
-        for record in records:
-            payload = record.get("payload") if isinstance(record.get("payload"), dict) else record
-            expected = payload.get("sha256") or payload.get("expected_sha256")
-            actual = payload.get("sample_sha256") or payload.get("actual_sha256")
-            if expected and actual and expected != actual:
-                report.add_finding(
-                    code="FILE_CHECKSUM_MISMATCH",
-                    message="File checksum sample mismatch.",
-                    object_type="gridfs-files-manifest",
-                    legacy_id=str(record.get("legacy_id") or ""),
-                    expected=expected,
-                    actual=actual,
-                )
 
     @staticmethod
     def _extract_month(*, dataset: str, payload: dict[str, Any]) -> str | None:
@@ -449,7 +685,15 @@ class AppMongoStagingImportBuilder:
 
 
 def compare_metric_snapshots(expected: dict[str, Any], actual: dict[str, Any]) -> ValidationReport:
-    report = ValidationReport(source_metrics=expected, actual_metrics=actual)
+    now = datetime.now(UTC).isoformat()
+    report = ValidationReport(
+        migration_run_id="00000000-0000-4000-8000-000000000000",
+        manifest_id="00000000-0000-4000-8000-000000000000",
+        started_at=now,
+        finished_at=now,
+        source_metrics=expected,
+        actual_metrics=actual,
+    )
     _compare_mapping(
         report,
         code="COUNT_MISMATCH",
@@ -569,8 +813,10 @@ class StagingImportExecutor:
                   payload,
                   payload_hash,
                   target_table,
-                  status
-                ) values (%s, %s, %s, %s, %s::jsonb, %s, %s, %s)
+                  status,
+                  error_code,
+                  error_message
+                ) values (%s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s)
                 """,
                 (
                     row["manifest_id"],
@@ -581,6 +827,8 @@ class StagingImportExecutor:
                     row["payload_hash"],
                     row["target_table"],
                     row["status"],
+                    row["error_code"],
+                    row["error_message"],
                 ),
             )
         connection.commit()
