@@ -31,6 +31,30 @@ API_SHADOW_SOURCE_CATEGORY_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 API_SHADOW_APP_MONGO_HINTS = ("app mongo", "mongo")
 API_SHADOW_NEGATIVE_SOURCE_HINTS = ("no ", "not ", "without ", "does not ", "doesn't ", "不得", "不", "未")
+LOAD_TEST_REQUIRED_SCENARIOS = {
+    "healthz",
+    "readyz",
+    "workbench_month_read_model",
+    "search",
+    "task_status",
+    "import_metadata",
+    "cost_read_model",
+    "tax_read_model",
+}
+LOAD_TEST_REQUIRED_TOP_LEVEL_FIELDS = {
+    "start_time",
+    "end_time",
+    "dataset_scale",
+    "request_count",
+    "concurrency",
+    "latency_ms",
+    "error_rate",
+    "db_pool_stats",
+    "nats_outbox_backlog",
+    "worker_lag_seconds",
+    "read_model_stale_seconds",
+    "scenarios",
+}
 
 
 @dataclass(frozen=True)
@@ -203,6 +227,9 @@ def evaluate_check(root: Path, check: EvidenceCheck) -> CheckResult:
     if check.check_id == "monitoring_alerts":
         return evaluate_monitoring_alerts_check(root, check, matches, evidence)
 
+    if check.check_id == "load_test":
+        return evaluate_load_test_check(root, check, matches, evidence)
+
     if not check.required_text_any and not check.required_text_all:
         return CheckResult(check.check_id, check.label, "passed", evidence, "evidence exists", None)
 
@@ -349,6 +376,63 @@ def evaluate_monitoring_alert_evidence_file(path: Path) -> dict[str, object]:
         "decision": decision,
         "usable": usable,
     }
+
+
+def evaluate_load_test_check(
+    root: Path,
+    check: EvidenceCheck,
+    matches: list[Path],
+    evidence: list[str],
+) -> CheckResult:
+    load_json_by_stem = {
+        path.stem: path
+        for path in matches
+        if path.name.startswith("load-test-baseline-") and path.suffix.lower() == ".json"
+    }
+    load_markdown_by_stem = {
+        path.stem: path
+        for path in matches
+        if path.name.startswith("load-test-baseline-") and path.suffix.lower() == ".md"
+    }
+    paired_stems = sorted(set(load_json_by_stem) & set(load_markdown_by_stem))
+    if not paired_stems:
+        return CheckResult(
+            check.check_id,
+            check.label,
+            "failed",
+            evidence,
+            "load test baseline requires matching JSON and Markdown reports",
+            check.blocking_prompt,
+        )
+
+    for stem in paired_stems:
+        json_path = load_json_by_stem[stem]
+        markdown_path = load_markdown_by_stem[stem]
+        json_text = read_text(json_path)
+        markdown_text = read_text(markdown_path)
+        json_go = load_test_json_evidence_is_complete(json_text)
+        markdown_go = (
+            read_evidence_decision(markdown_path, markdown_text) == "GO"
+            and not contains_blocker_evidence(markdown_text)
+        )
+        if json_go and markdown_go:
+            return CheckResult(
+                check.check_id,
+                check.label,
+                "passed",
+                evidence,
+                f"paired load test baseline reports passed for {stem}",
+                None,
+            )
+
+    return CheckResult(
+        check.check_id,
+        check.label,
+        "failed",
+        evidence,
+        "paired load test baseline reports exist but no pair has complete GO JSON and GO Markdown evidence",
+        check.blocking_prompt,
+    )
 
 
 def monitoring_alert_json_evidence_is_complete(text: str) -> bool:
@@ -531,6 +615,90 @@ def extract_json_decision(payload: dict[str, object]) -> str | None:
     if normalized and normalized <= {"GO"}:
         return "GO"
     return None
+
+
+def load_test_json_evidence_is_complete(text: str) -> bool:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("status") != "GO":
+        return False
+    if contains_no_go(text) or contains_blocker_evidence(text):
+        return False
+    if not LOAD_TEST_REQUIRED_TOP_LEVEL_FIELDS <= set(payload):
+        return False
+    if not isinstance(payload.get("start_time"), str) or not payload["start_time"].strip():
+        return False
+    if not isinstance(payload.get("end_time"), str) or not payload["end_time"].strip():
+        return False
+    if not isinstance(payload.get("dataset_scale"), dict) or not payload["dataset_scale"]:
+        return False
+    request_count = payload.get("request_count")
+    concurrency = payload.get("concurrency")
+    error_rate = payload.get("error_rate")
+    if not isinstance(request_count, int) or request_count <= 0:
+        return False
+    if not isinstance(concurrency, int) or concurrency <= 0:
+        return False
+    if not load_test_error_rate_is_valid(error_rate):
+        return False
+    if not load_test_latency_is_valid(payload.get("latency_ms")):
+        return False
+    for metric_key in (
+        "db_pool_stats",
+        "nats_outbox_backlog",
+        "worker_lag_seconds",
+        "read_model_stale_seconds",
+    ):
+        if not isinstance(payload.get(metric_key), dict):
+            return False
+    scenarios = payload.get("scenarios")
+    if not isinstance(scenarios, list) or not scenarios:
+        return False
+    scenario_ids: set[str] = set()
+    scenario_request_total = 0
+    for scenario in scenarios:
+        if not isinstance(scenario, dict):
+            return False
+        scenario_id = scenario.get("id")
+        if not isinstance(scenario_id, str) or not scenario_id:
+            return False
+        scenario_ids.add(scenario_id)
+        if scenario.get("status") != "GO":
+            return False
+        path = scenario.get("path")
+        if not isinstance(path, str) or not path.startswith("/"):
+            return False
+        scenario_request_count = scenario.get("request_count")
+        if not isinstance(scenario_request_count, int) or scenario_request_count <= 0:
+            return False
+        scenario_request_total += scenario_request_count
+        if not load_test_latency_is_valid(scenario.get("latency_ms")):
+            return False
+        if not load_test_error_rate_is_valid(scenario.get("error_rate")):
+            return False
+    if not LOAD_TEST_REQUIRED_SCENARIOS <= scenario_ids:
+        return False
+    return scenario_request_total == request_count
+
+
+def load_test_latency_is_valid(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    percentiles: list[float] = []
+    for key in ("p50", "p95", "p99"):
+        raw = value.get(key)
+        if not isinstance(raw, (int, float)) or isinstance(raw, bool) or raw < 0:
+            return False
+        percentiles.append(float(raw))
+    return percentiles[0] <= percentiles[1] <= percentiles[2]
+
+
+def load_test_error_rate_is_valid(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1
 
 
 def api_shadow_json_evidence_is_complete(text: str) -> bool:

@@ -7,10 +7,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = ROOT / "scripts" / "tools" / "backend_refactor_readiness_gate.py"
+LOAD_TEST_SCRIPT_PATH = ROOT / "scripts" / "tools" / "backend_refactor_load_test.py"
 
 
 def load_gate_module():
     spec = importlib.util.spec_from_file_location("backend_refactor_readiness_gate", SCRIPT_PATH)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_load_test_module():
+    spec = importlib.util.spec_from_file_location("backend_refactor_load_test", LOAD_TEST_SCRIPT_PATH)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -126,7 +137,42 @@ def test_readiness_gate_passes_only_when_all_required_evidence_is_go(tmp_path: P
   ]
 }
 """,
-        "docs/operations/backend-refactor/load-test-baseline-20260516.md": go_report,
+        "docs/operations/backend-refactor/load-test-baseline-20260516.md": (
+            "# load-test-baseline-20260516\n\n- Gate: **GO**\n"
+        ),
+        "docs/operations/backend-refactor/load-test-baseline-20260516.json": """
+{
+  "report": "load-test-baseline-20260516",
+  "status": "GO",
+  "start_time": "2026-05-16T10:00:00+08:00",
+  "end_time": "2026-05-16T10:15:00+08:00",
+  "dataset_scale": {
+    "label": "staging-medium",
+    "months": ["2026-04"],
+    "bank_transactions": 100000,
+    "invoice_rows": 100000,
+    "search_rows": 1000000
+  },
+  "request_count": 8000,
+  "concurrency": 16,
+  "latency_ms": {"p50": 40.0, "p95": 220.0, "p99": 410.0},
+  "error_rate": 0.0,
+  "db_pool_stats": {"available": true, "max_connections": 20, "in_use": 8},
+  "nats_outbox_backlog": {"available": true, "pending": 0},
+  "worker_lag_seconds": {"available": true, "max": 2.0},
+  "read_model_stale_seconds": {"available": true, "max": 4.0},
+  "scenarios": [
+    {"id": "healthz", "path": "/healthz", "status": "GO", "request_count": 1000, "latency_ms": {"p50": 3.0, "p95": 8.0, "p99": 12.0}, "error_rate": 0.0},
+    {"id": "readyz", "path": "/readyz", "status": "GO", "request_count": 1000, "latency_ms": {"p50": 5.0, "p95": 12.0, "p99": 18.0}, "error_rate": 0.0},
+    {"id": "workbench_month_read_model", "path": "/api/workbench?month=2026-04", "status": "GO", "request_count": 1000, "latency_ms": {"p50": 80.0, "p95": 220.0, "p99": 320.0}, "error_rate": 0.0},
+    {"id": "search", "path": "/api/search?q=PROJECT", "status": "GO", "request_count": 1000, "latency_ms": {"p50": 90.0, "p95": 260.0, "p99": 380.0}, "error_rate": 0.0},
+    {"id": "task_status", "path": "/api/background-jobs/sample", "status": "GO", "request_count": 1000, "latency_ms": {"p50": 30.0, "p95": 120.0, "p99": 180.0}, "error_rate": 0.0},
+    {"id": "import_metadata", "path": "/imports/files/sample", "status": "GO", "request_count": 1000, "latency_ms": {"p50": 35.0, "p95": 130.0, "p99": 190.0}, "error_rate": 0.0},
+    {"id": "cost_read_model", "path": "/api/cost-statistics?month=2026-04", "status": "GO", "request_count": 1000, "latency_ms": {"p50": 70.0, "p95": 210.0, "p99": 300.0}, "error_rate": 0.0},
+    {"id": "tax_read_model", "path": "/api/tax-offset?month=2026-04", "status": "GO", "request_count": 1000, "latency_ms": {"p50": 70.0, "p95": 210.0, "p99": 300.0}, "error_rate": 0.0}
+  ]
+}
+""",
         "docs/operations/backend-refactor/rollback-drill-record-20260516.md": go_report,
     }
     for relative_path, text in evidence_files.items():
@@ -1199,3 +1245,143 @@ def test_api_shadow_validation_rejects_json_with_failed_fixture_validation(tmp_p
 
     assert report["status"] == "NO_GO"
     assert report["checks"][0]["status"] == "failed"
+
+
+def test_load_test_accepts_paired_generated_json_and_markdown_go_report(
+    tmp_path: Path,
+) -> None:
+    gate = load_gate_module()
+
+    write_evidence(
+        tmp_path,
+        "docs/operations/backend-refactor/load-test-baseline-20260517.json",
+        """
+{
+  "report": "load-test-baseline-20260517",
+  "status": "GO",
+  "start_time": "2026-05-17T09:00:00+08:00",
+  "end_time": "2026-05-17T09:20:00+08:00",
+  "dataset_scale": {
+    "label": "staging-medium",
+    "months": ["2026-04"],
+    "bank_transactions": 100000,
+    "invoice_rows": 100000,
+    "search_rows": 1000000
+  },
+  "request_count": 8000,
+  "concurrency": 16,
+  "latency_ms": {"p50": 40.0, "p95": 220.0, "p99": 410.0},
+  "error_rate": 0.0,
+  "db_pool_stats": {"available": true, "max_connections": 20, "in_use": 8},
+  "nats_outbox_backlog": {"available": true, "pending": 0},
+  "worker_lag_seconds": {"available": true, "max": 2.0},
+  "read_model_stale_seconds": {"available": true, "max": 4.0},
+  "scenarios": [
+    {"id": "healthz", "path": "/healthz", "status": "GO", "request_count": 1000, "latency_ms": {"p50": 3.0, "p95": 8.0, "p99": 12.0}, "error_rate": 0.0},
+    {"id": "readyz", "path": "/readyz", "status": "GO", "request_count": 1000, "latency_ms": {"p50": 5.0, "p95": 12.0, "p99": 18.0}, "error_rate": 0.0},
+    {"id": "workbench_month_read_model", "path": "/api/workbench?month=2026-04", "status": "GO", "request_count": 1000, "latency_ms": {"p50": 80.0, "p95": 220.0, "p99": 320.0}, "error_rate": 0.0},
+    {"id": "search", "path": "/api/search?q=PROJECT", "status": "GO", "request_count": 1000, "latency_ms": {"p50": 90.0, "p95": 260.0, "p99": 380.0}, "error_rate": 0.0},
+    {"id": "task_status", "path": "/api/background-jobs/sample", "status": "GO", "request_count": 1000, "latency_ms": {"p50": 30.0, "p95": 120.0, "p99": 180.0}, "error_rate": 0.0},
+    {"id": "import_metadata", "path": "/imports/files/sample", "status": "GO", "request_count": 1000, "latency_ms": {"p50": 35.0, "p95": 130.0, "p99": 190.0}, "error_rate": 0.0},
+    {"id": "cost_read_model", "path": "/api/cost-statistics?month=2026-04", "status": "GO", "request_count": 1000, "latency_ms": {"p50": 70.0, "p95": 210.0, "p99": 300.0}, "error_rate": 0.0},
+    {"id": "tax_read_model", "path": "/api/tax-offset?month=2026-04", "status": "GO", "request_count": 1000, "latency_ms": {"p50": 70.0, "p95": 210.0, "p99": 300.0}, "error_rate": 0.0}
+  ]
+}
+""",
+    )
+    write_evidence(
+        tmp_path,
+        "docs/operations/backend-refactor/load-test-baseline-20260517.md",
+        """
+# load-test-baseline-20260517
+
+- Gate: **GO**
+""",
+    )
+
+    report = gate.evaluate(tmp_path, checks=(gate.DEFAULT_CHECKS[8],))
+
+    assert report["status"] == "GO"
+    assert report["checks"][0]["status"] == "passed"
+
+
+def test_load_test_rejects_markdown_go_without_matching_json_report(tmp_path: Path) -> None:
+    gate = load_gate_module()
+
+    write_evidence(
+        tmp_path,
+        "docs/operations/backend-refactor/load-test-baseline-20260517.md",
+        """
+# load-test-baseline-20260517
+
+- Gate: **GO**
+""",
+    )
+
+    report = gate.evaluate(tmp_path, checks=(gate.DEFAULT_CHECKS[8],))
+
+    assert report["status"] == "NO_GO"
+    assert report["checks"][0]["status"] == "failed"
+
+
+def test_load_test_rejects_go_json_missing_required_scenario(tmp_path: Path) -> None:
+    gate = load_gate_module()
+
+    write_evidence(
+        tmp_path,
+        "docs/operations/backend-refactor/load-test-baseline-20260517.json",
+        """
+{
+  "report": "load-test-baseline-20260517",
+  "status": "GO",
+  "start_time": "2026-05-17T09:00:00+08:00",
+  "end_time": "2026-05-17T09:20:00+08:00",
+  "dataset_scale": {"label": "staging-medium"},
+  "request_count": 1000,
+  "concurrency": 16,
+  "latency_ms": {"p50": 40.0, "p95": 220.0, "p99": 410.0},
+  "error_rate": 0.0,
+  "db_pool_stats": {"available": false},
+  "nats_outbox_backlog": {"available": false},
+  "worker_lag_seconds": {"available": false},
+  "read_model_stale_seconds": {"available": false},
+  "scenarios": [
+    {"id": "healthz", "path": "/healthz", "status": "GO", "request_count": 1000, "latency_ms": {"p50": 3.0, "p95": 8.0, "p99": 12.0}, "error_rate": 0.0}
+  ]
+}
+""",
+    )
+    write_evidence(
+        tmp_path,
+        "docs/operations/backend-refactor/load-test-baseline-20260517.md",
+        """
+# load-test-baseline-20260517
+
+- Gate: **GO**
+""",
+    )
+
+    report = gate.evaluate(tmp_path, checks=(gate.DEFAULT_CHECKS[8],))
+
+    assert report["status"] == "NO_GO"
+    assert report["checks"][0]["status"] == "failed"
+
+
+def test_load_test_tool_default_scenarios_cover_required_read_paths() -> None:
+    tool = load_load_test_module()
+
+    scenario_ids = {scenario.scenario_id for scenario in tool.DEFAULT_SCENARIOS}
+
+    assert tool.REQUIRED_SCENARIO_IDS <= scenario_ids
+    assert all("oa" not in scenario.path_template.lower() for scenario in tool.DEFAULT_SCENARIOS)
+
+
+def test_load_test_tool_validation_rejects_missing_staging_url_and_token() -> None:
+    tool = load_load_test_module()
+
+    args = tool.parse_args(["--dry-run"])
+    config = tool.build_config(args, env={})
+    errors = tool.validate_config(config)
+
+    assert any("FIN_OPS_STAGING_BASE_URL" in error for error in errors)
+    assert any("FIN_OPS_STAGING_AUTH_TOKEN" in error for error in errors)
