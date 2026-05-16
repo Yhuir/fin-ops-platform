@@ -38,12 +38,14 @@ class WorkbenchSpecialPairRuleServiceTests(unittest.TestCase):
 
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0]["rule_code"], SALARY_PERSONAL_AUTO_MATCH)
-        self.assertEqual(candidates[0]["status"], "auto_closed")
+        self.assertEqual(candidates[0]["status"], "suppressed")
         self.assertIn("工资", candidates[0]["tags"])
         self.assertEqual(
             candidates[0]["special_metadata"]["evidence"]["suggested_action_code"],
             "auto_close_salary_payment",
         )
+        self.assertTrue(candidates[0]["special_metadata"]["no_oa_managed"])
+        self.assertEqual(candidates[0]["special_metadata"]["managed_batch_type"], "salary")
 
     def test_detects_internal_transfer_by_company_identity_without_exact_name_equality(self) -> None:
         candidates = self.service.generate_candidates(

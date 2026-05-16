@@ -462,6 +462,7 @@ class ApplicationStateStore:
             loaded = {}
         cache_payload = loaded if isinstance(loaded, dict) else {}
         cache_payload[normalized_cache_key] = self._serialize_value(normalized_payload)
+        self._oa_attachment_invoice_cache_path.parent.mkdir(parents=True, exist_ok=True)
         self._oa_attachment_invoice_cache_path.write_text(
             json.dumps(cache_payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
@@ -1619,6 +1620,7 @@ class ApplicationStateStore:
         except json.JSONDecodeError:
             loaded = {}
         entry_count = len(loaded) if isinstance(loaded, dict) else 0
+        self._oa_attachment_invoice_cache_path.parent.mkdir(parents=True, exist_ok=True)
         self._oa_attachment_invoice_cache_path.write_text("{}", encoding="utf-8")
         return entry_count
 

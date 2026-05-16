@@ -541,6 +541,13 @@ class ImportNormalizationService:
         txn_date = self._parse_date(raw_row.get("txn_date"))
         if txn_date is not None:
             normalized["txn_date"] = txn_date
+            has_legacy_bank_narrative = bool(normalized.get("summary") or normalized.get("remark"))
+            if (
+                has_legacy_bank_narrative
+                and not normalized.get("trade_time")
+                and not normalized.get("pay_receive_time")
+            ):
+                normalized["trade_time"] = f"{txn_date} 00:00:00"
 
         booked_date = self._parse_date(raw_row.get("booked_date"))
         if booked_date is not None:

@@ -1368,6 +1368,23 @@ class MongoOAAdapter(OAAdapter):
         for file_entry in files:
             cache_key = self._attachment_invoice_cache_key(file_entry)
             cached_entry = cache.load_oa_attachment_invoice_cache_entry(cache_key)
+            if not self._is_current_attachment_invoice_cache_entry(cached_entry):
+                migrated_entry = self._migrate_cached_attachment_invoice_entry(
+                    cached_entry,
+                    file_entry=file_entry,
+                    cache_key=cache_key,
+                )
+                if migrated_entry is None:
+                    legacy_cache_key = self._legacy_attachment_invoice_cache_key(file_entry)
+                    if legacy_cache_key != cache_key:
+                        migrated_entry = self._migrate_cached_attachment_invoice_entry(
+                            cache.load_oa_attachment_invoice_cache_entry(legacy_cache_key),
+                            file_entry=file_entry,
+                            cache_key=cache_key,
+                        )
+                if migrated_entry is not None:
+                    cache.save_oa_attachment_invoice_cache_entry(cache_key, migrated_entry)
+                    cached_entry = migrated_entry
             if self._is_current_attachment_invoice_cache_entry(cached_entry):
                 normalized_entry, changed = self._normalize_attachment_invoice_cache_entry(cached_entry)
                 if changed:
@@ -1498,6 +1515,69 @@ class MongoOAAdapter(OAAdapter):
         }
         raw_fingerprint = json.dumps(fingerprint, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(raw_fingerprint.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _legacy_attachment_invoice_cache_key(cls, file_entry: dict[str, object]) -> str:
+        legacy_file_entry = {
+            key: value
+            for key, value in dict(file_entry).items()
+            if key != ATTACHMENT_INVOICE_SOURCE_CONTEXT_KEY
+        }
+        return cls._attachment_invoice_cache_key(legacy_file_entry)
+
+    @classmethod
+    def _migrate_cached_attachment_invoice_entry(
+        cls,
+        entry: object,
+        *,
+        file_entry: dict[str, object],
+        cache_key: str,
+    ) -> dict[str, object] | None:
+        if not isinstance(entry, dict):
+            return None
+        parser_version = clean_string(entry.get("parser_version") or "")
+        if parser_version != OAAttachmentInvoiceService.PARSER_VERSION:
+            return None
+        raw_invoices = entry.get("invoices")
+        raw_evidences = entry.get("evidences")
+        raw_artifacts = entry.get("artifacts")
+        source_evidences = raw_evidences if isinstance(raw_evidences, list) else raw_invoices
+        if not isinstance(source_evidences, list):
+            source_evidences = []
+        source_invoices = raw_invoices if isinstance(raw_invoices, list) else source_evidences
+        if not isinstance(source_invoices, list):
+            source_invoices = []
+
+        evidences = [
+            cls._normalize_parsed_attachment_evidence(evidence, file_entry=file_entry)
+            for evidence in source_evidences
+            if isinstance(evidence, dict)
+        ]
+        invoices = [
+            cls._normalize_parsed_attachment_invoice(invoice, file_entry=file_entry)
+            for invoice in source_invoices
+            if isinstance(invoice, dict)
+        ]
+        if not evidences and invoices:
+            evidences = [dict(invoice) for invoice in invoices]
+        artifacts = [
+            cls._normalize_parsed_attachment_evidence(artifact, file_entry=file_entry)
+            for artifact in (raw_artifacts if isinstance(raw_artifacts, list) else [])
+            if isinstance(artifact, dict)
+        ]
+        if not artifacts:
+            artifacts = [cls._attachment_artifact_for_file(file_entry, evidences=evidences)]
+        if not evidences and not invoices and not artifacts:
+            return None
+        return {
+            "cache_key": cache_key,
+            "parser_version": cls._attachment_invoice_cache_parser_version(),
+            "cache_schema_version": ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION,
+            "evidences": evidences,
+            "invoices": invoices,
+            "artifacts": artifacts,
+            "parsed_at": clean_string(entry.get("parsed_at") or "") or datetime.now().isoformat(),
+        }
 
     @classmethod
     def _attachment_invoice_source_fields(cls, file_entry: dict[str, object]) -> dict[str, str]:
