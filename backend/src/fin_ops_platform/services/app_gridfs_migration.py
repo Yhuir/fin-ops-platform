@@ -7,7 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 import uuid
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from fin_ops_platform.services.state_store import (
     GRIDFS_BUCKET_NAME,
@@ -18,6 +18,7 @@ from fin_ops_platform.services.state_store import (
 GRIDFS_MIGRATION_TOOL_VERSION = "app-gridfs-minio-migration-v1"
 GRIDFS_FILE_OBJECT_NAMESPACE = uuid.UUID("19d5a545-25ce-4e7d-9a99-b9bffab8ff75")
 GRIDFS_IMPORT_FILE_NAMESPACE = uuid.UUID("a4d21d3c-6224-4dd9-b4d4-5cf4a5fc72e3")
+GridFSMigrationMode = Literal["dry-run", "upload", "verify"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,15 +169,18 @@ class AppGridFSToObjectStorageMigrator:
         bucket: str,
         environment: str,
         output_dir: Path,
-        dry_run: bool = True,
+        mode: GridFSMigrationMode | str | None = None,
+        dry_run: bool | None = None,
         storage_provider: str = "minio",
         sample_size: int = 20,
         max_workers: int = 1,
         max_retries: int = 3,
     ) -> AppGridFSMigrationResult:
         self._ensure_app_gridfs_store()
-        if not dry_run and self._object_storage is None:
-            raise RuntimeError("object storage client is required when dry_run is false.")
+        migration_mode = self._resolve_mode(mode=mode, dry_run=dry_run)
+        is_dry_run = migration_mode == "dry-run"
+        if not is_dry_run and self._object_storage is None:
+            raise RuntimeError("object storage client is required for upload or verify GridFS migration modes.")
 
         started_at = datetime.now(UTC)
         records = self._list_gridfs_records()
@@ -188,7 +192,7 @@ class AppGridFSToObjectStorageMigrator:
                             record,
                             bucket=bucket,
                             environment=environment,
-                            dry_run=dry_run,
+                            mode=migration_mode,
                             storage_provider=storage_provider,
                             max_retries=max_retries,
                         ),
@@ -201,7 +205,7 @@ class AppGridFSToObjectStorageMigrator:
                     record,
                     bucket=bucket,
                     environment=environment,
-                    dry_run=dry_run,
+                    mode=migration_mode,
                     storage_provider=storage_provider,
                     max_retries=max_retries,
                 )
@@ -212,21 +216,33 @@ class AppGridFSToObjectStorageMigrator:
         for file_entry in files:
             file_findings = file_entry.pop("_findings", [])
             if file_findings:
-                file_entry["status"] = "failed"
+                self._mark_file_failed(file_entry, file_findings[0])
             findings.extend(file_findings)
 
         sample_summary = self._validate_checksum_samples(
             files,
             sample_size=sample_size,
-            dry_run=dry_run,
+            dry_run=is_dry_run,
             max_retries=max_retries,
             findings=findings,
         )
-        summary = self._build_summary(files, sample_summary=sample_summary, dry_run=dry_run, findings=findings)
-        readiness_gate = self._file_checksum_gate(files, sample_summary=sample_summary, dry_run=dry_run, findings=findings)
+        summary = self._build_summary(
+            files,
+            sample_summary=sample_summary,
+            dry_run=is_dry_run,
+            mode=migration_mode,
+            findings=findings,
+        )
+        readiness_gate = self._file_checksum_gate(
+            files,
+            sample_summary=sample_summary,
+            dry_run=is_dry_run,
+            findings=findings,
+        )
         manifest = {
             "tool": GRIDFS_MIGRATION_TOOL_VERSION,
-            "dry_run": dry_run,
+            "mode": migration_mode,
+            "dry_run": is_dry_run,
             "started_at": started_at.isoformat(),
             "finished_at": datetime.now(UTC).isoformat(),
             "source": {
@@ -265,6 +281,8 @@ class AppGridFSToObjectStorageMigrator:
         for document in sorted(files_collection.find({}), key=lambda item: str(item.get("_id", ""))):
             metadata = dict(document.get("metadata") or {})
             file_id = str(document.get("_id", ""))
+            content_type = document.get("contentType") or metadata.get("content_type")
+            content_type_status = "provided" if content_type else "defaulted"
             records.append(
                 {
                     "legacy_gridfs_id": file_id,
@@ -273,7 +291,8 @@ class AppGridFSToObjectStorageMigrator:
                     "byte_size": int(document.get("length") or 0),
                     "chunk_size": document.get("chunkSize"),
                     "chunk_count": chunks_collection.count_documents({"files_id": document.get("_id")}),
-                    "content_type": document.get("contentType") or metadata.get("content_type"),
+                    "content_type": content_type or "application/octet-stream",
+                    "content_type_status": content_type_status,
                     "upload_date": self._serialize_value(document.get("uploadDate")),
                     "metadata": self._serialize_value(metadata),
                     "purpose": self._classify_purpose(file_id, metadata),
@@ -287,7 +306,7 @@ class AppGridFSToObjectStorageMigrator:
         *,
         bucket: str,
         environment: str,
-        dry_run: bool,
+        mode: GridFSMigrationMode,
         storage_provider: str,
         max_retries: int,
     ) -> dict[str, Any]:
@@ -332,10 +351,13 @@ class AppGridFSToObjectStorageMigrator:
                 }
             )
 
-        if not dry_run:
+        if mode in {"upload", "verify"}:
             try:
                 existing = self._with_retries(
-                    lambda: self._object_storage.head_object(bucket=bucket, object_key=object_key),  # type: ignore[union-attr]
+                    lambda: self._object_storage.head_object(  # type: ignore[union-attr]
+                        bucket=bucket,
+                        object_key=object_key,
+                    ),
                     max_retries=max_retries,
                 )
             except Exception as exc:
@@ -353,6 +375,33 @@ class AppGridFSToObjectStorageMigrator:
                 )
             if existing is not None and existing.sha256 == sha256:
                 status = "skipped_existing"
+                etag = existing.etag
+                object_version = existing.version_id
+            elif mode == "verify":
+                if existing is None:
+                    return self._failed_file_entry(
+                        record,
+                        bucket=bucket,
+                        object_key=object_key,
+                        file_object_id=file_object_id,
+                        storage_provider=storage_provider,
+                        code="OBJECT_NOT_FOUND",
+                        message="Target object is missing during verify mode.",
+                        sha256=sha256,
+                        byte_size=byte_size,
+                    )
+                findings.append(
+                    {
+                        "severity": "error",
+                        "code": "FILE_CHECKSUM_MISMATCH",
+                        "legacy_gridfs_id": legacy_gridfs_id,
+                        "file_object_id": file_object_id,
+                        "expected": sha256,
+                        "actual": existing.sha256,
+                        "message": "Target object metadata sha256 differs from source GridFS checksum.",
+                    }
+                )
+                status = "failed"
                 etag = existing.etag
                 object_version = existing.version_id
             else:
@@ -390,24 +439,69 @@ class AppGridFSToObjectStorageMigrator:
                 etag = put_result.etag
                 object_version = put_result.version_id
 
+        return self._file_entry(
+            record,
+            bucket=bucket,
+            object_key=object_key,
+            file_object_id=file_object_id,
+            storage_provider=storage_provider,
+            object_version=object_version,
+            byte_size=byte_size,
+            sha256=sha256,
+            etag=etag,
+            status=status,
+            findings=findings,
+        )
+
+    def _file_entry(
+        self,
+        record: dict[str, Any],
+        *,
+        bucket: str,
+        object_key: str,
+        file_object_id: str,
+        storage_provider: str,
+        object_version: str | None,
+        byte_size: int,
+        sha256: str | None,
+        etag: str | None,
+        status: str,
+        findings: list[dict[str, Any]] | None = None,
+        failure_reason: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        error_code = None
+        error_summary = None
+        if findings:
+            first_finding = findings[0]
+            error_code = first_finding.get("code")
+            error_summary = first_finding.get("message")
+        legacy_collection = record["legacy_collection"]
         return {
             "legacy_collection": record["legacy_collection"],
-            "legacy_gridfs_id": legacy_gridfs_id,
+            "source_collection": legacy_collection,
+            "legacy_gridfs_id": record["legacy_gridfs_id"],
             "file_object_id": file_object_id,
             "storage_provider": storage_provider,
             "bucket": bucket,
             "object_key": object_key,
+            "storage_key": object_key,
             "object_version": object_version,
             "file_name": record.get("filename"),
             "content_type": record.get("content_type"),
+            "content_type_status": record.get("content_type_status", "provided"),
             "byte_size": byte_size,
+            "size": byte_size,
             "sha256": sha256,
             "etag": etag,
             "purpose": record["purpose"],
             "chunk_count": record.get("chunk_count"),
             "upload_date": record.get("upload_date"),
             "status": status,
-            "_findings": findings,
+            "migration_status": status,
+            "error_code": error_code,
+            "error_summary": error_summary,
+            "failure_reason": failure_reason,
+            "_findings": findings or [],
         }
 
     def _validate_checksum_samples(
@@ -439,32 +533,32 @@ class AppGridFSToObjectStorageMigrator:
                 )
             except Exception as exc:
                 mismatched += 1
-                findings.append(
-                    {
-                        "severity": "error",
-                        "code": "OBJECT_DOWNLOAD_ERROR",
-                        "legacy_gridfs_id": file_entry["legacy_gridfs_id"],
-                        "file_object_id": file_entry["file_object_id"],
-                        "message": f"Failed to download object for checksum sample: {type(exc).__name__}.",
-                    }
-                )
+                finding = {
+                    "severity": "error",
+                    "code": "OBJECT_DOWNLOAD_ERROR",
+                    "legacy_gridfs_id": file_entry["legacy_gridfs_id"],
+                    "file_object_id": file_entry["file_object_id"],
+                    "message": f"Failed to download object for checksum sample: {type(exc).__name__}.",
+                }
+                findings.append(finding)
+                self._mark_file_failed(file_entry, finding)
                 continue
             actual_sha256 = hashlib.sha256(downloaded).hexdigest()
             if actual_sha256 == file_entry["sha256"]:
                 matched += 1
                 continue
             mismatched += 1
-            findings.append(
-                {
-                    "severity": "error",
-                    "code": "FILE_CHECKSUM_MISMATCH",
-                    "legacy_gridfs_id": file_entry["legacy_gridfs_id"],
-                    "file_object_id": file_entry["file_object_id"],
-                    "expected": file_entry["sha256"],
-                    "actual": actual_sha256,
-                    "message": "Downloaded object checksum differs from source GridFS checksum.",
-                }
-            )
+            finding = {
+                "severity": "error",
+                "code": "FILE_CHECKSUM_MISMATCH",
+                "legacy_gridfs_id": file_entry["legacy_gridfs_id"],
+                "file_object_id": file_entry["file_object_id"],
+                "expected": file_entry["sha256"],
+                "actual": actual_sha256,
+                "message": "Downloaded object checksum differs from source GridFS checksum.",
+            }
+            findings.append(finding)
+            self._mark_file_failed(file_entry, finding)
         return {"sampled": len(candidates), "matched": matched, "mismatched": mismatched}
 
     def _failed_file_entry(
@@ -483,35 +577,30 @@ class AppGridFSToObjectStorageMigrator:
     ) -> dict[str, Any]:
         legacy_gridfs_id = record["legacy_gridfs_id"]
         failure_reason = self._failure_reason(code=code, message=message, exception=exception)
-        return {
-            "legacy_collection": record["legacy_collection"],
-            "legacy_gridfs_id": legacy_gridfs_id,
-            "file_object_id": file_object_id,
-            "storage_provider": storage_provider,
-            "bucket": bucket,
-            "object_key": object_key,
-            "object_version": None,
-            "file_name": record.get("filename"),
-            "content_type": record.get("content_type"),
-            "byte_size": byte_size if byte_size is not None else 0,
-            "sha256": sha256,
-            "etag": None,
-            "purpose": record["purpose"],
-            "chunk_count": record.get("chunk_count"),
-            "upload_date": record.get("upload_date"),
-            "status": "failed",
-            "failure_reason": failure_reason,
-            "_findings": [
-                {
-                    "severity": "error",
-                    "code": code,
-                    "legacy_gridfs_id": legacy_gridfs_id,
-                    "file_object_id": file_object_id,
-                    "message": message,
-                    "reason": failure_reason,
-                }
-            ],
-        }
+        findings = [
+            {
+                "severity": "error",
+                "code": code,
+                "legacy_gridfs_id": legacy_gridfs_id,
+                "file_object_id": file_object_id,
+                "message": message,
+                "reason": failure_reason,
+            }
+        ]
+        return self._file_entry(
+            record,
+            bucket=bucket,
+            object_key=object_key,
+            file_object_id=file_object_id,
+            storage_provider=storage_provider,
+            object_version=None,
+            byte_size=byte_size if byte_size is not None else 0,
+            sha256=sha256,
+            etag=None,
+            status="failed",
+            findings=findings,
+            failure_reason=failure_reason,
+        )
 
     def _build_summary(
         self,
@@ -519,6 +608,7 @@ class AppGridFSToObjectStorageMigrator:
         *,
         sample_summary: dict[str, int],
         dry_run: bool,
+        mode: GridFSMigrationMode,
         findings: list[dict[str, Any]],
     ) -> dict[str, Any]:
         failed_ids = {
@@ -530,7 +620,9 @@ class AppGridFSToObjectStorageMigrator:
         size_differences = [finding for finding in findings if finding.get("code") == "GRIDFS_LENGTH_MISMATCH"]
         return {
             "dry_run": dry_run,
+            "mode": mode,
             "total_files": len(files),
+            "empty_gridfs": len(files) == 0,
             "total_bytes": sum(int(file_entry.get("byte_size") or 0) for file_entry in files),
             "planned": sum(1 for file_entry in files if file_entry.get("status") == "planned"),
             "uploaded": sum(1 for file_entry in files if file_entry.get("status") == "uploaded"),
@@ -682,6 +774,13 @@ class AppGridFSToObjectStorageMigrator:
             "requires_report": "gridfs-checksum-validation-report.json",
         }
 
+    @staticmethod
+    def _mark_file_failed(file_entry: dict[str, Any], finding: dict[str, Any]) -> None:
+        file_entry["status"] = "failed"
+        file_entry["migration_status"] = "failed"
+        file_entry["error_code"] = finding.get("code")
+        file_entry["error_summary"] = finding.get("message")
+
     def _checksum_validation_report(self, output_dir: Path, manifest: dict[str, Any]) -> dict[str, Any]:
         output_files = [
             "gridfs-minio-migration-manifest.json",
@@ -705,13 +804,31 @@ class AppGridFSToObjectStorageMigrator:
             for finding in manifest["findings"]
             if finding.get("code") == "GRIDFS_READ_ERROR"
         ]
+        source_manifest_path = output_dir / "gridfs-minio-migration-manifest.json"
+        file_checksum_gate = manifest["readiness_gates"]["file_checksum"]
+        status = "GO" if file_checksum_gate["decision"] == "GO" else "NO_GO"
+        reason = "File checksum gate passed." if status == "GO" else "Blocking file checksum findings exist."
         return {
+            "report_id": f"gridfs-minio-checksum-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}",
+            "migration_run_id": str(uuid.uuid5(GRIDFS_FILE_OBJECT_NAMESPACE, manifest["started_at"])),
+            "phase": "06d_gridfs_minio_migration",
             "tool": GRIDFS_MIGRATION_TOOL_VERSION,
-            "status": "GO"
-            if manifest["readiness_gates"]["file_checksum"]["decision"] == "GO"
-            else "NO_GO",
+            "status": status,
             "readiness_gates": manifest["readiness_gates"],
             "secret_free": True,
+            "source": {
+                "kind": "app_mongo_gridfs",
+                "database": manifest["source"]["database"],
+                "gridfs_bucket": manifest["source"]["gridfs_bucket"],
+                "source_manifest_path": str(source_manifest_path),
+                "source_manifest_sha256": output_checksums.get("gridfs-minio-migration-manifest.json"),
+            },
+            "target": {
+                "storage_provider": manifest["target"]["storage_provider"],
+                "bucket": manifest["target"]["bucket"],
+                "environment": manifest["target"]["environment"],
+                "endpoint_present": None,
+            },
             "coverage": {
                 "manifest_checksum": {
                     "status": "covered",
@@ -731,6 +848,25 @@ class AppGridFSToObjectStorageMigrator:
                     "count": len(size_differences),
                     "items": size_differences,
                 },
+            },
+            "legacy_id_mapping": {
+                "mapping_file": "gridfs-object-mapping.ndjson",
+                "expected_gridfs_files": manifest["summary"]["total_files"],
+                "mapped_file_objects": len([file_entry for file_entry in manifest["files"] if file_entry["status"] != "failed"]),
+                "mapped_import_files": len([file_entry for file_entry in manifest["files"] if file_entry["status"] != "failed"]),
+                "missing_mappings": [
+                    file_entry["legacy_gridfs_id"]
+                    for file_entry in manifest["files"]
+                    if file_entry["status"] == "failed"
+                ],
+            },
+            "findings": manifest["findings"],
+            "decision": {
+                "go_no_go": status,
+                "reason": reason,
+                "required_action": ""
+                if status == "GO"
+                else "Fix object migration issue and rerun 06D upload or verify mode until file_checksum is GO.",
             },
         }
 
@@ -803,6 +939,17 @@ class AppGridFSToObjectStorageMigrator:
 
     def _serialize_value(self, value: Any) -> Any:
         return self._store._serialize_value(value)  # noqa: SLF001 - reuse existing app Mongo normalization.
+
+    @staticmethod
+    def _resolve_mode(*, mode: GridFSMigrationMode | str | None, dry_run: bool | None) -> GridFSMigrationMode:
+        if mode is None:
+            return "dry-run" if dry_run is not False else "upload"
+        normalized = str(mode).strip().lower().replace("_", "-")
+        if normalized in {"dryrun", "dry-run"}:
+            return "dry-run"
+        if normalized in {"upload", "verify"}:
+            return normalized  # type: ignore[return-value]
+        raise ValueError("GridFS migration mode must be one of: dry-run, upload, verify.")
 
     @staticmethod
     def _safe_segment(value: str) -> str:

@@ -20,6 +20,7 @@ def _build_store_with_gridfs_file(
     file_id: str = "import_file_0001",
     filename: str = "供应商银行流水明细.xlsx",
     content: bytes = b"bank rows",
+    content_type: str | None = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     metadata: dict | None = None,
 ) -> tuple[ApplicationStateStore, FakeMongoClient]:
     (data_dir / "app_mongo_config.json").write_text(
@@ -55,9 +56,10 @@ def _build_store_with_gridfs_file(
         "length": len(content),
         "chunkSize": 255,
         "uploadDate": "2026-05-16T00:00:00+00:00",
-        "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "metadata": dict(metadata or {}),
     }
+    if content_type is not None:
+        db[f"{GRIDFS_BUCKET_NAME}.files"].documents[file_id]["contentType"] = content_type
     db[f"{GRIDFS_BUCKET_NAME}.chunks"].documents[f"{file_id}:0"] = {
         "_id": f"{file_id}:0",
         "files_id": file_id,
@@ -88,6 +90,12 @@ class AppGridFSToObjectStorageMigratorTests(unittest.TestCase):
             self.assertEqual(storage.put_calls, [])
             file_entry = result.manifest["files"][0]
             self.assertEqual(file_entry["legacy_gridfs_id"], "import_file_0001")
+            self.assertEqual(file_entry["source_collection"], f"{GRIDFS_BUCKET_NAME}.files")
+            self.assertEqual(file_entry["migration_status"], "planned")
+            self.assertEqual(file_entry["size"], len(b"bank rows"))
+            self.assertEqual(file_entry["storage_key"], file_entry["object_key"])
+            self.assertIsNone(file_entry["error_code"])
+            self.assertIsNone(file_entry["error_summary"])
             self.assertEqual(file_entry["purpose"], "import_source_file")
             self.assertNotIn("供应商", file_entry["object_key"])
             self.assertTrue((output_dir / "gridfs-object-mapping.ndjson").exists())
@@ -133,6 +141,39 @@ class AppGridFSToObjectStorageMigratorTests(unittest.TestCase):
             self.assertEqual(checksum_report["coverage"]["duplicate_files"]["count"], 0)
             self.assertEqual(checksum_report["coverage"]["size_differences"]["count"], 0)
 
+    def test_verify_mode_downloads_existing_object_without_uploading(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "state"
+            upload_output_dir = Path(temp_dir) / "gridfs-upload-report"
+            verify_output_dir = Path(temp_dir) / "gridfs-verify-report"
+            data_dir.mkdir()
+            store, _ = _build_store_with_gridfs_file(data_dir, content=b"verify me")
+            storage = InMemoryObjectStorageClient()
+            uploaded = AppGridFSToObjectStorageMigrator(store, storage).migrate(
+                bucket="fin-ops-files",
+                environment="staging",
+                output_dir=upload_output_dir,
+                mode="upload",
+                sample_size=1,
+            )
+            storage.put_calls.clear()
+
+            verified = AppGridFSToObjectStorageMigrator(store, storage).migrate(
+                bucket="fin-ops-files",
+                environment="staging",
+                output_dir=verify_output_dir,
+                mode="verify",
+                sample_size=1,
+            )
+
+        self.assertEqual(uploaded.manifest["summary"]["uploaded"], 1)
+        self.assertEqual(verified.manifest["status"], "passed")
+        self.assertEqual(verified.manifest["summary"]["uploaded"], 0)
+        self.assertEqual(verified.manifest["summary"]["skipped_existing"], 1)
+        self.assertEqual(verified.manifest["summary"]["checksum_samples"]["matched"], 1)
+        self.assertEqual(verified.manifest["readiness_gates"]["file_checksum"]["decision"], "GO")
+        self.assertEqual(storage.put_calls, [])
+
     def test_existing_object_with_same_checksum_is_skipped_without_upload(self) -> None:
         with TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "state"
@@ -154,7 +195,7 @@ class AppGridFSToObjectStorageMigratorTests(unittest.TestCase):
                 bucket="fin-ops-files",
                 environment="staging",
                 output_dir=Path(temp_dir) / "gridfs-report-2",
-                dry_run=False,
+                mode="upload",
                 sample_size=1,
             )
 
@@ -182,6 +223,8 @@ class AppGridFSToObjectStorageMigratorTests(unittest.TestCase):
         self.assertTrue(result.manifest["blocking"])
         self.assertEqual(result.manifest["summary"]["checksum_samples"]["mismatched"], 1)
         self.assertEqual(result.manifest["findings"][0]["code"], "FILE_CHECKSUM_MISMATCH")
+        self.assertEqual(result.manifest["files"][0]["migration_status"], "failed")
+        self.assertEqual(result.manifest["files"][0]["error_code"], "FILE_CHECKSUM_MISMATCH")
 
     def test_failed_file_entries_preserve_structured_reason(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -201,10 +244,75 @@ class AppGridFSToObjectStorageMigratorTests(unittest.TestCase):
 
             failed = result.manifest["files"][0]
             self.assertEqual(failed["status"], "failed")
+            self.assertEqual(failed["migration_status"], "failed")
+            self.assertEqual(failed["error_code"], "GRIDFS_READ_ERROR")
+            self.assertIn("Failed to read source GridFS file", failed["error_summary"])
             self.assertEqual(failed["failure_reason"]["code"], "GRIDFS_READ_ERROR")
             self.assertIn("exception_type", failed["failure_reason"])
             failures = (output_dir / "gridfs-migration-failures.ndjson").read_text(encoding="utf-8")
             self.assertIn("GRIDFS_READ_ERROR", failures)
+
+    def test_gridfs_length_mismatch_marks_file_entry_failed(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "state"
+            output_dir = Path(temp_dir) / "gridfs-report"
+            data_dir.mkdir()
+            store, _ = _build_store_with_gridfs_file(data_dir, content=b"short")
+            store._mongo_database[f"{GRIDFS_BUCKET_NAME}.files"].documents["import_file_0001"]["length"] = 99  # noqa: SLF001
+
+            result = AppGridFSToObjectStorageMigrator(store, InMemoryObjectStorageClient()).migrate(
+                bucket="fin-ops-files",
+                environment="dryrun",
+                output_dir=output_dir,
+                mode="dry-run",
+            )
+
+        file_entry = result.manifest["files"][0]
+        self.assertEqual(file_entry["status"], "failed")
+        self.assertEqual(file_entry["migration_status"], "failed")
+        self.assertEqual(file_entry["error_code"], "GRIDFS_LENGTH_MISMATCH")
+        self.assertEqual(result.manifest["summary"]["size_differences"], 1)
+
+    def test_empty_gridfs_and_missing_content_type_are_explicit_in_manifest(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "state"
+            empty_output_dir = Path(temp_dir) / "empty-report"
+            missing_type_output_dir = Path(temp_dir) / "missing-type-report"
+            data_dir.mkdir()
+            store, _ = _build_store_with_gridfs_file(data_dir)
+            db = store._mongo_database  # noqa: SLF001
+            db.gridfs_buckets[GRIDFS_BUCKET_NAME].clear()
+            db[f"{GRIDFS_BUCKET_NAME}.files"].documents.clear()
+            db[f"{GRIDFS_BUCKET_NAME}.chunks"].documents.clear()
+
+            empty = AppGridFSToObjectStorageMigrator(store, InMemoryObjectStorageClient()).migrate(
+                bucket="fin-ops-files",
+                environment="dryrun",
+                output_dir=empty_output_dir,
+                mode="dry-run",
+            )
+
+            missing_type_data_dir = Path(temp_dir) / "state-missing-content-type"
+            missing_type_data_dir.mkdir()
+            store_with_missing_type, _ = _build_store_with_gridfs_file(
+                missing_type_data_dir,
+                content_type=None,
+            )
+            missing_type = AppGridFSToObjectStorageMigrator(
+                store_with_missing_type,
+                InMemoryObjectStorageClient(),
+            ).migrate(
+                bucket="fin-ops-files",
+                environment="dryrun",
+                output_dir=missing_type_output_dir,
+                mode="dry-run",
+            )
+
+        self.assertEqual(empty.manifest["summary"]["total_files"], 0)
+        self.assertEqual(empty.manifest["summary"]["empty_gridfs"], True)
+        self.assertEqual(empty.manifest["findings"], [])
+        self.assertEqual(missing_type.manifest["files"][0]["content_type"], "application/octet-stream")
+        self.assertEqual(missing_type.manifest["files"][0]["content_type_status"], "defaulted")
 
 
 if __name__ == "__main__":

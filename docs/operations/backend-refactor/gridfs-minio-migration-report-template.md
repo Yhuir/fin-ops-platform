@@ -4,6 +4,8 @@
 
 报告不得包含 Mongo URI、S3 endpoint credential、access key、secret key、session token、presigned URL 或其他裸 secret。对象访问 URL 只允许由 Axum 在线短 TTL 生成，不写入迁移报告。
 
+报告由 `scripts/tools/migrate_gridfs_minio.py --mode upload|verify` 生成。`dry-run` 可以生成报告文件，但 `readiness_gates.file_checksum.decision` 必须是 `NO_GO`，原因包含 `dry_run_does_not_download_verify_objects`。
+
 ```json
 {
   "report_id": "gridfs-minio-checksum-YYYYMMDD-HHMMSS",
@@ -22,7 +24,7 @@
     "storage_provider": "minio | s3",
     "bucket": "fin-ops-files",
     "environment": "staging | production",
-    "endpoint_present": true
+    "endpoint_present": null
   },
   "status": "GO | NO_GO",
   "readiness_gates": {
@@ -103,6 +105,8 @@
 - `missing_files.count` 和 `size_differences.count` 必须为 `0`。
 - 所有 `legacy_gridfs_id` 必须能映射到稳定 `file_object_id`；需要导入 import 文件事实的记录还必须有稳定 `import_file_id`。
 - dry-run 报告不能作为 `file_checksum` GO 报告，因为 dry-run 不执行对象存储下载校验。
+- 任一 `FILE_CHECKSUM_MISMATCH` 或 `OBJECT_DOWNLOAD_ERROR` 都必须是 `NO_GO`，并且对应 manifest file entry 的 `migration_status` 必须为 `failed`。
+- `verify` 模式不能上传对象；如果目标对象不存在，必须输出阻断 finding。
 
 ## 阻断码
 
@@ -113,7 +117,19 @@
 | `OBJECT_HEAD_ERROR` | 无法检查目标对象，不能证明幂等状态 | 是 |
 | `OBJECT_UPLOAD_ERROR` | 上传失败 | 是 |
 | `OBJECT_DOWNLOAD_ERROR` | 抽样下载失败 | 是 |
+| `OBJECT_NOT_FOUND` | verify 模式下目标对象不存在 | 是 |
 | `FILE_CHECKSUM_MISMATCH` | 抽样下载 SHA-256 与源文件 SHA-256 不一致 | 是 |
 | `UNMAPPED_LEGACY_GRIDFS_ID` | 缺少 legacy GridFS 到目标 id 映射 | 是 |
 
 所有阻断 findings 必须保留 `reason` 或可审计 message，且至少包含 `legacy_gridfs_id` 或 `file_object_id` 之一。
+
+## 人工门禁建议引用
+
+readiness gate 或人工门禁至少读取以下证据：
+
+| 文件 | 用途 |
+| --- | --- |
+| `gridfs-checksum-validation-report.json` | `file_checksum` GO/NO_GO 决策、coverage、blocking findings。 |
+| `gridfs-minio-migration-manifest.json` | 每个 GridFS 文件的 `legacy_gridfs_id`、`file_object_id`、`sha256`、`size`、`storage_key`、`migration_status` 和错误摘要。 |
+| `gridfs-object-mapping.ndjson` | legacy GridFS 到 `app.file_objects` / `app.import_files` 草案的稳定映射。 |
+| `gridfs-migration-failures.ndjson` | 阻断项清单，人工复核和重跑前处理依据。 |
