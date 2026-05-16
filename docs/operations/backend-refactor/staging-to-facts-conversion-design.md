@@ -10,7 +10,7 @@
 - `staging.mongo_import_rows.manifest_id`
 - 后续 `staging.legacy_id_map.migration_run_id`
 
-转换任务必须只读取一个 `manifest_id` 范围内的数据。重复执行时，先清理同一 `manifest_id` 的目标 dry-run 输出或使用独立临时库；不得跨批次混写。
+转换任务必须只读取一个 `migration_run_id` / `manifest_id` 范围内的数据。本阶段约定 06A/06B 传入的 `migration_run_id` 与 staging `manifest_id` 相同；若后续拆分，报告必须同时记录两个 ID 的映射。重复执行时，先清理同一 `migration_run_id` 的目标 dry-run 输出或使用独立临时库；不得跨批次混写。
 
 ## Bronze：staging 原始行
 
@@ -67,6 +67,63 @@ migration_run_id
 
 映射覆盖率低于 100% 的对象类型必须阻断，除非该对象类型在迁移计划中明确标记为“不迁移/可重建/归档”。
 
+06C 默认只生成转换计划，不写正式事实表。计划中的每个 target row 必须包含：
+
+- `source_dataset`
+- `legacy_collection`
+- `legacy_id`
+- `source_line`
+- `target_schema`
+- `target_table`
+- `target_id`
+- `target_partition_month`
+- `payload_hash`
+- `target_tables`
+- `supporting_tables`
+- `payload`
+
+如果显式启用 `--execute`，也只能在隔离 dry-run PostgreSQL 库或 dry-run schema 中执行以下动作：
+
+1. 准备已规划的历史分区。
+2. 按 `migration_run_id` 重建 `staging.legacy_id_map`。
+
+06C `--execute` 不写 `app`、`read_model`、`job` 或 `audit` 正式事实数据；正式写入必须进入后续人工门禁。
+
+## Dry-run 报告模式
+
+工具必须支持三类输入，均不得访问 OA 源数据库：
+
+| 模式 | 输入 | 用途 |
+| --- | --- | --- |
+| export report-only | 06A `manifest.json` + NDJSON | 无 PostgreSQL 环境时生成 GO/NO_GO 报告。 |
+| staging rows validate-only | JSON 中的 `manifest_record` + `staging_rows` | 校验报告格式、定位字段和门禁逻辑。 |
+| isolated PostgreSQL dry-run | `staging.mongo_export_manifest` + `staging.mongo_import_rows`，按 `migration_run_id` 读取 | 在临时库或 dry-run schema 中复核 staging -> facts plan。 |
+
+`report-only` 和 `validate-only` 不需要数据库连接，也不得写入任何目标表。
+
+## 对账维度
+
+06C 报告必须输出：
+
+- object type count。
+- amount totals。
+- month distribution。
+- status distribution。
+- legacy id coverage。
+- row hash/source hash 对账。
+- required partition range。
+- unmapped/invalid enum。
+- GO/NO_GO 决策。
+
+定位要求：
+
+- count 差异必须包含 `object_type`。
+- amount 差异必须包含 `object_type` 和 amount field 维度。
+- month 差异必须包含 `object_type` 和 `month`。
+- status 差异必须包含 `object_type` 和 `status`。
+- row/hash、mapping、staging failed 差异必须包含 `legacy_id` 和 `source_line`。
+- 合同不清楚、未知字段或未知对象类型必须输出 `BLOCKED_FACT_SOURCE` 或 `MAPPING_BLOCKER`，不得猜测目标列或 status 值。
+
 ## Gold：事实、审计和重建事件
 
 正式转换时的事务边界：
@@ -86,8 +143,10 @@ migration_run_id
 - `staging.mongo_import_rows.status='failed'` 或 validation report 有 blocking findings。
 - 发现未知状态枚举、未知金额格式、无法识别日期或缺失 legacy id。
 - 同一 legacy object 映射到多个 active target，且没有明确业务解释。
-- count、amount、month、status、file checksum 任一维度出现未解释差异。
+- count、amount、month、status、row hash、source hash 任一维度出现未解释差异。
 - read model 无法从事实表重建。
+
+文件内容 checksum 属于 06D。06C 只能校验 manifest/NDJSON hash 和 staging row `payload_hash`，并在报告中明确 `file_checksum_scope.owner_phase=06D`、`status=not_evaluated_in_06c`；不得把 GridFS/对象存储文件内容 checksum 伪造为已通过。
 
 ## 不做事项
 
