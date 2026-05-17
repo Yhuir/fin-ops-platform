@@ -1,0 +1,5609 @@
+{
+  "report": "api-shadow-validation-report-20260517",
+  "status": "NO_GO",
+  "python_base_url": "[REDACTED_LOCAL_SHADOW_PYTHON_BASE_URL]",
+  "axum_base_url": "[REDACTED_LOCAL_SHADOW_AXUM_BASE_URL]",
+  "fixture": "docs/dev/api-fixtures/business-api-shadow-validation.json",
+  "fixture_validation": {
+    "status": "GO",
+    "fixture": "docs/dev/api-fixtures/business-api-shadow-validation.json",
+    "endpoint_count": 70,
+    "endpoint_ids": [
+      "app-health-json-snapshot",
+      "app-health-sse-stream-first-events",
+      "app-metadata-readonly-contract",
+      "session-me-oa-identity-contract",
+      "search-empty-query-read-model",
+      "task-status-worker-task-detail",
+      "bank-detail-accounts-date-range",
+      "bank-detail-transactions-paged",
+      "bank-detail-category-write-command",
+      "turnover-ledger-flat-readonly",
+      "turnover-ledger-grouped-readonly",
+      "turnover-ledger-export-preview",
+      "turnover-ledger-relation-detail",
+      "no-oa-bank-batches-list-empty",
+      "no-oa-bank-batch-detail",
+      "no-oa-bank-batch-submit",
+      "no-oa-bank-batch-withdraw",
+      "no-oa-bank-batches-bulk-submit",
+      "tax-offset-month-read-model",
+      "tax-certified-imports-month",
+      "tax-offset-calculate-read-model",
+      "etc-direct-import-removed-contract",
+      "etc-invoices-list",
+      "etc-batches-list-readonly",
+      "etc-batch-detail-readonly",
+      "cost-statistics-month-read-model",
+      "cost-statistics-explorer-read-model",
+      "cost-statistics-project-detail-read-model",
+      "cost-statistics-transaction-detail-read-model",
+      "cost-statistics-export-preview-time-read-model",
+      "cost-statistics-export-preview-project-aggregate-read-model",
+      "cost-statistics-export-preview-expense-type-read-model",
+      "background-jobs-active",
+      "background-job-detail",
+      "import-templates-static-contract",
+      "import-batches-list-metadata",
+      "import-batch-detail-metadata",
+      "import-file-detail-metadata",
+      "file-object-metadata-access",
+      "import-file-upload-preflight",
+      "workbench-month-read-model",
+      "workbench-ignored-read-model",
+      "workbench-read-model-status",
+      "workbench-row-detail-read-model",
+      "workbench-confirm-link-write-command",
+      "workbench-confirm-link-preview-write-command",
+      "workbench-cancel-link-write-command",
+      "workbench-withdraw-link-preview-write-command",
+      "workbench-withdraw-link-write-command",
+      "workbench-mark-exception-write-command",
+      "workbench-bank-exception-update-write-command",
+      "workbench-oa-bank-exception-write-command",
+      "workbench-confirm-personal-advance-repayment-write-command",
+      "workbench-confirm-cash-pass-through-write-command",
+      "workbench-confirm-cash-ticket-purchase-write-command",
+      "workbench-cancel-cash-special-write-command",
+      "workbench-exception-apply-write-command",
+      "workbench-cancel-exception-write-command",
+      "workbench-ignore-row-write-command",
+      "workbench-unignore-row-write-command",
+      "workbench-settings-read-contract",
+      "settings-data-reset-active-job",
+      "settings-data-reset-job-detail",
+      "oa-sync-status",
+      "background-job-retry-request",
+      "import-file-retry-request",
+      "import-file-session-projection",
+      "matching-run-request",
+      "matching-results-list",
+      "matching-result-detail"
+    ],
+    "permission_failure_endpoint_ids": [
+      "app-health-json-snapshot",
+      "app-health-sse-stream-first-events",
+      "session-me-oa-identity-contract",
+      "search-empty-query-read-model",
+      "task-status-worker-task-detail",
+      "bank-detail-accounts-date-range",
+      "bank-detail-transactions-paged",
+      "bank-detail-category-write-command",
+      "turnover-ledger-flat-readonly",
+      "turnover-ledger-grouped-readonly",
+      "turnover-ledger-export-preview",
+      "turnover-ledger-relation-detail",
+      "no-oa-bank-batches-list-empty",
+      "no-oa-bank-batch-detail",
+      "no-oa-bank-batch-submit",
+      "no-oa-bank-batch-withdraw",
+      "no-oa-bank-batches-bulk-submit",
+      "tax-offset-month-read-model",
+      "tax-certified-imports-month",
+      "tax-offset-calculate-read-model",
+      "etc-direct-import-removed-contract",
+      "etc-invoices-list",
+      "etc-batches-list-readonly",
+      "etc-batch-detail-readonly",
+      "cost-statistics-month-read-model",
+      "cost-statistics-explorer-read-model",
+      "cost-statistics-project-detail-read-model",
+      "cost-statistics-transaction-detail-read-model",
+      "cost-statistics-export-preview-time-read-model",
+      "cost-statistics-export-preview-project-aggregate-read-model",
+      "cost-statistics-export-preview-expense-type-read-model",
+      "background-jobs-active",
+      "background-job-detail",
+      "import-templates-static-contract",
+      "import-batches-list-metadata",
+      "import-batch-detail-metadata",
+      "import-file-detail-metadata",
+      "file-object-metadata-access",
+      "import-file-upload-preflight",
+      "workbench-month-read-model",
+      "workbench-ignored-read-model",
+      "workbench-read-model-status",
+      "workbench-row-detail-read-model",
+      "workbench-confirm-link-write-command",
+      "workbench-confirm-link-preview-write-command",
+      "workbench-cancel-link-write-command",
+      "workbench-withdraw-link-preview-write-command",
+      "workbench-withdraw-link-write-command",
+      "workbench-mark-exception-write-command",
+      "workbench-bank-exception-update-write-command",
+      "workbench-oa-bank-exception-write-command",
+      "workbench-confirm-personal-advance-repayment-write-command",
+      "workbench-confirm-cash-pass-through-write-command",
+      "workbench-confirm-cash-ticket-purchase-write-command",
+      "workbench-cancel-cash-special-write-command",
+      "workbench-exception-apply-write-command",
+      "workbench-cancel-exception-write-command",
+      "workbench-ignore-row-write-command",
+      "workbench-unignore-row-write-command",
+      "workbench-settings-read-contract",
+      "settings-data-reset-active-job",
+      "settings-data-reset-job-detail",
+      "oa-sync-status",
+      "background-job-retry-request",
+      "import-file-retry-request",
+      "import-file-session-projection",
+      "matching-run-request",
+      "matching-results-list",
+      "matching-result-detail"
+    ],
+    "endpoint_errors": []
+  },
+  "filters": {
+    "endpoint_ids": [],
+    "risks": []
+  },
+  "generated_at": "2026-05-17T01:58:54Z",
+  "redaction": {
+    "sensitive_value": "[REDACTED]",
+    "field_hints": [
+      "authorization",
+      "cookie",
+      "credential",
+      "non_json_body",
+      "password",
+      "presign",
+      "signed_url",
+      "raw_content",
+      "raw_file",
+      "secret",
+      "stack",
+      "token",
+      "traceback",
+      "url"
+    ]
+  },
+  "summary": {
+    "total": 139,
+    "go": 0,
+    "no_go": 139,
+    "unexpected_diff_count": 139,
+    "explained_diff_count": 0,
+    "permission_failure_cases": 69,
+    "fixture_error_count": 0,
+    "permission_failure_required_count": 69,
+    "permission_failure_missing_count": 0
+  },
+  "results": [
+    {
+      "endpoint_id": "app-health-json-snapshot",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/app-health",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, read_model.workbench_snapshots, and OA identity adapter; no app Mongo",
+      "source_categories": [
+        "oa_identity",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "app-health-json-snapshot#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/app-health",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, read_model.workbench_snapshots, and OA identity adapter; no app Mongo",
+      "source_categories": [
+        "oa_identity",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "app-health-sse-stream-first-events",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/app-health/stream",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "SSE wrapper over the Axum app-health PostgreSQL/read_model/job facts snapshot; samples only the first app_health and heartbeat events and does not read app Mongo",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "app-health-sse-stream-first-events#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/app-health/stream",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "SSE wrapper over the Axum app-health PostgreSQL/read_model/job facts snapshot; samples only the first app_health and heartbeat events and does not read app Mongo",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "app-metadata-readonly-contract",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/app-metadata",
+      "owner": "platform-ops",
+      "risk": "low",
+      "source": "Axum static contract metadata; no app Mongo",
+      "source_categories": [
+        "static_contract"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "session-me-oa-identity-contract",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/session/me",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "OA identity adapter/session contract; no app Mongo",
+      "source_categories": [
+        "oa_identity"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "session-me-oa-identity-contract#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/session/me",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "OA identity adapter/session contract; no app Mongo",
+      "source_categories": [
+        "oa_identity"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "search-empty-query-read-model",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/search",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL read_model.search_index_rows; empty query returns bounded empty payload",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "search-empty-query-read-model#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/search",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL read_model.search_index_rows; empty query returns bounded empty payload",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "task-status-worker-task-detail",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/tasks/${WORKER_TASK_ID}/status",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL job.worker_tasks + job.worker_attempts",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "task-status-worker-task-detail#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/tasks/${WORKER_TASK_ID}/status",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL job.worker_tasks + job.worker_attempts",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "bank-detail-accounts-date-range",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/bank-details/accounts",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.bank_transactions",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "bank-detail-accounts-date-range#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/bank-details/accounts",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.bank_transactions",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "bank-detail-transactions-paged",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/bank-details/transactions",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.bank_transactions + app.bank_transaction_categories",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "bank-detail-transactions-paged#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/bank-details/transactions",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.bank_transactions + app.bank_transaction_categories",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "bank-detail-category-write-command",
+      "case": "primary",
+      "method": "PATCH",
+      "path": "/api/bank-details/transactions/categories",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.bank_transactions, app.bank_transaction_categories, app.bank_transaction_category_events, audit.events, app.write_idempotency_records, job.worker_tasks, and job.outbox_events read-model rebuild; no app Mongo or OA source database read",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "bank-detail-category-write-command#permission_failure",
+      "case": "permission_failure",
+      "method": "PATCH",
+      "path": "/api/bank-details/transactions/categories",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.bank_transactions, app.bank_transaction_categories, app.bank_transaction_category_events, audit.events, app.write_idempotency_records, job.worker_tasks, and job.outbox_events read-model rebuild; no app Mongo or OA source database read",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "turnover-ledger-flat-readonly",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/turnover-ledger",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.bank_transactions + active app.bank_transaction_categories raw_payload.category_code using Python turnover category rules; no app Mongo",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "turnover-ledger-flat-readonly#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/turnover-ledger",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.bank_transactions + active app.bank_transaction_categories raw_payload.category_code using Python turnover category rules; no app Mongo",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "turnover-ledger-grouped-readonly",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/turnover-ledger",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.bank_transactions + active app.bank_transaction_categories raw_payload.category_code using Python turnover category rules; no app Mongo",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "turnover-ledger-grouped-readonly#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/turnover-ledger",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.bank_transactions + active app.bank_transaction_categories raw_payload.category_code using Python turnover category rules; no app Mongo",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "turnover-ledger-export-preview",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/turnover-ledger/export-preview",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.bank_transactions + active app.bank_transaction_categories raw_payload.category_code using Python turnover category and export-preview rules; no app Mongo",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "turnover-ledger-export-preview#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/turnover-ledger/export-preview",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.bank_transactions + active app.bank_transaction_categories raw_payload.category_code using Python turnover category and export-preview rules; no app Mongo",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "turnover-ledger-relation-detail",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/turnover-ledger/relations/${TURNOVER_RELATION_ID}",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.bank_transactions + active app.bank_transaction_categories raw_payload.category_code using Python turnover category/detail rules and SHA1 relation ids; no app Mongo",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "turnover-ledger-relation-detail#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/turnover-ledger/relations/${TURNOVER_RELATION_ID}",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.bank_transactions + active app.bank_transaction_categories raw_payload.category_code using Python turnover category/detail rules and SHA1 relation ids; no app Mongo",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "no-oa-bank-batches-list-empty",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/no-oa-bank-batches",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.no_oa_bank_batches",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "no-oa-bank-batches-list-empty#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/no-oa-bank-batches",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.no_oa_bank_batches",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "no-oa-bank-batch-detail",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/no-oa-bank-batches/${NO_OA_BATCH_ID}",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.no_oa_bank_batches + app.bank_transactions + app.bank_transaction_categories",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "no-oa-bank-batch-detail#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/no-oa-bank-batches/${NO_OA_BATCH_ID}",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.no_oa_bank_batches + app.bank_transactions + app.bank_transaction_categories",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "no-oa-bank-batch-submit",
+      "case": "primary",
+      "method": "POST",
+      "path": "/api/no-oa-bank-batches/${NO_OA_SUBMIT_BATCH_ID}/submit",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.no_oa_bank_batches + transactional workbench write command + job/outbox rebuild marker",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "transactional_workbench_write"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "no-oa-bank-batch-submit#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/api/no-oa-bank-batches/${NO_OA_SUBMIT_BATCH_ID}/submit",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.no_oa_bank_batches + transactional workbench write command + job/outbox rebuild marker",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "transactional_workbench_write"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "no-oa-bank-batch-withdraw",
+      "case": "primary",
+      "method": "POST",
+      "path": "/api/no-oa-bank-batches/${NO_OA_WITHDRAW_BATCH_ID}/withdraw",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.no_oa_bank_batches + transactional workbench write command + job/outbox rebuild marker",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "transactional_workbench_write"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "no-oa-bank-batch-withdraw#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/api/no-oa-bank-batches/${NO_OA_WITHDRAW_BATCH_ID}/withdraw",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.no_oa_bank_batches + transactional workbench write command + job/outbox rebuild marker",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "transactional_workbench_write"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "no-oa-bank-batches-bulk-submit",
+      "case": "primary",
+      "method": "POST",
+      "path": "/api/no-oa-bank-batches/submit",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.no_oa_bank_batches + transactional workbench write command + per-item job/outbox rebuild marker",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "transactional_workbench_write"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "no-oa-bank-batches-bulk-submit#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/api/no-oa-bank-batches/submit",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.no_oa_bank_batches + transactional workbench write command + per-item job/outbox rebuild marker",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "transactional_workbench_write"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "tax-offset-month-read-model",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/tax-offset",
+      "owner": "tax-ops",
+      "risk": "medium",
+      "source": "PostgreSQL read_model.tax_offset_read_models",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "tax-offset-month-read-model#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/tax-offset",
+      "owner": "tax-ops",
+      "risk": "medium",
+      "source": "PostgreSQL read_model.tax_offset_read_models",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "tax-certified-imports-month",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/tax-offset/certified-imports",
+      "owner": "tax-ops",
+      "risk": "medium",
+      "source": "PostgreSQL app.invoice_certifications + app.invoices",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "tax-certified-imports-month#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/tax-offset/certified-imports",
+      "owner": "tax-ops",
+      "risk": "medium",
+      "source": "PostgreSQL app.invoice_certifications + app.invoices",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "tax-offset-calculate-read-model",
+      "case": "primary",
+      "method": "POST",
+      "path": "/api/tax-offset/calculate",
+      "owner": "tax-ops",
+      "risk": "medium",
+      "source": "PostgreSQL read_model.tax_offset_read_models payload only; no write/audit/outbox side effect",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "tax-offset-calculate-read-model#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/api/tax-offset/calculate",
+      "owner": "tax-ops",
+      "risk": "medium",
+      "source": "PostgreSQL read_model.tax_offset_read_models payload only; no write/audit/outbox side effect",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "etc-direct-import-removed-contract",
+      "case": "primary",
+      "method": "POST",
+      "path": "/api/etc/import",
+      "owner": "tax-ops",
+      "risk": "medium",
+      "source": "Static legacy compatibility contract; no PostgreSQL/app Mongo/OA side effect",
+      "source_categories": [
+        "postgres_facts",
+        "static_contract"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 410,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 410,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "etc-direct-import-removed-contract#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/api/etc/import",
+      "owner": "tax-ops",
+      "risk": "medium",
+      "source": "Static legacy compatibility contract; no PostgreSQL/app Mongo/OA side effect",
+      "source_categories": [
+        "postgres_facts",
+        "static_contract"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "etc-invoices-list",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/etc/invoices",
+      "owner": "tax-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.invoices ETC columns + raw_payload",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "etc-invoices-list#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/etc/invoices",
+      "owner": "tax-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.invoices ETC columns + raw_payload",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "etc-batches-list-readonly",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/etc/batches",
+      "owner": "tax-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.invoices ETC columns + raw_payload grouped by import_batch_id/current_batch_id; no app Mongo",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "etc-batches-list-readonly#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/etc/batches",
+      "owner": "tax-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.invoices ETC columns + raw_payload grouped by import_batch_id/current_batch_id; no app Mongo",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "etc-batch-detail-readonly",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/etc/batches/${ETC_BATCH_ID}",
+      "owner": "tax-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.invoices ETC columns + raw_payload grouped by import_batch_id/current_batch_id; no app Mongo",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "etc-batch-detail-readonly#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/etc/batches/${ETC_BATCH_ID}",
+      "owner": "tax-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.invoices ETC columns + raw_payload grouped by import_batch_id/current_batch_id; no app Mongo",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "cost-statistics-month-read-model",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/cost-statistics",
+      "owner": "cost-ops",
+      "risk": "medium",
+      "source": "PostgreSQL read_model.cost_statistics_read_models",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "cost-statistics-month-read-model#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/cost-statistics",
+      "owner": "cost-ops",
+      "risk": "medium",
+      "source": "PostgreSQL read_model.cost_statistics_read_models",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "cost-statistics-explorer-read-model",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/cost-statistics/explorer",
+      "owner": "cost-ops",
+      "risk": "medium",
+      "source": "PostgreSQL read_model.cost_statistics_read_models",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "cost-statistics-explorer-read-model#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/cost-statistics/explorer",
+      "owner": "cost-ops",
+      "risk": "medium",
+      "source": "PostgreSQL read_model.cost_statistics_read_models",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "cost-statistics-project-detail-read-model",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/cost-statistics/projects/${COST_PROJECT_NAME_PATH}",
+      "owner": "cost-ops",
+      "risk": "medium",
+      "source": "PostgreSQL read_model.cost_statistics_read_models time_rows",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "cost-statistics-project-detail-read-model#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/cost-statistics/projects/${COST_PROJECT_NAME_PATH}",
+      "owner": "cost-ops",
+      "risk": "medium",
+      "source": "PostgreSQL read_model.cost_statistics_read_models time_rows",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "cost-statistics-transaction-detail-read-model",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/cost-statistics/transactions/${COST_TRANSACTION_ID}",
+      "owner": "cost-ops",
+      "risk": "medium",
+      "source": "PostgreSQL app.bank_transactions + read_model.cost_statistics_read_models + read_model.workbench_rows",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "cost-statistics-transaction-detail-read-model#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/cost-statistics/transactions/${COST_TRANSACTION_ID}",
+      "owner": "cost-ops",
+      "risk": "medium",
+      "source": "PostgreSQL app.bank_transactions + read_model.cost_statistics_read_models + read_model.workbench_rows",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "cost-statistics-export-preview-time-read-model",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/cost-statistics/export-preview",
+      "owner": "cost-ops",
+      "risk": "medium",
+      "source": "PostgreSQL read_model.cost_statistics_read_models time_rows; no app Mongo/workbench recalculation",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "cost-statistics-export-preview-time-read-model#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/cost-statistics/export-preview",
+      "owner": "cost-ops",
+      "risk": "medium",
+      "source": "PostgreSQL read_model.cost_statistics_read_models time_rows; no app Mongo/workbench recalculation",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "cost-statistics-export-preview-project-aggregate-read-model",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/cost-statistics/export-preview",
+      "owner": "cost-ops",
+      "risk": "medium",
+      "source": "PostgreSQL read_model.cost_statistics_read_models time_rows project aggregate; no app Mongo/workbench detail recalculation",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "cost-statistics-export-preview-project-aggregate-read-model#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/cost-statistics/export-preview",
+      "owner": "cost-ops",
+      "risk": "medium",
+      "source": "PostgreSQL read_model.cost_statistics_read_models time_rows project aggregate; no app Mongo/workbench detail recalculation",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "cost-statistics-export-preview-expense-type-read-model",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/cost-statistics/export-preview",
+      "owner": "cost-ops",
+      "risk": "medium",
+      "source": "PostgreSQL read_model.cost_statistics_read_models time_rows expense_type filter; no app Mongo/workbench recalculation",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "cost-statistics-export-preview-expense-type-read-model#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/cost-statistics/export-preview",
+      "owner": "cost-ops",
+      "risk": "medium",
+      "source": "PostgreSQL read_model.cost_statistics_read_models time_rows expense_type filter; no app Mongo/workbench recalculation",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "background-jobs-active",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/background-jobs/active",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL job.worker_tasks system tasks, legacy active/attention list envelope",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "background-jobs-active#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/background-jobs/active",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL job.worker_tasks system tasks, legacy active/attention list envelope",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "background-job-detail",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/background-jobs/${BACKGROUND_JOB_ID}",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL job.worker_tasks system task detail, legacy {job} envelope",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "background-job-detail#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/background-jobs/${BACKGROUND_JOB_ID}",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL job.worker_tasks system task detail, legacy {job} envelope",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "import-templates-static-contract",
+      "case": "primary",
+      "method": "GET",
+      "path": "/imports/templates",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "Static contract mirrored from legacy Python TEMPLATE_DEFINITIONS",
+      "source_categories": [
+        "static_contract"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "import-templates-static-contract#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/imports/templates",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "Static contract mirrored from legacy Python TEMPLATE_DEFINITIONS",
+      "source_categories": [
+        "static_contract"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "import-batches-list-metadata",
+      "case": "primary",
+      "method": "GET",
+      "path": "/imports/batches",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL app.import_batches metadata only",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "import-batches-list-metadata#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/imports/batches",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL app.import_batches metadata only",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "import-batch-detail-metadata",
+      "case": "primary",
+      "method": "GET",
+      "path": "/imports/batches/${IMPORT_BATCH_ID}",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL app.import_batches + app.import_files + app.file_objects metadata only",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "import-batch-detail-metadata#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/imports/batches/${IMPORT_BATCH_ID}",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL app.import_batches + app.import_files + app.file_objects metadata only",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "import-file-detail-metadata",
+      "case": "primary",
+      "method": "GET",
+      "path": "/imports/files/${IMPORT_FILE_ID}",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL app.import_files + app.file_objects metadata only",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "import-file-detail-metadata#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/imports/files/${IMPORT_FILE_ID}",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL app.import_files + app.file_objects metadata only",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "file-object-metadata-access",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/files/objects/${FILE_OBJECT_ID}",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL app.file_objects metadata plus object-storage access provider for bounded presigned access metadata; no object content",
+      "source_categories": [
+        "object_storage",
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "file-object-metadata-access#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/files/objects/${FILE_OBJECT_ID}",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL app.file_objects metadata plus object-storage access provider for bounded presigned access metadata; no object content",
+      "source_categories": [
+        "object_storage",
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "import-file-upload-preflight",
+      "case": "primary",
+      "method": "POST",
+      "path": "/imports/files/upload-preflight",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL app.file_objects checksum lookup + deterministic object-key planning; no object write",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "import-file-upload-preflight#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/imports/files/upload-preflight",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL app.file_objects checksum lookup + deterministic object-key planning; no object write",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-month-read-model",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/workbench",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL read_model.workbench_snapshots; no app Mongo, no request-path rebuild",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-month-read-model#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/workbench",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL read_model.workbench_snapshots; no app Mongo, no request-path rebuild",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-ignored-read-model",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/workbench/ignored",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL read_model.workbench_snapshots ignored_rows projection; no app Mongo",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-ignored-read-model#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/workbench/ignored",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL read_model.workbench_snapshots ignored_rows projection; no app Mongo",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-read-model-status",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/workbench/read-model/status",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL read_model.workbench_snapshots status only; no app Mongo",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-read-model-status#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/workbench/read-model/status",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL read_model.workbench_snapshots status only; no app Mongo",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-row-detail-read-model",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/workbench/rows/${WORKBENCH_ROW_ID}",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL read_model.workbench_rows row payload; sensitive values sanitized",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-row-detail-read-model#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/workbench/rows/${WORKBENCH_ROW_ID}",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL read_model.workbench_rows row payload; sensitive values sanitized",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-confirm-link-write-command",
+      "case": "primary",
+      "method": "POST",
+      "path": "/api/workbench/actions/confirm-link",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional workbench write command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model",
+        "transactional_workbench_write"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-confirm-link-write-command#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/api/workbench/actions/confirm-link",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional workbench write command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model",
+        "transactional_workbench_write"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-confirm-link-preview-write-command",
+      "case": "primary",
+      "method": "POST",
+      "path": "/api/workbench/actions/confirm-link/preview",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional workbench write preflight/command validation; isolated fixture data only",
+      "source_categories": [
+        "postgres_facts",
+        "transactional_workbench_write"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-confirm-link-preview-write-command#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/api/workbench/actions/confirm-link/preview",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional workbench write preflight/command validation; isolated fixture data only",
+      "source_categories": [
+        "postgres_facts",
+        "transactional_workbench_write"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-cancel-link-write-command",
+      "case": "primary",
+      "method": "POST",
+      "path": "/api/workbench/actions/cancel-link",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional workbench write command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model",
+        "transactional_workbench_write"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-cancel-link-write-command#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/api/workbench/actions/cancel-link",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional workbench write command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model",
+        "transactional_workbench_write"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-withdraw-link-preview-write-command",
+      "case": "primary",
+      "method": "POST",
+      "path": "/api/workbench/actions/withdraw-link/preview",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional workbench write preflight/command validation; isolated fixture data only",
+      "source_categories": [
+        "postgres_facts",
+        "transactional_workbench_write"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-withdraw-link-preview-write-command#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/api/workbench/actions/withdraw-link/preview",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional workbench write preflight/command validation; isolated fixture data only",
+      "source_categories": [
+        "postgres_facts",
+        "transactional_workbench_write"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-withdraw-link-write-command",
+      "case": "primary",
+      "method": "POST",
+      "path": "/api/workbench/actions/withdraw-link",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional workbench write command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model",
+        "transactional_workbench_write"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-withdraw-link-write-command#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/api/workbench/actions/withdraw-link",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional workbench write command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model",
+        "transactional_workbench_write"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-mark-exception-write-command",
+      "case": "primary",
+      "method": "POST",
+      "path": "/api/workbench/actions/mark-exception",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional exception write command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-mark-exception-write-command#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/api/workbench/actions/mark-exception",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional exception write command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-bank-exception-update-write-command",
+      "case": "primary",
+      "method": "POST",
+      "path": "/api/workbench/actions/update-bank-exception",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional exception write command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-bank-exception-update-write-command#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/api/workbench/actions/update-bank-exception",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional exception write command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-oa-bank-exception-write-command",
+      "case": "primary",
+      "method": "POST",
+      "path": "/api/workbench/actions/oa-bank-exception",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional exception write command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-oa-bank-exception-write-command#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/api/workbench/actions/oa-bank-exception",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional exception write command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-confirm-personal-advance-repayment-write-command",
+      "case": "primary",
+      "method": "POST",
+      "path": "/api/workbench/actions/confirm-personal-advance-repayment",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional special reconciliation command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-confirm-personal-advance-repayment-write-command#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/api/workbench/actions/confirm-personal-advance-repayment",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional special reconciliation command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-confirm-cash-pass-through-write-command",
+      "case": "primary",
+      "method": "POST",
+      "path": "/api/workbench/actions/confirm-cash-pass-through",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional special reconciliation command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-confirm-cash-pass-through-write-command#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/api/workbench/actions/confirm-cash-pass-through",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional special reconciliation command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-confirm-cash-ticket-purchase-write-command",
+      "case": "primary",
+      "method": "POST",
+      "path": "/api/workbench/actions/confirm-cash-ticket-purchase",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional special reconciliation command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-confirm-cash-ticket-purchase-write-command#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/api/workbench/actions/confirm-cash-ticket-purchase",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional special reconciliation command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-cancel-cash-special-write-command",
+      "case": "primary",
+      "method": "POST",
+      "path": "/api/workbench/actions/cancel-cash-special",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional special reconciliation command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-cancel-cash-special-write-command#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/api/workbench/actions/cancel-cash-special",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional special reconciliation command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-exception-apply-write-command",
+      "case": "primary",
+      "method": "POST",
+      "path": "/api/workbench/exception/apply",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional exception application command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-exception-apply-write-command#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/api/workbench/exception/apply",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional exception application command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-cancel-exception-write-command",
+      "case": "primary",
+      "method": "POST",
+      "path": "/api/workbench/actions/cancel-exception",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional exception cancel command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-cancel-exception-write-command#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/api/workbench/actions/cancel-exception",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional exception cancel command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-ignore-row-write-command",
+      "case": "primary",
+      "method": "POST",
+      "path": "/api/workbench/actions/ignore-row",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional workbench override command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-ignore-row-write-command#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/api/workbench/actions/ignore-row",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional workbench override command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-unignore-row-write-command",
+      "case": "primary",
+      "method": "POST",
+      "path": "/api/workbench/actions/unignore-row",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional workbench override command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-unignore-row-write-command#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/api/workbench/actions/unignore-row",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL transactional workbench override command + job/outbox read-model invalidation; isolated fixture data only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-settings-read-contract",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/workbench/settings",
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "Axum static PostgreSQL/read-model cutover-safe settings projection; no app Mongo, no project sync, no mutation",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "workbench-settings-read-contract#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/workbench/settings",
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "Axum static PostgreSQL/read-model cutover-safe settings projection; no app Mongo, no project sync, no mutation",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "settings-data-reset-active-job",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/workbench/settings/data-reset/jobs/active",
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL job.worker_tasks filtered to task_type=settings_data_reset active system jobs",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "settings-data-reset-active-job#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/workbench/settings/data-reset/jobs/active",
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL job.worker_tasks filtered to task_type=settings_data_reset active system jobs",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "settings-data-reset-job-detail",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/workbench/settings/data-reset/jobs/${DATA_RESET_JOB_ID}",
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL job.worker_tasks filtered to task_type=settings_data_reset",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "settings-data-reset-job-detail#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/workbench/settings/data-reset/jobs/${DATA_RESET_JOB_ID}",
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL job.worker_tasks filtered to task_type=settings_data_reset",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "oa-sync-status",
+      "case": "primary",
+      "method": "GET",
+      "path": "/api/oa-sync/status",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL app.oa_sync_runs + app.oa_sync_watermarks",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "oa-sync-status#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/api/oa-sync/status",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL app.oa_sync_runs + app.oa_sync_watermarks",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "background-job-retry-request",
+      "case": "primary",
+      "method": "POST",
+      "path": "/api/background-jobs/${BACKGROUND_JOB_ID}/retry",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL job.worker_tasks, job.outbox_events, audit.events and app.write_idempotency_records; request creates retry task only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 202,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 202,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "background-job-retry-request#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/api/background-jobs/${BACKGROUND_JOB_ID}/retry",
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL job.worker_tasks, job.outbox_events, audit.events and app.write_idempotency_records; request creates retry task only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "import-file-retry-request",
+      "case": "primary",
+      "method": "POST",
+      "path": "/imports/files/retry",
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.import_files metadata plus job.worker_tasks/job.outbox_events/audit/idempotency request record; request creates parse retry task only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 202,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 202,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "import-file-retry-request#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/imports/files/retry",
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.import_files metadata plus job.worker_tasks/job.outbox_events/audit/idempotency request record; request creates parse retry task only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "import-file-session-projection",
+      "case": "primary",
+      "method": "GET",
+      "path": "/imports/files/sessions/${IMPORT_SESSION_ID}",
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.import_batches legacy_session_id projection joined to app.import_files",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "import-file-session-projection#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/imports/files/sessions/${IMPORT_SESSION_ID}",
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.import_batches legacy_session_id projection joined to app.import_files",
+      "source_categories": [
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "matching-run-request",
+      "case": "primary",
+      "method": "POST",
+      "path": "/matching/run",
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL job.worker_tasks, job.outbox_events, audit.events and app.write_idempotency_records; request queues workbench matching only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 202,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 202,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "matching-run-request#permission_failure",
+      "case": "permission_failure",
+      "method": "POST",
+      "path": "/matching/run",
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL job.worker_tasks, job.outbox_events, audit.events and app.write_idempotency_records; request queues workbench matching only",
+      "source_categories": [
+        "job_outbox",
+        "postgres_facts"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "matching-results-list",
+      "case": "primary",
+      "method": "GET",
+      "path": "/matching/results",
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL read_model.workbench_candidate_matches",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "matching-results-list#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/matching/results",
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL read_model.workbench_candidate_matches",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "matching-result-detail",
+      "case": "primary",
+      "method": "GET",
+      "path": "/matching/results/${MATCHING_RESULT_ID}",
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL read_model.workbench_candidate_matches",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 200,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 200,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    },
+    {
+      "endpoint_id": "matching-result-detail#permission_failure",
+      "case": "permission_failure",
+      "method": "GET",
+      "path": "/matching/results/${MATCHING_RESULT_ID}",
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL read_model.workbench_candidate_matches",
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "status": "NO_GO",
+      "python_status": null,
+      "axum_status": null,
+      "expected_status": 401,
+      "diff_count": 0,
+      "explained_diff_count": 0,
+      "unexpected_diff_count": 1,
+      "explained_diffs": [],
+      "unexpected_diffs": [
+        {
+          "kind": "expected_status",
+          "path": "$.status",
+          "expected": 401,
+          "python": null,
+          "axum": null
+        }
+      ],
+      "diff_summary": {
+        "field_diff_count": 0,
+        "sorting_diff_count": 0,
+        "money_format_diff_count": 0,
+        "date_format_diff_count": 0,
+        "value_diff_count": 0
+      },
+      "python_error": "<urlopen error [Errno 61] Connection refused>",
+      "axum_error": "<urlopen error [Errno 61] Connection refused>"
+    }
+  ]
+}
