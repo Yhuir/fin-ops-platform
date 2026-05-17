@@ -76,8 +76,47 @@ port: 5432
 - 已验证 `fin_ops_readonly` 不能在 `app` schema 建表。
 - 未配置 PostgreSQL PITR。
 - 未执行 PostgreSQL 逻辑备份演练。
+- 已新增 PostgreSQL backup/PITR/restore drill 证据工具：`scripts/tools/postgres_pitr_restore_drill.py`。
+- 已生成当前 NO_GO 证据：`postgres-pitr-drill-20260517.json` 和 `postgres-pitr-drill-20260517.md`。本次缺少受控 staging 环境变量，未执行真实 backup 或 restore drill。
 - 已执行 app Mongo 备份，记录见 `app-mongo-backup-runbook.md`。
 - 已执行 app Mongo 恢复演练，恢复到测试库 `fin_ops_platform_app_restore_test_20260516`，collection count 比对 `diff=0`。
+
+## PostgreSQL 备份与 PITR 演练工具
+
+`scripts/tools/postgres_pitr_restore_drill.py` 用于生成 secret-free 的 PostgreSQL backup、WAL/PITR 和 isolated restore drill 证据。
+
+支持模式：
+
+```bash
+python3 scripts/tools/postgres_pitr_restore_drill.py --validate-only
+python3 scripts/tools/postgres_pitr_restore_drill.py --report-only
+python3 scripts/tools/postgres_pitr_restore_drill.py --execute-drill
+```
+
+环境变量只从受控 shell 或密钥管理系统注入，不写入报告：
+
+| env | 用途 |
+| --- | --- |
+| `FIN_OPS_PG_SOURCE_CONNINFO` | staging/source PostgreSQL 连接配置。 |
+| `FIN_OPS_PG_BACKUP_DIR` | 备份工件目录。 |
+| `FIN_OPS_PG_RESTORE_CONNINFO` | isolated restore instance 连接配置。 |
+| `FIN_OPS_PG_RESTORE_TARGET_TIME` | PITR restore target time。 |
+| `FIN_OPS_PG_OPERATOR` | 执行人，默认 `Codex`。 |
+| `FIN_OPS_PG_SOURCE_INSTANCE_LABEL` | 脱敏源实例标签。 |
+| `FIN_OPS_PG_RESTORE_INSTANCE_LABEL` | 脱敏恢复实例标签。 |
+| `FIN_OPS_PG_WAL_ARCHIVE_STATUS` | WAL archive 验证结果，GO 前必须为 `GO`。 |
+| `FIN_OPS_PG_WAL_ARCHIVE_RANGE` | WAL archive range。 |
+| `FIN_OPS_PG_BASE_BACKUP_ID` | base backup id。 |
+| `FIN_OPS_PG_SAMPLE_COUNTS_JSON` | sample count checks JSON 数组。 |
+| `FIN_OPS_PG_RPO_SECONDS` / `FIN_OPS_PG_RTO_SECONDS` | RPO/RTO 指标。 |
+
+`--execute-drill` 还必须设置：
+
+```bash
+FIN_OPS_POSTGRES_PITR_EXECUTE=1
+```
+
+未满足以上条件时，工具只生成 `NO_GO` blocker 证据，不连接 PostgreSQL，不修改业务事实数据。GO 证据必须同时包含 logical backup、base backup/WAL archive、restore target time、isolated restore instance、checksum/list validation、sample count checks 和 RPO/RTO。
 
 ## 下一步
 

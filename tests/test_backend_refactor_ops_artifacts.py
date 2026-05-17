@@ -17,6 +17,10 @@ MONITORING_REPORT_TEMPLATE = (
     / "monitoring-alert-verification-report-template.md"
 )
 READINESS_GATE = ROOT / "scripts" / "tools" / "backend_refactor_readiness_gate.py"
+POSTGRES_PITR_SCRIPT = ROOT / "scripts" / "tools" / "postgres_pitr_restore_drill.py"
+POSTGRES_PITR_TEMPLATE = (
+    ROOT / "docs" / "operations" / "backend-refactor" / "postgresql-pitr-restore-drill-template.md"
+)
 
 
 REQUIRED_ALERT_COVERAGE = {
@@ -67,6 +71,16 @@ def run_script(script: str, *args: str) -> subprocess.CompletedProcess[str]:
 
 def load_readiness_gate_module():
     spec = importlib.util.spec_from_file_location("backend_refactor_readiness_gate", READINESS_GATE)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_postgres_pitr_module():
+    spec = importlib.util.spec_from_file_location("postgres_pitr_restore_drill", POSTGRES_PITR_SCRIPT)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -292,3 +306,104 @@ def test_feature_flag_script_defaults_to_dry_run_and_uses_allowlist() -> None:
     )
     assert execute.returncode == 78
     assert "refusing feature flag change" in execute.stderr
+
+
+def test_postgres_pitr_tool_generates_no_go_without_staging_environment() -> None:
+    tool = load_postgres_pitr_module()
+
+    args = tool.parse_args(["--validate-only"])
+    config = tool.build_config(
+        args,
+        env={
+            "FIN_OPS_PG_SOURCE_CONNINFO": "sensitive-source-conninfo",
+            "FIN_OPS_PG_RESTORE_CONNINFO": "sensitive-restore-conninfo",
+        },
+    )
+    report = tool.build_report(config, now=tool.parse_timestamp("2026-05-17T09:00:00+08:00"))
+    encoded = json.dumps(report, ensure_ascii=False, sort_keys=True)
+
+    assert report["status"] == "NO_GO"
+    assert report["go_no_go"] == "NO_GO"
+    assert report["executed_real_restore_drill"] is False
+    assert "FIN_OPS_PG_BACKUP_DIR" in report["blockers"]
+    assert "FIN_OPS_PG_RESTORE_TARGET_TIME" in report["blockers"]
+    assert "sensitive-source-conninfo" not in encoded
+    assert "sensitive-restore-conninfo" not in encoded
+
+
+def test_postgres_pitr_tool_writes_paired_no_go_reports(tmp_path: Path) -> None:
+    tool = load_postgres_pitr_module()
+    json_path = tmp_path / "postgres-pitr-drill-20260517.json"
+    md_path = tmp_path / "postgres-pitr-drill-20260517.md"
+
+    exit_code = tool.main(
+        [
+            "--report-only",
+            "--output-json",
+            str(json_path),
+            "--output-markdown",
+            str(md_path),
+            "--generated-at",
+            "2026-05-17T09:00:00+08:00",
+        ],
+        env={},
+    )
+
+    assert exit_code == 0
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    markdown = md_path.read_text(encoding="utf-8")
+    assert payload["status"] == "NO_GO"
+    assert payload["executed_real_restore_drill"] is False
+    assert payload["backup_artifacts"] == []
+    assert "Gate: **NO_GO**" in markdown
+    assert "FIN_OPS_PG_SOURCE_CONNINFO" in markdown
+
+
+def test_postgres_pitr_gate_rejects_no_go_and_template_reports(tmp_path: Path) -> None:
+    gate = load_readiness_gate_module()
+
+    write_evidence(
+        tmp_path,
+        "docs/operations/backend-refactor/postgres-pitr-drill-template.md",
+        "Gate: **GO**\n",
+    )
+    write_evidence(
+        tmp_path,
+        "docs/operations/backend-refactor/postgres-pitr-drill-20260517.json",
+        """
+{
+  "status": "NO_GO",
+  "go_no_go": "NO_GO",
+  "summary": {"no_go": 1},
+  "blockers": ["missing staging environment"]
+}
+""",
+    )
+    write_evidence(
+        tmp_path,
+        "docs/operations/backend-refactor/postgres-pitr-drill-20260517.md",
+        "Gate: **NO_GO**\n",
+    )
+
+    report = gate.evaluate(tmp_path, checks=(gate.DEFAULT_CHECKS[1],))
+
+    assert report["status"] == "NO_GO"
+    assert report["checks"][0]["status"] == "failed"
+
+
+def test_postgres_pitr_template_documents_required_drill_fields() -> None:
+    template = POSTGRES_PITR_TEMPLATE.read_text(encoding="utf-8")
+
+    for required_text in (
+        "base backup",
+        "logical backup",
+        "WAL archive",
+        "restore target time",
+        "isolated restore instance",
+        "checksum",
+        "sample count checks",
+        "RPO",
+        "RTO",
+        "GO/NO_GO",
+    ):
+        assert required_text in template

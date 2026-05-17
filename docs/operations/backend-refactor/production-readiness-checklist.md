@@ -46,6 +46,15 @@ P4-10 新增的监控草案位于：
 
 这些文件只能作为 staging 接入和验证起点；只有生成 `monitoring-alert-verification-*.md` 或等价 JSON 且结论为 `GO` 后，才可作为 P4-12 证据。
 
+PostgreSQL backup/PITR/restore drill 证据由以下文件生成和记录：
+
+- `scripts/tools/postgres_pitr_restore_drill.py`
+- `docs/operations/backend-refactor/postgresql-pitr-restore-drill-template.md`
+- `docs/operations/backend-refactor/postgres-pitr-drill-YYYYMMDD.json`
+- `docs/operations/backend-refactor/postgres-pitr-drill-YYYYMMDD.md`
+
+缺少受控 staging 环境变量时，工具只能生成 `NO_GO` blocker 证据；不得把模板、partial、只完成 `pg_dump`、未恢复到 isolated restore instance、缺少 WAL/PITR 或缺少 sample count/checksum/RPO/RTO 的报告解释为 `GO`。真实 secret 必须只从环境变量或密钥管理系统读取，不得写入报告。
+
 ## 生产上线门禁
 
 ### 版本与配置
