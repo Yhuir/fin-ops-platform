@@ -1,0 +1,242 @@
+{
+  "schema_version": "finops.read_model_rebuild_validation.v1",
+  "task_id": "p4-08-read-model-search-staging-rebuild",
+  "report_id": "read-model-rebuild-validation-report-20260517",
+  "GO/NO_GO": "NO_GO",
+  "go_no_go": "NO_GO",
+  "status": "NO_GO",
+  "operator": "yu",
+  "generated_at": "2026-05-17T09:18:39+08:00",
+  "staging_executed": false,
+  "scope": {
+    "source": "PostgreSQL facts only",
+    "excluded_sources": [
+      "app Mongo",
+      "OA source database"
+    ],
+    "write_surface": "No read_model/search rebuild was executed; evidence files only",
+    "api_route_changes": false,
+    "request_path_full_recompute": false
+  },
+  "environment": {
+    "DATABASE_URL": "missing",
+    "READ_MODEL_REBUILD_DATABASE_URL": "missing",
+    "FIN_OPS_POSTGRES_MIGRATION_URL": "missing",
+    "connection_values_recorded": false
+  },
+  "supported_model_kinds": [
+    {
+      "model_kind": "workbench",
+      "supported_scopes": [
+        {
+          "scope_type": "scope_month",
+          "scope_key_pattern": "workbench:YYYY-MM",
+          "example": "workbench:2026-05"
+        }
+      ],
+      "source_contract": "PostgreSQL fact rows for bank, invoice, and OA-derived fact tables for the requested month",
+      "target_contract": "read_model.workbench_rows partition plus read_model.workbench_snapshots",
+      "metadata_contract": {
+        "source_versions": true,
+        "source_watermark_input": true,
+        "rebuilt_at": "generated_at",
+        "stale_seconds": true,
+        "schema_version": "snapshot row",
+        "rebuild_task_id": "snapshot row"
+      }
+    },
+    {
+      "model_kind": "search_index",
+      "supported_scopes": [
+        {
+          "scope_type": "scope_month",
+          "scope_key_pattern": "search:YYYY-MM",
+          "example": "search:2026-05"
+        }
+      ],
+      "source_contract": "PostgreSQL facts and non-stale workbench read model rows for the requested month",
+      "target_contract": "read_model.search_index_rows partition",
+      "metadata_contract": {
+        "source_versions": true,
+        "source_watermark_input": true,
+        "rebuilt_at": "generated_at",
+        "stale_seconds": true,
+        "schema_version": "not stored on search_index_rows",
+        "rebuild_task_id": "not stored on search_index_rows"
+      }
+    },
+    {
+      "model_kind": "cost_statistics",
+      "supported_scopes": [
+        {
+          "scope_type": "scope_month",
+          "scope_key_pattern": "active:YYYY-MM",
+          "example": "active:2026-05"
+        },
+        {
+          "scope_type": "scope_month",
+          "scope_key_pattern": "all:YYYY-MM",
+          "example": "all:2026-05"
+        },
+        {
+          "scope_type": "all_time",
+          "scope_key_pattern": "active:all",
+          "example": "active:all"
+        },
+        {
+          "scope_type": "all_time",
+          "scope_key_pattern": "all:all",
+          "example": "all:all"
+        }
+      ],
+      "source_contract": "PostgreSQL fact totals and project-scope filters",
+      "target_contract": "read_model.cost_statistics_read_models",
+      "metadata_contract": {
+        "source_versions": true,
+        "source_watermark_input": true,
+        "rebuilt_at": "generated_at",
+        "stale_seconds": true,
+        "schema_version": "2026-05-cost-statistics-explorer-v1",
+        "rebuild_task_id": true
+      }
+    },
+    {
+      "model_kind": "tax_offset",
+      "supported_scopes": [
+        {
+          "scope_type": "scope_month",
+          "scope_key_pattern": "YYYY-MM",
+          "example": "2026-05"
+        }
+      ],
+      "source_contract": "PostgreSQL facts sufficient to build output_items, input_plan_items, and certified_items",
+      "target_contract": "read_model.tax_offset_read_models",
+      "metadata_contract": {
+        "source_versions": true,
+        "source_watermark_input": true,
+        "rebuilt_at": "generated_at",
+        "stale_seconds": true,
+        "schema_version": "2026-05-tax-offset-month-v1",
+        "rebuild_task_id": true
+      }
+    }
+  ],
+  "validation_results": [
+    {
+      "model_kind": "workbench",
+      "scope_key": "workbench:2026-05",
+      "source_fact_count": null,
+      "target_row_count": null,
+      "missing_row_count": null,
+      "stale_seconds": null,
+      "duration_seconds": null,
+      "failed_scope_keys": [
+        "workbench:2026-05"
+      ],
+      "status": "NO_GO",
+      "blocker": "STAGING_FACTS_UNAVAILABLE"
+    },
+    {
+      "model_kind": "search_index",
+      "scope_key": "search:2026-05",
+      "source_fact_count": null,
+      "target_row_count": null,
+      "missing_row_count": null,
+      "stale_seconds": null,
+      "duration_seconds": null,
+      "failed_scope_keys": [
+        "search:2026-05"
+      ],
+      "status": "NO_GO",
+      "blocker": "STAGING_FACTS_UNAVAILABLE"
+    },
+    {
+      "model_kind": "cost_statistics",
+      "scope_key": "active:2026-05",
+      "source_fact_count": null,
+      "target_row_count": null,
+      "missing_row_count": null,
+      "stale_seconds": null,
+      "duration_seconds": null,
+      "failed_scope_keys": [
+        "active:2026-05"
+      ],
+      "status": "NO_GO",
+      "blocker": "STAGING_FACTS_UNAVAILABLE"
+    },
+    {
+      "model_kind": "tax_offset",
+      "scope_key": "2026-05",
+      "source_fact_count": null,
+      "target_row_count": null,
+      "missing_row_count": null,
+      "stale_seconds": null,
+      "duration_seconds": null,
+      "failed_scope_keys": [
+        "2026-05"
+      ],
+      "status": "NO_GO",
+      "blocker": "STAGING_FACTS_UNAVAILABLE"
+    }
+  ],
+  "stale_metrics": {
+    "available": false,
+    "stale_scope_count": null,
+    "max_stale_seconds": null,
+    "workbench_stale_seconds": null,
+    "search_index_stale_seconds": null,
+    "cost_statistics_stale_seconds": null,
+    "tax_offset_stale_seconds": null,
+    "reason": "No staging facts connection was available; rebuild and stale aggregation were not executed."
+  },
+  "failed_scope_keys": [
+    "workbench:2026-05",
+    "search:2026-05",
+    "active:2026-05",
+    "2026-05"
+  ],
+  "blockers": [
+    {
+      "id": "STAGING_DATABASE_URL_MISSING",
+      "severity": "blocking",
+      "description": "No controlled staging PostgreSQL connection environment was present."
+    },
+    {
+      "id": "STAGING_FACTS_UNAVAILABLE",
+      "severity": "blocking",
+      "description": "Source fact counts and target row counts could not be measured."
+    },
+    {
+      "id": "READ_MODEL_REBUILD_NOT_EXECUTED",
+      "severity": "blocking",
+      "description": "Workbench, search_index, cost_statistics, and tax_offset rebuilds were not run."
+    }
+  ],
+  "local_implementation_checks": [
+    {
+      "command": "cd rust/fin-ops-api && cargo test --workspace jobs::read_model_rebuild",
+      "result": "pass"
+    },
+    {
+      "command": "cd rust/fin-ops-api && cargo test --workspace services::read_models",
+      "result": "pass"
+    },
+    {
+      "command": "cd rust/fin-ops-api && cargo test --workspace repositories::read_models",
+      "result": "pass"
+    },
+    {
+      "command": "cd rust/fin-ops-api && cargo check --workspace",
+      "result": "pass"
+    }
+  ],
+  "readiness_gate": {
+    "check_id": "read_model_rebuild",
+    "expected_status": "failed",
+    "reason": "NO_GO evidence is intentionally machine-readable and must not satisfy the readiness gate."
+  },
+  "remaining_risks": [
+    "No source fact count, target row count, missing row count, stale_seconds, or duration metric has been validated against staging.",
+    "No failed scope key can be tied to a live staging query because rebuild execution was blocked by missing environment."
+  ]
+}
