@@ -1,0 +1,241 @@
+{
+  "report": "load-test-baseline-20260517",
+  "status": "NO_GO",
+  "start_time": "2026-05-17T02:05:20Z",
+  "end_time": "2026-05-17T02:05:20Z",
+  "generated_at": "2026-05-17T02:05:20Z",
+  "environment": "staging",
+  "target_host": "not_configured",
+  "execution_mode": "validate_only",
+  "requests_sent": false,
+  "dataset_scale": {
+    "label": "not_configured",
+    "months": [],
+    "bank_transactions": 0,
+    "invoice_rows": 0,
+    "search_rows": 0
+  },
+  "request_count": 0,
+  "concurrency": 4,
+  "latency_ms": {
+    "p50": 0.0,
+    "p95": 0.0,
+    "p99": 0.0
+  },
+  "error_rate": 1.0,
+  "db_pool_stats": {
+    "available": false,
+    "reason": "staging run did not start"
+  },
+  "nats_outbox_backlog": {
+    "available": false,
+    "reason": "staging run did not start"
+  },
+  "worker_lag_seconds": {
+    "available": false,
+    "reason": "staging run did not start"
+  },
+  "read_model_stale_seconds": {
+    "available": false,
+    "reason": "staging run did not start"
+  },
+  "validation": {
+    "tool_help": "GO",
+    "validate_only": "NO_GO",
+    "staging_run": "NO_GO",
+    "requests_sent": 0
+  },
+  "configuration_errors": [
+    "missing required environment variable: FIN_OPS_STAGING_BASE_URL",
+    "missing required environment variable: FIN_OPS_STAGING_AUTH_TOKEN",
+    "missing required environment variable: FIN_OPS_LOAD_TEST_MONTH",
+    "missing required environment variable: FIN_OPS_LOAD_TEST_SEARCH_QUERY",
+    "missing required environment variable: FIN_OPS_LOAD_TEST_TASK_ID",
+    "missing required environment variable: FIN_OPS_LOAD_TEST_IMPORT_FILE_ID",
+    "missing required environment variable: FIN_OPS_LOAD_TEST_DATASET_LABEL",
+    "missing required environment variable: FIN_OPS_LOAD_TEST_BANK_TRANSACTION_ROWS",
+    "missing required environment variable: FIN_OPS_LOAD_TEST_INVOICE_ROWS",
+    "missing required environment variable: FIN_OPS_LOAD_TEST_SEARCH_ROWS"
+  ],
+  "blockers": [
+    "FIN_OPS_STAGING_BASE_URL and FIN_OPS_STAGING_AUTH_TOKEN were not configured in the isolated staging environment.",
+    "Required staging dataset sample variables were not configured, so workbench/search/task/import/cost/tax scenarios could not be executed safely.",
+    "No requests were sent. This avoids production load, OA source database access, traffic switching, and accidental writes outside staging.",
+    "Because no scenario produced latency/error results, readiness gate load_test must remain NO_GO."
+  ],
+  "thresholds": {
+    "max_error_rate": 0.0,
+    "scenario_p95_ms": {
+      "healthz": 20.0,
+      "readyz": 80.0,
+      "workbench_month_read_model": 800.0,
+      "search": 500.0,
+      "task_status": 300.0,
+      "import_metadata": 300.0,
+      "cost_read_model": 800.0,
+      "tax_read_model": 800.0
+    }
+  },
+  "scenarios": [
+    {
+      "id": "healthz",
+      "label": "Process health",
+      "path": "/healthz",
+      "source_category": "static_health",
+      "request_count": 0,
+      "concurrency": 4,
+      "latency_ms": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "error_rate": 1.0,
+      "target_p95_ms": 20.0,
+      "status": "NO_GO",
+      "status_codes": {},
+      "errors": {
+        "staging_not_configured": 1
+      }
+    },
+    {
+      "id": "readyz",
+      "label": "Dependency readiness",
+      "path": "/readyz",
+      "source_category": "dependency_health",
+      "request_count": 0,
+      "concurrency": 4,
+      "latency_ms": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "error_rate": 1.0,
+      "target_p95_ms": 80.0,
+      "status": "NO_GO",
+      "status_codes": {},
+      "errors": {
+        "staging_not_configured": 1
+      }
+    },
+    {
+      "id": "workbench_month_read_model",
+      "label": "Single-month workbench read model",
+      "path": "/api/workbench?month={month}",
+      "source_category": "read_model",
+      "request_count": 0,
+      "concurrency": 4,
+      "latency_ms": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "error_rate": 1.0,
+      "target_p95_ms": 800.0,
+      "status": "NO_GO",
+      "status_codes": {},
+      "errors": {
+        "staging_not_configured": 1
+      }
+    },
+    {
+      "id": "search",
+      "label": "Search",
+      "path": "/api/search?q={search_query}",
+      "source_category": "read_model",
+      "request_count": 0,
+      "concurrency": 4,
+      "latency_ms": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "error_rate": 1.0,
+      "target_p95_ms": 500.0,
+      "status": "NO_GO",
+      "status_codes": {},
+      "errors": {
+        "staging_not_configured": 1
+      }
+    },
+    {
+      "id": "task_status",
+      "label": "Task status",
+      "path": "/api/background-jobs/{task_id}",
+      "source_category": "job_status",
+      "request_count": 0,
+      "concurrency": 4,
+      "latency_ms": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "error_rate": 1.0,
+      "target_p95_ms": 300.0,
+      "status": "NO_GO",
+      "status_codes": {},
+      "errors": {
+        "staging_not_configured": 1
+      }
+    },
+    {
+      "id": "import_metadata",
+      "label": "Import metadata",
+      "path": "/imports/files/{import_file_id}",
+      "source_category": "postgres_facts",
+      "request_count": 0,
+      "concurrency": 4,
+      "latency_ms": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "error_rate": 1.0,
+      "target_p95_ms": 300.0,
+      "status": "NO_GO",
+      "status_codes": {},
+      "errors": {
+        "staging_not_configured": 1
+      }
+    },
+    {
+      "id": "cost_read_model",
+      "label": "Representative cost read model",
+      "path": "/api/cost-statistics?month={month}",
+      "source_category": "read_model",
+      "request_count": 0,
+      "concurrency": 4,
+      "latency_ms": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "error_rate": 1.0,
+      "target_p95_ms": 800.0,
+      "status": "NO_GO",
+      "status_codes": {},
+      "errors": {
+        "staging_not_configured": 1
+      }
+    },
+    {
+      "id": "tax_read_model",
+      "label": "Representative tax read model",
+      "path": "/api/tax-offset?month={month}",
+      "source_category": "read_model",
+      "request_count": 0,
+      "concurrency": 4,
+      "latency_ms": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "error_rate": 1.0,
+      "target_p95_ms": 800.0,
+      "status": "NO_GO",
+      "status_codes": {},
+      "errors": {
+        "staging_not_configured": 1
+      }
+    }
+  ]
+}
