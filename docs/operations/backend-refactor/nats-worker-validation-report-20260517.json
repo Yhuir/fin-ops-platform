@@ -1,0 +1,167 @@
+{
+  "GO_NO_GO": "NO_GO",
+  "ack_redelivery": {
+    "ack_delay_observed_ms": null,
+    "ack_wait_config": "not_verified_without_nats",
+    "backoff_observed": false,
+    "max_deliver_observed": false,
+    "redelivery_observed": false
+  },
+  "blocking": true,
+  "decision": {
+    "go_no_go": "NO_GO",
+    "reason": "Staging PostgreSQL and NATS environments were not provided; only local implementation tests were executed.",
+    "required_action": "Run disposable staging outbox publish, worker consume/retry/dead-letter and manual replay validation with DATABASE_URL and NATS_URL supplied by environment."
+  },
+  "environment": {
+    "database_url_status": "missing",
+    "nats_url_status": "missing",
+    "outbox_publisher_id_status": "missing",
+    "worker_durable_status": "missing",
+    "worker_stream_status": "missing",
+    "worker_subject_status": "missing"
+  },
+  "findings": [
+    {
+      "code": "STAGING_POSTGRES_URL_MISSING",
+      "dimension": "postgres_staging",
+      "message": "DATABASE_URL was not provided, so job.outbox_events, job.worker_tasks, job.worker_attempts and job.dead_letters could not be validated in staging.",
+      "required_action": "Provide a controlled staging PostgreSQL DATABASE_URL and rerun outbox/worker replay validation.",
+      "severity": "error"
+    },
+    {
+      "code": "STAGING_NATS_URL_MISSING",
+      "dimension": "nats_jetstream",
+      "message": "NATS_URL was not provided, so JetStream stream, consumer, ack, redelivery and DLQ behavior could not be validated in staging.",
+      "required_action": "Provide a controlled staging NATS_URL and rerun JetStream validation.",
+      "severity": "error"
+    },
+    {
+      "code": "MANUAL_REPLAY_NOT_EXECUTED",
+      "dimension": "manual_replay",
+      "message": "No staging dead letter list/replay operation was executed, so operator/reason/result audit evidence is missing.",
+      "required_action": "Run job_dead_letter_replay.py list and replay against disposable staging records and record the result.",
+      "severity": "error"
+    }
+  ],
+  "generated_at": "2026-05-17T09:23:00+08:00",
+  "go_no_go": "NO_GO",
+  "local_implementation_checks": [
+    {
+      "command": "cd rust/fin-ops-api && cargo test --workspace jobs::outbox_publisher",
+      "status": "passed",
+      "summary": "5 passed; covers publish success, retrying, dead_lettered, sensitive payload guard, payload passthrough."
+    },
+    {
+      "command": "cd rust/fin-ops-api && cargo test --workspace infra::nats",
+      "status": "passed",
+      "summary": "1 passed; verifies Nats-Msg-Id, X-Event-Id, X-Idempotency-Key, X-Trace-Id headers."
+    },
+    {
+      "command": "PYTHONPATH=backend/src python3 -m pytest tests/test_worker_task_protocol.py tests/test_worker_task_consumer.py tests/test_worker_task_postgres_repository.py -q",
+      "status": "passed",
+      "summary": "16 passed; covers worker envelope validation, attempt lifecycle, heartbeat, success/fail/retry/dead_letter, ack/nak/term behavior, repository SQL paths."
+    },
+    {
+      "command": "python3 scripts/tools/job_dead_letter_replay.py --help",
+      "status": "passed",
+      "summary": "CLI exposes list/replay filters for task_id, event_id, source_kind, operator and reason."
+    },
+    {
+      "command": "python3 scripts/tools/run_worker_task_consumer.py --help",
+      "status": "passed",
+      "summary": "CLI exposes DATABASE_URL/NATS_URL env-backed worker consumer options and smoke-succeed mode."
+    }
+  ],
+  "operator": "yu",
+  "phase": "outbox_nats_worker_staging_replay",
+  "readiness_gates": {
+    "nats_worker_replay": {
+      "decision": "NO_GO",
+      "reasons": [
+        "staging_postgres_url_missing",
+        "staging_nats_url_missing",
+        "manual_replay_not_executed"
+      ],
+      "requires_report": "nats-worker-validation-report-YYYYMMDD.{json,md}"
+    }
+  },
+  "replay_dlq_result": {
+    "actual_staging_replay_executed": false,
+    "audit_events_recorded": null,
+    "dlq_result": "not_executed_no_database_url_or_nats_url",
+    "new_outbox_event_ids": [],
+    "new_worker_task_ids": [],
+    "postgres_dead_letter_rows_replayed": null
+  },
+  "schema_version": "finops.nats_worker_replay_validation.v1",
+  "source_boundaries": {
+    "business_api_modified": false,
+    "connection_values_recorded": false,
+    "nats_or_redis_used_as_final_fact_source": false,
+    "oa_source_database_accessed": false,
+    "postgres_is_final_task_fact_source": true,
+    "production_cutover_executed": false
+  },
+  "staging_executed": false,
+  "staging_validation": {
+    "consumer": {
+      "ops-dlq-watchers": {
+        "ack_policy": "not_verified",
+        "status": "not_executed_no_nats_url"
+      },
+      "read-model-workers": {
+        "ack_policy": "not_verified",
+        "ack_wait": "not_verified",
+        "backoff": "not_verified",
+        "max_deliver": "not_verified",
+        "status": "not_executed_no_nats_url"
+      }
+    },
+    "dlq": {
+      "nats_dlq_stream": "not_executed_no_nats_url",
+      "postgres_dead_letters": "unit_tested_paths_not_staging_verified",
+      "source_kinds": [
+        "outbox",
+        "worker_task",
+        "nats_message"
+      ]
+    },
+    "manual_replay": {
+      "list_by_event_id": "cli_help_verified_not_staging_executed",
+      "list_by_task_id": "cli_help_verified_not_staging_executed",
+      "operator_reason_result_audit": "sql_path_read_not_staging_executed",
+      "replay_outbox": "sql_path_read_not_staging_executed",
+      "replay_worker_task": "sql_path_read_not_staging_executed"
+    },
+    "outbox_publisher": {
+      "claim_batch": "unit_test_passed_not_staging_verified",
+      "mark_dead_lettered": "unit_test_passed_not_staging_verified",
+      "mark_retrying": "unit_test_passed_not_staging_verified",
+      "nats_headers": "unit_test_passed_not_staging_verified",
+      "publish_ack_to_published": "unit_test_passed_not_staging_verified",
+      "staging_publish": "not_executed_no_database_url_or_nats_url"
+    },
+    "stream": {
+      "FINOPS_DLQ": "not_executed_no_nats_url",
+      "FINOPS_EVENTS": "not_executed_no_nats_url",
+      "FINOPS_JOBS": "not_executed_no_nats_url"
+    },
+    "worker": {
+      "ack": "unit_test_passed_not_staging_verified",
+      "ack_delay": "not_executed_no_staging_message",
+      "attempt": "unit_test_passed_not_staging_verified",
+      "consume": "unit_test_passed_not_staging_verified",
+      "dead_letter": "unit_test_passed_not_staging_verified",
+      "fail": "unit_test_passed_not_staging_verified",
+      "heartbeat": "unit_test_passed_not_staging_verified",
+      "nak": "unit_test_passed_not_staging_verified",
+      "redelivery": "not_executed_no_nats_url",
+      "retry": "unit_test_passed_not_staging_verified",
+      "success": "unit_test_passed_not_staging_verified",
+      "term": "unit_test_passed_not_staging_verified"
+    }
+  },
+  "status": "NO_GO",
+  "task_id": "p4-07-outbox-nats-worker-staging-replay"
+}
