@@ -1,0 +1,412 @@
+{
+  "status": "NO_GO",
+  "change_id": "p4-13-observability-alerts-go",
+  "env": "staging",
+  "generated_at": "2026-05-17T02:01:29Z",
+  "api_commit": "0c639382",
+  "worker_commit": "0c639382",
+  "prometheus_config_commit": "0c639382",
+  "grafana_dashboard_commit": "0c639382",
+  "operator": "Codex",
+  "reviewed_by": "pending staging operations review",
+  "scope": [
+    "api",
+    "postgresql",
+    "backup_pitr_wal",
+    "outbox",
+    "nats",
+    "worker",
+    "read_model",
+    "object_storage",
+    "host_resources"
+  ],
+  "validation": {
+    "prometheus_yaml_parse": "GO",
+    "grafana_dashboard_json_parse": "GO",
+    "staging_alert_trigger_run": "NO_GO",
+    "staging_alert_route_run": "NO_GO",
+    "staging_alert_recovery_run": "NO_GO"
+  },
+  "implemented_metrics_observed_in_code": [
+    "fin_ops_http_requests_total",
+    "fin_ops_http_request_duration_seconds",
+    "fin_ops_http_request_duration_seconds_bucket",
+    "fin_ops_readiness_checks_total"
+  ],
+  "alerts": [
+    {
+      "alert_name": "FinOpsApiUnavailable",
+      "severity": "P0",
+      "trigger_method": "not executed; isolated staging Prometheus target firing evidence missing",
+      "observed_state": "not observed: no firing, routed, or resolved evidence captured",
+      "owner": "platform-ops-oncall",
+      "go_no_go": "NO_GO",
+      "evidence": "rule exists in deploy/backend-refactor/monitoring/finops-alerts.yml; staging trigger evidence missing"
+    },
+    {
+      "alert_name": "FinOpsApiHigh5xxRate",
+      "severity": "P1",
+      "trigger_method": "not executed; no isolated staging synthetic 5xx run provided",
+      "observed_state": "not observed: no firing, routed, or resolved evidence captured",
+      "owner": "platform-ops-oncall",
+      "go_no_go": "NO_GO",
+      "evidence": "rule references fin_ops_http_requests_total; Rust metric exists, staging trigger evidence missing"
+    },
+    {
+      "alert_name": "FinOpsApiP95LatencyHigh",
+      "severity": "P1",
+      "trigger_method": "not executed; no isolated staging latency simulation provided",
+      "observed_state": "not observed: no firing, routed, or resolved evidence captured",
+      "owner": "platform-ops-oncall",
+      "go_no_go": "NO_GO",
+      "evidence": "rule references fin_ops_http_request_duration_seconds_bucket; Rust histogram exists, staging trigger evidence missing"
+    },
+    {
+      "alert_name": "FinOpsApiPostgresReadinessFailures",
+      "severity": "P1",
+      "trigger_method": "not executed; no isolated staging readiness failure run provided",
+      "observed_state": "not observed: no firing, routed, or resolved evidence captured",
+      "owner": "platform-ops-oncall",
+      "go_no_go": "NO_GO",
+      "evidence": "rule references fin_ops_readiness_checks_total; Rust readiness metric exists, staging trigger evidence missing"
+    },
+    {
+      "alert_name": "FinOpsPostgresUnavailable",
+      "severity": "P0",
+      "trigger_method": "not executed; no staging postgres exporter or controlled outage evidence provided",
+      "observed_state": "not observed: no firing, routed, or resolved evidence captured",
+      "owner": "database-ops-oncall",
+      "go_no_go": "NO_GO",
+      "evidence": "rule exists; exporter metric fin_ops_postgres_up not observed in current code"
+    },
+    {
+      "alert_name": "FinOpsPostgresBackupStale",
+      "severity": "P0",
+      "trigger_method": "not executed; no staging textfile/exporter backup-age override provided",
+      "observed_state": "not observed: no firing, routed, or resolved evidence captured",
+      "owner": "database-ops-oncall",
+      "go_no_go": "NO_GO",
+      "evidence": "rule exists; fin_ops_postgres_backup_age_seconds metric gap remains"
+    },
+    {
+      "alert_name": "FinOpsPostgresPitrDrillStale",
+      "severity": "P0",
+      "trigger_method": "not executed; no staging PITR drill age override provided",
+      "observed_state": "not observed: no firing, routed, or resolved evidence captured",
+      "owner": "database-ops-oncall",
+      "go_no_go": "NO_GO",
+      "evidence": "rule exists; fin_ops_postgres_pitr_drill_age_seconds metric gap remains"
+    },
+    {
+      "alert_name": "FinOpsPostgresWalArchiveLagHigh",
+      "severity": "P1",
+      "trigger_method": "not executed; no staging WAL archive lag simulation provided",
+      "observed_state": "not observed: no firing, routed, or resolved evidence captured",
+      "owner": "database-ops-oncall",
+      "go_no_go": "NO_GO",
+      "evidence": "rule exists; fin_ops_postgres_wal_archive_lag_seconds metric gap remains"
+    },
+    {
+      "alert_name": "FinOpsOutboxBacklogHigh",
+      "severity": "P1",
+      "trigger_method": "not executed; no staging outbox backlog injection provided",
+      "observed_state": "not observed: no firing, routed, or resolved evidence captured",
+      "owner": "platform-ops-oncall",
+      "go_no_go": "NO_GO",
+      "evidence": "rule exists; fin_ops_outbox_pending_events metric gap remains"
+    },
+    {
+      "alert_name": "FinOpsNatsBacklogGrowing",
+      "severity": "P1",
+      "trigger_method": "not executed; no staging NATS consumer backlog simulation provided",
+      "observed_state": "not observed: no firing, routed, or resolved evidence captured",
+      "owner": "platform-ops-oncall",
+      "go_no_go": "NO_GO",
+      "evidence": "rule exists; fin_ops_nats_consumer_pending_messages exporter evidence missing"
+    },
+    {
+      "alert_name": "FinOpsWorkerFailureRateHigh",
+      "severity": "P1",
+      "trigger_method": "not executed; no staging worker failure simulation provided",
+      "observed_state": "not observed: no firing, routed, or resolved evidence captured",
+      "owner": "platform-ops-oncall",
+      "go_no_go": "NO_GO",
+      "evidence": "rule exists; fin_ops_worker_jobs_failed_total and fin_ops_worker_jobs_started_total metric gaps remain"
+    },
+    {
+      "alert_name": "FinOpsWorkerDeadLetters",
+      "severity": "P1",
+      "trigger_method": "not executed; no staging worker dead-letter simulation provided",
+      "observed_state": "not observed: no firing, routed, or resolved evidence captured",
+      "owner": "platform-ops-oncall",
+      "go_no_go": "NO_GO",
+      "evidence": "rule exists; fin_ops_worker_dead_letters_total metric gap remains"
+    },
+    {
+      "alert_name": "FinOpsOutboxDeadLetters",
+      "severity": "P1",
+      "trigger_method": "not executed; no staging outbox dead-letter simulation provided",
+      "observed_state": "not observed: no firing, routed, or resolved evidence captured",
+      "owner": "platform-ops-oncall",
+      "go_no_go": "NO_GO",
+      "evidence": "rule exists; fin_ops_outbox_dead_letters_total metric gap remains"
+    },
+    {
+      "alert_name": "FinOpsReadModelStale",
+      "severity": "P1",
+      "trigger_method": "not executed; no staging read-model stale metric override provided",
+      "observed_state": "not observed: no firing, routed, or resolved evidence captured",
+      "owner": "finance-ops-oncall",
+      "go_no_go": "NO_GO",
+      "evidence": "rule exists; fin_ops_read_model_staleness_seconds metric gap remains"
+    },
+    {
+      "alert_name": "FinOpsObjectStoreErrorRateHigh",
+      "severity": "P1",
+      "trigger_method": "not executed; no staging object-store upload/download error simulation provided",
+      "observed_state": "not observed: no firing, routed, or resolved evidence captured",
+      "owner": "platform-ops-oncall",
+      "go_no_go": "NO_GO",
+      "evidence": "rule exists; object-store error metric gaps remain"
+    },
+    {
+      "alert_name": "FinOpsObjectChecksumMismatch",
+      "severity": "P0",
+      "trigger_method": "not executed; no staging checksum mismatch simulation provided",
+      "observed_state": "not observed: no firing, routed, or resolved evidence captured",
+      "owner": "platform-ops-oncall",
+      "go_no_go": "NO_GO",
+      "evidence": "rule exists; fin_ops_object_store_checksum_mismatch_total metric gap remains"
+    },
+    {
+      "alert_name": "FinOpsHostDiskFreeLow",
+      "severity": "P1",
+      "trigger_method": "not executed; no staging node-exporter disk threshold simulation provided",
+      "observed_state": "not observed: no firing, routed, or resolved evidence captured",
+      "owner": "infrastructure-oncall",
+      "go_no_go": "NO_GO",
+      "evidence": "rule exists; node exporter staging evidence missing"
+    },
+    {
+      "alert_name": "FinOpsHostCpuSaturationHigh",
+      "severity": "P1",
+      "trigger_method": "not executed; no staging CPU saturation simulation provided",
+      "observed_state": "not observed: no firing, routed, or resolved evidence captured",
+      "owner": "infrastructure-oncall",
+      "go_no_go": "NO_GO",
+      "evidence": "rule exists; node exporter staging evidence missing"
+    },
+    {
+      "alert_name": "FinOpsHostMemoryAvailableLow",
+      "severity": "P1",
+      "trigger_method": "not executed; no staging memory pressure simulation provided",
+      "observed_state": "not observed: no firing, routed, or resolved evidence captured",
+      "owner": "infrastructure-oncall",
+      "go_no_go": "NO_GO",
+      "evidence": "rule exists; node exporter staging evidence missing"
+    }
+  ],
+  "dashboard_panels": [
+    {
+      "panel": "API RPS / 5xx / latency",
+      "metric_checked": [
+        "fin_ops_http_requests_total",
+        "fin_ops_http_request_duration_seconds_bucket"
+      ],
+      "observed_state": "dashboard JSON parses and references real Rust metric names; staging panel query execution evidence missing",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "panel": "Readiness dependency failures",
+      "metric_checked": [
+        "fin_ops_readiness_checks_total"
+      ],
+      "observed_state": "dashboard JSON parses and references real Rust metric name; staging panel query execution evidence missing",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "panel": "PostgreSQL backup/PITR/WAL",
+      "metric_checked": [
+        "fin_ops_postgres_backup_age_seconds",
+        "fin_ops_postgres_pitr_drill_age_seconds",
+        "fin_ops_postgres_wal_archive_lag_seconds"
+      ],
+      "observed_state": "dashboard JSON parses; required exporter/textfile metrics not implemented or not observed in staging",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "panel": "Outbox/NATS/Worker",
+      "metric_checked": [
+        "fin_ops_outbox_pending_events",
+        "fin_ops_nats_consumer_pending_messages",
+        "fin_ops_worker_jobs_failed_total",
+        "fin_ops_worker_dead_letters_total"
+      ],
+      "observed_state": "dashboard JSON parses; worker/outbox/NATS exporter metrics not observed in staging",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "panel": "Read model",
+      "metric_checked": [
+        "fin_ops_read_model_staleness_seconds",
+        "fin_ops_read_model_dirty_scopes"
+      ],
+      "observed_state": "dashboard JSON parses; read-model exporter metrics not observed in staging",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "panel": "Object storage",
+      "metric_checked": [
+        "fin_ops_object_store_upload_errors_total",
+        "fin_ops_object_store_download_errors_total",
+        "fin_ops_object_store_checksum_mismatch_total"
+      ],
+      "observed_state": "dashboard JSON parses; object-storage verifier/exporter metrics not observed in staging",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "panel": "Host resources",
+      "metric_checked": [
+        "node_filesystem_avail_bytes",
+        "node_cpu_seconds_total",
+        "node_memory_MemAvailable_bytes"
+      ],
+      "observed_state": "dashboard JSON parses; node-exporter staging target evidence missing",
+      "go_no_go": "NO_GO"
+    }
+  ],
+  "metric_gaps": [
+    {
+      "metric": "fin_ops_postgres_up",
+      "source": "postgres exporter or API readiness gauge",
+      "owner": "database-ops-oncall",
+      "blocking_reason": "not implemented in Rust metrics and no staging exporter sample was provided",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "metric": "fin_ops_postgres_backup_age_seconds",
+      "source": "postgres backup exporter/textfile",
+      "owner": "database-ops-oncall",
+      "blocking_reason": "not implemented and no staging backup age sample was provided",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "metric": "fin_ops_postgres_pitr_drill_age_seconds",
+      "source": "PITR drill evidence exporter/textfile",
+      "owner": "database-ops-oncall",
+      "blocking_reason": "not implemented and no staging PITR drill age sample was provided",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "metric": "fin_ops_postgres_wal_archive_lag_seconds",
+      "source": "WAL archive exporter/textfile",
+      "owner": "database-ops-oncall",
+      "blocking_reason": "not implemented and no staging WAL lag sample was provided",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "metric": "fin_ops_outbox_pending_events",
+      "source": "outbox exporter",
+      "owner": "platform-ops-oncall",
+      "blocking_reason": "not implemented and no staging backlog sample was provided",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "metric": "fin_ops_outbox_dead_letters_total",
+      "source": "outbox exporter",
+      "owner": "platform-ops-oncall",
+      "blocking_reason": "not implemented and no staging dead-letter sample was provided",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "metric": "fin_ops_nats_consumer_pending_messages",
+      "source": "NATS exporter",
+      "owner": "platform-ops-oncall",
+      "blocking_reason": "no staging NATS exporter sample was provided",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "metric": "fin_ops_worker_jobs_started_total",
+      "source": "worker exporter",
+      "owner": "platform-ops-oncall",
+      "blocking_reason": "not implemented and no staging worker metric sample was provided",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "metric": "fin_ops_worker_jobs_failed_total",
+      "source": "worker exporter",
+      "owner": "platform-ops-oncall",
+      "blocking_reason": "not implemented and no staging worker failure sample was provided",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "metric": "fin_ops_worker_dead_letters_total",
+      "source": "worker exporter",
+      "owner": "platform-ops-oncall",
+      "blocking_reason": "not implemented and no staging dead-letter sample was provided",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "metric": "fin_ops_read_model_staleness_seconds",
+      "source": "read model exporter",
+      "owner": "finance-ops-oncall",
+      "blocking_reason": "not implemented and no staging stale scope sample was provided",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "metric": "fin_ops_read_model_dirty_scopes",
+      "source": "read model exporter",
+      "owner": "finance-ops-oncall",
+      "blocking_reason": "not implemented and no staging dirty scope sample was provided",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "metric": "fin_ops_object_store_upload_errors_total",
+      "source": "object storage exporter or API storage metrics",
+      "owner": "platform-ops-oncall",
+      "blocking_reason": "not implemented and no staging upload error sample was provided",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "metric": "fin_ops_object_store_download_errors_total",
+      "source": "object storage exporter or API storage metrics",
+      "owner": "platform-ops-oncall",
+      "blocking_reason": "not implemented and no staging download error sample was provided",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "metric": "fin_ops_object_store_checksum_mismatch_total",
+      "source": "object storage migration verifier/exporter",
+      "owner": "platform-ops-oncall",
+      "blocking_reason": "not implemented and no staging checksum mismatch sample was provided",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "metric": "node_filesystem_avail_bytes/node_filesystem_size_bytes",
+      "source": "node exporter",
+      "owner": "infrastructure-oncall",
+      "blocking_reason": "no staging node-exporter sample was provided",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "metric": "node_cpu_seconds_total",
+      "source": "node exporter",
+      "owner": "infrastructure-oncall",
+      "blocking_reason": "no staging node-exporter sample was provided",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "metric": "node_memory_MemAvailable_bytes/node_memory_MemTotal_bytes",
+      "source": "node exporter",
+      "owner": "infrastructure-oncall",
+      "blocking_reason": "no staging node-exporter sample was provided",
+      "go_no_go": "NO_GO"
+    }
+  ],
+  "remaining_blockers": [
+    "No isolated staging Prometheus firing/routed/resolved evidence was provided for any P0/P1 alert.",
+    "Only API HTTP and readiness Prometheus metrics are implemented in current Rust code.",
+    "Backup/PITR/WAL, outbox, worker, read model, object storage, NATS and host resource metrics are not proven by staging exporter samples.",
+    "Because metric_gaps is non-empty and all P0/P1 alerts are NO_GO, readiness gate must remain NO_GO."
+  ]
+}

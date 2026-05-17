@@ -248,7 +248,7 @@ P4-10 已补充可导入的监控草案；monitoring-alerts-h2 进一步对齐 R
 | `deploy/backend-refactor/monitoring/README.md` | staging 接入步骤、边界和 P4-12 证据要求。 |
 | `docs/operations/backend-refactor/monitoring-alert-verification-report-template.md` | P0/P1 告警触发、owner、severity、GO/NO_GO 和 metric gap 记录模板。 |
 
-这些文件不是生产已接入证明。P4-12 需要额外提交 `monitoring-alert-verification-*.md` 或等价 JSON，记录 Prometheus rule 校验、P0/P1 人工触发或低风险模拟、值班升级路径和 dashboard 截图/链接。
+这些文件不是生产已接入证明。P4-13 已提交 `docs/operations/backend-refactor/monitoring-alert-verification-20260517.{json,md}` 作为当前证据：Prometheus/Grafana 配置可解析，但 staging 未提供 P0/P1 firing/routed/resolved 观测，且 backup/PITR/WAL、outbox、worker、read model、object storage、NATS 和 host resource 指标仍缺 exporter/textfile 样本，因此 gate 维持 `NO_GO`。后续 GO 证据必须额外记录 Prometheus rule 校验、P0/P1 人工触发或低风险模拟、值班升级路径和 dashboard 截图/链接。
 
 ## 健康检查
 
