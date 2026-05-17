@@ -1,0 +1,87 @@
+{
+  "report_id": "cutover-window-approval-20260517",
+  "task_id": "p4-15-rollback-drill-maintenance-window",
+  "status": "NO_GO",
+  "go_no_go": "NO_GO",
+  "generated_at": "2026-05-17T10:12:00+08:00",
+  "environment": "proposed_window_only_no_production_authorization",
+  "window": {
+    "timezone": "Asia/Shanghai",
+    "proposed_start": "2026-05-24T22:00:00+08:00",
+    "proposed_end": "2026-05-25T02:00:00+08:00",
+    "duration_minutes": 240,
+    "approval_status": "pending_formal_change_approval"
+  },
+  "owners": {
+    "approver": "pending_named_change_approver",
+    "operator": "pending_named_finops_backend_operator",
+    "business_owner": "pending_named_business_owner",
+    "rollback_owner": "pending_named_rollback_owner",
+    "dba_or_ops_owner": "pending_named_dba_or_ops_owner",
+    "communications_owner": "pending_named_communications_owner"
+  },
+  "business_impact_scope": [
+    "FinOps web users may see a maintenance notice for migrated finance operations APIs during an approved cutover window.",
+    "Import confirmation, reconciliation confirmation or withdrawal, search, workbench read models, cost statistics, tax offset, ETC, and background job status are in scope for observation and rollback readiness.",
+    "No production side effects are authorized by this evidence. Write traffic, dual-write, and app Mongo freeze require a separate approved change record."
+  ],
+  "communication_plan": {
+    "before_window": "Announce proposed maintenance scope, start/end time, owner, rollback owner, and support channel after formal approval.",
+    "during_window": "Post status at start, after each phase decision, at rollback decision point, and at window end.",
+    "after_window": "Publish GO/NO_GO outcome, rollback decision, incident link if any, and evidence paths without secrets or full service URLs.",
+    "support_channel": "pending_internal_channel_without_secret"
+  },
+  "rollback_decision_points": [
+    {
+      "phase": "shadow_read",
+      "latest_decision_time": "2026-05-24T22:30:00+08:00",
+      "rollback_action": "disable shadow read and keep user traffic on old Python API",
+      "owner": "pending_named_rollback_owner"
+    },
+    {
+      "phase": "small_scope_read",
+      "latest_decision_time": "2026-05-24T23:15:00+08:00",
+      "rollback_action": "return scoped read route group to old Python API",
+      "owner": "pending_named_rollback_owner"
+    },
+    {
+      "phase": "dual_write",
+      "latest_decision_time": "2026-05-25T00:00:00+08:00",
+      "rollback_action": "disable dual-write, preserve PostgreSQL evidence, and reconcile through audited compensation only",
+      "owner": "pending_named_rollback_owner"
+    },
+    {
+      "phase": "full_read_switch",
+      "latest_decision_time": "2026-05-25T01:00:00+08:00",
+      "rollback_action": "route all migrated read groups back to old Python API",
+      "owner": "pending_named_rollback_owner"
+    },
+    {
+      "phase": "old_write_resume",
+      "latest_decision_time": "2026-05-25T01:30:00+08:00",
+      "rollback_action": "resume old write path only before PostgreSQL is declared sole fact source",
+      "owner": "pending_named_rollback_owner"
+    }
+  ],
+  "backup_and_freeze_confirmation": {
+    "latest_app_mongo_backup_evidence": "docs/operations/backend-refactor/app-mongo-backup-restore-report-20260517.json",
+    "latest_app_mongo_backup_status": "GO",
+    "freeze_point_backup_required": true,
+    "freeze_point_backup_confirmed": false,
+    "app_mongo_freeze_authorized": false,
+    "app_mongo_deleted": false,
+    "oa_source_database_accessed": false
+  },
+  "approval_blockers": [
+    "Maintenance window is only proposed and has not been formally approved.",
+    "Named approver, operator, business owner, rollback owner, DBA/ops owner, and communications owner are missing.",
+    "Rollback drill record is NO_GO because the scenarios were not executed.",
+    "Cutover-window app Mongo freeze-point backup is not confirmed.",
+    "Production cutover, dual-write, and app Mongo freeze are not authorized by this evidence."
+  ],
+  "decision": {
+    "maintenance_window_approval": "NO_GO",
+    "production_cutover_authorized": false,
+    "reason": "The window has a concrete proposed time and impact scope, but lacks formal approval, named owners, executed rollback drill evidence, and a confirmed freeze-point backup."
+  }
+}

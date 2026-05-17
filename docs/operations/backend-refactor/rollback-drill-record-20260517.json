@@ -1,0 +1,158 @@
+{
+  "report_id": "rollback-drill-record-20260517",
+  "task_id": "p4-15-rollback-drill-maintenance-window",
+  "status": "NO_GO",
+  "go_no_go": "NO_GO",
+  "generated_at": "2026-05-17T10:12:00+08:00",
+  "environment": "documentation_only_no_production_cutover",
+  "scope": "Cutover rollback drill evidence for shadow read rollback, small-scope read rollback, dual-write disable plan, full read switch rollback, old write resume plan, and app Mongo archive/freeze rollback constraints.",
+  "operator": {
+    "evidence_author": "Codex",
+    "execution_operator": "pending_named_finops_backend_operator"
+  },
+  "owners": {
+    "cutover_owner": "pending_named_cutover_owner",
+    "rollback_owner": "pending_named_rollback_owner",
+    "business_owner": "pending_named_business_owner",
+    "approval_owner": "pending_named_change_approver"
+  },
+  "authorization": {
+    "production_cutover_authorized": false,
+    "dual_write_authorized": false,
+    "app_mongo_freeze_authorized": false,
+    "app_mongo_delete_authorized": false,
+    "oa_source_database_accessed": false
+  },
+  "rollback_point": {
+    "cutover_change_id": "pending_change_record",
+    "postgresql_restore_point": "not_created_for_this_drill",
+    "route_config_snapshot": "not_captured_for_this_drill",
+    "feature_flag_snapshot": "not_captured_for_this_drill",
+    "old_python_backend_state": "must_remain_available_during_rollback_window",
+    "postgresql_after_fact_source_constraint": "old Mongo full overwrite of PostgreSQL is prohibited after PostgreSQL becomes the fact source"
+  },
+  "latest_app_mongo_backup_confirmation": {
+    "checked_existing_evidence": true,
+    "evidence_path": "docs/operations/backend-refactor/app-mongo-backup-restore-report-20260517.json",
+    "source_database": "fin_ops_platform_app",
+    "backup_time": "2026-05-16 01:29:00 CST",
+    "checksum_algorithm": "sha256",
+    "checksum": "1968e81888dd359ba7d9d8424cdef399744d81a6d5e7305db1f8222404b9422a",
+    "restore_drill_status": "GO",
+    "freeze_point_backup_confirmed": false,
+    "freeze_performed_by_this_task": false,
+    "reason": "Existing backup/restore evidence is valid, but no approved cutover-window app Mongo freeze-point backup was created or confirmed for this drill."
+  },
+  "drill_steps": [
+    {
+      "step_id": "shadow_read_rollback",
+      "start_time": "not_executed",
+      "end_time": "not_executed",
+      "operator": "pending_named_finops_backend_operator",
+      "metric": [
+        "api_shadow_validation.status",
+        "api_5xx_rate",
+        "api_p95_latency_ms",
+        "read_model_stale_seconds"
+      ],
+      "rollback_point": "shadow_read_enabled=false with user traffic still served by old Python API",
+      "expected_result": "Shadow read can be disabled without user-visible route changes and without writing business facts.",
+      "actual_result": "Not executed because no approved staging or production cutover drill window was provided.",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "step_id": "small_scope_read_rollback",
+      "start_time": "not_executed",
+      "end_time": "not_executed",
+      "operator": "pending_named_finops_backend_operator",
+      "metric": [
+        "route_group_error_rate",
+        "route_group_p95_latency_ms",
+        "postgres_pool_in_use",
+        "read_model_stale_seconds"
+      ],
+      "rollback_point": "route_group returned from Axum to old Python for a low-risk read scope",
+      "expected_result": "Low-risk read traffic can return to old Python while PostgreSQL data is preserved for diagnosis.",
+      "actual_result": "Not executed because no route control snapshot, traffic scope, or named rollback owner was approved.",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "step_id": "dual_write_disable_plan",
+      "start_time": "not_executed",
+      "end_time": "not_executed",
+      "operator": "pending_named_finops_backend_operator",
+      "metric": [
+        "dual_write_diff_count",
+        "idempotency_conflict_count",
+        "outbox_publish_backlog",
+        "audit_write_success_rate"
+      ],
+      "rollback_point": "dual_write_enabled=false before PostgreSQL is accepted as sole fact source",
+      "expected_result": "Dual-write can be disabled, differences can be frozen for investigation, and no business facts are deleted.",
+      "actual_result": "Not executed because dual-write was not enabled by this task and no staging replay evidence was provided.",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "step_id": "full_read_switch_rollback",
+      "start_time": "not_executed",
+      "end_time": "not_executed",
+      "operator": "pending_named_finops_backend_operator",
+      "metric": [
+        "global_5xx_rate",
+        "global_p95_latency_ms",
+        "postgres_pool_saturation",
+        "nats_outbox_backlog",
+        "read_model_stale_seconds"
+      ],
+      "rollback_point": "all migrated read route groups returned from Axum to old Python",
+      "expected_result": "Full read switch can be rolled back by route configuration only, with PostgreSQL retained and app Mongo untouched.",
+      "actual_result": "Not executed because no approved full-read switch drill or route snapshot exists.",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "step_id": "old_write_resume_plan",
+      "start_time": "not_executed",
+      "end_time": "not_executed",
+      "operator": "pending_named_finops_backend_operator",
+      "metric": [
+        "old_python_write_success_rate",
+        "mongo_write_health",
+        "postgres_compensation_queue_depth",
+        "audit_gap_count"
+      ],
+      "rollback_point": "old write path resumes only before PostgreSQL is declared sole fact source",
+      "expected_result": "Old write path can resume within the rollback window, with PostgreSQL differences compensated by audited scripts rather than destructive overwrite.",
+      "actual_result": "Not executed because no approved write rollback drill or business acceptance window exists.",
+      "go_no_go": "NO_GO"
+    },
+    {
+      "step_id": "app_mongo_archive_freeze_rollback_constraints",
+      "start_time": "not_executed",
+      "end_time": "not_executed",
+      "operator": "pending_named_dba_or_ops_owner",
+      "metric": [
+        "app_mongo_collection_count_after_freeze",
+        "app_mongo_backup_checksum_status",
+        "postgres_fact_source_status",
+        "archive_retention_status"
+      ],
+      "rollback_point": "app Mongo remains retained as archive and rollback reference; it is not deleted",
+      "expected_result": "Freeze/archive constraints are confirmed, no app Mongo deletion occurs, and old Mongo never overwrites PostgreSQL after PostgreSQL becomes fact source.",
+      "actual_result": "Not executed because app Mongo freeze was not authorized and no freeze-point backup was created.",
+      "go_no_go": "NO_GO"
+    }
+  ],
+  "blockers": [
+    "No approved rollback drill window was provided.",
+    "No named execution operator, cutover owner, rollback owner, business owner, or change approver was supplied.",
+    "No route configuration snapshot or feature flag snapshot was captured for this drill.",
+    "No staging or production drill execution record exists for the six rollback scenarios.",
+    "The latest app Mongo backup/restore evidence is valid, but it is not a cutover-window freeze-point backup.",
+    "Readiness gate remains NO_GO while other production readiness evidence is incomplete."
+  ],
+  "remaining_risks": [
+    "Rollback commands remain dry-run templates until a named change owner approves the environment, window, scope, and rollback point.",
+    "PostgreSQL must not be overwritten from old Mongo after PostgreSQL is accepted as fact source.",
+    "App Mongo must remain retained during the rollback window and must not be deleted by this task."
+  ]
+}
