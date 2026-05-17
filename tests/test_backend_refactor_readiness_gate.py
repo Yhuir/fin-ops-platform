@@ -44,8 +44,10 @@ def test_current_repository_readiness_gate_is_no_go() -> None:
     assert report["status"] == "NO_GO"
     checks = {item["check_id"]: item for item in report["checks"]}
 
+    assert checks["app_mongo_backup_restore"]["status"] == "passed"
+    assert checks["app_mongo_backup_restore"]["blocking_prompt"] is None
+
     for check_id in (
-        "app_mongo_backup_restore",
         "postgres_backup_pitr",
         "migration_dry_run",
         "file_checksum",
