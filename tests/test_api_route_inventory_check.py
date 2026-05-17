@@ -728,6 +728,7 @@ if method == "POST" and route_path == "/api/tax-offset/calculate":
 Router::new()
     .route("/api/bank-details/accounts", get(list_bank_detail_accounts))
     .route("/api/no-oa-bank-batches/{batch_id}", get(get_no_oa_bank_batch))
+    .route("/projects", get(list_projects).post(create_project))
 ''',
         encoding="utf-8",
     )
@@ -745,6 +746,8 @@ Router::new()
     assert discovered["rust_routes"] == [
         "GET /api/bank-details/accounts",
         "GET /api/no-oa-bank-batches/{batch_id}",
+        "GET /projects",
+        "POST /projects",
     ]
     assert discovered["frontend_refs"] == ["web/src/features/bankDetails/api.ts"]
 

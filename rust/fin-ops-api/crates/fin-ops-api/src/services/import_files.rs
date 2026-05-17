@@ -108,6 +108,64 @@ where
         })
     }
 
+    pub async fn download_batch(
+        &self,
+        batch_id: Uuid,
+        request: ImportBatchDownloadRequest,
+    ) -> Result<ImportBatchDownloadResponse, ImportFileServiceError> {
+        let format = request
+            .format
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("json");
+        if !matches!(format, "json" | "manifest") {
+            return Err(invalid_request(
+                "invalid_import_batch_download_request",
+                "format must be json or manifest",
+            ));
+        }
+
+        let batch = self.repository.find_batch(batch_id).await?.ok_or(
+            ImportFileServiceError::NotFound {
+                resource: "import_batch",
+            },
+        )?;
+        let files = self.repository.list_files_for_batch(batch_id).await?;
+        let mut download_files = Vec::with_capacity(files.len());
+
+        for file in files {
+            let file_object = match file.file_object_id {
+                Some(file_object_id) => self.repository.find_file_object(file_object_id).await?,
+                None => None,
+            };
+            let access = match file_object.as_ref() {
+                Some(file_object) => self
+                    .access_for_file_object(file_object)
+                    .await
+                    .map_err(ImportFileServiceError::FileAccess)?,
+                None => FileObjectAccessDto::unavailable("file_object_missing"),
+            };
+            download_files.push(ImportBatchDownloadFileDto {
+                file: ImportFileDto::from_row(file),
+                file_object: file_object.map(FileObjectDto::from_row),
+                access,
+            });
+        }
+
+        let file_name = format!("{}.json", batch.id);
+        Ok(ImportBatchDownloadResponse {
+            batch: ImportBatchDto::from_row(batch),
+            files: download_files,
+            download: ImportBatchDownloadDto {
+                format: "json".to_owned(),
+                content_type: "application/json; charset=utf-8".to_owned(),
+                content_disposition: format!("attachment; filename=\"{file_name}\""),
+                delivery: "object_manifest".to_owned(),
+            },
+        })
+    }
+
     pub async fn get_import_file(
         &self,
         file_id: Uuid,
@@ -134,24 +192,10 @@ where
             .ok_or(ImportFileServiceError::NotFound {
                 resource: "file_object",
             })?;
-        let access = match self
-            .file_access
-            .presign_get_object(
-                &file_object.bucket,
-                &file_object.object_key,
-                file_object.object_version.as_deref(),
-            )
+        let access = self
+            .access_for_file_object(&file_object)
             .await
-        {
-            Ok(grant) => FileObjectAccessDto::from_grant(grant),
-            Err(FileObjectAccessError::NotConfigured) => {
-                FileObjectAccessDto::unavailable("object_storage_not_configured")
-            }
-            Err(FileObjectAccessError::BucketNotAllowed) => {
-                FileObjectAccessDto::unavailable("object_bucket_not_allowed")
-            }
-            Err(error) => return Err(error.into()),
-        };
+            .map_err(ImportFileServiceError::FileAccess)?;
 
         Ok(FileObjectResponse {
             file_object: FileObjectDto::from_row(file_object),
@@ -279,6 +323,30 @@ where
             },
         })
     }
+
+    async fn access_for_file_object(
+        &self,
+        file_object: &FileObjectRow,
+    ) -> Result<FileObjectAccessDto, FileObjectAccessError> {
+        match self
+            .file_access
+            .presign_get_object(
+                &file_object.bucket,
+                &file_object.object_key,
+                file_object.object_version.as_deref(),
+            )
+            .await
+        {
+            Ok(grant) => Ok(FileObjectAccessDto::from_grant(grant)),
+            Err(FileObjectAccessError::NotConfigured) => Ok(FileObjectAccessDto::unavailable(
+                "object_storage_not_configured",
+            )),
+            Err(FileObjectAccessError::BucketNotAllowed) => Ok(FileObjectAccessDto::unavailable(
+                "object_bucket_not_allowed",
+            )),
+            Err(error) => Err(error),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -339,6 +407,11 @@ pub struct ListImportBatchesRequest {
     pub offset: Option<i64>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct ImportBatchDownloadRequest {
+    pub format: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ImportBatchListResponse {
     pub batches: Vec<ImportBatchDto>,
@@ -349,6 +422,28 @@ pub struct ImportBatchListResponse {
 pub struct ImportBatchDetailResponse {
     pub batch: ImportBatchDto,
     pub files: Vec<ImportFileDto>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ImportBatchDownloadResponse {
+    pub batch: ImportBatchDto,
+    pub files: Vec<ImportBatchDownloadFileDto>,
+    pub download: ImportBatchDownloadDto,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ImportBatchDownloadFileDto {
+    pub file: ImportFileDto,
+    pub file_object: Option<FileObjectDto>,
+    pub access: FileObjectAccessDto,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ImportBatchDownloadDto {
+    pub format: String,
+    pub content_type: String,
+    pub content_disposition: String,
+    pub delivery: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -844,6 +939,8 @@ mod tests {
     struct StaticRepository {
         duplicate: Option<FileObjectRow>,
         file_object: Option<FileObjectRow>,
+        batch: Option<ImportBatchRow>,
+        files: Vec<ImportFileRow>,
     }
 
     #[async_trait]
@@ -862,14 +959,14 @@ mod tests {
             &self,
             _batch_id: Uuid,
         ) -> Result<Option<ImportBatchRow>, ImportFileRepositoryError> {
-            Ok(None)
+            Ok(self.batch.clone())
         }
 
         async fn list_files_for_batch(
             &self,
             _batch_id: Uuid,
         ) -> Result<Vec<ImportFileRow>, ImportFileRepositoryError> {
-            Ok(Vec::new())
+            Ok(self.files.clone())
         }
 
         async fn find_import_file(
@@ -1005,6 +1102,66 @@ mod tests {
         assert!(!serialized.contains("secret-access-key"));
     }
 
+    #[tokio::test]
+    async fn batch_download_returns_object_manifest_and_presigned_access() {
+        let batch_id = Uuid::parse_str("0196f550-cc6e-7000-8000-000000000010").unwrap();
+        let file_object_id = Uuid::parse_str("0196f550-cc6e-7000-8000-000000000011").unwrap();
+        let service = test_service_with_batch(
+            sample_import_batch(batch_id),
+            vec![sample_import_file(batch_id, file_object_id)],
+            sample_file_object(file_object_id),
+        );
+
+        let response = service
+            .download_batch(batch_id, ImportBatchDownloadRequest { format: None })
+            .await
+            .unwrap();
+        let body = serde_json::to_value(&response).unwrap();
+
+        assert_eq!(body["download"]["delivery"], "object_manifest");
+        assert_eq!(
+            body["download"]["content_disposition"],
+            format!("attachment; filename=\"{batch_id}.json\"")
+        );
+        assert_eq!(
+            body["files"][0]["file"]["legacy_gridfs_id"],
+            "import_file_0001"
+        );
+        assert_eq!(
+            body["files"][0]["file_object"]["legacy_gridfs_id"],
+            "import_file_0001"
+        );
+        assert_eq!(body["files"][0]["access"]["method"], "presigned_get");
+    }
+
+    #[tokio::test]
+    async fn batch_download_rejects_unknown_format_without_presigning() {
+        let batch_id = Uuid::parse_str("0196f550-cc6e-7000-8000-000000000010").unwrap();
+        let service = test_service_with_batch(
+            sample_import_batch(batch_id),
+            Vec::new(),
+            sample_file_object(Uuid::parse_str("0196f550-cc6e-7000-8000-000000000011").unwrap()),
+        );
+
+        let error = service
+            .download_batch(
+                batch_id,
+                ImportBatchDownloadRequest {
+                    format: Some("zip".to_owned()),
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ImportFileServiceError::InvalidRequest {
+                code: "invalid_import_batch_download_request",
+                ..
+            }
+        ));
+    }
+
     #[test]
     fn templates_preserve_frontend_import_contract() {
         let service = test_service(None);
@@ -1025,6 +1182,8 @@ mod tests {
             StaticRepository {
                 duplicate,
                 file_object: None,
+                batch: None,
+                files: Vec::new(),
             },
             UploadPreflightPolicy {
                 storage_provider: "minio".to_owned(),
@@ -1041,6 +1200,28 @@ mod tests {
             StaticRepository {
                 duplicate: None,
                 file_object: Some(file_object),
+                batch: None,
+                files: Vec::new(),
+            },
+            UploadPreflightPolicy {
+                storage_provider: "minio".to_owned(),
+                bucket: "fin-ops-local".to_owned(),
+            },
+            StaticAccessProvider,
+        )
+    }
+
+    fn test_service_with_batch(
+        batch: ImportBatchRow,
+        files: Vec<ImportFileRow>,
+        file_object: FileObjectRow,
+    ) -> ImportFileService<StaticRepository, StaticAccessProvider> {
+        ImportFileService::new(
+            StaticRepository {
+                duplicate: None,
+                file_object: Some(file_object),
+                batch: Some(batch),
+                files,
             },
             UploadPreflightPolicy {
                 storage_provider: "minio".to_owned(),
@@ -1090,6 +1271,69 @@ mod tests {
             purpose: "import_source_file".to_owned(),
             created_by: Some("mongo_migration".to_owned()),
             created_at: "2026-05-16T00:00:00Z".to_owned(),
+        }
+    }
+
+    fn sample_import_batch(id: Uuid) -> ImportBatchRow {
+        ImportBatchRow {
+            id,
+            batch_type: "bank_transaction".to_owned(),
+            source_type: "file".to_owned(),
+            source_name: Some("source.xlsx".to_owned()),
+            status: "completed".to_owned(),
+            row_count: 1,
+            success_count: 1,
+            error_count: 0,
+            duplicate_count: 0,
+            suspected_duplicate_count: 0,
+            updated_count: 0,
+            checksum: Some("c".repeat(64)),
+            source_system: Some("app_mongo".to_owned()),
+            source_reference: Some("import_file_0001".to_owned()),
+            source_metadata: json!({"legacy_gridfs_id": "import_file_0001"}),
+            legacy_session_id: Some("session-1".to_owned()),
+            legacy_import_id: None,
+            created_by: Some("mongo_migration".to_owned()),
+            updated_by: Some("mongo_migration".to_owned()),
+            confirmed_at: Some("2026-05-16T00:00:00Z".to_owned()),
+            reverted_at: None,
+            created_at: "2026-05-16T00:00:00Z".to_owned(),
+            updated_at: "2026-05-16T00:00:00Z".to_owned(),
+        }
+    }
+
+    fn sample_import_file(batch_id: Uuid, file_object_id: Uuid) -> ImportFileRow {
+        ImportFileRow {
+            id: Uuid::parse_str("0196f550-cc6e-7000-8000-000000000012").unwrap(),
+            batch_id,
+            file_object_id: Some(file_object_id),
+            file_role: "source".to_owned(),
+            parse_status: "parsed".to_owned(),
+            row_count: 1,
+            error_count: 0,
+            template_key: Some("icbc_historydetail".to_owned()),
+            checksum: Some("c".repeat(64)),
+            source_file_id: Some("import_file_0001".to_owned()),
+            source_path: None,
+            source_metadata: json!({"legacy_gridfs_id": "import_file_0001"}),
+            legacy_file_id: Some("import_file_0001".to_owned()),
+            legacy_gridfs_id: Some("import_file_0001".to_owned()),
+            file_name: Some("source.xlsx".to_owned()),
+            content_type: Some(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet".to_owned(),
+            ),
+            byte_size: Some(2048),
+            sha256: Some("c".repeat(64)),
+            storage_provider: Some("minio".to_owned()),
+            bucket: Some("fin-ops-local".to_owned()),
+            object_key: Some("staging/app-gridfs/import_source_file/2026/05/hash/file".to_owned()),
+            object_version: None,
+            etag: Some("etag".to_owned()),
+            storage_class: None,
+            purpose: Some("import_source_file".to_owned()),
+            file_object_metadata: Some(json!({"legacy_gridfs_id": "import_file_0001"})),
+            created_at: "2026-05-16T00:00:00Z".to_owned(),
+            updated_at: "2026-05-16T00:00:00Z".to_owned(),
         }
     }
 }

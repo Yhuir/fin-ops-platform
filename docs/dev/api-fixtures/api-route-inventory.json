@@ -33,6 +33,7 @@
         "GET /api/app-metadata",
         "GET /api/background-jobs/active",
         "GET /api/background-jobs/{job_id}",
+        "POST /api/background-jobs/{job_id}/acknowledge",
         "POST /api/background-jobs/{job_id}/retry",
         "GET /api/session/me",
         "GET /api/search",
@@ -46,11 +47,14 @@
       "migration_status": "partial",
       "risk": "medium",
       "owner": "platform-ops",
-      "source_categories": ["postgres_facts", "read_model", "job_outbox", "static_contract", "oa_identity", "pending_contract"],
-      "blocked_routes": {
-        "POST /api/background-jobs/{job_id}/acknowledge": "旧 Python 写入 acknowledged 状态和 acknowledged_at；当前 job.worker_tasks 状态机没有 acknowledged，需先冻结通知/ack 状态模型。"
-      },
-      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope. Background-job retry creates PostgreSQL worker task/outbox/audit/idempotency records and does not execute side effects in the request path."
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "static_contract",
+        "oa_identity"
+      ],
+      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope. Background-job acknowledge writes PostgreSQL job.worker_task_acknowledgements plus audit/idempotency without mutating worker task status. Background-job retry creates PostgreSQL worker task/outbox/audit/idempotency records and does not execute side effects in the request path."
     },
     {
       "domain": "bank-details",
@@ -64,11 +68,18 @@
         "GET /api/bank-details/transactions",
         "PATCH /api/bank-details/transactions/categories"
       ],
-      "frontend_refs": ["web/src/features/bankDetails/api.ts", "web/src/pages/BankDetailsPage.tsx"],
+      "frontend_refs": [
+        "web/src/features/bankDetails/api.ts",
+        "web/src/pages/BankDetailsPage.tsx"
+      ],
       "migration_status": "migrated_shadow_required",
       "risk": "high",
       "owner": "finance-ops",
-      "source_categories": ["postgres_facts", "job_outbox", "read_model"],
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "read_model"
+      ],
       "source": "GET routes use PostgreSQL app.bank_transactions + app.bank_transaction_categories. PATCH category writes lock PostgreSQL app.bank_transactions, replace active app.bank_transaction_categories, append app.bank_transaction_category_events, audit.events, app.write_idempotency_records, and enqueue job.worker_tasks/job.outbox_events read-model rebuild for workbench/search_index/cost_statistics; no app Mongo or OA source database read."
     },
     {
@@ -87,11 +98,17 @@
         "POST /api/no-oa-bank-batches/{batch_id}/withdraw",
         "POST /api/no-oa-bank-batches/submit"
       ],
-      "frontend_refs": ["web/src/features/noOaBankBatches/api.ts", "web/src/pages/NoOaBankBatchPage.tsx"],
+      "frontend_refs": [
+        "web/src/features/noOaBankBatches/api.ts",
+        "web/src/pages/NoOaBankBatchPage.tsx"
+      ],
       "migration_status": "partial",
       "risk": "high",
       "owner": "finance-ops",
-      "source_categories": ["postgres_facts", "job_outbox"],
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox"
+      ],
       "source": "GET routes use PostgreSQL app.no_oa_bank_batches + app.bank_transactions; POST routes already existed in Axum workbench_writes and require existing dry-run/shadow validation before cutover."
     },
     {
@@ -109,21 +126,27 @@
       "rust_routes": [
         "GET /api/turnover-ledger",
         "GET /api/turnover-ledger/export-preview",
+        "GET /api/turnover-ledger/export",
         "GET /api/turnover-ledger/relations/{relation_id}"
       ],
-      "frontend_refs": ["web/src/features/turnoverLedger/api.ts", "web/src/pages/TurnoverLedgerPage.tsx"],
+      "frontend_refs": [
+        "web/src/features/turnoverLedger/api.ts",
+        "web/src/pages/TurnoverLedgerPage.tsx"
+      ],
       "migration_status": "partial",
       "risk": "high",
       "owner": "finance-ops",
-      "source_categories": ["postgres_facts", "pending_contract"],
+      "source_categories": [
+        "postgres_facts",
+        "pending_contract"
+      ],
       "blocked_routes": {
-        "GET /api/turnover-ledger/export": "二进制 XLSX 导出需冻结 workbook 样式、Content-Disposition、全量分页和 extra/FIFO 字段；当前只迁移 JSON export-preview。",
         "GET /api/turnover-ledger/relations/{relation_id}/extra": "旧值来自 turnover extra snapshot/app state；无 PostgreSQL/read_model 事实源前不能只返回默认 extra 遮蔽差异。",
         "PUT /api/turnover-ledger/relations/{relation_id}/extra": "extra 写入来自旧 extra snapshot，并需 actor/audit/read-model invalidation 合同。",
         "POST /api/turnover-ledger/relations/confirm": "人工确认写入 relation state，需冻结 PostgreSQL relation facts、audit、幂等和 outbox 合同。",
         "POST /api/turnover-ledger/relations/{relation_id}/withdraw": "撤回写入 relation state，需冻结 PostgreSQL relation facts、audit、幂等和 outbox 合同。"
       },
-      "source": "GET /api/turnover-ledger flat/grouped read-only views, GET /api/turnover-ledger/export-preview, and GET /api/turnover-ledger/relations/{relation_id} derive from PostgreSQL app.bank_transactions plus active app.bank_transaction_categories raw_payload.category_code using Python turnover category/export/detail rules; no app Mongo. Binary export, relation extra GET/PUT, confirm/withdraw, persisted manual relation state, and FIFO allocation lots remain pending contract."
+      "source": "GET /api/turnover-ledger flat/grouped read-only views, GET /api/turnover-ledger/export-preview, GET /api/turnover-ledger/export, and GET /api/turnover-ledger/relations/{relation_id} derive from PostgreSQL app.bank_transactions plus active app.bank_transaction_categories raw_payload.category_code using Python turnover category/export/detail rules; no app Mongo. Binary export uses the same PostgreSQL-derived export rows and emits synchronous XLSX bytes. Relation extra GET/PUT, confirm/withdraw, persisted manual relation state, and FIFO allocation lots remain pending contract."
     },
     {
       "domain": "etc",
@@ -152,11 +175,22 @@
         "GET /api/etc/batches",
         "GET /api/etc/batches/{batch_id}"
       ],
-      "frontend_refs": ["web/src/features/etc/api.ts", "web/src/pages/EtcTicketManagementPage.tsx", "web/src/components/imports/ImportWorkflowPage.tsx"],
+      "frontend_refs": [
+        "web/src/features/etc/api.ts",
+        "web/src/pages/EtcTicketManagementPage.tsx",
+        "web/src/components/imports/ImportWorkflowPage.tsx"
+      ],
       "migration_status": "partial",
       "risk": "high",
       "owner": "tax-ops",
-      "source_categories": ["postgres_facts", "job_outbox", "object_storage", "static_contract", "legacy_python_state_blocked", "pending_contract"],
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "object_storage",
+        "static_contract",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
       "blocked_routes": {
         "POST /api/etc/import/preview": "ETC import preview parses uploaded files and creates legacy preview state; needs object-storage/job contract before Axum migration.",
         "POST /api/etc/import/confirm": "ETC import confirm persists parsed invoices and invalidates downstream state; needs audit/job/outbox and object-storage contract.",
@@ -188,11 +222,19 @@
         "POST /api/tax-offset/calculate",
         "GET /api/tax-offset/certified-imports"
       ],
-      "frontend_refs": ["web/src/features/tax/api.ts", "web/src/pages/TaxOffsetPage.tsx"],
+      "frontend_refs": [
+        "web/src/features/tax/api.ts",
+        "web/src/pages/TaxOffsetPage.tsx"
+      ],
       "migration_status": "partial",
       "risk": "medium",
       "owner": "tax-ops",
-      "source_categories": ["postgres_facts", "read_model", "job_outbox", "pending_contract"],
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
       "blocked_routes": {
         "POST /api/tax-offset/certified-import/preview": "Python parses multipart Excel files and persists tax_certified_import_sessions in legacy app state; needs PostgreSQL/object-storage preview-session contract.",
         "POST /api/tax-offset/certified-import/confirm": "Python confirms a legacy preview session, writes certification records and invalidates read models; needs audit/outbox/idempotency contract."
@@ -213,18 +255,23 @@
         "GET /api/cost-statistics",
         "GET /api/cost-statistics/explorer",
         "GET /api/cost-statistics/export-preview",
+        "GET /api/cost-statistics/export",
         "GET /api/cost-statistics/projects/{project_name}",
         "GET /api/cost-statistics/transactions/{transaction_id}"
       ],
-      "frontend_refs": ["web/src/features/cost-statistics/api.ts", "web/src/pages/CostStatisticsPage.tsx"],
+      "frontend_refs": [
+        "web/src/features/cost-statistics/api.ts",
+        "web/src/pages/CostStatisticsPage.tsx"
+      ],
       "migration_status": "partial",
       "risk": "medium",
       "owner": "cost-ops",
-      "source_categories": ["postgres_facts", "read_model", "pending_contract"],
-      "blocked_routes": {
-        "GET /api/cost-statistics/export": "Binary XLSX export needs workbook style, detail inclusion flags, Content-Disposition and large-result behavior frozen separately; JSON export-preview is migrated."
-      },
-      "source": "Main/explorer/project detail/export-preview reads use PostgreSQL read_model.cost_statistics_read_models. Transaction detail additionally uses app.bank_transactions to locate scope month and read_model.workbench_rows for summary/detail fields. Binary Excel export remains pending until exact workbook contract is frozen."
+      "source_categories": [
+        "postgres_facts",
+        "read_model"
+      ],
+      "blocked_routes": {},
+      "source": "Main/explorer/project detail/export-preview/export reads use PostgreSQL read_model.cost_statistics_read_models. Transaction detail additionally uses app.bank_transactions to locate scope month and read_model.workbench_rows for summary/detail fields. Binary Excel export uses the same export-preview rows to generate synchronous XLSX; transaction-detail workbook and async large-result export remain outside this migrated route contract."
     },
     {
       "domain": "settings-project-sync-data-reset",
@@ -241,23 +288,28 @@
       ],
       "rust_routes": [
         "GET /api/workbench/settings",
+        "POST /api/workbench/settings",
+        "POST /api/workbench/settings/projects/sync",
+        "POST /api/workbench/settings/projects",
+        "DELETE /api/workbench/settings/projects/{project_id}",
+        "POST /api/workbench/settings/data-reset/jobs",
         "GET /api/workbench/settings/data-reset/jobs/active",
-        "GET /api/workbench/settings/data-reset/jobs/{job_id}"
+        "GET /api/workbench/settings/data-reset/jobs/{job_id}",
+        "POST /api/workbench/settings/data-reset"
       ],
-      "frontend_refs": ["web/src/features/workbench/api.ts", "web/src/pages/SettingsPage.tsx"],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts",
+        "web/src/pages/SettingsPage.tsx"
+      ],
       "migration_status": "partial",
       "risk": "high",
       "owner": "platform-ops",
-      "source_categories": ["postgres_facts", "job_outbox", "static_contract", "pending_contract"],
-      "blocked_routes": {
-        "POST /api/workbench/settings": "Settings save mutates app settings and access-control state; needs PostgreSQL settings facts, audit and rollback contract.",
-        "POST /api/workbench/settings/projects/sync": "Project sync talks to OA/project sources and mutates settings projections; needs source contract and job/outbox boundary.",
-        "POST /api/workbench/settings/projects": "Project create/update is an admin write path requiring PostgreSQL settings facts, audit and rollback contract.",
-        "DELETE /api/workbench/settings/projects/{project_id}": "Project deletion is an admin write path requiring PostgreSQL settings facts, audit and rollback contract.",
-        "POST /api/workbench/settings/data-reset/jobs": "Data reset job creation schedules destructive admin work; needs job/outbox, permissions, backup and rollback evidence.",
-        "POST /api/workbench/settings/data-reset": "Data reset execution is destructive admin work; needs backup, audit, idempotency and rollback contract."
-      },
-      "source": "Settings read route is default projection only. Data-reset job status reads use PostgreSQL job.worker_tasks. Sync, mutations, job creation, and reset execution require PostgreSQL settings facts plus admin audit/job/outbox contract and were not migrated."
+      "source_categories": [
+        "postgres_facts",
+        "job_outbox",
+        "static_contract"
+      ],
+      "source": "Settings read route is default projection only until settings facts are backfilled. Settings writes use PostgreSQL app.settings_profiles with audit/idempotency. Project settings create/delete use app.project_profiles and soft-deactivation. Project sync creates a PostgreSQL worker task/outbox command from frozen staging scope metadata without request-path OA scans. Data-reset job and direct API route both queue settings_data_reset worker tasks with approval/backup evidence; request path does not execute destructive reset work. Data-reset job status reads use PostgreSQL job.worker_tasks."
     },
     {
       "domain": "workbench-read-model-and-actions",
@@ -305,11 +357,18 @@
         "POST /api/workbench/actions/ignore-row",
         "POST /api/workbench/actions/unignore-row"
       ],
-      "frontend_refs": ["web/src/features/workbench/api.ts"],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
       "migration_status": "partial",
       "risk": "high",
       "owner": "finance-ops",
-      "source_categories": ["postgres_facts", "read_model", "job_outbox", "pending_contract"],
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "job_outbox",
+        "pending_contract"
+      ],
       "blocked_routes": {
         "POST /api/workbench/exception/preview": "Exception preview depends on legacy Python exception projection and matching candidate state; no independent PostgreSQL/read_model preview contract is frozen."
       },
@@ -317,19 +376,29 @@
     },
     {
       "domain": "oa-sync-status",
-      "python_routes": ["GET /api/oa-sync/status"],
-      "rust_routes": ["GET /api/oa-sync/status"],
-      "frontend_refs": ["web/src/features/workbench/api.ts", "web/src/features/appHealth/api.ts"],
+      "python_routes": [
+        "GET /api/oa-sync/status"
+      ],
+      "rust_routes": [
+        "GET /api/oa-sync/status"
+      ],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts",
+        "web/src/features/appHealth/api.ts"
+      ],
       "migration_status": "migrated_shadow_required",
       "risk": "medium",
       "owner": "platform-ops",
-      "source_categories": ["postgres_facts"],
+      "source_categories": [
+        "postgres_facts"
+      ],
       "source": "PostgreSQL app.oa_sync_runs + app.oa_sync_watermarks."
     },
     {
       "domain": "projects-ledgers-reminders-imports-matching-legacy",
       "python_routes": [
-        "GET|POST /projects",
+        "GET /projects",
+        "POST /projects",
         "GET /projects/{project_id}",
         "POST /projects/assign",
         "GET /ledgers",
@@ -352,9 +421,19 @@
         "GET /matching/results/{result_id}"
       ],
       "rust_routes": [
+        "GET /projects",
+        "POST /projects",
+        "GET /projects/{project_id}",
+        "POST /projects/assign",
+        "GET /ledgers",
+        "GET /ledgers/{ledger_id}",
+        "POST /ledgers/{ledger_id}/status",
+        "GET /reminders",
+        "POST /reminders/run",
         "GET /imports/templates",
         "GET /imports/batches",
         "GET /imports/batches/{batch_id}",
+        "GET /imports/batches/{batch_id}/download",
         "GET /imports/files/{file_id}",
         "GET /api/files/objects/{file_object_id}",
         "POST /imports/files/upload-preflight",
@@ -364,28 +443,29 @@
         "GET /matching/results",
         "GET /matching/results/{result_id}"
       ],
-      "frontend_refs": ["web/src/features/imports/api.ts"],
+      "frontend_refs": [
+        "web/src/features/imports/api.ts",
+        "web/src/features/workbench/api.ts"
+      ],
       "migration_status": "partial",
       "risk": "high",
       "owner": "platform-ops",
-      "source_categories": ["postgres_facts", "read_model", "object_storage", "job_outbox", "legacy_python_state_blocked", "pending_contract"],
+      "source_categories": [
+        "postgres_facts",
+        "read_model",
+        "object_storage",
+        "job_outbox",
+        "legacy_python_state_blocked",
+        "pending_contract"
+      ],
       "blocked_routes": {
-        "GET|POST /projects": "Legacy project routes remain Python state/source driven; PostgreSQL project facts and mutation contract are not frozen.",
-        "GET /projects/{project_id}": "Legacy project detail route lacks frozen PostgreSQL fact/source contract.",
-        "POST /projects/assign": "Project assignment is a write path requiring actor, audit and fact-state transition contract.",
-        "GET /ledgers": "Legacy ledger list lacks frozen PostgreSQL fact/read-model contract.",
-        "GET /ledgers/{ledger_id}": "Legacy ledger detail lacks frozen PostgreSQL fact/read-model contract.",
-        "POST /ledgers/{ledger_id}/status": "Ledger status mutation needs actor, audit and fact-state transition contract.",
-        "GET /reminders": "Legacy reminders lack frozen job/read-model fact contract.",
-        "POST /reminders/run": "Reminder execution is a job-producing write path requiring job/outbox contract.",
         "POST /imports/preview": "Legacy import preview parses files into Python session state; use migrated metadata/preflight routes until object-storage/job contract is frozen.",
         "POST /imports/confirm": "Legacy import confirm writes business facts and invalidates read models; needs audit/outbox/idempotency contract.",
         "POST /imports/files/preview": "File preview creates legacy file session state; needs object-storage/session fact contract.",
         "POST /imports/files/confirm": "File confirm writes business facts from legacy session state; needs audit/outbox/idempotency contract.",
-        "GET /imports/batches/{batch_id}/download": "Batch download is binary/object response behavior requiring object-storage and Content-Disposition contract.",
         "POST /imports/batches/{batch_id}/revert": "Batch revert mutates imported facts and read models; needs audit/outbox/idempotency and rollback contract."
       },
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts."
+      "source": "Project hub/detail/create/delete routes use PostgreSQL app.project_profiles plus audit/idempotency. Project assignment validates the target project and object, supersedes any previous active assignment, and writes app.project_assignments plus app.project_profile_events/audit/idempotency. Ledger list/detail/status routes use PostgreSQL app.ledgers and app.ledger_events with legacy Python status values. Reminder list reads app.reminders; reminder run writes app.reminder_runs and queues job.worker_tasks/job.outbox_events with no external notifications in the request path. Import metadata, batch download manifest, and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Import preview/confirm/revert routes remain blocked pending facts/job/outbox contracts."
     }
   ]
 }

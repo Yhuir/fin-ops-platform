@@ -1,0 +1,206 @@
+{
+  "report": "p0-platform-integrated-runtime-remediation-20260517",
+  "generated_at": "2026-05-17T09:34:01Z",
+  "status": "NO_GO_RUNTIME_DIFFS",
+  "scope": "Prompt04 platform API production cutover runtime shadow integrated remediation",
+  "preflight_status": "GO",
+  "health_checks": [
+    {
+      "name": "python_health",
+      "url": "http://127.0.0.1:8001/health",
+      "status": "GO",
+      "http_status": 200,
+      "error": ""
+    },
+    {
+      "name": "axum_healthz",
+      "url": "http://127.0.0.1:8002/healthz",
+      "status": "GO",
+      "http_status": 200,
+      "error": ""
+    },
+    {
+      "name": "axum_readyz",
+      "url": "http://127.0.0.1:8002/readyz",
+      "status": "GO",
+      "http_status": 200,
+      "error": ""
+    }
+  ],
+  "shadow_validation_status": "NO_GO",
+  "shadow_summary": {
+    "total": 32,
+    "go": 24,
+    "no_go": 8,
+    "unexpected_diff_count": 102,
+    "explained_diff_count": 48,
+    "accepted_production_change_count": 3,
+    "permission_failure_cases": 16,
+    "fixture_error_count": 0,
+    "permission_failure_required_count": 88,
+    "permission_failure_missing_count": 0
+  },
+  "remaining_primary_no_go": [
+    {
+      "endpoint_id": "workbench-settings-project-sync-request",
+      "python_status": 200,
+      "axum_status": 200,
+      "unexpected_diff_count": 14,
+      "top_unexpected_paths": [
+        "$.sync.failed_count",
+        "$.sync.finished_at",
+        "$.sync.id",
+        "$.sync.issue_count",
+        "$.sync.issues",
+        "$.sync.pulled_count",
+        "$.sync.retry_of_run_id",
+        "$.sync.scope",
+        "$.sync.source_system",
+        "$.sync.started_at",
+        "$.sync.success_count",
+        "$.sync.triggered_by"
+      ]
+    },
+    {
+      "endpoint_id": "settings-data-reset-create-job",
+      "python_status": 202,
+      "axum_status": 202,
+      "unexpected_diff_count": 10,
+      "top_unexpected_paths": [
+        "$.job.action",
+        "$.job.created_at",
+        "$.job.current",
+        "$.job.job_id",
+        "$.job.message",
+        "$.job.percent",
+        "$.job.phase",
+        "$.job.total",
+        "$.job.updated_at",
+        "$.job.accepted"
+      ]
+    },
+    {
+      "endpoint_id": "settings-data-reset-direct-queues-job",
+      "python_status": 202,
+      "axum_status": 202,
+      "unexpected_diff_count": 10,
+      "top_unexpected_paths": [
+        "$.job.action",
+        "$.job.created_at",
+        "$.job.current",
+        "$.job.job_id",
+        "$.job.message",
+        "$.job.percent",
+        "$.job.phase",
+        "$.job.total",
+        "$.job.updated_at",
+        "$.job.accepted"
+      ]
+    },
+    {
+      "endpoint_id": "projects-hub-list",
+      "python_status": 200,
+      "axum_status": 200,
+      "unexpected_diff_count": 12,
+      "top_unexpected_paths": [
+        "$.assignable_objects[0].current_project_uuid",
+        "$.assignable_objects[0].effective_project_id",
+        "$.assignable_objects[0].effective_project_uuid",
+        "$.assignable_objects[1].current_project_uuid",
+        "$.assignable_objects[1].current_project_id",
+        "$.assignable_objects[1].effective_project_uuid",
+        "$.assignable_objects[1].title",
+        "$.projects[0].oa_external_id",
+        "$.projects[0].updated_at",
+        "$.projects[0].version",
+        "$.projects[1].oa_external_id",
+        "$.projects[1].updated_at"
+      ]
+    },
+    {
+      "endpoint_id": "project-detail",
+      "python_status": 200,
+      "axum_status": 200,
+      "unexpected_diff_count": 2,
+      "top_unexpected_paths": [
+        "$.objects.length",
+        "$.project.oa_external_id"
+      ]
+    },
+    {
+      "endpoint_id": "projects-create-manual-profile",
+      "python_status": 200,
+      "axum_status": 200,
+      "unexpected_diff_count": 7,
+      "top_unexpected_paths": [
+        "$.project.oa_external_id",
+        "$.project.project_id",
+        "$.project.project_uuid",
+        "$.project.source",
+        "$.project.source_system",
+        "$.project.updated_at",
+        "$.project.version"
+      ]
+    },
+    {
+      "endpoint_id": "project-assign-request",
+      "python_status": 200,
+      "axum_status": 200,
+      "unexpected_diff_count": 21,
+      "top_unexpected_paths": [
+        "$.assignment.assigned_by",
+        "$.assignment.created_at",
+        "$.assignment.source",
+        "$.assignment.actor_id",
+        "$.assignment.project_uuid",
+        "$.assignment.status",
+        "$.assignment.id",
+        "$.assignment.project_id",
+        "$.assignments[0].source",
+        "$.assignments[0].assignment_id",
+        "$.assignments[0].project_uuid",
+        "$.assignments[0].status"
+      ]
+    },
+    {
+      "endpoint_id": "reminder-run-request",
+      "python_status": 202,
+      "axum_status": 202,
+      "unexpected_diff_count": 26,
+      "top_unexpected_paths": [
+        "$.job.acknowledgeable",
+        "$.job.acknowledged_at",
+        "$.job.affected_months",
+        "$.job.affected_scopes",
+        "$.job.attention",
+        "$.job.created_at",
+        "$.job.current",
+        "$.job.error",
+        "$.job.finished_at",
+        "$.job.job_id",
+        "$.job.label",
+        "$.job.message"
+      ]
+    }
+  ],
+  "completed_closure": [
+    "real OA token/password loaded from /tmp/finops-shadow-secret.env without writing secrets into repo",
+    "PostgreSQL 17 Docker shadow DB seeded and probed",
+    "Python and Axum health probes GO",
+    "before-group PostgreSQL cleanup/seed + legacy seed + token-gated reload hook enabled",
+    "16 permission-failure runtime cases GO",
+    "primary runtime NO_GO reduced from 16 to 8 cases"
+  ],
+  "go_standard": {
+    "preflight": "GO",
+    "runtime_services_health": "GO",
+    "permission_failure_cases": "GO",
+    "primary_runtime_cases": "NO_GO",
+    "overall": "NO_GO"
+  },
+  "next_required_work": [
+    "Return queue-only project sync/data reset/reminder run envelopes in a formally compatible shape or document and validate a complete accepted production delta for every differing field.",
+    "Finish project hub/detail/create/assign projection parity for legacy public id, assignment id fields, assignable object list, and field presence.",
+    "Rerun platform_shadow_runtime.py until all 32 cases are GO before production cutover."
+  ]
+}

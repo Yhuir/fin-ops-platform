@@ -1,0 +1,231 @@
+{
+  "report": "p0-business-api-implementation-20260517",
+  "generated_at": "2026-05-17",
+  "status": "NO_GO",
+  "scope": {
+    "goal": "P0 high business complexity APIs: ETC reconciliation, tax certified preview/confirm, turnover extra/confirm/withdraw/export, binary exports",
+    "completed_this_run": [
+      "GET /api/turnover-ledger/export",
+      "GET /api/cost-statistics/export"
+    ],
+    "not_completed_this_run": [
+      "GET /api/turnover-ledger/relations/{relation_id}/extra",
+      "PUT /api/turnover-ledger/relations/{relation_id}/extra",
+      "POST /api/turnover-ledger/relations/confirm",
+      "POST /api/turnover-ledger/relations/{relation_id}/withdraw",
+      "POST /api/etc/import/preview",
+      "POST /api/etc/import/confirm",
+      "GET /api/etc/reconciliation-tasks/ready-for-import",
+      "GET /api/etc/reconciliation-tasks",
+      "POST /api/etc/reconciliation-tasks",
+      "GET|DELETE /api/etc/reconciliation-tasks/{task_id}",
+      "GET|PATCH|DELETE /api/etc/reconciliation-tasks/{task_id}/*",
+      "POST /api/etc/batches/draft",
+      "POST /api/etc/batches/{batch_id}/draft",
+      "POST /api/etc/batches/{batch_id}/confirm-submitted",
+      "POST /api/etc/batches/{batch_id}/mark-not-submitted",
+      "DELETE /api/etc/batches/{batch_id}",
+      "POST /api/etc/invoices/revoke-submitted",
+      "POST /api/tax-offset/certified-import/preview",
+      "POST /api/tax-offset/certified-import/confirm"
+    ]
+  },
+  "implemented_routes": [
+    {
+      "route": "GET /api/turnover-ledger/export",
+      "domain": "turnover-ledger",
+      "status": "implemented_shadow_fixture_go_runtime_no_go",
+      "request_contract": {
+        "method": "GET",
+        "path": "/api/turnover-ledger/export",
+        "query": {
+          "family": "optional: all|personal|company|bank|business; invalid or empty values normalize to all, matching existing turnover export-preview behavior"
+        },
+        "body": null
+      },
+      "response_contract": {
+        "success_status": 200,
+        "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "content_disposition": "attachment; filename*=UTF-8''<percent-encoded legacy filename>",
+        "workbook": {
+          "sheet_name": "往来款台账",
+          "columns": [
+            "序号",
+            "行类型",
+            "源银行流水ID",
+            "流水方向",
+            "流水金额",
+            "往来大类",
+            "对方户名",
+            "待还款金额",
+            "待收款金额",
+            "余额",
+            "借款金额",
+            "借款日",
+            "还款金额",
+            "还款日",
+            "对方开户机构",
+            "还款备注",
+            "利率类型",
+            "利率值",
+            "已还利息额",
+            "借款天数",
+            "应还利息",
+            "还利息日期",
+            "还利息方式",
+            "备注",
+            "关系状态"
+          ]
+        }
+      },
+      "fact_source": [
+        "app.bank_transactions",
+        "app.bank_transaction_categories active raw_payload.category_code"
+      ],
+      "source_of_truth": [
+        "backend/src/fin_ops_platform/services/turnover_ledger_export_service.py",
+        "backend/src/fin_ops_platform/app/routes_turnover_ledger.py",
+        "tests/test_turnover_ledger_export_service.py",
+        "tests/test_turnover_ledger_api.py",
+        "rust/fin-ops-api/crates/fin-ops-api/src/services/turnover_ledger.rs"
+      ],
+      "permission": "can_access_app; readonly export users are allowed because route is read-only",
+      "audit": "none in current synchronous read-only implementation; optional export.turnover_ledger_requested remains a future audit enhancement",
+      "idempotency": "not required; GET download has no business fact write",
+      "object_storage": "not used; synchronous XLSX is generated from PostgreSQL-derived rows in request path and returned directly",
+      "expiration": "not applicable for synchronous response; async export artifact retention remains future work",
+      "known_gaps": [
+        "turnover relation extra/FIFO/allocation lot facts are still not frozen into PostgreSQL, so their fields cannot be claimed shadow-equivalent",
+        "runtime Python-vs-Axum binary shadow was not executed because base URLs and staging facts are not available in this shell"
+      ]
+    },
+    {
+      "route": "GET /api/cost-statistics/export",
+      "domain": "cost-statistics",
+      "status": "implemented_shadow_fixture_go_runtime_no_go",
+      "request_contract": {
+        "method": "GET",
+        "path": "/api/cost-statistics/export",
+        "query": {
+          "month": "required: YYYY-MM|all",
+          "view": "required: time|month|project|expense_type",
+          "project_scope": "optional: active|all; defaults to active",
+          "start_month": "optional YYYY-MM",
+          "end_month": "optional YYYY-MM",
+          "start_date": "optional YYYY-MM-DD",
+          "end_date": "optional YYYY-MM-DD",
+          "project_name": "repeatable; required for project view",
+          "expense_type": "repeatable; required for expense_type view",
+          "aggregate_by": "optional: month|year for project view"
+        },
+        "body": null
+      },
+      "response_contract": {
+        "success_status": 200,
+        "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "content_disposition": "attachment; filename*=UTF-8''<percent-encoded legacy filename>",
+        "headers": {
+          "x-fin-ops-export-row-count": "number"
+        },
+        "workbook": {
+          "sheet_name": "from export-preview sheet_names[0]",
+          "columns": "from export-preview columns",
+          "rows": "from export-preview rows"
+        }
+      },
+      "fact_source": [
+        "read_model.cost_statistics_read_models"
+      ],
+      "source_of_truth": [
+        "backend/src/fin_ops_platform/services/cost_statistics_service.py",
+        "backend/src/fin_ops_platform/app/server.py",
+        "tests/test_cost_statistics_api.py",
+        "rust/fin-ops-api/crates/fin-ops-api/src/services/business_read.rs"
+      ],
+      "permission": "can_access_app; readonly export users are allowed because route is read-only",
+      "audit": "none in current synchronous read-only implementation; optional export.cost_statistics_requested remains a future audit enhancement",
+      "idempotency": "not required; GET download has no business fact write",
+      "object_storage": "not used; synchronous XLSX is generated from PostgreSQL read-model rows in request path and returned directly",
+      "expiration": "not applicable for synchronous response; async export artifact retention remains future work",
+      "known_gaps": [
+        "transaction-detail workbook view is not frozen in the Axum contract and remains outside this synchronous read-model export implementation",
+        "runtime Python-vs-Axum binary shadow was not executed because base URLs and seeded read-model facts are not available in this shell"
+      ]
+    }
+  ],
+  "shadow": {
+    "fixture_updates": [
+      "Added business-api-shadow-validation endpoint turnover-ledger-export-xlsx with response_mode=binary",
+      "Added business-api-shadow-validation endpoint cost-statistics-export-xlsx-time-read-model with response_mode=binary",
+      "Updated api shadow validator to normalize binary responses into content metadata instead of recording raw bytes"
+    ],
+    "fixture_validation": {
+      "command": "python3 scripts/tools/api_shadow_validate.py --fixture docs/dev/api-fixtures/business-api-shadow-validation.json --validate-fixture-only --endpoint-id turnover-ledger-export-xlsx",
+      "status": "GO"
+    },
+    "runtime_validation": {
+      "status": "NO_GO",
+      "blocking_reason": "FIN_OPS_SHADOW_PYTHON_BASE_URL, FIN_OPS_SHADOW_AXUM_BASE_URL, FIN_OPS_SHADOW_OA_TOKEN, DATABASE_URL and seeded PostgreSQL facts were not provided; no live Python/Axum services were available for runtime shadow."
+    }
+  },
+  "verification": [
+    {
+      "command": "cargo fmt --all --check && cargo check --workspace && cargo test --workspace",
+      "cwd": "rust/fin-ops-api",
+      "status": "GO",
+      "result": "124 Rust tests passed"
+    },
+    {
+      "command": "cargo test -p fin-ops-api services::business_read::tests::cost_export_xlsx_uses_preview_rows_and_returns_binary_contract",
+      "cwd": "rust/fin-ops-api",
+      "status": "GO",
+      "result": "targeted Rust cost export binary test passed"
+    },
+    {
+      "command": "PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_export_service tests.test_turnover_ledger_api -v",
+      "status": "GO",
+      "result": "17 Python turnover tests passed"
+    },
+    {
+      "command": "PYTHONPATH=backend/src pytest tests/test_api_shadow_validate.py tests/test_api_route_inventory_check.py -q",
+      "status": "GO",
+      "result": "78 pytest tests passed"
+    },
+    {
+      "command": "python3 scripts/tools/api_route_inventory_check.py --inventory docs/dev/api-fixtures/api-route-inventory.json --write-route-level-inventory docs/dev/api-fixtures/api-route-inventory-route-level.json --shadow-fixture docs/dev/api-fixtures/business-api-shadow-validation.json",
+      "status": "GO",
+      "result": "route inventory and shadow route coverage passed"
+    },
+    {
+      "command": "python3 scripts/tools/backend_refactor_readiness_gate.py --format markdown",
+      "status": "NO_GO",
+      "result": "global readiness gate still has 9 blocking checks"
+    }
+  ],
+  "blocking_items": [
+    {
+      "area": "turnover relation writes/extras",
+      "status": "NO_GO",
+      "reason": "Old Python uses turnover relation/extra state; PostgreSQL extra/FIFO/event facts and runtime shadow fixtures are not complete enough to implement without guessing."
+    },
+    {
+      "area": "ETC reconciliation/import/batch writes",
+      "status": "NO_GO",
+      "reason": "Task/file/evidence/batch event workflows require parser staging rows, object storage, job/outbox, audit/idempotency and seeded staging environment before GO."
+    },
+    {
+      "area": "tax certified preview/confirm",
+      "status": "NO_GO",
+      "reason": "Preview parser staging and confirm lineage into invoice_certifications are not wired in Rust runtime shadow environment."
+    },
+    {
+      "area": "cost statistics binary export",
+      "status": "PARTIAL_GO",
+      "reason": "Synchronous read-model XLSX route and fixture are implemented. Transaction-detail workbook, large async export strategy and runtime Python-vs-Axum binary shadow remain open."
+    }
+  ],
+  "go_standard": {
+    "met": false,
+    "reason": "Turnover ledger and cost statistics synchronous binary exports were implemented and locally verified. The broader high-complexity P0 scope, write APIs and runtime shadow evidence remain NO_GO."
+  }
+}

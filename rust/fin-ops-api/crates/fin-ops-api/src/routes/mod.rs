@@ -247,6 +247,251 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn readonly_identity_cannot_request_background_job_attention_routes() {
+        let retry_response = request(
+            trusted_header_state(),
+            authorized_json_request(
+                "/api/background-jobs/00000000-0000-4000-8000-000000000001/retry",
+                "readonly_user",
+                "finops:app:view",
+                json!({
+                    "idempotency_key": "background-job-retry:readonly",
+                    "reason": "retry visible background job"
+                }),
+            ),
+        )
+        .await;
+
+        assert_eq!(retry_response.status(), StatusCode::FORBIDDEN);
+        let body = to_json(retry_response.into_body()).await;
+        assert_eq!(body["error"], "permission_denied");
+
+        let ack_response = request(
+            trusted_header_state(),
+            authorized_json_request(
+                "/api/background-jobs/00000000-0000-4000-8000-000000000001/acknowledge",
+                "readonly_user",
+                "finops:app:view",
+                json!({
+                    "idempotency_key": "background-job-ack:readonly",
+                    "reason": "dismiss visible background job"
+                }),
+            ),
+        )
+        .await;
+
+        assert_eq!(ack_response.status(), StatusCode::FORBIDDEN);
+        let body = to_json(ack_response.into_body()).await;
+        assert_eq!(body["error"], "permission_denied");
+    }
+
+    #[tokio::test]
+    async fn readonly_identity_cannot_request_platform_mutation_routes() {
+        let cases = [
+            (
+                "/projects/assign",
+                json!({
+                    "actor_id": "readonly_user",
+                    "object_type": "bank_transaction",
+                    "object_id": "00000000-0000-4000-8000-000000000011",
+                    "project_id": "00000000-0000-4000-8000-000000000012",
+                    "idempotency_key": "project-assign:readonly"
+                }),
+            ),
+            (
+                "/ledgers/00000000-0000-4000-8000-000000000021/status",
+                json!({
+                    "actor_id": "readonly_user",
+                    "status": "resolved",
+                    "idempotency_key": "ledger-status:readonly"
+                }),
+            ),
+            (
+                "/reminders/run",
+                json!({
+                    "as_of": "2026-05-17",
+                    "days_ahead": 7,
+                    "actor_id": "readonly_user",
+                    "idempotency_key": "reminder-run:readonly"
+                }),
+            ),
+        ];
+
+        for (uri, payload) in cases {
+            let response = request(
+                trusted_header_state(),
+                authorized_json_request(uri, "readonly_user", "finops:app:view", payload),
+            )
+            .await;
+
+            assert_eq!(response.status(), StatusCode::FORBIDDEN, "{uri}");
+            let body = to_json(response.into_body()).await;
+            assert_eq!(body["error"], "permission_denied");
+        }
+    }
+
+    #[tokio::test]
+    async fn admin_identity_reaches_platform_admin_writes_before_database() {
+        let cases = [
+            (
+                "/api/workbench/settings",
+                json!({
+                    "completed_project_ids": [],
+                    "bank_account_mappings": [],
+                    "allowed_usernames": ["writer_user"],
+                    "readonly_export_usernames": ["readonly_user"],
+                    "admin_usernames": ["admin_user"],
+                    "idempotency_key": "settings:admin"
+                }),
+            ),
+            (
+                "/api/workbench/settings/projects/sync",
+                json!({
+                    "actor_id": "spoofed_body_actor",
+                    "scope": {"kind": "all"},
+                    "idempotency_key": "project-sync:admin"
+                }),
+            ),
+            (
+                "/api/workbench/settings/projects",
+                json!({
+                    "actor_id": "spoofed_body_actor",
+                    "project_code": "P-ADMIN",
+                    "project_name": "Admin Project",
+                    "idempotency_key": "settings-project:admin"
+                }),
+            ),
+            (
+                "/api/workbench/settings/data-reset/jobs",
+                json!({
+                    "action": "reset_invoices",
+                    "oa_password": "verified-upstream",
+                    "approval_id": "approval-admin",
+                    "backup_evidence_id": "backup-admin",
+                    "idempotency_key": "data-reset:admin"
+                }),
+            ),
+            (
+                "/api/workbench/settings/data-reset",
+                json!({
+                    "action": "reset_bank_transactions",
+                    "oa_password": "verified-upstream",
+                    "approval_id": "approval-direct",
+                    "backup_evidence_id": "backup-direct",
+                    "idempotency_key": "data-reset-direct:admin"
+                }),
+            ),
+            (
+                "/projects",
+                json!({
+                    "actor_id": "spoofed_body_actor",
+                    "project_code": "P-HUB",
+                    "project_name": "Hub Project",
+                    "idempotency_key": "projects-create:admin"
+                }),
+            ),
+        ];
+
+        for (uri, payload) in cases {
+            let response = request(
+                trusted_header_state(),
+                authorized_json_request(uri, "admin_user", "finops:app:view", payload),
+            )
+            .await;
+
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "{uri}");
+            let body = to_json(response.into_body()).await;
+            assert_eq!(body["error"], "database_unavailable");
+        }
+    }
+
+    #[tokio::test]
+    async fn mutate_identity_reaches_platform_mutation_writes_before_database() {
+        let cases = [
+            (
+                "/api/background-jobs/00000000-0000-4000-8000-000000000001/retry",
+                json!({
+                    "idempotency_key": "background-job-retry:writer",
+                    "reason": "retry visible background job"
+                }),
+            ),
+            (
+                "/api/background-jobs/00000000-0000-4000-8000-000000000001/acknowledge",
+                json!({
+                    "idempotency_key": "background-job-ack:writer",
+                    "reason": "reviewed"
+                }),
+            ),
+            (
+                "/projects/assign",
+                json!({
+                    "actor_id": "spoofed_body_actor",
+                    "object_type": "bank_transaction",
+                    "object_id": "00000000-0000-4000-8000-000000000011",
+                    "project_id": "00000000-0000-4000-8000-000000000012",
+                    "idempotency_key": "project-assign:writer"
+                }),
+            ),
+            (
+                "/ledgers/00000000-0000-4000-8000-000000000021/status",
+                json!({
+                    "actor_id": "spoofed_body_actor",
+                    "status": "resolved",
+                    "idempotency_key": "ledger-status:writer"
+                }),
+            ),
+            (
+                "/reminders/run",
+                json!({
+                    "as_of": "2026-05-17",
+                    "days_ahead": 7,
+                    "actor_id": "spoofed_body_actor",
+                    "idempotency_key": "reminder-run:writer"
+                }),
+            ),
+        ];
+
+        for (uri, payload) in cases {
+            let response = request(
+                trusted_header_state(),
+                authorized_json_request(uri, "writer_user", "finops:app:view", payload),
+            )
+            .await;
+
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "{uri}");
+            let body = to_json(response.into_body()).await;
+            assert_eq!(body["error"], "database_unavailable");
+        }
+    }
+
+    #[tokio::test]
+    async fn background_job_retry_accepts_idempotency_key_header() {
+        let response = request(
+            trusted_header_state(),
+            authorized_request(
+                "/api/background-jobs/00000000-0000-4000-8000-000000000001/retry",
+                "writer_user",
+                "finops:app:view",
+            )
+            .method(Method::POST)
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("Idempotency-Key", "background-job-retry:header")
+            .body(Body::from(
+                json!({
+                    "reason": "retry visible background job"
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_json(response.into_body()).await;
+        assert_eq!(body["error"], "database_unavailable");
+    }
+
+    #[tokio::test]
     async fn write_route_rejects_body_actor_mismatch() {
         let response = request(
             trusted_header_state(),

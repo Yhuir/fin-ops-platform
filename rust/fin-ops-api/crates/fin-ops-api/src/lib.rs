@@ -9,6 +9,9 @@ pub mod routes;
 pub mod services;
 pub mod state;
 
+#[cfg(test)]
+mod migration_contracts;
+
 use axum::Router;
 
 use crate::state::AppState;

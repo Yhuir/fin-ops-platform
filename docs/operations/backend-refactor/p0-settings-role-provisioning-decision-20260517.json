@@ -1,0 +1,114 @@
+{
+  "report": "p0-settings-role-provisioning-decision-20260517",
+  "generated_at": "2026-05-17T11:20:25Z",
+  "status": "IMPLEMENTED_RECOMMENDED_DECISION_PENDING_PRODUCT_OPS_APPROVAL_AND_WORKER_SLA",
+  "scope": "Resolve workbench-settings-write-contract OA role sync blocker by replacing synchronous Python OA role sync semantics with Rust/Axum PostgreSQL identity role provisioning request, worker task, and outbox enqueue semantics.",
+  "source_blocker": {
+    "code": "SETTINGS_WRITE_OA_ROLE_SYNC_DECISION",
+    "source_reports": [
+      "docs/operations/backend-refactor/p0-platform-api-final-no-go-20260517.json",
+      "docs/operations/backend-refactor/p0-platform-contract-delta-20260517.json",
+      "docs/architecture/backend-refactor/remaining-api-contracts.md"
+    ],
+    "legacy_python_behavior": "POST /api/workbench/settings synchronously called OARoleSyncService.sync_access_control and returned oa_role_sync_failed when the OA MySQL role sync failed.",
+    "implemented_rust_behavior": "POST /api/workbench/settings saves the PostgreSQL settings profile fact and queues app.identity_provisioning_requests + job.worker_tasks + job.outbox_events in the same PostgreSQL transaction. The request path does not connect to or write OA MySQL."
+  },
+  "recommended_decision": {
+    "decision": "Move OA role provisioning out of the settings write request path and treat settings write success as settings fact persisted plus identity role provisioning queued.",
+    "rationale": [
+      "Keeps POST /api/workbench/settings independent from OA MySQL availability.",
+      "Preserves audit/idempotency on the PostgreSQL write boundary.",
+      "Creates explicit worker/outbox lineage for retry, health, and alerting instead of hiding role sync failure inside the settings route."
+    ],
+    "approval_state": "RECOMMENDED_NOT_APPROVED",
+    "not_approved_by_this_report": [
+      "product",
+      "operations"
+    ]
+  },
+  "implemented_contract": {
+    "success_semantics": "HTTP success means the workbench settings PostgreSQL fact is active and the identity role provisioning request/job/outbox is queued or an identical access_control provisioning request already exists. It does not mean OA roles have been applied.",
+    "transaction_writes": [
+      "app.settings_profiles",
+      "audit.events event_type=settings.updated",
+      "app.identity_provisioning_requests",
+      "job.worker_tasks task_type=identity_role_provisioning",
+      "job.outbox_events event_type=identity.role_provisioning_requested subject=finops.jobs.identity.role_provisioning",
+      "audit.events event_type=identity_role_provisioning.requested",
+      "app.write_idempotency_records operation=settings.save"
+    ],
+    "payload_contract": {
+      "schema_version": "finops.identity.role_provisioning.v1",
+      "source": "workbench_settings",
+      "required_fields": [
+        "settings_profile_id",
+        "settings_version",
+        "access_control",
+        "assignments",
+        "requested_by",
+        "trace_id"
+      ],
+      "secret_policy": "No password, token, secret, credential, URI, or raw file content is included in provisioning payloads."
+    },
+    "idempotency": {
+      "settings_write": "Existing app.write_idempotency_records operation=settings.save remains authoritative; the same idempotency key with a different request payload returns 409.",
+      "provisioning": "app.identity_provisioning_requests has unique guards for (settings_profile_id, settings_version), idempotency_key, and payload_hash. payload_hash is derived from schema_version/source/access_control/assignments so identical access_control does not create duplicate provisioning work."
+    }
+  },
+  "code_changes": [
+    "rust/fin-ops-api/migrations/0011_identity_provisioning.sql",
+    "rust/fin-ops-api/crates/fin-ops-api/src/repositories/platform_legacy.rs",
+    "rust/fin-ops-api/crates/fin-ops-api/src/jobs/mod.rs",
+    "rust/fin-ops-api/crates/fin-ops-api/src/jobs/identity_role_provisioning.rs"
+  ],
+  "explicit_non_changes": [
+    "No synchronous OA MySQL write was added.",
+    "No route-level SQL was added.",
+    "Data reset worker files and Prompt07 final report files were not intentionally modified by this task.",
+    "Product/ops approval was not forged or marked complete."
+  ],
+  "human_approval_required": [
+    {
+      "owner": "product",
+      "decision": "Approve that POST /api/workbench/settings success no longer means OA roles are already synchronized.",
+      "required_before": "production cutover contract freeze"
+    },
+    {
+      "owner": "operations",
+      "decision": "Approve UI, health, alerting, and runbook wording for queued/running/failed identity role provisioning.",
+      "required_before": "production cutover"
+    },
+    {
+      "owner": "operations",
+      "decision": "Define worker failure SLA, retry/dead-letter handling, escalation thresholds, and recovery evidence requirements.",
+      "required_before": "production cutover"
+    }
+  ],
+  "remaining_risks": [
+    "The worker execution path and OA-side apply proof still require staging evidence.",
+    "UI and health endpoints must surface role provisioning queued/running/failed states before users rely on the new contract.",
+    "Alerting must distinguish settings persistence success from identity provisioning completion."
+  ],
+  "verification": [
+    {
+      "command": "cd rust/fin-ops-api && cargo fmt --all --check",
+      "status": "PASS",
+      "result": "exit 0"
+    },
+    {
+      "command": "cd rust/fin-ops-api && cargo check --workspace",
+      "status": "PASS",
+      "result": "exit 0"
+    },
+    {
+      "command": "cd rust/fin-ops-api && cargo test platform_legacy --workspace",
+      "status": "PASS",
+      "result": "35 passed; 0 failed"
+    },
+    {
+      "command": "cd rust/fin-ops-api && cargo test identity_role_provisioning --workspace",
+      "status": "PASS",
+      "result": "3 passed; 0 failed"
+    }
+  ]
+}

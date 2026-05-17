@@ -175,6 +175,12 @@ fn route_policy(method: &Method, path: &str) -> RoutePolicy {
     if is_admin_route(method, path) {
         return RoutePolicy::Admin;
     }
+    if method == Method::POST
+        && path.starts_with("/api/background-jobs/")
+        && (path.ends_with("/acknowledge") || path.ends_with("/retry"))
+    {
+        return RoutePolicy::Mutate;
+    }
     if is_protected_business_route(path) {
         if is_mutation_method(method) {
             RoutePolicy::Mutate
@@ -187,7 +193,13 @@ fn route_policy(method: &Method, path: &str) -> RoutePolicy {
 }
 
 fn is_admin_route(method: &Method, path: &str) -> bool {
-    is_mutation_method(method) && path.starts_with("/api/workbench/settings/data-reset")
+    if !is_mutation_method(method) {
+        return false;
+    }
+    path == "/api/workbench/settings"
+        || path.starts_with("/api/workbench/settings/projects")
+        || path.starts_with("/api/workbench/settings/data-reset")
+        || (method == Method::POST && path == "/projects")
 }
 
 fn is_protected_business_route(path: &str) -> bool {
@@ -472,5 +484,58 @@ mod tests {
         assert!(session.can_access_app);
         assert!(!session.can_mutate_data);
         assert_eq!(session.access_tier, "read_export_only");
+    }
+
+    #[test]
+    fn platform_settings_writes_require_admin_policy() {
+        assert_eq!(
+            route_policy(&Method::POST, "/api/workbench/settings"),
+            RoutePolicy::Admin
+        );
+        assert_eq!(
+            route_policy(&Method::POST, "/api/workbench/settings/projects/sync"),
+            RoutePolicy::Admin
+        );
+        assert_eq!(
+            route_policy(
+                &Method::DELETE,
+                "/api/workbench/settings/projects/project-1"
+            ),
+            RoutePolicy::Admin
+        );
+        assert_eq!(
+            route_policy(&Method::POST, "/api/workbench/settings/data-reset/jobs"),
+            RoutePolicy::Admin
+        );
+        assert_eq!(
+            route_policy(
+                &Method::POST,
+                "/api/background-jobs/00000000-0000-4000-8000-000000000001/acknowledge"
+            ),
+            RoutePolicy::Mutate
+        );
+        assert_eq!(
+            route_policy(
+                &Method::POST,
+                "/api/background-jobs/00000000-0000-4000-8000-000000000001/retry"
+            ),
+            RoutePolicy::Mutate
+        );
+        assert_eq!(route_policy(&Method::POST, "/projects"), RoutePolicy::Admin);
+        assert_eq!(
+            route_policy(&Method::POST, "/projects/assign"),
+            RoutePolicy::Mutate
+        );
+        assert_eq!(
+            route_policy(
+                &Method::POST,
+                "/ledgers/00000000-0000-4000-8000-000000000001/status"
+            ),
+            RoutePolicy::Mutate
+        );
+        assert_eq!(
+            route_policy(&Method::POST, "/reminders/run"),
+            RoutePolicy::Mutate
+        );
     }
 }

@@ -1,0 +1,503 @@
+{
+  "diagnostic_migration_dry_run": {
+    "database": "fin_ops_shadow",
+    "limitations": [
+      "PostgreSQL 15.17 is below the target production/staging PostgreSQL 16/17 baseline.",
+      "No migrated Mongo/GridFS/OA staging data was loaded.",
+      "No checksum, legacy id map, EXPLAIN ANALYZE, PITR, rollback, or load-test evidence was produced.",
+      "The temporary cluster was destroyed after the diagnostic run."
+    ],
+    "migrations_applied": [
+      "0001_foundation.sql",
+      "0002_imports_files.sql",
+      "0003_low_risk_read_models.sql",
+      "0004_p0_foundation.sql",
+      "0005_money_stage2.sql",
+      "0006_contracts_outbox_audit.sql",
+      "0007_read_model_rebuild.sql",
+      "0008_cutover_readiness.sql",
+      "0009_p0_api_fact_sources.sql"
+    ],
+    "port": 55432,
+    "postgres_binary": "/opt/homebrew/opt/postgresql@15/bin/postgres",
+    "postgres_version": "15.17",
+    "roles_created": [
+      "fin_ops_migrator",
+      "fin_ops_api",
+      "fin_ops_worker",
+      "fin_ops_readonly"
+    ],
+    "status": "DIAGNOSTIC_GO_NOT_CUTOVER_GO",
+    "table_count": 68
+  },
+  "generated_at": "2026-05-17T23:45:00+08:00",
+  "go_standard": {
+    "legacy_python_contract_tests": "GO",
+    "reason": "Runtime shadow validation could not run because --python-base-url and --axum-base-url were not provided and no isolated staging/local shadow services were available in this session.",
+    "route_inventory_with_shadow_fixture": "GO",
+    "runtime_shadow_validation": "NO_GO",
+    "rust_check": "GO",
+    "rust_fmt_check": "GO",
+    "rust_test": "GO",
+    "shadow_fixture_contract_validation": "GO"
+  },
+  "implemented_routes": [
+    {
+      "audit_event": "background_job.acknowledged",
+      "auth_policy": "can_access_app; Axum route policy is AppSession for acknowledge and does not require can_mutate_data, matching old Python protected-route access semantics.",
+      "fact_sources": [
+        "job.worker_tasks",
+        "job.worker_task_acknowledgements",
+        "audit.events",
+        "app.write_idempotency_records"
+      ],
+      "idempotency": "required",
+      "method_path": "POST /api/background-jobs/{job_id}/acknowledge",
+      "repository_module": "rust/fin-ops-api/crates/fin-ops-api/src/repositories/platform_legacy.rs",
+      "rust_route_module": "rust/fin-ops-api/crates/fin-ops-api/src/routes/platform_legacy.rs",
+      "service_module": "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs"
+    },
+    {
+      "audit_event": "settings.updated",
+      "contract_corrections": "bank_account_mappings is the old Python array contract; response returns the legacy settings projection rather than an internal {version, settings} envelope",
+      "fact_sources": [
+        "app.settings_profiles",
+        "app.project_profiles",
+        "audit.events",
+        "app.write_idempotency_records"
+      ],
+      "idempotency": "required",
+      "method_path": "POST /api/workbench/settings"
+    },
+    {
+      "audit_event": "project.sync.requested",
+      "fact_sources": [
+        "job.worker_tasks",
+        "job.outbox_events",
+        "audit.events",
+        "app.write_idempotency_records",
+        "app.settings_profiles"
+      ],
+      "idempotency": "required",
+      "method_path": "POST /api/workbench/settings/projects/sync",
+      "outbox_subject": "finops.jobs.project.sync"
+    },
+    {
+      "audit_event": "project_profile.upserted",
+      "fact_sources": [
+        "app.project_profiles",
+        "audit.events",
+        "app.write_idempotency_records"
+      ],
+      "idempotency": "required",
+      "method_path": "POST /api/workbench/settings/projects"
+    },
+    {
+      "audit_event": "project_profile.deactivated",
+      "fact_sources": [
+        "app.project_profiles",
+        "audit.events",
+        "app.write_idempotency_records"
+      ],
+      "idempotency": "required",
+      "method_path": "DELETE /api/workbench/settings/projects/{project_id}"
+    },
+    {
+      "audit_event": "data_reset.request.requested",
+      "conflict_semantics": "same action with queued/running data reset request returns 409 settings_data_reset_job_running",
+      "fact_sources": [
+        "app.data_reset_requests",
+        "job.worker_tasks",
+        "job.outbox_events",
+        "audit.events",
+        "app.write_idempotency_records"
+      ],
+      "idempotency": "required",
+      "method_path": "POST /api/workbench/settings/data-reset/jobs",
+      "outbox_subject": "finops.jobs.settings.data_reset",
+      "password_verification": "requires staging/legacy OA verification adapter for runtime GO; local Rust validates presence only and reports oa_password_verification_failed when missing.",
+      "request_path_side_effects": "queues worker task only; destructive execution is not performed in the API request path",
+      "secret_handling": "oa_password is required for legacy contract parity but is not persisted in command source, payload, request_payload, outbox, audit, or idempotency payloads."
+    },
+    {
+      "audit_event": "data_reset.request.requested",
+      "conflict_semantics": "same action with queued/running data reset request returns 409 settings_data_reset_job_running",
+      "fact_sources": [
+        "app.data_reset_requests",
+        "job.worker_tasks",
+        "job.outbox_events",
+        "audit.events",
+        "app.write_idempotency_records"
+      ],
+      "idempotency": "required",
+      "method_path": "POST /api/workbench/settings/data-reset",
+      "outbox_subject": "finops.jobs.settings.data_reset",
+      "password_verification": "requires staging/legacy OA verification adapter for runtime GO; local Rust validates presence only and reports oa_password_verification_failed when missing.",
+      "request_path_side_effects": "queues worker task only; direct execution remains worker-maintenance scope",
+      "secret_handling": "oa_password is required for legacy contract parity but is not persisted in command source, payload, request_payload, outbox, audit, or idempotency payloads."
+    },
+    {
+      "audit_event": "POST project_profile.upserted",
+      "fact_sources": [
+        "app.project_profiles",
+        "audit.events",
+        "app.write_idempotency_records"
+      ],
+      "idempotency": "POST required",
+      "method_path": "GET|POST /projects"
+    },
+    {
+      "audit_event": "none",
+      "fact_sources": [
+        "app.project_profiles"
+      ],
+      "idempotency": "not required for read",
+      "method_path": "GET /projects/{project_id}"
+    },
+    {
+      "audit_event": "project.assigned",
+      "fact_sources": [
+        "app.project_profiles",
+        "app.project_assignments",
+        "app.project_profile_events",
+        "audit.events",
+        "app.write_idempotency_records"
+      ],
+      "idempotency": "required",
+      "method_path": "POST /projects/assign",
+      "target_validation": "validates project and object facts before writing assignment; supersedes previous active assignment for the same object"
+    },
+    {
+      "audit_event": "none",
+      "fact_sources": [
+        "app.ledgers"
+      ],
+      "idempotency": "not required for read",
+      "method_path": "GET /ledgers",
+      "legacy_view_semantics": "Rust SQL now matches old Python LedgerReminderService.list_ledgers: missing/null view behaves as all, view=all returns all rows, view=overdue returns non-resolved/non-cancelled rows due before as_of/current_date, view=due returns non-resolved/non-cancelled rows due within the seven-day as_of/current_date horizon, and unknown non-all views return open rows."
+    },
+    {
+      "audit_event": "none",
+      "fact_sources": [
+        "app.ledgers",
+        "app.ledger_events"
+      ],
+      "idempotency": "not required for read",
+      "method_path": "GET /ledgers/{ledger_id}"
+    },
+    {
+      "audit_event": "ledger.status_changed",
+      "fact_sources": [
+        "app.ledgers",
+        "app.ledger_events",
+        "audit.events",
+        "app.write_idempotency_records"
+      ],
+      "idempotency": "required",
+      "method_path": "POST /ledgers/{ledger_id}/status"
+    },
+    {
+      "audit_event": "none",
+      "fact_sources": [
+        "app.reminders"
+      ],
+      "idempotency": "not required for read",
+      "method_path": "GET /reminders"
+    },
+    {
+      "audit_event": "reminder.run.requested",
+      "fact_sources": [
+        "app.reminder_runs",
+        "job.worker_tasks",
+        "job.outbox_events",
+        "audit.events",
+        "app.write_idempotency_records"
+      ],
+      "idempotency": "required",
+      "method_path": "POST /reminders/run",
+      "outbox_subject": "finops.jobs.reminder.run",
+      "request_path_side_effects": "queues worker task only; no external notifications sent in request path",
+      "request_validation": "days_ahead must be null or non-negative before queueing so invalid reminder run requests cannot enter job.worker_tasks/outbox_events; mirrors app.reminder_runs.days_ahead >= 0 schema invariant."
+    }
+  ],
+  "remaining_no_go_items": [
+    "Runtime Python vs Axum shadow validation was not executed because isolated Python/Axum base URLs are absent; preflight report p0-platform-shadow-preflight-20260517 records PYTHON_BASE_URL_MISSING and AXUM_BASE_URL_MISSING.",
+    "No local Axum shadow service can be started from this shell because DATABASE_URL is absent; p0-platform-shadow-preflight-20260517 records AXUM_DATABASE_URL_MISSING.",
+    "Platform runtime shadow fixture variables are not available in this shell: BACKGROUND_JOB_ID, BANK_TRANSACTION_ID, FIN_OPS_SHADOW_OA_PASSWORD, FIN_OPS_SHADOW_OA_TOKEN, LEDGER_ID, PROJECT_DELETE_ID, PROJECT_ID, SHADOW_RUN_ID. The fact ids must be seeded equivalently in legacy Python/Mongo and Axum PostgreSQL before runtime shadow; preflight now probes BACKGROUND_JOB_ID against job.worker_tasks, PROJECT_ID/PROJECT_DELETE_ID against app.project_profiles, BANK_TRANSACTION_ID against app.bank_transactions, and LEDGER_ID against app.ledgers when DATABASE_URL and UUID values are present.",
+    "Axum trusted header auth is not confirmed for runtime shadow; start the Axum shadow service with FIN_OPS_OA_IDENTITY_ADAPTER=trusted_headers or set FIN_OPS_SHADOW_AXUM_AUTH_MODE_CONFIRMED=trusted_headers for a managed Axum base URL, and provide a Python-accepted FIN_OPS_SHADOW_OA_TOKEN.",
+    "A diagnostic PostgreSQL 15.17 empty-schema migration run applied 0001 through 0009, but no real PostgreSQL 16/17 staging migration dry-run was completed; Docker daemon is unavailable and no managed PostgreSQL 16/17 DATABASE_URL was provided.",
+    "Data reset destructive execution worker is not implemented here; API safely queues the job only."
+  ],
+  "report": "p0-platform-api-implementation-20260517",
+  "runtime_fixture_preflight": {
+    "auth_requirements": {
+      "blocking_checks": [
+        "FIN_OPS_SHADOW_OA_TOKEN is not set for legacy Python primary auth",
+        "FIN_OPS_OA_IDENTITY_ADAPTER=trusted_headers or FIN_OPS_SHADOW_AXUM_AUTH_MODE_CONFIRMED=trusted_headers is not set"
+      ],
+      "go_checks": [
+        "primary fixture headers include Authorization and x-fin-ops-oa-* trusted identity headers",
+        "trusted permission header contains finops:app:view",
+        "trusted username YNSYLP005 satisfies Axum admin-route policy"
+      ],
+      "status": "NO_GO"
+    },
+    "auth_variables": [
+      "FIN_OPS_SHADOW_OA_PASSWORD",
+      "FIN_OPS_SHADOW_OA_TOKEN"
+    ],
+    "evidence": "docs/operations/backend-refactor/p0-platform-shadow-preflight-20260517.json runtime_variables, seed_requirements, and auth_requirements",
+    "fact_seed_variables": [
+      "BACKGROUND_JOB_ID",
+      "BANK_TRANSACTION_ID",
+      "LEDGER_ID",
+      "PROJECT_DELETE_ID",
+      "PROJECT_ID"
+    ],
+    "fixture_static_checks": {
+      "checks": [
+        "duplicate idempotency keys",
+        "duplicate data reset 202 actions",
+        "destructive target variable reuse"
+      ],
+      "status": "GO"
+    },
+    "required_variables": [
+      "BACKGROUND_JOB_ID",
+      "BANK_TRANSACTION_ID",
+      "FIN_OPS_SHADOW_OA_PASSWORD",
+      "FIN_OPS_SHADOW_OA_TOKEN",
+      "LEDGER_ID",
+      "PROJECT_DELETE_ID",
+      "PROJECT_ID",
+      "SHADOW_RUN_ID"
+    ],
+    "run_correlation_variables": [
+      "SHADOW_RUN_ID"
+    ],
+    "runtime_shadow_input_plan": {
+      "evidence": "docs/operations/backend-refactor/p0-platform-shadow-preflight-20260517.json runtime_shadow_input_plan",
+      "postgres_fact_probes": [
+        "BACKGROUND_JOB_ID",
+        "BANK_TRANSACTION_ID",
+        "LEDGER_ID",
+        "PROJECT_DELETE_ID",
+        "PROJECT_ID"
+      ],
+      "required_exports": [
+        "FIN_OPS_SHADOW_PYTHON_BASE_URL",
+        "FIN_OPS_SHADOW_AXUM_BASE_URL",
+        "DATABASE_URL",
+        "FIN_OPS_OA_IDENTITY_ADAPTER",
+        "FIN_OPS_SHADOW_AXUM_AUTH_MODE_CONFIRMED",
+        "BACKGROUND_JOB_ID",
+        "BANK_TRANSACTION_ID",
+        "FIN_OPS_SHADOW_OA_PASSWORD",
+        "FIN_OPS_SHADOW_OA_TOKEN",
+        "LEDGER_ID",
+        "PROJECT_DELETE_ID",
+        "PROJECT_ID",
+        "SHADOW_RUN_ID"
+      ],
+      "service_start_order": [
+        "legacy_python_shadow",
+        "postgres_migrations",
+        "axum_shadow",
+        "platform_seed_fact_probes",
+        "runtime_shadow_validation"
+      ],
+      "status": "NO_GO"
+    },
+    "runtime_shadow_runner": {
+      "blocking_reasons": [
+        "preflight_no_go",
+        "shadow_service_health_no_go"
+      ],
+      "evidence": "docs/operations/backend-refactor/p0-platform-runtime-shadow-20260517.json",
+      "health_checks": {
+        "axum_healthz": "NO_GO",
+        "axum_readyz": "NO_GO",
+        "python_health": "NO_GO"
+      },
+      "shadow_validation_status": "SKIPPED",
+      "status": "NO_GO_PRECHECK"
+    },
+    "seed_probe_sources": {
+      "BACKGROUND_JOB_ID": "job.worker_tasks where visibility='system'",
+      "BANK_TRANSACTION_ID": "app.bank_transactions",
+      "LEDGER_ID": "app.ledgers where status='open'",
+      "PROJECT_DELETE_ID": "app.project_profiles where project_status='active'",
+      "PROJECT_ID": "app.project_profiles where project_status='active'"
+    },
+    "seed_probe_status": "NO_GO_SKIPPED_MISSING_VARIABLES_AND_DATABASE_URL",
+    "status": "NO_GO"
+  },
+  "schema_corrections": [
+    "Settings read/write now uses settings_profiles.status='active' and project_profiles.project_source from 0009 instead of non-existent is_active/source_system columns.",
+    "0009 worker_task_acknowledgements now includes acknowledged_at/trace_id used by the ack repository write path.",
+    "0009 data_reset_requests now includes requested_by and the repository records outbox_event_id after creating the outbox event.",
+    "Reminder run requests now write app.reminder_runs alongside worker task/outbox facts.",
+    "Settings, project profile delete/update, and ledger status writes now return explicit 409 version conflicts instead of ignoring expected_version or mapping conflicts to 404.",
+    "POST /api/workbench/settings accepts bank_account_mappings as the legacy Python array contract and returns the full settings projection.",
+    "0009 data_reset_requests_action_chk now uses legacy Python actions reset_bank_transactions/reset_invoices/reset_oa_and_rebuild.",
+    "0009 ledger status/type checks now use legacy Python LedgerType and LedgerStatus values.",
+    "0009 reminders_status_chk now uses legacy Python ReminderStatus values pending/sent/skipped/cancelled.",
+    "api_shadow_validate.py fixture-only mode now honors endpoint filters and returns NO_GO when no endpoints match, so scoped platform fixture evidence is no longer ambiguous.",
+    "api_route_inventory_check.py now discovers chained Axum route methods such as get(...).post(...), so POST /projects is included in discovered Rust route evidence.",
+    "platform_shadow_preflight.py now maps platform runtime fixture variables to concrete seed requirements and PostgreSQL probe sources for job.worker_tasks, app.project_profiles, app.bank_transactions, and app.ledgers.",
+    "settings-data-reset-direct-queues-job shadow sample now uses reset_bank_transactions so it does not conflict with the preceding reset_invoices create-job sample in the same runtime shadow run.",
+    "workbench-settings-project-delete-request now uses PROJECT_DELETE_ID instead of PROJECT_ID so destructive project deletion cannot invalidate subsequent project detail and assignment samples.",
+    "platform_shadow_preflight.py now performs static fixture write-order checks for duplicate idempotency keys, duplicate data reset 202 actions, and destructive target variable reuse.",
+    "Platform shadow fixture defaults now include Axum trusted OA identity headers required by middleware/auth.rs while preserving the legacy Python Authorization bearer token contract.",
+    "platform_shadow_preflight.py now checks platform auth prerequisites: primary Authorization token variable, Axum trusted OA headers, required finops:app:view permission, admin username for admin routes, and FIN_OPS_OA_IDENTITY_ADAPTER=trusted_headers or explicit remote confirmation.",
+    "platform_shadow_preflight.py now emits a machine-readable runtime_shadow_input_plan with required environment exports, service start order, PostgreSQL fact probe commands, and the final runtime shadow validation command.",
+    "platform_shadow_seed.py now generates deterministic PostgreSQL seed SQL and runtime env exports for BACKGROUND_JOB_ID, BANK_TRANSACTION_ID, LEDGER_ID, PROJECT_ID, PROJECT_DELETE_ID, and SHADOW_RUN_ID so platform runtime shadow can move from missing fixture IDs to concrete seeded facts once DATABASE_URL is available.",
+    "platform_shadow_runtime.py now orchestrates the production-cutover runtime gate: preflight, Python/Axum health probes, and 16 endpoint Python-vs-Axum shadow validation with permission-failure cases. It refuses to run shadow when preflight or service health is NO_GO.",
+    "GET /ledgers PostgreSQL query now preserves legacy Python view semantics for all/overdue/due/open fallback and excludes cancelled ledgers from open-style views.",
+    "POST /api/background-jobs/{job_id}/acknowledge now uses AppSession route policy so allowed read/export users can acknowledge visible background-job attention state like old Python; business write routes remain Mutate/Admin.",
+    "POST /reminders/run now rejects negative days_ahead in service validation before creating worker task/outbox commands, preserving the app.reminder_runs.days_ahead >= 0 fact invariant."
+  ],
+  "scope": "P0 platform legacy APIs: background job acknowledge, workbench settings writes, project sync/create/delete, data reset create/direct queueing, projects, ledgers, reminders.",
+  "security_hardening": [
+    {
+      "change": "Rust data reset APIs now require a non-empty oa_password but exclude it from PlatformJobCommand.source, payload, and request_payload so it cannot be persisted through outbox, audit, or idempotency records.",
+      "evidence": [
+        "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs::queue_data_reset_job",
+        "services::platform_legacy::tests::data_reset_requires_password_but_never_persists_it",
+        "services::platform_legacy::tests::data_reset_and_reminder_runs_create_async_jobs_without_request_path_side_effects"
+      ],
+      "remaining": "Rust still cannot verify the OA password against OA without a staging identity/password verification adapter; runtime shadow remains NO_GO.",
+      "scope": "settings data reset password handling",
+      "status": "GO_LOCAL_VERIFIED_RUNTIME_NO_GO"
+    }
+  ],
+  "shadow_fixture_endpoint_ids": [
+    "background-job-acknowledge-request",
+    "workbench-settings-write-contract",
+    "workbench-settings-project-sync-request",
+    "workbench-settings-project-create-request",
+    "workbench-settings-project-delete-request",
+    "settings-data-reset-create-job",
+    "settings-data-reset-direct-queues-job",
+    "projects-hub-list",
+    "projects-create-manual-profile",
+    "project-detail",
+    "project-assign-request",
+    "ledgers-list",
+    "ledger-detail",
+    "ledger-status-update",
+    "reminders-list",
+    "reminder-run-request"
+  ],
+  "status": "NO_GO_RUNTIME_SHADOW_BLOCKED",
+  "validation": [
+    {
+      "command": "cargo fmt --all --check && cargo check --workspace && cargo test --workspace",
+      "cwd": "rust/fin-ops-api",
+      "result": "cargo fmt --all --check passed; cargo check --workspace passed; cargo test --workspace passed with 123 tests.",
+      "status": "GO"
+    },
+    {
+      "command": "PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_settings_sync_api tests.test_ledger_api tests.test_app_health_api tests.test_settings_data_reset_service -v",
+      "cwd": ".",
+      "result": "Ran 42 tests; OK.",
+      "status": "GO"
+    },
+    {
+      "command": "python3 scripts/tools/api_route_inventory_check.py --scan-root . --include-route-prefix /api/background-jobs --include-route-prefix /api/workbench/settings --include-route-prefix /projects --include-route-prefix /ledgers --include-route-prefix /reminders --shadow-fixture docs/dev/api-fixtures/business-api-shadow-validation.json",
+      "cwd": ".",
+      "result": "inventory status GO; missing routes/frontends/readiness/shadow coverage all empty.",
+      "status": "GO"
+    },
+    {
+      "command": "python3 scripts/tools/api_shadow_validate.py --fixture docs/dev/api-fixtures/business-api-shadow-validation.json --validate-fixture-only --endpoint-id background-job-acknowledge-request --endpoint-id workbench-settings-write-contract --endpoint-id workbench-settings-project-sync-request --endpoint-id workbench-settings-project-create-request --endpoint-id workbench-settings-project-delete-request --endpoint-id settings-data-reset-create-job --endpoint-id settings-data-reset-direct-queues-job --endpoint-id projects-hub-list --endpoint-id projects-create-manual-profile --endpoint-id project-detail --endpoint-id project-assign-request --endpoint-id ledgers-list --endpoint-id ledger-detail --endpoint-id ledger-status-update --endpoint-id reminders-list --endpoint-id reminder-run-request",
+      "cwd": ".",
+      "result": "scoped platform fixture contract validation status GO; endpoint_count=16 and endpoint_errors=[].",
+      "status": "GO_FIXTURE_ONLY"
+    },
+    {
+      "command": "PYTHONPATH=backend/src pytest tests/test_api_shadow_validate.py tests/test_api_route_inventory_check.py -q",
+      "cwd": ".",
+      "result": "api shadow validator, platform shadow preflight/runtime runner, and route inventory checker tests passed: 78 tests after background-job acknowledge permission contract alignment.",
+      "status": "GO"
+    },
+    {
+      "command": "PYTHONPATH=backend/src pytest tests/test_api_shadow_validate.py tests/test_platform_shadow_seed.py -q",
+      "cwd": ".",
+      "result": "58 tests passed, including deterministic platform shadow seed SQL/env generation tests.",
+      "status": "GO"
+    },
+    {
+      "command": "PYTHONPATH=backend/src pytest tests/test_api_shadow_validate.py tests/test_api_route_inventory_check.py tests/test_platform_shadow_seed.py -q",
+      "cwd": ".",
+      "result": "80 tests passed for shadow validator, route inventory checker, platform preflight/runtime, and seed generation.",
+      "status": "GO"
+    },
+    {
+      "command": "python3 scripts/tools/platform_shadow_seed.py --run-id p0-platform-smoke-20260517 --write-sql /tmp/p0-platform-shadow-seed.sql --write-env /tmp/p0-platform-shadow-env.sh",
+      "cwd": ".",
+      "result": "Generated deterministic seed SQL and env exports for platform runtime shadow IDs; apply_status=SKIPPED because no DATABASE_URL was provided.",
+      "status": "GO_GENERATED_NOT_APPLIED"
+    },
+    {
+      "command": "python3 scripts/tools/api_shadow_validate.py --fixture docs/dev/api-fixtures/business-api-shadow-validation.json --endpoint-id background-job-acknowledge-request --endpoint-id workbench-settings-write-contract --endpoint-id workbench-settings-project-sync-request --endpoint-id workbench-settings-project-create-request --endpoint-id workbench-settings-project-delete-request --endpoint-id settings-data-reset-create-job --endpoint-id settings-data-reset-direct-queues-job --endpoint-id projects-hub-list --endpoint-id projects-create-manual-profile --endpoint-id project-detail --endpoint-id project-assign-request --endpoint-id ledgers-list --endpoint-id ledger-detail --endpoint-id ledger-status-update --endpoint-id reminders-list --endpoint-id reminder-run-request",
+      "cwd": ".",
+      "result": "--python-base-url and --axum-base-url are required unless --validate-fixture-only is set.",
+      "status": "NO_GO_ENVIRONMENT"
+    },
+    {
+      "command": "python3 scripts/tools/platform_shadow_preflight.py --report-date 20260517",
+      "cwd": ".",
+      "result": "Generated docs/operations/backend-refactor/p0-platform-shadow-preflight-20260517.json and .md. Fixture subset GO, static fixture write-order checks GO, and trusted auth fixture headers GO. The report now includes runtime_shadow_input_plan with required exports, a platform_postgres_seed step using scripts/tools/platform_shadow_seed.py, service/probe/validation steps, and PostgreSQL fact probe commands. Blockers remain missing Python/Axum shadow base URLs, missing DATABASE_URL for local Axum, local PostgreSQL 14 (<16), unavailable Docker daemon, missing runtime fixture variables BACKGROUND_JOB_ID/BANK_TRANSACTION_ID/FIN_OPS_SHADOW_OA_PASSWORD/FIN_OPS_SHADOW_OA_TOKEN/LEDGER_ID/PROJECT_DELETE_ID/PROJECT_ID/SHADOW_RUN_ID, and unconfirmed Axum trusted_headers adapter. Seed requirement probes are defined but skipped because variables and DATABASE_URL are absent.",
+      "status": "NO_GO_ENVIRONMENT"
+    },
+    {
+      "command": "python3 scripts/tools/platform_shadow_runtime.py --report-date 20260517",
+      "cwd": ".",
+      "result": "Generated docs/operations/backend-refactor/p0-platform-runtime-shadow-20260517.json and .md after background-job acknowledge permission contract alignment and reminder days_ahead validation. Runtime shadow was skipped because preflight_no_go and shadow_service_health_no_go are blocking: Python/Axum base URLs are absent, service health probes are NO_GO, and the seed/auth/DATABASE_URL blockers from preflight remain unresolved.",
+      "status": "NO_GO_PRECHECK"
+    },
+    {
+      "command": "python3 scripts/tools/backend_refactor_readiness_gate.py --format markdown",
+      "cwd": ".",
+      "result": "Global backend refactor readiness gate remains NO_GO with 9 blocking checks: PITR, migration dry-run, file checksum, API shadow, NATS/Worker, read-model rebuild, monitoring alerts, load test, and cutover/rollback.",
+      "status": "NO_GO_GLOBAL_GATE"
+    },
+    {
+      "command": "ephemeral PostgreSQL 15.17 cluster on port 55432; create fin_ops_* roles and fin_ops_shadow database; apply rust/fin-ops-api/migrations/*.sql in lexical order",
+      "cwd": ".",
+      "result": "Diagnostic-only local migration dry-run applied 0001 through 0009 successfully on PostgreSQL 15.17 and produced table_count=68. This is not a production/staging GO result because target cutover requires PostgreSQL 16/17, migrated staging data, checksum evidence, legacy id map validation, and rollback evidence.",
+      "status": "DIAGNOSTIC_GO_NOT_CUTOVER_GO"
+    },
+    {
+      "command": "cargo test -p fin-ops-api platform_legacy::tests::data_reset -- --nocapture",
+      "cwd": "rust/fin-ops-api",
+      "result": "2 passed; verifies data reset password is required and not persisted in job command payloads",
+      "status": "GO"
+    },
+    {
+      "command": "cargo fmt --all --check && cargo test -p fin-ops-api repositories::platform_legacy::tests::ledger_list_query_preserves_legacy_view_semantics -- --nocapture",
+      "cwd": "rust/fin-ops-api",
+      "result": "cargo fmt passed; targeted repository contract test passed with 1 test and verifies GET /ledgers all/overdue/due/open fallback SQL semantics.",
+      "status": "GO"
+    },
+    {
+      "command": "cargo fmt --all && cargo fmt --all --check && cargo test -p fin-ops-api middleware::auth::tests::platform_settings_writes_require_admin_policy -- --nocapture",
+      "cwd": "rust/fin-ops-api",
+      "result": "cargo fmt normalized middleware/auth.rs; fmt check passed; targeted middleware test passed and verifies settings/data-reset/project-create stay Admin while background-job acknowledge is AppSession.",
+      "status": "GO"
+    },
+    {
+      "command": "cargo fmt --all --check && cargo test -p fin-ops-api platform_legacy::tests::reminder_run_rejects_negative_days_ahead_before_queueing -- --nocapture",
+      "cwd": "rust/fin-ops-api",
+      "result": "cargo fmt passed; targeted service test passed with 1 test and verifies negative days_ahead returns invalid_reminder_run_request before any worker task/outbox command is created.",
+      "status": "GO"
+    },
+    {
+      "command": "cargo check --workspace && cargo test --workspace",
+      "cwd": "rust/fin-ops-api",
+      "result": "cargo check passed; cargo test passed with 124 tests in the current workspace.",
+      "status": "GO"
+    }
+  ]
+}

@@ -1,0 +1,600 @@
+{
+  "report_date": "2026-05-17",
+  "prompt": "P0 Prompt 03 PostgreSQL fact source gap",
+  "overall_status": "SCHEMA_PLAN_READY_DB_DRY_RUN_NO_GO",
+  "migration_file": "rust/fin-ops-api/migrations/0009_p0_api_fact_sources.sql",
+  "migration_status": {
+    "created": true,
+    "does_not_modify_0001_to_0008": true,
+    "structure_tests": "GO",
+    "database_apply_validation": "NO_GO_LOCAL_POSTGRES_VERSION",
+    "database_apply_blocker": "Local PostgreSQL is 14.15; existing migration 0002_imports_files.sql fails before 0009 because it uses NULLS NOT DISTINCT unique-index syntax. Target architecture requires PostgreSQL 16/17, so this local run is not valid staging dry-run evidence.",
+    "local_validation_attempt": {
+      "server_version": "14.15 (Homebrew)",
+      "command": "psql -h localhost -p 5432 -d p0_prompt03_20260517 -v ON_ERROR_STOP=1 -f migrations/0002_imports_files.sql",
+      "failure": "syntax error at or near \"nulls\" in file_objects_object_location_uk",
+      "cleanup": "temporary database p0_prompt03_20260517 was dropped"
+    },
+    "dry_run_commands": [
+      "cd /Users/yu/Desktop/fin-ops-platform/rust/fin-ops-api && sqlx migrate run --source migrations",
+      "cd /Users/yu/Desktop/fin-ops-platform/rust/fin-ops-api && sqlx migrate info --source migrations",
+      "PGSERVICE=fin_ops_migrator_staging psql -X -v ON_ERROR_STOP=1 -f migrations/0009_p0_api_fact_sources.sql"
+    ]
+  },
+  "schema_summary": {
+    "new_tables": [
+      "job.worker_task_acknowledgements",
+      "app.settings_profiles",
+      "app.project_profiles",
+      "app.project_assignments",
+      "app.project_profile_events",
+      "staging.project_sync_rows",
+      "app.data_reset_requests",
+      "app.ledgers",
+      "app.ledger_events",
+      "app.reminders",
+      "app.reminder_runs",
+      "app.import_preview_sessions",
+      "app.import_fact_lineage",
+      "app.import_revert_events",
+      "app.matching_runs",
+      "app.turnover_relation_extras",
+      "app.turnover_relation_events",
+      "app.etc_import_sessions",
+      "app.etc_reconciliation_tasks",
+      "app.etc_reconciliation_task_files",
+      "app.etc_reconciliation_task_items",
+      "app.etc_reconciliation_task_evidences",
+      "app.etc_reconciliation_task_events",
+      "app.etc_oa_drafts",
+      "app.etc_batch_events",
+      "app.etc_invoice_submission_events",
+      "app.tax_certified_import_sessions",
+      "app.export_artifacts",
+      "staging.p0_api_fact_source_backfill_plan"
+    ],
+    "modified_tables": [
+      "read_model.workbench_candidate_matches",
+      "app.turnover_relations"
+    ],
+    "shared_field_groups": [
+      "created_at/updated_at",
+      "created_by/updated_by",
+      "idempotency_key on write/event tables",
+      "audit_event_id references audit.events(id)",
+      "legacy_id_map_id references staging.legacy_id_map(id)",
+      "legacy_collection/legacy_id pair constraints",
+      "jsonb object checks",
+      "status/version check constraints",
+      "active uniqueness and lookup indexes"
+    ]
+  },
+  "route_fact_sources": [
+    {
+      "route_no": 1,
+      "method_path": "POST /api/background-jobs/{job_id}/acknowledge",
+      "status": "ready_for_repository",
+      "tables": ["job.worker_tasks", "job.worker_task_acknowledgements", "audit.events", "staging.legacy_id_map"],
+      "fields": ["task_id", "actor_id", "acknowledgement_state", "reason", "idempotency_key", "audit_event_id", "legacy_id_map_id"],
+      "indexes_constraints": ["worker_task_acknowledgements_task_actor_uk", "worker_task_acknowledgements_idempotency_key_uk", "worker_task_acknowledgements_actor_idx"],
+      "migration_status": "added_in_0009",
+      "legacy_id_map": "optional migration rows map legacy background_jobs acknowledgement state to job.worker_task_acknowledgements"
+    },
+    {
+      "route_no": 2,
+      "method_path": "POST /api/background-jobs/{job_id}/retry",
+      "status": "existing_schema_sufficient",
+      "tables": ["job.worker_tasks", "job.dead_letters", "job.outbox_events", "app.write_idempotency_records", "audit.events"],
+      "fields": ["task_type", "status", "retryable", "attempt_count", "payload", "source_kind", "replay_status", "idempotency_key"],
+      "indexes_constraints": ["worker_tasks_idempotency_key_uidx", "worker_tasks_type_status_idx", "dead_letters_source_idx", "outbox_events_idempotency_key_uidx"],
+      "migration_status": "covered_by_0005_and_0008",
+      "legacy_id_map": "retry source remains traceable through worker_tasks.source and dead_letters.source_id"
+    },
+    {
+      "route_no": 3,
+      "method_path": "POST /api/workbench/settings",
+      "status": "ready_for_repository",
+      "tables": ["app.settings_profiles", "audit.events", "job.outbox_events", "staging.legacy_id_map"],
+      "fields": ["settings_key", "settings_payload", "version", "affected_scopes", "idempotency_key", "audit_event_id"],
+      "indexes_constraints": ["settings_profiles_active_key_uidx", "settings_profiles_key_version_idx", "settings_profiles_idempotency_key_uk"],
+      "migration_status": "added_in_0009",
+      "legacy_id_map": "app Mongo settings documents map to app.settings_profiles via legacy_collection/legacy_id"
+    },
+    {
+      "route_no": 4,
+      "method_path": "POST /api/workbench/settings/projects/sync",
+      "status": "ready_for_repository",
+      "tables": ["app.oa_sync_runs", "staging.project_sync_rows", "app.project_profiles", "job.worker_tasks", "job.outbox_events"],
+      "fields": ["sync_run_id", "external_project_id", "project_code", "project_name", "source_watermark", "payload_hash", "target_project_id", "status"],
+      "indexes_constraints": ["project_sync_rows_sync_external_uidx", "project_sync_rows_status_idx", "project_profiles_external_project_uidx"],
+      "migration_status": "added_in_0009_reusing_0004_0005",
+      "legacy_id_map": "OA project source rows retain external_project_id and can populate staging.legacy_id_map after apply"
+    },
+    {
+      "route_no": 5,
+      "method_path": "POST /api/workbench/settings/projects",
+      "status": "ready_for_repository",
+      "tables": ["app.project_profiles", "app.project_profile_events", "audit.events", "staging.legacy_id_map"],
+      "fields": ["project_code", "project_name", "project_status", "project_source", "department_name", "owner_name", "version", "idempotency_key"],
+      "indexes_constraints": ["project_profiles_project_code_uidx", "project_profiles_idempotency_key_uidx", "project_profile_events_idempotency_key_uidx"],
+      "migration_status": "added_in_0009",
+      "legacy_id_map": "manual project profiles may be mapped from app settings or project costing legacy collections"
+    },
+    {
+      "route_no": 6,
+      "method_path": "DELETE /api/workbench/settings/projects/{project_id}",
+      "status": "ready_for_repository",
+      "tables": ["app.project_profiles", "app.project_profile_events", "audit.events"],
+      "fields": ["project_status", "deactivated_at", "deactivated_by", "version", "audit_event_id", "idempotency_key"],
+      "indexes_constraints": ["project_profiles_status_name_idx", "project_profiles_project_code_uidx"],
+      "migration_status": "added_in_0009",
+      "legacy_id_map": "deactivation preserves original project mapping; no physical delete"
+    },
+    {
+      "route_no": 7,
+      "method_path": "POST /api/workbench/settings/data-reset/jobs",
+      "status": "ready_for_repository",
+      "tables": ["app.data_reset_requests", "job.worker_tasks", "job.outbox_events", "audit.events"],
+      "fields": ["action", "approval_id", "backup_evidence_id", "scope", "worker_task_id", "outbox_event_id", "execution_mode", "idempotency_key"],
+      "indexes_constraints": ["data_reset_requests_idempotency_key_uk", "data_reset_requests_running_uidx", "data_reset_requests_status_idx"],
+      "migration_status": "added_in_0009",
+      "legacy_id_map": "destructive reset requests are new governance facts; migration backfill is not expected"
+    },
+    {
+      "route_no": 8,
+      "method_path": "POST /api/workbench/settings/data-reset",
+      "status": "schema_ready_product_decision_required",
+      "tables": ["app.data_reset_requests", "job.worker_tasks", "audit.events"],
+      "fields": ["execution_mode", "approval_id", "backup_evidence_id", "status", "idempotency_key"],
+      "indexes_constraints": ["data_reset_requests_running_uidx", "data_reset_requests_status_idx"],
+      "migration_status": "added_in_0009",
+      "legacy_id_map": "same reset request facts as route 7; direct execution remains blocked unless worker-maintenance context is approved"
+    },
+    {
+      "route_no": 9,
+      "method_path": "GET|POST /projects",
+      "status": "ready_for_repository",
+      "tables": ["app.project_profiles", "app.project_profile_events", "read_model.search_index_rows", "staging.legacy_id_map"],
+      "fields": ["project_code", "project_name", "project_status", "department_name", "owner_name", "profile_payload", "idempotency_key"],
+      "indexes_constraints": ["project_profiles_status_name_idx", "project_profiles_project_code_uidx", "search_index_rows_project_idx"],
+      "migration_status": "added_in_0009_reusing_0007",
+      "legacy_id_map": "project hub can backfill from Mongo settings/project costing into app.project_profiles"
+    },
+    {
+      "route_no": 10,
+      "method_path": "GET /projects/{project_id}",
+      "status": "ready_for_repository",
+      "tables": ["app.project_profiles", "app.project_assignments", "read_model.cost_statistics_read_models", "read_model.workbench_rows"],
+      "fields": ["id", "project_code", "project_name", "project_status", "version", "profile_payload", "object_type", "object_id"],
+      "indexes_constraints": ["project_profiles_project_code_uidx", "project_assignments_project_idx", "workbench_rows_filter_idx"],
+      "migration_status": "added_in_0009_reusing_0007",
+      "legacy_id_map": "project detail keeps source project legacy ids on app.project_profiles"
+    },
+    {
+      "route_no": 11,
+      "method_path": "POST /projects/assign",
+      "status": "ready_for_repository",
+      "tables": ["app.project_assignments", "app.project_profile_events", "app.workbench_row_overrides", "audit.events", "job.outbox_events"],
+      "fields": ["object_type", "object_id", "object_month", "project_id", "status", "version", "idempotency_key", "audit_event_id"],
+      "indexes_constraints": ["project_assignments_active_object_uidx", "project_assignments_project_idx", "project_assignments_idempotency_key_uk"],
+      "migration_status": "added_in_0009_reusing_0004",
+      "legacy_id_map": "assignment facts map any legacy workbench override/project assignment records"
+    },
+    {
+      "route_no": 12,
+      "method_path": "GET /ledgers",
+      "status": "ready_for_repository",
+      "tables": ["app.ledgers", "app.reconciliation_cases", "app.turnover_relations", "read_model.search_index_rows"],
+      "fields": ["ledger_type", "ledger_key", "status", "counterparty_id", "project_id", "due_at", "amount", "remaining_amount", "ledger_payload"],
+      "indexes_constraints": ["ledgers_ledger_key_uidx", "ledgers_status_due_idx", "ledgers_counterparty_idx"],
+      "migration_status": "added_in_0009_reusing_0004",
+      "legacy_id_map": "legacy ledger service rows map to app.ledgers through legacy pair fields"
+    },
+    {
+      "route_no": 13,
+      "method_path": "GET /ledgers/{ledger_id}",
+      "status": "ready_for_repository",
+      "tables": ["app.ledgers", "app.ledger_events", "app.reconciliation_cases", "app.turnover_relations"],
+      "fields": ["ledger_payload", "version", "source_case_id", "source_turnover_relation_id", "event_type", "event_payload"],
+      "indexes_constraints": ["ledgers_ledger_key_uidx", "ledger_events_ledger_idx"],
+      "migration_status": "added_in_0009",
+      "legacy_id_map": "ledger detail audit timeline can join app.ledger_events and audit.events"
+    },
+    {
+      "route_no": 14,
+      "method_path": "POST /ledgers/{ledger_id}/status",
+      "status": "ready_for_repository",
+      "tables": ["app.ledgers", "app.ledger_events", "audit.events", "job.outbox_events"],
+      "fields": ["status", "version", "closed_at", "event_type", "previous_status", "new_status", "idempotency_key", "audit_event_id"],
+      "indexes_constraints": ["ledger_events_idempotency_key_uk", "ledger_events_ledger_idx", "ledgers_status_due_idx"],
+      "migration_status": "added_in_0009",
+      "legacy_id_map": "status mutations are append-only events; rollback uses compensating ledger_events"
+    },
+    {
+      "route_no": 15,
+      "method_path": "GET /reminders",
+      "status": "ready_for_repository",
+      "tables": ["app.reminders", "app.ledgers", "staging.legacy_id_map"],
+      "fields": ["reminder_type", "ledger_id", "source_object_type", "source_object_id", "status", "due_at", "recipient_user_id", "message_payload"],
+      "indexes_constraints": ["reminders_status_due_idx", "reminders_ledger_idx"],
+      "migration_status": "added_in_0009",
+      "legacy_id_map": "legacy reminders map to app.reminders with optional source object references"
+    },
+    {
+      "route_no": 16,
+      "method_path": "POST /reminders/run",
+      "status": "ready_for_repository",
+      "tables": ["app.reminder_runs", "app.reminders", "job.worker_tasks", "job.outbox_events", "audit.events"],
+      "fields": ["run_scope", "as_of", "days_ahead", "worker_task_id", "sent_count", "failed_count", "result_payload", "idempotency_key"],
+      "indexes_constraints": ["reminder_runs_idempotency_key_uk", "reminder_runs_status_created_idx"],
+      "migration_status": "added_in_0009",
+      "legacy_id_map": "run facts can reference migrated reminder ids through legacy_id_map_id"
+    },
+    {
+      "route_no": 17,
+      "method_path": "POST /imports/preview",
+      "status": "ready_for_repository",
+      "tables": ["app.import_preview_sessions", "app.import_batches", "staging.import_parse_results", "staging.import_parse_issues"],
+      "fields": ["session_key", "preview_type", "template_code", "status", "version", "row_count", "issue_count", "source_hash", "preview_payload", "idempotency_key"],
+      "indexes_constraints": ["import_preview_sessions_session_key_uk", "import_preview_sessions_idempotency_key_uk", "import_parse_results_batch_decision_idx"],
+      "migration_status": "added_in_0009_reusing_0002_0006",
+      "legacy_id_map": "legacy JSON/file preview sessions map to app.import_preview_sessions"
+    },
+    {
+      "route_no": 18,
+      "method_path": "POST /imports/confirm",
+      "status": "ready_for_repository",
+      "tables": ["app.import_batches", "app.import_preview_sessions", "app.import_fact_lineage", "job.outbox_events", "audit.events"],
+      "fields": ["batch_id", "preview_session_id", "source_parse_result_id", "target_schema", "target_table", "target_id", "target_partition_month", "target_snapshot"],
+      "indexes_constraints": ["import_fact_lineage_batch_target_uidx", "import_fact_lineage_target_idx", "outbox_events_idempotency_key_uidx"],
+      "migration_status": "added_in_0009_reusing_0002_0003_0005",
+      "legacy_id_map": "lineage records tie staging parse rows and migrated legacy ids to final facts"
+    },
+    {
+      "route_no": 19,
+      "method_path": "POST /imports/files/preview",
+      "status": "ready_for_repository",
+      "tables": ["app.import_preview_sessions", "app.file_objects", "app.import_files", "staging.import_parse_results", "staging.import_parse_issues"],
+      "fields": ["file_object_id", "file_id", "preview_type", "template_code", "source_hash", "preview_payload", "idempotency_key"],
+      "indexes_constraints": ["import_preview_sessions_file_idx", "file_objects_sha256_idx", "import_files_file_object_id_idx"],
+      "migration_status": "added_in_0009_reusing_0002_0006",
+      "legacy_id_map": "legacy file sessions map to preview sessions and import file legacy ids"
+    },
+    {
+      "route_no": 20,
+      "method_path": "POST /imports/files/confirm",
+      "status": "ready_for_repository",
+      "tables": ["app.import_preview_sessions", "app.import_files", "app.import_fact_lineage", "job.worker_tasks", "job.outbox_events"],
+      "fields": ["session_key", "version", "status", "target_table", "target_id", "worker_task_id via job.worker_tasks.source"],
+      "indexes_constraints": ["import_preview_sessions_session_key_uk", "import_fact_lineage_batch_target_uidx", "worker_tasks_idempotency_key_uidx"],
+      "migration_status": "added_in_0009_reusing_0005",
+      "legacy_id_map": "selected_file_ids resolve through app.import_files and staging.legacy_id_map"
+    },
+    {
+      "route_no": 21,
+      "method_path": "POST /imports/files/retry",
+      "status": "existing_schema_sufficient",
+      "tables": ["app.import_files", "job.worker_tasks", "job.outbox_events", "app.write_idempotency_records", "audit.events"],
+      "fields": ["parse_status", "file_object_id", "source_metadata", "task_type", "payload", "idempotency_key"],
+      "indexes_constraints": ["import_files_parse_status_created_at_idx", "worker_tasks_idempotency_key_uidx", "outbox_events_idempotency_key_uidx"],
+      "migration_status": "covered_by_0002_0005_0008",
+      "legacy_id_map": "retry target resolves through import_files.legacy_collection/legacy_id"
+    },
+    {
+      "route_no": 22,
+      "method_path": "POST /imports/batches/{batch_id}/revert",
+      "status": "ready_for_repository",
+      "tables": ["app.import_batches", "app.import_fact_lineage", "app.import_revert_events", "audit.events", "job.outbox_events"],
+      "fields": ["revert_status", "target_snapshot", "event_type", "reason", "affected_scopes", "idempotency_key"],
+      "indexes_constraints": ["import_fact_lineage_target_idx", "import_revert_events_idempotency_key_uk", "import_revert_events_batch_idx"],
+      "migration_status": "added_in_0009",
+      "legacy_id_map": "revert can validate every target fact has either import lineage or legacy_id_map_id"
+    },
+    {
+      "route_no": 23,
+      "method_path": "GET /imports/files/sessions/{session_id}",
+      "status": "ready_for_repository",
+      "tables": ["app.import_preview_sessions", "app.import_batches", "app.import_files", "app.file_objects"],
+      "fields": ["session_key", "batch_id", "file_id", "file_object_id", "preview_payload", "status", "version", "legacy_id"],
+      "indexes_constraints": ["import_preview_sessions_session_key_uk", "import_preview_sessions_file_idx", "import_files_batch_id_idx"],
+      "migration_status": "added_in_0009_reusing_0002",
+      "legacy_id_map": "legacy session id is stored as session_key and legacy_collection/legacy_id"
+    },
+    {
+      "route_no": 24,
+      "method_path": "POST /matching/run",
+      "status": "ready_for_repository",
+      "tables": ["app.matching_runs", "job.worker_tasks", "job.outbox_events", "read_model.workbench_candidate_matches"],
+      "fields": ["scope_month", "scope_key", "status", "reason", "source_watermark", "worker_task_id", "outbox_event_id", "idempotency_key"],
+      "indexes_constraints": ["matching_runs_idempotency_key_uk", "matching_runs_scope_status_idx", "worker_tasks_claim_idx"],
+      "migration_status": "added_in_0009_reusing_0005_0007",
+      "legacy_id_map": "matching run summaries may record legacy matching dirty scope ids if present"
+    },
+    {
+      "route_no": 25,
+      "method_path": "GET /matching/results",
+      "status": "ready_for_repository",
+      "tables": ["app.matching_runs", "read_model.workbench_candidate_matches"],
+      "fields": ["matching_run_id", "scope_month", "status", "score", "result_count", "detail_payload"],
+      "indexes_constraints": ["matching_runs_scope_status_idx", "workbench_candidate_matches_run_idx", "workbench_candidate_matches_status_idx"],
+      "migration_status": "added_in_0009_modifies_0007",
+      "legacy_id_map": "candidate detail remains rebuildable from read model and matching run source_watermark"
+    },
+    {
+      "route_no": 26,
+      "method_path": "GET /matching/results/{result_id}",
+      "status": "ready_for_repository",
+      "tables": ["read_model.workbench_candidate_matches", "app.matching_runs"],
+      "fields": ["id", "matching_run_id", "candidate_key", "reasons", "detail_payload", "source_versions"],
+      "indexes_constraints": ["workbench_candidate_matches_run_idx", "workbench_candidate_matches_key_uidx"],
+      "migration_status": "added_in_0009_modifies_0007",
+      "legacy_id_map": "detail payload can record legacy result id in source_versions"
+    },
+    {
+      "route_no": 27,
+      "method_path": "PATCH /api/bank-details/transactions/categories",
+      "status": "existing_schema_sufficient",
+      "tables": ["app.bank_transactions", "app.bank_transaction_categories", "app.bank_transaction_category_events", "audit.events", "job.outbox_events"],
+      "fields": ["bank_transaction_id", "category_type", "status", "amount", "idempotency_key", "event_payload"],
+      "indexes_constraints": ["bank_transaction_categories_active_uk", "bank_transaction_category_events_idempotency_key_uk", "bank_transactions_status_date_idx"],
+      "migration_status": "covered_by_0003_0008",
+      "legacy_id_map": "bank transaction/category legacy ids are already present in 0003"
+    },
+    {
+      "route_no": 28,
+      "method_path": "GET /api/turnover-ledger/relations/{relation_id}/extra",
+      "status": "ready_for_repository",
+      "tables": ["app.turnover_relations", "app.turnover_relation_extras", "staging.legacy_id_map"],
+      "fields": ["relation_id", "status", "version", "extra_payload", "fifo_payload", "allocation_payload"],
+      "indexes_constraints": ["turnover_relation_extras_active_relation_uidx", "turnover_relations_status_idx"],
+      "migration_status": "added_in_0009_reusing_0004",
+      "legacy_id_map": "legacy turnover extra documents map to app.turnover_relation_extras"
+    },
+    {
+      "route_no": 29,
+      "method_path": "PUT /api/turnover-ledger/relations/{relation_id}/extra",
+      "status": "ready_for_repository",
+      "tables": ["app.turnover_relation_extras", "app.turnover_relation_events", "audit.events", "job.outbox_events"],
+      "fields": ["extra_payload", "fifo_payload", "allocation_payload", "version", "event_type", "idempotency_key", "audit_event_id"],
+      "indexes_constraints": ["turnover_relation_extras_idempotency_key_uidx", "turnover_relation_events_idempotency_key_uk", "turnover_relation_events_relation_idx"],
+      "migration_status": "added_in_0009",
+      "legacy_id_map": "extra update events keep legacy extra id through legacy pair fields"
+    },
+    {
+      "route_no": 30,
+      "method_path": "POST /api/turnover-ledger/relations/confirm",
+      "status": "ready_for_repository",
+      "tables": ["app.turnover_relations", "app.turnover_relation_events", "app.bank_transactions", "audit.events", "job.outbox_events"],
+      "fields": ["row_version", "idempotency_key", "audit_event_id", "event_type", "affected_months"],
+      "indexes_constraints": ["turnover_relations_idempotency_key_uidx", "turnover_relation_events_idempotency_key_uk", "turnover_relations_active_source_uk"],
+      "migration_status": "added_in_0009_modifies_0004",
+      "legacy_id_map": "manual relation backfill keeps source bank row legacy ids and relation legacy id"
+    },
+    {
+      "route_no": 31,
+      "method_path": "POST /api/turnover-ledger/relations/{relation_id}/withdraw",
+      "status": "ready_for_repository",
+      "tables": ["app.turnover_relations", "app.turnover_relation_events", "audit.events", "job.outbox_events"],
+      "fields": ["status", "cancelled_at", "row_version", "event_type", "previous_status", "new_status", "idempotency_key"],
+      "indexes_constraints": ["turnover_relation_events_relation_idx", "turnover_relation_events_idempotency_key_uk", "turnover_relations_status_idx"],
+      "migration_status": "added_in_0009",
+      "legacy_id_map": "withdraw is compensating event; no physical delete"
+    },
+    {
+      "route_no": 32,
+      "method_path": "POST /api/etc/import/preview",
+      "status": "ready_for_repository",
+      "tables": ["app.etc_import_sessions", "app.import_preview_sessions", "app.file_objects", "staging.import_parse_results"],
+      "fields": ["manifest_hash", "template_code", "item_count", "warning_count", "session_payload", "idempotency_key"],
+      "indexes_constraints": ["etc_import_sessions_manifest_uidx", "etc_import_sessions_idempotency_key_uk", "import_preview_sessions_idempotency_key_uk"],
+      "migration_status": "added_in_0009_reusing_0002_0006",
+      "legacy_id_map": "ETC legacy preview state maps to import_preview_sessions and etc_import_sessions"
+    },
+    {
+      "route_no": 33,
+      "method_path": "POST /api/etc/import/confirm",
+      "status": "ready_for_repository",
+      "tables": ["app.etc_import_sessions", "app.import_batches", "app.invoices", "app.import_fact_lineage", "audit.events", "job.outbox_events"],
+      "fields": ["batch_id", "affected_months", "status", "target_table", "target_id", "target_snapshot", "idempotency_key"],
+      "indexes_constraints": ["etc_import_sessions_idempotency_key_uk", "import_fact_lineage_batch_target_uidx", "invoices_invoice_no_without_code_uk"],
+      "migration_status": "added_in_0009_reusing_0003",
+      "legacy_id_map": "confirmed ETC rows write lineage to invoices/import facts and retain legacy import ids"
+    },
+    {
+      "route_no": 34,
+      "method_path": "GET /api/etc/reconciliation-tasks/ready-for-import",
+      "status": "ready_for_repository",
+      "tables": ["app.etc_reconciliation_tasks", "app.etc_reconciliation_task_files"],
+      "fields": ["ready_for_import", "unavailable_reason", "status", "period_month", "task_payload"],
+      "indexes_constraints": ["etc_reconciliation_tasks_ready_idx", "etc_reconciliation_tasks_status_period_idx"],
+      "migration_status": "added_in_0009",
+      "legacy_id_map": "legacy task ids map through task_key and legacy pair fields"
+    },
+    {
+      "route_no": 35,
+      "method_path": "GET /api/etc/reconciliation-tasks",
+      "status": "ready_for_repository",
+      "tables": ["app.etc_reconciliation_tasks", "app.etc_reconciliation_task_files", "app.etc_reconciliation_task_items"],
+      "fields": ["task_key", "title", "period_month", "status", "version", "ready_for_import", "task_payload"],
+      "indexes_constraints": ["etc_reconciliation_tasks_status_period_idx", "etc_reconciliation_tasks_task_key_uk", "etc_reconciliation_task_items_status_idx"],
+      "migration_status": "added_in_0009",
+      "legacy_id_map": "list filters can resolve migrated task ids through staging.legacy_id_map"
+    },
+    {
+      "route_no": 36,
+      "method_path": "POST /api/etc/reconciliation-tasks",
+      "status": "ready_for_repository",
+      "tables": ["app.etc_reconciliation_tasks", "app.etc_reconciliation_task_files", "app.etc_reconciliation_task_events", "job.worker_tasks", "job.outbox_events"],
+      "fields": ["task_key", "title", "period_month", "file_object_id", "event_type", "worker_task_id", "idempotency_key"],
+      "indexes_constraints": ["etc_reconciliation_tasks_idempotency_key_uk", "etc_reconciliation_task_files_role_uidx", "etc_reconciliation_task_events_idempotency_key_uk"],
+      "migration_status": "added_in_0009",
+      "legacy_id_map": "new task creation has no required legacy id; migrated tasks keep legacy pair fields"
+    },
+    {
+      "route_no": 37,
+      "method_path": "GET|DELETE /api/etc/reconciliation-tasks/{task_id}",
+      "status": "ready_for_repository",
+      "tables": ["app.etc_reconciliation_tasks", "app.etc_reconciliation_task_events", "audit.events", "job.outbox_events"],
+      "fields": ["status", "version", "cancelled_at", "cancelled_by", "event_type", "previous_status", "new_status", "idempotency_key"],
+      "indexes_constraints": ["etc_reconciliation_tasks_task_key_uk", "etc_reconciliation_task_events_task_idx", "etc_reconciliation_task_events_idempotency_key_uk"],
+      "migration_status": "added_in_0009",
+      "legacy_id_map": "delete is soft-cancel; legacy task mapping remains intact"
+    },
+    {
+      "route_no": 38,
+      "method_path": "GET|PATCH|DELETE /api/etc/reconciliation-tasks/{task_id}/*",
+      "status": "schema_ready_typed_subroutes_required",
+      "tables": ["app.etc_reconciliation_task_files", "app.etc_reconciliation_task_items", "app.etc_reconciliation_task_evidences", "app.etc_reconciliation_task_events", "app.file_objects"],
+      "fields": ["file_role", "artifact_type", "item_key", "item_type", "evidence_type", "event_payload", "idempotency_key", "audit_event_id"],
+      "indexes_constraints": ["etc_reconciliation_task_files_role_uidx", "etc_reconciliation_task_items_key_uidx", "etc_reconciliation_task_evidences_task_idx", "etc_reconciliation_task_events_task_idx"],
+      "migration_status": "added_in_0009",
+      "legacy_id_map": "wildcard child resources can be traced after each typed child route is frozen"
+    },
+    {
+      "route_no": 39,
+      "method_path": "POST /api/etc/batches/draft",
+      "status": "ready_for_repository",
+      "tables": ["app.etc_oa_drafts", "app.etc_batch_events", "job.worker_tasks", "job.outbox_events", "audit.events"],
+      "fields": ["batch_scope", "selected_invoice_ids", "source_watermark", "draft_payload", "worker_task_id", "idempotency_key"],
+      "indexes_constraints": ["etc_oa_drafts_idempotency_key_uk", "etc_oa_drafts_status_idx", "etc_batch_events_idempotency_key_uk"],
+      "migration_status": "added_in_0009",
+      "legacy_id_map": "OA draft requests are new command facts; no request-path OA write"
+    },
+    {
+      "route_no": 40,
+      "method_path": "POST /api/etc/batches/{batch_id}/draft",
+      "status": "ready_for_repository",
+      "tables": ["app.etc_oa_drafts", "app.etc_batch_events", "job.worker_tasks", "job.outbox_events"],
+      "fields": ["batch_id", "batch_scope", "status", "source_watermark", "idempotency_key", "audit_event_id"],
+      "indexes_constraints": ["etc_oa_drafts_idempotency_key_uk", "etc_batch_events_batch_idx"],
+      "migration_status": "added_in_0009",
+      "legacy_id_map": "batch-scoped draft requests retain batch id and source watermark"
+    },
+    {
+      "route_no": 41,
+      "method_path": "POST /api/etc/batches/{batch_id}/confirm-submitted",
+      "status": "ready_for_repository",
+      "tables": ["app.etc_batch_events", "app.etc_invoice_submission_events", "app.invoices", "audit.events", "job.outbox_events"],
+      "fields": ["batch_id", "event_type", "previous_status", "new_status", "invoice_ids", "affected_months", "idempotency_key"],
+      "indexes_constraints": ["etc_batch_events_batch_idx", "etc_invoice_submission_events_batch_idx", "etc_invoice_submission_events_idempotency_key_uk"],
+      "migration_status": "added_in_0009_reusing_0003",
+      "legacy_id_map": "event payload carries legacy ETC batch id and invoice mapping"
+    },
+    {
+      "route_no": 42,
+      "method_path": "POST /api/etc/batches/{batch_id}/mark-not-submitted",
+      "status": "ready_for_repository",
+      "tables": ["app.etc_batch_events", "app.etc_invoice_submission_events", "audit.events", "job.outbox_events"],
+      "fields": ["batch_id", "event_type", "reason", "previous_status", "new_status", "affected_months", "idempotency_key"],
+      "indexes_constraints": ["etc_batch_events_idempotency_key_uk", "etc_invoice_submission_events_batch_idx"],
+      "migration_status": "added_in_0009",
+      "legacy_id_map": "submission reversal is a compensating event, not invoice deletion"
+    },
+    {
+      "route_no": 43,
+      "method_path": "DELETE /api/etc/batches/{batch_id}",
+      "status": "ready_for_repository",
+      "tables": ["app.etc_batch_events", "app.etc_invoice_submission_events", "audit.events", "job.outbox_events"],
+      "fields": ["batch_id", "event_type", "invoice_ids", "event_payload", "affected_months", "idempotency_key"],
+      "indexes_constraints": ["etc_batch_events_batch_idx", "etc_batch_events_idempotency_key_uk"],
+      "migration_status": "added_in_0009",
+      "legacy_id_map": "cancel keeps invoices traceable through batch/invoice events"
+    },
+    {
+      "route_no": 44,
+      "method_path": "POST /api/etc/invoices/revoke-submitted",
+      "status": "ready_for_repository",
+      "tables": ["app.etc_invoice_submission_events", "app.invoices", "audit.events", "job.outbox_events"],
+      "fields": ["invoice_month", "invoice_id", "batch_id", "event_type", "reason", "affected_months", "idempotency_key"],
+      "indexes_constraints": ["etc_invoice_submission_events_invoice_idx", "etc_invoice_submission_events_idempotency_key_uk", "invoices_type_no_idx"],
+      "migration_status": "added_in_0009_reusing_0003",
+      "legacy_id_map": "invoice event payload can reference legacy invoice ids from app.invoices"
+    },
+    {
+      "route_no": 45,
+      "method_path": "POST /api/tax-offset/certified-import/preview",
+      "status": "ready_for_repository",
+      "tables": ["app.tax_certified_import_sessions", "app.import_preview_sessions", "app.file_objects", "staging.import_parse_results"],
+      "fields": ["scope_month", "row_count", "recognized_count", "invalid_count", "matched_count", "outside_count", "session_payload", "idempotency_key"],
+      "indexes_constraints": ["tax_certified_import_sessions_scope_status_idx", "tax_certified_import_sessions_idempotency_key_uk", "file_objects_sha256_idx"],
+      "migration_status": "added_in_0009_reusing_0002_0006",
+      "legacy_id_map": "certified preview sessions map to file_object/import preview legacy ids"
+    },
+    {
+      "route_no": 46,
+      "method_path": "POST /api/tax-offset/certified-import/confirm",
+      "status": "ready_for_repository",
+      "tables": ["app.tax_certified_import_sessions", "app.invoice_certifications", "app.import_batches", "app.import_fact_lineage", "audit.events"],
+      "fields": ["batch_id", "preview_session_id", "scope_month", "status", "target_table", "target_id", "idempotency_key"],
+      "indexes_constraints": ["tax_certified_import_sessions_idempotency_key_uk", "import_fact_lineage_batch_target_uidx", "invoice_certifications_invoice_idx"],
+      "migration_status": "added_in_0009_reusing_0003",
+      "legacy_id_map": "certification facts retain import session and legacy row lineage"
+    },
+    {
+      "route_no": 47,
+      "method_path": "POST /api/workbench/exception/preview",
+      "status": "existing_schema_sufficient",
+      "tables": ["app.workbench_exception_cases", "read_model.workbench_rows", "read_model.workbench_candidate_matches"],
+      "fields": ["exception_code", "resolution_action", "payload", "source_versions", "detail_payload"],
+      "indexes_constraints": ["workbench_exception_cases_status_idx", "workbench_rows_exception_idx", "workbench_candidate_matches_status_idx"],
+      "migration_status": "covered_by_0004_0007_0009_detail_payload",
+      "legacy_id_map": "preview is no-write and derives from existing facts/read models"
+    },
+    {
+      "route_no": 48,
+      "method_path": "GET /api/turnover-ledger/export",
+      "status": "ready_for_repository",
+      "tables": ["app.turnover_relations", "app.turnover_relation_extras", "app.export_artifacts", "app.file_objects"],
+      "fields": ["export_type", "scope_key", "query_hash", "content_type", "content_disposition", "checksum_sha256", "access_policy"],
+      "indexes_constraints": ["export_artifacts_scope_query_uidx", "export_artifacts_status_idx", "turnover_relation_extras_active_relation_uidx"],
+      "migration_status": "added_in_0009",
+      "legacy_id_map": "large export artifacts remain object-backed and can map generated archives to legacy request ids"
+    },
+    {
+      "route_no": 49,
+      "method_path": "GET /api/cost-statistics/export",
+      "status": "ready_for_repository",
+      "tables": ["read_model.cost_statistics_read_models", "app.export_artifacts", "app.file_objects"],
+      "fields": ["scope_key", "project_scope", "payload", "summary", "entry_count", "export_type", "query_hash", "content_disposition"],
+      "indexes_constraints": ["cost_statistics_scope_month_idx", "cost_statistics_stale_idx", "export_artifacts_scope_query_uidx"],
+      "migration_status": "added_in_0009_reusing_0007",
+      "legacy_id_map": "sync export reads read model; async artifact maps generated object id through export_artifacts"
+    },
+    {
+      "route_no": 50,
+      "method_path": "GET /imports/batches/{batch_id}/download",
+      "status": "ready_for_repository",
+      "tables": ["app.import_batches", "app.import_files", "app.file_objects", "app.export_artifacts", "job.worker_tasks"],
+      "fields": ["batch_id", "file_object_id", "export_type", "scope_key", "query_hash", "content_type", "content_disposition", "access_policy", "expires_at"],
+      "indexes_constraints": ["import_files_batch_id_idx", "file_objects_object_location_uk", "export_artifacts_scope_query_uidx"],
+      "migration_status": "added_in_0009_reusing_0002",
+      "legacy_id_map": "batch archive/download resolves batch/file legacy ids and never returns local paths or object-store secrets"
+    }
+  ],
+  "backfill_plan": {
+    "plan_table": "staging.p0_api_fact_source_backfill_plan",
+    "required_source_order": [
+      "app Mongo export manifest",
+      "GridFS to MinIO file manifest",
+      "staging.mongo_import_rows",
+      "staging.legacy_id_map",
+      "core facts from 0002-0007",
+      "P0 extension facts from 0009",
+      "read model rebuild"
+    ],
+    "checksum_strategy": "Use row count, payload_hash/source_hash, target_snapshot checksum, amount/month/status rollups, and file sha256 where applicable.",
+    "rollback_strategy": "No physical deletes for business facts; use status transitions, event reversal, import_fact_lineage revert_status, and compensating events."
+  },
+  "open_decisions": [
+    {
+      "route_no": 8,
+      "decision": "Keep direct data reset API as job-only for normal callers or allow only worker-maintenance execution context.",
+      "current_schema_support": "app.data_reset_requests supports both queued and maintenance_worker execution_mode."
+    },
+    {
+      "route_no": 38,
+      "decision": "Split wildcard ETC task subresources into typed child route contracts before implementation.",
+      "current_schema_support": "files/items/evidences/events tables support typed resources, but route contract is not yet split."
+    }
+  ]
+}

@@ -1,0 +1,584 @@
+{
+  "report": "p0-platform-api-final-no-go-20260517",
+  "generated_at": "2026-05-17T11:34:09.663647+00:00",
+  "status": "NO_GO_PRODUCTION_CUTOVER_EXTERNAL_APPROVAL_AND_STAGING_EVIDENCE_REQUIRED",
+  "scope": "Prompt04 platform P0 API final production cutover gate for 16 runtime-shadow endpoints.",
+  "decision": {
+    "runtime_shadow": "GO",
+    "production_cutover": "NO_GO",
+    "reason": "Runtime shadow, route inventory, Rust/Python tests, and local code-side remediation are GO. Production cutover remains NO_GO because settings write identity provisioning still requires product/ops approval and worker SLA/alerting approval, and data reset queue-only destructive worker still lacks real staging execution proof plus backup/PITR/rollback evidence."
+  },
+  "source_reports": {
+    "implementation_report": {
+      "path": "docs/operations/backend-refactor/p0-platform-api-implementation-20260517.json",
+      "status": "NO_GO_RUNTIME_SHADOW_BLOCKED",
+      "note": "Earlier code-layer report is stale for runtime; superseded by runtime/preflight reports below."
+    },
+    "code_gap_report": {
+      "path": "docs/operations/backend-refactor/p0-platform-code-gap-20260517.json",
+      "status": "CODE_LAYER_GO_RUNTIME_SHADOW_NO_GO",
+      "code_layer_go": true,
+      "note": "Earlier runtime NO_GO was environment-blocked; rerun preflight/runtime in Prompt 7 is GO."
+    },
+    "shadow_preflight_report": {
+      "path": "docs/operations/backend-refactor/p0-platform-shadow-preflight-20260517.json",
+      "status": "GO"
+    },
+    "runtime_shadow_report": {
+      "path": "docs/operations/backend-refactor/p0-platform-runtime-shadow-20260517.json",
+      "status": "GO"
+    },
+    "api_shadow_report": {
+      "path": "docs/operations/backend-refactor/api-shadow-validation-report-20260517.json",
+      "status": "GO",
+      "summary": {
+        "total": 32,
+        "go": 32,
+        "no_go": 0,
+        "unexpected_diff_count": 0,
+        "explained_diff_count": 36,
+        "accepted_production_change_count": 3,
+        "permission_failure_cases": 16,
+        "fixture_error_count": 0,
+        "permission_failure_required_count": 88,
+        "permission_failure_missing_count": 0
+      }
+    },
+    "seed_report": {
+      "path": "docs/operations/backend-refactor/p0-platform-shadow-seed-20260517.json",
+      "status": "GO"
+    },
+    "contract_delta_report": {
+      "path": "docs/operations/backend-refactor/p0-platform-contract-delta-20260517.json",
+      "status": "GO_AUDIT_WITH_RECORDED_CODE_AND_PRODUCT_FOLLOWUPS",
+      "audit_result": {
+        "all_deltas_have_source_evidence": "GO",
+        "data_reset_kept_queue_only": "GO",
+        "needs_product_decision_items_are_explicit": "GO",
+        "runtime_shadow_evidence": "GO",
+        "cutover_readiness": "NO_GO_NON_PROMPT4_GATE"
+      }
+    },
+    "security_idempotency_audit_report": {
+      "path": "docs/operations/backend-refactor/p0-platform-security-idempotency-audit-20260517.json",
+      "status": "GO_SECURITY_IDEMPOTENCY_AUDIT_WITH_RUNTIME_GATE_NOT_CHANGED"
+    },
+    "remaining_contracts": {
+      "path": "docs/architecture/backend-refactor/remaining-api-contracts.md"
+    },
+    "settings_role_provisioning_decision_report": {
+      "path": "docs/operations/backend-refactor/p0-settings-role-provisioning-decision-20260517.json",
+      "status": "IMPLEMENTED_RECOMMENDED_DECISION_PENDING_PRODUCT_OPS_APPROVAL_AND_WORKER_SLA",
+      "note": "Code-side integrated solution exists: settings write persists settings and queues identity role provisioning request/job/outbox in the same PostgreSQL transaction; product/ops approval and worker SLA/alerting evidence remain external gates."
+    },
+    "data_reset_worker_staging_proof_report": {
+      "path": "docs/operations/backend-refactor/p0-data-reset-worker-staging-proof-20260517.json",
+      "status": "NO_GO_EXTERNAL_EVIDENCE_REQUIRED",
+      "note": "Local worker implementation, proof command, lineage tool, and operator runbook exist; real staging run, approval, restorable backup, PITR/restore drill, and lineage evidence remain missing."
+    },
+    "data_reset_worker_runbook": {
+      "path": "docs/operations/backend-refactor/data-reset-worker-runbook.md",
+      "status": "DRAFT_LOCAL_RUNBOOK_REQUIRES_OPS_APPROVAL"
+    }
+  },
+  "validation_commands": [
+    {
+      "command": "cd rust/fin-ops-api && cargo fmt --all --check",
+      "status": "GO",
+      "result": "exit 0 on final rerun"
+    },
+    {
+      "command": "cd rust/fin-ops-api && cargo check --workspace",
+      "status": "GO",
+      "result": "exit 0 on final rerun"
+    },
+    {
+      "command": "cd rust/fin-ops-api && cargo test --workspace",
+      "status": "GO",
+      "result": "152 passed"
+    },
+    {
+      "command": "PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_settings_sync_api tests.test_ledger_api tests.test_app_health_api tests.test_settings_data_reset_service -v",
+      "status": "GO",
+      "result": "included in final Python targeted suite"
+    },
+    {
+      "command": "python3 scripts/tools/api_route_inventory_check.py --inventory docs/dev/api-fixtures/api-route-inventory.json --write-route-level-inventory docs/dev/api-fixtures/api-route-inventory-route-level.json --shadow-fixture docs/dev/api-fixtures/business-api-shadow-validation.json",
+      "status": "GO",
+      "result": "exit 0 on final rerun"
+    },
+    {
+      "command": "python3 scripts/tools/platform_shadow_preflight.py --report-date 20260517",
+      "status": "GO",
+      "result": "exit 0 on final rerun"
+    },
+    {
+      "command": "python3 scripts/tools/platform_shadow_runtime.py --report-date 20260517",
+      "status": "GO",
+      "result": "32/32 platform runtime shadow cases GO; unexpected_diff_count=0"
+    },
+    {
+      "command": "cd rust/fin-ops-api && cargo test identity_role_provisioning --workspace",
+      "status": "GO",
+      "result": "3 passed"
+    },
+    {
+      "command": "PYTHONPATH=backend/src python3 -m unittest tests.test_settings_data_reset_worker tests.test_worker_task_consumer tests.test_worker_task_postgres_repository -v",
+      "status": "GO",
+      "result": "worker/consumer/repository targeted tests passed"
+    },
+    {
+      "command": "python3 scripts/tools/data_reset_worker_staging_proof.py --help",
+      "status": "GO",
+      "result": "CLI available; real proof remains NO_GO without staging evidence"
+    },
+    {
+      "command": "python3 scripts/tools/data_reset_audit_lineage.py --help",
+      "status": "GO",
+      "result": "CLI available; lineage query requires DATABASE_URL and real task/request ids"
+    },
+    {
+      "command": "python3 -m json.tool docs/operations/backend-refactor/p0-settings-role-provisioning-decision-20260517.json",
+      "status": "GO",
+      "result": "JSON valid"
+    },
+    {
+      "command": "python3 -m json.tool docs/operations/backend-refactor/p0-data-reset-worker-staging-proof-20260517.json",
+      "status": "GO",
+      "result": "JSON valid"
+    },
+    {
+      "command": "PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_settings_sync_api tests.test_ledger_api tests.test_app_health_api tests.test_settings_data_reset_service tests.test_settings_data_reset_worker tests.test_worker_task_consumer tests.test_worker_task_postgres_repository -v",
+      "status": "GO",
+      "result": "55 tests OK"
+    }
+  ],
+  "go_standard_assessment": {
+    "sixteen_platform_endpoint_runtime_shadow_all_go": "GO",
+    "rust_python_route_inventory_preflight_runtime_all_pass": "GO",
+    "data_reset_contract_delta_closed_or_approved": "NO_GO",
+    "no_readiness_or_shadow_no_go_manually_marked_go": "GO",
+    "all_endpoint_dimensions_go": "NO_GO",
+    "settings_role_provisioning_code_integrated": "GO",
+    "settings_role_provisioning_product_ops_approved": "NO_GO",
+    "data_reset_worker_local_code_and_runbook": "GO",
+    "data_reset_real_staging_backup_pitr_evidence": "NO_GO"
+  },
+  "endpoints": [
+    {
+      "endpoint": "background-job-acknowledge-request",
+      "method_path": "POST /api/background-jobs/{job_id}/acknowledge",
+      "checks": {
+        "code_layer_go": true,
+        "route_inventory_go": true,
+        "fixture_shadow_go": true,
+        "runtime_shadow_go": true,
+        "auth_audit_idempotency_go": true,
+        "contract_delta_closed": true
+      },
+      "contract_delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "runtime_primary_status": "GO",
+      "runtime_permission_failure_status": "GO",
+      "blockers": []
+    },
+    {
+      "endpoint": "workbench-settings-write-contract",
+      "method_path": "POST /api/workbench/settings",
+      "checks": {
+        "code_layer_go": true,
+        "route_inventory_go": true,
+        "fixture_shadow_go": true,
+        "runtime_shadow_go": true,
+        "auth_audit_idempotency_go": true,
+        "contract_delta_closed": false
+      },
+      "contract_delta_status": "ACCEPTED_PRODUCTION_CHANGE_PENDING_APPROVAL",
+      "runtime_primary_status": "GO",
+      "runtime_permission_failure_status": "GO",
+      "blockers": [
+        {
+          "blocker": "SETTINGS_ROLE_PROVISIONING_APPROVAL_AND_WORKER_SLA_REQUIRED",
+          "owner_type": "product_ops_decision_and_worker_operations",
+          "required_env": [
+            "identity role provisioning worker staging environment",
+            "OA test/staging identity apply target for proof",
+            "worker health/alerting destination"
+          ],
+          "required_code_change": "No further settings request-path code change is required for the recommended production design. Existing Rust code writes app.identity_provisioning_requests, job.worker_tasks, job.outbox_events, audit.events, and idempotency records in one transaction. Remaining implementation is worker execution/SLA/health/alerting if not already deployed.",
+          "required_decision": "Product must approve that POST /api/workbench/settings success means settings persisted plus identity provisioning queued, not OA roles synchronously applied. Operations must approve worker retry/dead-letter SLA, alerting, and runbook wording.",
+          "evidence_report": "docs/operations/backend-refactor/p0-settings-role-provisioning-decision-20260517.json",
+          "next_command": "Run identity provisioning worker staging proof against an approved OA test/staging target, attach product/ops approval id and worker SLA evidence, then rerun Prompt 7 validation."
+        }
+      ]
+    },
+    {
+      "endpoint": "workbench-settings-project-sync-request",
+      "method_path": "POST /api/workbench/settings/projects/sync",
+      "checks": {
+        "code_layer_go": true,
+        "route_inventory_go": true,
+        "fixture_shadow_go": true,
+        "runtime_shadow_go": true,
+        "auth_audit_idempotency_go": true,
+        "contract_delta_closed": true
+      },
+      "contract_delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "runtime_primary_status": "GO",
+      "runtime_permission_failure_status": "GO",
+      "blockers": []
+    },
+    {
+      "endpoint": "workbench-settings-project-create-request",
+      "method_path": "POST /api/workbench/settings/projects",
+      "checks": {
+        "code_layer_go": true,
+        "route_inventory_go": true,
+        "fixture_shadow_go": true,
+        "runtime_shadow_go": true,
+        "auth_audit_idempotency_go": true,
+        "contract_delta_closed": true
+      },
+      "contract_delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "runtime_primary_status": "GO",
+      "runtime_permission_failure_status": "GO",
+      "blockers": []
+    },
+    {
+      "endpoint": "workbench-settings-project-delete-request",
+      "method_path": "DELETE /api/workbench/settings/projects/{project_id}",
+      "checks": {
+        "code_layer_go": true,
+        "route_inventory_go": true,
+        "fixture_shadow_go": true,
+        "runtime_shadow_go": true,
+        "auth_audit_idempotency_go": true,
+        "contract_delta_closed": true
+      },
+      "contract_delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "runtime_primary_status": "GO",
+      "runtime_permission_failure_status": "GO",
+      "blockers": []
+    },
+    {
+      "endpoint": "settings-data-reset-create-job",
+      "method_path": "POST /api/workbench/settings/data-reset/jobs",
+      "checks": {
+        "code_layer_go": true,
+        "route_inventory_go": true,
+        "fixture_shadow_go": true,
+        "runtime_shadow_go": true,
+        "auth_audit_idempotency_go": true,
+        "contract_delta_closed": false
+      },
+      "contract_delta_status": "ACCEPTED_PRODUCTION_CHANGE_PENDING_EXTERNAL_EVIDENCE",
+      "runtime_primary_status": "GO",
+      "runtime_permission_failure_status": "GO",
+      "blockers": [
+        {
+          "blocker": "DATA_RESET_EXTERNAL_APPROVAL_STAGING_BACKUP_PITR_EVIDENCE_REQUIRED",
+          "owner_type": "ops_approval_worker_staging_backup_pitr",
+          "required_env": [
+            "approval_id source of truth",
+            "backup_evidence_id linked to a restorable backup/PITR point",
+            "staging worker environment",
+            "real data reset worker task id",
+            "operator id and staging run id"
+          ],
+          "required_code_change": "No API request-path code change is required; keep queue-only. Local worker, CLI proof command, audit lineage tool, and operator runbook have been added. Production cutover still requires real staging destructive worker evidence and restore/PITR evidence.",
+          "required_decision": "Product/ops approval for queue-only data reset contract, destructive worker runbook, and restore/PITR gate before production use.",
+          "evidence_report": "docs/operations/backend-refactor/p0-data-reset-worker-staging-proof-20260517.json",
+          "runbook": "docs/operations/backend-refactor/data-reset-worker-runbook.md",
+          "next_command": "Run scripts/tools/data_reset_worker_staging_proof.py with approved staging DATABASE_URL/task/request ids, approval_id, backup_evidence_id, pitr_evidence_id, operator_id, and staging_run_id; then attach lineage output and rerun Prompt 7 validation."
+        }
+      ]
+    },
+    {
+      "endpoint": "settings-data-reset-direct-queues-job",
+      "method_path": "POST /api/workbench/settings/data-reset",
+      "checks": {
+        "code_layer_go": true,
+        "route_inventory_go": true,
+        "fixture_shadow_go": true,
+        "runtime_shadow_go": true,
+        "auth_audit_idempotency_go": true,
+        "contract_delta_closed": false
+      },
+      "contract_delta_status": "ACCEPTED_PRODUCTION_CHANGE_PENDING_EXTERNAL_EVIDENCE",
+      "runtime_primary_status": "GO",
+      "runtime_permission_failure_status": "GO",
+      "blockers": [
+        {
+          "blocker": "DATA_RESET_EXTERNAL_APPROVAL_STAGING_BACKUP_PITR_EVIDENCE_REQUIRED",
+          "owner_type": "ops_approval_worker_staging_backup_pitr",
+          "required_env": [
+            "approval_id source of truth",
+            "backup_evidence_id linked to a restorable backup/PITR point",
+            "staging worker environment",
+            "real data reset worker task id",
+            "operator id and staging run id"
+          ],
+          "required_code_change": "No API request-path code change is required; keep queue-only. Local worker, CLI proof command, audit lineage tool, and operator runbook have been added. Production cutover still requires real staging destructive worker evidence and restore/PITR evidence.",
+          "required_decision": "Product/ops approval for direct endpoint becoming queue-only, destructive worker runbook, and restore/PITR gate before production use.",
+          "evidence_report": "docs/operations/backend-refactor/p0-data-reset-worker-staging-proof-20260517.json",
+          "runbook": "docs/operations/backend-refactor/data-reset-worker-runbook.md",
+          "next_command": "Run scripts/tools/data_reset_worker_staging_proof.py with approved staging DATABASE_URL/task/request ids, approval_id, backup_evidence_id, pitr_evidence_id, operator_id, and staging_run_id; then attach lineage output and rerun Prompt 7 validation."
+        }
+      ]
+    },
+    {
+      "endpoint": "projects-hub-list",
+      "method_path": "GET /projects",
+      "checks": {
+        "code_layer_go": true,
+        "route_inventory_go": true,
+        "fixture_shadow_go": true,
+        "runtime_shadow_go": true,
+        "auth_audit_idempotency_go": true,
+        "contract_delta_closed": true
+      },
+      "contract_delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "runtime_primary_status": "GO",
+      "runtime_permission_failure_status": "GO",
+      "blockers": []
+    },
+    {
+      "endpoint": "projects-create-manual-profile",
+      "method_path": "POST /projects",
+      "checks": {
+        "code_layer_go": true,
+        "route_inventory_go": true,
+        "fixture_shadow_go": true,
+        "runtime_shadow_go": true,
+        "auth_audit_idempotency_go": true,
+        "contract_delta_closed": true
+      },
+      "contract_delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "runtime_primary_status": "GO",
+      "runtime_permission_failure_status": "GO",
+      "blockers": []
+    },
+    {
+      "endpoint": "project-detail",
+      "method_path": "GET /projects/{project_id}",
+      "checks": {
+        "code_layer_go": true,
+        "route_inventory_go": true,
+        "fixture_shadow_go": true,
+        "runtime_shadow_go": true,
+        "auth_audit_idempotency_go": true,
+        "contract_delta_closed": true
+      },
+      "contract_delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "runtime_primary_status": "GO",
+      "runtime_permission_failure_status": "GO",
+      "blockers": []
+    },
+    {
+      "endpoint": "project-assign-request",
+      "method_path": "POST /projects/assign",
+      "checks": {
+        "code_layer_go": true,
+        "route_inventory_go": true,
+        "fixture_shadow_go": true,
+        "runtime_shadow_go": true,
+        "auth_audit_idempotency_go": true,
+        "contract_delta_closed": true
+      },
+      "contract_delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "runtime_primary_status": "GO",
+      "runtime_permission_failure_status": "GO",
+      "blockers": []
+    },
+    {
+      "endpoint": "ledgers-list",
+      "method_path": "GET /ledgers",
+      "checks": {
+        "code_layer_go": true,
+        "route_inventory_go": true,
+        "fixture_shadow_go": true,
+        "runtime_shadow_go": true,
+        "auth_audit_idempotency_go": true,
+        "contract_delta_closed": true
+      },
+      "contract_delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "runtime_primary_status": "GO",
+      "runtime_permission_failure_status": "GO",
+      "blockers": []
+    },
+    {
+      "endpoint": "ledger-detail",
+      "method_path": "GET /ledgers/{ledger_id}",
+      "checks": {
+        "code_layer_go": true,
+        "route_inventory_go": true,
+        "fixture_shadow_go": true,
+        "runtime_shadow_go": true,
+        "auth_audit_idempotency_go": true,
+        "contract_delta_closed": true
+      },
+      "contract_delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "runtime_primary_status": "GO",
+      "runtime_permission_failure_status": "GO",
+      "blockers": []
+    },
+    {
+      "endpoint": "ledger-status-update",
+      "method_path": "POST /ledgers/{ledger_id}/status",
+      "checks": {
+        "code_layer_go": true,
+        "route_inventory_go": true,
+        "fixture_shadow_go": true,
+        "runtime_shadow_go": true,
+        "auth_audit_idempotency_go": true,
+        "contract_delta_closed": true
+      },
+      "contract_delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "runtime_primary_status": "GO",
+      "runtime_permission_failure_status": "GO",
+      "blockers": []
+    },
+    {
+      "endpoint": "reminders-list",
+      "method_path": "GET /reminders",
+      "checks": {
+        "code_layer_go": true,
+        "route_inventory_go": true,
+        "fixture_shadow_go": true,
+        "runtime_shadow_go": true,
+        "auth_audit_idempotency_go": true,
+        "contract_delta_closed": true
+      },
+      "contract_delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "runtime_primary_status": "GO",
+      "runtime_permission_failure_status": "GO",
+      "blockers": []
+    },
+    {
+      "endpoint": "reminder-run-request",
+      "method_path": "POST /reminders/run",
+      "checks": {
+        "code_layer_go": true,
+        "route_inventory_go": true,
+        "fixture_shadow_go": true,
+        "runtime_shadow_go": true,
+        "auth_audit_idempotency_go": true,
+        "contract_delta_closed": true
+      },
+      "contract_delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "runtime_primary_status": "GO",
+      "runtime_permission_failure_status": "GO",
+      "blockers": []
+    }
+  ],
+  "blocking_endpoints": [
+    {
+      "endpoint": "workbench-settings-write-contract",
+      "method_path": "POST /api/workbench/settings",
+      "checks": {
+        "code_layer_go": true,
+        "route_inventory_go": true,
+        "fixture_shadow_go": true,
+        "runtime_shadow_go": true,
+        "auth_audit_idempotency_go": true,
+        "contract_delta_closed": false
+      },
+      "contract_delta_status": "NEEDS_PRODUCT_DECISION",
+      "runtime_primary_status": "GO",
+      "runtime_permission_failure_status": "GO",
+      "blockers": [
+        {
+          "blocker": "SETTINGS_WRITE_OA_ROLE_SYNC_DECISION",
+          "owner_type": "product_ops_decision",
+          "required_env": [],
+          "required_code_change": "If product keeps synchronous OA role provisioning in settings write, implement audited async or synchronous equivalent with rollback evidence; recommended path is async task/outbox role provisioning.",
+          "required_decision": "Decide whether OA role sync remains in POST /api/workbench/settings or moves to async identity provisioning workflow.",
+          "next_command": "Record product/ops decision, update p0-platform-contract-delta-20260517.json or successor report, then rerun Prompt 7 validation."
+        }
+      ]
+    },
+    {
+      "endpoint": "settings-data-reset-create-job",
+      "method_path": "POST /api/workbench/settings/data-reset/jobs",
+      "checks": {
+        "code_layer_go": true,
+        "route_inventory_go": true,
+        "fixture_shadow_go": true,
+        "runtime_shadow_go": true,
+        "auth_audit_idempotency_go": true,
+        "contract_delta_closed": false
+      },
+      "contract_delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "runtime_primary_status": "GO",
+      "runtime_permission_failure_status": "GO",
+      "blockers": [
+        {
+          "blocker": "DATA_RESET_PRODUCT_OPS_APPROVAL_AND_WORKER_EVIDENCE_REQUIRED",
+          "owner_type": "ops_approval_worker_staging",
+          "required_env": [
+            "approval_id source of truth",
+            "backup_evidence_id linked to restorable backup/PITR point",
+            "staging worker environment"
+          ],
+          "required_code_change": "No request-path code change; keep API queue-only. Provide or implement worker-side destructive execution evidence and lineage queries if missing.",
+          "required_decision": "Product/ops approval for queue-only data reset contract and destructive worker runbook.",
+          "next_command": "Run staging data reset worker proof with approval_id and backup_evidence_id, then attach PITR/rollback evidence to a successor contract delta report."
+        }
+      ]
+    },
+    {
+      "endpoint": "settings-data-reset-direct-queues-job",
+      "method_path": "POST /api/workbench/settings/data-reset",
+      "checks": {
+        "code_layer_go": true,
+        "route_inventory_go": true,
+        "fixture_shadow_go": true,
+        "runtime_shadow_go": true,
+        "auth_audit_idempotency_go": true,
+        "contract_delta_closed": false
+      },
+      "contract_delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "runtime_primary_status": "GO",
+      "runtime_permission_failure_status": "GO",
+      "blockers": [
+        {
+          "blocker": "DATA_RESET_PRODUCT_OPS_APPROVAL_AND_WORKER_EVIDENCE_REQUIRED",
+          "owner_type": "ops_approval_worker_staging",
+          "required_env": [
+            "approval_id source of truth",
+            "backup_evidence_id linked to restorable backup/PITR point",
+            "staging worker environment"
+          ],
+          "required_code_change": "No request-path code change; keep API queue-only. Provide or implement worker-side destructive execution evidence and lineage queries if missing.",
+          "required_decision": "Product/ops approval for direct endpoint becoming queue-only plus destructive worker runbook.",
+          "next_command": "Run staging data reset worker proof for direct-queue action, then attach PITR/rollback evidence to a successor contract delta report."
+        }
+      ]
+    }
+  ],
+  "global_followups_not_counted_as_16_endpoint_runtime_shadow": [
+    {
+      "code": "BACKGROUND_JOB_RETRY_REASON_REQUIRED",
+      "classification": "MUST_FIX_CODE",
+      "detail": "Rust retry now consumes the Idempotency-Key header, but still requires request.reason. Old Python tests allow POST /api/background-jobs/{job_id}/retry with an empty JSON body for supported job types.",
+      "required_next_action": "Make reason optional for retry or document an approved replacement contract before adding retry to platform runtime shadow scope."
+    },
+    {
+      "code": "SETTINGS_WRITE_OA_ROLE_SYNC_DECISION",
+      "classification": "NEEDS_PRODUCT_DECISION",
+      "detail": "Old Python settings write synchronously calls OARoleSyncService.sync_access_control and rolls it back on persistence failure. Rust stores versioned PostgreSQL settings facts with audit/idempotency but does not synchronously provision OA roles.",
+      "decision_question": "Should OA role sync remain part of POST /api/workbench/settings, or move to an async identity/role provisioning workflow?",
+      "recommended_decision": "Move OA role provisioning to an audited async task/outbox workflow; keep settings write as PostgreSQL fact persistence plus read-model invalidation, and expose role-provisioning health separately."
+    },
+    {
+      "code": "DATA_RESET_WORKER_STAGING_EVIDENCE_REQUIRED_FOR_CUTOVER",
+      "classification": "ACCEPTED_PRODUCTION_CHANGE",
+      "detail": "API request path is intentionally queue-only. Prompt04 runtime shadow proves request contract equivalence, but destructive worker execution still requires separate staging worker proof, approval evidence, backup evidence, and rollback/PITR drill before production cutover."
+    }
+  ],
+  "required_next_actions": [
+    "Record product/ops decision for settings write OA role sync and update the contract delta successor report.",
+    "Record product/ops approval for data reset queue-only production contract.",
+    "Attach staging worker execution proof for each destructive data reset action, including approval_id, backup_evidence_id, PITR/rollback drill, audit lineage query evidence, and operator runbook.",
+    "Rerun Prompt 7 validation after the above evidence is recorded; only then generate p0-platform-api-final-go-YYYYMMDD.json."
+  ]
+}

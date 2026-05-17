@@ -11,8 +11,8 @@ use uuid::Uuid;
 use crate::{
     repositories::import_files::SqlxImportFileRepository,
     services::import_files::{
-        ImportFileService, ImportFileServiceError, ListImportBatchesRequest, UploadPreflightPolicy,
-        UploadPreflightRequest,
+        ImportBatchDownloadRequest, ImportFileService, ImportFileServiceError,
+        ListImportBatchesRequest, UploadPreflightPolicy, UploadPreflightRequest,
     },
     state::AppState,
 };
@@ -21,6 +21,10 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/imports/templates", get(import_templates))
         .route("/imports/batches", get(list_import_batches))
+        .route(
+            "/imports/batches/{batch_id}/download",
+            get(download_import_batch),
+        )
         .route("/imports/batches/{batch_id}", get(get_import_batch))
         .route("/imports/files/upload-preflight", post(upload_preflight))
         .route("/imports/files/{file_id}", get(get_import_file))
@@ -50,6 +54,19 @@ async fn get_import_batch(
     Ok(Json(
         service
             .get_batch(parse_uuid("batch_id", &batch_id)?)
+            .await?,
+    ))
+}
+
+async fn download_import_batch(
+    State(state): State<AppState>,
+    Path(batch_id): Path<String>,
+    Query(query): Query<ImportBatchDownloadRequest>,
+) -> Result<impl IntoResponse, ImportFilesApiError> {
+    let service = build_service(&state);
+    Ok(Json(
+        service
+            .download_batch(parse_uuid("batch_id", &batch_id)?, query)
             .await?,
     ))
 }

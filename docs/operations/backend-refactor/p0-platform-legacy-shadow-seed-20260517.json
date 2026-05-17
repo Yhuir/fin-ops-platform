@@ -1,0 +1,79 @@
+{
+  "report": "p0-platform-legacy-shadow-seed-20260517",
+  "report_date": "20260517",
+  "generated_at": "2026-05-17T11:33:56Z",
+  "status": "GO",
+  "scope": "Isolated legacy Python state seed for P0 platform runtime shadow.",
+  "data_dir": "/tmp/fin-ops-platform-shadow-legacy-p0-platform-local",
+  "run_id": "p0-platform-local",
+  "runtime_variables": {
+    "SHADOW_RUN_ID": "p0-platform-local",
+    "BACKGROUND_JOB_ID": "ad1d1132-89ff-5198-a096-f45ad3573ed1",
+    "BANK_TRANSACTION_ID": "210895bd-e515-5488-bae8-1815b291a72f",
+    "LEDGER_ID": "29c2554f-c6a3-5b69-9fb1-bf0cd431ec91",
+    "PROJECT_ID": "fce10a80-61e0-520c-88dc-57f34e5afaf0",
+    "PROJECT_DELETE_ID": "35d0adce-fb9b-5b11-ae5b-78e4ecf90262"
+  },
+  "legacy_python_seed": {
+    "status": "GO",
+    "storage_mode": "auto",
+    "state_files": [
+      "app_settings.json",
+      "background_jobs.pkl",
+      "state.pkl"
+    ],
+    "runtime_reload_required": "restart_or_reload_required",
+    "reload_note": "LedgerReminderService loads platform_shadow_legacy_seed from the isolated data-dir during Application startup; an already-running legacy Python process must be restarted or given an explicit non-production reload hook before ledger/reminder seed facts enter memory.",
+    "seeded_collections": [
+      "app_settings.manual_projects",
+      "background_jobs",
+      "imports.transactions",
+      "platform_shadow_legacy_seed.ledgers",
+      "platform_shadow_legacy_seed.reminders"
+    ]
+  },
+  "secret_requirements": {
+    "status": "GO",
+    "identity_source": {
+      "name": "FIN_OPS_SHADOW_OA_IDENTITY_SOURCE",
+      "value": "production_oa_test_user",
+      "status": "GO",
+      "accepted_values": [
+        "production_oa_test_user",
+        "staging_oa",
+        "test_oa"
+      ],
+      "environment": "production",
+      "risk_note": "Production OA test user is accepted only as identity/password source; business writes must target isolated shadow data stores."
+    },
+    "required": [
+      {
+        "name": "FIN_OPS_SHADOW_OA_TOKEN",
+        "present": true,
+        "sensitive": true,
+        "required_for": "legacy Python Authorization header"
+      },
+      {
+        "name": "FIN_OPS_SHADOW_OA_PASSWORD",
+        "present": true,
+        "sensitive": true,
+        "required_for": "settings data reset runtime samples"
+      }
+    ]
+  },
+  "go_standard": {
+    "legacy_python_state_seeded": "GO",
+    "same_runtime_ids_as_postgres_seed": "GO",
+    "real_oa_token_password_present": "GO",
+    "oa_identity_source_accepted": "GO",
+    "overall": "GO"
+  },
+  "blocking_items": [],
+  "non_secret_sample": {
+    "manual_project_count": 2,
+    "background_job_count": 1,
+    "bank_transaction_count": 1,
+    "ledger_count": 1,
+    "reminder_count": 1
+  }
+}

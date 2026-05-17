@@ -1,7 +1,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io::{Cursor, Write},
+};
 use uuid::Uuid;
+use zip::{write::FileOptions, CompressionMethod, ZipWriter};
 
 use crate::repositories::business_read::{
     BankDetailAccountRow, BankDetailTransactionFilter, BankDetailTransactionRow,
@@ -23,6 +27,10 @@ pub enum BusinessReadServiceError {
     #[error(transparent)]
     Repository(#[from] BusinessReadRepositoryError),
 }
+
+const COST_XLSX_MIME_TYPE: &str =
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const COST_XLSX_MAX_ROWS: usize = 50_000;
 
 pub struct BusinessReadService<R> {
     repository: R,
@@ -296,6 +304,75 @@ where
         cost_export_preview_payload(&row.payload, month, view, query)
     }
 
+    pub async fn get_cost_export_xlsx(
+        &self,
+        query: CostExportPreviewQuery,
+    ) -> Result<CostStatisticsExportFile, BusinessReadServiceError> {
+        let month = required_month_or_all(query.month.as_deref())?;
+        let view = cost_export_view(query.view.as_deref())?;
+        let project_scope = cost_project_scope(query.project_scope.clone())?;
+        let Some(row) = self
+            .repository
+            .find_cost_statistics_read_model(&month, &project_scope)
+            .await?
+        else {
+            return Err(BusinessReadServiceError::NotFound {
+                resource: "cost_statistics_read_model",
+            });
+        };
+        let payload = cost_export_payload(
+            &row.payload,
+            month,
+            view,
+            query,
+            "invalid_cost_statistics_export_request",
+        )?;
+        let columns = payload
+            .get("columns")
+            .and_then(Value::as_array)
+            .map(|items| items.iter().map(value_as_cell_text).collect::<Vec<_>>())
+            .unwrap_or_default();
+        let rows = payload
+            .get("rows")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .map(|row| {
+                        row.as_array()
+                            .map(|cells| cells.iter().map(value_as_cell_text).collect::<Vec<_>>())
+                            .unwrap_or_default()
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if rows.len() > COST_XLSX_MAX_ROWS {
+            return Err(BusinessReadServiceError::InvalidRequest {
+                code: "cost_export_too_large",
+                message: "cost statistics export exceeds the synchronous XLSX row limit.",
+            });
+        }
+        let sheet_name = payload
+            .get("sheet_names")
+            .and_then(Value::as_array)
+            .and_then(|items| items.first())
+            .and_then(Value::as_str)
+            .unwrap_or("成本统计");
+        let filename = payload
+            .get("file_name")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("成本统计.xlsx")
+            .to_owned();
+        let bytes = build_cost_xlsx(&columns, &rows, sheet_name)?;
+        Ok(CostStatisticsExportFile {
+            filename,
+            content_type: COST_XLSX_MIME_TYPE.to_owned(),
+            bytes,
+            row_count: rows.len(),
+        })
+    }
+
     pub async fn get_cost_transaction_detail(
         &self,
         query: CostTransactionDetailQuery,
@@ -476,6 +553,14 @@ pub struct CostExportPreviewQuery {
     pub start_date: Option<String>,
     pub end_date: Option<String>,
     pub aggregate_by: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct CostStatisticsExportFile {
+    pub filename: String,
+    pub content_type: String,
+    pub bytes: Vec<u8>,
+    pub row_count: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1386,6 +1471,18 @@ fn cost_export_preview_view(value: Option<&str>) -> Result<&'static str, Busines
     }
 }
 
+fn cost_export_view(value: Option<&str>) -> Result<&'static str, BusinessReadServiceError> {
+    match value.map(str::trim) {
+        Some("time") | Some("month") => Ok("time"),
+        Some("project") => Ok("project"),
+        Some("expense_type") => Ok("expense_type"),
+        _ => Err(invalid_request(
+            "invalid_cost_statistics_export_request",
+            "view must be time, month, project, or expense_type.",
+        )),
+    }
+}
+
 fn cost_project_aggregate_by(value: Option<&str>) -> Option<&'static str> {
     match value.map(str::trim) {
         Some("month") => Some("month"),
@@ -1616,6 +1713,22 @@ fn cost_export_preview_payload(
     view: &str,
     query: CostExportPreviewQuery,
 ) -> Result<Value, BusinessReadServiceError> {
+    cost_export_payload(
+        payload,
+        month,
+        view,
+        query,
+        "invalid_cost_statistics_export_preview_request",
+    )
+}
+
+fn cost_export_payload(
+    payload: &Value,
+    month: String,
+    view: &str,
+    query: CostExportPreviewQuery,
+    invalid_request_code: &'static str,
+) -> Result<Value, BusinessReadServiceError> {
     let project_names = clean_vec(query.project_name);
     let expense_types = clean_vec(query.expense_type);
     let aggregate_by = cost_project_aggregate_by(query.aggregate_by.as_deref());
@@ -1644,7 +1757,7 @@ fn cost_export_preview_payload(
         "expense_type" => {
             if expense_types.is_empty() {
                 return Err(BusinessReadServiceError::InvalidRequest {
-                    code: "invalid_cost_statistics_export_preview_request",
+                    code: invalid_request_code,
                     message: "expense_type is required for expense_type export preview",
                 });
             }
@@ -1657,7 +1770,7 @@ fn cost_export_preview_payload(
         "project" => {
             if project_names.is_empty() {
                 return Err(BusinessReadServiceError::InvalidRequest {
-                    code: "invalid_cost_statistics_export_preview_request",
+                    code: invalid_request_code,
                     message: "project_name is required for project export preview",
                 });
             }
@@ -1946,6 +2059,200 @@ fn cost_preview_payload(
             "sheet_count": sheet_names.len(),
         },
     })
+}
+
+fn build_cost_xlsx(
+    columns: &[String],
+    rows: &[Vec<String>],
+    sheet_name: &str,
+) -> Result<Vec<u8>, BusinessReadServiceError> {
+    let mut buffer = Cursor::new(Vec::new());
+    {
+        let mut zip = ZipWriter::new(&mut buffer);
+        let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
+        write_cost_zip_file(
+            &mut zip,
+            "[Content_Types].xml",
+            cost_content_types_xml(),
+            options,
+        )?;
+        write_cost_zip_file(&mut zip, "_rels/.rels", cost_root_rels_xml(), options)?;
+        write_cost_zip_file(
+            &mut zip,
+            "xl/workbook.xml",
+            cost_workbook_xml(sheet_name),
+            options,
+        )?;
+        write_cost_zip_file(
+            &mut zip,
+            "xl/_rels/workbook.xml.rels",
+            cost_workbook_rels_xml(),
+            options,
+        )?;
+        write_cost_zip_file(&mut zip, "xl/styles.xml", cost_styles_xml(), options)?;
+        write_cost_zip_file(
+            &mut zip,
+            "xl/worksheets/sheet1.xml",
+            cost_worksheet_xml(columns, rows),
+            options,
+        )?;
+        zip.finish().map_err(|_| cost_export_build_failed())?;
+    }
+    Ok(buffer.into_inner())
+}
+
+fn write_cost_zip_file<W: Write + std::io::Seek>(
+    zip: &mut ZipWriter<W>,
+    name: &str,
+    content: String,
+    options: FileOptions,
+) -> Result<(), BusinessReadServiceError> {
+    zip.start_file(name, options)
+        .map_err(|_| cost_export_build_failed())?;
+    zip.write_all(content.as_bytes())
+        .map_err(|_| cost_export_build_failed())
+}
+
+fn cost_content_types_xml() -> String {
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>"#
+        .to_owned()
+}
+
+fn cost_root_rels_xml() -> String {
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"#
+        .to_owned()
+}
+
+fn cost_workbook_xml(sheet_name: &str) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">\
+<sheets><sheet name=\"{}\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>",
+        xml_escape(sheet_name)
+    )
+}
+
+fn cost_workbook_rels_xml() -> String {
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>"#
+        .to_owned()
+}
+
+fn cost_styles_xml() -> String {
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="2">
+    <font><sz val="11"/><name val="Calibri"/></font>
+    <font><b/><sz val="11"/><name val="Calibri"/></font>
+  </fonts>
+  <fills count="1"><fill><patternFill patternType="none"/></fill></fills>
+  <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="2">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1">
+      <alignment horizontal="center"/>
+    </xf>
+  </cellXfs>
+</styleSheet>"#
+        .to_owned()
+}
+
+fn cost_worksheet_xml(columns: &[String], rows: &[Vec<String>]) -> String {
+    let column_count = columns.len().max(1);
+    let max_row = rows.len() + 1;
+    let dimension = format!("A1:{}{}", cost_column_ref(column_count), max_row);
+    let mut xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">\
+<dimension ref=\"{dimension}\"/><sheetData>"
+    );
+    xml.push_str("<row r=\"1\">");
+    for (index, column) in columns.iter().enumerate() {
+        xml.push_str(&cost_inline_string_cell(index + 1, 1, column, Some(1)));
+    }
+    xml.push_str("</row>");
+    for (row_index, row) in rows.iter().enumerate() {
+        let excel_row = row_index + 2;
+        xml.push_str(&format!("<row r=\"{excel_row}\">"));
+        for column_index in 0..columns.len() {
+            let text = row.get(column_index).map(String::as_str).unwrap_or("");
+            xml.push_str(&cost_inline_string_cell(
+                column_index + 1,
+                excel_row,
+                text,
+                None,
+            ));
+        }
+        xml.push_str("</row>");
+    }
+    xml.push_str("</sheetData></worksheet>");
+    xml
+}
+
+fn cost_inline_string_cell(column: usize, row: usize, text: &str, style: Option<usize>) -> String {
+    let cell_ref = format!("{}{}", cost_column_ref(column), row);
+    let style = style
+        .map(|style| format!(" s=\"{style}\""))
+        .unwrap_or_default();
+    format!(
+        "<c r=\"{cell_ref}\" t=\"inlineStr\"{style}><is><t>{}</t></is></c>",
+        xml_escape(text)
+    )
+}
+
+fn value_as_cell_text(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        Value::Number(number) => number.to_string(),
+        Value::Bool(value) => value.to_string(),
+        Value::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
+fn cost_column_ref(mut column: usize) -> String {
+    let mut letters = Vec::new();
+    while column > 0 {
+        column -= 1;
+        letters.push((b'A' + (column % 26) as u8) as char);
+        column /= 26;
+    }
+    letters.iter().rev().collect()
+}
+
+fn xml_escape(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(|ch| match ch {
+            '&' => "&amp;".chars().collect::<Vec<_>>(),
+            '<' => "&lt;".chars().collect::<Vec<_>>(),
+            '>' => "&gt;".chars().collect::<Vec<_>>(),
+            '"' => "&quot;".chars().collect::<Vec<_>>(),
+            '\'' => "&apos;".chars().collect::<Vec<_>>(),
+            _ => vec![ch],
+        })
+        .collect()
+}
+
+fn cost_export_build_failed() -> BusinessReadServiceError {
+    BusinessReadServiceError::InvalidRequest {
+        code: "invalid_cost_statistics_export_request",
+        message: "failed to build cost statistics XLSX export.",
+    }
 }
 
 fn cost_scope_label(
@@ -2629,6 +2936,53 @@ mod tests {
         assert_eq!(payload["summary"]["transaction_count"], 2);
         assert_eq!(payload["summary"]["total_amount"], "1290.50");
         assert_eq!(payload["summary"]["sheet_count"], 1);
+    }
+
+    #[tokio::test]
+    async fn cost_export_xlsx_uses_preview_rows_and_returns_binary_contract() {
+        let service = BusinessReadService::new(StubBusinessReadRepository {
+            cost_read_model: Some(ready_cost_read_model(json!({
+                "month": "2026-03",
+                "time_rows": [
+                    {
+                        "transaction_id": "txn-cost-1",
+                        "project_name": "云南溯源科技",
+                        "trade_time": "2026-03-10",
+                        "direction": "支出",
+                        "expense_type": "设备货款及材料费",
+                        "expense_content": "PLC 模块采购",
+                        "amount": "1250.00",
+                        "counterparty_name": "昆明设备供应商",
+                        "payment_account_label": "建行 8106"
+                    }
+                ]
+            }))),
+            ..Default::default()
+        });
+
+        let file = service
+            .get_cost_export_xlsx(CostExportPreviewQuery {
+                month: Some("2026-03".to_owned()),
+                view: Some("time".to_owned()),
+                project_scope: Some("active".to_owned()),
+                project_name: vec![],
+                expense_type: vec![],
+                start_month: None,
+                end_month: None,
+                start_date: None,
+                end_date: None,
+                aggregate_by: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            file.content_type,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        );
+        assert!(file.filename.ends_with(".xlsx"));
+        assert_eq!(file.row_count, 1);
+        assert_eq!(&file.bytes[0..2], b"PK");
     }
 
     #[tokio::test]

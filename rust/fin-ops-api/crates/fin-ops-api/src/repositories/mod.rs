@@ -7,4 +7,5 @@ pub mod read_models;
 // Repository modules will own SQLx queries and transaction-scoped persistence.
 pub mod task_status;
 pub mod turnover_ledger;
+pub mod workbench_settings_projection;
 pub mod workbench_writes;

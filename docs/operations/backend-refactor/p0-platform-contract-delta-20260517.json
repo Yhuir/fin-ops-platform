@@ -1,0 +1,540 @@
+{
+  "report": "p0-platform-contract-delta-20260517",
+  "generated_at": "2026-05-17T18:25:00+08:00",
+  "status": "GO_AUDIT_WITH_RECORDED_CODE_AND_PRODUCT_FOLLOWUPS",
+  "scope": "Prompt04 platform API old-Python contract delta audit versus Rust/PostgreSQL production-safe implementation.",
+  "audit_result": {
+    "all_deltas_have_source_evidence": "GO",
+    "data_reset_kept_queue_only": "GO",
+    "needs_product_decision_items_are_explicit": "GO",
+    "runtime_shadow_evidence": "GO",
+    "cutover_readiness": "NO_GO_NON_PROMPT4_GATE"
+  },
+  "runtime_shadow_evidence": {
+    "preflight_report": "docs/operations/backend-refactor/p0-platform-shadow-preflight-20260517.json",
+    "runtime_report": "docs/operations/backend-refactor/p0-platform-runtime-shadow-20260517.json",
+    "api_shadow_report": "docs/operations/backend-refactor/api-shadow-validation-report-20260517.json",
+    "summary": {
+      "total": 32,
+      "go": 32,
+      "no_go": 0,
+      "unexpected_diff_count": 0,
+      "explained_diff_count": 35,
+      "accepted_production_change_count": 3,
+      "permission_failure_cases": 16,
+      "fixture_error_count": 0,
+      "permission_failure_required_count": 88,
+      "permission_failure_missing_count": 0
+    }
+  },
+  "global_followups": [
+    {
+      "code": "BACKGROUND_JOB_RETRY_REASON_REQUIRED",
+      "classification": "MUST_FIX_CODE",
+      "detail": "Rust retry now consumes the Idempotency-Key header, but still requires request.reason. Old Python tests allow POST /api/background-jobs/{job_id}/retry with an empty JSON body for supported job types.",
+      "required_next_action": "Make reason optional for retry or document an approved replacement contract before adding retry to platform runtime shadow scope."
+    },
+    {
+      "code": "SETTINGS_WRITE_OA_ROLE_SYNC_DECISION",
+      "classification": "NEEDS_PRODUCT_DECISION",
+      "detail": "Old Python settings write synchronously calls OARoleSyncService.sync_access_control and rolls it back on persistence failure. Rust stores versioned PostgreSQL settings facts with audit/idempotency but does not synchronously provision OA roles.",
+      "decision_question": "Should OA role sync remain part of POST /api/workbench/settings, or move to an async identity/role provisioning workflow?",
+      "recommended_decision": "Move OA role provisioning to an audited async task/outbox workflow; keep settings write as PostgreSQL fact persistence plus read-model invalidation, and expose role-provisioning health separately."
+    },
+    {
+      "code": "DATA_RESET_WORKER_STAGING_EVIDENCE_REQUIRED_FOR_CUTOVER",
+      "classification": "ACCEPTED_PRODUCTION_CHANGE",
+      "detail": "API request path is intentionally queue-only. Prompt04 runtime shadow proves request contract equivalence, but destructive worker execution still requires separate staging worker proof, approval evidence, backup evidence, and rollback/PITR drill before production cutover."
+    }
+  ],
+  "data_reset_decision": {
+    "classification": "ACCEPTED_PRODUCTION_CHANGE",
+    "legacy_python_behavior": {
+      "direct_endpoint": "POST /api/workbench/settings/data-reset validates admin/OA password and historically executed SettingsDataResetService.execute in the API process.",
+      "job_endpoint": "POST /api/workbench/settings/data-reset/jobs created a background job envelope in the Python process; old tests cover queryable job shape and no password leakage.",
+      "source_files": [
+        "backend/src/fin_ops_platform/app/server.py::_handle_api_workbench_settings_data_reset",
+        "backend/src/fin_ops_platform/app/server.py::_handle_api_workbench_settings_data_reset_job_create",
+        "backend/src/fin_ops_platform/app/server.py::_execute_settings_data_reset",
+        "backend/src/fin_ops_platform/services/settings_data_reset_service.py::execute"
+      ],
+      "test_evidence": [
+        "tests/test_settings_data_reset_service.py::test_reset_api_allows_local_dev_admin_with_local_dev_password",
+        "tests/test_settings_data_reset_service.py::test_reset_job_api_creates_queryable_job_without_storing_password",
+        "tests/test_settings_data_reset_service.py::test_reset_direct_api_queues_job_without_executing_reset_or_leaking_password"
+      ]
+    },
+    "rust_behavior": {
+      "direct_endpoint": "POST /api/workbench/settings/data-reset returns 202 and queues a settings_data_reset worker task/outbox command.",
+      "job_endpoint": "POST /api/workbench/settings/data-reset/jobs also returns 202 queued job envelope and records data reset request lineage.",
+      "source_files": [
+        "rust/fin-ops-api/crates/fin-ops-api/src/routes/platform_legacy.rs::request_data_reset_execution",
+        "rust/fin-ops-api/crates/fin-ops-api/src/routes/platform_legacy.rs::create_data_reset_job",
+        "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs::queue_data_reset_job",
+        "rust/fin-ops-api/crates/fin-ops-api/src/repositories/platform_legacy.rs::insert_data_reset_request_if_needed",
+        "rust/fin-ops-api/migrations/0009_p0_api_fact_sources.sql::app.data_reset_requests"
+      ]
+    },
+    "architecture_approval": [
+      "docs/architecture/backend-refactor/remaining-api-contracts.md route 7: API only queues work.",
+      "docs/architecture/backend-refactor/remaining-api-contracts.md route 8: direct execution is not production-safe; API caller receives queued job unless worker-maintenance context is used.",
+      "docs/architecture/backend-refactor/remaining-api-contracts.md Prompt04 delta note for data reset queue-only behavior."
+    ],
+    "product_ops_approval_needed": true,
+    "cutover_required_evidence": [
+      "approval_id source of truth and retention policy",
+      "backup_evidence_id linked to a restorable backup/PITR point",
+      "staging worker execution proof for each destructive reset action",
+      "rollback/PITR drill evidence after worker failure and partial completion",
+      "audit event and data_reset_requests lineage query evidence",
+      "operator runbook for queued/running/cancelled/failed reset jobs"
+    ],
+    "prohibited_change": "Do not restore synchronous destructive reset in the API request path."
+  },
+  "endpoints": [
+    {
+      "endpoint_id": "background-job-acknowledge-request",
+      "method_path": "POST /api/background-jobs/{job_id}/acknowledge",
+      "delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "source_files": [
+        "backend/src/fin_ops_platform/app/server.py::_handle_api_background_job_acknowledge",
+        "backend/src/fin_ops_platform/services/background_job_service.py::acknowledge_job",
+        "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs::acknowledge_background_job",
+        "rust/fin-ops-api/crates/fin-ops-api/src/repositories/platform_legacy.rs::acknowledge_background_job"
+      ],
+      "test_evidence": [
+        "tests/test_app_health_api.py::test_app_health_excludes_acknowledged_failed_job_from_active_and_attention",
+        "tests/test_background_job_service.py::test_acknowledge_job_is_idempotent_for_visible_acknowledged_job",
+        "rust services::platform_legacy::tests::background_job_acknowledge_records_actor_trace_and_idempotency"
+      ],
+      "comparison": {
+        "request_fields": "Path job_id; optional reason/idempotency. Rust requires idempotency through body/header for write safety.",
+        "response_fields": "Both expose legacy {job} envelope in runtime shadow.",
+        "http_status": "200 on visible acknowledgement; 401/403 auth failure; 404 not found/invisible.",
+        "permission_failure": "Runtime permission-failure case is GO.",
+        "side_effects": "Python marks visible job acknowledged; Rust writes acknowledgement fact without mutating core worker task status.",
+        "audit_idempotency": "Rust records audit/idempotency; Python service is in-process state-store based."
+      },
+      "required_next_action": "No Prompt04 code action. Keep core worker status separate from notification acknowledgement."
+    },
+    {
+      "endpoint_id": "background-job-retry-request",
+      "method_path": "POST /api/background-jobs/{job_id}/retry",
+      "delta_status": "MUST_FIX_CODE",
+      "source_files": [
+        "backend/src/fin_ops_platform/app/server.py::_handle_api_background_job_retry",
+        "backend/src/fin_ops_platform/app/server.py::_retry_file_import_background_job",
+        "backend/src/fin_ops_platform/app/server.py::_retry_cost_statistics_cache_warmup_background_job",
+        "rust/fin-ops-api/crates/fin-ops-api/src/routes/platform_legacy.rs::retry_background_job",
+        "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs::retry_background_job"
+      ],
+      "test_evidence": [
+        "tests/test_cost_statistics_api.py::test_retry_failed_cost_statistics_warmup_requeues_months_and_closes_old_job",
+        "rust routes::tests::background_job_retry_accepts_idempotency_key_header",
+        "rust services::platform_legacy::tests::background_job_retry_creates_job_command_with_actor_and_idempotency"
+      ],
+      "comparison": {
+        "request_fields": "Old Python accepts an empty JSON body for supported retry paths; Rust now accepts Idempotency-Key header but still requires reason.",
+        "response_fields": "Old Python returns a legacy {job} replacement/retry envelope; Rust returns task/outbox command metadata.",
+        "http_status": "Python supported retry returns 202; Rust route returns 202 only after reason/idempotency validation.",
+        "permission_failure": "Covered by general auth middleware; not in the 16 Prompt04 runtime fixture endpoints.",
+        "side_effects": "Both should avoid replaying side effects in the request path; Rust correctly queues task/outbox.",
+        "audit_idempotency": "Rust has actor/trace/idempotency; Python retry path is background-job-service based."
+      },
+      "required_next_action": "Make reason optional and add retry to runtime shadow scope, or document an approved replacement contract."
+    },
+    {
+      "endpoint_id": "workbench-settings-write-contract",
+      "method_path": "POST /api/workbench/settings",
+      "delta_status": "NEEDS_PRODUCT_DECISION",
+      "source_files": [
+        "backend/src/fin_ops_platform/app/server.py::_handle_api_workbench_settings_update",
+        "backend/src/fin_ops_platform/services/app_settings_service.py::update_settings",
+        "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs::save_workbench_settings",
+        "rust/fin-ops-api/crates/fin-ops-api/src/repositories/platform_legacy.rs::save_workbench_settings",
+        "rust/fin-ops-api/crates/fin-ops-api/src/repositories/workbench_settings_projection.rs"
+      ],
+      "test_evidence": [
+        "tests/test_workbench_settings_sync_api.py::test_settings_update_returns_bad_gateway_when_oa_role_sync_fails",
+        "tests/test_workbench_settings_sync_api.py::test_settings_update_returns_clear_error_when_app_mongo_save_times_out",
+        "rust services::platform_legacy::tests::settings_write_normalizes_lists_and_requires_array_mappings"
+      ],
+      "comparison": {
+        "request_fields": "Both validate settings arrays/maps; Rust additionally requires idempotency and versioned fact write semantics.",
+        "response_fields": "Runtime shadow verifies compatible settings payload for Prompt04 fixture.",
+        "http_status": "Runtime shadow status is GO; old Python has explicit 502 oa_role_sync_failed and 503 app_settings_persistence_failed branches.",
+        "permission_failure": "Runtime permission-failure case is GO.",
+        "side_effects": "Old Python synchronously syncs OA roles, invalidates workbench read models and clears search cache. Rust writes PostgreSQL settings facts/audit/idempotency; role provisioning is not synchronous.",
+        "audit_idempotency": "Rust production path is stronger; Python old path has app-state persistence and role-sync rollback semantics."
+      },
+      "decision_question": "Should OA role sync stay inside settings write or move to async identity provisioning?",
+      "recommended_decision": "Move OA role sync to async task/outbox with separate health and retry visibility.",
+      "required_next_action": "Product/ops decision required before final cutover contract is frozen for role provisioning side effects."
+    },
+    {
+      "endpoint_id": "workbench-settings-project-sync-request",
+      "method_path": "POST /api/workbench/settings/projects/sync",
+      "delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "source_files": [
+        "backend/src/fin_ops_platform/app/server.py::_handle_api_workbench_settings_projects_sync",
+        "backend/src/fin_ops_platform/services/project_costing.py::sync_projects_from_oa",
+        "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs::request_project_sync"
+      ],
+      "test_evidence": [
+        "tests/test_workbench_settings_sync_api.py::test_project_sync_endpoint_syncs_oa_projects_into_settings_payload",
+        "tests/test_workbench_settings_sync_api.py::test_project_sync_endpoint_failure_does_not_destroy_existing_settings",
+        "docs/operations/backend-refactor/api-shadow-validation-report-20260517.json::workbench-settings-project-sync-request"
+      ],
+      "comparison": {
+        "request_fields": "actor_id/scope/idempotency covered; actor comes from trusted session in runtime.",
+        "response_fields": "Runtime shadow verifies legacy sync facade; started_at/finished_at are documented volatile timestamps.",
+        "http_status": "Runtime shadow GO.",
+        "permission_failure": "Runtime permission-failure case is GO.",
+        "side_effects": "Old Python scans OA synchronously. Rust queues project_sync worker task/outbox and does not scan OA in request path.",
+        "audit_idempotency": "Rust writes job/audit/idempotency facts."
+      },
+      "required_next_action": "Keep queue-only implementation; worker-side project sync evidence remains a later cutover gate."
+    },
+    {
+      "endpoint_id": "workbench-settings-project-create-request",
+      "method_path": "POST /api/workbench/settings/projects",
+      "delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "source_files": [
+        "backend/src/fin_ops_platform/app/server.py::_handle_api_workbench_settings_project_create",
+        "backend/src/fin_ops_platform/services/app_settings_service.py::create_manual_project",
+        "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs::create_settings_project",
+        "rust/fin-ops-api/crates/fin-ops-api/src/repositories/platform_legacy.rs::create_project_profile"
+      ],
+      "test_evidence": [
+        "tests/test_workbench_settings_sync_api.py::test_manual_project_create_and_delete_endpoints_persist_settings",
+        "docs/operations/backend-refactor/api-shadow-validation-report-20260517.json::workbench-settings-project-create-request"
+      ],
+      "comparison": {
+        "request_fields": "actor_id/project_code/project_name supported; Rust adds idempotent PostgreSQL profile write.",
+        "response_fields": "Runtime shadow verifies settings projection.",
+        "http_status": "Runtime shadow GO.",
+        "permission_failure": "Runtime permission-failure case is GO.",
+        "side_effects": "Old Python mutates settings snapshot/manual project memory; Rust writes app.project_profiles with audit/idempotency.",
+        "audit_idempotency": "Rust production path records audit/idempotency; accepted data-source change."
+      },
+      "required_next_action": "No Prompt04 code action."
+    },
+    {
+      "endpoint_id": "workbench-settings-project-delete-request",
+      "method_path": "DELETE /api/workbench/settings/projects/{project_id}",
+      "delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "source_files": [
+        "backend/src/fin_ops_platform/app/server.py::_handle_api_workbench_settings_project_delete",
+        "backend/src/fin_ops_platform/services/app_settings_service.py::delete_project",
+        "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs::delete_settings_project",
+        "rust/fin-ops-api/crates/fin-ops-api/src/repositories/platform_legacy.rs::deactivate_project_profile"
+      ],
+      "test_evidence": [
+        "tests/test_workbench_settings_sync_api.py::test_manual_project_create_and_delete_endpoints_persist_settings",
+        "docs/operations/backend-refactor/api-shadow-validation-report-20260517.json::workbench-settings-project-delete-request"
+      ],
+      "comparison": {
+        "request_fields": "Path project_id and idempotency covered.",
+        "response_fields": "Runtime shadow verifies settings projection.",
+        "http_status": "Runtime shadow GO.",
+        "permission_failure": "Runtime permission-failure case is GO.",
+        "side_effects": "Old Python removes from settings snapshot; Rust soft-deactivates project profile with audit/idempotency.",
+        "audit_idempotency": "Rust production path preserves history; accepted safety change."
+      },
+      "required_next_action": "No Prompt04 code action."
+    },
+    {
+      "endpoint_id": "settings-data-reset-create-job",
+      "method_path": "POST /api/workbench/settings/data-reset/jobs",
+      "delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "source_files": [
+        "backend/src/fin_ops_platform/app/server.py::_handle_api_workbench_settings_data_reset_job_create",
+        "backend/src/fin_ops_platform/app/server.py::_queued_settings_data_reset_background_job",
+        "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs::create_data_reset_job",
+        "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs::queue_data_reset_job"
+      ],
+      "test_evidence": [
+        "tests/test_settings_data_reset_service.py::test_reset_job_api_creates_queryable_job_without_storing_password",
+        "rust services::platform_legacy::tests::queue_only_data_reset_returns_legacy_job_envelope",
+        "docs/operations/backend-refactor/api-shadow-validation-report-20260517.json::settings-data-reset-create-job"
+      ],
+      "comparison": {
+        "request_fields": "action/oa_password/approval_id/backup_evidence_id/scope/idempotency covered.",
+        "response_fields": "Runtime shadow verifies legacy queued job facade; job_id/timestamps are documented volatile task facts.",
+        "http_status": "Rust returns 202 under accepted production change; fixture records accepted status delta.",
+        "permission_failure": "Runtime permission-failure case is GO.",
+        "side_effects": "API only queues worker job; no destructive reset runs in request path.",
+        "audit_idempotency": "Rust writes worker task/outbox/data_reset_requests/audit/idempotency and does not persist password."
+      },
+      "required_next_action": "Before production cutover, collect worker/staging/backup/rollback evidence listed in data_reset_decision."
+    },
+    {
+      "endpoint_id": "settings-data-reset-direct-queues-job",
+      "method_path": "POST /api/workbench/settings/data-reset",
+      "delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "source_files": [
+        "backend/src/fin_ops_platform/app/server.py::_handle_api_workbench_settings_data_reset",
+        "backend/src/fin_ops_platform/app/server.py::_execute_settings_data_reset",
+        "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs::request_data_reset_execution",
+        "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs::queue_data_reset_job"
+      ],
+      "test_evidence": [
+        "tests/test_settings_data_reset_service.py::test_reset_direct_api_queues_job_without_executing_reset_or_leaking_password",
+        "tests/test_settings_data_reset_service.py::test_reset_oa_api_uses_mode_b_and_rebuilds_with_oa_retention_cutoff",
+        "docs/operations/backend-refactor/api-shadow-validation-report-20260517.json::settings-data-reset-direct-queues-job"
+      ],
+      "comparison": {
+        "request_fields": "action/oa_password/approval/backup/idempotency covered.",
+        "response_fields": "Runtime shadow verifies queued job facade.",
+        "http_status": "Rust returns 202 under accepted production change.",
+        "permission_failure": "Runtime permission-failure case is GO.",
+        "side_effects": "Old direct destructive execution is no longer in API path; worker-maintenance execution remains separate.",
+        "audit_idempotency": "Rust records worker/data reset request facts and redacts password."
+      },
+      "required_next_action": "Do not reintroduce synchronous destructive execution; require worker/staging/rollback evidence before cutover."
+    },
+    {
+      "endpoint_id": "projects-hub-list",
+      "method_path": "GET /projects",
+      "delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "source_files": [
+        "backend/src/fin_ops_platform/app/server.py::_handle_projects",
+        "backend/src/fin_ops_platform/services/project_costing.py::build_project_hub",
+        "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs::list_projects",
+        "rust/fin-ops-api/crates/fin-ops-api/src/repositories/platform_legacy.rs::PROJECT_HUB_SQL"
+      ],
+      "test_evidence": [
+        "tests/test_project_costing_api.py::test_project_create_assign_and_detail_round_trip",
+        "rust repositories::platform_legacy::tests::project_queries_return_legacy_hub_and_detail_envelopes",
+        "docs/operations/backend-refactor/api-shadow-validation-report-20260517.json::projects-hub-list"
+      ],
+      "comparison": {
+        "request_fields": "GET without body.",
+        "response_fields": "Runtime shadow verifies projects/summaries/totals/assignable_objects/total.",
+        "http_status": "Runtime shadow GO.",
+        "permission_failure": "Runtime permission-failure case is GO.",
+        "side_effects": "Read-only.",
+        "audit_idempotency": "Not applicable for read."
+      },
+      "required_next_action": "No Prompt04 code action; future object types require fixture coverage."
+    },
+    {
+      "endpoint_id": "projects-create-manual-profile",
+      "method_path": "POST /projects",
+      "delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "source_files": [
+        "backend/src/fin_ops_platform/app/server.py::_handle_project_create",
+        "backend/src/fin_ops_platform/services/project_costing.py::create_project",
+        "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs::create_project",
+        "rust/fin-ops-api/crates/fin-ops-api/src/repositories/platform_legacy.rs::create_project_profile"
+      ],
+      "test_evidence": [
+        "tests/test_project_costing_api.py::test_project_create_assign_and_detail_round_trip",
+        "rust services::platform_legacy::tests::project_create_returns_legacy_project_without_internal_fields",
+        "docs/operations/backend-refactor/api-shadow-validation-report-20260517.json::projects-create-manual-profile"
+      ],
+      "comparison": {
+        "request_fields": "actor_id/project_code/project_name/project_status/department/owner covered.",
+        "response_fields": "Runtime shadow verifies {project,hub} facade.",
+        "http_status": "Runtime shadow GO.",
+        "permission_failure": "Runtime permission-failure case is GO.",
+        "side_effects": "Rust writes app.project_profiles with audit/idempotency instead of Python memory/manual project state.",
+        "audit_idempotency": "Accepted production-safe fact-source change."
+      },
+      "required_next_action": "No Prompt04 code action."
+    },
+    {
+      "endpoint_id": "project-detail",
+      "method_path": "GET /projects/{project_id}",
+      "delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "source_files": [
+        "backend/src/fin_ops_platform/app/server.py::_handle_project_detail",
+        "backend/src/fin_ops_platform/services/project_costing.py::get_project_detail",
+        "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs::get_project_detail",
+        "rust/fin-ops-api/crates/fin-ops-api/src/repositories/platform_legacy.rs::PROJECT_DETAIL_SQL"
+      ],
+      "test_evidence": [
+        "tests/test_project_costing_api.py::test_project_create_assign_and_detail_round_trip",
+        "rust repositories::platform_legacy::tests::project_queries_return_legacy_hub_and_detail_envelopes",
+        "docs/operations/backend-refactor/api-shadow-validation-report-20260517.json::project-detail"
+      ],
+      "comparison": {
+        "request_fields": "Path project_id supports legacy/public and UUID mapping in Rust.",
+        "response_fields": "Runtime shadow verifies project/summary/assignments/objects.",
+        "http_status": "Runtime shadow GO.",
+        "permission_failure": "Runtime permission-failure case is GO.",
+        "side_effects": "Read-only.",
+        "audit_idempotency": "Not applicable for read."
+      },
+      "required_next_action": "No Prompt04 code action."
+    },
+    {
+      "endpoint_id": "project-assign-request",
+      "method_path": "POST /projects/assign",
+      "delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "source_files": [
+        "backend/src/fin_ops_platform/app/server.py::_handle_project_assign",
+        "backend/src/fin_ops_platform/services/project_costing.py::assign_project",
+        "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs::assign_project",
+        "rust/fin-ops-api/crates/fin-ops-api/src/repositories/platform_legacy.rs::assign_project"
+      ],
+      "test_evidence": [
+        "tests/test_project_costing_api.py::test_project_create_assign_and_detail_round_trip",
+        "rust services::platform_legacy::tests::project_assignment_accepts_legacy_object_type_aliases",
+        "docs/operations/backend-refactor/api-shadow-validation-report-20260517.json::project-assign-request"
+      ],
+      "comparison": {
+        "request_fields": "actor_id/object_type/object_id/project_id/note/idempotency covered; legacy object aliases supported.",
+        "response_fields": "Runtime shadow verifies assignment plus project detail; created_at is documented volatile timestamp.",
+        "http_status": "Runtime shadow GO.",
+        "permission_failure": "Runtime permission-failure case is GO.",
+        "side_effects": "Rust writes app.project_assignments/events/audit/idempotency and updates object project references.",
+        "audit_idempotency": "Accepted production-safe fact-source change."
+      },
+      "required_next_action": "No Prompt04 code action; do not explain non-timestamp assignment fields."
+    },
+    {
+      "endpoint_id": "ledgers-list",
+      "method_path": "GET /ledgers",
+      "delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "source_files": [
+        "backend/src/fin_ops_platform/app/server.py::_handle_ledgers",
+        "backend/src/fin_ops_platform/services/ledgers.py::list_ledger_payloads",
+        "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs::list_ledgers",
+        "rust/fin-ops-api/crates/fin-ops-api/src/repositories/platform_legacy.rs::LEDGERS_LIST_SQL"
+      ],
+      "test_evidence": [
+        "tests/test_ledger_api.py::test_workbench_confirm_auto_creates_ledger_and_supports_due_views",
+        "rust repositories::platform_legacy::tests::ledger_list_query_preserves_legacy_view_semantics",
+        "docs/operations/backend-refactor/api-shadow-validation-report-20260517.json::ledgers-list"
+      ],
+      "comparison": {
+        "request_fields": "view/as_of/status query semantics covered.",
+        "response_fields": "Runtime shadow verifies legacy {ledgers} projection.",
+        "http_status": "Runtime shadow GO.",
+        "permission_failure": "Runtime permission-failure case is GO.",
+        "side_effects": "Read-only.",
+        "audit_idempotency": "Not applicable for read."
+      },
+      "required_next_action": "No Prompt04 code action."
+    },
+    {
+      "endpoint_id": "ledger-detail",
+      "method_path": "GET /ledgers/{ledger_id}",
+      "delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "source_files": [
+        "backend/src/fin_ops_platform/app/server.py::_handle_ledger_detail",
+        "backend/src/fin_ops_platform/services/ledgers.py::get_ledger_payload",
+        "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs::get_ledger_detail",
+        "rust/fin-ops-api/crates/fin-ops-api/src/repositories/platform_legacy.rs::LEDGER_DETAIL_SQL"
+      ],
+      "test_evidence": [
+        "tests/test_ledger_api.py::test_reminder_run_and_ledger_status_update_round_trip",
+        "docs/operations/backend-refactor/api-shadow-validation-report-20260517.json::ledger-detail"
+      ],
+      "comparison": {
+        "request_fields": "Path ledger_id covered.",
+        "response_fields": "Runtime shadow verifies {ledger} detail and events.",
+        "http_status": "Runtime shadow GO.",
+        "permission_failure": "Runtime permission-failure case is GO.",
+        "side_effects": "Read-only.",
+        "audit_idempotency": "Not applicable for read."
+      },
+      "required_next_action": "No Prompt04 code action."
+    },
+    {
+      "endpoint_id": "ledger-status-update",
+      "method_path": "POST /ledgers/{ledger_id}/status",
+      "delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "source_files": [
+        "backend/src/fin_ops_platform/app/server.py::_handle_ledger_status_update",
+        "backend/src/fin_ops_platform/services/ledgers.py::update_ledger",
+        "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs::change_ledger_status",
+        "rust/fin-ops-api/crates/fin-ops-api/src/repositories/platform_legacy.rs::change_ledger_status"
+      ],
+      "test_evidence": [
+        "tests/test_ledger_api.py::test_reminder_run_and_ledger_status_update_round_trip",
+        "rust services::platform_legacy::tests::ledger_status_update_allows_note_or_date_without_status",
+        "docs/operations/backend-refactor/api-shadow-validation-report-20260517.json::ledger-status-update"
+      ],
+      "comparison": {
+        "request_fields": "actor_id/status?/expected_date?/note?/expected_version/idempotency covered.",
+        "response_fields": "Runtime shadow verifies updated {ledger}.",
+        "http_status": "Runtime shadow GO.",
+        "permission_failure": "Runtime permission-failure case is GO.",
+        "side_effects": "Rust appends ledger event and audit/idempotency facts.",
+        "audit_idempotency": "Production-safe fact-source change; legacy semantics preserved for optional fields."
+      },
+      "required_next_action": "No Prompt04 code action."
+    },
+    {
+      "endpoint_id": "reminders-list",
+      "method_path": "GET /reminders",
+      "delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "source_files": [
+        "backend/src/fin_ops_platform/app/server.py::_handle_reminders",
+        "backend/src/fin_ops_platform/services/ledgers.py::list_reminder_payloads",
+        "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs::list_reminders",
+        "rust/fin-ops-api/crates/fin-ops-api/src/repositories/platform_legacy.rs::REMINDERS_LIST_SQL"
+      ],
+      "test_evidence": [
+        "tests/test_ledger_api.py::test_reminder_run_and_ledger_status_update_round_trip",
+        "docs/operations/backend-refactor/api-shadow-validation-report-20260517.json::reminders-list"
+      ],
+      "comparison": {
+        "request_fields": "as_of/status query semantics covered.",
+        "response_fields": "Runtime shadow verifies legacy {reminders} projection.",
+        "http_status": "Runtime shadow GO.",
+        "permission_failure": "Runtime permission-failure case is GO.",
+        "side_effects": "Read-only.",
+        "audit_idempotency": "Not applicable for read."
+      },
+      "required_next_action": "No Prompt04 code action."
+    },
+    {
+      "endpoint_id": "reminder-run-request",
+      "method_path": "POST /reminders/run",
+      "delta_status": "ACCEPTED_PRODUCTION_CHANGE",
+      "source_files": [
+        "backend/src/fin_ops_platform/app/server.py::_handle_reminder_run",
+        "backend/src/fin_ops_platform/services/ledgers.py::run_reminders",
+        "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs::request_reminder_run",
+        "rust/fin-ops-api/crates/fin-ops-api/src/repositories/platform_legacy.rs::insert_reminder_run_if_needed"
+      ],
+      "test_evidence": [
+        "tests/test_ledger_api.py::test_reminder_run_and_ledger_status_update_round_trip",
+        "rust services::platform_legacy::tests::reminder_run_defaults_missing_days_ahead_to_legacy_seven_days",
+        "docs/operations/backend-refactor/api-shadow-validation-report-20260517.json::reminder-run-request"
+      ],
+      "comparison": {
+        "request_fields": "actor_id/as_of/days_ahead/idempotency covered; omitted days_ahead defaults to 7.",
+        "response_fields": "Runtime shadow verifies queue-only {job} facade and sent_reminders accepted delta; job_id/timestamps are documented volatile task facts.",
+        "http_status": "Rust returns 202 under accepted production change.",
+        "permission_failure": "Runtime permission-failure case is GO.",
+        "side_effects": "Old Python sent reminders in request path; Rust queues reminder scan worker task/outbox only.",
+        "audit_idempotency": "Rust records reminder run/job/outbox/audit/idempotency facts."
+      },
+      "required_next_action": "Worker-side reminder send evidence is a later cutover gate; no Prompt04 request-path code action."
+    }
+  ],
+  "validation": [
+    {
+      "command": "PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_settings_sync_api tests.test_ledger_api tests.test_app_health_api tests.test_settings_data_reset_service -v",
+      "cwd": ".",
+      "status": "GO",
+      "result": "Ran 42 tests in 0.117s; OK."
+    },
+    {
+      "command": "python3 scripts/tools/api_shadow_validate.py --fixture docs/dev/api-fixtures/business-api-shadow-validation.json --validate-fixture-only --endpoint-id background-job-acknowledge-request --endpoint-id workbench-settings-write-contract --endpoint-id workbench-settings-project-sync-request --endpoint-id workbench-settings-project-create-request --endpoint-id workbench-settings-project-delete-request --endpoint-id settings-data-reset-create-job --endpoint-id settings-data-reset-direct-queues-job --endpoint-id projects-hub-list --endpoint-id projects-create-manual-profile --endpoint-id project-detail --endpoint-id project-assign-request --endpoint-id ledgers-list --endpoint-id ledger-detail --endpoint-id ledger-status-update --endpoint-id reminders-list --endpoint-id reminder-run-request",
+      "cwd": ".",
+      "status": "GO",
+      "result": "Fixture-only scoped validation status GO; endpoint_count=16; endpoint_errors=[]."
+    },
+    {
+      "command": "python3 scripts/tools/platform_shadow_runtime.py --report-date 20260517",
+      "cwd": ".",
+      "status": "GO_EXISTING_REPORT",
+      "result": "Latest generated runtime report is GO; api-shadow summary total=32, go=32, no_go=0, unexpected_diff_count=0."
+    }
+  ]
+}

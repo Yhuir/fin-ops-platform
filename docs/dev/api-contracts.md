@@ -174,14 +174,14 @@ Axum 必须通过 OA identity adapter 解析身份并复用旧 Python 成功响�
 
 ### `GET /api/workbench/settings`
 
-用途：低风险设置读取契约。P3-09A Axum 返回兼容默认投影，不执行项目同步、不保存设置、不触发数据重置。
+用途：设置读取契约。P0 Axum 从 PostgreSQL `app.settings_profiles` 与 `app.project_profiles` 生成旧 Python 兼容投影；没有活跃 settings/profile facts 时返回兼容默认投影。不执行项目同步、不保存设置、不触发数据重置。
 
 成功响应字段：
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `projects.active` | array | 活跃项目设置。P3-09A 默认空数组。 |
-| `projects.completed` | array | 已完成项目设置。P3-09A 默认空数组。 |
+| `projects.active` | array | 活跃项目设置；来源为 `app.project_profiles` 且不在 `completed_project_ids` 中。 |
+| `projects.completed` | array | 已完成项目设置；来源为 `completed_project_ids` 对应项目。 |
 | `projects.completed_project_ids` | string[] | 已完成项目 ID。 |
 | `bank_account_mappings` | array | 银行尾号映射。 |
 | `access_control.allowed_usernames` | string[] | 兼容旧字段，默认包含旧默认管理员。 |
@@ -1004,6 +1004,7 @@ python scripts/tools/api_route_inventory_check.py \
 | `POST /api/no-oa-bank-batches/submit` | PostgreSQL `app.no_oa_bank_batches`、transactional workbench write command、job/outbox rebuild marker | 批量提交返回 per-item results；每个 item 必须带 `batch_id`、`expected_version`、`idempotency_key`。 |
 | `GET /api/turnover-ledger?view=grouped&family=company&page=1&page_size=50` | PostgreSQL `app.bank_transactions`、active `app.bank_transaction_categories.raw_payload.category_code` | 只读 flat/grouped 往来台账视图按 Python `turnover_ledger_service.py` 分类规则从银行流水和手工分类事实实时派生；不读取 app Mongo，不按 `app.turnover_relations` 猜测 Python grouping/lot/extra 字段。relation id、allocation lots、lot rows、人工确认/撤回状态和 relation extra 仍是 shadow 解释项或阻塞项。 |
 | `GET /api/turnover-ledger/export-preview?family=company&limit=20` | PostgreSQL `app.bank_transactions`、active `app.bank_transaction_categories.raw_payload.category_code` | 按 Python `turnover_ledger_export_service.py` 生成旧 preview envelope：`columns/rows/totals/pagination/filters`。只读 preview，不生成 XLSX、不写对象存储、不读取 app Mongo。 |
+| `GET /api/turnover-ledger/export?family=company` | PostgreSQL `app.bank_transactions`、active `app.bank_transaction_categories.raw_payload.category_code` | 使用与 export-preview 相同的 Python 导出行规则生成同步 XLSX：sheet `往来款台账`、固定 25 列、`Content-Type` 为 XLSX、`Content-Disposition` 使用 UTF-8 filename。只读下载不写业务事实、不读取 app Mongo；extra/FIFO 字段仍为空或按当前 PostgreSQL 派生结果输出，待 relation extra/FIFO facts 冻结后再提升 shadow 口径。 |
 | `GET /api/turnover-ledger/relations/{relation_id}` | PostgreSQL `app.bank_transactions`、active `app.bank_transaction_categories.raw_payload.category_code` | 按 Python SHA1 relation id 规则从同一 facts 派生 relation detail，返回 `relation/row/bank_rows/audit_history` envelope；不读取 app Mongo audit/extras。 |
 | `GET /api/tax-offset?month=YYYY-MM` | `read_model.tax_offset_read_models` | 返回 read model payload 原形并附加 `read_model_status`。`month=all` 返回 400。 |
 | `POST /api/tax-offset/calculate` | `read_model.tax_offset_read_models` | 从月度 read model payload 计算旧 Python summary；不写入认证状态、不触发 rebuild、不写 audit/outbox。 |
@@ -1015,6 +1016,7 @@ python scripts/tools/api_route_inventory_check.py \
 | `GET /api/cost-statistics?month=YYYY-MM\|all&project_scope=active\|all` | `read_model.cost_statistics_read_models` | 返回 read model payload 原形并附加 `read_model_status`。 |
 | `GET /api/cost-statistics/explorer?month=YYYY-MM\|all&project_scope=active\|all` | `read_model.cost_statistics_read_models` | 与主成本统计读取同源；行排序和金额格式必须由 shadow validation 判定。 |
 | `GET /api/cost-statistics/export-preview?month=YYYY-MM\|all&view=time\|project\|expense_type&project_scope=active\|all` | `read_model.cost_statistics_read_models` | 从 `time_rows` 生成旧 Python 预览 envelope：`view/file_name/scope_label/sheet_names/columns/rows/summary`。支持时间视图、费用类型视图和前端项目聚合预览；不读取 app Mongo，不回算 Python workbench 明细。 |
+| `GET /api/cost-statistics/export?month=YYYY-MM\|all&view=time\|month\|project\|expense_type&project_scope=active\|all` | `read_model.cost_statistics_read_models` | 从同一 `export-preview` 行集同步生成 XLSX，返回 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`、UTF-8 `Content-Disposition` 和 `x-fin-ops-export-row-count`；不请求路径 rebuild，不写业务事实。 |
 | `GET /api/cost-statistics/projects/{project_name}?month=YYYY-MM\|all&project_scope=active\|all` | `read_model.cost_statistics_read_models` | 从 explorer `time_rows` 按项目名过滤并按 `trade_time, transaction_id` 升序输出旧项目下钻 shape；不回算 Python workbench entries。 |
 | `GET /api/cost-statistics/transactions/{transaction_id}?project_scope=active\|all` | PostgreSQL `app.bank_transactions`、`read_model.cost_statistics_read_models`、`read_model.workbench_rows` | 先用 bank transaction fact 定位月份，再从成本 read model 找交易行，并从 workbench row read model 合并 `summary_fields/detail_fields`。 |
 | `GET /api/workbench?month=YYYY-MM` | `read_model.workbench_snapshots` | 返回单月工作台 snapshot，不支持 `month=all`，不在请求路径 rebuild，不回读 app Mongo。 |
@@ -1039,11 +1041,11 @@ python scripts/tools/api_route_inventory_check.py \
 以下接口在本批次只进入 inventory，不实现 Axum 切换：
 
 - `bank-details`：账户/流水 GET 与分类 PATCH 已迁移为 PostgreSQL facts + audit/idempotency/job/outbox 写入。relation tag 投影和 auto category 没有独立 PostgreSQL/read_model 事实源，生产切流前必须通过 shadow report 显式解释或补齐事实源。
-- `turnover-ledger`：`GET /api/turnover-ledger` flat/grouped 只读视图、`GET /api/turnover-ledger/export-preview` 和 `GET /api/turnover-ledger/relations/{relation_id}` 已迁移为 PostgreSQL bank/category facts 实时派生；二进制 `export`、extra GET/PUT、confirm/withdraw、manual relation persistence、FIFO allocation lots 仍必须先从 `turnover_ledger_service.py` 和产品文档追溯合同，不能按 `app.turnover_relations` 猜字段。
+- `turnover-ledger`：`GET /api/turnover-ledger` flat/grouped 只读视图、`GET /api/turnover-ledger/export-preview`、`GET /api/turnover-ledger/export` 和 `GET /api/turnover-ledger/relations/{relation_id}` 已迁移为 PostgreSQL bank/category facts 实时派生；extra GET/PUT、confirm/withdraw、manual relation persistence、FIFO allocation lots 仍必须先从 `turnover_ledger_service.py` 和产品文档追溯合同，不能按 `app.turnover_relations` 猜字段。
 - `ETC`：`POST /api/etc/import` 已迁移为静态 410 removed contract；`GET /api/etc/invoices`、`GET /api/etc/batches`、`GET /api/etc/batches/{batch_id}` 已迁移为 PostgreSQL ETC invoice facts 读取。导入 preview/confirm、对账任务、附件/票根文件、OA draft、提交状态写入和批次写操作依赖 job/outbox/object storage 组合合同，未冻结前不得迁移。
 - `settings` 项目同步、项目增删、data-reset 创建/执行：属于管理写操作，必须先有 PostgreSQL settings facts、权限、审计、回滚和 job/outbox 合同。data-reset job 状态 GET 已迁移为 `job.worker_tasks` 读取。
 - `tax-offset`：GET 与 calculate 已迁移为 `read_model.tax_offset_read_models` 只读路径；certified import preview/confirm 仍未迁移，写入、审计、幂等和 read-model invalidation/outbox 合同需先冻结。
-- `cost-statistics`：export-preview 已迁移为 `read_model.cost_statistics_read_models.time_rows` 只读路径；二进制 Excel `export` 仍未迁移，workbook 样式、下载头、导出筛选和后台缓存语义需单独冻结。单项目无 `aggregate_by` 的 Python 项目明细预览依赖 workbench 明细构造，Axum 切流 fixture 应使用前端实际发送的 `aggregate_by=month|year` 聚合预览。
+- `cost-statistics`：export-preview 和同步二进制 Excel `export` 已迁移为 `read_model.cost_statistics_read_models.time_rows` 只读路径；大结果异步导出和 `transaction` 详情型工作簿仍需单独冻结。单项目无 `aggregate_by` 的 Python 项目明细预览依赖 workbench 明细构造，Axum 切流 fixture 应使用前端实际发送的 `aggregate_by=month|year` 聚合预览。
 - `workbench`：单月 snapshot、ignored rows、row detail、read-model status 读取已迁移为 `read_model.workbench_snapshots/workbench_rows`。既有 Axum 写命令已进入 inventory 和 shadow fixture，但只能在隔离 local/staging 数据上验证；`POST /api/workbench/exception/preview` 仍阻塞，因为旧 Python preview 依赖 exception projection 和 matching candidate state，独立 read_model 合同未冻结。
 - `background-jobs`：active/detail GET 已迁移为 `job.worker_tasks` system task 读取；`retry` 已迁移为 PostgreSQL task/outbox/audit/idempotency 写入；`acknowledge` 写操作未迁移，需先冻结通知表/ack 语义。
 - `app-health`：JSON snapshot 和 SSE stream `/api/app-health/stream` 已迁移；app Mongo alerts 和旧 Python dirty scope state 未迁移。Axum matching 状态只读取 `job.worker_tasks` 和 `read_model.workbench_snapshots`。

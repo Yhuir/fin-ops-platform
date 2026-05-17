@@ -14,6 +14,13 @@ BACKEND_SRC = REPO_ROOT / "backend" / "src"
 if str(BACKEND_SRC) not in sys.path:
     sys.path.insert(0, str(BACKEND_SRC))
 
+from fin_ops_platform.app.server import build_application
+from fin_ops_platform.services.settings_data_reset_worker import (
+    ALLOW_DATA_RESET_WORKER_ENV,
+    SETTINGS_DATA_RESET_TASK_TYPE,
+    SettingsDataResetWorkerHandler,
+)
+from fin_ops_platform.services.state_store import default_data_dir
 from fin_ops_platform.services.worker_task_consumer import consume_nats_forever
 from fin_ops_platform.services.worker_task_postgres_repository import PostgresWorkerTaskRepository
 from fin_ops_platform.services.worker_task_protocol import PermanentWorkerError, WorkerTaskContext, WorkerTaskEnvelope
@@ -28,6 +35,12 @@ def main() -> int:
     parser.add_argument("--durable", default=os.environ.get("WORKER_NATS_DURABLE", "finops-python-workers"))
     parser.add_argument("--worker-id", default=os.environ.get("WORKER_ID", f"python-worker-{os.getpid()}"))
     parser.add_argument("--batch-size", type=int, default=int(os.environ.get("WORKER_BATCH_SIZE", "1")))
+    parser.add_argument("--data-dir", default=os.environ.get("FIN_OPS_DATA_DIR"))
+    parser.add_argument(
+        "--allow-data-reset-worker",
+        action="store_true",
+        help=f"Allow destructive settings_data_reset worker execution. Equivalent to {ALLOW_DATA_RESET_WORKER_ENV}=1.",
+    )
     parser.add_argument(
         "--smoke-succeed",
         action="store_true",
@@ -40,7 +53,16 @@ def main() -> int:
         raise SystemExit("NATS_URL or --nats-url is required.")
 
     repository = PostgresWorkerTaskRepository.from_database_url(args.database_url)
-    handler = smoke_success_handler if args.smoke_succeed else unsupported_task_handler
+    if args.smoke_succeed:
+        handler = smoke_success_handler
+    else:
+        data_dir = Path(args.data_dir) if args.data_dir else default_data_dir()
+        app = build_application(data_dir=data_dir)
+        settings_data_reset_handler = SettingsDataResetWorkerHandler(
+            reset_executor=app._execute_settings_data_reset,
+            allow_destructive=args.allow_data_reset_worker or os.environ.get(ALLOW_DATA_RESET_WORKER_ENV) == "1",
+        )
+        handler = dispatch_worker_task_handler(settings_data_reset_handler)
     asyncio.run(
         consume_nats_forever(
             nats_url=args.nats_url,
@@ -56,6 +78,15 @@ def main() -> int:
     return 0
 
 
+def dispatch_worker_task_handler(settings_data_reset_handler):
+    def handler(envelope: WorkerTaskEnvelope, context: WorkerTaskContext) -> dict[str, object]:
+        if envelope.task_type == SETTINGS_DATA_RESET_TASK_TYPE:
+            return dict(settings_data_reset_handler(envelope, context))
+        return unsupported_task_handler(envelope, context)
+
+    return handler
+
+
 def unsupported_task_handler(envelope: WorkerTaskEnvelope, _context: WorkerTaskContext) -> dict[str, object]:
     raise PermanentWorkerError(
         "WORKER_TASK_HANDLER_NOT_CONFIGURED",
@@ -64,6 +95,11 @@ def unsupported_task_handler(envelope: WorkerTaskEnvelope, _context: WorkerTaskC
 
 
 def smoke_success_handler(envelope: WorkerTaskEnvelope, context: WorkerTaskContext) -> dict[str, object]:
+    if envelope.task_type == SETTINGS_DATA_RESET_TASK_TYPE:
+        raise PermanentWorkerError(
+            "DATA_RESET_SMOKE_HANDLER_FORBIDDEN",
+            "settings_data_reset tasks require the formal worker handler; --smoke-succeed is forbidden.",
+        )
     context.heartbeat()
     return {
         "smoke_consumed": True,

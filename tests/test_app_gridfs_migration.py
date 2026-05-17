@@ -100,6 +100,7 @@ class AppGridFSToObjectStorageMigratorTests(unittest.TestCase):
             self.assertNotIn("供应商", file_entry["object_key"])
             self.assertTrue((output_dir / "gridfs-object-mapping.ndjson").exists())
             self.assertTrue((output_dir / "file-objects-import.ndjson").exists())
+            self.assertTrue((output_dir / "legacy-id-map-import.ndjson").exists())
 
     def test_execute_uploads_file_and_validates_sample_download_checksum(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -131,6 +132,13 @@ class AppGridFSToObjectStorageMigratorTests(unittest.TestCase):
             self.assertEqual(mapping["legacy_gridfs_id"], "etc_reconciliation:task-1:file-1")
             self.assertEqual(mapping["target_table"], "app.file_objects")
             self.assertIn("import_file_id", mapping)
+            self.assertEqual(mapping["content_type"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            legacy_map_rows = [
+                json.loads(line)
+                for line in (output_dir / "legacy-id-map-import.ndjson").read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual({row["target_table"] for row in legacy_map_rows}, {"file_objects", "import_files"})
+            self.assertTrue(all(row["legacy_id"] == "etc_reconciliation:task-1:file-1" for row in legacy_map_rows))
             checksum_report = json.loads(
                 (output_dir / "gridfs-checksum-validation-report.json").read_text(encoding="utf-8")
             )
@@ -140,6 +148,7 @@ class AppGridFSToObjectStorageMigratorTests(unittest.TestCase):
             self.assertEqual(checksum_report["coverage"]["missing_files"]["count"], 0)
             self.assertEqual(checksum_report["coverage"]["duplicate_files"]["count"], 0)
             self.assertEqual(checksum_report["coverage"]["size_differences"]["count"], 0)
+            self.assertEqual(checksum_report["legacy_id_mapping"]["legacy_id_map_file"], "legacy-id-map-import.ndjson")
 
     def test_verify_mode_downloads_existing_object_without_uploading(self) -> None:
         with TemporaryDirectory() as temp_dir:

@@ -4,7 +4,12 @@
   "defaults": {
     "headers": {
       "Accept": "application/json",
-      "Authorization": "Bearer ${FIN_OPS_SHADOW_OA_TOKEN}"
+      "Authorization": "Bearer ${FIN_OPS_SHADOW_OA_TOKEN}",
+      "x-fin-ops-oa-user-id": "${FIN_OPS_SHADOW_OA_USER_ID}",
+      "x-fin-ops-oa-username": "${FIN_OPS_SHADOW_OA_USERNAME}",
+      "x-fin-ops-oa-display-name": "${FIN_OPS_SHADOW_OA_DISPLAY_NAME}",
+      "x-fin-ops-oa-roles": "finance",
+      "x-fin-ops-oa-permissions": "finops:app:view"
     },
     "permission_failure": {
       "request_headers": {},
@@ -30,8 +35,16 @@
       "contract_cases": {
         "query": [],
         "body": null,
-        "status": [200, 401, 403, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "with no active worker tasks and no stale workbench snapshots, returns status ok, empty jobs, empty dirty scopes, and empty alerts",
         "permission_failure": "401 invalid_oa_session or 403 forbidden"
@@ -63,12 +76,23 @@
       "contract_cases": {
         "query": [],
         "body": null,
-        "status": [200, 401, 403, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "not applicable; stream emits app_health and heartbeat events for the current snapshot",
         "permission_failure": "401 invalid_oa_session or 403 forbidden",
-        "sse_events": ["app_health", "heartbeat"]
+        "sse_events": [
+          "app_health",
+          "heartbeat"
+        ]
       },
       "explain_diffs": [
         "$._content_type",
@@ -95,8 +119,13 @@
       "contract_cases": {
         "query": [],
         "body": null,
-        "status": [200],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "not applicable; static metadata route always returns service metadata",
         "permission_failure": "not applicable; route is public readonly metadata"
@@ -120,8 +149,16 @@
       "contract_cases": {
         "query": [],
         "body": null,
-        "status": [200, 401, 403, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "not applicable; missing or invalid identity returns 401/503",
         "permission_failure": "401 invalid_oa_session, 403 permission_denied, or 503 oa_identity_unavailable"
@@ -152,13 +189,38 @@
         "web/src/features/workbench/api.ts"
       ],
       "contract_cases": {
-        "query": ["q", "scope", "month", "project_name", "status", "limit"],
+        "query": [
+          "q",
+          "scope",
+          "month",
+          "project_name",
+          "status",
+          "limit"
+        ],
         "body": null,
-        "status": [200, 401, 403, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "limit defaults to 20 and is capped at 100; no cursor",
-        "empty_result": {"summary": {"total": 0, "oa": 0, "bank": 0, "invoice": 0}, "oa_results": [], "bank_results": [], "invoice_results": []},
-        "permission_failure": "401 invalid_oa_session or 403 permission_denied"
+        "empty_result": {
+          "summary": {
+            "total": 0,
+            "oa": 0,
+            "bank": 0,
+            "invoice": 0
+          },
+          "oa_results": [],
+          "bank_results": [],
+          "invoice_results": []
+        },
+        "permission_failure": "401 invalid_oa_session or 403 forbidden"
       },
       "explain_diffs": [
         "$.filters.limit",
@@ -181,8 +243,18 @@
       "contract_cases": {
         "query": [],
         "body": null,
-        "status": [200, 400, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated; attempts are ordered by attempt_no",
         "empty_result": "missing task returns 404 task_not_found",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -216,12 +288,27 @@
         "web/src/pages/BankDetailsPage.tsx"
       ],
       "contract_cases": {
-        "query": ["date_from", "date_to"],
+        "query": [
+          "date_from",
+          "date_to"
+        ],
         "body": null,
-        "status": [200, 400, 401, 403, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
-        "empty_result": {"accounts": [], "total_balance": null},
+        "empty_result": {
+          "accounts": [],
+          "total_balance": null
+        },
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
       "explain_diffs": [
@@ -248,12 +335,32 @@
         "web/src/pages/BankDetailsPage.tsx"
       ],
       "contract_cases": {
-        "query": ["account_key", "date_from", "date_to", "keyword", "page", "page_size"],
+        "query": [
+          "account_key",
+          "date_from",
+          "date_to",
+          "keyword",
+          "page",
+          "page_size"
+        ],
         "body": null,
-        "status": [200, 400, 401, 403, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "page starts at 1; page_size defaults to 100 and is capped at 500",
-        "empty_result": {"rows": [], "category_counts": "all category count keys are 0", "pagination.total": 0},
+        "empty_result": {
+          "rows": [],
+          "category_counts": "all category count keys are 0",
+          "pagination.total": 0
+        },
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
       "explain_diffs": [
@@ -303,8 +410,19 @@
           "updates[].category_code",
           "updates[].expected_version"
         ],
-        "status": [200, 400, 401, 403, 404, 409, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "unknown transaction_id returns 404 not_found; stale expected_version returns 409 category_version_conflict",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -337,12 +455,41 @@
         "web/src/pages/TurnoverLedgerPage.tsx"
       ],
       "contract_cases": {
-        "query": ["family", "status", "page", "page_size"],
+        "query": [
+          "family",
+          "status",
+          "page",
+          "page_size"
+        ],
         "body": null,
-        "status": [200, 400, 401, 403, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "page starts at 1; page_size defaults to 50 and is capped at 200; response field is pagination.page_size",
-        "empty_result": {"summary": {"pending_repayment_amount": "0.00", "repaid_amount": "0.00", "pending_collection_amount": "0.00", "collected_amount": "0.00", "closed_amount": "0.00", "suggested_count": 0, "conflict_count": 0, "row_count": 0}, "rows": [], "pagination": {"total": 0}},
+        "empty_result": {
+          "summary": {
+            "pending_repayment_amount": "0.00",
+            "repaid_amount": "0.00",
+            "pending_collection_amount": "0.00",
+            "collected_amount": "0.00",
+            "closed_amount": "0.00",
+            "suggested_count": 0,
+            "conflict_count": 0,
+            "row_count": 0
+          },
+          "rows": [],
+          "pagination": {
+            "total": 0
+          }
+        },
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
       "explain_diffs": [
@@ -381,12 +528,42 @@
         "web/src/pages/TurnoverLedgerPage.tsx"
       ],
       "contract_cases": {
-        "query": ["view", "family", "status", "page", "page_size"],
+        "query": [
+          "view",
+          "family",
+          "status",
+          "page",
+          "page_size"
+        ],
         "body": null,
-        "status": [200, 400, 401, 403, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "page starts at 1; page_size defaults to 50 and is capped at 200; response field is pagination.page_size",
-        "empty_result": {"summary": {"pending_repayment_amount": "0.00", "repaid_amount": "0.00", "pending_collection_amount": "0.00", "collected_amount": "0.00", "closed_amount": "0.00", "suggested_count": 0, "conflict_count": 0, "row_count": 0}, "groups": [], "pagination": {"total": 0}},
+        "empty_result": {
+          "summary": {
+            "pending_repayment_amount": "0.00",
+            "repaid_amount": "0.00",
+            "pending_collection_amount": "0.00",
+            "collected_amount": "0.00",
+            "closed_amount": "0.00",
+            "suggested_count": 0,
+            "conflict_count": 0,
+            "row_count": 0
+          },
+          "groups": [],
+          "pagination": {
+            "total": 0
+          }
+        },
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
       "explain_diffs": [
@@ -431,12 +608,30 @@
         "web/src/pages/TurnoverLedgerPage.tsx"
       ],
       "contract_cases": {
-        "query": ["family", "limit"],
+        "query": [
+          "family",
+          "limit"
+        ],
         "body": null,
-        "status": [200, 400, 401, 403, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "preview limit defaults to 20 and is coerced to at least 1; response includes pagination.preview_count, pagination.total, and pagination.limit",
-        "empty_result": {"columns": "legacy export column list", "rows": [], "totals": {"row_count": 0}},
+        "empty_result": {
+          "columns": "legacy export column list",
+          "rows": [],
+          "totals": {
+            "row_count": 0
+          }
+        },
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
       "explain_diffs": [
@@ -449,6 +644,49 @@
         "money_format:$.rows[*].还款金额",
         "money_format:$.rows[*].已还利息额",
         "money_format:$.rows[*].应还利息"
+      ]
+    },
+    {
+      "id": "turnover-ledger-export-xlsx",
+      "method": "GET",
+      "path": "/api/turnover-ledger/export",
+      "query": {
+        "family": "company"
+      },
+      "expected_status": 200,
+      "response_mode": "binary",
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.bank_transactions plus active app.bank_transaction_categories raw_payload.category_code; binary XLSX generated from the same turnover export rows as export-preview, with no app Mongo read.",
+      "frontend_refs": [
+        "web/src/features/turnoverLedger/api.ts",
+        "web/src/pages/TurnoverLedgerPage.tsx"
+      ],
+      "contract_cases": {
+        "query": [
+          "family"
+        ],
+        "body": null,
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
+        "pagination": "not paginated; synchronous export is capped by server-side XLSX row limit",
+        "empty_result": "valid XLSX workbook with the legacy header row and no data rows",
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied"
+      },
+      "explain_diffs": [
+        "$._content_disposition",
+        "binary_package_metadata:zip timestamps/workbook producer metadata",
+        "sorting:worksheet.rows",
+        "money_format:worksheet.money_columns"
       ]
     },
     {
@@ -466,8 +704,17 @@
       "contract_cases": {
         "query": [],
         "body": null,
-        "status": [200, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "missing relation id returns 404 unknown_relation_id",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -508,12 +755,30 @@
         "web/src/features/noOaBankBatches/api.ts"
       ],
       "contract_cases": {
-        "query": ["month", "status", "bucket", "type", "account_key"],
+        "query": [
+          "month",
+          "status",
+          "bucket",
+          "type",
+          "account_key"
+        ],
         "body": null,
-        "status": [200, 400, 401, 403, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "bounded by server-side limit 500; no page cursor in legacy Python contract",
-        "empty_result": {"summary": "zero counts", "batches": []},
+        "empty_result": {
+          "summary": "zero counts",
+          "batches": []
+        },
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
       "explain_diffs": [
@@ -539,8 +804,18 @@
       "contract_cases": {
         "query": [],
         "body": null,
-        "status": [200, 400, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated in legacy Python contract",
         "empty_result": "not applicable; missing batch returns 404",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -572,9 +847,24 @@
       ],
       "contract_cases": {
         "query": [],
-        "body": ["expected_version", "note", "idempotency_key"],
-        "status": [200, 400, 401, 403, 404, 409, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "expected_version",
+          "note",
+          "idempotency_key"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "missing batch returns 404 no_oa_bank_batch_not_found/unknown_no_oa_bank_batch",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -608,9 +898,24 @@
       ],
       "contract_cases": {
         "query": [],
-        "body": ["expected_version", "reason", "idempotency_key"],
-        "status": [200, 400, 401, 403, 404, 409, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "expected_version",
+          "reason",
+          "idempotency_key"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "missing batch returns 404 no_oa_bank_batch_not_found/unknown_no_oa_bank_batch",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -649,9 +954,24 @@
       ],
       "contract_cases": {
         "query": [],
-        "body": ["batches[].batch_id", "batches[].expected_version", "batches[].idempotency_key"],
-        "status": [200, 400, 401, 403, 404, 409, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "batches[].batch_id",
+          "batches[].expected_version",
+          "batches[].idempotency_key"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated; returns per-item results",
         "empty_result": "empty or invalid batches return failed per-item result or summary submitted=0",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -680,10 +1000,22 @@
         "web/src/pages/TaxOffsetPage.tsx"
       ],
       "contract_cases": {
-        "query": ["month"],
+        "query": [
+          "month"
+        ],
         "body": null,
-        "status": [200, 400, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "missing read model returns 404 tax_offset_read_model_not_found",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -710,12 +1042,26 @@
         "web/src/pages/TaxOffsetPage.tsx"
       ],
       "contract_cases": {
-        "query": ["month"],
+        "query": [
+          "month"
+        ],
         "body": null,
-        "status": [200, 400, 401, 403, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated; records are ordered by source_file_name/source_row_number/invoice_no/id",
-        "empty_result": {"month": "YYYY-MM", "records": []},
+        "empty_result": {
+          "month": "YYYY-MM",
+          "records": []
+        },
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
       "explain_diffs": [
@@ -735,8 +1081,12 @@
       },
       "body": {
         "month": "2026-05",
-        "selected_output_ids": ["tax-output-sample-id"],
-        "selected_input_ids": ["tax-input-sample-id"]
+        "selected_output_ids": [
+          "tax-output-sample-id"
+        ],
+        "selected_input_ids": [
+          "tax-input-sample-id"
+        ]
       },
       "expected_status": 200,
       "owner": "tax-ops",
@@ -748,9 +1098,23 @@
       ],
       "contract_cases": {
         "query": [],
-        "body": ["month", "selected_output_ids", "selected_input_ids"],
-        "status": [200, 400, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "month",
+          "selected_output_ids",
+          "selected_input_ids"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "missing read model returns 404 tax_offset_read_model_not_found",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -782,8 +1146,15 @@
       "contract_cases": {
         "query": [],
         "body": {},
-        "status": [410, 401, 403],
-        "error_shape": {"error": "etc_direct_import_removed", "message": "string"},
+        "status": [
+          410,
+          401,
+          403
+        ],
+        "error_shape": {
+          "error": "etc_direct_import_removed",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "not applicable; route always returns 410 Gone",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -809,12 +1180,36 @@
         "web/src/pages/EtcTicketManagementPage.tsx"
       ],
       "contract_cases": {
-        "query": ["status", "month", "plate", "keyword", "page", "page_size"],
+        "query": [
+          "status",
+          "month",
+          "plate",
+          "keyword",
+          "page",
+          "page_size"
+        ],
         "body": null,
-        "status": [200, 400, 401, 403, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "page starts at 1; page_size defaults to 50 and is capped at 500; response field is pageSize",
-        "empty_result": {"items": [], "counts": {"unsubmitted": 0, "submitted": 0, "current": 0}, "total": 0},
+        "empty_result": {
+          "items": [],
+          "counts": {
+            "unsubmitted": 0,
+            "submitted": 0,
+            "current": 0
+          },
+          "total": 0
+        },
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
       "explain_diffs": [
@@ -846,15 +1241,39 @@
         "web/src/pages/EtcTicketManagementPage.tsx"
       ],
       "contract_cases": {
-        "query": ["status", "month", "plate", "keyword", "page", "page_size"],
+        "query": [
+          "status",
+          "month",
+          "plate",
+          "keyword",
+          "page",
+          "page_size"
+        ],
         "body": null,
-        "status": [200, 400, 401, 403, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "page starts at 1; page_size defaults to 50 and is capped at 500; response field is pagination.page_size",
         "empty_result": {
           "items": [],
-          "counts": {"unsubmitted": 0, "submitted": 0, "current": 0},
-          "pagination": {"page": 1, "page_size": 50, "total": 0},
+          "counts": {
+            "unsubmitted": 0,
+            "submitted": 0,
+            "current": 0
+          },
+          "pagination": {
+            "page": 1,
+            "page_size": 50,
+            "total": 0
+          },
           "selectedBatch": null,
           "plateSummary": [],
           "invoiceItems": []
@@ -890,8 +1309,17 @@
       "contract_cases": {
         "query": [],
         "body": null,
-        "status": [200, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated; invoiceItems are ordered by issue_date desc, invoice_number desc",
         "empty_result": "missing batch id returns 404 etc_batch_not_found",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -929,10 +1357,23 @@
         "web/src/pages/CostStatisticsPage.tsx"
       ],
       "contract_cases": {
-        "query": ["month", "project_scope"],
+        "query": [
+          "month",
+          "project_scope"
+        ],
         "body": null,
-        "status": [200, 400, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated; payload may contain bounded rows from read model",
         "empty_result": "missing read model returns 404 cost_statistics_read_model_not_found",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -961,10 +1402,23 @@
         "web/src/pages/CostStatisticsPage.tsx"
       ],
       "contract_cases": {
-        "query": ["month", "project_scope"],
+        "query": [
+          "month",
+          "project_scope"
+        ],
         "body": null,
-        "status": [200, 400, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated; payload rows are prebounded by read model rebuild",
         "empty_result": "missing read model returns 404 cost_statistics_read_model_not_found",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -994,12 +1448,32 @@
         "web/src/pages/CostStatisticsPage.tsx"
       ],
       "contract_cases": {
-        "query": ["month", "project_scope"],
+        "query": [
+          "month",
+          "project_scope"
+        ],
         "body": null,
-        "status": [200, 400, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated; rows are filtered from read model time_rows",
-        "empty_result": {"summary": {"row_count": 0, "transaction_count": 0, "total_amount": "0.00"}, "rows": []},
+        "empty_result": {
+          "summary": {
+            "row_count": 0,
+            "transaction_count": 0,
+            "total_amount": "0.00"
+          },
+          "rows": []
+        },
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
       "explain_diffs": [
@@ -1025,10 +1499,22 @@
         "web/src/pages/CostStatisticsPage.tsx"
       ],
       "contract_cases": {
-        "query": ["project_scope"],
+        "query": [
+          "project_scope"
+        ],
         "body": null,
-        "status": [200, 400, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "missing app.bank_transactions row or missing cost read model row returns 404 cost_statistics_transaction_not_found/cost_statistics_read_model_not_found",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -1060,12 +1546,41 @@
         "web/src/pages/CostStatisticsPage.tsx"
       ],
       "contract_cases": {
-        "query": ["month", "view", "project_scope", "start_month", "end_month", "start_date", "end_date", "project_name", "expense_type", "aggregate_by"],
+        "query": [
+          "month",
+          "view",
+          "project_scope",
+          "start_month",
+          "end_month",
+          "start_date",
+          "end_date",
+          "project_name",
+          "expense_type",
+          "aggregate_by"
+        ],
         "body": null,
-        "status": [200, 400, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated; rows are filtered from read model time_rows",
-        "empty_result": {"summary": {"row_count": 0, "transaction_count": 0, "total_amount": "0.00", "sheet_count": 1}, "rows": []},
+        "empty_result": {
+          "summary": {
+            "row_count": 0,
+            "transaction_count": 0,
+            "total_amount": "0.00",
+            "sheet_count": 1
+          },
+          "rows": []
+        },
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
       "explain_diffs": [
@@ -1084,9 +1599,13 @@
         "month": "all",
         "view": "project",
         "project_scope": "all",
-        "project_name": ["${COST_PROJECT_NAME}"],
+        "project_name": [
+          "${COST_PROJECT_NAME}"
+        ],
         "aggregate_by": "month",
-        "expense_type": ["${COST_EXPENSE_TYPE}"]
+        "expense_type": [
+          "${COST_EXPENSE_TYPE}"
+        ]
       },
       "expected_status": 200,
       "owner": "cost-ops",
@@ -1097,12 +1616,37 @@
         "web/src/pages/CostStatisticsPage.tsx"
       ],
       "contract_cases": {
-        "query": ["month", "view", "project_scope", "project_name", "aggregate_by", "expense_type"],
+        "query": [
+          "month",
+          "view",
+          "project_scope",
+          "project_name",
+          "aggregate_by",
+          "expense_type"
+        ],
         "body": null,
-        "status": [200, 400, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated; aggregate rows are derived from read model time_rows",
-        "empty_result": {"summary": {"row_count": 0, "transaction_count": 0, "total_amount": "0.00", "sheet_count": 1}, "rows": []},
+        "empty_result": {
+          "summary": {
+            "row_count": 0,
+            "transaction_count": 0,
+            "total_amount": "0.00",
+            "sheet_count": 1
+          },
+          "rows": []
+        },
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
       "explain_diffs": [
@@ -1122,7 +1666,9 @@
         "project_scope": "active",
         "start_date": "2026-03-18",
         "end_date": "2026-04-16",
-        "expense_type": ["${COST_EXPENSE_TYPE}"]
+        "expense_type": [
+          "${COST_EXPENSE_TYPE}"
+        ]
       },
       "expected_status": 200,
       "owner": "cost-ops",
@@ -1133,12 +1679,37 @@
         "web/src/pages/CostStatisticsPage.tsx"
       ],
       "contract_cases": {
-        "query": ["month", "view", "project_scope", "start_date", "end_date", "expense_type"],
+        "query": [
+          "month",
+          "view",
+          "project_scope",
+          "start_date",
+          "end_date",
+          "expense_type"
+        ],
         "body": null,
-        "status": [200, 400, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated; rows are filtered from read model time_rows",
-        "empty_result": {"summary": {"row_count": 0, "transaction_count": 0, "total_amount": "0.00", "sheet_count": 1}, "rows": []},
+        "empty_result": {
+          "summary": {
+            "row_count": 0,
+            "transaction_count": 0,
+            "total_amount": "0.00",
+            "sheet_count": 1
+          },
+          "rows": []
+        },
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
       "explain_diffs": [
@@ -1147,6 +1718,64 @@
         "money_format:$.summary.total_amount",
         "date_format:$.rows[*][0]",
         "$.file_name"
+      ]
+    },
+    {
+      "id": "cost-statistics-export-xlsx-time-read-model",
+      "method": "GET",
+      "path": "/api/cost-statistics/export",
+      "query": {
+        "month": "all",
+        "view": "time",
+        "project_scope": "active",
+        "start_date": "2026-03-10",
+        "end_date": "2026-03-10"
+      },
+      "expected_status": 200,
+      "response_mode": "binary",
+      "owner": "cost-ops",
+      "risk": "medium",
+      "source": "PostgreSQL read_model.cost_statistics_read_models time_rows; binary XLSX generated from the same read-model rows as export-preview, with no app Mongo/workbench recalculation.",
+      "frontend_refs": [
+        "web/src/features/cost-statistics/api.ts",
+        "web/src/pages/CostStatisticsPage.tsx"
+      ],
+      "contract_cases": {
+        "query": [
+          "month",
+          "view",
+          "project_scope",
+          "start_month",
+          "end_month",
+          "start_date",
+          "end_date",
+          "project_name",
+          "expense_type",
+          "aggregate_by"
+        ],
+        "body": null,
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
+        "pagination": "not paginated; synchronous export is capped by server-side XLSX row limit",
+        "empty_result": "valid XLSX workbook with the legacy header row and no data rows",
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied"
+      },
+      "explain_diffs": [
+        "$._content_disposition",
+        "binary_package_metadata:zip timestamps/workbook producer metadata",
+        "sorting:worksheet.rows",
+        "money_format:worksheet.money_columns",
+        "date_format:worksheet.date_columns"
       ]
     },
     {
@@ -1164,10 +1793,22 @@
       "contract_cases": {
         "query": [],
         "body": null,
-        "status": [200, 401, 403, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
-        "empty_result": {"jobs": [], "active_jobs": [], "attention_jobs": []},
+        "empty_result": {
+          "jobs": [],
+          "active_jobs": [],
+          "attention_jobs": []
+        },
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
       "explain_diffs": [
@@ -1206,8 +1847,17 @@
       "contract_cases": {
         "query": [],
         "body": null,
-        "status": [200, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "missing/non-system task returns 404 background_job_not_found",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -1235,8 +1885,16 @@
       "contract_cases": {
         "query": [],
         "body": null,
-        "status": [200, 401, 403, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "not applicable; template registry returns configured templates",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -1262,12 +1920,31 @@
         "web/src/features/imports/api.ts"
       ],
       "contract_cases": {
-        "query": ["status", "batch_type", "limit", "offset"],
+        "query": [
+          "status",
+          "batch_type",
+          "limit",
+          "offset"
+        ],
         "body": null,
-        "status": [200, 400, 401, 403, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "limit defaults to 50, maximum 200; offset defaults to 0",
-        "empty_result": {"batches": [], "pagination": {"returned": 0}},
+        "empty_result": {
+          "batches": [],
+          "pagination": {
+            "returned": 0
+          }
+        },
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
       "explain_diffs": [
@@ -1292,8 +1969,18 @@
       "contract_cases": {
         "query": [],
         "body": null,
-        "status": [200, 400, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated; files are bounded by batch",
         "empty_result": "missing batch returns 404 not_found",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -1304,6 +1991,51 @@
         "date_format:$.batch.updated_at",
         "date_format:$.files[*].created_at",
         "date_format:$.files[*].updated_at"
+      ]
+    },
+    {
+      "id": "import-batch-download-object-manifest",
+      "method": "GET",
+      "path": "/imports/batches/${IMPORT_BATCH_ID}/download",
+      "query": {
+        "format": "json"
+      },
+      "expected_status": 200,
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.import_batches + app.import_files + app.file_objects object manifest with bounded presigned access metadata; no local path or object-store secret",
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "contract_cases": {
+        "query": [
+          "format"
+        ],
+        "body": null,
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
+        "pagination": "not paginated; files are bounded by batch",
+        "empty_result": "missing batch returns 404 not_found",
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied"
+      },
+      "explain_diffs": [
+        "$.download.content_disposition",
+        "$.download.delivery",
+        "$.files[*].access.method",
+        "$.files[*].access.url",
+        "$.files[*].access.unavailable_reason",
+        "$.files[*].file_object.object_version",
+        "$.files[*].file_object.etag"
       ]
     },
     {
@@ -1320,8 +2052,18 @@
       "contract_cases": {
         "query": [],
         "body": null,
-        "status": [200, 400, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "missing file returns 404 not_found",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -1347,8 +2089,18 @@
       "contract_cases": {
         "query": [],
         "body": null,
-        "status": [200, 400, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "missing file object returns 404 not_found",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -1387,9 +2139,24 @@
       ],
       "contract_cases": {
         "query": [],
-        "body": ["file_name", "byte_size", "content_type", "sha256", "purpose"],
-        "status": [200, 400, 401, 403, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "file_name",
+          "byte_size",
+          "content_type",
+          "sha256",
+          "purpose"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "new checksum returns duplicate=false; existing checksum returns duplicate=true with existing_file_object",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -1405,17 +2172,33 @@
       "id": "workbench-month-read-model",
       "method": "GET",
       "path": "/api/workbench",
-      "query": {"month": "${WORKBENCH_MONTH}"},
+      "query": {
+        "month": "${WORKBENCH_MONTH}"
+      },
       "expected_status": 200,
       "owner": "finance-ops",
       "risk": "high",
       "source": "PostgreSQL read_model.workbench_snapshots; no app Mongo, no request-path rebuild",
-      "frontend_refs": ["web/src/features/workbench/api.ts"],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
       "contract_cases": {
-        "query": ["month"],
+        "query": [
+          "month"
+        ],
         "body": null,
-        "status": [200, 400, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated; single month snapshot only",
         "empty_result": "missing snapshot returns 404 read_model_not_found",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -1430,19 +2213,37 @@
       "id": "workbench-ignored-read-model",
       "method": "GET",
       "path": "/api/workbench/ignored",
-      "query": {"month": "${WORKBENCH_MONTH}"},
+      "query": {
+        "month": "${WORKBENCH_MONTH}"
+      },
       "expected_status": 200,
       "owner": "finance-ops",
       "risk": "high",
       "source": "PostgreSQL read_model.workbench_snapshots ignored_rows projection; no app Mongo",
-      "frontend_refs": ["web/src/features/workbench/api.ts"],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
       "contract_cases": {
-        "query": ["month"],
+        "query": [
+          "month"
+        ],
         "body": null,
-        "status": [200, 400, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated; bounded by monthly ignored_rows read model",
-        "empty_result": {"rows": []},
+        "empty_result": {
+          "rows": []
+        },
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
       "explain_diffs": [
@@ -1455,52 +2256,94 @@
       "id": "workbench-read-model-status",
       "method": "GET",
       "path": "/api/workbench/read-model/status",
-      "query": {"month": "${WORKBENCH_MONTH}"},
+      "query": {
+        "month": "${WORKBENCH_MONTH}"
+      },
       "expected_status": 200,
       "owner": "finance-ops",
       "risk": "high",
       "source": "PostgreSQL read_model.workbench_snapshots status only; no app Mongo",
-      "frontend_refs": ["web/src/features/workbench/api.ts"],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
       "contract_cases": {
-        "query": ["month"],
+        "query": [
+          "month"
+        ],
         "body": null,
-        "status": [200, 400, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "missing snapshot returns 404 read_model_not_found",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
-      "explain_diffs": ["$.read_model_status.*", "date_format:$.read_model_status.*"]
+      "explain_diffs": [
+        "$.read_model_status.*",
+        "date_format:$.read_model_status.*"
+      ]
     },
     {
       "id": "workbench-row-detail-read-model",
       "method": "GET",
       "path": "/api/workbench/rows/${WORKBENCH_ROW_ID}",
-      "query": {"month": "${WORKBENCH_MONTH}"},
+      "query": {
+        "month": "${WORKBENCH_MONTH}"
+      },
       "expected_status": 200,
       "owner": "finance-ops",
       "risk": "high",
       "source": "PostgreSQL read_model.workbench_rows row payload; sensitive values sanitized",
-      "frontend_refs": ["web/src/features/workbench/api.ts"],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
       "contract_cases": {
-        "query": ["month"],
+        "query": [
+          "month"
+        ],
         "body": null,
-        "status": [200, 400, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "missing row returns 404 workbench_row_not_found",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
-      "explain_diffs": ["$.row.read_model_status.*", "date_format:$.row.*"]
+      "explain_diffs": [
+        "$.row.read_model_status.*",
+        "date_format:$.row.*"
+      ]
     },
     {
       "id": "workbench-confirm-link-write-command",
       "method": "POST",
       "path": "/api/workbench/actions/confirm-link",
-      "headers": {"Content-Type": "application/json"},
+      "headers": {
+        "Content-Type": "application/json"
+      },
       "body": {
         "month": "${WORKBENCH_MONTH}",
-        "row_ids": ["${WORKBENCH_ROW_ID}"],
+        "row_ids": [
+          "${WORKBENCH_ROW_ID}"
+        ],
         "expected_version": 1,
         "idempotency_key": "${WORKBENCH_IDEMPOTENCY_KEY}",
         "note": "shadow validation"
@@ -1509,26 +2352,54 @@
       "owner": "finance-ops",
       "risk": "high",
       "source": "PostgreSQL transactional workbench write command + job/outbox read-model invalidation; isolated fixture data only",
-      "frontend_refs": ["web/src/features/workbench/api.ts"],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
       "contract_cases": {
         "query": [],
-        "body": ["month", "row_ids", "expected_version", "idempotency_key", "note"],
-        "status": [200, 400, 401, 403, 404, 409, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "month",
+          "row_ids",
+          "expected_version",
+          "idempotency_key",
+          "note"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "empty row_ids returns 400 validation error",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
-      "explain_diffs": ["$.request_id", "$.updated_at", "$.read_model_rebuild_task_id", "$.audit_id"]
+      "explain_diffs": [
+        "$.request_id",
+        "$.updated_at",
+        "$.read_model_rebuild_task_id",
+        "$.audit_id"
+      ]
     },
     {
       "id": "workbench-confirm-link-preview-write-command",
       "method": "POST",
       "path": "/api/workbench/actions/confirm-link/preview",
-      "headers": {"Content-Type": "application/json"},
+      "headers": {
+        "Content-Type": "application/json"
+      },
       "body": {
         "month": "${WORKBENCH_MONTH}",
-        "row_ids": ["${WORKBENCH_ROW_ID}"],
+        "row_ids": [
+          "${WORKBENCH_ROW_ID}"
+        ],
         "expected_version": 1,
         "idempotency_key": "${WORKBENCH_IDEMPOTENCY_KEY}"
       },
@@ -1536,23 +2407,46 @@
       "owner": "finance-ops",
       "risk": "high",
       "source": "PostgreSQL transactional workbench write preflight/command validation; isolated fixture data only",
-      "frontend_refs": ["web/src/features/workbench/api.ts"],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
       "contract_cases": {
         "query": [],
-        "body": ["month", "row_ids", "expected_version", "idempotency_key"],
-        "status": [200, 400, 401, 403, 404, 409, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "month",
+          "row_ids",
+          "expected_version",
+          "idempotency_key"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "empty row_ids returns 400 validation error",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
-      "explain_diffs": ["$.preview_id", "$.checks[*].*"]
+      "explain_diffs": [
+        "$.preview_id",
+        "$.checks[*].*"
+      ]
     },
     {
       "id": "workbench-cancel-link-write-command",
       "method": "POST",
       "path": "/api/workbench/actions/cancel-link",
-      "headers": {"Content-Type": "application/json"},
+      "headers": {
+        "Content-Type": "application/json"
+      },
       "body": {
         "month": "${WORKBENCH_MONTH}",
         "relation_id": "${WORKBENCH_RELATION_ID}",
@@ -1564,23 +2458,49 @@
       "owner": "finance-ops",
       "risk": "high",
       "source": "PostgreSQL transactional workbench write command + job/outbox read-model invalidation; isolated fixture data only",
-      "frontend_refs": ["web/src/features/workbench/api.ts"],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
       "contract_cases": {
         "query": [],
-        "body": ["month", "relation_id", "expected_version", "idempotency_key", "reason"],
-        "status": [200, 400, 401, 403, 404, 409, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "month",
+          "relation_id",
+          "expected_version",
+          "idempotency_key",
+          "reason"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "missing relation returns 404 relation_not_found",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
-      "explain_diffs": ["$.request_id", "$.updated_at", "$.read_model_rebuild_task_id", "$.audit_id"]
+      "explain_diffs": [
+        "$.request_id",
+        "$.updated_at",
+        "$.read_model_rebuild_task_id",
+        "$.audit_id"
+      ]
     },
     {
       "id": "workbench-withdraw-link-preview-write-command",
       "method": "POST",
       "path": "/api/workbench/actions/withdraw-link/preview",
-      "headers": {"Content-Type": "application/json"},
+      "headers": {
+        "Content-Type": "application/json"
+      },
       "body": {
         "month": "${WORKBENCH_MONTH}",
         "relation_id": "${WORKBENCH_RELATION_ID}",
@@ -1591,23 +2511,46 @@
       "owner": "finance-ops",
       "risk": "high",
       "source": "PostgreSQL transactional workbench write preflight/command validation; isolated fixture data only",
-      "frontend_refs": ["web/src/features/workbench/api.ts"],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
       "contract_cases": {
         "query": [],
-        "body": ["month", "relation_id", "expected_version", "idempotency_key"],
-        "status": [200, 400, 401, 403, 404, 409, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "month",
+          "relation_id",
+          "expected_version",
+          "idempotency_key"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "missing relation returns 404 relation_not_found",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
-      "explain_diffs": ["$.preview_id", "$.checks[*].*"]
+      "explain_diffs": [
+        "$.preview_id",
+        "$.checks[*].*"
+      ]
     },
     {
       "id": "workbench-withdraw-link-write-command",
       "method": "POST",
       "path": "/api/workbench/actions/withdraw-link",
-      "headers": {"Content-Type": "application/json"},
+      "headers": {
+        "Content-Type": "application/json"
+      },
       "body": {
         "month": "${WORKBENCH_MONTH}",
         "relation_id": "${WORKBENCH_RELATION_ID}",
@@ -1619,26 +2562,54 @@
       "owner": "finance-ops",
       "risk": "high",
       "source": "PostgreSQL transactional workbench write command + job/outbox read-model invalidation; isolated fixture data only",
-      "frontend_refs": ["web/src/features/workbench/api.ts"],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
       "contract_cases": {
         "query": [],
-        "body": ["month", "relation_id", "expected_version", "idempotency_key", "reason"],
-        "status": [200, 400, 401, 403, 404, 409, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "month",
+          "relation_id",
+          "expected_version",
+          "idempotency_key",
+          "reason"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "missing relation returns 404 relation_not_found",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
-      "explain_diffs": ["$.request_id", "$.updated_at", "$.read_model_rebuild_task_id", "$.audit_id"]
+      "explain_diffs": [
+        "$.request_id",
+        "$.updated_at",
+        "$.read_model_rebuild_task_id",
+        "$.audit_id"
+      ]
     },
     {
       "id": "workbench-mark-exception-write-command",
       "method": "POST",
       "path": "/api/workbench/actions/mark-exception",
-      "headers": {"Content-Type": "application/json"},
+      "headers": {
+        "Content-Type": "application/json"
+      },
       "body": {
         "month": "${WORKBENCH_MONTH}",
-        "row_ids": ["${WORKBENCH_ROW_ID}"],
+        "row_ids": [
+          "${WORKBENCH_ROW_ID}"
+        ],
         "exception_code": "manual_exception",
         "expected_version": 1,
         "idempotency_key": "${WORKBENCH_IDEMPOTENCY_KEY}",
@@ -1648,26 +2619,55 @@
       "owner": "finance-ops",
       "risk": "high",
       "source": "PostgreSQL transactional exception write command + job/outbox read-model invalidation; isolated fixture data only",
-      "frontend_refs": ["web/src/features/workbench/api.ts"],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
       "contract_cases": {
         "query": [],
-        "body": ["month", "row_ids", "exception_code", "expected_version", "idempotency_key", "note"],
-        "status": [200, 400, 401, 403, 404, 409, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "month",
+          "row_ids",
+          "exception_code",
+          "expected_version",
+          "idempotency_key",
+          "note"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "empty row_ids returns 400 validation error",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
-      "explain_diffs": ["$.request_id", "$.updated_at", "$.read_model_rebuild_task_id", "$.audit_id"]
+      "explain_diffs": [
+        "$.request_id",
+        "$.updated_at",
+        "$.read_model_rebuild_task_id",
+        "$.audit_id"
+      ]
     },
     {
       "id": "workbench-bank-exception-update-write-command",
       "method": "POST",
       "path": "/api/workbench/actions/update-bank-exception",
-      "headers": {"Content-Type": "application/json"},
+      "headers": {
+        "Content-Type": "application/json"
+      },
       "body": {
         "month": "${WORKBENCH_MONTH}",
-        "row_ids": ["${WORKBENCH_ROW_ID}"],
+        "row_ids": [
+          "${WORKBENCH_ROW_ID}"
+        ],
         "exception_code": "bank_exception",
         "expected_version": 1,
         "idempotency_key": "${WORKBENCH_IDEMPOTENCY_KEY}"
@@ -1676,26 +2676,54 @@
       "owner": "finance-ops",
       "risk": "high",
       "source": "PostgreSQL transactional exception write command + job/outbox read-model invalidation; isolated fixture data only",
-      "frontend_refs": ["web/src/features/workbench/api.ts"],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
       "contract_cases": {
         "query": [],
-        "body": ["month", "row_ids", "exception_code", "expected_version", "idempotency_key"],
-        "status": [200, 400, 401, 403, 404, 409, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "month",
+          "row_ids",
+          "exception_code",
+          "expected_version",
+          "idempotency_key"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "empty row_ids returns 400 validation error",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
-      "explain_diffs": ["$.request_id", "$.updated_at", "$.read_model_rebuild_task_id", "$.audit_id"]
+      "explain_diffs": [
+        "$.request_id",
+        "$.updated_at",
+        "$.read_model_rebuild_task_id",
+        "$.audit_id"
+      ]
     },
     {
       "id": "workbench-oa-bank-exception-write-command",
       "method": "POST",
       "path": "/api/workbench/actions/oa-bank-exception",
-      "headers": {"Content-Type": "application/json"},
+      "headers": {
+        "Content-Type": "application/json"
+      },
       "body": {
         "month": "${WORKBENCH_MONTH}",
-        "row_ids": ["${WORKBENCH_ROW_ID}"],
+        "row_ids": [
+          "${WORKBENCH_ROW_ID}"
+        ],
         "exception_code": "oa_bank_exception",
         "expected_version": 1,
         "idempotency_key": "${WORKBENCH_IDEMPOTENCY_KEY}"
@@ -1704,26 +2732,54 @@
       "owner": "finance-ops",
       "risk": "high",
       "source": "PostgreSQL transactional exception write command + job/outbox read-model invalidation; isolated fixture data only",
-      "frontend_refs": ["web/src/features/workbench/api.ts"],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
       "contract_cases": {
         "query": [],
-        "body": ["month", "row_ids", "exception_code", "expected_version", "idempotency_key"],
-        "status": [200, 400, 401, 403, 404, 409, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "month",
+          "row_ids",
+          "exception_code",
+          "expected_version",
+          "idempotency_key"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "empty row_ids returns 400 validation error",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
-      "explain_diffs": ["$.request_id", "$.updated_at", "$.read_model_rebuild_task_id", "$.audit_id"]
+      "explain_diffs": [
+        "$.request_id",
+        "$.updated_at",
+        "$.read_model_rebuild_task_id",
+        "$.audit_id"
+      ]
     },
     {
       "id": "workbench-confirm-personal-advance-repayment-write-command",
       "method": "POST",
       "path": "/api/workbench/actions/confirm-personal-advance-repayment",
-      "headers": {"Content-Type": "application/json"},
+      "headers": {
+        "Content-Type": "application/json"
+      },
       "body": {
         "month": "${WORKBENCH_MONTH}",
-        "row_ids": ["${WORKBENCH_ROW_ID}"],
+        "row_ids": [
+          "${WORKBENCH_ROW_ID}"
+        ],
         "expected_version": 1,
         "idempotency_key": "${WORKBENCH_IDEMPOTENCY_KEY}"
       },
@@ -1731,26 +2787,53 @@
       "owner": "finance-ops",
       "risk": "high",
       "source": "PostgreSQL transactional special reconciliation command + job/outbox read-model invalidation; isolated fixture data only",
-      "frontend_refs": ["web/src/features/workbench/api.ts"],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
       "contract_cases": {
         "query": [],
-        "body": ["month", "row_ids", "expected_version", "idempotency_key"],
-        "status": [200, 400, 401, 403, 404, 409, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "month",
+          "row_ids",
+          "expected_version",
+          "idempotency_key"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "empty row_ids returns 400 validation error",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
-      "explain_diffs": ["$.request_id", "$.updated_at", "$.read_model_rebuild_task_id", "$.audit_id"]
+      "explain_diffs": [
+        "$.request_id",
+        "$.updated_at",
+        "$.read_model_rebuild_task_id",
+        "$.audit_id"
+      ]
     },
     {
       "id": "workbench-confirm-cash-pass-through-write-command",
       "method": "POST",
       "path": "/api/workbench/actions/confirm-cash-pass-through",
-      "headers": {"Content-Type": "application/json"},
+      "headers": {
+        "Content-Type": "application/json"
+      },
       "body": {
         "month": "${WORKBENCH_MONTH}",
-        "row_ids": ["${WORKBENCH_ROW_ID}"],
+        "row_ids": [
+          "${WORKBENCH_ROW_ID}"
+        ],
         "expected_version": 1,
         "idempotency_key": "${WORKBENCH_IDEMPOTENCY_KEY}"
       },
@@ -1758,26 +2841,53 @@
       "owner": "finance-ops",
       "risk": "high",
       "source": "PostgreSQL transactional special reconciliation command + job/outbox read-model invalidation; isolated fixture data only",
-      "frontend_refs": ["web/src/features/workbench/api.ts"],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
       "contract_cases": {
         "query": [],
-        "body": ["month", "row_ids", "expected_version", "idempotency_key"],
-        "status": [200, 400, 401, 403, 404, 409, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "month",
+          "row_ids",
+          "expected_version",
+          "idempotency_key"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "empty row_ids returns 400 validation error",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
-      "explain_diffs": ["$.request_id", "$.updated_at", "$.read_model_rebuild_task_id", "$.audit_id"]
+      "explain_diffs": [
+        "$.request_id",
+        "$.updated_at",
+        "$.read_model_rebuild_task_id",
+        "$.audit_id"
+      ]
     },
     {
       "id": "workbench-confirm-cash-ticket-purchase-write-command",
       "method": "POST",
       "path": "/api/workbench/actions/confirm-cash-ticket-purchase",
-      "headers": {"Content-Type": "application/json"},
+      "headers": {
+        "Content-Type": "application/json"
+      },
       "body": {
         "month": "${WORKBENCH_MONTH}",
-        "row_ids": ["${WORKBENCH_ROW_ID}"],
+        "row_ids": [
+          "${WORKBENCH_ROW_ID}"
+        ],
         "expected_version": 1,
         "idempotency_key": "${WORKBENCH_IDEMPOTENCY_KEY}"
       },
@@ -1785,26 +2895,53 @@
       "owner": "finance-ops",
       "risk": "high",
       "source": "PostgreSQL transactional special reconciliation command + job/outbox read-model invalidation; isolated fixture data only",
-      "frontend_refs": ["web/src/features/workbench/api.ts"],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
       "contract_cases": {
         "query": [],
-        "body": ["month", "row_ids", "expected_version", "idempotency_key"],
-        "status": [200, 400, 401, 403, 404, 409, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "month",
+          "row_ids",
+          "expected_version",
+          "idempotency_key"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "empty row_ids returns 400 validation error",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
-      "explain_diffs": ["$.request_id", "$.updated_at", "$.read_model_rebuild_task_id", "$.audit_id"]
+      "explain_diffs": [
+        "$.request_id",
+        "$.updated_at",
+        "$.read_model_rebuild_task_id",
+        "$.audit_id"
+      ]
     },
     {
       "id": "workbench-cancel-cash-special-write-command",
       "method": "POST",
       "path": "/api/workbench/actions/cancel-cash-special",
-      "headers": {"Content-Type": "application/json"},
+      "headers": {
+        "Content-Type": "application/json"
+      },
       "body": {
         "month": "${WORKBENCH_MONTH}",
-        "row_ids": ["${WORKBENCH_ROW_ID}"],
+        "row_ids": [
+          "${WORKBENCH_ROW_ID}"
+        ],
         "expected_version": 1,
         "idempotency_key": "${WORKBENCH_IDEMPOTENCY_KEY}",
         "reason": "shadow validation"
@@ -1813,26 +2950,54 @@
       "owner": "finance-ops",
       "risk": "high",
       "source": "PostgreSQL transactional special reconciliation command + job/outbox read-model invalidation; isolated fixture data only",
-      "frontend_refs": ["web/src/features/workbench/api.ts"],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
       "contract_cases": {
         "query": [],
-        "body": ["month", "row_ids", "expected_version", "idempotency_key", "reason"],
-        "status": [200, 400, 401, 403, 404, 409, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "month",
+          "row_ids",
+          "expected_version",
+          "idempotency_key",
+          "reason"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "empty row_ids returns 400 validation error",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
-      "explain_diffs": ["$.request_id", "$.updated_at", "$.read_model_rebuild_task_id", "$.audit_id"]
+      "explain_diffs": [
+        "$.request_id",
+        "$.updated_at",
+        "$.read_model_rebuild_task_id",
+        "$.audit_id"
+      ]
     },
     {
       "id": "workbench-exception-apply-write-command",
       "method": "POST",
       "path": "/api/workbench/exception/apply",
-      "headers": {"Content-Type": "application/json"},
+      "headers": {
+        "Content-Type": "application/json"
+      },
       "body": {
         "month": "${WORKBENCH_MONTH}",
-        "row_ids": ["${WORKBENCH_ROW_ID}"],
+        "row_ids": [
+          "${WORKBENCH_ROW_ID}"
+        ],
         "scenario_code": "manual_exception",
         "expected_version": 1,
         "idempotency_key": "${WORKBENCH_IDEMPOTENCY_KEY}",
@@ -1842,23 +3007,50 @@
       "owner": "finance-ops",
       "risk": "high",
       "source": "PostgreSQL transactional exception application command + job/outbox read-model invalidation; isolated fixture data only",
-      "frontend_refs": ["web/src/features/workbench/api.ts"],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
       "contract_cases": {
         "query": [],
-        "body": ["month", "row_ids", "scenario_code", "expected_version", "idempotency_key", "note"],
-        "status": [200, 400, 401, 403, 404, 409, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "month",
+          "row_ids",
+          "scenario_code",
+          "expected_version",
+          "idempotency_key",
+          "note"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "empty row_ids returns 400 validation error",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
-      "explain_diffs": ["$.request_id", "$.updated_at", "$.read_model_rebuild_task_id", "$.audit_id"]
+      "explain_diffs": [
+        "$.request_id",
+        "$.updated_at",
+        "$.read_model_rebuild_task_id",
+        "$.audit_id"
+      ]
     },
     {
       "id": "workbench-cancel-exception-write-command",
       "method": "POST",
       "path": "/api/workbench/actions/cancel-exception",
-      "headers": {"Content-Type": "application/json"},
+      "headers": {
+        "Content-Type": "application/json"
+      },
       "body": {
         "month": "${WORKBENCH_MONTH}",
         "exception_case_id": "${WORKBENCH_EXCEPTION_CASE_ID}",
@@ -1870,23 +3062,49 @@
       "owner": "finance-ops",
       "risk": "high",
       "source": "PostgreSQL transactional exception cancel command + job/outbox read-model invalidation; isolated fixture data only",
-      "frontend_refs": ["web/src/features/workbench/api.ts"],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
       "contract_cases": {
         "query": [],
-        "body": ["month", "exception_case_id", "expected_version", "idempotency_key", "reason"],
-        "status": [200, 400, 401, 403, 404, 409, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "month",
+          "exception_case_id",
+          "expected_version",
+          "idempotency_key",
+          "reason"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "missing exception_case_id returns 400 validation error",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
-      "explain_diffs": ["$.request_id", "$.updated_at", "$.read_model_rebuild_task_id", "$.audit_id"]
+      "explain_diffs": [
+        "$.request_id",
+        "$.updated_at",
+        "$.read_model_rebuild_task_id",
+        "$.audit_id"
+      ]
     },
     {
       "id": "workbench-ignore-row-write-command",
       "method": "POST",
       "path": "/api/workbench/actions/ignore-row",
-      "headers": {"Content-Type": "application/json"},
+      "headers": {
+        "Content-Type": "application/json"
+      },
       "body": {
         "month": "${WORKBENCH_MONTH}",
         "row_id": "${WORKBENCH_ROW_ID}",
@@ -1898,23 +3116,49 @@
       "owner": "finance-ops",
       "risk": "high",
       "source": "PostgreSQL transactional workbench override command + job/outbox read-model invalidation; isolated fixture data only",
-      "frontend_refs": ["web/src/features/workbench/api.ts"],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
       "contract_cases": {
         "query": [],
-        "body": ["month", "row_id", "expected_version", "idempotency_key", "reason"],
-        "status": [200, 400, 401, 403, 404, 409, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "month",
+          "row_id",
+          "expected_version",
+          "idempotency_key",
+          "reason"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "missing row returns 404 workbench_row_not_found",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
-      "explain_diffs": ["$.request_id", "$.updated_at", "$.read_model_rebuild_task_id", "$.audit_id"]
+      "explain_diffs": [
+        "$.request_id",
+        "$.updated_at",
+        "$.read_model_rebuild_task_id",
+        "$.audit_id"
+      ]
     },
     {
       "id": "workbench-unignore-row-write-command",
       "method": "POST",
       "path": "/api/workbench/actions/unignore-row",
-      "headers": {"Content-Type": "application/json"},
+      "headers": {
+        "Content-Type": "application/json"
+      },
       "body": {
         "month": "${WORKBENCH_MONTH}",
         "row_id": "${WORKBENCH_ROW_ID}",
@@ -1925,17 +3169,40 @@
       "owner": "finance-ops",
       "risk": "high",
       "source": "PostgreSQL transactional workbench override command + job/outbox read-model invalidation; isolated fixture data only",
-      "frontend_refs": ["web/src/features/workbench/api.ts"],
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
       "contract_cases": {
         "query": [],
-        "body": ["month", "row_id", "expected_version", "idempotency_key"],
-        "status": [200, 400, 401, 403, 404, 409, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "month",
+          "row_id",
+          "expected_version",
+          "idempotency_key"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "missing row returns 404 workbench_row_not_found",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
-      "explain_diffs": ["$.request_id", "$.updated_at", "$.read_model_rebuild_task_id", "$.audit_id"]
+      "explain_diffs": [
+        "$.request_id",
+        "$.updated_at",
+        "$.read_model_rebuild_task_id",
+        "$.audit_id"
+      ]
     },
     {
       "id": "workbench-settings-read-contract",
@@ -1944,7 +3211,7 @@
       "expected_status": 200,
       "owner": "platform-ops",
       "risk": "high",
-      "source": "Axum static PostgreSQL/read-model cutover-safe settings projection; no app Mongo, no project sync, no mutation",
+      "source": "Axum PostgreSQL app.settings_profiles/app.project_profiles cutover-safe settings projection; no app Mongo, no project sync, no mutation",
       "frontend_refs": [
         "web/src/features/workbench/api.ts",
         "web/src/pages/SettingsPage.tsx"
@@ -1952,8 +3219,16 @@
       "contract_cases": {
         "query": [],
         "body": null,
-        "status": [200, 401, 403, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": {
           "projects": {
@@ -1990,10 +3265,20 @@
       "contract_cases": {
         "query": [],
         "body": null,
-        "status": [200, 401, 403, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
-        "empty_result": {"job": null},
+        "empty_result": {
+          "job": null
+        },
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
       "explain_diffs": [
@@ -2016,8 +3301,17 @@
       "contract_cases": {
         "query": [],
         "body": null,
-        "status": [200, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "missing/non settings_data_reset task returns 404 settings_data_reset_job_not_found",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -2043,10 +3337,20 @@
       "contract_cases": {
         "query": [],
         "body": null,
-        "status": [200, 401, 403, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
-        "empty_result": {"status": "not_started"},
+        "empty_result": {
+          "status": "not_started"
+        },
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
       "explain_diffs": [
@@ -2055,6 +3359,817 @@
         "date_format:$.last_finished_at",
         "date_format:$.last_synced_at"
       ]
+    },
+    {
+      "id": "background-job-acknowledge-request",
+      "method": "POST",
+      "path": "/api/background-jobs/${BACKGROUND_JOB_ID}/acknowledge",
+      "expected_status": 200,
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL job.worker_tasks + job.worker_task_acknowledgements, audit.events, app.write_idempotency_records; does not mutate core worker task status",
+      "frontend_refs": [
+        "web/src/features/backgroundJobs/api.ts"
+      ],
+      "body": {
+        "idempotency_key": "shadow-background-job-ack-${SHADOW_RUN_ID}",
+        "reason": "shadow validation acknowledgement"
+      },
+      "contract_cases": {
+        "query": [],
+        "body": [
+          "idempotency_key",
+          "reason"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
+        "pagination": "not paginated",
+        "empty_result": "missing or invisible job returns 404 background_job_not_found",
+        "permission_failure": "401 invalid_oa_session or 403 forbidden"
+      },
+      "explain_diffs": [
+        "$.job.acknowledged_at",
+        "$.job.acknowledged_by",
+        "date_format:$.job.created_at",
+        "date_format:$.job.updated_at"
+      ],
+      "isolation_group": "background-job-ack-write",
+      "requires_reseed": true
+    },
+    {
+      "id": "workbench-settings-write-contract",
+      "method": "POST",
+      "path": "/api/workbench/settings",
+      "expected_status": 200,
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.settings_profiles, audit.events and app.write_idempotency_records",
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts",
+        "web/src/pages/SettingsPage.tsx"
+      ],
+      "body": {
+        "idempotency_key": "shadow-settings-save-${SHADOW_RUN_ID}",
+        "completed_project_ids": [],
+        "bank_account_mappings": [],
+        "allowed_usernames": [
+          "${FIN_OPS_SHADOW_OA_USERNAME}"
+        ],
+        "readonly_export_usernames": [],
+        "admin_usernames": [
+          "${FIN_OPS_SHADOW_OA_USERNAME}"
+        ],
+        "workbench_column_layouts": {}
+      },
+      "contract_cases": {
+        "query": [],
+        "body": [
+          "idempotency_key",
+          "completed_project_ids",
+          "bank_account_mappings",
+          "allowed_usernames",
+          "readonly_export_usernames",
+          "admin_usernames",
+          "workbench_column_layouts"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
+        "pagination": "not paginated",
+        "empty_result": "not applicable; write returns legacy settings projection",
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied/admin_only"
+      },
+      "explain_diffs": [
+        "$.projects.*",
+        "$.access_control.*"
+      ],
+      "isolation_group": "settings-write",
+      "requires_reseed": true
+    },
+    {
+      "id": "workbench-settings-project-sync-request",
+      "method": "POST",
+      "path": "/api/workbench/settings/projects/sync",
+      "expected_status": 200,
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL job.worker_tasks/job.outbox_events/audit/idempotency; request queues project sync and does not scan OA source",
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts",
+        "web/src/pages/SettingsPage.tsx"
+      ],
+      "body": {
+        "idempotency_key": "shadow-project-sync-${SHADOW_RUN_ID}",
+        "actor_id": "${FIN_OPS_SHADOW_OA_USERNAME}",
+        "scope": {}
+      },
+      "contract_cases": {
+        "query": [],
+        "body": [
+          "idempotency_key",
+          "actor_id",
+          "scope"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
+        "pagination": "not paginated",
+        "empty_result": "not applicable; request creates queued sync metadata",
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied/admin_only"
+      },
+      "explain_diffs": [
+        "date_format:$.sync.started_at",
+        "date_format:$.sync.finished_at",
+        "$.sync.task_id",
+        "$.sync.outbox_event_id",
+        "$.settings.*"
+      ],
+      "isolation_group": "settings-project-sync-write",
+      "requires_reseed": true,
+      "accepted_production_change": {
+        "change_id": "p0-platform-project-sync-queue-only",
+        "legacy_status": 200,
+        "axum_status": 200,
+        "summary": "Legacy Python scanned OA projects in the request path; Rust only queues project_sync worker command from frozen staging/OA-sync facts.",
+        "source_contract": "docs/architecture/backend-refactor/remaining-api-contracts.md#prompt04-platform-contract-delta-2026-05-17",
+        "owner": "platform-ops",
+        "next_verification": "Runtime shadow must verify queued sync metadata and worker execution evidence without restoring request-path OA scans."
+      }
+    },
+    {
+      "id": "workbench-settings-project-create-request",
+      "method": "POST",
+      "path": "/api/workbench/settings/projects",
+      "expected_status": 200,
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.project_profiles, audit.events and app.write_idempotency_records",
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts",
+        "web/src/pages/SettingsPage.tsx"
+      ],
+      "body": {
+        "idempotency_key": "shadow-settings-project-${SHADOW_RUN_ID}",
+        "actor_id": "${FIN_OPS_SHADOW_OA_USERNAME}",
+        "project_code": "SHADOW-${SHADOW_RUN_ID}",
+        "project_name": "Shadow Project"
+      },
+      "contract_cases": {
+        "query": [],
+        "body": [
+          "idempotency_key",
+          "actor_id",
+          "project_code",
+          "project_name"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
+        "pagination": "not paginated",
+        "empty_result": "not applicable; write returns settings projection",
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied/admin_only"
+      },
+      "explain_diffs": [
+        "$.settings.*"
+      ],
+      "isolation_group": "settings-project-profile-write",
+      "requires_reseed": true,
+      "accepted_production_change": {
+        "change_id": "p0-platform-settings-project-profile-facts",
+        "legacy_status": 200,
+        "axum_status": 200,
+        "summary": "Legacy Python updated app settings snapshot; Rust writes app.project_profiles with audit/idempotency and returns compatible settings projection.",
+        "source_contract": "docs/architecture/backend-refactor/remaining-api-contracts.md#prompt04-platform-contract-delta-2026-05-17",
+        "owner": "platform-ops",
+        "next_verification": "Runtime shadow must verify UUID project id projection and frontend settings compatibility."
+      }
+    },
+    {
+      "id": "workbench-settings-project-delete-request",
+      "method": "DELETE",
+      "path": "/api/workbench/settings/projects/${PROJECT_DELETE_ID}",
+      "expected_status": 200,
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.project_profiles soft-deactivation, audit.events and app.write_idempotency_records",
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts",
+        "web/src/pages/SettingsPage.tsx"
+      ],
+      "body": {
+        "idempotency_key": "shadow-settings-project-delete-${SHADOW_RUN_ID}"
+      },
+      "contract_cases": {
+        "query": [],
+        "body": [
+          "idempotency_key"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
+        "pagination": "not paginated",
+        "empty_result": "missing project returns 404 project_not_found",
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied/admin_only"
+      },
+      "explain_diffs": [
+        "$.settings.*"
+      ],
+      "isolation_group": "settings-project-profile-write",
+      "requires_reseed": true,
+      "accepted_production_change": {
+        "change_id": "p0-platform-settings-project-soft-delete",
+        "legacy_status": 200,
+        "axum_status": 200,
+        "summary": "Legacy Python removed manual project from settings snapshot; Rust soft-deactivates project profile with audit/idempotency.",
+        "source_contract": "docs/architecture/backend-refactor/remaining-api-contracts.md#prompt04-platform-contract-delta-2026-05-17",
+        "owner": "platform-ops",
+        "next_verification": "Runtime shadow must verify deactivated project disappears from active settings projection and remains auditable."
+      }
+    },
+    {
+      "id": "settings-data-reset-create-job",
+      "method": "POST",
+      "path": "/api/workbench/settings/data-reset/jobs",
+      "expected_status": 202,
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL job.worker_tasks/job.outbox_events/audit/idempotency; request queues destructive reset only",
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts",
+        "web/src/pages/SettingsPage.tsx"
+      ],
+      "body": {
+        "idempotency_key": "shadow-data-reset-${SHADOW_RUN_ID}",
+        "action": "reset_invoices",
+        "oa_password": "${FIN_OPS_SHADOW_OA_PASSWORD}",
+        "approval_id": "shadow-approval-${SHADOW_RUN_ID}",
+        "backup_evidence_id": "shadow-backup-${SHADOW_RUN_ID}",
+        "scope": {}
+      },
+      "contract_cases": {
+        "query": [],
+        "body": [
+          "idempotency_key",
+          "action",
+          "oa_password",
+          "approval_id",
+          "backup_evidence_id",
+          "scope"
+        ],
+        "status": [
+          202,
+          400,
+          401,
+          403,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
+        "pagination": "not paginated",
+        "empty_result": "not applicable; request creates queued data reset job",
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied/admin_only"
+      },
+      "explain_diffs": [
+        "$.job.job_id",
+        "date_format:$.job.created_at",
+        "date_format:$.job.updated_at",
+        "$.job.task_id",
+        "$.job.outbox_event_id",
+        "$.job.idempotency_key"
+      ],
+      "isolation_group": "data-reset-job-write",
+      "requires_reseed": true,
+      "accepted_production_change": {
+        "change_id": "p0-platform-data-reset-job-queue-only",
+        "legacy_status": 200,
+        "axum_status": 202,
+        "summary": "Legacy Python data-reset job endpoint executed destructive reset in-process; Rust only queues approved settings_data_reset worker task/outbox.",
+        "source_contract": "docs/architecture/backend-refactor/remaining-api-contracts.md#7-8-data-reset",
+        "owner": "platform-ops",
+        "next_verification": "Runtime shadow must verify queued job envelope, approval/backup evidence, and worker-maintenance execution evidence."
+      }
+    },
+    {
+      "id": "settings-data-reset-direct-queues-job",
+      "method": "POST",
+      "path": "/api/workbench/settings/data-reset",
+      "expected_status": 202,
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL job.worker_tasks/job.outbox_events/audit/idempotency; API route queues settings_data_reset worker task and direct destructive execution remains worker-maintenance only",
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts",
+        "web/src/pages/SettingsPage.tsx"
+      ],
+      "body": {
+        "idempotency_key": "shadow-data-reset-direct-${SHADOW_RUN_ID}",
+        "action": "reset_bank_transactions",
+        "oa_password": "${FIN_OPS_SHADOW_OA_PASSWORD}",
+        "approval_id": "shadow-approval-direct-${SHADOW_RUN_ID}",
+        "backup_evidence_id": "shadow-backup-direct-${SHADOW_RUN_ID}"
+      },
+      "contract_cases": {
+        "query": [],
+        "body": [
+          "idempotency_key",
+          "action",
+          "oa_password",
+          "approval_id",
+          "backup_evidence_id"
+        ],
+        "status": [
+          202,
+          400,
+          401,
+          403,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
+        "pagination": "not paginated",
+        "empty_result": "not applicable; request creates queued data reset job",
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied/admin_only"
+      },
+      "explain_diffs": [
+        "$.job.job_id",
+        "date_format:$.job.created_at",
+        "date_format:$.job.updated_at",
+        "$.job.task_id",
+        "$.job.outbox_event_id",
+        "$.job.idempotency_key"
+      ],
+      "isolation_group": "data-reset-direct-write",
+      "requires_reseed": true,
+      "accepted_production_change": {
+        "change_id": "p0-platform-data-reset-direct-queue-only",
+        "legacy_status": 200,
+        "axum_status": 202,
+        "summary": "Legacy Python direct reset returned completed after destructive request-path execution; Rust API callers receive a queued job and direct execution is worker-maintenance only.",
+        "source_contract": "docs/architecture/backend-refactor/remaining-api-contracts.md#8-post-api-workbench-settings-data-reset",
+        "owner": "platform-ops",
+        "next_verification": "Runtime shadow must verify API caller receives 202 queued job and no destructive reset runs outside maintenance worker context."
+      }
+    },
+    {
+      "id": "projects-hub-list",
+      "method": "GET",
+      "path": "/projects",
+      "expected_status": 200,
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.project_profiles active project hub projection",
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "contract_cases": {
+        "query": [],
+        "body": null,
+        "status": [
+          200,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
+        "pagination": "not paginated",
+        "empty_result": {
+          "projects": [],
+          "total": 0
+        },
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied"
+      },
+      "explain_diffs": [
+        "sorting:$.projects",
+        "date_format:$.projects[*].updated_at"
+      ],
+      "isolation_group": "projects-readonly"
+    },
+    {
+      "id": "project-detail",
+      "method": "GET",
+      "path": "/projects/${PROJECT_ID}",
+      "expected_status": 200,
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.project_profiles project detail projection",
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "contract_cases": {
+        "query": [],
+        "body": null,
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
+        "pagination": "not paginated",
+        "empty_result": "missing project returns 404 project_not_found",
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied"
+      },
+      "explain_diffs": [
+        "$.project.updated_at"
+      ],
+      "isolation_group": "projects-readonly"
+    },
+    {
+      "id": "projects-create-manual-profile",
+      "method": "POST",
+      "path": "/projects",
+      "expected_status": 200,
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.project_profiles, audit.events and app.write_idempotency_records",
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "body": {
+        "idempotency_key": "shadow-project-create-${SHADOW_RUN_ID}",
+        "actor_id": "${FIN_OPS_SHADOW_OA_USERNAME}",
+        "project_code": "SHADOW-HUB-${SHADOW_RUN_ID}",
+        "project_name": "Shadow Hub Project"
+      },
+      "contract_cases": {
+        "query": [],
+        "body": [
+          "idempotency_key",
+          "actor_id",
+          "project_code",
+          "project_name"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
+        "pagination": "not paginated",
+        "empty_result": "not applicable; write returns project and hub",
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied"
+      },
+      "explain_diffs": [
+        "$.project.id",
+        "$.hub.*"
+      ],
+      "isolation_group": "projects-create-write",
+      "requires_reseed": true
+    },
+    {
+      "id": "project-assign-request",
+      "method": "POST",
+      "path": "/projects/assign",
+      "expected_status": 200,
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.project_profiles target project check, target object fact check, app.project_assignments, app.project_profile_events, audit.events and app.write_idempotency_records",
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "body": {
+        "idempotency_key": "shadow-project-assign-${SHADOW_RUN_ID}",
+        "actor_id": "${FIN_OPS_SHADOW_OA_USERNAME}",
+        "object_type": "bank_transaction",
+        "object_id": "${BANK_TRANSACTION_ID}",
+        "project_id": "${PROJECT_ID}"
+      },
+      "contract_cases": {
+        "query": [],
+        "body": [
+          "idempotency_key",
+          "actor_id",
+          "object_type",
+          "object_id",
+          "project_id"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
+        "pagination": "not paginated",
+        "empty_result": "missing project or object returns 404 project_or_object_not_found",
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied"
+      },
+      "explain_diffs": [
+        "$.assignment.assignment_id",
+        "date_format:$.assignment.created_at",
+        "date_format:$.assignments*.created_at"
+      ],
+      "isolation_group": "project-assign-write",
+      "requires_reseed": true
+    },
+    {
+      "id": "ledgers-list",
+      "method": "GET",
+      "path": "/ledgers",
+      "query": {
+        "as_of": "2026-05-17",
+        "status": "open"
+      },
+      "expected_status": 200,
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.ledgers legacy FollowUpLedger projection",
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "contract_cases": {
+        "query": [
+          "view",
+          "as_of",
+          "status"
+        ],
+        "body": null,
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
+        "pagination": "not paginated",
+        "empty_result": {
+          "ledgers": []
+        },
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied"
+      },
+      "explain_diffs": [
+        "sorting:$.ledgers",
+        "date_format:$.ledgers[*].created_at"
+      ],
+      "isolation_group": "ledger-reminder-readonly"
+    },
+    {
+      "id": "ledger-detail",
+      "method": "GET",
+      "path": "/ledgers/${LEDGER_ID}",
+      "expected_status": 200,
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.ledgers + app.ledger_events legacy detail projection",
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "contract_cases": {
+        "query": [],
+        "body": null,
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
+        "pagination": "not paginated",
+        "empty_result": "missing ledger returns 404 ledger_not_found",
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied"
+      },
+      "explain_diffs": [
+        "date_format:$.ledger.created_at",
+        "date_format:$.ledger.events[*].created_at"
+      ],
+      "isolation_group": "ledger-reminder-readonly"
+    },
+    {
+      "id": "reminders-list",
+      "method": "GET",
+      "path": "/reminders",
+      "query": {
+        "as_of": "2026-05-17",
+        "status": "pending"
+      },
+      "expected_status": 200,
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.reminders legacy reminder projection",
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "contract_cases": {
+        "query": [
+          "as_of",
+          "status"
+        ],
+        "body": null,
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
+        "pagination": "not paginated",
+        "empty_result": {
+          "reminders": []
+        },
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied"
+      },
+      "explain_diffs": [
+        "sorting:$.reminders",
+        "date_format:$.reminders[*].created_at"
+      ],
+      "isolation_group": "ledger-reminder-readonly"
+    },
+    {
+      "id": "ledger-status-update",
+      "method": "POST",
+      "path": "/ledgers/${LEDGER_ID}/status",
+      "expected_status": 200,
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.ledgers/app.ledger_events with audit.events and app.write_idempotency_records",
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "body": {
+        "idempotency_key": "shadow-ledger-status-${SHADOW_RUN_ID}",
+        "actor_id": "${FIN_OPS_SHADOW_OA_USERNAME}",
+        "status": "resolved",
+        "note": "shadow validation status update"
+      },
+      "contract_cases": {
+        "query": [],
+        "body": [
+          "idempotency_key",
+          "actor_id",
+          "status",
+          "note"
+        ],
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
+        "pagination": "not paginated",
+        "empty_result": "missing ledger returns 404 ledger_not_found",
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied"
+      },
+      "explain_diffs": [
+        "$.ledger.version",
+        "date_format:$.ledger.events[*].created_at"
+      ],
+      "isolation_group": "ledger-status-write",
+      "requires_reseed": true
+    },
+    {
+      "id": "reminder-run-request",
+      "method": "POST",
+      "path": "/reminders/run",
+      "expected_status": 202,
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL job.worker_tasks/job.outbox_events/audit/idempotency; request queues reminder scan and sends no external notification",
+      "frontend_refs": [
+        "web/src/features/workbench/api.ts"
+      ],
+      "body": {
+        "idempotency_key": "shadow-reminder-run-${SHADOW_RUN_ID}",
+        "actor_id": "${FIN_OPS_SHADOW_OA_USERNAME}",
+        "as_of": "2026-05-17",
+        "days_ahead": 7
+      },
+      "contract_cases": {
+        "query": [],
+        "body": [
+          "idempotency_key",
+          "actor_id",
+          "as_of",
+          "days_ahead"
+        ],
+        "status": [
+          202,
+          400,
+          401,
+          403,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
+        "pagination": "not paginated",
+        "empty_result": "not applicable; request queues reminder run job",
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied"
+      },
+      "explain_diffs": [
+        "$.job.job_id",
+        "date_format:$.job.created_at",
+        "date_format:$.job.updated_at",
+        "$.job.task_id",
+        "$.job.outbox_event_id",
+        "$.sent_reminders"
+      ],
+      "isolation_group": "reminder-run-write",
+      "requires_reseed": true,
+      "accepted_production_change": {
+        "change_id": "p0-platform-reminder-run-queue-only",
+        "legacy_status": 200,
+        "axum_status": 202,
+        "summary": "Legacy Python returned sent_reminders from request-path notification execution; Rust queues reminder.run_requested worker task/outbox.",
+        "source_contract": "docs/architecture/backend-refactor/remaining-api-contracts.md#16-post-reminders-run",
+        "owner": "platform-ops",
+        "next_verification": "Runtime shadow must verify queued job envelope, default days_ahead contract, and worker-side reminder send evidence."
+      }
     },
     {
       "id": "background-job-retry-request",
@@ -2073,9 +4188,23 @@
       },
       "contract_cases": {
         "query": [],
-        "body": ["idempotency_key", "reason"],
-        "status": [202, 400, 401, 403, 404, 409, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "idempotency_key",
+          "reason"
+        ],
+        "status": [
+          202,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "missing job id returns 404 or database unavailable in unseeded fixture",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -2104,9 +4233,24 @@
       },
       "contract_cases": {
         "query": [],
-        "body": ["file_id", "idempotency_key", "reason"],
-        "status": [202, 400, 401, 403, 404, 409, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "file_id",
+          "idempotency_key",
+          "reason"
+        ],
+        "status": [
+          202,
+          400,
+          401,
+          403,
+          404,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "missing file id returns 404 or database unavailable in unseeded fixture",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -2131,8 +4275,17 @@
       "contract_cases": {
         "query": [],
         "body": null,
-        "status": [200, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "unknown session id returns 404 not_found",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -2160,9 +4313,23 @@
       },
       "contract_cases": {
         "query": [],
-        "body": ["scope_month", "idempotency_key", "reason"],
-        "status": [202, 400, 401, 403, 409, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "body": [
+          "scope_month",
+          "idempotency_key",
+          "reason"
+        ],
+        "status": [
+          202,
+          400,
+          401,
+          403,
+          409,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "not applicable; request creates a queued task",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
@@ -2189,12 +4356,28 @@
         "web/src/features/imports/api.ts"
       ],
       "contract_cases": {
-        "query": ["scope_month", "status", "limit"],
+        "query": [
+          "scope_month",
+          "status",
+          "limit"
+        ],
         "body": null,
-        "status": [200, 400, 401, 403, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "limit defaults to 50 and is capped at 200",
-        "empty_result": {"total": 0, "results": []},
+        "empty_result": {
+          "total": 0,
+          "results": []
+        },
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"
       },
       "explain_diffs": [
@@ -2216,8 +4399,18 @@
       "contract_cases": {
         "query": [],
         "body": null,
-        "status": [200, 400, 401, 403, 404, 503],
-        "error_shape": {"error": "string", "message": "string"},
+        "status": [
+          200,
+          400,
+          401,
+          403,
+          404,
+          503
+        ],
+        "error_shape": {
+          "error": "string",
+          "message": "string"
+        },
         "pagination": "not paginated",
         "empty_result": "unknown result id returns 404 not_found",
         "permission_failure": "401 invalid_oa_session or 403 permission_denied"

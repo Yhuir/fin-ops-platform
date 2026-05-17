@@ -1,0 +1,76 @@
+{
+  "report": "p0-data-reset-worker-staging-proof-20260517",
+  "generated_at": "2026-05-17T11:22:48Z",
+  "status": "NO_GO_EXTERNAL_EVIDENCE_REQUIRED",
+  "scope": "settings_data_reset worker staging proof for the queue-only data reset endpoints.",
+  "operator_id": null,
+  "staging_run_id": null,
+  "staging_environment": null,
+  "task_id": null,
+  "data_reset_request_id": null,
+  "approval_id": null,
+  "backup_evidence_id": null,
+  "pitr_evidence_id": null,
+  "checks": [
+    {
+      "check": "real_staging_worker_run",
+      "status": "NO_GO"
+    },
+    {
+      "check": "product_ops_approval",
+      "status": "NO_GO"
+    },
+    {
+      "check": "restorable_backup",
+      "status": "NO_GO"
+    },
+    {
+      "check": "postgres_pitr_restore_drill",
+      "status": "NO_GO"
+    },
+    {
+      "check": "lineage_join",
+      "status": "NO_GO"
+    }
+  ],
+  "blocking_reasons": [
+    "real_staging_worker_run",
+    "product_ops_approval",
+    "restorable_backup",
+    "postgres_pitr_restore_drill",
+    "lineage_join"
+  ],
+  "required_external_evidence": [
+    "real staging worker run",
+    "product/ops approval source of truth",
+    "backup evidence linked to a restorable point",
+    "PostgreSQL PITR or restore drill evidence"
+  ],
+  "lineage_report": {
+    "report": "data-reset-audit-lineage",
+    "generated_at": "2026-05-17T11:22:48Z",
+    "status": "NO_GO_LINEAGE_DATABASE_REQUIRED",
+    "join_sources": [
+      "app.data_reset_requests",
+      "job.worker_tasks",
+      "job.outbox_events",
+      "audit.events",
+      "app.write_idempotency_records",
+      "job.worker_attempts"
+    ],
+    "filters": {
+      "data_reset_request_id": null,
+      "task_id": null,
+      "limit": 20
+    },
+    "rows": [],
+    "gaps": [
+      {
+        "source": "postgres",
+        "status": "missing",
+        "detail": "DATABASE_URL or --database-url is required to query lineage facts."
+      }
+    ]
+  },
+  "go_no_go_reason": "Local code proof exists, but real staging/product/ops approval/backup/PITR evidence is missing or incomplete."
+}

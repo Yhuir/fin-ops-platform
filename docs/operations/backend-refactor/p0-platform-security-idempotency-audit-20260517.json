@@ -1,0 +1,522 @@
+{
+  "report": "p0-platform-security-idempotency-audit-20260517",
+  "generated_at": "2026-05-17T18:55:00+08:00",
+  "scope": "Prompt 5: P0 platform API auth, audit, idempotency, actor-spoofing, and trace validation for Prompt04 platform write operations.",
+  "overall_status": "GO_SECURITY_IDEMPOTENCY_AUDIT_WITH_RUNTIME_GATE_NOT_CHANGED",
+  "runtime_go_asserted_by_this_report": false,
+  "runtime_gate_note": "This Prompt 5 report validates code-level auth/audit/idempotency/trace coverage only. It does not mark runtime shadow GO; runtime cutover remains governed by the Prompt04 runtime shadow reports and staging/worker evidence.",
+  "code_changes": [
+    {
+      "file": "rust/fin-ops-api/crates/fin-ops-api/src/middleware/auth.rs",
+      "change": "POST /api/background-jobs/{job_id}/acknowledge and /retry are now RoutePolicy::Mutate instead of AppSession, so readonly identities are rejected before service/database execution."
+    },
+    {
+      "file": "rust/fin-ops-api/crates/fin-ops-api/src/routes/mod.rs",
+      "change": "Route tests now assert readonly users receive 403 permission_denied for background job acknowledge/retry while mutate users still reach the service/database boundary."
+    },
+    {
+      "file": "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs",
+      "change": "Missing idempotency coverage expanded to all Prompt 5 platform write operations and asserts no repository command capture occurs before missing_idempotency_key is returned."
+    }
+  ],
+  "write_operations": [
+    {
+      "operation": "background_job_acknowledge",
+      "method_path": "POST /api/background-jobs/{job_id}/acknowledge",
+      "permission": {
+        "readonly_rejected": "GO",
+        "admin_or_mutate_allowed": "GO_MUTATE",
+        "evidence": [
+          "routes::tests::readonly_identity_cannot_request_background_job_attention_routes",
+          "routes::tests::mutate_identity_reaches_platform_mutation_writes_before_database",
+          "middleware::auth::tests::platform_settings_writes_require_admin_policy"
+        ]
+      },
+      "actor_spoofing": {
+        "status": "NOT_APPLICABLE_NO_BODY_ACTOR_FIELD",
+        "trusted_actor_evidence": "services::platform_legacy::tests::background_job_acknowledge_records_actor_trace_and_idempotency"
+      },
+      "trace": {
+        "status": "GO",
+        "evidence": "BackgroundJobAcknowledgeCommand carries WriteActor.request_id; repository writes trace_id to worker_task_acknowledgements and audit.events."
+      },
+      "audit": {
+        "status": "GO",
+        "event_type": "background_job.acknowledged"
+      },
+      "outbox": {
+        "status": "NOT_APPLICABLE",
+        "reason": "Acknowledge only records attention dismissal/audit/idempotency and does not queue asynchronous worker side effects."
+      },
+      "idempotency": {
+        "missing_key": "GO",
+        "replay_no_duplicate_side_effects": "GO_SQL_CONTRACT",
+        "evidence": [
+          "services::platform_legacy::tests::platform_writes_reject_missing_idempotency_before_repository_call",
+          "repositories::platform_legacy::tests::idempotency_record_insert_conflicts_only_on_different_payload"
+        ]
+      }
+    },
+    {
+      "operation": "background_job_retry",
+      "method_path": "POST /api/background-jobs/{job_id}/retry",
+      "permission": {
+        "readonly_rejected": "GO",
+        "admin_or_mutate_allowed": "GO_MUTATE",
+        "evidence": [
+          "routes::tests::readonly_identity_cannot_request_background_job_attention_routes",
+          "routes::tests::mutate_identity_reaches_platform_mutation_writes_before_database",
+          "middleware::auth::tests::platform_settings_writes_require_admin_policy"
+        ]
+      },
+      "actor_spoofing": {
+        "status": "NOT_APPLICABLE_NO_BODY_ACTOR_FIELD",
+        "trusted_actor_evidence": "services::platform_legacy::tests::background_job_retry_creates_job_command_with_actor_and_idempotency"
+      },
+      "trace": {
+        "status": "GO",
+        "evidence": "PlatformJobCommand carries WriteActor.request_id; repository writes trace_id to job.worker_tasks, job.outbox_events, and audit.events."
+      },
+      "audit": {
+        "status": "GO",
+        "event_type": "background_job.retry_requested",
+        "evidence": "repositories::platform_legacy::tests::job_command_event_names_match_frozen_platform_contracts"
+      },
+      "outbox": {
+        "status": "GO",
+        "event_type": "worker_task.retry_requested"
+      },
+      "idempotency": {
+        "missing_key": "GO",
+        "replay_no_duplicate_side_effects": "GO_SQL_CONTRACT",
+        "evidence": [
+          "services::platform_legacy::tests::platform_writes_reject_missing_idempotency_before_repository_call",
+          "repositories::platform_legacy::tests::retry_target_queries_require_failed_postgresql_facts",
+          "repositories::platform_legacy::tests::idempotency_record_insert_conflicts_only_on_different_payload"
+        ]
+      },
+      "contract_followup": "Prompt04 contract delta still records that retry currently requires reason; this is not changed by Prompt 5."
+    },
+    {
+      "operation": "workbench_settings_write",
+      "method_path": "POST /api/workbench/settings",
+      "permission": {
+        "readonly_rejected": "GO",
+        "admin_or_mutate_allowed": "GO_ADMIN_ONLY",
+        "evidence": [
+          "routes::tests::readonly_identity_can_read_but_cannot_write",
+          "routes::tests::admin_identity_reaches_platform_admin_writes_before_database",
+          "middleware::auth::tests::platform_settings_writes_require_admin_policy"
+        ]
+      },
+      "actor_spoofing": {
+        "status": "GO_AUTHORITATIVE_ACTOR_IS_SESSION",
+        "body_actor_field": "NOT_APPLICABLE_CURRENT_CONTRACT"
+      },
+      "trace": {
+        "status": "GO",
+        "evidence": "WorkbenchSettingsCommand carries WriteActor.request_id to repository audit writes."
+      },
+      "audit": {
+        "status": "GO",
+        "event_type": "settings.updated"
+      },
+      "outbox": {
+        "status": "NOT_APPLICABLE_CURRENT_CONTRACT",
+        "reason": "Synchronous settings profile write plus audit/idempotency; role sync remains a Prompt04 product decision."
+      },
+      "idempotency": {
+        "missing_key": "GO",
+        "replay_no_duplicate_side_effects": "GO_SQL_CONTRACT",
+        "evidence": [
+          "services::platform_legacy::tests::settings_write_normalizes_lists_and_requires_array_mappings",
+          "services::platform_legacy::tests::platform_writes_reject_missing_idempotency_before_repository_call",
+          "repositories::platform_legacy::tests::idempotency_record_insert_conflicts_only_on_different_payload"
+        ]
+      }
+    },
+    {
+      "operation": "workbench_settings_project_sync",
+      "method_path": "POST /api/workbench/settings/projects/sync",
+      "permission": {
+        "readonly_rejected": "GO",
+        "admin_or_mutate_allowed": "GO_ADMIN_ONLY",
+        "evidence": [
+          "routes::tests::admin_identity_reaches_platform_admin_writes_before_database",
+          "middleware::auth::tests::platform_settings_writes_require_admin_policy"
+        ]
+      },
+      "actor_spoofing": {
+        "status": "GO_AUTHORITATIVE_ACTOR_IS_SESSION",
+        "evidence": "services::platform_legacy::tests::platform_async_commands_use_trusted_actor_and_trace_not_body_actor"
+      },
+      "trace": {
+        "status": "GO",
+        "evidence": "PlatformJobCommand carries WriteActor.request_id into job/audit/outbox records."
+      },
+      "audit": {
+        "status": "GO",
+        "event_type": "project_sync.requested"
+      },
+      "outbox": {
+        "status": "GO",
+        "event_type": "project.sync_requested"
+      },
+      "idempotency": {
+        "missing_key": "GO",
+        "replay_no_duplicate_side_effects": "GO_SQL_CONTRACT",
+        "evidence": [
+          "services::platform_legacy::tests::platform_writes_reject_missing_idempotency_before_repository_call",
+          "repositories::platform_legacy::tests::job_command_event_names_match_frozen_platform_contracts",
+          "repositories::platform_legacy::tests::idempotency_record_insert_conflicts_only_on_different_payload"
+        ]
+      }
+    },
+    {
+      "operation": "settings_project_create",
+      "method_path": "POST /api/workbench/settings/projects",
+      "permission": {
+        "readonly_rejected": "GO",
+        "admin_or_mutate_allowed": "GO_ADMIN_ONLY",
+        "evidence": [
+          "routes::tests::admin_identity_reaches_platform_admin_writes_before_database",
+          "middleware::auth::tests::platform_settings_writes_require_admin_policy"
+        ]
+      },
+      "actor_spoofing": {
+        "status": "GO_AUTHORITATIVE_ACTOR_IS_SESSION",
+        "evidence": "routes::tests::admin_identity_reaches_platform_admin_writes_before_database sends spoofed actor_id but service uses trusted_actor"
+      },
+      "trace": {
+        "status": "GO",
+        "evidence": "ProjectProfileCommand carries WriteActor.request_id to audit/idempotency writes."
+      },
+      "audit": {
+        "status": "GO",
+        "event_type": "project_profile.upserted"
+      },
+      "outbox": {
+        "status": "NOT_APPLICABLE_CURRENT_CONTRACT"
+      },
+      "idempotency": {
+        "missing_key": "GO",
+        "replay_no_duplicate_side_effects": "GO_SQL_CONTRACT",
+        "evidence": [
+          "services::platform_legacy::tests::platform_writes_reject_missing_idempotency_before_repository_call",
+          "repositories::platform_legacy::tests::idempotency_record_insert_conflicts_only_on_different_payload"
+        ]
+      }
+    },
+    {
+      "operation": "settings_project_delete",
+      "method_path": "DELETE /api/workbench/settings/projects/{project_id}",
+      "permission": {
+        "readonly_rejected": "GO",
+        "admin_or_mutate_allowed": "GO_ADMIN_ONLY",
+        "evidence": [
+          "middleware::auth::tests::platform_settings_writes_require_admin_policy"
+        ]
+      },
+      "actor_spoofing": {
+        "status": "NOT_APPLICABLE_NO_BODY_ACTOR_FIELD"
+      },
+      "trace": {
+        "status": "GO",
+        "evidence": "ProjectDeleteCommand carries WriteActor.request_id to audit/idempotency writes."
+      },
+      "audit": {
+        "status": "GO",
+        "event_type": "project_profile.deactivated"
+      },
+      "outbox": {
+        "status": "NOT_APPLICABLE_CURRENT_CONTRACT"
+      },
+      "idempotency": {
+        "missing_key": "GO",
+        "replay_no_duplicate_side_effects": "GO_SQL_CONTRACT",
+        "evidence": [
+          "services::platform_legacy::tests::platform_writes_reject_missing_idempotency_before_repository_call",
+          "repositories::platform_legacy::tests::idempotency_record_insert_conflicts_only_on_different_payload"
+        ]
+      }
+    },
+    {
+      "operation": "projects_create_manual_profile",
+      "method_path": "POST /projects",
+      "permission": {
+        "readonly_rejected": "GO",
+        "admin_or_mutate_allowed": "GO_ADMIN_ONLY",
+        "evidence": [
+          "routes::tests::admin_identity_reaches_platform_admin_writes_before_database",
+          "middleware::auth::tests::platform_settings_writes_require_admin_policy"
+        ]
+      },
+      "actor_spoofing": {
+        "status": "GO_AUTHORITATIVE_ACTOR_IS_SESSION",
+        "evidence": "routes::tests::admin_identity_reaches_platform_admin_writes_before_database sends spoofed actor_id but service uses trusted_actor"
+      },
+      "trace": {
+        "status": "GO",
+        "evidence": "ProjectProfileCommand carries WriteActor.request_id to audit/idempotency writes."
+      },
+      "audit": {
+        "status": "GO",
+        "event_type": "project_profile.upserted"
+      },
+      "outbox": {
+        "status": "NOT_APPLICABLE_CURRENT_CONTRACT"
+      },
+      "idempotency": {
+        "missing_key": "GO",
+        "replay_no_duplicate_side_effects": "GO_SQL_CONTRACT",
+        "evidence": [
+          "services::platform_legacy::tests::platform_writes_reject_missing_idempotency_before_repository_call",
+          "repositories::platform_legacy::tests::idempotency_record_insert_conflicts_only_on_different_payload"
+        ]
+      }
+    },
+    {
+      "operation": "project_assign",
+      "method_path": "POST /projects/assign",
+      "permission": {
+        "readonly_rejected": "GO",
+        "admin_or_mutate_allowed": "GO_MUTATE",
+        "evidence": [
+          "routes::tests::readonly_identity_cannot_request_platform_mutation_routes",
+          "routes::tests::mutate_identity_reaches_platform_mutation_writes_before_database"
+        ]
+      },
+      "actor_spoofing": {
+        "status": "GO_AUTHORITATIVE_ACTOR_IS_SESSION",
+        "evidence": "routes::tests::mutate_identity_reaches_platform_mutation_writes_before_database sends spoofed actor_id; service receives trusted_actor from route"
+      },
+      "trace": {
+        "status": "GO",
+        "evidence": "ProjectAssignmentCommand carries WriteActor.request_id to audit/idempotency writes."
+      },
+      "audit": {
+        "status": "GO",
+        "event_type": "project.assigned"
+      },
+      "outbox": {
+        "status": "NOT_APPLICABLE_CURRENT_CONTRACT"
+      },
+      "idempotency": {
+        "missing_key": "GO",
+        "replay_no_duplicate_side_effects": "GO_SQL_CONTRACT",
+        "evidence": [
+          "services::platform_legacy::tests::platform_writes_reject_missing_idempotency_before_repository_call",
+          "repositories::platform_legacy::tests::idempotency_record_insert_conflicts_only_on_different_payload"
+        ]
+      }
+    },
+    {
+      "operation": "ledger_status_update",
+      "method_path": "POST /ledgers/{ledger_id}/status",
+      "permission": {
+        "readonly_rejected": "GO",
+        "admin_or_mutate_allowed": "GO_MUTATE",
+        "evidence": [
+          "routes::tests::readonly_identity_cannot_request_platform_mutation_routes",
+          "routes::tests::mutate_identity_reaches_platform_mutation_writes_before_database"
+        ]
+      },
+      "actor_spoofing": {
+        "status": "GO_AUTHORITATIVE_ACTOR_IS_SESSION",
+        "evidence": "routes::tests::mutate_identity_reaches_platform_mutation_writes_before_database sends spoofed actor_id; service receives trusted_actor from route"
+      },
+      "trace": {
+        "status": "GO",
+        "evidence": "LedgerStatusCommand carries WriteActor.request_id to audit/idempotency writes."
+      },
+      "audit": {
+        "status": "GO",
+        "event_type": "ledger.status_changed"
+      },
+      "outbox": {
+        "status": "NOT_APPLICABLE_CURRENT_CONTRACT"
+      },
+      "idempotency": {
+        "missing_key": "GO",
+        "replay_no_duplicate_side_effects": "GO_SQL_CONTRACT",
+        "evidence": [
+          "services::platform_legacy::tests::platform_writes_reject_missing_idempotency_before_repository_call",
+          "repositories::platform_legacy::tests::idempotency_record_insert_conflicts_only_on_different_payload"
+        ]
+      }
+    },
+    {
+      "operation": "reminder_run",
+      "method_path": "POST /reminders/run",
+      "permission": {
+        "readonly_rejected": "GO",
+        "admin_or_mutate_allowed": "GO_MUTATE",
+        "evidence": [
+          "routes::tests::readonly_identity_cannot_request_platform_mutation_routes",
+          "routes::tests::mutate_identity_reaches_platform_mutation_writes_before_database",
+          "middleware::auth::tests::platform_settings_writes_require_admin_policy"
+        ]
+      },
+      "actor_spoofing": {
+        "status": "GO_AUTHORITATIVE_ACTOR_IS_SESSION",
+        "evidence": "services::platform_legacy::tests::platform_async_commands_use_trusted_actor_and_trace_not_body_actor"
+      },
+      "trace": {
+        "status": "GO",
+        "evidence": "PlatformJobCommand carries WriteActor.request_id into job/audit/outbox records."
+      },
+      "audit": {
+        "status": "GO",
+        "event_type": "reminder.run_requested"
+      },
+      "outbox": {
+        "status": "GO",
+        "event_type": "reminder.run_requested"
+      },
+      "idempotency": {
+        "missing_key": "GO",
+        "replay_no_duplicate_side_effects": "GO_SQL_CONTRACT",
+        "evidence": [
+          "services::platform_legacy::tests::platform_writes_reject_missing_idempotency_before_repository_call",
+          "repositories::platform_legacy::tests::job_command_event_names_match_frozen_platform_contracts",
+          "repositories::platform_legacy::tests::idempotency_record_insert_conflicts_only_on_different_payload"
+        ]
+      }
+    },
+    {
+      "operation": "data_reset_create_job",
+      "method_path": "POST /api/workbench/settings/data-reset/jobs",
+      "permission": {
+        "readonly_rejected": "GO",
+        "admin_or_mutate_allowed": "GO_ADMIN_ONLY",
+        "evidence": [
+          "routes::tests::admin_identity_reaches_platform_admin_writes_before_database",
+          "middleware::auth::tests::platform_settings_writes_require_admin_policy"
+        ]
+      },
+      "actor_spoofing": {
+        "status": "GO_AUTHORITATIVE_ACTOR_IS_SESSION"
+      },
+      "trace": {
+        "status": "GO",
+        "evidence": "PlatformJobCommand carries WriteActor.request_id into job/audit/outbox records."
+      },
+      "audit": {
+        "status": "GO",
+        "event_type": "data_reset.requested"
+      },
+      "outbox": {
+        "status": "GO",
+        "event_type": "data_reset.requested"
+      },
+      "idempotency": {
+        "missing_key": "GO",
+        "replay_no_duplicate_side_effects": "GO_SQL_CONTRACT",
+        "evidence": [
+          "services::platform_legacy::tests::platform_writes_reject_missing_idempotency_before_repository_call",
+          "services::platform_legacy::tests::data_reset_requires_password_but_never_persists_it",
+          "repositories::platform_legacy::tests::job_command_event_names_match_frozen_platform_contracts",
+          "repositories::platform_legacy::tests::idempotency_record_insert_conflicts_only_on_different_payload"
+        ]
+      },
+      "secret_handling": {
+        "status": "GO",
+        "evidence": "services::platform_legacy::tests::data_reset_requires_password_but_never_persists_it"
+      }
+    },
+    {
+      "operation": "data_reset_direct_queue",
+      "method_path": "POST /api/workbench/settings/data-reset",
+      "permission": {
+        "readonly_rejected": "GO",
+        "admin_or_mutate_allowed": "GO_ADMIN_ONLY",
+        "evidence": [
+          "routes::tests::admin_identity_reaches_platform_admin_writes_before_database",
+          "middleware::auth::tests::platform_settings_writes_require_admin_policy"
+        ]
+      },
+      "actor_spoofing": {
+        "status": "GO_AUTHORITATIVE_ACTOR_IS_SESSION"
+      },
+      "trace": {
+        "status": "GO",
+        "evidence": "PlatformJobCommand carries WriteActor.request_id into job/audit/outbox records."
+      },
+      "audit": {
+        "status": "GO",
+        "event_type": "data_reset.requested"
+      },
+      "outbox": {
+        "status": "GO",
+        "event_type": "data_reset.requested"
+      },
+      "idempotency": {
+        "missing_key": "GO",
+        "replay_no_duplicate_side_effects": "GO_SQL_CONTRACT",
+        "evidence": [
+          "services::platform_legacy::tests::platform_writes_reject_missing_idempotency_before_repository_call",
+          "services::platform_legacy::tests::data_reset_and_reminder_runs_create_async_jobs_without_request_path_side_effects",
+          "repositories::platform_legacy::tests::job_command_event_names_match_frozen_platform_contracts",
+          "repositories::platform_legacy::tests::idempotency_record_insert_conflicts_only_on_different_payload"
+        ]
+      },
+      "direct_execution": "API remains queue-only and does not execute destructive reset in the request path."
+    }
+  ],
+  "route_sql_or_repository_business_rules_introduced": false,
+  "remaining_followups": [
+    {
+      "area": "background_job_retry_contract",
+      "status": "RECORDED_PROMPT04_FOLLOWUP",
+      "detail": "Prompt04 contract delta still records Rust retry requires reason while legacy Python allowed reason-less retry. Prompt 5 did not broaden this contract."
+    },
+    {
+      "area": "settings_role_sync",
+      "status": "NEEDS_PRODUCT_DECISION_RECORDED_IN_PROMPT04_DELTA",
+      "detail": "Whether settings write should synchronously change admin/readonly lists or queue an identity-governance job remains a product/ops decision."
+    },
+    {
+      "area": "runtime_revalidation",
+      "status": "REQUIRED_BEFORE_CUTOVER",
+      "detail": "Because background job acknowledge/retry permission tightened from AppSession to Mutate, the full runtime shadow/security suite should be rerun before production traffic cutover."
+    }
+  ],
+  "verification": [
+    {
+      "command": "cd rust/fin-ops-api && cargo test platform_legacy --workspace",
+      "status": "GO",
+      "result": "33 passed; 0 failed."
+    },
+    {
+      "command": "cd rust/fin-ops-api && cargo test auth --workspace",
+      "status": "GO",
+      "result": "4 passed; 0 failed."
+    },
+    {
+      "command": "cd rust/fin-ops-api && cargo fmt --all --check",
+      "status": "GO",
+      "result": "No rustfmt diff."
+    },
+    {
+      "command": "cd rust/fin-ops-api && cargo check --workspace",
+      "status": "GO",
+      "result": "Finished dev profile successfully."
+    },
+    {
+      "command": "cd rust/fin-ops-api && cargo test --workspace",
+      "status": "GO",
+      "result": "148 passed; 0 failed."
+    }
+  ],
+  "go_standard": {
+    "all_platform_writes_have_auth_audit_idempotency_trace_tests_or_reasons": "GO",
+    "readonly_rejected_for_all_listed_write_operations": "GO",
+    "admin_or_mutate_permission_passes": "GO",
+    "body_actor_cannot_forge_authoritative_actor": "GO_OR_NOT_APPLICABLE_NO_BODY_ACTOR_FIELD",
+    "trace_id_enters_command_audit_or_outbox": "GO",
+    "audit_event_names_correct": "GO",
+    "idempotency_missing_and_replay_semantics": "GO_CODE_AND_SQL_CONTRACT",
+    "no_route_sql_or_repository_business_rule_introduced_by_prompt5": "GO",
+    "runtime_go_not_marked_by_security_validation": "GO"
+  }
+}

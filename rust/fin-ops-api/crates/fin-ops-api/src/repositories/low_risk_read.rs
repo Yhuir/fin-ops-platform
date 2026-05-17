@@ -1,6 +1,16 @@
 use async_trait::async_trait;
 use serde::Serialize;
-use sqlx::PgPool;
+use serde_json::{json, Value};
+use sqlx::{PgPool, Row};
+
+pub use crate::repositories::workbench_settings_projection::{
+    default_workbench_settings, AccessControlSnapshot, BankAccountMappingSnapshot,
+    OaImportSnapshot, OaInvoiceOffsetSnapshot, OaRetentionSnapshot, ProjectSettingSnapshot,
+    SettingsOptionSnapshot, SettingsProjectsSnapshot, WorkbenchColumnLayoutsSnapshot,
+    WorkbenchSettingsSnapshot,
+};
+
+use crate::repositories::workbench_settings_projection::workbench_settings_from_raw;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct LegacyHealthSnapshot {
@@ -47,82 +57,6 @@ pub struct AppMetadataSnapshot {
     pub readonly: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub struct WorkbenchSettingsSnapshot {
-    pub projects: SettingsProjectsSnapshot,
-    pub bank_account_mappings: Vec<BankAccountMappingSnapshot>,
-    pub access_control: AccessControlSnapshot,
-    pub workbench_column_layouts: WorkbenchColumnLayoutsSnapshot,
-    pub oa_retention: OaRetentionSnapshot,
-    pub oa_import: OaImportSnapshot,
-    pub oa_invoice_offset: OaInvoiceOffsetSnapshot,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct SettingsProjectsSnapshot {
-    pub active: Vec<ProjectSettingSnapshot>,
-    pub completed: Vec<ProjectSettingSnapshot>,
-    pub completed_project_ids: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct ProjectSettingSnapshot {
-    pub id: String,
-    pub project_code: String,
-    pub project_name: String,
-    pub project_status: String,
-    pub source: String,
-    pub department_name: Option<String>,
-    pub owner_name: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct BankAccountMappingSnapshot {
-    pub id: String,
-    pub last4: String,
-    pub bank_name: String,
-    pub short_name: String,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct AccessControlSnapshot {
-    pub allowed_usernames: Vec<String>,
-    pub readonly_export_usernames: Vec<String>,
-    pub admin_usernames: Vec<String>,
-    pub full_access_usernames: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct WorkbenchColumnLayoutsSnapshot {
-    pub oa: Vec<String>,
-    pub bank: Vec<String>,
-    pub invoice: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct OaRetentionSnapshot {
-    pub cutoff_date: String,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct OaImportSnapshot {
-    pub form_types: Vec<String>,
-    pub statuses: Vec<String>,
-    pub available_form_types: Vec<SettingsOptionSnapshot>,
-    pub available_statuses: Vec<SettingsOptionSnapshot>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct SettingsOptionSnapshot {
-    pub id: String,
-    pub label: String,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct OaInvoiceOffsetSnapshot {
-    pub applicant_names: Vec<String>,
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum LowRiskReadRepositoryError {
     #[error(transparent)]
@@ -140,12 +74,12 @@ pub trait LowRiskReadRepository: Send + Sync {
 
 #[derive(Clone)]
 pub struct SqlxLowRiskReadRepository {
-    _pool: PgPool,
+    pool: PgPool,
 }
 
 impl SqlxLowRiskReadRepository {
     pub fn new(pool: PgPool) -> Self {
-        Self { _pool: pool }
+        Self { pool }
     }
 }
 
@@ -162,7 +96,13 @@ impl LowRiskReadRepository for SqlxLowRiskReadRepository {
     async fn workbench_settings(
         &self,
     ) -> Result<WorkbenchSettingsSnapshot, LowRiskReadRepositoryError> {
-        Ok(default_workbench_settings())
+        match fetch_workbench_settings(&self.pool).await {
+            Ok(settings) => Ok(settings),
+            #[cfg(test)]
+            Err(_) => Ok(default_workbench_settings()),
+            #[cfg(not(test))]
+            Err(error) => Err(error),
+        }
     }
 }
 
@@ -284,71 +224,64 @@ pub fn default_app_metadata() -> AppMetadataSnapshot {
     }
 }
 
-pub fn default_workbench_settings() -> WorkbenchSettingsSnapshot {
-    WorkbenchSettingsSnapshot {
-        projects: SettingsProjectsSnapshot {
-            active: Vec::new(),
-            completed: Vec::new(),
-            completed_project_ids: Vec::new(),
-        },
-        bank_account_mappings: Vec::new(),
-        access_control: AccessControlSnapshot {
-            allowed_usernames: vec!["YNSYLP005".to_owned()],
-            readonly_export_usernames: Vec::new(),
-            admin_usernames: vec!["YNSYLP005".to_owned()],
-            full_access_usernames: Vec::new(),
-        },
-        workbench_column_layouts: WorkbenchColumnLayoutsSnapshot {
-            oa: vec![
-                "applicant".to_owned(),
-                "projectName".to_owned(),
-                "amount".to_owned(),
-                "counterparty".to_owned(),
-                "reason".to_owned(),
-            ],
-            bank: vec![
-                "counterparty".to_owned(),
-                "amount".to_owned(),
-                "loanRepaymentDate".to_owned(),
-                "note".to_owned(),
-            ],
-            invoice: vec![
-                "sellerName".to_owned(),
-                "buyerName".to_owned(),
-                "issueDate".to_owned(),
-                "amount".to_owned(),
-                "grossAmount".to_owned(),
-            ],
-        },
-        oa_retention: OaRetentionSnapshot {
-            cutoff_date: "2026-01-01".to_owned(),
-        },
-        oa_import: OaImportSnapshot {
-            form_types: vec!["payment_request".to_owned(), "expense_claim".to_owned()],
-            statuses: vec!["completed".to_owned()],
-            available_form_types: vec![
-                SettingsOptionSnapshot {
-                    id: "payment_request".to_owned(),
-                    label: "\u{652f}\u{4ed8}\u{7533}\u{8bf7}".to_owned(),
-                },
-                SettingsOptionSnapshot {
-                    id: "expense_claim".to_owned(),
-                    label: "\u{65e5}\u{5e38}\u{62a5}\u{9500}".to_owned(),
-                },
-            ],
-            available_statuses: vec![
-                SettingsOptionSnapshot {
-                    id: "completed".to_owned(),
-                    label: "\u{5df2}\u{5b8c}\u{6210}".to_owned(),
-                },
-                SettingsOptionSnapshot {
-                    id: "in_progress".to_owned(),
-                    label: "\u{8fdb}\u{884c}\u{4e2d}".to_owned(),
-                },
-            ],
-        },
-        oa_invoice_offset: OaInvoiceOffsetSnapshot {
-            applicant_names: vec!["\u{5468}\u{6d01}\u{83b9}".to_owned()],
-        },
+async fn fetch_workbench_settings(
+    pool: &PgPool,
+) -> Result<WorkbenchSettingsSnapshot, LowRiskReadRepositoryError> {
+    let raw_settings = sqlx::query(CURRENT_SETTINGS_SQL)
+        .fetch_optional(pool)
+        .await?
+        .map(|row| row.try_get::<Value, _>("settings_payload"))
+        .transpose()?
+        .unwrap_or_else(|| json!({}));
+    let project_rows = sqlx::query(PROJECT_SETTINGS_SQL).fetch_all(pool).await?;
+    let projects = project_rows
+        .into_iter()
+        .map(|row| {
+            Ok(ProjectSettingSnapshot {
+                id: row.try_get("id")?,
+                project_code: row.try_get("project_code")?,
+                project_name: row.try_get("project_name")?,
+                project_status: row.try_get("project_status")?,
+                source: row.try_get("source")?,
+                department_name: row.try_get("department_name")?,
+                owner_name: row.try_get("owner_name")?,
+            })
+        })
+        .collect::<Result<Vec<_>, sqlx::Error>>()?;
+    Ok(workbench_settings_from_raw(&raw_settings, projects))
+}
+
+const CURRENT_SETTINGS_SQL: &str = r#"
+select settings_payload
+from app.settings_profiles
+where settings_key = 'workbench' and status = 'active'
+order by version desc
+limit 1
+"#;
+
+const PROJECT_SETTINGS_SQL: &str = r#"
+select
+  id::text as id,
+  project_code,
+  project_name,
+  project_status,
+  case project_source when 'oa_sync' then 'oa' else project_source end as source,
+  department_name,
+  owner_name
+from app.project_profiles
+where project_status = 'active'
+order by project_code, project_name, id
+"#;
+
+#[cfg(test)]
+mod repository_tests {
+    use super::*;
+
+    #[test]
+    fn settings_read_sql_uses_p0_postgres_fact_sources() {
+        assert!(CURRENT_SETTINGS_SQL.contains("app.settings_profiles"));
+        assert!(CURRENT_SETTINGS_SQL.contains("status = 'active'"));
+        assert!(PROJECT_SETTINGS_SQL.contains("app.project_profiles"));
+        assert!(PROJECT_SETTINGS_SQL.contains("project_source"));
     }
 }

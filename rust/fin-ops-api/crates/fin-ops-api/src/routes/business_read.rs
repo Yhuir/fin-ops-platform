@@ -1,6 +1,10 @@
 use axum::{
+    body::Body,
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{
+        header::{CONTENT_DISPOSITION, CONTENT_TYPE},
+        StatusCode,
+    },
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -51,6 +55,7 @@ pub fn router() -> Router<AppState> {
             "/api/cost-statistics/export-preview",
             get(get_cost_export_preview),
         )
+        .route("/api/cost-statistics/export", get(get_cost_export))
         .route(
             "/api/cost-statistics/transactions/{transaction_id}",
             get(get_cost_transaction_detail),
@@ -184,6 +189,20 @@ async fn get_cost_export_preview(
     ))
 }
 
+async fn get_cost_export(
+    State(state): State<AppState>,
+    Query(query): Query<CostExportPreviewQuery>,
+) -> Result<Response, BusinessReadApiError> {
+    let file = build_service(&state).get_cost_export_xlsx(query).await?;
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, file.content_type)
+        .header(CONTENT_DISPOSITION, content_disposition(&file.filename))
+        .header("x-fin-ops-export-row-count", file.row_count.to_string())
+        .body(Body::from(file.bytes))
+        .map_err(|_| BusinessReadApiError::DatabaseUnavailable)
+}
+
 async fn get_cost_transaction_detail(
     State(state): State<AppState>,
     Path(transaction_id): Path<String>,
@@ -212,6 +231,23 @@ fn parse_uuid(field: &'static str, value: &str) -> Result<Uuid, BusinessReadApiE
         code: "invalid_uuid",
         message: format!("{field} must be a valid UUID"),
     })
+}
+
+fn content_disposition(filename: &str) -> String {
+    format!("attachment; filename*=UTF-8''{}", percent_encode(filename))
+}
+
+fn percent_encode(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.as_bytes() {
+        let ch = *byte as char;
+        if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '~') {
+            encoded.push(ch);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    encoded
 }
 
 #[derive(Debug)]

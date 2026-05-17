@@ -1,0 +1,288 @@
+{
+  "report": "p0-platform-code-gap-20260517",
+  "generated_at": "2026-05-17T14:48:33+08:00",
+  "scope": "Prompt04 platform API code gap audit and minimal hardening for Rust platform_legacy/task_status modules",
+  "status": "CODE_LAYER_GO_RUNTIME_SHADOW_NO_GO",
+  "source_of_truth": [
+    "AGENTS.md",
+    "README.md",
+    "ARCHITECTURE.md",
+    "docs/architecture/backend-refactor/remaining-api-contracts.md",
+    "docs/exec-plans/active/backend-refactor-progress.md",
+    "docs/operations/backend-refactor/p0-platform-api-implementation-20260517.json",
+    "docs/operations/backend-refactor/p0-platform-shadow-preflight-20260517.md",
+    "docs/operations/backend-refactor/p0-platform-runtime-shadow-20260517.md",
+    "backend/src/fin_ops_platform/app/server.py",
+    "backend/src/fin_ops_platform/services/background_job_service.py",
+    "backend/src/fin_ops_platform/services/ledgers.py",
+    "rust/fin-ops-api/migrations/0009_p0_api_fact_sources.sql",
+    "rust/fin-ops-api/crates/fin-ops-api/src/routes/platform_legacy.rs",
+    "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs",
+    "rust/fin-ops-api/crates/fin-ops-api/src/repositories/platform_legacy.rs",
+    "rust/fin-ops-api/crates/fin-ops-api/src/routes/task_status.rs",
+    "rust/fin-ops-api/crates/fin-ops-api/src/services/task_status.rs",
+    "rust/fin-ops-api/crates/fin-ops-api/src/repositories/task_status.rs"
+  ],
+  "code_changes": [
+    {
+      "area": "background job retry",
+      "change": "POST /api/background-jobs/{job_id}/retry now accepts Idempotency-Key from the trusted HTTP header when the body omits idempotency_key.",
+      "evidence": "routes::tests::background_job_retry_accepts_idempotency_key_header"
+    },
+    {
+      "area": "background job retry permission",
+      "change": "Retry now uses AppSession route policy like the legacy protected Python route and repository retry target SQL checks actor visibility through system visibility, created_by, or owner_user_id.",
+      "evidence": "routes::tests::readonly_identity_can_request_background_job_retry_like_legacy_protected_route"
+    },
+    {
+      "area": "audit/outbox event naming",
+      "change": "Job command audit/outbox event types now use frozen contract mappings instead of operation + '.requested'.",
+      "evidence": "repositories::platform_legacy::tests::job_command_event_names_match_frozen_platform_contracts"
+    }
+  ],
+  "contract_delta": [
+    {
+      "endpoint": "POST /api/workbench/settings/data-reset",
+      "delta": "Rust API remains queue-only and does not execute destructive reset synchronously in the request path.",
+      "reason": "remaining-api-contracts.md freezes direct execution as not production-safe for API callers; worker-maintenance execution is outside this Prompt 1 code-layer scope.",
+      "status": "ACCEPTED_DOCUMENTED_DELTA"
+    }
+  ],
+  "endpoints": [
+    {
+      "method_path": "POST /api/background-jobs/{job_id}/acknowledge",
+      "route_status": "GO routes/platform_legacy.rs",
+      "service_status": "GO PlatformLegacyService::acknowledge_background_job",
+      "repository_status": "GO job.worker_task_acknowledgements + audit.events + app.write_idempotency_records",
+      "auth_status": "GO AppSession; actor from AuthenticatedSession only",
+      "audit_status": "GO background_job.acknowledged",
+      "idempotency_status": "GO required body/header key recorded in app.write_idempotency_records",
+      "tests_status": "GO service actor/idempotency test and repository fact-source tests",
+      "remaining_gap": "runtime shadow still NO_GO because Python/Axum base URLs, seeded IDs, OA token/password, trusted-header confirmation, and DATABASE_URL are absent"
+    },
+    {
+      "method_path": "POST /api/background-jobs/{job_id}/retry",
+      "route_status": "GO routes/platform_legacy.rs",
+      "service_status": "GO PlatformLegacyService::retry_background_job",
+      "repository_status": "GO job.worker_tasks visibility/retryable check + job.worker_tasks/job.outbox_events/audit.events/app.write_idempotency_records write path",
+      "auth_status": "GO AppSession with repository actor visibility check; actor from AuthenticatedSession only",
+      "audit_status": "GO background_job.retry_requested",
+      "idempotency_status": "GO body or Idempotency-Key header required; replay_mode participates in request_payload conflict detection",
+      "tests_status": "GO targeted route/service/repository tests cover permission, header idempotency, and event names",
+      "remaining_gap": "runtime shadow still NO_GO; retry lineage worker replay execution remains asynchronous and outside request path"
+    },
+    {
+      "method_path": "POST /api/workbench/settings",
+      "route_status": "GO routes/platform_legacy.rs",
+      "service_status": "GO settings normalization and expected_version validation",
+      "repository_status": "GO app.settings_profiles + app.project_profiles projection + audit/idempotency",
+      "auth_status": "GO Admin route policy; actor from AuthenticatedSession only",
+      "audit_status": "GO settings.updated",
+      "idempotency_status": "GO required key with request_payload conflict detection",
+      "tests_status": "GO settings normalization and admin policy tests",
+      "remaining_gap": "runtime shadow and production settings backfill remain NO_GO"
+    },
+    {
+      "method_path": "POST /api/workbench/settings/projects/sync",
+      "route_status": "GO routes/platform_legacy.rs",
+      "service_status": "GO queued project sync command; no request-path OA scan",
+      "repository_status": "GO job.worker_tasks/job.outbox_events/audit.events/app.write_idempotency_records",
+      "auth_status": "GO Admin route policy; actor from AuthenticatedSession only",
+      "audit_status": "GO project_sync.requested",
+      "idempotency_status": "GO required key with deterministic project sync scope",
+      "tests_status": "GO event-name mapping and admin policy tests",
+      "remaining_gap": "runtime shadow and real staging project sync worker remain NO_GO"
+    },
+    {
+      "method_path": "POST /api/workbench/settings/projects",
+      "route_status": "GO routes/platform_legacy.rs",
+      "service_status": "GO project profile validation",
+      "repository_status": "GO app.project_profiles + audit/idempotency",
+      "auth_status": "GO Admin route policy; actor from AuthenticatedSession only",
+      "audit_status": "GO project_profile.upserted",
+      "idempotency_status": "GO required key with request_payload conflict detection",
+      "tests_status": "GO project create service and admin policy coverage",
+      "remaining_gap": "runtime shadow still NO_GO"
+    },
+    {
+      "method_path": "DELETE /api/workbench/settings/projects/{project_id}",
+      "route_status": "GO routes/platform_legacy.rs",
+      "service_status": "GO delete command validation",
+      "repository_status": "GO soft deactivation in app.project_profiles + audit/idempotency",
+      "auth_status": "GO Admin route policy; actor from AuthenticatedSession only",
+      "audit_status": "GO project_profile.deactivated",
+      "idempotency_status": "GO required key with expected_version conflict semantics",
+      "tests_status": "GO admin policy and repository conflict semantics covered by code-path tests/static checks",
+      "remaining_gap": "runtime shadow still NO_GO"
+    },
+    {
+      "method_path": "POST /api/workbench/settings/data-reset/jobs",
+      "route_status": "GO routes/platform_legacy.rs",
+      "service_status": "GO validates action, approval_id, backup_evidence_id, non-empty oa_password presence; does not persist oa_password",
+      "repository_status": "GO app.data_reset_requests + job.worker_tasks/job.outbox_events/audit.events/app.write_idempotency_records",
+      "auth_status": "GO Admin route policy; actor from AuthenticatedSession only",
+      "audit_status": "GO data_reset.requested",
+      "idempotency_status": "GO required key; same active action conflict returns settings_data_reset_job_running",
+      "tests_status": "GO data reset async/password tests and event-name mapping tests",
+      "remaining_gap": "real OA password verification adapter, destructive worker execution, and runtime shadow remain NO_GO"
+    },
+    {
+      "method_path": "POST /api/workbench/settings/data-reset",
+      "route_status": "GO routes/platform_legacy.rs",
+      "service_status": "GO queue-only API behavior",
+      "repository_status": "GO same queue/audit/outbox/idempotency path as data-reset/jobs",
+      "auth_status": "GO Admin route policy; actor from AuthenticatedSession only",
+      "audit_status": "GO data_reset.requested",
+      "idempotency_status": "GO required key; same active action conflict returns settings_data_reset_job_running",
+      "tests_status": "GO data reset async/password tests and event-name mapping tests",
+      "remaining_gap": "documented contract delta: no synchronous destructive reset in API request path; runtime shadow still NO_GO"
+    },
+    {
+      "method_path": "GET|POST /projects",
+      "route_status": "GO routes/platform_legacy.rs",
+      "service_status": "GO list hub and manual create use cases",
+      "repository_status": "GO app.project_profiles + audit/idempotency for POST",
+      "auth_status": "GO GET AppSession, POST Admin; actor from AuthenticatedSession only on POST",
+      "audit_status": "GO POST project_profile.upserted; GET none",
+      "idempotency_status": "GO POST required key; GET none",
+      "tests_status": "GO route inventory, admin policy, project service tests",
+      "remaining_gap": "runtime shadow still NO_GO"
+    },
+    {
+      "method_path": "POST /projects/assign",
+      "route_status": "GO routes/platform_legacy.rs",
+      "service_status": "GO validates supported object_type and UUID ids",
+      "repository_status": "GO app.project_assignments + app.project_profile_events + audit/idempotency",
+      "auth_status": "GO Mutate route policy; actor from AuthenticatedSession only",
+      "audit_status": "GO project.assigned",
+      "idempotency_status": "GO required key with expected_version in request_payload",
+      "tests_status": "GO service object type/UUID test and route inventory coverage",
+      "remaining_gap": "runtime shadow seeded object/project IDs still missing"
+    },
+    {
+      "method_path": "GET /projects/{project_id}",
+      "route_status": "GO routes/platform_legacy.rs",
+      "service_status": "GO project detail use case",
+      "repository_status": "GO read-only app.project_profiles",
+      "auth_status": "GO AppSession",
+      "audit_status": "GO none required for read",
+      "idempotency_status": "GO none required for read",
+      "tests_status": "GO route inventory and project read path coverage",
+      "remaining_gap": "runtime shadow seeded PROJECT_ID still missing"
+    },
+    {
+      "method_path": "GET /ledgers",
+      "route_status": "GO routes/platform_legacy.rs",
+      "service_status": "GO query validation",
+      "repository_status": "GO read-only app.ledgers with legacy all/overdue/due/open fallback semantics",
+      "auth_status": "GO AppSession",
+      "audit_status": "GO none required for read",
+      "idempotency_status": "GO none required for read",
+      "tests_status": "GO repository legacy view semantics test",
+      "remaining_gap": "runtime shadow still NO_GO"
+    },
+    {
+      "method_path": "GET /ledgers/{ledger_id}",
+      "route_status": "GO routes/platform_legacy.rs",
+      "service_status": "GO ledger detail use case",
+      "repository_status": "GO read-only app.ledgers + app.ledger_events",
+      "auth_status": "GO AppSession",
+      "audit_status": "GO none required for read",
+      "idempotency_status": "GO none required for read",
+      "tests_status": "GO route inventory and repository fact-source tests",
+      "remaining_gap": "runtime shadow seeded LEDGER_ID still missing"
+    },
+    {
+      "method_path": "POST /ledgers/{ledger_id}/status",
+      "route_status": "GO routes/platform_legacy.rs",
+      "service_status": "GO validates actor_id, legacy status, date and expected_version",
+      "repository_status": "GO app.ledgers + app.ledger_events + audit/idempotency",
+      "auth_status": "GO Mutate route policy; actor from AuthenticatedSession only",
+      "audit_status": "GO ledger.status_changed",
+      "idempotency_status": "GO required key with expected_version conflict semantics",
+      "tests_status": "GO ledger status service test",
+      "remaining_gap": "runtime shadow seeded LEDGER_ID still missing"
+    },
+    {
+      "method_path": "GET /reminders",
+      "route_status": "GO routes/platform_legacy.rs",
+      "service_status": "GO query validation",
+      "repository_status": "GO read-only app.reminders",
+      "auth_status": "GO AppSession",
+      "audit_status": "GO none required for read",
+      "idempotency_status": "GO none required for read",
+      "tests_status": "GO route inventory and repository fact-source tests",
+      "remaining_gap": "runtime shadow still NO_GO"
+    },
+    {
+      "method_path": "POST /reminders/run",
+      "route_status": "GO routes/platform_legacy.rs",
+      "service_status": "GO validates as_of and non-negative days_ahead before queueing",
+      "repository_status": "GO app.reminder_runs + job.worker_tasks/job.outbox_events/audit.events/app.write_idempotency_records",
+      "auth_status": "GO Mutate route policy; actor from AuthenticatedSession only",
+      "audit_status": "GO reminder.run_requested",
+      "idempotency_status": "GO required key with deterministic scope id",
+      "tests_status": "GO negative days_ahead test, async job test, event-name mapping test",
+      "remaining_gap": "runtime shadow still NO_GO; no external notifications in request path"
+    }
+  ],
+  "targeted_validation": [
+    {
+      "command": "cargo test -p fin-ops-api background_job_retry -- --nocapture",
+      "cwd": "rust/fin-ops-api",
+      "status": "GO",
+      "result": "3 passed; covers retry route permission, Idempotency-Key header injection, and service command actor/idempotency."
+    },
+    {
+      "command": "cargo test -p fin-ops-api repositories::platform_legacy::tests::job_command_event_names_match_frozen_platform_contracts -- --nocapture",
+      "cwd": "rust/fin-ops-api",
+      "status": "GO",
+      "result": "1 passed; covers frozen audit/outbox event names for platform job commands."
+    },
+    {
+      "command": "cargo test -p fin-ops-api middleware::auth::tests::platform_settings_writes_require_admin_policy -- --nocapture",
+      "cwd": "rust/fin-ops-api",
+      "status": "GO",
+      "result": "1 passed; covers Admin routes, background job AppSession routes, and Mutate project assignment route."
+    }
+  ],
+  "required_final_validation": [
+    {
+      "command": "cargo fmt --all --check",
+      "cwd": "rust/fin-ops-api",
+      "status": "GO",
+      "result": "passed"
+    },
+    {
+      "command": "cargo check --workspace",
+      "cwd": "rust/fin-ops-api",
+      "status": "GO",
+      "result": "Finished dev profile; exit code 0"
+    },
+    {
+      "command": "cargo test --workspace",
+      "cwd": "rust/fin-ops-api",
+      "status": "GO",
+      "result": "133 passed; 0 failed; doc tests 0 passed"
+    },
+    {
+      "command": "python3 scripts/tools/api_route_inventory_check.py --inventory docs/dev/api-fixtures/api-route-inventory.json --write-route-level-inventory docs/dev/api-fixtures/api-route-inventory-route-level.json --shadow-fixture docs/dev/api-fixtures/business-api-shadow-validation.json",
+      "cwd": ".",
+      "status": "GO",
+      "result": "status GO; schema_errors, missing routes, missing frontend refs, missing readiness entrypoints, and shadow_coverage_errors all empty"
+    }
+  ],
+  "remaining_blockers": [
+    "Runtime shadow remains NO_GO because FIN_OPS_SHADOW_PYTHON_BASE_URL and FIN_OPS_SHADOW_AXUM_BASE_URL are absent.",
+    "No DATABASE_URL was provided for local Axum/PostgreSQL shadow service or seed probes.",
+    "Runtime fixture variables BACKGROUND_JOB_ID, BANK_TRANSACTION_ID, LEDGER_ID, PROJECT_ID, PROJECT_DELETE_ID, SHADOW_RUN_ID, FIN_OPS_SHADOW_OA_TOKEN and FIN_OPS_SHADOW_OA_PASSWORD are absent.",
+    "Axum trusted-header auth mode is not confirmed for runtime shadow.",
+    "No real PostgreSQL 16/17 staging migration dry-run, NATS/Worker replay, read-model rebuild, PITR, load, alert, or rollback evidence was produced in this Prompt 1 code-layer task."
+  ],
+  "go_standard_assessment": {
+    "code_layer_go": true,
+    "runtime_shadow_go": false,
+    "production_cutover_go": false,
+    "notes": "Required code-layer validation completed. This must not be used as Prompt04 runtime shadow or production cutover GO evidence."
+  }
+}

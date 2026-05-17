@@ -1,0 +1,1400 @@
+{
+  "report": "p0-platform-shadow-preflight-20260517",
+  "report_date": "20260517",
+  "generated_at": "2026-05-17T11:33:34Z",
+  "status": "GO",
+  "scope": "P0 platform API runtime shadow preflight for Python vs Axum contract equivalence.",
+  "fixture": "/Users/yu/Desktop/fin-ops-platform/docs/dev/api-fixtures/business-api-shadow-validation.json",
+  "platform_endpoint_ids": [
+    "background-job-acknowledge-request",
+    "workbench-settings-write-contract",
+    "workbench-settings-project-sync-request",
+    "workbench-settings-project-create-request",
+    "workbench-settings-project-delete-request",
+    "settings-data-reset-create-job",
+    "settings-data-reset-direct-queues-job",
+    "projects-hub-list",
+    "projects-create-manual-profile",
+    "project-detail",
+    "project-assign-request",
+    "ledgers-list",
+    "ledger-detail",
+    "ledger-status-update",
+    "reminders-list",
+    "reminder-run-request"
+  ],
+  "inputs": {
+    "python_base_url_present": true,
+    "axum_base_url_present": true,
+    "database_url_env": "DATABASE_URL",
+    "database_url_present": true,
+    "target_postgres_major_min": 16
+  },
+  "fixture_validation": {
+    "status": "GO",
+    "fixture": "/Users/yu/Desktop/fin-ops-platform/docs/dev/api-fixtures/business-api-shadow-validation.json",
+    "filters": {
+      "endpoint_ids": [
+        "background-job-acknowledge-request",
+        "ledger-detail",
+        "ledger-status-update",
+        "ledgers-list",
+        "project-assign-request",
+        "project-detail",
+        "projects-create-manual-profile",
+        "projects-hub-list",
+        "reminder-run-request",
+        "reminders-list",
+        "settings-data-reset-create-job",
+        "settings-data-reset-direct-queues-job",
+        "workbench-settings-project-create-request",
+        "workbench-settings-project-delete-request",
+        "workbench-settings-project-sync-request",
+        "workbench-settings-write-contract"
+      ],
+      "risks": []
+    },
+    "endpoint_count": 16,
+    "endpoint_ids": [
+      "background-job-acknowledge-request",
+      "workbench-settings-write-contract",
+      "workbench-settings-project-sync-request",
+      "workbench-settings-project-create-request",
+      "workbench-settings-project-delete-request",
+      "settings-data-reset-create-job",
+      "settings-data-reset-direct-queues-job",
+      "projects-hub-list",
+      "project-detail",
+      "projects-create-manual-profile",
+      "project-assign-request",
+      "ledgers-list",
+      "ledger-detail",
+      "reminders-list",
+      "ledger-status-update",
+      "reminder-run-request"
+    ],
+    "permission_failure_endpoint_ids": [
+      "background-job-acknowledge-request",
+      "workbench-settings-write-contract",
+      "workbench-settings-project-sync-request",
+      "workbench-settings-project-create-request",
+      "workbench-settings-project-delete-request",
+      "settings-data-reset-create-job",
+      "settings-data-reset-direct-queues-job",
+      "projects-hub-list",
+      "project-detail",
+      "projects-create-manual-profile",
+      "project-assign-request",
+      "ledgers-list",
+      "ledger-detail",
+      "reminders-list",
+      "ledger-status-update",
+      "reminder-run-request"
+    ],
+    "endpoint_errors": []
+  },
+  "fixture_static_checks": {
+    "status": "GO",
+    "conflict_count": 0,
+    "conflicts": []
+  },
+  "runtime_variables": {
+    "status": "GO",
+    "required_count": 11,
+    "missing_count": 0,
+    "missing_variables": [],
+    "required_variables": [
+      {
+        "name": "BACKGROUND_JOB_ID",
+        "present": true,
+        "classification": "fixture_fact_id",
+        "used_by": [
+          "background-job-acknowledge-request"
+        ]
+      },
+      {
+        "name": "BANK_TRANSACTION_ID",
+        "present": true,
+        "classification": "fixture_fact_id",
+        "used_by": [
+          "project-assign-request"
+        ]
+      },
+      {
+        "name": "FIN_OPS_SHADOW_OA_DISPLAY_NAME",
+        "present": true,
+        "classification": "runtime_parameter",
+        "used_by": [
+          "background-job-acknowledge-request",
+          "ledger-detail",
+          "ledger-status-update",
+          "ledgers-list",
+          "project-assign-request",
+          "project-detail",
+          "projects-create-manual-profile",
+          "projects-hub-list",
+          "reminder-run-request",
+          "reminders-list",
+          "settings-data-reset-create-job",
+          "settings-data-reset-direct-queues-job",
+          "workbench-settings-project-create-request",
+          "workbench-settings-project-delete-request",
+          "workbench-settings-project-sync-request",
+          "workbench-settings-write-contract"
+        ]
+      },
+      {
+        "name": "FIN_OPS_SHADOW_OA_PASSWORD",
+        "present": true,
+        "classification": "auth_secret",
+        "used_by": [
+          "settings-data-reset-create-job",
+          "settings-data-reset-direct-queues-job"
+        ]
+      },
+      {
+        "name": "FIN_OPS_SHADOW_OA_TOKEN",
+        "present": true,
+        "classification": "auth_secret",
+        "used_by": [
+          "background-job-acknowledge-request",
+          "ledger-detail",
+          "ledger-status-update",
+          "ledgers-list",
+          "project-assign-request",
+          "project-detail",
+          "projects-create-manual-profile",
+          "projects-hub-list",
+          "reminder-run-request",
+          "reminders-list",
+          "settings-data-reset-create-job",
+          "settings-data-reset-direct-queues-job",
+          "workbench-settings-project-create-request",
+          "workbench-settings-project-delete-request",
+          "workbench-settings-project-sync-request",
+          "workbench-settings-write-contract"
+        ]
+      },
+      {
+        "name": "FIN_OPS_SHADOW_OA_USERNAME",
+        "present": true,
+        "classification": "runtime_parameter",
+        "used_by": [
+          "background-job-acknowledge-request",
+          "ledger-detail",
+          "ledger-status-update",
+          "ledgers-list",
+          "project-assign-request",
+          "project-detail",
+          "projects-create-manual-profile",
+          "projects-hub-list",
+          "reminder-run-request",
+          "reminders-list",
+          "settings-data-reset-create-job",
+          "settings-data-reset-direct-queues-job",
+          "workbench-settings-project-create-request",
+          "workbench-settings-project-delete-request",
+          "workbench-settings-project-sync-request",
+          "workbench-settings-write-contract"
+        ]
+      },
+      {
+        "name": "FIN_OPS_SHADOW_OA_USER_ID",
+        "present": true,
+        "classification": "fixture_fact_id",
+        "used_by": [
+          "background-job-acknowledge-request",
+          "ledger-detail",
+          "ledger-status-update",
+          "ledgers-list",
+          "project-assign-request",
+          "project-detail",
+          "projects-create-manual-profile",
+          "projects-hub-list",
+          "reminder-run-request",
+          "reminders-list",
+          "settings-data-reset-create-job",
+          "settings-data-reset-direct-queues-job",
+          "workbench-settings-project-create-request",
+          "workbench-settings-project-delete-request",
+          "workbench-settings-project-sync-request",
+          "workbench-settings-write-contract"
+        ]
+      },
+      {
+        "name": "LEDGER_ID",
+        "present": true,
+        "classification": "fixture_fact_id",
+        "used_by": [
+          "ledger-detail",
+          "ledger-status-update"
+        ]
+      },
+      {
+        "name": "PROJECT_DELETE_ID",
+        "present": true,
+        "classification": "fixture_fact_id",
+        "used_by": [
+          "workbench-settings-project-delete-request"
+        ]
+      },
+      {
+        "name": "PROJECT_ID",
+        "present": true,
+        "classification": "fixture_fact_id",
+        "used_by": [
+          "project-assign-request",
+          "project-detail"
+        ]
+      },
+      {
+        "name": "SHADOW_RUN_ID",
+        "present": true,
+        "classification": "run_correlation",
+        "used_by": [
+          "background-job-acknowledge-request",
+          "ledger-status-update",
+          "project-assign-request",
+          "projects-create-manual-profile",
+          "reminder-run-request",
+          "settings-data-reset-create-job",
+          "settings-data-reset-direct-queues-job",
+          "workbench-settings-project-create-request",
+          "workbench-settings-project-delete-request",
+          "workbench-settings-project-sync-request",
+          "workbench-settings-write-contract"
+        ]
+      }
+    ]
+  },
+  "seed_requirements": {
+    "status": "GO",
+    "database_url_env": "DATABASE_URL",
+    "database_url_present": true,
+    "requirements": [
+      {
+        "variable": "BACKGROUND_JOB_ID",
+        "kind": "postgres_fact_id",
+        "description": "System-visible worker task that can be acknowledged by the shadow actor.",
+        "present": true,
+        "used_by": [
+          "background-job-acknowledge-request"
+        ],
+        "postgres_fact_source": "job.worker_tasks",
+        "legacy_fact_source": "legacy Python background job store / app-health background job projection",
+        "probe": {
+          "status": "GO",
+          "command": {
+            "command": [
+              "psql",
+              "postgres://[REDACTED]",
+              "-X",
+              "-v",
+              "ON_ERROR_STOP=1",
+              "-At",
+              "-c",
+              "select exists (select 1 from job.worker_tasks where id = 'ad1d1132-89ff-5198-a096-f45ad3573ed1'::uuid and visibility = 'system')"
+            ],
+            "status": "GO",
+            "returncode": 0,
+            "stdout": "t",
+            "stderr": ""
+          },
+          "expected_stdout": "t",
+          "stdout": "t",
+          "stderr": ""
+        }
+      },
+      {
+        "variable": "BANK_TRANSACTION_ID",
+        "kind": "postgres_fact_id",
+        "description": "Bank transaction target for project assignment object validation.",
+        "present": true,
+        "used_by": [
+          "project-assign-request"
+        ],
+        "postgres_fact_source": "app.bank_transactions",
+        "legacy_fact_source": "legacy Python bank transaction / workbench row state",
+        "probe": {
+          "status": "GO",
+          "command": {
+            "command": [
+              "psql",
+              "postgres://[REDACTED]",
+              "-X",
+              "-v",
+              "ON_ERROR_STOP=1",
+              "-At",
+              "-c",
+              "select exists (select 1 from app.bank_transactions where id = '210895bd-e515-5488-bae8-1815b291a72f'::uuid)"
+            ],
+            "status": "GO",
+            "returncode": 0,
+            "stdout": "t",
+            "stderr": ""
+          },
+          "expected_stdout": "t",
+          "stdout": "t",
+          "stderr": ""
+        }
+      },
+      {
+        "variable": "FIN_OPS_SHADOW_OA_DISPLAY_NAME",
+        "kind": "runtime_parameter",
+        "description": "Runtime variable required by platform shadow fixture.",
+        "present": true,
+        "used_by": [
+          "background-job-acknowledge-request",
+          "ledger-detail",
+          "ledger-status-update",
+          "ledgers-list",
+          "project-assign-request",
+          "project-detail",
+          "projects-create-manual-profile",
+          "projects-hub-list",
+          "reminder-run-request",
+          "reminders-list",
+          "settings-data-reset-create-job",
+          "settings-data-reset-direct-queues-job",
+          "workbench-settings-project-create-request",
+          "workbench-settings-project-delete-request",
+          "workbench-settings-project-sync-request",
+          "workbench-settings-write-contract"
+        ],
+        "postgres_fact_source": null,
+        "legacy_fact_source": null,
+        "probe": {
+          "status": "SKIPPED_NOT_POSTGRES_FACT",
+          "reason": "variable is not a PostgreSQL fact id"
+        }
+      },
+      {
+        "variable": "FIN_OPS_SHADOW_OA_PASSWORD",
+        "kind": "auth_secret",
+        "description": "Password sample required by legacy data reset contract; must come from the accepted shadow OA identity source.",
+        "present": true,
+        "used_by": [
+          "settings-data-reset-create-job",
+          "settings-data-reset-direct-queues-job"
+        ],
+        "postgres_fact_source": null,
+        "legacy_fact_source": "legacy Python data reset password validation path",
+        "probe": {
+          "status": "SKIPPED_NOT_POSTGRES_FACT",
+          "reason": "variable is not a PostgreSQL fact id"
+        }
+      },
+      {
+        "variable": "FIN_OPS_SHADOW_OA_TOKEN",
+        "kind": "auth_secret",
+        "description": "Bearer token or equivalent local shadow token accepted by both Python and Axum.",
+        "present": true,
+        "used_by": [
+          "background-job-acknowledge-request",
+          "ledger-detail",
+          "ledger-status-update",
+          "ledgers-list",
+          "project-assign-request",
+          "project-detail",
+          "projects-create-manual-profile",
+          "projects-hub-list",
+          "reminder-run-request",
+          "reminders-list",
+          "settings-data-reset-create-job",
+          "settings-data-reset-direct-queues-job",
+          "workbench-settings-project-create-request",
+          "workbench-settings-project-delete-request",
+          "workbench-settings-project-sync-request",
+          "workbench-settings-write-contract"
+        ],
+        "postgres_fact_source": null,
+        "legacy_fact_source": "legacy Python OA/session auth configuration",
+        "probe": {
+          "status": "SKIPPED_NOT_POSTGRES_FACT",
+          "reason": "variable is not a PostgreSQL fact id"
+        }
+      },
+      {
+        "variable": "FIN_OPS_SHADOW_OA_USERNAME",
+        "kind": "runtime_parameter",
+        "description": "Runtime variable required by platform shadow fixture.",
+        "present": true,
+        "used_by": [
+          "background-job-acknowledge-request",
+          "ledger-detail",
+          "ledger-status-update",
+          "ledgers-list",
+          "project-assign-request",
+          "project-detail",
+          "projects-create-manual-profile",
+          "projects-hub-list",
+          "reminder-run-request",
+          "reminders-list",
+          "settings-data-reset-create-job",
+          "settings-data-reset-direct-queues-job",
+          "workbench-settings-project-create-request",
+          "workbench-settings-project-delete-request",
+          "workbench-settings-project-sync-request",
+          "workbench-settings-write-contract"
+        ],
+        "postgres_fact_source": null,
+        "legacy_fact_source": null,
+        "probe": {
+          "status": "SKIPPED_NOT_POSTGRES_FACT",
+          "reason": "variable is not a PostgreSQL fact id"
+        }
+      },
+      {
+        "variable": "FIN_OPS_SHADOW_OA_USER_ID",
+        "kind": "fixture_fact_id",
+        "description": "Runtime variable required by platform shadow fixture.",
+        "present": true,
+        "used_by": [
+          "background-job-acknowledge-request",
+          "ledger-detail",
+          "ledger-status-update",
+          "ledgers-list",
+          "project-assign-request",
+          "project-detail",
+          "projects-create-manual-profile",
+          "projects-hub-list",
+          "reminder-run-request",
+          "reminders-list",
+          "settings-data-reset-create-job",
+          "settings-data-reset-direct-queues-job",
+          "workbench-settings-project-create-request",
+          "workbench-settings-project-delete-request",
+          "workbench-settings-project-sync-request",
+          "workbench-settings-write-contract"
+        ],
+        "postgres_fact_source": null,
+        "legacy_fact_source": null,
+        "probe": {
+          "status": "SKIPPED_NOT_POSTGRES_FACT",
+          "reason": "variable is not a PostgreSQL fact id"
+        }
+      },
+      {
+        "variable": "LEDGER_ID",
+        "kind": "postgres_fact_id",
+        "description": "Open ledger target for detail and status update shadow cases.",
+        "present": true,
+        "used_by": [
+          "ledger-detail",
+          "ledger-status-update"
+        ],
+        "postgres_fact_source": "app.ledgers",
+        "legacy_fact_source": "legacy Python ledger service state",
+        "probe": {
+          "status": "GO",
+          "command": {
+            "command": [
+              "psql",
+              "postgres://[REDACTED]",
+              "-X",
+              "-v",
+              "ON_ERROR_STOP=1",
+              "-At",
+              "-c",
+              "select exists (select 1 from app.ledgers where id = '29c2554f-c6a3-5b69-9fb1-bf0cd431ec91'::uuid and status = 'open')"
+            ],
+            "status": "GO",
+            "returncode": 0,
+            "stdout": "t",
+            "stderr": ""
+          },
+          "expected_stdout": "t",
+          "stdout": "t",
+          "stderr": ""
+        }
+      },
+      {
+        "variable": "PROJECT_DELETE_ID",
+        "kind": "postgres_fact_id",
+        "description": "Dedicated active project profile used only by the project deletion shadow case.",
+        "present": true,
+        "used_by": [
+          "workbench-settings-project-delete-request"
+        ],
+        "postgres_fact_source": "app.project_profiles",
+        "legacy_fact_source": "legacy Python workbench settings projects payload",
+        "probe": {
+          "status": "GO",
+          "command": {
+            "command": [
+              "psql",
+              "postgres://[REDACTED]",
+              "-X",
+              "-v",
+              "ON_ERROR_STOP=1",
+              "-At",
+              "-c",
+              "select exists (select 1 from app.project_profiles where id = '35d0adce-fb9b-5b11-ae5b-78e4ecf90262'::uuid and project_status = 'active')"
+            ],
+            "status": "GO",
+            "returncode": 0,
+            "stdout": "t",
+            "stderr": ""
+          },
+          "expected_stdout": "t",
+          "stdout": "t",
+          "stderr": ""
+        }
+      },
+      {
+        "variable": "PROJECT_ID",
+        "kind": "postgres_fact_id",
+        "description": "Active project profile used by project detail, project deletion, and project assignment.",
+        "present": true,
+        "used_by": [
+          "project-assign-request",
+          "project-detail"
+        ],
+        "postgres_fact_source": "app.project_profiles",
+        "legacy_fact_source": "legacy Python workbench settings projects payload",
+        "probe": {
+          "status": "GO",
+          "command": {
+            "command": [
+              "psql",
+              "postgres://[REDACTED]",
+              "-X",
+              "-v",
+              "ON_ERROR_STOP=1",
+              "-At",
+              "-c",
+              "select exists (select 1 from app.project_profiles where id = 'fce10a80-61e0-520c-88dc-57f34e5afaf0'::uuid and project_status = 'active')"
+            ],
+            "status": "GO",
+            "returncode": 0,
+            "stdout": "t",
+            "stderr": ""
+          },
+          "expected_stdout": "t",
+          "stdout": "t",
+          "stderr": ""
+        }
+      },
+      {
+        "variable": "SHADOW_RUN_ID",
+        "kind": "run_correlation",
+        "description": "Unique run suffix used to keep idempotency keys and generated project codes isolated.",
+        "present": true,
+        "used_by": [
+          "background-job-acknowledge-request",
+          "ledger-status-update",
+          "project-assign-request",
+          "projects-create-manual-profile",
+          "reminder-run-request",
+          "settings-data-reset-create-job",
+          "settings-data-reset-direct-queues-job",
+          "workbench-settings-project-create-request",
+          "workbench-settings-project-delete-request",
+          "workbench-settings-project-sync-request",
+          "workbench-settings-write-contract"
+        ],
+        "postgres_fact_source": null,
+        "legacy_fact_source": "shadow validation runtime only",
+        "probe": {
+          "status": "SKIPPED_NOT_POSTGRES_FACT",
+          "reason": "variable is not a PostgreSQL fact id"
+        }
+      }
+    ],
+    "failed_probe_count": 0,
+    "skipped_probe_count": 6
+  },
+  "auth_requirements": {
+    "status": "GO",
+    "source": "Axum middleware/auth.rs and Python app/auth.py",
+    "checks": [
+      {
+        "code": "PRIMARY_AUTH_HEADERS_PRESENT",
+        "status": "GO",
+        "missing_headers": []
+      },
+      {
+        "code": "PRIMARY_AUTH_TOKEN_VARIABLE_PRESENT",
+        "status": "GO",
+        "header_uses_shadow_token": true,
+        "required_variable": "FIN_OPS_SHADOW_OA_TOKEN"
+      },
+      {
+        "code": "OA_IDENTITY_SOURCE_ACCEPTED",
+        "status": "GO",
+        "source": "production_oa_test_user",
+        "accepted_values": [
+          "production_oa_test_user",
+          "staging_oa",
+          "test_oa"
+        ],
+        "environment": "production",
+        "description": "Production OA test user accepted by updated Prompt04 Prompt 2 criteria; business writes must still target isolated local/shadow Python and Axum data stores.",
+        "risk_note": "Production OA test user is accepted only as identity/password source; Python and Axum business writes must remain isolated from production data."
+      },
+      {
+        "code": "AXUM_TRUSTED_PERMISSION_PRESENT",
+        "status": "GO",
+        "required_permission": "finops:app:view",
+        "configured_permissions": [
+          "finops:app:view"
+        ]
+      },
+      {
+        "code": "AXUM_ADMIN_USERNAME_PRESENT_FOR_ADMIN_ROUTES",
+        "status": "GO",
+        "admin_route_count": 7,
+        "trusted_username": "test",
+        "accepted_admin_usernames": [
+          "YNSYLP005",
+          "test"
+        ]
+      },
+      {
+        "code": "AXUM_TRUSTED_HEADERS_ADAPTER_CONFIRMED",
+        "status": "GO",
+        "local_env_value": "trusted_headers",
+        "remote_confirmation_env": "FIN_OPS_SHADOW_AXUM_AUTH_MODE_CONFIRMED",
+        "remote_confirmation_value": "trusted_headers",
+        "axum_base_url_present": true
+      }
+    ]
+  },
+  "local_runtime_diagnostics": {
+    "status": "GO",
+    "checks": [
+      {
+        "name": "preflight_script",
+        "status": "GO",
+        "path": "/Users/yu/Desktop/fin-ops-platform/scripts/tools/platform_shadow_preflight.py",
+        "purpose": "repeatable preflight report generation",
+        "blocker_type": "local_fixable"
+      },
+      {
+        "name": "runtime_script",
+        "status": "GO",
+        "path": "/Users/yu/Desktop/fin-ops-platform/scripts/tools/platform_shadow_runtime.py",
+        "purpose": "health-gated runtime shadow execution",
+        "blocker_type": "local_fixable"
+      },
+      {
+        "name": "seed_script",
+        "status": "GO",
+        "path": "/Users/yu/Desktop/fin-ops-platform/scripts/tools/platform_shadow_seed.py",
+        "purpose": "deterministic PostgreSQL seed SQL and env exports",
+        "blocker_type": "local_fixable"
+      },
+      {
+        "name": "legacy_seed_script",
+        "status": "GO",
+        "path": "/Users/yu/Desktop/fin-ops-platform/scripts/tools/platform_shadow_legacy_seed.py",
+        "purpose": "deterministic isolated legacy Python data-dir seed",
+        "blocker_type": "local_fixable"
+      },
+      {
+        "name": "legacy_reload_script",
+        "status": "GO",
+        "path": "/Users/yu/Desktop/fin-ops-platform/scripts/tools/platform_shadow_legacy_reload.py",
+        "purpose": "token-gated reload of the isolated legacy Python shadow process after reseed",
+        "blocker_type": "local_fixable"
+      },
+      {
+        "name": "reseed_hook",
+        "status": "GO",
+        "path": "/Users/yu/Desktop/fin-ops-platform/scripts/tools/platform_shadow_reseed_hook.py",
+        "purpose": "runtime before-group cleanup, PostgreSQL seed, legacy seed, and legacy reload orchestration",
+        "blocker_type": "local_fixable"
+      },
+      {
+        "name": "shadow_validator",
+        "status": "GO",
+        "path": "/Users/yu/Desktop/fin-ops-platform/scripts/tools/api_shadow_validate.py",
+        "purpose": "Python-vs-Axum runtime comparison",
+        "blocker_type": "local_fixable"
+      },
+      {
+        "name": "python_start_script",
+        "status": "GO",
+        "path": "/Users/yu/Desktop/fin-ops-platform/scripts/start-backend.sh",
+        "purpose": "legacy Python shadow service startup",
+        "blocker_type": "local_fixable"
+      },
+      {
+        "name": "seed_output_command",
+        "status": "GO",
+        "command": "python3 scripts/tools/platform_shadow_seed.py --run-id \"$SHADOW_RUN_ID\" --write-sql /tmp/p0-platform-shadow-seed.sql --write-env /tmp/p0-platform-shadow-env.sh",
+        "purpose": "generate deterministic seed SQL/env without applying to PostgreSQL",
+        "blocker_type": "local_fixable"
+      },
+      {
+        "name": "seed_output_artifacts",
+        "status": "GO",
+        "purpose": "persist deterministic seed SQL/env/probe/report output for repeatable runtime shadow runs",
+        "artifacts": [
+          {
+            "name": "seed_sql",
+            "pattern": "/Users/yu/Desktop/fin-ops-platform/docs/operations/backend-refactor/p0-platform-shadow-seed-*.sql",
+            "present": true,
+            "paths": [
+              "/Users/yu/Desktop/fin-ops-platform/docs/operations/backend-refactor/p0-platform-shadow-seed-p0-platform-local.sql"
+            ]
+          },
+          {
+            "name": "seed_env",
+            "pattern": "/Users/yu/Desktop/fin-ops-platform/docs/operations/backend-refactor/p0-platform-shadow-env-*.sh",
+            "present": true,
+            "paths": [
+              "/Users/yu/Desktop/fin-ops-platform/docs/operations/backend-refactor/p0-platform-shadow-env-p0-platform-local.sh"
+            ]
+          },
+          {
+            "name": "seed_probe_sql",
+            "pattern": "/Users/yu/Desktop/fin-ops-platform/docs/operations/backend-refactor/p0-platform-shadow-probe-*.sql",
+            "present": true,
+            "paths": [
+              "/Users/yu/Desktop/fin-ops-platform/docs/operations/backend-refactor/p0-platform-shadow-probe-p0-platform-local.sql"
+            ]
+          },
+          {
+            "name": "seed_report",
+            "pattern": "/Users/yu/Desktop/fin-ops-platform/docs/operations/backend-refactor/p0-platform-shadow-seed-*.json",
+            "present": true,
+            "paths": [
+              "/Users/yu/Desktop/fin-ops-platform/docs/operations/backend-refactor/p0-platform-shadow-seed-20260517.json"
+            ]
+          }
+        ],
+        "blocker_type": "local_fixable"
+      },
+      {
+        "name": "health_probe_commands",
+        "status": "GO",
+        "commands": [
+          {
+            "name": "python_health",
+            "url": "$FIN_OPS_SHADOW_PYTHON_BASE_URL/health",
+            "command": "curl -fsS \"$FIN_OPS_SHADOW_PYTHON_BASE_URL/health\""
+          },
+          {
+            "name": "axum_healthz",
+            "url": "$FIN_OPS_SHADOW_AXUM_BASE_URL/healthz",
+            "command": "curl -fsS \"$FIN_OPS_SHADOW_AXUM_BASE_URL/healthz\""
+          },
+          {
+            "name": "axum_readyz",
+            "url": "$FIN_OPS_SHADOW_AXUM_BASE_URL/readyz",
+            "command": "curl -fsS \"$FIN_OPS_SHADOW_AXUM_BASE_URL/readyz\""
+          }
+        ],
+        "purpose": "probe legacy Python and Axum readiness before running shadow cases",
+        "blocker_type": "local_fixable"
+      },
+      {
+        "name": "final_shadow_command",
+        "status": "GO",
+        "command": "python3 scripts/tools/api_shadow_validate.py --fixture /Users/yu/Desktop/fin-ops-platform/docs/dev/api-fixtures/business-api-shadow-validation.json --output-dir docs/operations/backend-refactor --include-permission-failures --python-base-url $FIN_OPS_SHADOW_PYTHON_BASE_URL --axum-base-url $FIN_OPS_SHADOW_AXUM_BASE_URL --endpoint-id background-job-acknowledge-request --endpoint-id workbench-settings-write-contract --endpoint-id workbench-settings-project-sync-request --endpoint-id workbench-settings-project-create-request --endpoint-id workbench-settings-project-delete-request --endpoint-id settings-data-reset-create-job --endpoint-id settings-data-reset-direct-queues-job --endpoint-id projects-hub-list --endpoint-id projects-create-manual-profile --endpoint-id project-detail --endpoint-id project-assign-request --endpoint-id ledgers-list --endpoint-id ledger-detail --endpoint-id ledger-status-update --endpoint-id reminders-list --endpoint-id reminder-run-request",
+        "purpose": "run all 16 platform endpoint primary and permission-failure cases",
+        "blocker_type": "local_fixable"
+      }
+    ],
+    "failed_count": 0
+  },
+  "runtime_shadow_input_plan": {
+    "status": "GO",
+    "required_environment": [
+      {
+        "name": "FIN_OPS_SHADOW_PYTHON_BASE_URL",
+        "required_for": "legacy Python runtime shadow target and /health probe",
+        "sensitive": false,
+        "source": "environment",
+        "present": true,
+        "status": "GO",
+        "example": "http://127.0.0.1:8001"
+      },
+      {
+        "name": "FIN_OPS_SHADOW_AXUM_BASE_URL",
+        "required_for": "Axum runtime shadow target and /healthz /readyz probes",
+        "sensitive": false,
+        "source": "environment",
+        "present": true,
+        "status": "GO",
+        "example": "http://127.0.0.1:8002"
+      },
+      {
+        "name": "DATABASE_URL",
+        "required_for": "PostgreSQL 16/17 migration, seed apply, seed fact probes, and local Axum startup",
+        "sensitive": true,
+        "source": "environment",
+        "present": true,
+        "status": "GO",
+        "example": "postgres://fin_ops_api:[REDACTED]@127.0.0.1:5432/fin_ops_shadow"
+      },
+      {
+        "name": "FIN_OPS_SHADOW_OA_TOKEN",
+        "required_for": "legacy Python Authorization header and platform API auth parity",
+        "sensitive": true,
+        "source": "fixture",
+        "present": true,
+        "status": "GO",
+        "example": "[REDACTED-STAGING-OA-TOKEN]"
+      },
+      {
+        "name": "FIN_OPS_SHADOW_OA_PASSWORD",
+        "required_for": "settings data reset runtime samples",
+        "sensitive": true,
+        "source": "fixture",
+        "present": true,
+        "status": "GO",
+        "example": "[REDACTED-STAGING-RESET-PASSWORD]"
+      },
+      {
+        "name": "FIN_OPS_SHADOW_OA_IDENTITY_SOURCE",
+        "required_for": "audit of OA identity source used by runtime shadow",
+        "sensitive": false,
+        "source": "environment",
+        "allowed_values": [
+          "production_oa_test_user",
+          "staging_oa",
+          "test_oa"
+        ],
+        "present": true,
+        "status": "GO",
+        "example": "production_oa_test_user"
+      },
+      {
+        "name": "FIN_OPS_OA_IDENTITY_ADAPTER",
+        "required_for": "local Axum trusted-header identity resolution",
+        "sensitive": false,
+        "source": "environment",
+        "required_value": "trusted_headers",
+        "alternative": "FIN_OPS_SHADOW_AXUM_AUTH_MODE_CONFIRMED=trusted_headers",
+        "present": true,
+        "status": "GO",
+        "example": "trusted_headers"
+      },
+      {
+        "name": "FIN_OPS_SHADOW_AXUM_AUTH_MODE_CONFIRMED",
+        "required_for": "managed Axum shadow service trusted-header attestation",
+        "sensitive": false,
+        "source": "environment",
+        "required_value": "trusted_headers",
+        "alternative": "FIN_OPS_OA_IDENTITY_ADAPTER=trusted_headers",
+        "present": true,
+        "status": "GO",
+        "example": "trusted_headers"
+      },
+      {
+        "name": "BACKGROUND_JOB_ID",
+        "required_for": "background-job-acknowledge-request",
+        "sensitive": false,
+        "source": "seed",
+        "present": true,
+        "status": "GO",
+        "example": "00000000-0000-0000-0000-000000000000"
+      },
+      {
+        "name": "BANK_TRANSACTION_ID",
+        "required_for": "project-assign-request",
+        "sensitive": false,
+        "source": "seed",
+        "present": true,
+        "status": "GO",
+        "example": "00000000-0000-0000-0000-000000000000"
+      },
+      {
+        "name": "LEDGER_ID",
+        "required_for": "ledger-detail and ledger-status-update",
+        "sensitive": false,
+        "source": "seed",
+        "present": true,
+        "status": "GO",
+        "example": "00000000-0000-0000-0000-000000000000"
+      },
+      {
+        "name": "PROJECT_ID",
+        "required_for": "project-detail and project-assign-request",
+        "sensitive": false,
+        "source": "seed",
+        "present": true,
+        "status": "GO",
+        "example": "00000000-0000-0000-0000-000000000000"
+      },
+      {
+        "name": "PROJECT_DELETE_ID",
+        "required_for": "workbench-settings-project-delete-request",
+        "sensitive": false,
+        "source": "seed",
+        "present": true,
+        "status": "GO",
+        "example": "00000000-0000-0000-0000-000000000000"
+      },
+      {
+        "name": "SHADOW_RUN_ID",
+        "required_for": "runtime write isolation, idempotency keys, and report correlation",
+        "sensitive": false,
+        "source": "runtime",
+        "present": true,
+        "status": "GO",
+        "example": "p0-platform-20260517113334"
+      }
+    ],
+    "environment_exports": [
+      {
+        "name": "FIN_OPS_SHADOW_PYTHON_BASE_URL",
+        "required_for": "runtime shadow validator",
+        "example": "http://127.0.0.1:8001",
+        "sensitive": false,
+        "status": "GO"
+      },
+      {
+        "name": "FIN_OPS_SHADOW_AXUM_BASE_URL",
+        "required_for": "runtime shadow validator",
+        "example": "http://127.0.0.1:8002",
+        "sensitive": false,
+        "status": "GO"
+      },
+      {
+        "name": "DATABASE_URL",
+        "required_for": "local Axum service and PostgreSQL seed probes",
+        "example": "postgres://fin_ops_api:[REDACTED]@127.0.0.1:5432/fin_ops_shadow",
+        "sensitive": true,
+        "status": "GO"
+      },
+      {
+        "name": "FIN_OPS_OA_IDENTITY_ADAPTER",
+        "required_for": "local Axum trusted-header identity resolution",
+        "example": "trusted_headers",
+        "sensitive": false,
+        "status": "GO"
+      },
+      {
+        "name": "FIN_OPS_SHADOW_AXUM_AUTH_MODE_CONFIRMED",
+        "required_for": "managed/remote Axum shadow service auth-mode attestation",
+        "example": "trusted_headers",
+        "sensitive": false,
+        "status": "GO"
+      },
+      {
+        "name": "FIN_OPS_SHADOW_OA_IDENTITY_SOURCE",
+        "required_for": "runtime shadow identity-source audit",
+        "example": "production_oa_test_user",
+        "sensitive": false,
+        "allowed_values": [
+          "production_oa_test_user",
+          "staging_oa",
+          "test_oa"
+        ],
+        "status": "GO"
+      },
+      {
+        "name": "FIN_OPS_SHADOW_LEGACY_RELOAD_TOKEN",
+        "required_for": "local legacy Python shadow reload after per-group reseed",
+        "example": "generate with openssl rand -hex 24",
+        "sensitive": true,
+        "status": "GO"
+      },
+      {
+        "name": "FIN_OPS_SHADOW_LEGACY_DATA_DIR",
+        "required_for": "isolated legacy Python seed and reload source",
+        "example": "/tmp/fin-ops-platform-shadow-legacy-$SHADOW_RUN_ID",
+        "sensitive": false,
+        "status": "GO"
+      },
+      {
+        "name": "BACKGROUND_JOB_ID",
+        "required_for": "background-job-acknowledge-request",
+        "classification": "fixture_fact_id",
+        "example": "00000000-0000-0000-0000-000000000000",
+        "sensitive": false,
+        "status": "GO"
+      },
+      {
+        "name": "BANK_TRANSACTION_ID",
+        "required_for": "project-assign-request",
+        "classification": "fixture_fact_id",
+        "example": "00000000-0000-0000-0000-000000000000",
+        "sensitive": false,
+        "status": "GO"
+      },
+      {
+        "name": "FIN_OPS_SHADOW_OA_DISPLAY_NAME",
+        "required_for": "background-job-acknowledge-request, ledger-detail, ledger-status-update, ledgers-list, project-assign-request, project-detail, projects-create-manual-profile, projects-hub-list, reminder-run-request, reminders-list, settings-data-reset-create-job, settings-data-reset-direct-queues-job, workbench-settings-project-create-request, workbench-settings-project-delete-request, workbench-settings-project-sync-request, workbench-settings-write-contract",
+        "classification": "runtime_parameter",
+        "example": "<FIN_OPS_SHADOW_OA_DISPLAY_NAME>",
+        "sensitive": false,
+        "status": "GO"
+      },
+      {
+        "name": "FIN_OPS_SHADOW_OA_PASSWORD",
+        "required_for": "settings-data-reset-create-job, settings-data-reset-direct-queues-job",
+        "classification": "auth_secret",
+        "example": "[REDACTED-STAGING-RESET-PASSWORD]",
+        "sensitive": true,
+        "status": "GO"
+      },
+      {
+        "name": "FIN_OPS_SHADOW_OA_TOKEN",
+        "required_for": "background-job-acknowledge-request, ledger-detail, ledger-status-update, ledgers-list, project-assign-request, project-detail, projects-create-manual-profile, projects-hub-list, reminder-run-request, reminders-list, settings-data-reset-create-job, settings-data-reset-direct-queues-job, workbench-settings-project-create-request, workbench-settings-project-delete-request, workbench-settings-project-sync-request, workbench-settings-write-contract",
+        "classification": "auth_secret",
+        "example": "[REDACTED-STAGING-OA-TOKEN]",
+        "sensitive": true,
+        "status": "GO"
+      },
+      {
+        "name": "FIN_OPS_SHADOW_OA_USERNAME",
+        "required_for": "background-job-acknowledge-request, ledger-detail, ledger-status-update, ledgers-list, project-assign-request, project-detail, projects-create-manual-profile, projects-hub-list, reminder-run-request, reminders-list, settings-data-reset-create-job, settings-data-reset-direct-queues-job, workbench-settings-project-create-request, workbench-settings-project-delete-request, workbench-settings-project-sync-request, workbench-settings-write-contract",
+        "classification": "runtime_parameter",
+        "example": "<FIN_OPS_SHADOW_OA_USERNAME>",
+        "sensitive": false,
+        "status": "GO"
+      },
+      {
+        "name": "FIN_OPS_SHADOW_OA_USER_ID",
+        "required_for": "background-job-acknowledge-request, ledger-detail, ledger-status-update, ledgers-list, project-assign-request, project-detail, projects-create-manual-profile, projects-hub-list, reminder-run-request, reminders-list, settings-data-reset-create-job, settings-data-reset-direct-queues-job, workbench-settings-project-create-request, workbench-settings-project-delete-request, workbench-settings-project-sync-request, workbench-settings-write-contract",
+        "classification": "fixture_fact_id",
+        "example": "<FIN_OPS_SHADOW_OA_USER_ID>",
+        "sensitive": false,
+        "status": "GO"
+      },
+      {
+        "name": "LEDGER_ID",
+        "required_for": "ledger-detail, ledger-status-update",
+        "classification": "fixture_fact_id",
+        "example": "00000000-0000-0000-0000-000000000000",
+        "sensitive": false,
+        "status": "GO"
+      },
+      {
+        "name": "PROJECT_DELETE_ID",
+        "required_for": "workbench-settings-project-delete-request",
+        "classification": "fixture_fact_id",
+        "example": "00000000-0000-0000-0000-000000000000",
+        "sensitive": false,
+        "status": "GO"
+      },
+      {
+        "name": "PROJECT_ID",
+        "required_for": "project-assign-request, project-detail",
+        "classification": "fixture_fact_id",
+        "example": "00000000-0000-0000-0000-000000000000",
+        "sensitive": false,
+        "status": "GO"
+      },
+      {
+        "name": "SHADOW_RUN_ID",
+        "required_for": "background-job-acknowledge-request, ledger-status-update, project-assign-request, projects-create-manual-profile, reminder-run-request, settings-data-reset-create-job, settings-data-reset-direct-queues-job, workbench-settings-project-create-request, workbench-settings-project-delete-request, workbench-settings-project-sync-request, workbench-settings-write-contract",
+        "classification": "run_correlation",
+        "example": "p0-platform-20260517113334",
+        "sensitive": false,
+        "status": "GO"
+      }
+    ],
+    "postgres_migration_command": "for f in rust/fin-ops-api/migrations/000*.sql; do psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f \"$f\"; done",
+    "seed_command": "python3 scripts/tools/platform_shadow_seed.py --run-id \"$SHADOW_RUN_ID\" --actor-id \"$FIN_OPS_SHADOW_OA_USERNAME\" --user-id \"$FIN_OPS_SHADOW_OA_USER_ID\" --display-name \"$FIN_OPS_SHADOW_OA_DISPLAY_NAME\" --apply && python3 scripts/tools/platform_shadow_legacy_seed.py --run-id \"$SHADOW_RUN_ID\" --username \"$FIN_OPS_SHADOW_OA_USERNAME\" --user-id \"$FIN_OPS_SHADOW_OA_USER_ID\" --data-dir \"$FIN_OPS_SHADOW_LEGACY_DATA_DIR\"",
+    "python_service_start_command": "FIN_OPS_DEV_ALLOW_LOCAL_SESSION=0 FIN_OPS_TEST_DEFAULT_AUTH=0 FIN_OPS_BACKEND_PORT=8001 FIN_OPS_STORAGE_MODE=auto scripts/start-backend.sh",
+    "axum_service_start_command": "cd rust/fin-ops-api && FIN_OPS_API_BIND_ADDR=127.0.0.1:8002 FIN_OPS_OA_IDENTITY_ADAPTER=trusted_headers cargo run -p fin-ops-api --bin fin-ops-api",
+    "health_probe_commands": [
+      {
+        "name": "python_health",
+        "url": "$FIN_OPS_SHADOW_PYTHON_BASE_URL/health",
+        "command": "curl -fsS \"$FIN_OPS_SHADOW_PYTHON_BASE_URL/health\""
+      },
+      {
+        "name": "axum_healthz",
+        "url": "$FIN_OPS_SHADOW_AXUM_BASE_URL/healthz",
+        "command": "curl -fsS \"$FIN_OPS_SHADOW_AXUM_BASE_URL/healthz\""
+      },
+      {
+        "name": "axum_readyz",
+        "url": "$FIN_OPS_SHADOW_AXUM_BASE_URL/readyz",
+        "command": "curl -fsS \"$FIN_OPS_SHADOW_AXUM_BASE_URL/readyz\""
+      }
+    ],
+    "final_api_shadow_validate_command": "python3 scripts/tools/api_shadow_validate.py --fixture /Users/yu/Desktop/fin-ops-platform/docs/dev/api-fixtures/business-api-shadow-validation.json --output-dir docs/operations/backend-refactor --include-permission-failures --python-base-url http://127.0.0.1:8001 --axum-base-url http://127.0.0.1:8002 --endpoint-id background-job-acknowledge-request --endpoint-id workbench-settings-write-contract --endpoint-id workbench-settings-project-sync-request --endpoint-id workbench-settings-project-create-request --endpoint-id workbench-settings-project-delete-request --endpoint-id settings-data-reset-create-job --endpoint-id settings-data-reset-direct-queues-job --endpoint-id projects-hub-list --endpoint-id projects-create-manual-profile --endpoint-id project-detail --endpoint-id project-assign-request --endpoint-id ledgers-list --endpoint-id ledger-detail --endpoint-id ledger-status-update --endpoint-id reminders-list --endpoint-id reminder-run-request",
+    "service_start_order": [
+      {
+        "step": 1,
+        "name": "legacy_python_shadow",
+        "command": "FIN_OPS_DEV_ALLOW_LOCAL_SESSION=0 FIN_OPS_TEST_DEFAULT_AUTH=0 FIN_OPS_BACKEND_PORT=8001 FIN_OPS_STORAGE_MODE=auto scripts/start-backend.sh",
+        "readiness": "curl -fsS \"$FIN_OPS_SHADOW_PYTHON_BASE_URL/health\""
+      },
+      {
+        "step": 2,
+        "name": "postgres_migrations",
+        "command": "for f in rust/fin-ops-api/migrations/000*.sql; do psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f \"$f\"; done",
+        "readiness": "all 0001-0009 migrations applied on PostgreSQL 16/17 shadow database"
+      },
+      {
+        "step": 3,
+        "name": "platform_postgres_seed",
+        "command": "python3 scripts/tools/platform_shadow_seed.py --run-id \"$SHADOW_RUN_ID\" --actor-id \"$FIN_OPS_SHADOW_OA_USERNAME\" --user-id \"$FIN_OPS_SHADOW_OA_USER_ID\" --display-name \"$FIN_OPS_SHADOW_OA_DISPLAY_NAME\" --apply",
+        "readiness": "generated seed SQL applied; source the generated p0-platform-shadow-env-*.sh file for fixture IDs"
+      },
+      {
+        "step": 4,
+        "name": "platform_legacy_seed",
+        "command": "python3 scripts/tools/platform_shadow_legacy_seed.py --run-id \"$SHADOW_RUN_ID\" --username \"$FIN_OPS_SHADOW_OA_USERNAME\" --user-id \"$FIN_OPS_SHADOW_OA_USER_ID\" --data-dir \"$FIN_OPS_SHADOW_LEGACY_DATA_DIR\"",
+        "readiness": "legacy Python isolated data-dir seeded before service startup"
+      },
+      {
+        "step": 5,
+        "name": "axum_shadow",
+        "command": "cd rust/fin-ops-api && FIN_OPS_API_BIND_ADDR=127.0.0.1:8002 FIN_OPS_OA_IDENTITY_ADAPTER=trusted_headers cargo run -p fin-ops-api --bin fin-ops-api",
+        "readiness": "curl -fsS \"$FIN_OPS_SHADOW_AXUM_BASE_URL/readyz\""
+      },
+      {
+        "step": 6,
+        "name": "platform_seed_fact_probes",
+        "command": "run every command in fact_probe_commands until each returns t",
+        "readiness": "all fact id variables resolve to equivalent seeded PostgreSQL facts"
+      },
+      {
+        "step": 7,
+        "name": "legacy_shadow_reload_probe",
+        "command": "python3 scripts/tools/platform_shadow_legacy_reload.py",
+        "readiness": "reload report status GO"
+      },
+      {
+        "step": 8,
+        "name": "runtime_shadow_validation",
+        "command": "python3 scripts/tools/platform_shadow_runtime.py --report-date 20260517",
+        "readiness": "api_shadow_validate report status GO for all platform endpoint primary and permission cases"
+      }
+    ],
+    "fact_probe_commands": [
+      {
+        "variable": "BACKGROUND_JOB_ID",
+        "postgres_fact_source": "job.worker_tasks",
+        "status": "GO",
+        "command": "psql \"$DATABASE_URL\" -X -v ON_ERROR_STOP=1 -At -c \"select exists (select 1 from job.worker_tasks where id = '${BACKGROUND_JOB_ID}'::uuid and visibility = 'system')\""
+      },
+      {
+        "variable": "BANK_TRANSACTION_ID",
+        "postgres_fact_source": "app.bank_transactions",
+        "status": "GO",
+        "command": "psql \"$DATABASE_URL\" -X -v ON_ERROR_STOP=1 -At -c \"select exists (select 1 from app.bank_transactions where id = '${BANK_TRANSACTION_ID}'::uuid)\""
+      },
+      {
+        "variable": "LEDGER_ID",
+        "postgres_fact_source": "app.ledgers",
+        "status": "GO",
+        "command": "psql \"$DATABASE_URL\" -X -v ON_ERROR_STOP=1 -At -c \"select exists (select 1 from app.ledgers where id = '${LEDGER_ID}'::uuid and status = 'open')\""
+      },
+      {
+        "variable": "PROJECT_DELETE_ID",
+        "postgres_fact_source": "app.project_profiles",
+        "status": "GO",
+        "command": "psql \"$DATABASE_URL\" -X -v ON_ERROR_STOP=1 -At -c \"select exists (select 1 from app.project_profiles where id = '${PROJECT_DELETE_ID}'::uuid and project_status = 'active')\""
+      },
+      {
+        "variable": "PROJECT_ID",
+        "postgres_fact_source": "app.project_profiles",
+        "status": "GO",
+        "command": "psql \"$DATABASE_URL\" -X -v ON_ERROR_STOP=1 -At -c \"select exists (select 1 from app.project_profiles where id = '${PROJECT_ID}'::uuid and project_status = 'active')\""
+      }
+    ],
+    "auth_summary": {
+      "status": "GO",
+      "source": "Axum middleware/auth.rs and Python app/auth.py",
+      "checks": [
+        {
+          "code": "PRIMARY_AUTH_HEADERS_PRESENT",
+          "status": "GO",
+          "missing_headers": []
+        },
+        {
+          "code": "PRIMARY_AUTH_TOKEN_VARIABLE_PRESENT",
+          "status": "GO",
+          "header_uses_shadow_token": true,
+          "required_variable": "FIN_OPS_SHADOW_OA_TOKEN"
+        },
+        {
+          "code": "OA_IDENTITY_SOURCE_ACCEPTED",
+          "status": "GO",
+          "source": "production_oa_test_user",
+          "accepted_values": [
+            "production_oa_test_user",
+            "staging_oa",
+            "test_oa"
+          ],
+          "environment": "production",
+          "description": "Production OA test user accepted by updated Prompt04 Prompt 2 criteria; business writes must still target isolated local/shadow Python and Axum data stores.",
+          "risk_note": "Production OA test user is accepted only as identity/password source; Python and Axum business writes must remain isolated from production data."
+        },
+        {
+          "code": "AXUM_TRUSTED_PERMISSION_PRESENT",
+          "status": "GO",
+          "required_permission": "finops:app:view",
+          "configured_permissions": [
+            "finops:app:view"
+          ]
+        },
+        {
+          "code": "AXUM_ADMIN_USERNAME_PRESENT_FOR_ADMIN_ROUTES",
+          "status": "GO",
+          "admin_route_count": 7,
+          "trusted_username": "test",
+          "accepted_admin_usernames": [
+            "YNSYLP005",
+            "test"
+          ]
+        },
+        {
+          "code": "AXUM_TRUSTED_HEADERS_ADAPTER_CONFIRMED",
+          "status": "GO",
+          "local_env_value": "trusted_headers",
+          "remote_confirmation_env": "FIN_OPS_SHADOW_AXUM_AUTH_MODE_CONFIRMED",
+          "remote_confirmation_value": "trusted_headers",
+          "axum_base_url_present": true
+        }
+      ]
+    }
+  },
+  "out_of_scope_dependencies": [
+    {
+      "name": "NATS",
+      "status": "OUT_OF_SCOPE_FOR_PROMPT_2",
+      "reason": "Prompt 2 gates runtime shadow preflight, service health, fixture variables, and Python-vs-Axum API validation only; NATS/Worker replay remains a separate production readiness blocker."
+    }
+  ],
+  "blocker_summary": {
+    "local_fixable_count": 0,
+    "environment_blocker_count": 0,
+    "local_fixable": [],
+    "environment_blockers": []
+  },
+  "environment_checks": {
+    "python_readiness_check": {
+      "command": [
+        "python3",
+        "-m",
+        "fin_ops_platform.app.main",
+        "--check"
+      ],
+      "status": "GO",
+      "returncode": 0,
+      "stdout": "{\n  \"service\": \"fin-ops-platform-api\",\n  \"version\": \"0.1.0\",\n  \"status\": \"ready\",\n  \"entrypoints\": [\n    \"/health\",\n    \"/foundation/seed\",\n    \"/imports/preview\",\n    \"/imports/confirm\",\n    \"/imports/templates\",\n    \"/imports/batches/{batch_id}/download\",\n    \"/imports/batches/{batch_id}/revert\",\n    \"/imports/files/preview\",\n    \"/imports/files/confirm\",\n    \"/imports/files/retry\",\n    \"/imports/files/sessions/{session_id}\",\n    \"/matching/run\",\n    \"/matching/results\",\n    \"/api/workbench\",\n    \"/api/search\",\n    \"/api/background-jobs/active\",\n    \"/api/background-jobs/{job_id}\",\n    \"/api/background-jobs/{job_id}/acknowledge\",\n    \"/api/etc/import/preview\",\n    \"/api/etc/import/confirm\",\n    \"/api/etc/invoices\",\n    \"/api/etc/invoices/revoke-submitted\",\n    \"/api/etc/reconciliation-tasks/{task_id}\",\n    \"/api/etc/reconciliation-tasks/{task_id}/ticket-root-texts\",\n    \"/api/etc/reconciliation-tasks/{task_id}/ticket-root-files\",\n    \"/api/etc/reconciliation-tasks/{task_id}/credit-card-statement\",\n    \"/api/etc/reconciliation-tasks/{task_id}/supplement-evidences\",\n    \"/api/etc/reconciliation-tasks/{task_id}/refresh-matches\",\n    \"/api/etc/batches/{batch_id}\",\n    \"/api/etc/batches/draft\",\n    \"/api/etc/batches/{batch_id}/confirm-submitted\",\n    \"/api/etc/batches/{batch_id}/mark-not-submitted\",\n    \"/api/no-oa-bank-batches\",\n    \"/api/no-oa-bank-batches/submit\",\n    \"/api/no-oa-bank-batches/{batch_id}\",\n    \"/api/no-oa-bank-batches/{batch_id}/submit\",\n    \"/api/no-oa-bank-batches/{batch_id}/withdraw\",\n    \"/api/session/me\",\n    \"/api/workbench/ignored\",\n    \"/api/workbench/settings\",\n    \"/api/workbench/settings/data-reset\",\n    \"/api/workbench/rows/{row_id}\",\n    \"/api/workbench/exception/preview\",\n    \"/api/workbench/exception/apply\",\n    \"/api/workbench/actions/confirm-link\",\n    \"/api/workbench/actions/mark-exception\",\n    \"/api/workbench/actions/cancel-link\",\n    \"/api/workbench/actions/update-bank-exception\",\n    \"/api/workbench/actions/oa-bank-exception\",\n    \"/api/workbench/actions/confirm-personal-advance-repayment\",\n    \"/api/workbench/actions/cancel-exception\",\n    \"/api/workbench/actions/ignore-row\",\n    \"/api/workbench/actions/unignore-row\",\n    \"/api/tax-offset\",\n    \"/api/tax-offset/certified-import/preview\",\n    \"/api/tax-offset/certified-import/confirm\",\n    \"/api/tax-offset/certified-imports\",\n    \"/api/tax-offset/calculate\",\n    \"/api/cost-statistics\",\n    \"/api/cost-statistics/explorer\",\n    \"/api/cost-statistics/export-preview\",\n    \"/api/cost-statistics/export\",\n    \"/api/cost-statistics/projects/{project_name}\",\n    \"/api/cost-statistics/transactions/{transaction_id}\",\n    \"/workbench\",\n    \"/workbench/actions/confirm\",\n    \"/workbench/actions/difference\",\n    \"/workbench/actions/exception\",\n    \"/workbench/actions/offline\",\n    \"/workbench/actions/offset\",\n    \"/integrations/oa\",\n    \"/integrations/oa/sync\",\n    \"/integrations/oa/sync-runs\",\n    \"/projects\",\n    \"/projects/assign\",\n    \"/ledgers\",\n    \"/reminders\",\n    \"/reconciliation/cases\"\n  ],\n  \"capabilities\": [\n    \"reconciliation\",\n    \"audit_trail\",\n    \"seed_data\",\n    \"import_preview\",\n    \"file_import_formalization\",\n    \"import_persistence\",\n    \"matching_engine\",\n    \"manual_workbench\",\n    \"follow_up_ledgers\",\n    \"reminder_scheduler\",\n    \"advanced_exceptions\",\n    \"oa_integration_foundation\",\n    \"oa_session_foundation\",\n    \"project_costing_foundation\",\n    \"workbench_v2_backend_contracts\",\n    \"workbench_global_search_foundation\",\n    \"cost_statistics_foundation\",\n    \"cost_statistics_export\",\n    \"etc_invoice_management\",\n    \"no_oa_bank_batch_processing\",\n    \"background_job_foundation\"\n  ],\n  \"storage\": {\n    \"mode\": \"mongo_only\",\n    \"backend\": \"mongo\",\n    \"database\": \"fin_ops_platform_app\"\n  },\n  \"future_modules\": []\n}",
+      "stderr": ""
+    },
+    "psql_version": {
+      "command": [
+        "psql",
+        "--version"
+      ],
+      "status": "GO",
+      "returncode": 0,
+      "stdout": "psql (PostgreSQL) 17.10 (Homebrew)",
+      "stderr": ""
+    },
+    "postgres_major_detected": 17,
+    "local_postgres_server": {
+      "status": "GO",
+      "host": "localhost",
+      "port": 5432,
+      "reachable": true,
+      "readiness": {
+        "command": [
+          "pg_isready",
+          "-h",
+          "localhost",
+          "-p",
+          "5432"
+        ],
+        "status": "GO",
+        "returncode": 0,
+        "stdout": "localhost:5432 - accepting connections",
+        "stderr": ""
+      },
+      "server_version": "14.15 (Homebrew)",
+      "server_major": 14,
+      "version_probe": {
+        "command": [
+          "psql",
+          "-h",
+          "localhost",
+          "-p",
+          "5432",
+          "-d",
+          "postgres",
+          "-At",
+          "-c",
+          "show server_version;"
+        ],
+        "status": "GO",
+        "returncode": 0,
+        "stdout": "14.15 (Homebrew)",
+        "stderr": ""
+      },
+      "target_postgres_major_min": 16
+    },
+    "docker_info": {
+      "command": [
+        "docker",
+        "info",
+        "--format",
+        "{{.ServerVersion}}"
+      ],
+      "status": "GO",
+      "returncode": 0,
+      "stdout": "28.5.1",
+      "stderr": ""
+    },
+    "cargo_sqlx_version": {
+      "command": [
+        "cargo",
+        "sqlx",
+        "--version"
+      ],
+      "status": "NO_GO",
+      "returncode": 101,
+      "stdout": "",
+      "stderr": "error: no such command: `sqlx`\n\nhelp: a command with a similar name exists: `fix`\n\nhelp: view all installed commands with `cargo --list`\nhelp: find a package to install `sqlx` with `cargo search cargo-sqlx`"
+    }
+  },
+  "findings": [],
+  "next_runtime_shadow_command": [
+    "python3",
+    "scripts/tools/api_shadow_validate.py",
+    "--fixture",
+    "/Users/yu/Desktop/fin-ops-platform/docs/dev/api-fixtures/business-api-shadow-validation.json",
+    "--output-dir",
+    "docs/operations/backend-refactor",
+    "--include-permission-failures",
+    "--python-base-url",
+    "http://127.0.0.1:8001",
+    "--axum-base-url",
+    "http://127.0.0.1:8002",
+    "--endpoint-id",
+    "background-job-acknowledge-request",
+    "--endpoint-id",
+    "workbench-settings-write-contract",
+    "--endpoint-id",
+    "workbench-settings-project-sync-request",
+    "--endpoint-id",
+    "workbench-settings-project-create-request",
+    "--endpoint-id",
+    "workbench-settings-project-delete-request",
+    "--endpoint-id",
+    "settings-data-reset-create-job",
+    "--endpoint-id",
+    "settings-data-reset-direct-queues-job",
+    "--endpoint-id",
+    "projects-hub-list",
+    "--endpoint-id",
+    "projects-create-manual-profile",
+    "--endpoint-id",
+    "project-detail",
+    "--endpoint-id",
+    "project-assign-request",
+    "--endpoint-id",
+    "ledgers-list",
+    "--endpoint-id",
+    "ledger-detail",
+    "--endpoint-id",
+    "ledger-status-update",
+    "--endpoint-id",
+    "reminders-list",
+    "--endpoint-id",
+    "reminder-run-request"
+  ]
+}

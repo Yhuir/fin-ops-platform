@@ -61,6 +61,13 @@ PYTHON_ROUTE_ENDSWITH_RE = re.compile(
 RUST_ROUTE_RE = re.compile(
     r'\.route\(\s*"(?P<path>/[^"]+)"\s*,\s*(?P<method>get|post|put|patch|delete)\s*\('
 )
+RUST_CHAINED_ROUTE_RE = re.compile(
+    r'\.route\(\s*"(?P<path>/[^"]+)"\s*,\s*'
+    r'(?P<first>get|post|put|patch|delete)\s*\([^)]*\)'
+    r'(?P<chain>(?:\s*\.\s*(?:get|post|put|patch|delete)\s*\([^)]*\))+)',
+    re.DOTALL,
+)
+RUST_CHAINED_METHOD_RE = re.compile(r'\.\s*(?P<method>get|post|put|patch|delete)\s*\(')
 FRONTEND_ENDPOINT_RE = re.compile(
     r'["`](?:/api/|/imports/|/projects/|/ledgers/|/reminders/|/matching/)[^"`]*?["`]'
 )
@@ -283,6 +290,11 @@ def discover_rust_routes(root: Path) -> list[str]:
         text = path.read_text(encoding="utf-8", errors="replace")
         for match in RUST_ROUTE_RE.finditer(text):
             routes.add(f"{ROUTING_METHODS[match.group('method')]} {match.group('path')}")
+        for match in RUST_CHAINED_ROUTE_RE.finditer(text):
+            route_path = match.group("path")
+            routes.add(f"{ROUTING_METHODS[match.group('first')]} {route_path}")
+            for chained_match in RUST_CHAINED_METHOD_RE.finditer(match.group("chain")):
+                routes.add(f"{ROUTING_METHODS[chained_match.group('method')]} {route_path}")
     return sorted(routes)
 
 

@@ -2,7 +2,11 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io::{Cursor, Write},
+};
+use zip::{write::FileOptions, CompressionMethod, ZipWriter};
 
 const FAMILIES: [(&str, &str); 4] = [
     ("personal", "个人往来"),
@@ -37,6 +41,9 @@ const TURNOVER_EXPORT_COLUMNS: [&str; 25] = [
     "备注",
     "关系状态",
 ];
+const TURNOVER_XLSX_MIME_TYPE: &str =
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const TURNOVER_XLSX_MAX_ROWS: usize = 50_000;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TurnoverLedgerServiceError {
@@ -219,6 +226,43 @@ where
         }))
     }
 
+    pub async fn export_xlsx(
+        &self,
+        query: TurnoverLedgerQuery,
+        today: &str,
+    ) -> Result<TurnoverLedgerExportFile, TurnoverLedgerServiceError> {
+        let family = normalize_family(query.family.as_deref());
+        let grouped = self
+            .list_grouped_ledger(TurnoverLedgerQuery {
+                view: Some("grouped".to_owned()),
+                family: Some(family.clone()),
+                status: None,
+                page: Some("1".to_owned()),
+                page_size: Some("10000".to_owned()),
+                limit: None,
+            })
+            .await?;
+        let rows = turnover_export_rows(&grouped, &family);
+        if rows.len() > TURNOVER_XLSX_MAX_ROWS {
+            return Err(TurnoverLedgerServiceError::InvalidRequest {
+                code: "turnover_export_too_large",
+                message: "turnover ledger export exceeds the synchronous XLSX row limit.",
+            });
+        }
+        let filename = format!(
+            "往来款台账-{}-{}.xlsx",
+            family_scope_label(&family),
+            today.trim()
+        );
+        let bytes = build_turnover_xlsx(&rows)?;
+        Ok(TurnoverLedgerExportFile {
+            filename,
+            content_type: TURNOVER_XLSX_MIME_TYPE.to_owned(),
+            bytes,
+            row_count: rows.len(),
+        })
+    }
+
     pub async fn get_relation_detail(
         &self,
         relation_id: &str,
@@ -253,6 +297,14 @@ where
             "audit_history": [],
         }))
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct TurnoverLedgerExportFile {
+    pub filename: String,
+    pub content_type: String,
+    pub bytes: Vec<u8>,
+    pub row_count: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -1209,6 +1261,219 @@ fn turnover_export_totals(rows: &[Value]) -> Value {
     })
 }
 
+fn build_turnover_xlsx(rows: &[Value]) -> Result<Vec<u8>, TurnoverLedgerServiceError> {
+    let mut buffer = Cursor::new(Vec::new());
+    {
+        let mut zip = ZipWriter::new(&mut buffer);
+        let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
+        write_zip_file(
+            &mut zip,
+            "[Content_Types].xml",
+            content_types_xml(),
+            options,
+        )?;
+        write_zip_file(&mut zip, "_rels/.rels", root_rels_xml(), options)?;
+        write_zip_file(&mut zip, "xl/workbook.xml", workbook_xml(), options)?;
+        write_zip_file(
+            &mut zip,
+            "xl/_rels/workbook.xml.rels",
+            workbook_rels_xml(),
+            options,
+        )?;
+        write_zip_file(&mut zip, "xl/styles.xml", styles_xml(), options)?;
+        write_zip_file(
+            &mut zip,
+            "xl/worksheets/sheet1.xml",
+            worksheet_xml(rows),
+            options,
+        )?;
+        zip.finish().map_err(|_| turnover_export_build_failed())?;
+    }
+    Ok(buffer.into_inner())
+}
+
+fn write_zip_file<W: Write + std::io::Seek>(
+    zip: &mut ZipWriter<W>,
+    name: &str,
+    content: String,
+    options: FileOptions,
+) -> Result<(), TurnoverLedgerServiceError> {
+    zip.start_file(name, options)
+        .map_err(|_| turnover_export_build_failed())?;
+    zip.write_all(content.as_bytes())
+        .map_err(|_| turnover_export_build_failed())
+}
+
+fn content_types_xml() -> String {
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>"#
+        .to_owned()
+}
+
+fn root_rels_xml() -> String {
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"#
+        .to_owned()
+}
+
+fn workbook_xml() -> String {
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="往来款台账" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#
+        .to_owned()
+}
+
+fn workbook_rels_xml() -> String {
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>"#
+        .to_owned()
+}
+
+fn styles_xml() -> String {
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="2">
+    <font><sz val="11"/><name val="Calibri"/></font>
+    <font><b/><sz val="11"/><name val="Calibri"/></font>
+  </fonts>
+  <fills count="1"><fill><patternFill patternType="none"/></fill></fills>
+  <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="2">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1">
+      <alignment horizontal="center"/>
+    </xf>
+  </cellXfs>
+</styleSheet>"#
+        .to_owned()
+}
+
+fn worksheet_xml(rows: &[Value]) -> String {
+    let max_row = rows.len() + 1;
+    let dimension = format!(
+        "A1:{}{}",
+        column_ref(TURNOVER_EXPORT_COLUMNS.len()),
+        max_row
+    );
+    let mut xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">\
+<dimension ref=\"{dimension}\"/><cols>{}</cols><sheetData>",
+        column_widths_xml()
+    );
+    xml.push_str("<row r=\"1\">");
+    for (index, column) in TURNOVER_EXPORT_COLUMNS.iter().enumerate() {
+        xml.push_str(&inline_string_cell(index + 1, 1, column, Some(1)));
+    }
+    xml.push_str("</row>");
+    for (row_index, row) in rows.iter().enumerate() {
+        let excel_row = row_index + 2;
+        xml.push_str(&format!("<row r=\"{excel_row}\">"));
+        for (column_index, column) in TURNOVER_EXPORT_COLUMNS.iter().enumerate() {
+            let text = export_cell_text(row.get(*column));
+            xml.push_str(&inline_string_cell(
+                column_index + 1,
+                excel_row,
+                &text,
+                None,
+            ));
+        }
+        xml.push_str("</row>");
+    }
+    xml.push_str("</sheetData></worksheet>");
+    xml
+}
+
+fn column_widths_xml() -> String {
+    let widths = [
+        8.0, 10.0, 18.0, 14.0, 18.0, 14.0, 14.0, 14.0, 14.0, 18.0, 24.0, 12.0, 12.0, 14.0, 12.0,
+        14.0, 14.0, 16.0, 24.0, 14.0, 14.0, 16.0, 24.0, 24.0, 14.0,
+    ];
+    widths
+        .iter()
+        .enumerate()
+        .map(|(index, width)| {
+            let column = index + 1;
+            format!("<col min=\"{column}\" max=\"{column}\" width=\"{width}\" customWidth=\"1\"/>")
+        })
+        .collect::<String>()
+}
+
+fn inline_string_cell(column: usize, row: usize, text: &str, style: Option<usize>) -> String {
+    let cell_ref = format!("{}{}", column_ref(column), row);
+    let style = style
+        .map(|style| format!(" s=\"{style}\""))
+        .unwrap_or_default();
+    format!(
+        "<c r=\"{cell_ref}\" t=\"inlineStr\"{style}><is><t>{}</t></is></c>",
+        xml_escape(text)
+    )
+}
+
+fn export_cell_text(value: Option<&Value>) -> String {
+    match value {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Number(number)) => number.to_string(),
+        Some(Value::Bool(value)) => value.to_string(),
+        Some(Value::Null) | None => String::new(),
+        Some(other) => other.to_string(),
+    }
+}
+
+fn column_ref(mut column: usize) -> String {
+    let mut letters = Vec::new();
+    while column > 0 {
+        column -= 1;
+        letters.push((b'A' + (column % 26) as u8) as char);
+        column /= 26;
+    }
+    letters.iter().rev().collect()
+}
+
+fn xml_escape(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(|ch| match ch {
+            '&' => "&amp;".chars().collect::<Vec<_>>(),
+            '<' => "&lt;".chars().collect::<Vec<_>>(),
+            '>' => "&gt;".chars().collect::<Vec<_>>(),
+            '"' => "&quot;".chars().collect::<Vec<_>>(),
+            '\'' => "&apos;".chars().collect::<Vec<_>>(),
+            _ => vec![ch],
+        })
+        .collect()
+}
+
+fn turnover_export_build_failed() -> TurnoverLedgerServiceError {
+    TurnoverLedgerServiceError::InvalidRequest {
+        code: "invalid_turnover_ledger_export_request",
+        message: "failed to build turnover ledger XLSX export.",
+    }
+}
+
+fn family_scope_label(value: &str) -> &str {
+    if value == "all" {
+        "全部"
+    } else {
+        family_label(value)
+    }
+}
+
 fn sum_export_column(rows: &[&Value], key: &str) -> i64 {
     rows.iter()
         .filter_map(|row| row.get(key).and_then(Value::as_str))
@@ -1677,6 +1942,7 @@ fn empty_default<'a>(value: &'a str, default: &'a str) -> &'a str {
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use std::io::Read;
 
     #[derive(Clone, Default)]
     struct StubTurnoverLedgerRepository {
@@ -1863,6 +2129,63 @@ mod tests {
         assert_eq!(preview["rows"][0]["待还款金额"], "120.00");
         assert_eq!(preview["rows"][1]["行类型"], "真实流水");
         assert_eq!(preview["rows"][1]["源银行流水ID"], "txn-borrow");
+    }
+
+    #[tokio::test]
+    async fn export_xlsx_uses_legacy_filename_mime_and_open_xml_package() {
+        let service = TurnoverLedgerService::new(StubTurnoverLedgerRepository {
+            rows: vec![TurnoverBankFactRow {
+                id: "txn-borrow".to_owned(),
+                transaction_at: Some("2026-05-01T02:00:00Z".to_owned()),
+                txn_direction: "inflow".to_owned(),
+                amount: "200.00".to_owned(),
+                counterparty_name: "云南路桥".to_owned(),
+                account_no: "6222000012348106".to_owned(),
+                bank_name: "建行".to_owned(),
+                summary: Some("公司暂借款".to_owned()),
+                remark: None,
+                purpose: None,
+                bank_text_fields: Vec::new(),
+                category_code: "borrow_in_company_pending_repayment".to_owned(),
+                category_label: "公司暂借款：待还款".to_owned(),
+            }],
+        });
+
+        let file = service
+            .export_xlsx(
+                TurnoverLedgerQuery {
+                    view: None,
+                    family: Some("company".to_owned()),
+                    status: None,
+                    page: None,
+                    page_size: None,
+                    limit: None,
+                },
+                "2026-05-17",
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(file.filename, "往来款台账-公司往来-2026-05-17.xlsx");
+        assert_eq!(file.content_type, TURNOVER_XLSX_MIME_TYPE);
+        assert_eq!(file.row_count, 2);
+        assert!(file.bytes.starts_with(b"PK"));
+        let mut archive = zip::ZipArchive::new(Cursor::new(file.bytes)).unwrap();
+        let mut workbook = String::new();
+        archive
+            .by_name("xl/workbook.xml")
+            .unwrap()
+            .read_to_string(&mut workbook)
+            .unwrap();
+        let mut worksheet = String::new();
+        archive
+            .by_name("xl/worksheets/sheet1.xml")
+            .unwrap()
+            .read_to_string(&mut worksheet)
+            .unwrap();
+        assert!(workbook.contains("往来款台账"));
+        assert!(worksheet.contains("源银行流水ID"));
+        assert!(worksheet.contains("txn-borrow"));
     }
 
     #[tokio::test]

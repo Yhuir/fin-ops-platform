@@ -1,0 +1,152 @@
+{
+  "report": "p0-platform-shadow-seed",
+  "report_date": "20260517",
+  "generated_at": "2026-05-17T11:33:56.188235Z",
+  "status": "GO",
+  "scope": "Prompt 3 PostgreSQL shadow seed and legacy Python/Mongo fixture data closure for P0 platform APIs.",
+  "run_id": "p0-platform-local",
+  "runtime_variables": {
+    "SHADOW_RUN_ID": "p0-platform-local",
+    "BACKGROUND_JOB_ID": "ad1d1132-89ff-5198-a096-f45ad3573ed1",
+    "BANK_TRANSACTION_ID": "210895bd-e515-5488-bae8-1815b291a72f",
+    "LEDGER_ID": "29c2554f-c6a3-5b69-9fb1-bf0cd431ec91",
+    "PROJECT_ID": "fce10a80-61e0-520c-88dc-57f34e5afaf0",
+    "PROJECT_DELETE_ID": "35d0adce-fb9b-5b11-ae5b-78e4ecf90262"
+  },
+  "postgres_seed_generation": {
+    "status": "GO",
+    "sql_path": "/Users/yu/Desktop/fin-ops-platform/docs/operations/backend-refactor/p0-platform-shadow-seed-p0-platform-local.sql",
+    "env_path": "/Users/yu/Desktop/fin-ops-platform/docs/operations/backend-refactor/p0-platform-shadow-env-p0-platform-local.sh",
+    "probe_sql_path": "/Users/yu/Desktop/fin-ops-platform/docs/operations/backend-refactor/p0-platform-shadow-probe-p0-platform-local.sql",
+    "namespace": "6da43df3-1acb-4dd5-8cdd-0304c90323d4",
+    "fixed_dates": {
+      "seed_month": "2026-05-01",
+      "seed_date": "2026-05-17",
+      "seed_timestamp": "2026-05-17 09:00:00+08",
+      "due_timestamp": "2026-05-17 18:00:00+08"
+    },
+    "deterministic_ids": {
+      "actor_username": "test",
+      "oa_user_id": "63",
+      "background_job_id": "ad1d1132-89ff-5198-a096-f45ad3573ed1",
+      "bank_transaction_id": "210895bd-e515-5488-bae8-1815b291a72f",
+      "ledger_id": "29c2554f-c6a3-5b69-9fb1-bf0cd431ec91",
+      "project_id": "fce10a80-61e0-520c-88dc-57f34e5afaf0",
+      "project_delete_id": "35d0adce-fb9b-5b11-ae5b-78e4ecf90262",
+      "reminder_id": "442936df-7f55-59cc-b36f-58e37e53025a",
+      "settings_profile_id": "26232b50-9e6b-599b-939e-e96de970a6ea",
+      "data_reset_task_id": "ac58279c-9284-5bbb-a457-1a91c1d35dc2",
+      "data_reset_outbox_event_id": "45f9d274-d9dc-571a-8bb1-6793e144f072",
+      "data_reset_audit_event_id": "a79c7d79-e79d-5101-a322-a82178205dd7"
+    },
+    "covered_postgres_facts": [
+      "job.worker_tasks",
+      "app.settings_profiles",
+      "app.project_profiles",
+      "app.project_assignments",
+      "app.project_profile_events",
+      "app.bank_transactions",
+      "app.ledgers",
+      "app.reminders",
+      "app.data_reset_requests",
+      "job.outbox_events",
+      "job.worker_task_acknowledgements",
+      "audit.events",
+      "app.write_idempotency_records"
+    ],
+    "rerun_guards": [
+      "UUIDs derive from SHADOW_RUN_ID and a fixed namespace.",
+      "Seed SQL deletes only rows tied to the deterministic shadow IDs, run_id payloads, trace_id, or shadow idempotency key prefixes before upserting seed facts.",
+      "Seed SQL uses insert ... on conflict for deterministic records.",
+      "Seed SQL uses fixed timestamps instead of now() for seeded facts.",
+      "Data reset support request is status=succeeded and action=reset_oa_and_rebuild, so it does not create queued/running conflicts with runtime samples reset_invoices/reset_bank_transactions."
+    ],
+    "cleanup_model": {
+      "status": "GO",
+      "scope": "Only current SHADOW_RUN_ID rows and deterministic seed IDs are cleaned before reseed.",
+      "tables": [
+        "app.ledger_events",
+        "app.reminder_runs",
+        "job.worker_task_acknowledgements",
+        "app.project_profile_events",
+        "app.project_assignments",
+        "app.data_reset_requests",
+        "app.identity_provisioning_requests",
+        "app.write_idempotency_records",
+        "job.outbox_events",
+        "job.worker_tasks",
+        "app.settings_profiles",
+        "app.project_profiles",
+        "audit.events"
+      ],
+      "non_shadow_data_guard": [
+        "No blanket table truncation or date-range deletion.",
+        "Predicates use deterministic IDs, payload.run_id, metadata.run_id, trace_id, or platform-shadow/shadow runtime idempotency-key prefixes."
+      ]
+    }
+  },
+  "postgres_apply": {
+    "status": "GO",
+    "database_url_present": true,
+    "no_go_reason": null
+  },
+  "postgres_probe_sql": {
+    "status": "GO",
+    "probe_sql_path": "/Users/yu/Desktop/fin-ops-platform/docs/operations/backend-refactor/p0-platform-shadow-probe-p0-platform-local.sql",
+    "checks": [
+      {
+        "variable": "BACKGROUND_JOB_ID",
+        "postgres_fact": "job.worker_tasks",
+        "condition": "id matches and visibility='system'"
+      },
+      {
+        "variable": "BANK_TRANSACTION_ID",
+        "postgres_fact": "app.bank_transactions",
+        "condition": "id matches, txn_month=2026-05-01, status='pending'"
+      },
+      {
+        "variable": "LEDGER_ID",
+        "postgres_fact": "app.ledgers",
+        "condition": "id matches and status='open'"
+      },
+      {
+        "variable": "PROJECT_ID",
+        "postgres_fact": "app.project_profiles",
+        "condition": "id matches and project_status='active'"
+      },
+      {
+        "variable": "PROJECT_DELETE_ID",
+        "postgres_fact": "app.project_profiles",
+        "condition": "id matches and project_status='active'"
+      },
+      {
+        "variable": "SETTINGS_AND_DATA_RESET_SUPPORT",
+        "postgres_fact": "app.settings_profiles, app.data_reset_requests, job.outbox_events, audit.events, app.write_idempotency_records",
+        "condition": "deterministic support rows exist and data reset support row is non-active succeeded state"
+      }
+    ]
+  },
+  "legacy_python_mongo_seed_plan": {
+    "status": "GO",
+    "reason": "Executable legacy Python shadow seed report exists for the same runtime fixture IDs.",
+    "report_path": "/Users/yu/Desktop/fin-ops-platform/docs/operations/backend-refactor/p0-platform-legacy-shadow-seed-20260517.json",
+    "seeded_collections": [
+      "app_settings.manual_projects",
+      "background_jobs",
+      "imports.transactions",
+      "platform_shadow_legacy_seed.ledgers",
+      "platform_shadow_legacy_seed.reminders"
+    ],
+    "data_dir": "/tmp/fin-ops-platform-shadow-legacy-p0-platform-local",
+    "secret_requirements_status": "GO"
+  },
+  "go_standard": {
+    "postgres_seed_repeatable_generation": "GO",
+    "postgres_seed_apply": "GO",
+    "fixture_variable_sources": "GO",
+    "legacy_python_mongo_equivalent_seed": "GO",
+    "no_untraceable_or_uncleanable_test_data": "GO",
+    "overall": "GO"
+  },
+  "blocking_items": []
+}

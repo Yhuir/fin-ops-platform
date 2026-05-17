@@ -183,6 +183,7 @@ class AppGridFSToObjectStorageMigrator:
             raise RuntimeError("object storage client is required for upload or verify GridFS migration modes.")
 
         started_at = datetime.now(UTC)
+        migration_run_id = str(uuid.uuid5(GRIDFS_FILE_OBJECT_NAMESPACE, started_at.isoformat()))
         records = self._list_gridfs_records()
         if max_workers > 1 and len(records) > 1:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -241,6 +242,7 @@ class AppGridFSToObjectStorageMigrator:
         )
         manifest = {
             "tool": GRIDFS_MIGRATION_TOOL_VERSION,
+            "migration_run_id": migration_run_id,
             "mode": migration_mode,
             "dry_run": is_dry_run,
             "started_at": started_at.isoformat(),
@@ -254,6 +256,10 @@ class AppGridFSToObjectStorageMigrator:
                 "storage_provider": storage_provider,
                 "bucket": bucket,
                 "environment": environment,
+            },
+            "retry_policy": {
+                "max_retries": max(0, max_retries),
+                "retryable_operations": ["head_object", "put_object", "get_object_bytes"],
             },
             "summary": summary,
             "readiness_gates": {"file_checksum": readiness_gate},
@@ -486,6 +492,10 @@ class AppGridFSToObjectStorageMigrator:
             "object_key": object_key,
             "storage_key": object_key,
             "object_version": object_version,
+            "versioning": {
+                "captured": object_version is not None,
+                "object_version": object_version,
+            },
             "file_name": record.get("filename"),
             "content_type": record.get("content_type"),
             "content_type_status": record.get("content_type_status", "provided"),
@@ -642,6 +652,10 @@ class AppGridFSToObjectStorageMigrator:
         )
         self._write_ndjson(output_dir / "gridfs-object-mapping.ndjson", self._mapping_rows(manifest["files"]))
         self._write_ndjson(output_dir / "file-objects-import.ndjson", self._file_object_rows(manifest["files"]))
+        self._write_ndjson(
+            output_dir / "legacy-id-map-import.ndjson",
+            self._legacy_id_map_rows(manifest["files"], migration_run_id=manifest["migration_run_id"]),
+        )
         self._write_ndjson(output_dir / "gridfs-migration-failures.ndjson", manifest["findings"])
         checksum_report = self._checksum_validation_report(output_dir, manifest)
         (output_dir / "gridfs-checksum-validation-report.json").write_text(
@@ -662,6 +676,9 @@ class AppGridFSToObjectStorageMigrator:
                 "target_tables": ["app.file_objects", "app.import_files"],
                 "bucket": file_entry["bucket"],
                 "object_key": file_entry["object_key"],
+                "object_version": file_entry["object_version"],
+                "content_type": file_entry["content_type"],
+                "etag": file_entry["etag"],
                 "sha256": file_entry["sha256"],
                 "byte_size": file_entry["byte_size"],
                 "purpose": file_entry["purpose"],
@@ -670,6 +687,52 @@ class AppGridFSToObjectStorageMigrator:
             for file_entry in files
             if file_entry["status"] != "failed"
         ]
+
+    def _legacy_id_map_rows(self, files: list[dict[str, Any]], *, migration_run_id: str) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for file_entry in files:
+            if file_entry["status"] == "failed":
+                continue
+            import_file_id = self._import_file_id(file_entry["legacy_gridfs_id"])
+            payload_hash = hashlib.sha256(
+                json.dumps(
+                    {
+                        "legacy_gridfs_id": file_entry["legacy_gridfs_id"],
+                        "file_object_id": file_entry["file_object_id"],
+                        "import_file_id": import_file_id,
+                        "object_key": file_entry["object_key"],
+                        "sha256": file_entry["sha256"],
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            rows.extend(
+                [
+                    {
+                        "source_system": "app_mongo_gridfs",
+                        "legacy_collection": file_entry["legacy_collection"],
+                        "legacy_id": file_entry["legacy_gridfs_id"],
+                        "target_schema": "app",
+                        "target_table": "file_objects",
+                        "target_id": file_entry["file_object_id"],
+                        "payload_hash": payload_hash,
+                        "migration_run_id": migration_run_id,
+                    },
+                    {
+                        "source_system": "app_mongo_gridfs",
+                        "legacy_collection": file_entry["legacy_collection"],
+                        "legacy_id": file_entry["legacy_gridfs_id"],
+                        "target_schema": "app",
+                        "target_table": "import_files",
+                        "target_id": import_file_id,
+                        "payload_hash": payload_hash,
+                        "migration_run_id": migration_run_id,
+                    },
+                ]
+            )
+        return rows
 
     def _file_object_rows(self, files: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return [
@@ -786,6 +849,7 @@ class AppGridFSToObjectStorageMigrator:
             "gridfs-minio-migration-manifest.json",
             "gridfs-object-mapping.ndjson",
             "file-objects-import.ndjson",
+            "legacy-id-map-import.ndjson",
             "gridfs-migration-failures.ndjson",
         ]
         output_checksums = {
@@ -810,7 +874,8 @@ class AppGridFSToObjectStorageMigrator:
         reason = "File checksum gate passed." if status == "GO" else "Blocking file checksum findings exist."
         return {
             "report_id": f"gridfs-minio-checksum-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}",
-            "migration_run_id": str(uuid.uuid5(GRIDFS_FILE_OBJECT_NAMESPACE, manifest["started_at"])),
+            "migration_run_id": manifest.get("migration_run_id")
+            or str(uuid.uuid5(GRIDFS_FILE_OBJECT_NAMESPACE, manifest["started_at"])),
             "phase": "06d_gridfs_minio_migration",
             "tool": GRIDFS_MIGRATION_TOOL_VERSION,
             "status": status,
@@ -851,6 +916,7 @@ class AppGridFSToObjectStorageMigrator:
             },
             "legacy_id_mapping": {
                 "mapping_file": "gridfs-object-mapping.ndjson",
+                "legacy_id_map_file": "legacy-id-map-import.ndjson",
                 "expected_gridfs_files": manifest["summary"]["total_files"],
                 "mapped_file_objects": len([file_entry for file_entry in manifest["files"] if file_entry["status"] != "failed"]),
                 "mapped_import_files": len([file_entry for file_entry in manifest["files"] if file_entry["status"] != "failed"]),

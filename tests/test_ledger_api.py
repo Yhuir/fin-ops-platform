@@ -2,11 +2,24 @@ import json
 import unittest
 
 from fin_ops_platform.app.server import build_application
+from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 
 
 class LedgerApiTests(unittest.TestCase):
+    def _install_user_auth(self, app, username: str = "user_finance_01") -> dict[str, str]:
+        app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
+            user_id=f"{username}-id",
+            username=username,
+            nickname=username,
+            display_name=username,
+            roles=["finance"],
+            permissions=["finops:app:view"],
+        )
+        return {"Authorization": "Bearer ledger-token"}
+
     def test_workbench_confirm_auto_creates_ledger_and_supports_due_views(self) -> None:
         app = build_application()
+        headers = self._install_user_auth(app)
         self._preview_and_confirm(
             app,
             "output_invoice",
@@ -56,18 +69,22 @@ class LedgerApiTests(unittest.TestCase):
         confirm_payload = json.loads(confirm_response.body)
         self.assertEqual(confirm_payload["ledgers"][0]["ledger_type"], "payment_collection")
 
-        ledgers_response = app.handle_request("GET", "/ledgers?view=all")
+        ledgers_response = app.handle_request("GET", "/ledgers?view=all", headers=headers)
         self.assertEqual(ledgers_response.status_code, 200)
         ledgers_payload = json.loads(ledgers_response.body)
         self.assertEqual(len(ledgers_payload["ledgers"]), 1)
+        self.assertEqual(ledgers_payload["ledgers"][0]["counterparty_name"], "Ledger API Client")
+        self.assertNotIn("source_object_id", ledgers_payload["ledgers"][0])
+        self.assertNotIn("owner_id", ledgers_payload["ledgers"][0])
 
-        overdue_response = app.handle_request("GET", "/ledgers?view=overdue&as_of=2026-04-10")
+        overdue_response = app.handle_request("GET", "/ledgers?view=overdue&as_of=2026-04-10", headers=headers)
         self.assertEqual(overdue_response.status_code, 200)
         overdue_payload = json.loads(overdue_response.body)
         self.assertEqual(len(overdue_payload["ledgers"]), 1)
 
     def test_reminder_run_and_ledger_status_update_round_trip(self) -> None:
         app = build_application()
+        headers = self._install_user_auth(app)
         self._preview_and_confirm(
             app,
             "bank_transaction",
@@ -108,16 +125,21 @@ class LedgerApiTests(unittest.TestCase):
         run_response = app.handle_request(
             "POST",
             "/reminders/run",
-            json.dumps({"as_of": "2026-04-10"}),
+            json.dumps({"as_of": "2026-04-10", "actor_id": "user_finance_01"}),
+            headers=headers,
         )
-        self.assertEqual(run_response.status_code, 200)
+        self.assertEqual(run_response.status_code, 202)
         run_payload = json.loads(run_response.body)
-        self.assertEqual(len(run_payload["sent_reminders"]), 1)
+        self.assertEqual(run_payload["job"]["type"], "reminder_run")
+        self.assertEqual(run_payload["job"]["owner_user_id"], "user_finance_01")
 
-        reminders_response = app.handle_request("GET", "/reminders?as_of=2026-04-10&status=sent")
+        app._ledger_service.run_reminders(as_of="2026-04-10")
+        reminders_response = app.handle_request("GET", "/reminders?as_of=2026-04-10&status=sent", headers=headers)
         self.assertEqual(reminders_response.status_code, 200)
         reminders_payload = json.loads(reminders_response.body)
         self.assertEqual(len(reminders_payload["reminders"]), 1)
+        self.assertNotIn("channel", reminders_payload["reminders"][0])
+        self.assertRegex(reminders_payload["reminders"][0]["remind_at"], r"T")
 
         update_response = app.handle_request(
             "POST",
@@ -130,11 +152,14 @@ class LedgerApiTests(unittest.TestCase):
                     "expected_date": "2026-04-12",
                 }
             ),
+            headers=headers,
         )
         self.assertEqual(update_response.status_code, 200)
         update_payload = json.loads(update_response.body)
         self.assertEqual(update_payload["ledger"]["status"], "resolved")
-        self.assertEqual(update_payload["ledger"]["latest_note"], "invoice issued and closed")
+        self.assertEqual(update_payload["ledger"]["events"][0]["event_type"], "status_changed")
+        self.assertEqual(update_payload["ledger"]["events"][0]["event_payload"]["note"], "invoice issued and closed")
+        self.assertNotIn("latest_note", update_payload["ledger"])
 
     def _preview_and_confirm(self, app, batch_type: str, rows: list[dict[str, str]]) -> None:
         preview_response = app.handle_request(

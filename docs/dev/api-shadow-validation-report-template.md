@@ -31,7 +31,7 @@ When `--include-permission-failures` is set, the validator also runs each endpoi
 
 For any 4xx response, the validator checks the JSON body against the active `contract_cases.error_shape`. Shape values such as `"string"`, `"number"`, and `"boolean"` are treated as type assertions; any other non-null value is treated as an exact expected value. Permission-failure cases may override that shape with `defaults.permission_failure.error_shape` or endpoint-level `permission_failure.error_shape`.
 
-For SSE endpoints, set `response_mode: "sse_first_events"` and list expected event names in `contract_cases.sse_events`. The validator samples only those first events, normalizes them under `_sse_events[]`, then closes the stream so infinite streams remain suitable for GO/NO_GO evidence.
+For SSE endpoints, set `response_mode: "sse_first_events"` and list expected event names in `contract_cases.sse_events`. The validator samples only those first events, normalizes them under `_sse_events[]`, then closes the stream so infinite streams remain suitable for GO/NO_GO evidence. For binary downloads, set `response_mode: "binary"`; the validator compares status, content type, content disposition, and the binary magic/container marker instead of embedding raw file bytes in reports.
 
 Diff values under sensitive-looking fields such as token, password, secret, credential, cookie, authorization, URL/presigned URL, raw file/content, non-JSON body, stack, or traceback paths are emitted as `[REDACTED]`. The diff still counts toward `GO`/`NO_GO`; redaction only prevents report evidence from carrying secrets, access URLs, or raw payload content.
 
@@ -79,6 +79,7 @@ python scripts/tools/api_shadow_validate.py \
 | `/api/turnover-ledger` flat | GET | high | finance-ops |  |  |  |  |
 | `/api/turnover-ledger` grouped | GET | high | finance-ops |  |  |  |  |
 | `/api/turnover-ledger/export-preview` | GET | high | finance-ops |  |  |  |  |
+| `/api/turnover-ledger/export` | GET | high | finance-ops |  |  |  |  |
 | `/api/turnover-ledger/relations/{relation_id}` | GET | high | finance-ops |  |  |  |  |
 | `/api/tax-offset` | GET | medium | tax-ops |  |  |  |  |
 | `/api/tax-offset/calculate` | POST | medium | tax-ops |  |  |  |  |
@@ -90,6 +91,7 @@ python scripts/tools/api_shadow_validate.py \
 | `/api/cost-statistics` | GET | medium | cost-ops |  |  |  |  |
 | `/api/cost-statistics/explorer` | GET | medium | cost-ops |  |  |  |  |
 | `/api/cost-statistics/export-preview` | GET | medium | cost-ops |  |  |  |  |
+| `/api/cost-statistics/export` | GET | medium | cost-ops |  |  |  |  |
 | `/api/cost-statistics/projects/{project_name}` | GET | medium | cost-ops |  |  |  |  |
 | `/api/cost-statistics/transactions/{transaction_id}` | GET | medium | cost-ops |  |  |  |  |
 | `/api/workbench` | GET | high | finance-ops |  |  |  |  |
@@ -113,12 +115,29 @@ python scripts/tools/api_shadow_validate.py \
 | `/api/workbench/actions/ignore-row` | POST | high | finance-ops |  |  |  |  |
 | `/api/workbench/actions/unignore-row` | POST | high | finance-ops |  |  |  |  |
 | `/api/workbench/settings` | GET | high | platform-ops |  |  |  |  |
+| `/api/workbench/settings` | POST | high | platform-ops |  |  |  |  |
+| `/api/workbench/settings/projects/sync` | POST | high | platform-ops |  |  |  |  |
+| `/api/workbench/settings/projects` | POST | high | platform-ops |  |  |  |  |
+| `/api/workbench/settings/projects/{project_id}` | DELETE | high | platform-ops |  |  |  |  |
+| `/api/workbench/settings/data-reset/jobs` | POST | high | platform-ops |  |  |  |  |
+| `/api/workbench/settings/data-reset` | POST | high | platform-ops |  |  |  |  |
 | `/api/background-jobs/active` | GET | medium | platform-ops |  |  |  |  |
 | `/api/background-jobs/{job_id}` | GET | medium | platform-ops |  |  |  |  |
+| `/api/background-jobs/{job_id}/acknowledge` | POST | medium | platform-ops |  |  |  |  |
 | `/api/background-jobs/{job_id}/retry` | POST | medium | platform-ops |  |  |  |  |
+| `/projects` | GET | high | platform-ops |  |  |  |  |
+| `/projects` | POST | high | platform-ops |  |  |  |  |
+| `/projects/{project_id}` | GET | high | platform-ops |  |  |  |  |
+| `/projects/assign` | POST | high | platform-ops |  |  |  |  |
+| `/ledgers` | GET | high | platform-ops |  |  |  |  |
+| `/ledgers/{ledger_id}` | GET | high | platform-ops |  |  |  |  |
+| `/ledgers/{ledger_id}/status` | POST | high | platform-ops |  |  |  |  |
+| `/reminders` | GET | high | platform-ops |  |  |  |  |
+| `/reminders/run` | POST | high | platform-ops |  |  |  |  |
 | `/imports/templates` | GET | medium | platform-ops |  |  |  |  |
 | `/imports/batches` | GET | medium | platform-ops |  |  |  |  |
 | `/imports/batches/{batch_id}` | GET | medium | platform-ops |  |  |  |  |
+| `/imports/batches/{batch_id}/download` | GET | high | platform-ops |  |  |  |  |
 | `/imports/files/{file_id}` | GET | medium | platform-ops |  |  |  |  |
 | `/imports/files/retry` | POST | high | platform-ops |  |  |  |  |
 | `/imports/files/sessions/{session_id}` | GET | high | platform-ops |  |  |  |  |

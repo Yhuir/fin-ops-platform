@@ -6,7 +6,8 @@ import unittest
 from datetime import UTC, datetime
 
 from fin_ops_platform.services.worker_task_consumer import consume_worker_message
-from fin_ops_platform.services.worker_task_protocol import WorkerTaskRecord
+from fin_ops_platform.services.worker_task_protocol import PermanentWorkerError, WorkerTaskEnvelope, WorkerTaskRecord
+from scripts.tools.run_worker_task_consumer import dispatch_worker_task_handler, smoke_success_handler
 
 from tests.test_worker_task_protocol import FakeWorkerRepository, valid_message
 
@@ -108,6 +109,44 @@ class WorkerTaskConsumerTests(unittest.TestCase):
         self.assertTrue(message.terminated)
         self.assertEqual(repository.dead_letters[0]["source_kind"], "nats_message")
         self.assertEqual(repository.dead_letters[0]["error_code"], "WORKER_TASK_MESSAGE_INVALID")
+
+    def test_smoke_success_handler_rejects_settings_data_reset_tasks(self) -> None:
+        envelope = WorkerTaskEnvelope.from_mapping(
+            valid_message(
+                task_type="settings_data_reset",
+                source={"action": "reset_bank_transactions"},
+                payload={"action": "reset_bank_transactions"},
+            )
+        )
+
+        with self.assertRaises(PermanentWorkerError) as raised:
+            smoke_success_handler(envelope, object())
+
+        self.assertEqual(raised.exception.error_code, "DATA_RESET_SMOKE_HANDLER_FORBIDDEN")
+
+    def test_dispatch_uses_formal_settings_data_reset_handler_only_for_data_reset_tasks(self) -> None:
+        called: list[str] = []
+
+        def formal_handler(envelope: WorkerTaskEnvelope, _context: object) -> dict[str, object]:
+            called.append(envelope.task_type)
+            return {"handled": True}
+
+        data_reset_envelope = WorkerTaskEnvelope.from_mapping(
+            valid_message(
+                task_type="settings_data_reset",
+                source={"action": "reset_bank_transactions"},
+                payload={"action": "reset_bank_transactions"},
+            )
+        )
+        other_envelope = WorkerTaskEnvelope.from_mapping(valid_message())
+        handler = dispatch_worker_task_handler(formal_handler)
+
+        self.assertEqual(handler(data_reset_envelope, object()), {"handled": True})
+        with self.assertRaises(PermanentWorkerError) as raised:
+            handler(other_envelope, object())
+
+        self.assertEqual(called, ["settings_data_reset"])
+        self.assertEqual(raised.exception.error_code, "WORKER_TASK_HANDLER_NOT_CONFIGURED")
 
 
 if __name__ == "__main__":

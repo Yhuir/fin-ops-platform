@@ -122,6 +122,18 @@ class PostgresWorkerTaskRepository(WorkerTaskRepository):
             """,
             (started_at, worker_id, started_at, started_at, task_id),
         )
+        cursor.execute(
+            """
+            update app.data_reset_requests
+            set status = 'running',
+                execution_mode = 'maintenance_worker',
+                updated_by = %s,
+                updated_at = %s
+            where worker_task_id = %s
+              and status in ('requested', 'queued', 'running')
+            """,
+            (worker_id, started_at, task_id),
+        )
         self._commit_lease()
 
     def record_heartbeat(
@@ -207,6 +219,24 @@ class PostgresWorkerTaskRepository(WorkerTaskRepository):
                     where id = %s
                     """,
                     (_json(result_summary), finished_at, finished_at, task_id),
+                )
+                cursor.execute(
+                    """
+                    update app.data_reset_requests
+                    set status = 'succeeded',
+                        completed_at = %s,
+                        failed_at = null,
+                        failure_code = null,
+                        failure_message = null,
+                        updated_by = coalesce(
+                          (select worker_id from job.worker_attempts where id = %s and task_id = %s),
+                          updated_by
+                        ),
+                        updated_at = %s
+                    where worker_task_id = %s
+                      and status <> 'cancelled'
+                    """,
+                    (finished_at, attempt_id, task_id, finished_at, task_id),
                 )
             connection.commit()
         except Exception:
@@ -383,6 +413,24 @@ class PostgresWorkerTaskRepository(WorkerTaskRepository):
                         task_id,
                     ),
                 )
+                if status in {"failed", "dead_lettered"}:
+                    cursor.execute(
+                        """
+                        update app.data_reset_requests
+                        set status = 'failed',
+                            failed_at = %s,
+                            failure_code = %s,
+                            failure_message = %s,
+                            updated_by = coalesce(
+                              (select worker_id from job.worker_attempts where id = %s and task_id = %s),
+                              updated_by
+                            ),
+                            updated_at = %s
+                        where worker_task_id = %s
+                          and status <> 'cancelled'
+                        """,
+                        (finished_at, error_code, error_summary, attempt_id, task_id, finished_at, task_id),
+                    )
                 if payload is not None:
                     cursor.execute(
                         """

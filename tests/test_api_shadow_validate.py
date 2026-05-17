@@ -1,6 +1,8 @@
 import importlib.util
 import json
+import os
 import re
+import sys
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Barrier, BrokenBarrierError, Thread
@@ -64,6 +66,32 @@ def test_no_go_when_diff_is_not_explained() -> None:
     assert result["explained_diff_count"] == 1
 
 
+def test_explain_diffs_array_wildcard_matches_indexed_paths() -> None:
+    shadow = load_shadow_module()
+    endpoint = {
+        "id": "ledger-status-update",
+        "method": "POST",
+        "path": "/ledgers/${LEDGER_ID}/status",
+        "explain_diffs": ["date_format:$.ledger.events[*].created_at"],
+    }
+    diff = {
+        "diffs": [
+            {
+                "kind": "date_format",
+                "path": "$.ledger.events[0].created_at",
+                "python": "2026-05-17T10:45:47Z",
+                "axum": "2026-05-17T10:45:46Z",
+            }
+        ]
+    }
+
+    result = shadow.evaluate_endpoint_gate(endpoint, 200, 200, diff)
+
+    assert result["status"] == "GO"
+    assert result["unexpected_diff_count"] == 0
+    assert result["explained_diff_count"] == 1
+
+
 def test_shadow_validator_runs_against_two_local_http_services(tmp_path) -> None:
     shadow = load_shadow_module()
     python_server = serve_json({"summary": {"total_amount": "3.00"}, "rows": [{"id": "a"}]})
@@ -115,6 +143,227 @@ def test_shadow_validator_runs_against_two_local_http_services(tmp_path) -> None
     ]
     assert (tmp_path / "api-shadow-validation-report-20260517.json").exists()
     assert (tmp_path / "api-shadow-validation-report-20260517.md").exists()
+
+
+def test_shadow_validator_records_strict_accepted_production_change(tmp_path) -> None:
+    shadow = load_shadow_module()
+    python_server = serve_json({"sent_reminders": [{"id": "legacy"}]}, status=200)
+    axum_server = serve_json({"job": {"status": "queued"}}, status=202)
+    fixture_path = tmp_path / "fixture.json"
+    fixture_path.write_text(
+        json.dumps(
+            {
+                "endpoints": [
+                    complete_endpoint(
+                        id="reminder-run-request",
+                        method="POST",
+                        path="/reminders/run",
+                        expected_status=202,
+                        accepted_production_change={
+                            "change_id": "p0-platform-reminder-run-queue-only",
+                            "legacy_status": 200,
+                            "axum_status": 202,
+                            "summary": "Legacy sent reminders in request path; Rust queues a worker task.",
+                            "source_contract": "docs/architecture/backend-refactor/remaining-api-contracts.md#16",
+                            "owner": "platform-ops",
+                            "next_verification": "runtime shadow verifies queued job envelope and worker execution evidence.",
+                        },
+                        explain_diffs=["$.sent_reminders", "$.job"],
+                    )
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        report = shadow.run_shadow_validation(
+            python_base_url=server_url(python_server),
+            axum_base_url=server_url(axum_server),
+            fixture_path=fixture_path,
+            output_dir=tmp_path,
+            report_date="20260517",
+            timeout=2.0,
+        )
+    finally:
+        python_server.shutdown()
+        axum_server.shutdown()
+
+    assert report["status"] == "GO"
+    assert report["summary"]["accepted_production_change_count"] == 1
+    assert report["accepted_production_changes"] == [
+        {
+            "endpoint_id": "reminder-run-request",
+            "case": "primary",
+            "change_id": "p0-platform-reminder-run-queue-only",
+            "legacy_status": 200,
+            "axum_status": 202,
+            "summary": "Legacy sent reminders in request path; Rust queues a worker task.",
+            "source_contract": "docs/architecture/backend-refactor/remaining-api-contracts.md#16",
+            "owner": "platform-ops",
+            "next_verification": "runtime shadow verifies queued job envelope and worker execution evidence.",
+        }
+    ]
+    assert report["results"][0]["accepted_production_change"]["change_id"] == "p0-platform-reminder-run-queue-only"
+
+
+def test_shadow_validator_rejects_incomplete_accepted_production_change(tmp_path) -> None:
+    shadow = load_shadow_module()
+    fixture_path = tmp_path / "fixture.json"
+    fixture_path.write_text(
+        json.dumps(
+            {
+                "endpoints": [
+                    complete_endpoint(
+                        id="incomplete-change",
+                        method="POST",
+                        path="/api/incomplete",
+                        expected_status=202,
+                        accepted_production_change={
+                            "change_id": "missing-required-fields",
+                            "legacy_status": 200,
+                            "axum_status": 202,
+                        },
+                    )
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    validation = shadow.validate_shadow_fixture(fixture_path)
+
+    assert validation["status"] == "NO_GO"
+    assert "accepted_production_change.source_contract is required" in validation["endpoint_errors"][0]["messages"]
+
+
+def test_shadow_validator_runs_before_group_hook_for_reseed_boundaries(tmp_path) -> None:
+    shadow = load_shadow_module()
+    python_server = serve_json({"ok": True})
+    axum_server = serve_json({"ok": True})
+    hook_log = tmp_path / "hook.log"
+    fixture_path = tmp_path / "fixture.json"
+    fixture_path.write_text(
+        json.dumps(
+            {
+                "endpoints": [
+                    complete_endpoint(
+                        id="ledger-detail",
+                        method="GET",
+                        path="/ledgers/seeded",
+                        expected_status=200,
+                        isolation_group="ledger-readonly",
+                    ),
+                    complete_endpoint(
+                        id="ledger-status-update",
+                        method="POST",
+                        path="/ledgers/seeded/status",
+                        expected_status=200,
+                        isolation_group="ledger-status-write",
+                        requires_reseed=True,
+                    ),
+                    complete_endpoint(
+                        id="reminder-run-request",
+                        method="POST",
+                        path="/reminders/run",
+                        expected_status=200,
+                        isolation_group="reminder-run-write",
+                        requires_reseed=True,
+                    ),
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    hook = (
+        f"{sys.executable} -c \"import os,pathlib;"
+        f"pathlib.Path(os.environ['HOOK_LOG']).open('a').write(os.environ['SHADOW_ISOLATION_GROUP']+'\\n')\""
+    )
+    old_hook_log = os.environ.get("HOOK_LOG")
+    os.environ["HOOK_LOG"] = str(hook_log)
+    try:
+        report = shadow.run_shadow_validation(
+            python_base_url=server_url(python_server),
+            axum_base_url=server_url(axum_server),
+            fixture_path=fixture_path,
+            output_dir=tmp_path,
+            report_date="20260517",
+            timeout=2.0,
+            before_group_hook=hook,
+        )
+    finally:
+        python_server.shutdown()
+        axum_server.shutdown()
+        if old_hook_log is None:
+            os.environ.pop("HOOK_LOG", None)
+        else:
+            os.environ["HOOK_LOG"] = old_hook_log
+
+    assert hook_log.read_text(encoding="utf-8").splitlines() == [
+        "ledger-readonly",
+        "ledger-status-write",
+        "reminder-run-write",
+    ]
+    assert report["seed_generation"]["before_group_hook_configured"] is True
+    assert report["side_effect_probe_results"] == []
+    assert report["results"][1]["isolation_group"] == "ledger-status-write"
+    assert report["results"][1]["seed_applied_at"] is not None
+    assert report["results"][1]["legacy_seed_applied"] is True
+    assert report["results"][1]["postgres_cleanup_applied"] is True
+
+
+def test_shadow_validator_blocks_requests_when_reseed_hook_reports_restart_required(tmp_path) -> None:
+    shadow = load_shadow_module()
+    python_server = serve_json({"request": "must-not-be-sent"})
+    axum_server = serve_json({"request": "must-not-be-sent"})
+    fixture_path = tmp_path / "fixture.json"
+    fixture_path.write_text(
+        json.dumps(
+            {
+                "endpoints": [
+                    complete_endpoint(
+                        id="ledger-status-update",
+                        method="POST",
+                        path="/ledgers/seeded/status",
+                        expected_status=200,
+                        isolation_group="ledger-status-write",
+                        requires_reseed=True,
+                    )
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    hook = (
+        f"{sys.executable} -c \"import json,sys;"
+        "print(json.dumps({'status':'NO_GO','postgres_cleanup_applied':True,"
+        "'legacy_seed_applied':True,'restart_required':True,"
+        "'message':'legacy Python process must restart to load reseeded data-dir'}));"
+        "sys.exit(4)\""
+    )
+
+    try:
+        report = shadow.run_shadow_validation(
+            python_base_url=server_url(python_server),
+            axum_base_url=server_url(axum_server),
+            fixture_path=fixture_path,
+            output_dir=tmp_path,
+            report_date="20260517",
+            timeout=2.0,
+            before_group_hook=hook,
+        )
+    finally:
+        python_server.shutdown()
+        axum_server.shutdown()
+
+    result = report["results"][0]
+    assert report["status"] == "NO_GO"
+    assert result["case"] == "seed_isolation"
+    assert result["python_error"] == "request_not_sent_seed_isolation_failed"
+    assert result["postgres_cleanup_applied"] is True
+    assert result["legacy_seed_applied"] is True
+    assert result["hook_report"]["restart_required"] is True
+    assert "restart" in result["unexpected_diffs"][0]["message"]
 
 
 def test_markdown_report_includes_diff_details() -> None:
@@ -309,6 +558,65 @@ def test_shadow_report_records_fixture_endpoint_ids(tmp_path) -> None:
         axum_server.shutdown()
 
     assert report["fixture_validation"]["endpoint_ids"] == ["alpha-check", "beta-check"]
+
+
+def test_shadow_fixture_validation_filters_endpoint_ids(tmp_path) -> None:
+    shadow = load_shadow_module()
+    fixture_path = tmp_path / "fixture.json"
+    fixture_path.write_text(
+        json.dumps(
+            {
+                "endpoints": [
+                    complete_endpoint(
+                        id="alpha-check",
+                        method="GET",
+                        path="/api/alpha",
+                        expected_status=200,
+                    ),
+                    complete_endpoint(
+                        id="beta-check",
+                        method="GET",
+                        path="/api/beta",
+                        expected_status=200,
+                    ),
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = shadow.validate_shadow_fixture(fixture_path, endpoint_ids={"beta-check"})
+
+    assert report["status"] == "GO"
+    assert report["filters"]["endpoint_ids"] == ["beta-check"]
+    assert report["endpoint_count"] == 1
+    assert report["endpoint_ids"] == ["beta-check"]
+
+
+def test_shadow_fixture_validation_rejects_unknown_endpoint_filter(tmp_path) -> None:
+    shadow = load_shadow_module()
+    fixture_path = tmp_path / "fixture.json"
+    fixture_path.write_text(
+        json.dumps(
+            {
+                "endpoints": [
+                    complete_endpoint(
+                        id="alpha-check",
+                        method="GET",
+                        path="/api/alpha",
+                        expected_status=200,
+                    )
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = shadow.validate_shadow_fixture(fixture_path, endpoint_ids={"missing-check"})
+
+    assert report["status"] == "NO_GO"
+    assert report["endpoint_count"] == 0
+    assert report["endpoint_errors"][0]["messages"] == ["no endpoints matched the selected filters"]
 
 
 def test_shadow_fixture_records_permission_failure_endpoint_ids(tmp_path) -> None:
@@ -1590,6 +1898,586 @@ def test_shadow_validator_expands_query_and_body_env_vars(tmp_path, monkeypatch)
         axum_server.shutdown()
 
     assert report["status"] == "GO"
+
+
+def load_platform_shadow_preflight_module():
+    module_path = Path(__file__).resolve().parents[1] / "scripts" / "tools" / "platform_shadow_preflight.py"
+    spec = importlib.util.spec_from_file_location("platform_shadow_preflight", module_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec is not None
+    assert spec.loader is not None
+    sys.modules["platform_shadow_preflight"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_platform_shadow_runtime_module():
+    module_path = Path(__file__).resolve().parents[1] / "scripts" / "tools" / "platform_shadow_runtime.py"
+    spec = importlib.util.spec_from_file_location("platform_shadow_runtime", module_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec is not None
+    assert spec.loader is not None
+    sys.modules["platform_shadow_runtime"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_platform_shadow_preflight_parse_postgres_major() -> None:
+    preflight = load_platform_shadow_preflight_module()
+
+    assert preflight.parse_postgres_major("psql (PostgreSQL) 16.12") == 16
+    assert preflight.parse_postgres_major("PostgreSQL 17.4 on aarch64-apple-darwin") == 17
+    assert preflight.parse_postgres_major("not postgres") is None
+
+
+def test_platform_shadow_preflight_finds_missing_runtime_inputs() -> None:
+    preflight = load_platform_shadow_preflight_module()
+    fixture_validation = {"status": "GO", "endpoint_count": 16}
+    ok_command = preflight.CommandResult(["true"], "GO", 0, "psql (PostgreSQL) 16.12", "")
+    no_go_command = preflight.CommandResult(["docker"], "NO_GO", 1, "", "daemon unavailable")
+
+    findings = preflight.findings_for_report(
+        fixture_validation=fixture_validation,
+        python_base_url=None,
+        axum_base_url=None,
+        database_url_env="DATABASE_URL",
+        database_url_present=False,
+        postgres_major=14,
+        psql_version=ok_command,
+        docker_info=no_go_command,
+        sqlx_version=no_go_command,
+        python_check=ok_command,
+    )
+
+    assert [finding["code"] for finding in findings] == [
+        "PYTHON_BASE_URL_MISSING",
+        "AXUM_BASE_URL_MISSING",
+        "AXUM_DATABASE_URL_MISSING",
+        "LOCAL_POSTGRES_VERSION_TOO_OLD",
+        "DOCKER_DAEMON_UNAVAILABLE",
+    ]
+
+
+def test_platform_shadow_preflight_reports_missing_fixture_variables(tmp_path) -> None:
+    preflight = load_platform_shadow_preflight_module()
+    fixture_path = tmp_path / "fixture.json"
+    fixture_path.write_text(
+        json.dumps(
+            {
+                "defaults": {
+                    "headers": {
+                        "Authorization": "Bearer ${FIN_OPS_SHADOW_OA_TOKEN}",
+                    }
+                },
+                "endpoints": [
+                    {
+                        "id": "project-detail",
+                        "method": "GET",
+                        "path": "/projects/${PROJECT_ID}",
+                        "query": {"run_id": "${SHADOW_RUN_ID}"},
+                    },
+                    {
+                        "id": "ledger-detail",
+                        "method": "GET",
+                        "path": "/ledgers/${LEDGER_ID}",
+                    },
+                    {
+                        "id": "unselected",
+                        "method": "GET",
+                        "path": "/ignored/${IGNORED_ID}",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    runtime_variables = preflight.collect_runtime_variable_requirements(
+        fixture_path,
+        endpoint_ids={"project-detail", "ledger-detail"},
+        environ={"SHADOW_RUN_ID": "p0-runtime"},
+    )
+    findings = preflight.findings_for_report(
+        fixture_validation={"status": "GO", "endpoint_count": 2},
+        python_base_url="http://python",
+        axum_base_url="http://axum",
+        database_url_env="DATABASE_URL",
+        database_url_present=True,
+        postgres_major=16,
+        psql_version=preflight.CommandResult(["psql"], "GO", 0, "psql (PostgreSQL) 16.12", ""),
+        docker_info=preflight.CommandResult(["docker"], "GO", 0, "26.0.0", ""),
+        sqlx_version=preflight.CommandResult(["cargo", "sqlx"], "GO", 0, "cargo-sqlx 0.8.0", ""),
+        python_check=preflight.CommandResult(["python3"], "GO", 0, "ready", ""),
+        runtime_variables=runtime_variables,
+    )
+
+    assert runtime_variables["status"] == "NO_GO"
+    assert runtime_variables["missing_variables"] == [
+        "FIN_OPS_SHADOW_OA_TOKEN",
+        "LEDGER_ID",
+        "PROJECT_ID",
+    ]
+    required = {item["name"]: item for item in runtime_variables["required_variables"]}
+    assert required["FIN_OPS_SHADOW_OA_TOKEN"]["classification"] == "auth_secret"
+    assert required["PROJECT_ID"]["classification"] == "fixture_fact_id"
+    assert required["SHADOW_RUN_ID"]["classification"] == "run_correlation"
+    assert "IGNORED_ID" not in required
+    assert [finding["code"] for finding in findings] == ["PLATFORM_FIXTURE_VARIABLES_MISSING"]
+
+
+def test_platform_shadow_preflight_builds_seed_requirements_without_database_url(tmp_path) -> None:
+    preflight = load_platform_shadow_preflight_module()
+    fixture_path = tmp_path / "fixture.json"
+    fixture_path.write_text(
+        json.dumps(
+            {
+                "defaults": {"headers": {"Authorization": "Bearer ${FIN_OPS_SHADOW_OA_TOKEN}"}},
+                "endpoints": [
+                    {
+                        "id": "project-detail",
+                        "method": "GET",
+                        "path": "/projects/${PROJECT_ID}",
+                    },
+                    {
+                        "id": "ledger-detail",
+                        "method": "GET",
+                        "path": "/ledgers/${LEDGER_ID}",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    runtime_variables = preflight.collect_runtime_variable_requirements(
+        fixture_path,
+        endpoint_ids={"project-detail", "ledger-detail"},
+        environ={
+            "FIN_OPS_SHADOW_OA_TOKEN": "token",
+            "PROJECT_ID": "11111111-1111-1111-1111-111111111111",
+            "LEDGER_ID": "22222222-2222-2222-2222-222222222222",
+        },
+    )
+    seed_requirements = preflight.collect_seed_requirements(
+        runtime_variables,
+        database_url_env="DATABASE_URL",
+        environ={
+            "FIN_OPS_SHADOW_OA_TOKEN": "token",
+            "PROJECT_ID": "11111111-1111-1111-1111-111111111111",
+            "LEDGER_ID": "22222222-2222-2222-2222-222222222222",
+        },
+    )
+
+    by_variable = {item["variable"]: item for item in seed_requirements["requirements"]}
+    assert seed_requirements["status"] == "NO_GO"
+    assert by_variable["PROJECT_ID"]["postgres_fact_source"] == "app.project_profiles"
+    assert by_variable["PROJECT_ID"]["probe"]["status"] == "SKIPPED_DATABASE_URL_MISSING"
+    assert by_variable["LEDGER_ID"]["postgres_fact_source"] == "app.ledgers"
+    assert by_variable["FIN_OPS_SHADOW_OA_TOKEN"]["probe"]["status"] == "SKIPPED_NOT_POSTGRES_FACT"
+
+
+def test_platform_shadow_preflight_flags_invalid_seed_uuid() -> None:
+    preflight = load_platform_shadow_preflight_module()
+    runtime_variables = {
+        "required_variables": [
+            {
+                "name": "PROJECT_ID",
+                "present": True,
+                "classification": "fixture_fact_id",
+                "used_by": ["project-detail"],
+            }
+        ]
+    }
+
+    seed_requirements = preflight.collect_seed_requirements(
+        runtime_variables,
+        database_url_env="DATABASE_URL",
+        environ={
+            "DATABASE_URL": "postgres://user:secret@localhost/db",
+            "PROJECT_ID": "not-a-uuid",
+        },
+    )
+    findings = preflight.findings_for_report(
+        fixture_validation={"status": "GO", "endpoint_count": 1},
+        python_base_url="http://python",
+        axum_base_url="http://axum",
+        database_url_env="DATABASE_URL",
+        database_url_present=True,
+        postgres_major=16,
+        psql_version=preflight.CommandResult(["psql"], "GO", 0, "psql (PostgreSQL) 16.12", ""),
+        docker_info=preflight.CommandResult(["docker"], "GO", 0, "26.0.0", ""),
+        sqlx_version=preflight.CommandResult(["cargo", "sqlx"], "GO", 0, "cargo-sqlx 0.8.0", ""),
+        python_check=preflight.CommandResult(["python3"], "GO", 0, "ready", ""),
+        runtime_variables={"missing_variables": []},
+        seed_requirements=seed_requirements,
+    )
+
+    assert seed_requirements["status"] == "NO_GO"
+    assert seed_requirements["requirements"][0]["probe"]["status"] == "NO_GO"
+    assert [finding["code"] for finding in findings] == ["PLATFORM_SEED_FACTS_MISSING"]
+
+
+def test_platform_fixture_data_reset_shadow_actions_do_not_self_conflict() -> None:
+    fixture = json.loads(Path("docs/dev/api-fixtures/business-api-shadow-validation.json").read_text(encoding="utf-8"))
+    actions = {
+        endpoint["id"]: endpoint["body"]["action"]
+        for endpoint in fixture["endpoints"]
+        if endpoint.get("id") in {"settings-data-reset-create-job", "settings-data-reset-direct-queues-job"}
+    }
+
+    assert actions == {
+        "settings-data-reset-create-job": "reset_invoices",
+        "settings-data-reset-direct-queues-job": "reset_bank_transactions",
+    }
+
+
+def test_platform_shadow_preflight_detects_static_fixture_conflicts(tmp_path) -> None:
+    preflight = load_platform_shadow_preflight_module()
+    fixture_path = tmp_path / "fixture.json"
+    fixture_path.write_text(
+        json.dumps(
+            {
+                "endpoints": [
+                    {
+                        "id": "delete-project",
+                        "method": "DELETE",
+                        "path": "/api/workbench/settings/projects/${PROJECT_ID}",
+                        "body": {"idempotency_key": "same-${SHADOW_RUN_ID}"},
+                    },
+                    {
+                        "id": "project-detail",
+                        "method": "GET",
+                        "path": "/projects/${PROJECT_ID}",
+                    },
+                    {
+                        "id": "reset-one",
+                        "method": "POST",
+                        "path": "/api/workbench/settings/data-reset/jobs",
+                        "expected_status": 202,
+                        "body": {"idempotency_key": "same-${SHADOW_RUN_ID}", "action": "reset_invoices"},
+                    },
+                    {
+                        "id": "reset-two",
+                        "method": "POST",
+                        "path": "/api/workbench/settings/data-reset",
+                        "expected_status": 202,
+                        "body": {"idempotency_key": "other-${SHADOW_RUN_ID}", "action": "reset_invoices"},
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    checks = preflight.collect_fixture_static_checks(
+        fixture_path,
+        endpoint_ids={"delete-project", "project-detail", "reset-one", "reset-two"},
+    )
+    conflicts = {item["kind"]: item for item in checks["conflicts"]}
+
+    assert checks["status"] == "NO_GO"
+    assert conflicts["duplicate_idempotency_key"]["endpoint_ids"] == ["delete-project", "reset-one"]
+    assert conflicts["data_reset_action_reuse"]["endpoint_ids"] == ["reset-one", "reset-two"]
+    assert conflicts["destructive_target_reuse"]["value"] == "PROJECT_ID"
+
+
+def test_platform_shadow_fixture_has_no_static_write_order_conflicts() -> None:
+    preflight = load_platform_shadow_preflight_module()
+    checks = preflight.collect_fixture_static_checks(
+        Path("docs/dev/api-fixtures/business-api-shadow-validation.json"),
+        endpoint_ids=set(preflight.PLATFORM_ENDPOINT_IDS),
+    )
+
+    assert checks == {"status": "GO", "conflict_count": 0, "conflicts": []}
+
+
+def test_platform_shadow_fixture_declares_axum_trusted_auth_headers() -> None:
+    fixture = json.loads(Path("docs/dev/api-fixtures/business-api-shadow-validation.json").read_text(encoding="utf-8"))
+    headers = {key.lower(): value for key, value in fixture["defaults"]["headers"].items()}
+
+    assert headers["authorization"] == "Bearer ${FIN_OPS_SHADOW_OA_TOKEN}"
+    assert headers["x-fin-ops-oa-user-id"] == "${FIN_OPS_SHADOW_OA_USER_ID}"
+    assert headers["x-fin-ops-oa-username"] == "${FIN_OPS_SHADOW_OA_USERNAME}"
+    assert headers["x-fin-ops-oa-permissions"] == "finops:app:view"
+
+
+def test_platform_shadow_preflight_auth_requirements(tmp_path) -> None:
+    preflight = load_platform_shadow_preflight_module()
+    fixture_path = tmp_path / "fixture.json"
+    fixture_path.write_text(
+        json.dumps(
+            {
+                "defaults": {
+                    "headers": {
+                        "Authorization": "Bearer ${FIN_OPS_SHADOW_OA_TOKEN}",
+                        "x-fin-ops-oa-user-id": "${FIN_OPS_SHADOW_OA_USER_ID}",
+                        "x-fin-ops-oa-username": "${FIN_OPS_SHADOW_OA_USERNAME}",
+                        "x-fin-ops-oa-permissions": "finops:app:view",
+                    }
+                },
+                "endpoints": [
+                    {
+                        "id": "settings",
+                        "method": "POST",
+                        "path": "/api/workbench/settings",
+                    },
+                    {
+                        "id": "assign",
+                        "method": "POST",
+                        "path": "/projects/assign",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    checks = preflight.collect_auth_requirements(
+        fixture_path,
+        endpoint_ids={"settings", "assign"},
+        axum_base_url=None,
+        environ={
+            "FIN_OPS_SHADOW_OA_TOKEN": "token",
+            "FIN_OPS_SHADOW_OA_USER_ID": "test-id",
+            "FIN_OPS_SHADOW_OA_USERNAME": "YNSYLP005",
+            "FIN_OPS_SHADOW_OA_IDENTITY_SOURCE": "production_oa_test_user",
+            "FIN_OPS_OA_IDENTITY_ADAPTER": "trusted_headers",
+        },
+    )
+
+    assert checks["status"] == "GO"
+    by_code = {item["code"]: item for item in checks["checks"]}
+    assert by_code["AXUM_ADMIN_USERNAME_PRESENT_FOR_ADMIN_ROUTES"]["admin_route_count"] == 1
+    assert by_code["OA_IDENTITY_SOURCE_ACCEPTED"]["source"] == "production_oa_test_user"
+    assert by_code["OA_IDENTITY_SOURCE_ACCEPTED"]["environment"] == "production"
+
+
+def test_platform_shadow_preflight_auth_requirements_report_blockers(tmp_path) -> None:
+    preflight = load_platform_shadow_preflight_module()
+    fixture_path = tmp_path / "fixture.json"
+    fixture_path.write_text(
+        json.dumps(
+            {
+                "defaults": {"headers": {"Authorization": "Bearer ${FIN_OPS_SHADOW_OA_TOKEN}"}},
+                "endpoints": [
+                    {
+                        "id": "settings",
+                        "method": "POST",
+                        "path": "/api/workbench/settings",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    auth_requirements = preflight.collect_auth_requirements(
+        fixture_path,
+        endpoint_ids={"settings"},
+        axum_base_url=None,
+        environ={},
+    )
+    findings = preflight.findings_for_report(
+        fixture_validation={"status": "GO", "endpoint_count": 1},
+        python_base_url="http://python",
+        axum_base_url="http://axum",
+        database_url_env="DATABASE_URL",
+        database_url_present=True,
+        postgres_major=16,
+        psql_version=preflight.CommandResult(["psql"], "GO", 0, "psql (PostgreSQL) 16.12", ""),
+        docker_info=preflight.CommandResult(["docker"], "GO", 0, "26.0.0", ""),
+        sqlx_version=preflight.CommandResult(["cargo", "sqlx"], "GO", 0, "cargo-sqlx 0.8.0", ""),
+        python_check=preflight.CommandResult(["python3"], "GO", 0, "ready", ""),
+        runtime_variables={"missing_variables": []},
+        seed_requirements={"status": "GO", "requirements": []},
+        auth_requirements=auth_requirements,
+    )
+
+    assert auth_requirements["status"] == "NO_GO"
+    assert [finding["code"] for finding in findings] == ["PLATFORM_AUTH_REQUIREMENTS_NO_GO"]
+
+
+def test_platform_shadow_preflight_builds_runtime_input_plan() -> None:
+    preflight = load_platform_shadow_preflight_module()
+    args = type(
+        "Args",
+        (),
+        {
+            "fixture": Path("docs/dev/api-fixtures/business-api-shadow-validation.json"),
+            "python_base_url": None,
+            "axum_base_url": None,
+            "database_url_env": "DATABASE_URL",
+        },
+    )()
+    runtime_variables = {
+        "status": "NO_GO",
+        "required_variables": [
+            {
+                "name": "PROJECT_ID",
+                "present": False,
+                "classification": "fixture_fact_id",
+                "used_by": ["project-detail"],
+            },
+            {
+                "name": "FIN_OPS_SHADOW_OA_TOKEN",
+                "present": False,
+                "classification": "auth_secret",
+                "used_by": ["project-detail"],
+            },
+        ],
+    }
+    seed_requirements = {
+        "status": "NO_GO",
+        "requirements": [
+            {
+                "variable": "PROJECT_ID",
+                "postgres_fact_source": "app.project_profiles",
+                "probe": {"status": "SKIPPED_MISSING_VARIABLE"},
+            },
+            {
+                "variable": "FIN_OPS_SHADOW_OA_TOKEN",
+                "postgres_fact_source": None,
+                "probe": {"status": "SKIPPED_NOT_POSTGRES_FACT"},
+            },
+        ],
+    }
+
+    input_plan = preflight.runtime_shadow_input_plan(
+        runtime_variables=runtime_variables,
+        seed_requirements=seed_requirements,
+        auth_requirements={"status": "GO", "checks": []},
+        args=args,
+    )
+
+    exports = {item["name"]: item for item in input_plan["environment_exports"]}
+    assert input_plan["status"] == "NO_GO"
+    assert exports["FIN_OPS_SHADOW_PYTHON_BASE_URL"]["example"] == "http://127.0.0.1:8001"
+    assert exports["FIN_OPS_SHADOW_AXUM_BASE_URL"]["example"] == "http://127.0.0.1:8002"
+    assert exports["FIN_OPS_SHADOW_OA_TOKEN"]["sensitive"] is True
+    assert exports["FIN_OPS_SHADOW_OA_IDENTITY_SOURCE"]["example"] == "production_oa_test_user"
+    assert "FIN_OPS_DEV_ALLOW_LOCAL_SESSION=0" in input_plan["python_service_start_command"]
+    assert "FIN_OPS_TEST_DEFAULT_AUTH=0" in input_plan["python_service_start_command"]
+    assert input_plan["fact_probe_commands"] == [
+        {
+            "variable": "PROJECT_ID",
+            "postgres_fact_source": "app.project_profiles",
+            "status": "SKIPPED_MISSING_VARIABLE",
+            "command": (
+                "psql \"$DATABASE_URL\" -X -v ON_ERROR_STOP=1 -At -c "
+                "\"select exists (select 1 from app.project_profiles "
+                "where id = '${PROJECT_ID}'::uuid and project_status = 'active')\""
+            ),
+        }
+    ]
+    assert input_plan["service_start_order"][-1]["name"] == "runtime_shadow_validation"
+
+
+def test_platform_shadow_runtime_skips_shadow_when_preflight_no_go(tmp_path) -> None:
+    runtime = load_platform_shadow_runtime_module()
+    args = type(
+        "Args",
+        (),
+        {
+            "fixture": Path("fixture.json"),
+            "output_dir": tmp_path,
+            "report_date": "20260517",
+            "python_base_url": None,
+            "axum_base_url": None,
+            "database_url_env": "DATABASE_URL",
+            "timeout": 1.0,
+            "skip_python_check": False,
+        },
+    )()
+
+    def fail_if_called(**_kwargs):
+        raise AssertionError("shadow runner must not be called when preflight is NO_GO")
+
+    report = runtime.build_runtime_report(
+        args,
+        preflight_builder=lambda _args: {
+            "status": "NO_GO",
+            "findings": [{"code": "PYTHON_BASE_URL_MISSING", "severity": "blocking"}],
+        },
+        shadow_runner=fail_if_called,
+        http_probe=lambda name, url, timeout: runtime.HttpProbe(name, url, "GO", 200, None),
+    )
+
+    assert report["status"] == "NO_GO"
+    assert report["shadow_validation_status"] == "SKIPPED"
+    assert "preflight_no_go" in report["blocking_reasons"]
+
+
+def test_platform_shadow_runtime_runs_shadow_after_preflight_and_health_go(tmp_path) -> None:
+    runtime = load_platform_shadow_runtime_module()
+    captured = {}
+    args = type(
+        "Args",
+        (),
+        {
+            "fixture": Path("fixture.json"),
+            "output_dir": tmp_path,
+            "report_date": "20260517",
+            "python_base_url": "http://python.test",
+            "axum_base_url": "http://axum.test",
+            "database_url_env": "DATABASE_URL",
+            "timeout": 2.0,
+            "skip_python_check": False,
+            "before_group_hook": None,
+        },
+    )()
+
+    def shadow_runner(**kwargs):
+        captured.update(kwargs)
+        return {
+            "status": "GO",
+            "json_path": str(tmp_path / "shadow.json"),
+            "markdown_path": str(tmp_path / "shadow.md"),
+            "summary": {"total": 32, "go": 32, "no_go": 0},
+            "filters": {"endpoint_ids": sorted(kwargs["endpoint_ids"])},
+        }
+
+    report = runtime.build_runtime_report(
+        args,
+        preflight_builder=lambda _args: {"status": "GO", "findings": []},
+        shadow_runner=shadow_runner,
+        http_probe=lambda name, url, timeout: runtime.HttpProbe(name, url, "GO", 200, None),
+    )
+
+    assert report["status"] == "GO"
+    assert report["python_shadow_auth_environment"] == {
+        "FIN_OPS_DEV_ALLOW_LOCAL_SESSION": "0",
+        "FIN_OPS_TEST_DEFAULT_AUTH": "0",
+    }
+    assert captured["python_base_url"] == "http://python.test"
+    assert captured["axum_base_url"] == "http://axum.test"
+    assert captured["include_permission_failures"] is True
+    assert captured["endpoint_ids"] == set(runtime.PLATFORM_ENDPOINT_IDS)
+    assert "platform_shadow_reseed_hook.py" in captured["before_group_hook"]
+    assert report["shadow_validation_report"]["summary"] == {"total": 32, "go": 32, "no_go": 0}
+
+
+def test_platform_shadow_preflight_markdown_handles_scalar_checks() -> None:
+    preflight = load_platform_shadow_preflight_module()
+    report = {
+        "report": "p0-platform-shadow-preflight-20260517",
+        "status": "NO_GO",
+        "generated_at": "2026-05-17T00:00:00Z",
+        "fixture": "fixture.json",
+        "platform_endpoint_ids": ["alpha"],
+        "inputs": {"python_base_url_present": False},
+        "fixture_validation": {"status": "GO", "endpoint_count": 1},
+        "environment_checks": {
+            "postgres_major_detected": 14,
+            "python_readiness_check": {"status": "SKIPPED"},
+        },
+        "findings": [],
+        "next_runtime_shadow_command": ["python3", "scripts/tools/api_shadow_validate.py"],
+    }
+
+    markdown = preflight.render_markdown(report)
+
+    assert "| `postgres_major_detected` | `observed` | `14` |" in markdown
+    assert "| `python_readiness_check` | `SKIPPED` | `` |" in markdown
 
 
 def complete_endpoint(**overrides):

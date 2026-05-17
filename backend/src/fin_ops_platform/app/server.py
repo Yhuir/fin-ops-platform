@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock, Thread
 from time import monotonic, sleep
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Literal
 from urllib.parse import parse_qs, quote, unquote, urlparse
 from uuid import uuid4
 
@@ -188,6 +188,7 @@ WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-11-oa-attachment-evidence-source-
 SYSTEM_AUTO_PAIR_RELATION_MODES = {
     OA_INVOICE_OFFSET_AUTO_MATCH_MODE,
 }
+RouteAccessPolicy = Literal["public", "read", "mutate", "admin"]
 
 
 @dataclass(slots=True)
@@ -384,6 +385,11 @@ class Application:
         self._ledger_service = LedgerReminderService(
             self._import_service,
             self._audit_service,
+        )
+        self._ledger_service.restore_shadow_seed(
+            persisted_state.get("platform_shadow_legacy_seed")
+            if isinstance(persisted_state, dict)
+            else None
         )
         self._integration_service = IntegrationHubService(
             self._import_service,
@@ -659,11 +665,14 @@ class Application:
 
         if method == "GET" and route_path == "/health":
             return self._json_response(HTTPStatus.OK, self._health_payload())
+        if method == "POST" and route_path == "/__shadow/reload-runtime":
+            return self._handle_shadow_runtime_reload(headers)
         if method == "OPTIONS":
             return Response(status_code=int(HTTPStatus.NO_CONTENT), body="")
         if method == "GET" and route_path == "/foundation/seed":
             return self._json_response(HTTPStatus.OK, self._seed_payload)
         auth_error = self._enforce_route_access(
+            method,
             route_path,
             headers,
             request_id=request_id,
@@ -824,9 +833,9 @@ class Application:
         if method == "POST" and route_path == "/api/workbench/settings":
             return self._handle_api_workbench_settings_update(body)
         if method == "POST" and route_path == "/api/workbench/settings/projects/sync":
-            return self._handle_api_workbench_settings_projects_sync(body)
+            return self._handle_api_workbench_settings_projects_sync(body, headers)
         if method == "POST" and route_path == "/api/workbench/settings/projects":
-            return self._handle_api_workbench_settings_project_create(body)
+            return self._handle_api_workbench_settings_project_create(body, headers)
         if method == "DELETE" and route_path.startswith("/api/workbench/settings/projects/"):
             project_id = unquote(route_path.rsplit("/", 1)[-1])
             return self._handle_api_workbench_settings_project_delete(project_id)
@@ -1011,9 +1020,9 @@ class Application:
         if method == "GET" and route_path == "/projects":
             return self._handle_projects()
         if method == "POST" and route_path == "/projects":
-            return self._handle_project_create(body)
+            return self._handle_project_create(body, headers)
         if method == "POST" and route_path == "/projects/assign":
-            return self._handle_project_assign(body)
+            return self._handle_project_assign(body, headers)
         if method == "GET" and route_path.startswith("/projects/"):
             project_id = route_path.rsplit("/", 1)[-1]
             return self._handle_project_detail(project_id)
@@ -1027,13 +1036,13 @@ class Application:
             return self._handle_ledger_detail(ledger_id)
         if method == "POST" and route_path.startswith("/ledgers/") and route_path.endswith("/status"):
             ledger_id = route_path.rsplit("/", 2)[-2]
-            return self._handle_ledger_status_update(ledger_id, body)
+            return self._handle_ledger_status_update(ledger_id, body, headers)
         if method == "GET" and route_path == "/reminders":
             as_of = query.get("as_of", [None])[0]
             status = query.get("status", [None])[0]
             return self._handle_reminders(as_of=as_of, status=status)
         if method == "POST" and route_path == "/reminders/run":
-            return self._handle_reminder_run(body)
+            return self._handle_reminder_run(body, headers)
         if method == "GET" and route_path == "/reconciliation/cases":
             return self._handle_reconciliation_cases()
         if method == "GET" and route_path.startswith("/reconciliation/cases/"):
@@ -1217,6 +1226,28 @@ class Application:
             "planned": ["costing"],
         }
         return payload
+
+    def _handle_shadow_runtime_reload(self, headers: dict[str, str] | None) -> Response:
+        expected_token = os.getenv("FIN_OPS_SHADOW_LEGACY_RELOAD_TOKEN", "").strip()
+        if not expected_token:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+        header_token = str((headers or {}).get("X-Fin-Ops-Shadow-Reload-Token") or "").strip()
+        if header_token != expected_token:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {
+                    "error": "shadow_reload_forbidden",
+                    "message": "Shadow runtime reload token is invalid.",
+                },
+            )
+        self._reload_runtime_services()
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "status": "reloaded",
+                "reloaded_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            },
+        )
 
     def _handle_workbench_prototype(self) -> Response:
         prototype_path = Path(__file__).resolve().parents[4] / "web" / "prototypes" / "reconciliation-workbench-v2.html"
@@ -2061,7 +2092,10 @@ class Application:
         return self._json_response(HTTPStatus.OK, {"job": self._serialize_background_job(job)})
 
     def _handle_api_background_job_acknowledge(self, job_id: str, headers: dict[str, str] | None) -> Response:
-        owner_user_id = self._resolve_background_job_owner(headers)
+        session, auth_error = self._resolve_authenticated_session(headers)
+        if auth_error is not None or session is None:
+            return auth_error
+        owner_user_id = self._trusted_session_actor(session)
         try:
             job = self._background_job_service.acknowledge_job(job_id, owner_user_id)
         except (BackgroundJobNotFoundError, BackgroundJobAccessError):
@@ -3336,11 +3370,45 @@ class Application:
             },
         )
 
-    def _route_requires_oa_access(self, route_path: str) -> bool:
+    def _route_access_policy(self, method: str, route_path: str) -> RouteAccessPolicy:
         if route_path == "/api/session/me":
-            return False
-        if route_path.startswith("/api/workbench/settings/data-reset/jobs/"):
-            return False
+            return "public"
+        if route_path == "/api/workbench/settings" and method in {"POST", "PUT", "PATCH", "DELETE"}:
+            return "admin"
+        if route_path.startswith("/api/workbench/settings/projects/") and method in {"POST", "PUT", "PATCH", "DELETE"}:
+            return "admin"
+        if route_path == "/api/workbench/settings/projects/sync" and method == "POST":
+            return "admin"
+        if route_path == "/api/workbench/settings/projects" and method in {"POST", "PUT", "PATCH", "DELETE"}:
+            return "admin"
+        if route_path.startswith("/api/workbench/settings/data-reset") and method in {"POST", "PUT", "PATCH", "DELETE"}:
+            return "admin"
+        if route_path.startswith("/api/workbench/actions/") and method in {"POST", "PUT", "PATCH", "DELETE"}:
+            return "mutate"
+        if route_path == "/api/workbench/exception/apply" and method == "POST":
+            return "mutate"
+        if route_path.startswith("/api/no-oa-bank-batches/") and method in {"POST", "PUT", "PATCH", "DELETE"}:
+            return "mutate"
+        if route_path == "/api/no-oa-bank-batches/submit" and method == "POST":
+            return "mutate"
+        if route_path == "/api/bank-details/transactions/categories" and method in {"POST", "PUT", "PATCH", "DELETE"}:
+            return "mutate"
+        if route_path == "/projects/assign" and method == "POST":
+            return "mutate"
+        if route_path == "/projects" and method == "POST":
+            return "mutate"
+        if route_path.startswith("/ledgers/") and route_path.endswith("/status") and method == "POST":
+            return "mutate"
+        if route_path == "/reminders/run" and method == "POST":
+            return "mutate"
+        if route_path.startswith("/api/background-jobs/") and method in {"POST", "PUT", "PATCH", "DELETE"}:
+            return "mutate"
+        if route_path.startswith("/api/turnover-ledger/relations/") and method in {"POST", "PUT", "PATCH", "DELETE"}:
+            return "mutate"
+        if route_path == "/api/turnover-ledger/relations/confirm" and method == "POST":
+            return "mutate"
+        if route_path == "/matching/run" and method == "POST":
+            return "mutate"
         protected_prefixes = (
             "/api/",
             "/workbench",
@@ -3352,7 +3420,9 @@ class Application:
             "/imports",
             "/matching",
         )
-        return route_path.startswith(protected_prefixes)
+        if route_path.startswith(protected_prefixes):
+            return "read" if method == "GET" else "mutate"
+        return "public"
 
     @staticmethod
     def _duration_ms(started_at: float) -> float:
@@ -3880,13 +3950,15 @@ class Application:
 
     def _enforce_route_access(
         self,
+        method: str,
         route_path: str,
         headers: dict[str, str] | None,
         *,
         request_id: str | None = None,
         action_name: str | None = None,
     ) -> Response | None:
-        if not self._route_requires_oa_access(route_path):
+        policy = self._route_access_policy(method, route_path)
+        if policy == "public":
             return None
         auth_started_at = monotonic()
         try:
@@ -3895,8 +3967,24 @@ class Application:
                 identity_service=self._oa_identity_service,
                 access_control_service=self._access_control_service,
             )
-            if not session.allowed:
+            if not session.can_access_app:
                 raise ForbiddenOAAccessError("当前 OA 账户未被授权访问财务运营平台。")
+            if policy == "admin" and not session.can_admin_access:
+                return self._json_response(
+                    HTTPStatus.FORBIDDEN,
+                    {
+                        "error": "admin_only",
+                        "message": "当前账号没有管理员权限，不能执行管理写操作。",
+                    },
+                )
+            if policy == "mutate" and not session.can_mutate_data:
+                return self._json_response(
+                    HTTPStatus.FORBIDDEN,
+                    {
+                        "error": "permission_denied",
+                        "message": "当前账户没有执行该写操作的权限。",
+                    },
+                )
         except UnauthorizedOASessionError as error:
             return self._json_response(
                 HTTPStatus.UNAUTHORIZED,
@@ -3946,6 +4034,90 @@ class Application:
                     duration_ms=self._duration_ms(auth_started_at),
                 )
         return None
+
+    def _resolve_authenticated_session(
+        self,
+        headers: dict[str, str] | None,
+    ) -> tuple[OARequestSession | None, Response | None]:
+        try:
+            session = resolve_oa_request_session(
+                headers,
+                identity_service=self._oa_identity_service,
+                access_control_service=self._access_control_service,
+            )
+            if not session.can_access_app:
+                raise ForbiddenOAAccessError("当前 OA 账户未被授权访问财务运营平台。")
+        except UnauthorizedOASessionError as error:
+            return None, self._json_response(
+                HTTPStatus.UNAUTHORIZED,
+                {
+                    "error": "invalid_oa_session",
+                    "message": str(error) or "缺少 OA 登录态，请从 OA 系统进入。",
+                },
+            )
+        except OASessionExpiredError as error:
+            return None, self._json_response(
+                HTTPStatus.UNAUTHORIZED,
+                {
+                    "error": "invalid_oa_session",
+                    "message": str(error) or "OA 登录状态已过期。",
+                },
+            )
+        except ForbiddenOAAccessError as error:
+            return None, self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {
+                    "error": "forbidden",
+                    "message": str(error) or "当前 OA 账户未被授权访问财务运营平台。",
+                },
+            )
+        except OAIdentityConfigurationError as error:
+            return None, self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "oa_identity_unavailable",
+                    "message": str(error) or "OA 身份服务未配置。",
+                },
+            )
+        except OAIdentityServiceError as error:
+            return None, self._json_response(
+                HTTPStatus.BAD_GATEWAY,
+                {
+                    "error": "oa_identity_lookup_failed",
+                    "message": str(error) or "OA 身份解析失败。",
+                },
+            )
+        return session, None
+
+    @staticmethod
+    def _trusted_session_actor(session: OARequestSession) -> str:
+        actor = str(session.identity.username or session.identity.user_id or "").strip()
+        return actor or "web_finance_user"
+
+    def _inject_trusted_actor(
+        self,
+        payload: dict[str, object],
+        session: OARequestSession,
+        *,
+        preferred_field: str = "actor_id",
+    ) -> tuple[dict[str, object], Response | None]:
+        trusted_actor = self._trusted_session_actor(session)
+        updated_payload = dict(payload)
+        for field_name in ("actor", "actor_id"):
+            value = updated_payload.get(field_name)
+            if value is None:
+                continue
+            actor_value = str(value).strip()
+            if actor_value and actor_value != trusted_actor:
+                return {}, self._json_response(
+                    HTTPStatus.FORBIDDEN,
+                    {
+                        "error": "actor_mismatch",
+                        "message": "请求 actor 与当前 OA 登录用户不一致。",
+                    },
+                )
+        updated_payload[preferred_field] = trusted_actor
+        return updated_payload, None
 
     def _handle_api_workbench_ignored(self, month: str | None) -> Response:
         current_month = month or "all"
@@ -4034,10 +4206,20 @@ class Application:
         self._search_service.clear_cache()
         return self._json_response(HTTPStatus.OK, updated_payload)
 
-    def _handle_api_workbench_settings_projects_sync(self, body: str | bytes | None) -> Response:
+    def _handle_api_workbench_settings_projects_sync(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session, auth_error = self._resolve_authenticated_session(headers)
+        if auth_error is not None or session is None:
+            return auth_error
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
+        payload, actor_error = self._inject_trusted_actor(payload, session)
+        if actor_error is not None:
+            return actor_error
         actor_id = str(payload.get("actor_id", "")).strip()
         if not actor_id:
             return self._json_response(
@@ -4062,10 +4244,20 @@ class Application:
             },
         )
 
-    def _handle_api_workbench_settings_project_create(self, body: str | bytes | None) -> Response:
+    def _handle_api_workbench_settings_project_create(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session, auth_error = self._resolve_authenticated_session(headers)
+        if auth_error is not None or session is None:
+            return auth_error
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
+        payload, actor_error = self._inject_trusted_actor(payload, session)
+        if actor_error is not None:
+            return actor_error
         actor_id = str(payload.get("actor_id", "")).strip()
         if not actor_id:
             return self._json_response(
@@ -4106,11 +4298,15 @@ class Application:
         if error is not None:
             return error
         action = str(payload.get("action") or "").strip()
-        try:
-            result = self._execute_settings_data_reset(action)
-        except ValueError:
+        if action not in self._settings_data_reset_service.supported_actions():
             return self._unsupported_settings_data_reset_response()
-        return self._json_response(HTTPStatus.OK, result)
+        owner_user_id = self._resolve_data_reset_owner(headers)
+        job = self._queued_settings_data_reset_background_job(
+            action=action,
+            owner_user_id=owner_user_id,
+            payload=payload,
+        )
+        return self._json_response(HTTPStatus.ACCEPTED, {"job": self._serialize_data_reset_background_job(job)})
 
     def _handle_api_workbench_settings_data_reset_job_create(
         self,
@@ -4124,7 +4320,7 @@ class Application:
         if action not in self._settings_data_reset_service.supported_actions():
             return self._unsupported_settings_data_reset_response()
 
-        owner_user_id = self._resolve_background_job_owner(headers)
+        owner_user_id = self._resolve_data_reset_owner(headers)
         active_job = self._active_data_reset_background_job(owner_user_id)
         if active_job is not None:
             return self._json_response(
@@ -4136,21 +4332,51 @@ class Application:
                 },
             )
 
-        job = self._background_job_service.create_job(
+        job = self._queued_settings_data_reset_background_job(
+            action=action,
+            owner_user_id=owner_user_id,
+            payload=payload,
+        )
+        return self._json_response(HTTPStatus.ACCEPTED, {"job": self._serialize_data_reset_background_job(job)})
+
+    def _resolve_data_reset_owner(self, headers: dict[str, str] | None) -> str:
+        session, error = self._resolve_admin_session(headers)
+        if error is not None or session is None:
+            raise RuntimeError("admin session must be validated before queuing data reset")
+        return self._trusted_session_actor(session)
+
+    def _queued_settings_data_reset_background_job(
+        self,
+        *,
+        action: str,
+        owner_user_id: str,
+        payload: dict[str, object],
+    ):
+        idempotency_key = str(payload.get("idempotency_key") or "").strip()
+        source = {
+            "action": action,
+            "approval_id": str(payload.get("approval_id") or "").strip() or None,
+            "backup_evidence_id": str(payload.get("backup_evidence_id") or "").strip() or None,
+            "scope": payload.get("scope") if isinstance(payload.get("scope"), dict) else {},
+        }
+        result_summary = {key: value for key, value in source.items() if value not in (None, "", {})}
+        result_summary["action"] = action
+        job, _created = self._background_job_service.create_or_get_idempotent_job_with_created(
             job_type="settings_data_reset",
             label=self._data_reset_job_label(action),
             owner_user_id=owner_user_id,
+            idempotency_key=idempotency_key,
             visibility="system",
             phase="queued",
-            current=1,
+            current=0,
             total=100,
             message="数据重置任务已排队。",
-            result_summary={"action": action},
-            source={"action": action},
+            result_summary=result_summary,
+            source=source,
             affected_scopes=["settings", "workbench"],
+            reuse_any_status=True,
         )
-        self._background_job_service.run_job(job, lambda running_job: self._run_settings_data_reset_background_job(running_job, action))
-        return self._json_response(HTTPStatus.ACCEPTED, {"job": self._serialize_data_reset_background_job(job)})
+        return job
 
     def _run_settings_data_reset_background_job(self, running_job, action: str) -> dict[str, object]:
         def update(phase: str, message: str, percent: int) -> None:
@@ -7548,10 +7774,16 @@ class Application:
     def _handle_projects(self) -> Response:
         return self._json_response(HTTPStatus.OK, self._project_costing_service.build_project_hub())
 
-    def _handle_project_create(self, body: str | bytes | None) -> Response:
+    def _handle_project_create(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
+        session, auth_error = self._resolve_authenticated_session(headers)
+        if auth_error is not None or session is None:
+            return auth_error
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
+        payload, actor_error = self._inject_trusted_actor(payload, session)
+        if actor_error is not None:
+            return actor_error
         actor_id = payload.get("actor_id")
         if not actor_id:
             return self._json_response(
@@ -7574,10 +7806,16 @@ class Application:
             )
         return self._json_response(HTTPStatus.OK, {"project": project, "hub": self._project_costing_service.build_project_hub()})
 
-    def _handle_project_assign(self, body: str | bytes | None) -> Response:
+    def _handle_project_assign(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
+        session, auth_error = self._resolve_authenticated_session(headers)
+        if auth_error is not None or session is None:
+            return auth_error
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
+        payload, actor_error = self._inject_trusted_actor(payload, session)
+        if actor_error is not None:
+            return actor_error
         actor_id = payload.get("actor_id")
         if not actor_id:
             return self._json_response(
@@ -7617,7 +7855,7 @@ class Application:
 
     def _handle_ledgers(self, *, view: str, as_of: str | None, status: str | None) -> Response:
         try:
-            ledgers = self._ledger_service.list_ledgers(view=view, as_of=as_of, status=status)
+            ledgers = self._ledger_service.list_ledger_payloads(view=view, as_of=as_of, status=status)
         except ValueError as exc:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
@@ -7627,7 +7865,7 @@ class Application:
 
     def _handle_ledger_detail(self, ledger_id: str) -> Response:
         try:
-            ledger = self._ledger_service.get_ledger(ledger_id)
+            ledger = self._ledger_service.get_ledger_payload(ledger_id)
         except KeyError:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
@@ -7635,10 +7873,21 @@ class Application:
             )
         return self._json_response(HTTPStatus.OK, {"ledger": ledger})
 
-    def _handle_ledger_status_update(self, ledger_id: str, body: str | bytes | None) -> Response:
+    def _handle_ledger_status_update(
+        self,
+        ledger_id: str,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session, auth_error = self._resolve_authenticated_session(headers)
+        if auth_error is not None or session is None:
+            return auth_error
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
+        payload, actor_error = self._inject_trusted_actor(payload, session)
+        if actor_error is not None:
+            return actor_error
         actor_id = payload.get("actor_id")
         if not actor_id:
             return self._json_response(
@@ -7646,13 +7895,14 @@ class Application:
                 {"error": "invalid_ledger_status_request", "message": "actor_id is required."},
             )
         try:
-            ledger = self._ledger_service.update_ledger(
+            self._ledger_service.update_ledger(
                 ledger_id,
                 actor_id=str(actor_id),
                 status=payload.get("status"),
                 expected_date=payload.get("expected_date"),
                 note=payload.get("note"),
             )
+            ledger = self._ledger_service.get_ledger_payload(ledger_id)
         except KeyError:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
@@ -7667,7 +7917,7 @@ class Application:
 
     def _handle_reminders(self, *, as_of: str | None, status: str | None) -> Response:
         try:
-            reminders = self._ledger_service.list_reminders(as_of=as_of, status=status)
+            reminders = self._ledger_service.list_reminder_payloads(as_of=as_of, status=status)
         except ValueError as exc:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
@@ -7675,10 +7925,16 @@ class Application:
             )
         return self._json_response(HTTPStatus.OK, {"reminders": reminders})
 
-    def _handle_reminder_run(self, body: str | bytes | None) -> Response:
+    def _handle_reminder_run(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
+        session, auth_error = self._resolve_authenticated_session(headers)
+        if auth_error is not None or session is None:
+            return auth_error
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
+        payload, actor_error = self._inject_trusted_actor(payload, session)
+        if actor_error is not None:
+            return actor_error
         as_of = payload.get("as_of")
         if not as_of:
             return self._json_response(
@@ -7686,13 +7942,30 @@ class Application:
                 {"error": "invalid_reminder_run_request", "message": "as_of is required."},
             )
         try:
-            sent_reminders = self._ledger_service.run_reminders(as_of=str(as_of))
+            days_ahead = int(payload.get("days_ahead", 7))
         except ValueError as exc:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_reminder_run_request", "message": str(exc)},
             )
-        return self._json_response(HTTPStatus.OK, {"sent_reminders": sent_reminders})
+        idempotency_key = str(payload.get("idempotency_key") or "").strip()
+        owner_user_id = self._trusted_session_actor(session)
+        job, _created = self._background_job_service.create_or_get_idempotent_job_with_created(
+            job_type="reminder_run",
+            label="提醒扫描",
+            owner_user_id=owner_user_id,
+            idempotency_key=idempotency_key,
+            visibility="system",
+            phase="queued",
+            current=0,
+            total=100,
+            message="提醒扫描任务已排队。",
+            result_summary={"as_of": str(as_of), "days_ahead": days_ahead},
+            source={"as_of": str(as_of), "days_ahead": days_ahead},
+            affected_scopes=["reminders", "ledgers"],
+            reuse_any_status=True,
+        )
+        return self._json_response(HTTPStatus.ACCEPTED, {"job": self._serialize_background_job(job)})
 
     def _handle_reconciliation_cases(self) -> Response:
         return self._json_response(

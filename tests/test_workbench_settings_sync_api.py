@@ -8,6 +8,7 @@ from pymongo.errors import NetworkTimeout
 
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError
+from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 
 
 class ExplodingSyncService:
@@ -29,9 +30,23 @@ class ExplodingProjectAdapter:
 
 
 class WorkbenchSettingsSyncApiTests(unittest.TestCase):
+    def _install_admin_auth(self, app) -> dict[str, str]:
+        app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
+            user_id="admin-id",
+            username="YNSYLP005",
+            nickname="管理员",
+            display_name="管理员",
+            dept_id="01",
+            dept_name="财务部",
+            roles=["finance"],
+            permissions=["finops:app:view"],
+        )
+        return {"Authorization": "Bearer admin-token"}
+
     def test_settings_update_returns_bad_gateway_when_oa_role_sync_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            headers = self._install_admin_auth(app)
             app._app_settings_service._oa_role_sync_service = ExplodingSyncService()
 
             response = app.handle_request(
@@ -46,9 +61,10 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
                         "admin_usernames": ["YNSYLP005"],
                     }
                 ),
+                headers=headers,
             )
             payload = json.loads(response.body)
-            settings_payload = json.loads(app.handle_request("GET", "/api/workbench/settings").body)
+            settings_payload = json.loads(app.handle_request("GET", "/api/workbench/settings", headers=headers).body)
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(payload["error"], "oa_role_sync_failed")
@@ -58,6 +74,7 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
     def test_settings_update_returns_clear_error_when_app_mongo_save_times_out(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            headers = self._install_admin_auth(app)
 
             def raise_timeout(_: dict[str, Any]) -> None:
                 raise NetworkTimeout("139.155.5.132:27017: timed out")
@@ -76,6 +93,7 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
                         "admin_usernames": [],
                     }
                 ),
+                headers=headers,
             )
             payload = json.loads(response.body)
 
@@ -86,11 +104,13 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
     def test_project_sync_endpoint_syncs_oa_projects_into_settings_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            headers = self._install_admin_auth(app)
 
             response = app.handle_request(
                 "POST",
                 "/api/workbench/settings/projects/sync",
-                body=json.dumps({"actor_id": "settings_test"}),
+                body=json.dumps({"actor_id": "YNSYLP005"}),
+                headers=headers,
             )
             payload = json.loads(response.body)
 
@@ -106,27 +126,30 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
     def test_manual_project_create_and_delete_endpoints_persist_settings(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            headers = self._install_admin_auth(app)
 
             create_response = app.handle_request(
                 "POST",
                 "/api/workbench/settings/projects",
                 body=json.dumps(
                     {
-                        "actor_id": "settings_test",
+                        "actor_id": "YNSYLP005",
                         "project_code": "LOCAL-001",
                         "project_name": "本地测试项目",
                     }
                 ),
+                headers=headers,
             )
             create_payload = json.loads(create_response.body)
             project_id = create_payload["settings"]["projects"]["active"][0]["id"]
 
             reloaded_payload = json.loads(
-                build_application(data_dir=Path(temp_dir)).handle_request("GET", "/api/workbench/settings").body
+                app.handle_request("GET", "/api/workbench/settings", headers=headers).body
             )
             delete_response = app.handle_request(
                 "DELETE",
                 f"/api/workbench/settings/projects/{project_id}",
+                headers=headers,
             )
             delete_payload = json.loads(delete_response.body)
 
@@ -139,6 +162,7 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
     def test_project_sync_endpoint_failure_does_not_destroy_existing_settings(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            headers = self._install_admin_auth(app)
             app._app_settings_service.create_manual_project(
                 actor_id="settings_test",
                 project_code="LOCAL-001",
@@ -149,10 +173,11 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
             response = app.handle_request(
                 "POST",
                 "/api/workbench/settings/projects/sync",
-                body=json.dumps({"actor_id": "settings_test"}),
+                body=json.dumps({"actor_id": "YNSYLP005"}),
+                headers=headers,
             )
             payload = json.loads(response.body)
-            settings_payload = json.loads(app.handle_request("GET", "/api/workbench/settings").body)
+            settings_payload = json.loads(app.handle_request("GET", "/api/workbench/settings", headers=headers).body)
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(payload["error"], "oa_project_sync_failed")

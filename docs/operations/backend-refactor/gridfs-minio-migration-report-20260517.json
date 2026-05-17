@@ -36,8 +36,8 @@
   },
   "decision": {
     "go_no_go": "NO_GO",
-    "reason": "Object storage environment is missing and upload/verify/sample download checksum validation was not executed.",
-    "required_action": "Run scripts/tools/migrate_gridfs_minio.py in controlled staging upload or verify mode with S3/MinIO environment values, then publish the generated checksum validation report with zero mismatches."
+    "reason": "Object storage implementation and local checksum tests are improved, but controlled staging MinIO/S3 upload/verify/sample download and imports/files runtime shadow were not executed.",
+    "required_action": "Run scripts/tools/migrate_gridfs_minio.py in upload or verify mode against controlled staging MinIO/S3 with sample_download_hash.mismatched=0, import legacy-id-map-import.ndjson into staging.legacy_id_map, then run imports/files runtime shadow against Python and Axum base URLs."
   },
   "execution": {
     "api_cutover_executed": false,
@@ -46,9 +46,12 @@
     "mode": "not_executed_metadata_only_blocker_report",
     "oa_source_database_accessed": false,
     "required_environment_status": {
+      "axum_base_url": "missing",
       "bucket": "missing",
       "endpoint": "missing",
-      "object_storage_auth": "missing"
+      "object_storage_auth": "missing",
+      "python_base_url": "missing",
+      "staging_postgres": "missing"
     },
     "sample_download_executed": false,
     "upload_executed": false,
@@ -80,8 +83,49 @@
       "severity": "warning"
     }
   ],
-  "generated_at": "2026-05-17T09:16:00+08:00",
+  "generated_at": "2026-05-17T23:20:00+08:00",
   "go_no_go": "NO_GO",
+  "implementation_evidence": {
+    "gridfs_migration_tool": {
+      "legacy_id_map_targets": [
+        "app.file_objects",
+        "app.import_files"
+      ],
+      "new_fields": [
+        "migration_run_id",
+        "retry_policy",
+        "object_version",
+        "versioning",
+        "content_type",
+        "etag"
+      ],
+      "outputs": [
+        "gridfs-minio-migration-manifest.json",
+        "gridfs-object-mapping.ndjson",
+        "file-objects-import.ndjson",
+        "legacy-id-map-import.ndjson",
+        "gridfs-checksum-validation-report.json",
+        "gridfs-migration-failures.ndjson"
+      ],
+      "status": "implemented_local_verified"
+    },
+    "rust_batch_download_manifest": {
+      "delivery": "object_manifest_with_presigned_get_or_unavailable_reason",
+      "facts": [
+        "app.import_batches",
+        "app.import_files",
+        "app.file_objects"
+      ],
+      "limitations": [
+        "shadow_fixture_missing",
+        "staging_minio_presign_not_executed",
+        "large_archive_worker_not_implemented"
+      ],
+      "route": "GET /imports/batches/{batch_id}/download",
+      "secret_free": true,
+      "status": "implemented_runtime_no_go"
+    }
+  },
   "legacy_id_mapping": {
     "audit_sample": [
       {
@@ -390,6 +434,50 @@
     "mapped_file_objects": 0,
     "mapped_import_files": 0,
     "missing_mappings_status": "not_evaluated_upload_or_verify_not_executed"
+  },
+  "local_verification": {
+    "commands": [
+      {
+        "command": "PYTHONPATH=backend/src python3 -m unittest tests.test_app_gridfs_migration -v",
+        "result": "8 passed; covers upload, verify, checksum mismatch, missing GridFS file, length mismatch, content type defaulting, legacy id map output",
+        "status": "passed"
+      },
+      {
+        "command": "cargo test -p fin-ops-api import_files -- --nocapture",
+        "result": "10 passed; covers upload preflight, file object presign, batch download object manifest/presign, invalid download format",
+        "status": "passed"
+      },
+      {
+        "command": "cargo fmt --all --check",
+        "status": "passed"
+      },
+      {
+        "command": "cargo check --workspace",
+        "status": "passed"
+      },
+      {
+        "command": "cargo test --workspace",
+        "result": "120 passed",
+        "status": "passed"
+      },
+      {
+        "command": "PYTHONPATH=backend/src pytest tests/test_api_route_inventory_check.py tests/test_api_shadow_validate.py -q",
+        "result": "78 passed",
+        "status": "passed"
+      },
+      {
+        "command": "python3 scripts/tools/api_route_inventory_check.py --scan-root . --include-route-prefix /api --include-route-prefix /projects --include-route-prefix /ledgers --include-route-prefix /reminders --include-route-prefix /imports --include-route-prefix /matching --write-route-level-inventory docs/dev/api-fixtures/api-route-inventory-route-level.json --shadow-fixture docs/dev/api-fixtures/business-api-shadow-validation.json",
+        "result": "missing_rust_routes=[]; shadow_coverage_errors=[]",
+        "status": "GO"
+      },
+      {
+        "command": "python3 scripts/tools/api_shadow_validate.py --fixture docs/dev/api-fixtures/business-api-shadow-validation.json --validate-fixture-only --endpoint-id import-batch-download-object-manifest --endpoint-id file-object-metadata-access --endpoint-id import-file-upload-preflight --endpoint-id import-file-retry-request --endpoint-id import-file-session-projection",
+        "result": "fixture-only validation for 5 imports/files endpoints; no HTTP shadow runtime executed",
+        "status": "GO"
+      }
+    ],
+    "object_storage_double": "InMemoryObjectStorageClient",
+    "real_staging_object_storage_used": false
   },
   "metadata_summary": {
     "content_type_counts": {

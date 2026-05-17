@@ -1,11 +1,9 @@
 import json
 import os
 import tempfile
-import time
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
-from threading import Event
 from unittest.mock import call, patch
 
 from fin_ops_platform.app.server import build_application
@@ -96,6 +94,18 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 os.environ.pop("FIN_OPS_TEST_DEFAULT_AUTH", None)
             else:
                 os.environ["FIN_OPS_TEST_DEFAULT_AUTH"] = previous
+
+    def _install_admin_identity(self, app) -> None:
+        app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
+            user_id="1",
+            username="YNSYLP005",
+            nickname="管理员",
+            display_name="管理员",
+            dept_id="01",
+            dept_name="财务部",
+            roles=["finance_admin"],
+            permissions=[],
+        )
 
     def test_reset_bank_transactions_keeps_invoices_and_protects_form_data_db(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -301,7 +311,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(payload["error"], "admin_only")
 
-    def test_reset_api_allows_admin_and_returns_protected_targets(self) -> None:
+    def test_reset_direct_api_queues_job_without_executing_reset_or_leaking_password(self) -> None:
         with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
@@ -331,9 +341,10 @@ class SettingsDataResetServiceTests(unittest.TestCase):
             )
             payload = json.loads(response.body)
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["action"], RESET_BANK_TRANSACTIONS_ACTION)
-        self.assertIn("form_data_db.form_data", payload["protected_targets"])
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(payload["job"]["action"], RESET_BANK_TRANSACTIONS_ACTION)
+        self.assertEqual(payload["job"]["status"], "queued")
+        self.assertEqual(payload["job"]["phase"], "queued")
         self.assertNotIn("oa_password", payload)
         self.assertNotIn("correct-password", response.body)
 
@@ -368,32 +379,25 @@ class SettingsDataResetServiceTests(unittest.TestCase):
             create_payload = json.loads(create_response.body)
             job_id = create_payload["job"]["job_id"]
 
-            deadline = time.monotonic() + 3
-            job_payload = create_payload["job"]
-            while time.monotonic() < deadline:
-                query_response = app.handle_request(
-                    "GET",
-                    f"/api/workbench/settings/data-reset/jobs/{job_id}",
-                    headers={"Authorization": "Bearer admin-token"},
-                )
-                job_payload = json.loads(query_response.body)["job"]
-                if job_payload["status"] == "completed":
-                    break
-                time.sleep(0.02)
+            self._install_admin_identity(app)
+            query_response = app.handle_request(
+                "GET",
+                f"/api/workbench/settings/data-reset/jobs/{job_id}",
+                headers={"Authorization": "Bearer admin-token"},
+            )
+            job_payload = json.loads(query_response.body)["job"]
 
         self.assertEqual(create_response.status_code, 202)
         self.assertEqual(query_response.status_code, 200)
         self.assertEqual(job_payload["job_id"], job_id)
         self.assertEqual(job_payload["action"], RESET_BANK_TRANSACTIONS_ACTION)
-        self.assertEqual(job_payload["status"], "completed")
-        self.assertEqual(job_payload["phase"], "complete")
-        self.assertEqual(job_payload["current"], job_payload["total"])
-        self.assertEqual(job_payload["percent"], 100)
-        self.assertIn("result", job_payload)
+        self.assertEqual(job_payload["status"], "queued")
+        self.assertEqual(job_payload["phase"], "queued")
+        self.assertNotIn("result", job_payload)
         self.assertNotIn("oa_password", json.dumps(job_payload, ensure_ascii=False))
         self.assertNotIn("correct-password", json.dumps(job_payload, ensure_ascii=False))
 
-    def test_reset_job_api_exposes_active_running_job_for_page_reentry(self) -> None:
+    def test_reset_job_api_exposes_active_queued_job_for_page_reentry(self) -> None:
         with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
@@ -410,17 +414,6 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 token == "admin-token" and password == "correct-password"
             )
 
-            original_execute = app._settings_data_reset_service.execute
-            release_job = Event()
-
-            def slow_execute(action: str, **kwargs: object):
-                progress_callback = kwargs.get("progress_callback")
-                if callable(progress_callback):
-                    progress_callback("persist_state", "正在写入银行流水重置结果。", 2, 4)
-                release_job.wait(timeout=2)
-                return original_execute(action, **kwargs)
-
-            app._settings_data_reset_service.execute = slow_execute
             create_response = app.handle_request(
                 "POST",
                 "/api/workbench/settings/data-reset/jobs",
@@ -435,39 +428,20 @@ class SettingsDataResetServiceTests(unittest.TestCase):
             create_payload = json.loads(create_response.body)
             job_id = create_payload["job"]["job_id"]
 
-            active_payload = None
-            deadline = time.monotonic() + 3
-            while time.monotonic() < deadline:
-                active_response = app.handle_request(
-                    "GET",
-                    "/api/workbench/settings/data-reset/jobs/active",
-                    headers={"Authorization": "Bearer admin-token"},
-                )
-                active_payload = json.loads(active_response.body)["job"]
-                if active_payload is not None and active_payload["status"] == "running":
-                    break
-                time.sleep(0.02)
-
-            release_job.set()
-            deadline = time.monotonic() + 3
-            while time.monotonic() < deadline:
-                completed_response = app.handle_request(
-                    "GET",
-                    f"/api/workbench/settings/data-reset/jobs/{job_id}",
-                    headers={"Authorization": "Bearer admin-token"},
-                )
-                completed_payload = json.loads(completed_response.body)["job"]
-                if completed_payload["status"] in {"completed", "failed"}:
-                    break
-                time.sleep(0.02)
+            self._install_admin_identity(app)
+            active_response = app.handle_request(
+                "GET",
+                "/api/workbench/settings/data-reset/jobs/active",
+                headers={"Authorization": "Bearer admin-token"},
+            )
+            active_payload = json.loads(active_response.body)["job"]
 
         self.assertEqual(create_response.status_code, 202)
         self.assertEqual(active_response.status_code, 200)
         self.assertIsNotNone(active_payload)
         self.assertEqual(active_payload["job_id"], job_id)
         self.assertEqual(active_payload["action"], RESET_BANK_TRANSACTIONS_ACTION)
-        self.assertEqual(active_payload["status"], "running")
-        self.assertGreater(active_payload["percent"], 0)
+        self.assertEqual(active_payload["status"], "queued")
 
     def test_reset_oa_job_rebuilds_progress_with_retained_months_only(self) -> None:
         with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
@@ -547,24 +521,18 @@ class SettingsDataResetServiceTests(unittest.TestCase):
             payload = json.loads(response.body)
             job_id = payload["job"]["job_id"]
 
-            deadline = time.monotonic() + 3
-            job_payload = payload["job"]
-            while time.monotonic() < deadline:
-                query_response = app.handle_request(
-                    "GET",
-                    f"/api/workbench/settings/data-reset/jobs/{job_id}",
-                    headers={"Authorization": "Bearer admin-token"},
-                )
-                job_payload = json.loads(query_response.body)["job"]
-                if job_payload["status"] == "completed":
-                    break
-                time.sleep(0.02)
+            self._install_admin_identity(app)
+            query_response = app.handle_request(
+                "GET",
+                f"/api/workbench/settings/data-reset/jobs/{job_id}",
+                headers={"Authorization": "Bearer admin-token"},
+            )
+            job_payload = json.loads(query_response.body)["job"]
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(query_response.status_code, 200)
-        self.assertEqual(job_payload["status"], "completed")
-        self.assertEqual(job_payload["percent"], 100)
-        self.assertEqual(job_payload["result"]["rebuild_status"], "completed")
+        self.assertEqual(job_payload["status"], "queued")
+        self.assertNotIn("result", job_payload)
 
     def test_reset_api_allows_local_dev_admin_with_local_dev_password(self) -> None:
         with self._without_default_test_auth(), self._temporary_env(
@@ -590,8 +558,9 @@ class SettingsDataResetServiceTests(unittest.TestCase):
             )
             payload = json.loads(response.body)
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["action"], RESET_BANK_TRANSACTIONS_ACTION)
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(payload["job"]["action"], RESET_BANK_TRANSACTIONS_ACTION)
+        self.assertEqual(payload["job"]["status"], "queued")
         self.assertNotIn("local-reset-password", response.body)
 
     def test_reset_oa_api_uses_mode_b_and_rebuilds_with_oa_retention_cutoff(self) -> None:
@@ -649,22 +618,10 @@ class SettingsDataResetServiceTests(unittest.TestCase):
             )
 
             with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload) as raw_builder:
-                response = app.handle_request(
-                    "POST",
-                    "/api/workbench/settings/data-reset",
-                    body=json.dumps(
-                        {
-                            "action": RESET_OA_AND_REBUILD_ACTION,
-                            "oa_password": "correct-password",
-                        }
-                    ),
-                    headers={"Authorization": "Bearer admin-token"},
-                )
-            payload = json.loads(response.body)
+                payload = app._execute_settings_data_reset(RESET_OA_AND_REBUILD_ACTION)
             rebuilt_payload = app._build_api_workbench_payload("all")
             retained_attachment_cache_entry = app._state_store.load_oa_attachment_invoice_cache_entry("cache-oa-old")
 
-        self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["action"], RESET_OA_AND_REBUILD_ACTION)
         self.assertEqual(payload["rebuild_status"], "completed")
         self.assertEqual(
@@ -878,21 +835,9 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 autospec=True,
                 side_effect=load_form_month_documents,
             ):
-                response = app.handle_request(
-                    "POST",
-                    "/api/workbench/settings/data-reset",
-                    body=json.dumps(
-                        {
-                            "action": RESET_OA_AND_REBUILD_ACTION,
-                            "oa_password": "correct-password",
-                        }
-                    ),
-                    headers={"Authorization": "Bearer admin-token"},
-                )
+                payload = app._execute_settings_data_reset(RESET_OA_AND_REBUILD_ACTION)
                 rebuilt_payload = app._build_api_workbench_payload("all")
-            payload = json.loads(response.body)
 
-        self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["rebuild_status"], "completed")
         rebuilt_oa_ids = _flatten_group_rows(rebuilt_payload, "oa")
         self.assertEqual(rebuilt_oa_ids, ["oa-pay-2047"])
@@ -1032,21 +977,9 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 "fin_ops_platform.services.mongo_oa_adapter.OAAttachmentInvoiceService.parse_files",
                 side_effect=AssertionError("reset OA should not re-run attachment invoice OCR"),
             ) as parse_files:
-                response = app.handle_request(
-                    "POST",
-                    "/api/workbench/settings/data-reset",
-                    body=json.dumps(
-                        {
-                            "action": RESET_OA_AND_REBUILD_ACTION,
-                            "oa_password": "correct-password",
-                        }
-                    ),
-                    headers={"Authorization": "Bearer admin-token"},
-                )
+                payload = app._execute_settings_data_reset(RESET_OA_AND_REBUILD_ACTION)
                 rebuilt_payload = app._build_api_workbench_payload("all")
-            payload = json.loads(response.body)
 
-        self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["rebuild_status"], "completed")
         parse_files.assert_not_called()
         rebuilt_invoice_ids = _flatten_group_rows(rebuilt_payload, "invoice")

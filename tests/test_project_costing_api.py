@@ -2,11 +2,24 @@ import json
 import unittest
 
 from fin_ops_platform.app.server import build_application
+from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 
 
 class ProjectCostingApiTests(unittest.TestCase):
+    def _install_user_auth(self, app, username: str = "user_finance_01") -> dict[str, str]:
+        app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
+            user_id=f"{username}-id",
+            username=username,
+            nickname=username,
+            display_name=username,
+            roles=["finance"],
+            permissions=["finops:app:view"],
+        )
+        return {"Authorization": "Bearer project-token"}
+
     def test_project_create_assign_and_detail_round_trip(self) -> None:
         app = build_application()
+        headers = self._install_user_auth(app)
         self._preview_and_confirm(
             app,
             "output_invoice",
@@ -32,6 +45,7 @@ class ProjectCostingApiTests(unittest.TestCase):
                     "project_name": "API 项目",
                 }
             ),
+            headers=headers,
         )
         self.assertEqual(create_response.status_code, 200)
         create_payload = json.loads(create_response.body)
@@ -52,20 +66,25 @@ class ProjectCostingApiTests(unittest.TestCase):
                     "note": "api assignment",
                 }
             ),
+            headers=headers,
         )
         self.assertEqual(assign_response.status_code, 200)
         assign_payload = json.loads(assign_response.body)
         self.assertEqual(assign_payload["assignment"]["project_id"], project_id)
 
-        list_response = app.handle_request("GET", "/projects")
+        list_response = app.handle_request("GET", "/projects", headers=headers)
         self.assertEqual(list_response.status_code, 200)
         list_payload = json.loads(list_response.body)
+        self.assertEqual(list_payload["total"], 1)
         self.assertEqual(list_payload["projects"][0]["id"], project_id)
+        self.assertEqual(list_payload["projects"][0]["project_id"], project_id)
+        self.assertIn("source_system", list_payload["projects"][0])
 
-        detail_response = app.handle_request("GET", f"/projects/{project_id}")
+        detail_response = app.handle_request("GET", f"/projects/{project_id}", headers=headers)
         self.assertEqual(detail_response.status_code, 200)
         detail_payload = json.loads(detail_response.body)
         self.assertEqual(detail_payload["project"]["id"], project_id)
+        self.assertEqual(detail_payload["project"]["project_id"], project_id)
         self.assertEqual(detail_payload["summary"]["income_amount"], "150.00")
         self.assertEqual(detail_payload["assignments"][0]["object_id"], invoice_id)
 

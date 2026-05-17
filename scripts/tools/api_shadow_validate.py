@@ -7,6 +7,8 @@ import argparse
 import fnmatch
 import json
 import os
+import re
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -58,7 +60,17 @@ REQUIRED_CONTRACT_CASE_FIELDS = {
     "permission_failure",
 }
 VALID_RISKS = {"low", "medium", "high"}
-VALID_RESPONSE_MODES = {"json", "sse_first_events"}
+VALID_RESPONSE_MODES = {"binary", "json", "sse_first_events"}
+REQUIRED_ACCEPTED_CHANGE_FIELDS = {
+    "change_id",
+    "legacy_status",
+    "axum_status",
+    "summary",
+    "source_contract",
+    "owner",
+    "next_verification",
+}
+RUNTIME_VARIABLE_PATTERN = re.compile(r"\$\{([A-Z0-9_]+)\}")
 ALLOWED_SOURCE_HINTS = (
     "postgresql",
     "read_model",
@@ -86,7 +98,12 @@ APP_MONGO_HINTS = ("app mongo", "mongo")
 NEGATIVE_SOURCE_HINTS = ("no ", "not ", "without ", "does not ", "doesn't ", "不得", "不", "未")
 
 
-def validate_shadow_fixture(fixture_path: Path) -> dict[str, Any]:
+def validate_shadow_fixture(
+    fixture_path: Path,
+    *,
+    endpoint_ids: set[str] | None = None,
+    risks: set[str] | None = None,
+) -> dict[str, Any]:
     fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
     defaults = fixture.get("defaults") if isinstance(fixture.get("defaults"), dict) else {}
     endpoints = fixture.get("endpoints")
@@ -104,11 +121,47 @@ def validate_shadow_fixture(fixture_path: Path) -> dict[str, Any]:
             ],
         }
 
+    filter_endpoint_ids = endpoint_ids
+    filter_risks = risks
+    if filter_endpoint_ids or filter_risks:
+        selected_endpoint_entries = [
+            (index, endpoint)
+            for index, endpoint in enumerate(endpoints)
+            if isinstance(endpoint, dict)
+            and (
+                not filter_endpoint_ids
+                or str(endpoint.get("id") or endpoint.get("path") or "") in filter_endpoint_ids
+            )
+            and (not filter_risks or str(endpoint.get("risk") or "") in filter_risks)
+        ]
+    else:
+        selected_endpoint_entries = list(enumerate(endpoints))
+    if (filter_endpoint_ids or filter_risks) and not selected_endpoint_entries:
+        return {
+            "status": "NO_GO",
+            "fixture": str(fixture_path),
+            "filters": {
+                "endpoint_ids": sorted(filter_endpoint_ids) if filter_endpoint_ids else [],
+                "risks": sorted(filter_risks) if filter_risks else [],
+            },
+            "endpoint_count": 0,
+            "endpoint_ids": [],
+            "permission_failure_endpoint_ids": [],
+            "endpoint_errors": [
+                {
+                    "endpoint_id": None,
+                    "path": "$.endpoints",
+                    "missing_fields": [],
+                    "messages": ["no endpoints matched the selected filters"],
+                }
+            ],
+        }
+
     endpoint_errors = []
     seen_ids = set()
-    endpoint_ids = []
+    fixture_endpoint_ids = []
     permission_failure_endpoint_ids = []
-    for index, endpoint in enumerate(endpoints):
+    for index, endpoint in selected_endpoint_entries:
         if not isinstance(endpoint, dict):
             endpoint_errors.append(
                 {
@@ -134,7 +187,7 @@ def validate_shadow_fixture(fixture_path: Path) -> dict[str, Any]:
         if endpoint_id in seen_ids:
             messages.append("endpoint id must be unique")
         seen_ids.add(endpoint_id)
-        endpoint_ids.append(endpoint_id)
+        fixture_endpoint_ids.append(endpoint_id)
         if endpoint_requires_permission_failure(endpoint):
             permission_failure_endpoint_ids.append(endpoint_id)
         if str(endpoint.get("method") or "").upper() not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
@@ -146,7 +199,8 @@ def validate_shadow_fixture(fixture_path: Path) -> dict[str, Any]:
         messages.extend(validate_source_contract(endpoint.get("source")))
         response_mode = str(endpoint.get("response_mode") or "json")
         if response_mode not in VALID_RESPONSE_MODES:
-            messages.append("response_mode must be json or sse_first_events")
+            messages.append("response_mode must be binary, json, or sse_first_events")
+        messages.extend(validate_accepted_production_change(endpoint.get("accepted_production_change")))
         expected_status = endpoint.get("expected_status")
         if not isinstance(expected_status, int) or not 200 <= expected_status < 500:
             messages.append("expected_status must be an expected 2xx or 4xx contract status")
@@ -175,11 +229,33 @@ def validate_shadow_fixture(fixture_path: Path) -> dict[str, Any]:
     return {
         "status": "GO" if not endpoint_errors else "NO_GO",
         "fixture": str(fixture_path),
-        "endpoint_count": len(endpoints),
-        "endpoint_ids": endpoint_ids,
+        "filters": {
+            "endpoint_ids": sorted(filter_endpoint_ids) if filter_endpoint_ids else [],
+            "risks": sorted(filter_risks) if filter_risks else [],
+        },
+        "endpoint_count": len(selected_endpoint_entries),
+        "endpoint_ids": fixture_endpoint_ids,
         "permission_failure_endpoint_ids": permission_failure_endpoint_ids,
         "endpoint_errors": endpoint_errors,
     }
+
+
+def validate_accepted_production_change(change: Any) -> list[str]:
+    if change is None:
+        return []
+    if not isinstance(change, dict):
+        return ["accepted_production_change must be an object when present"]
+    messages = []
+    for field in sorted(REQUIRED_ACCEPTED_CHANGE_FIELDS - set(change)):
+        messages.append(f"accepted_production_change.{field} is required")
+    for field in ("change_id", "summary", "source_contract", "owner", "next_verification"):
+        if field in change and not str(change.get(field) or "").strip():
+            messages.append(f"accepted_production_change.{field} must be non-empty")
+    for field in ("legacy_status", "axum_status"):
+        value = change.get(field)
+        if field in change and (not isinstance(value, int) or not 100 <= value < 600):
+            messages.append(f"accepted_production_change.{field} must be an HTTP status integer")
+    return messages
 
 
 def endpoint_requires_permission_failure(endpoint: dict[str, Any]) -> bool:
@@ -312,9 +388,10 @@ def evaluate_endpoint_gate(
     explained_patterns = [str(pattern) for pattern in endpoint.get("explain_diffs") or []]
     explained = []
     unexpected = []
+    accepted_change = accepted_production_change_for_status(endpoint, python_status, axum_status)
 
     if python_status != axum_status:
-        unexpected.append(
+        status_diff = (
             {
                 "kind": "status",
                 "path": "$.status",
@@ -322,32 +399,45 @@ def evaluate_endpoint_gate(
                 "axum": axum_status,
             }
         )
+        if accepted_change:
+            status_diff["accepted_production_change"] = accepted_change["change_id"]
+            explained.append(status_diff)
+        else:
+            unexpected.append(status_diff)
 
     expected_status = endpoint.get("expected_status")
     if expected_status is not None and (python_status != expected_status or axum_status != expected_status):
-        unexpected.append(
-            {
+        expected_diff = {
                 "kind": "expected_status",
                 "path": "$.status",
                 "expected": expected_status,
                 "python": python_status,
                 "axum": axum_status,
             }
-        )
+        if accepted_change and axum_status == expected_status:
+            expected_diff["accepted_production_change"] = accepted_change["change_id"]
+            explained.append(expected_diff)
+        else:
+            unexpected.append(expected_diff)
 
     for item in diff.get("diffs", []):
         path = str(item.get("path", ""))
         kind_path = f"{item.get('kind')}:{path}"
-        if any(fnmatch.fnmatch(path, pattern) or fnmatch.fnmatch(kind_path, pattern) for pattern in explained_patterns):
+        if any(
+            explain_pattern_matches(path, pattern)
+            or explain_pattern_matches(kind_path, pattern)
+            for pattern in explained_patterns
+        ):
             explained.append(item)
         else:
             unexpected.append(item)
 
-    return {
+    result = {
         "endpoint_id": endpoint.get("id") or endpoint.get("path"),
         "case": endpoint.get("case", "primary"),
         "method": endpoint.get("method", "GET"),
         "path": endpoint.get("path"),
+        "isolation_group": endpoint.get("isolation_group"),
         "owner": endpoint.get("owner", "unassigned"),
         "risk": endpoint.get("risk", "unknown"),
         "source": endpoint.get("source", "unspecified"),
@@ -367,6 +457,41 @@ def evaluate_endpoint_gate(
             if key.endswith("_count")
         },
     }
+    if accepted_change:
+        result["accepted_production_change"] = accepted_change
+    return result
+
+
+def explain_pattern_matches(value: str, pattern: str) -> bool:
+    if fnmatch.fnmatch(value, pattern):
+        return True
+    if "[*]" not in pattern:
+        return False
+    regex = re.escape(pattern)
+    regex = regex.replace(r"\[\*\]", r"\[[^\]]+\]")
+    regex = regex.replace(r"\*", ".*")
+    return re.fullmatch(regex, value) is not None
+
+
+def accepted_production_change_for_status(
+    endpoint: dict[str, Any],
+    python_status: int | None,
+    axum_status: int | None,
+) -> dict[str, Any] | None:
+    change = endpoint.get("accepted_production_change")
+    if not isinstance(change, dict):
+        return None
+    if change.get("legacy_status") != python_status or change.get("axum_status") != axum_status:
+        return None
+    return {
+        "change_id": str(change["change_id"]),
+        "legacy_status": int(change["legacy_status"]),
+        "axum_status": int(change["axum_status"]),
+        "summary": str(change["summary"]),
+        "source_contract": str(change["source_contract"]),
+        "owner": str(change["owner"]),
+        "next_verification": str(change["next_verification"]),
+    }
 
 
 def run_shadow_validation(
@@ -380,6 +505,7 @@ def run_shadow_validation(
     include_permission_failures: bool = False,
     endpoint_ids: set[str] | None = None,
     risks: set[str] | None = None,
+    before_group_hook: str | None = None,
 ) -> dict[str, Any]:
     fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
     fixture_validation = validate_shadow_fixture(fixture_path)
@@ -393,12 +519,22 @@ def run_shadow_validation(
         results.extend(fixture_validation_results(fixture_validation))
     else:
         selected_endpoints = filter_endpoints(endpoints, endpoint_ids=endpoint_ids, risks=risks)
+        isolation_runtime = ShadowIsolationRuntime(before_group_hook=before_group_hook)
         for endpoint in selected_endpoints:
+            isolation_info = isolation_runtime.prepare_endpoint(endpoint)
+            if isolation_info.get("status") == "NO_GO":
+                results.append(isolation_failure_result(endpoint, isolation_info))
+                continue
             for case_endpoint, request_spec in endpoint_shadow_cases(
                 defaults,
                 endpoint,
                 include_permission_failures=include_permission_failures,
             ):
+                case_endpoint = {**case_endpoint, **isolation_info}
+                unresolved_variables = unresolved_runtime_variables(request_spec)
+                if unresolved_variables:
+                    results.append(unresolved_runtime_variable_result(case_endpoint, unresolved_variables))
+                    continue
                 python_response, axum_response = request_endpoint_pair(
                     python_base_url,
                     axum_base_url,
@@ -415,6 +551,7 @@ def run_shadow_validation(
                 )
                 gate["python_error"] = python_response.get("error")
                 gate["axum_error"] = axum_response.get("error")
+                add_isolation_result_fields(gate, isolation_info)
                 results.append(gate)
 
         if should_require_permission_failure_coverage(
@@ -458,6 +595,7 @@ def run_shadow_validation(
 
     overall_status = "GO" if all(result["status"] == "GO" for result in results) else "NO_GO"
     generated_date = report_date or date.today().strftime("%Y%m%d")
+    accepted_changes = accepted_production_changes_from_results(results)
     report = {
         "report": f"api-shadow-validation-report-{generated_date}",
         "status": overall_status,
@@ -480,6 +618,7 @@ def run_shadow_validation(
             "no_go": sum(1 for result in results if result["status"] == "NO_GO"),
             "unexpected_diff_count": sum(result["unexpected_diff_count"] for result in results),
             "explained_diff_count": sum(result["explained_diff_count"] for result in results),
+            "accepted_production_change_count": len(accepted_changes),
             "permission_failure_cases": sum(1 for result in results if result.get("case") == "permission_failure"),
                 "fixture_error_count": len(fixture_validation.get("endpoint_errors") or []),
                 "permission_failure_required_count": len(
@@ -488,6 +627,12 @@ def run_shadow_validation(
                 "permission_failure_missing_count": sum(
                     1 for result in results if result.get("case") == "permission_failure_coverage"
                 ),
+        },
+        "accepted_production_changes": accepted_changes,
+        "side_effect_probe_results": [],
+        "seed_generation": {
+            "before_group_hook_configured": bool(before_group_hook),
+            "groups_reseeded": isolation_runtime.groups_reseeded if fixture_validation["status"] == "GO" else [],
         },
         "results": results,
     }
@@ -499,6 +644,177 @@ def run_shadow_validation(
     report["json_path"] = str(json_path)
     report["markdown_path"] = str(md_path)
     return report
+
+
+class ShadowIsolationRuntime:
+    def __init__(self, *, before_group_hook: str | None) -> None:
+        self.before_group_hook = before_group_hook
+        self.seeded_groups: dict[str, dict[str, Any]] = {}
+        self.groups_reseeded: list[dict[str, Any]] = []
+
+    def prepare_endpoint(self, endpoint: dict[str, Any]) -> dict[str, Any]:
+        group = str(endpoint.get("isolation_group") or "default")
+        requires_reseed = bool(endpoint.get("requires_reseed")) or is_mutating_endpoint(endpoint) or bool(self.before_group_hook)
+        info: dict[str, Any] = {
+            "isolation_group": group,
+            "seed_applied_at": None,
+            "legacy_seed_applied": False,
+            "postgres_cleanup_applied": False,
+        }
+        if not requires_reseed:
+            return info
+        if group in self.seeded_groups:
+            return {**info, **self.seeded_groups[group]}
+        if not self.before_group_hook:
+            return info
+
+        applied_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        env = {
+            **os.environ,
+            "SHADOW_ISOLATION_GROUP": group,
+            "SHADOW_ENDPOINT_ID": str(endpoint.get("id") or endpoint.get("path") or ""),
+        }
+        completed = subprocess.run(
+            self.before_group_hook,
+            shell=True,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+        hook_report = parse_hook_report(completed.stdout)
+        hook_postgres_cleanup = hook_report.get("postgres_cleanup_applied")
+        hook_legacy_seed = hook_report.get("legacy_seed_applied")
+        postgres_cleanup_applied = bool(hook_postgres_cleanup) if hook_postgres_cleanup is not None else completed.returncode == 0
+        legacy_seed_applied = bool(hook_legacy_seed) if hook_legacy_seed is not None else completed.returncode == 0
+        if completed.returncode != 0:
+            return {
+                **info,
+                "status": "NO_GO",
+                "seed_applied_at": applied_at,
+                "legacy_seed_applied": legacy_seed_applied,
+                "postgres_cleanup_applied": postgres_cleanup_applied,
+                "hook_report": hook_report,
+                "hook_returncode": completed.returncode,
+                "hook_stdout": redact_sensitive_fields(completed.stdout.strip()),
+                "hook_stderr": redact_sensitive_fields(completed.stderr.strip()),
+            }
+        if hook_report.get("status") == "NO_GO" or hook_report.get("restart_required") is True:
+            return {
+                **info,
+                "status": "NO_GO",
+                "seed_applied_at": applied_at,
+                "legacy_seed_applied": legacy_seed_applied,
+                "postgres_cleanup_applied": postgres_cleanup_applied,
+                "hook_report": hook_report,
+                "hook_returncode": completed.returncode,
+                "hook_stdout": redact_sensitive_fields(completed.stdout.strip()),
+                "hook_stderr": redact_sensitive_fields(completed.stderr.strip()),
+            }
+        seed_info = {
+            "seed_applied_at": applied_at,
+            "legacy_seed_applied": legacy_seed_applied,
+            "postgres_cleanup_applied": postgres_cleanup_applied,
+            "hook_report": hook_report,
+        }
+        self.seeded_groups[group] = seed_info
+        self.groups_reseeded.append({"isolation_group": group, "seed_applied_at": applied_at})
+        return {**info, **seed_info}
+
+
+def parse_hook_report(stdout: str) -> dict[str, Any]:
+    text = stdout.strip()
+    if not text:
+        return {}
+    for line in reversed(text.splitlines()):
+        candidate = line.strip()
+        if not candidate.startswith("{"):
+            continue
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return redact_sensitive_fields(parsed)
+    return {}
+
+
+def is_mutating_endpoint(endpoint: dict[str, Any]) -> bool:
+    return str(endpoint.get("method") or "GET").upper() in {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def add_isolation_result_fields(result: dict[str, Any], isolation_info: dict[str, Any]) -> None:
+    result["isolation_group"] = isolation_info.get("isolation_group")
+    result["seed_applied_at"] = isolation_info.get("seed_applied_at")
+    result["legacy_seed_applied"] = bool(isolation_info.get("legacy_seed_applied"))
+    result["postgres_cleanup_applied"] = bool(isolation_info.get("postgres_cleanup_applied"))
+
+
+def isolation_failure_result(endpoint: dict[str, Any], isolation_info: dict[str, Any]) -> dict[str, Any]:
+    hook_report = isolation_info.get("hook_report") if isinstance(isolation_info.get("hook_report"), dict) else {}
+    message = "before-group seed hook failed"
+    if hook_report.get("restart_required"):
+        message = "before-group seed hook reported restart_required; request was not sent"
+    elif hook_report.get("message"):
+        message = str(hook_report.get("message"))
+    return {
+        "endpoint_id": endpoint.get("id") or endpoint.get("path"),
+        "case": "seed_isolation",
+        "method": endpoint.get("method", "GET"),
+        "path": endpoint.get("path"),
+        "isolation_group": isolation_info.get("isolation_group"),
+        "seed_applied_at": isolation_info.get("seed_applied_at"),
+        "legacy_seed_applied": bool(isolation_info.get("legacy_seed_applied")),
+        "postgres_cleanup_applied": bool(isolation_info.get("postgres_cleanup_applied")),
+        "hook_report": hook_report,
+        "owner": endpoint.get("owner", "unassigned"),
+        "risk": endpoint.get("risk", "unknown"),
+        "source": endpoint.get("source", "runtime seed isolation"),
+        "source_categories": classify_source_categories(endpoint.get("source")),
+        "status": "NO_GO",
+        "python_status": None,
+        "axum_status": None,
+        "expected_status": endpoint.get("expected_status"),
+        "diff_count": 0,
+        "explained_diff_count": 0,
+        "unexpected_diff_count": 1,
+        "explained_diffs": [],
+        "unexpected_diffs": [
+            {
+                "kind": "seed_isolation",
+                "path": "$.isolation_group",
+                "message": message,
+                "returncode": isolation_info.get("hook_returncode"),
+                "stdout": isolation_info.get("hook_stdout"),
+                "stderr": isolation_info.get("hook_stderr"),
+            }
+        ],
+        "diff_summary": {"seed_isolation_failure_count": 1},
+        "python_error": "request_not_sent_seed_isolation_failed",
+        "axum_error": "request_not_sent_seed_isolation_failed",
+    }
+
+
+def accepted_production_changes_from_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    changes = []
+    seen = set()
+    for result in results:
+        change = result.get("accepted_production_change")
+        if not isinstance(change, dict):
+            continue
+        key = (result.get("endpoint_id"), result.get("case"), change.get("change_id"))
+        if key in seen:
+            continue
+        seen.add(key)
+        changes.append(
+            {
+                "endpoint_id": result.get("endpoint_id"),
+                "case": result.get("case", "primary"),
+                **change,
+            }
+        )
+    return changes
 
 
 def should_require_permission_failure_coverage(
@@ -561,6 +877,65 @@ def missing_permission_failure_coverage_results(
             }
         )
     return missing
+
+
+def unresolved_runtime_variable_result(
+    endpoint: dict[str, Any],
+    variables: list[str],
+) -> dict[str, Any]:
+    return {
+        "endpoint_id": endpoint.get("id") or endpoint.get("path"),
+        "case": endpoint.get("case", "primary"),
+        "method": endpoint.get("method", "GET"),
+        "path": endpoint.get("path"),
+        "isolation_group": endpoint.get("isolation_group"),
+        "seed_applied_at": endpoint.get("seed_applied_at"),
+        "legacy_seed_applied": bool(endpoint.get("legacy_seed_applied")),
+        "postgres_cleanup_applied": bool(endpoint.get("postgres_cleanup_applied")),
+        "owner": endpoint.get("owner", "unassigned"),
+        "risk": endpoint.get("risk", "unknown"),
+        "source": endpoint.get("source", "runtime variable preflight"),
+        "source_categories": classify_source_categories(endpoint.get("source")),
+        "status": "NO_GO",
+        "python_status": None,
+        "axum_status": None,
+        "expected_status": endpoint.get("expected_status"),
+        "diff_count": 0,
+        "explained_diff_count": 0,
+        "unexpected_diff_count": 1,
+        "explained_diffs": [],
+        "unexpected_diffs": [
+            {
+                "kind": "runtime_variable",
+                "path": "$.request",
+                "message": "runtime shadow request contains unresolved environment variables",
+                "variables": variables,
+            }
+        ],
+        "diff_summary": {"runtime_variable_diff_count": 1},
+        "python_error": "request_not_sent_unresolved_runtime_variables",
+        "axum_error": "request_not_sent_unresolved_runtime_variables",
+    }
+
+
+def unresolved_runtime_variables(value: Any) -> list[str]:
+    variables: set[str] = set()
+
+    def visit(item: Any) -> None:
+        if isinstance(item, str):
+            expanded = os.path.expandvars(item)
+            variables.update(RUNTIME_VARIABLE_PATTERN.findall(expanded))
+            return
+        if isinstance(item, list):
+            for child in item:
+                visit(child)
+            return
+        if isinstance(item, dict):
+            for child in item.values():
+                visit(child)
+
+    visit(value)
+    return sorted(variables)
 
 
 def response_contract_diffs(
@@ -693,6 +1068,8 @@ def request_endpoint(base_url: str, endpoint: dict[str, Any], timeout: float) ->
                     expected_events=expected_sse_events(endpoint),
                 )
             raw = response.read()
+            if str(endpoint.get("response_mode") or "json") == "binary":
+                return binary_response_payload(response.status, raw, response.headers)
             return response_payload(response.status, raw, content_type)
     except HTTPError as error:
         return response_payload(error.code, error.read(), error.headers.get("Content-Type", ""))
@@ -827,6 +1204,20 @@ def response_payload(status: int, raw: bytes, content_type: str) -> dict[str, An
         except json.JSONDecodeError:
             parsed = {"_non_json_body": text[:1000], "_content_type": content_type}
     return {"status": status, "json": parsed, "error": None}
+
+
+def binary_response_payload(status: int, raw: bytes, headers: Any) -> dict[str, Any]:
+    content_type = headers.get("Content-Type", "")
+    content_disposition = headers.get("Content-Disposition", "")
+    payload = {
+        "_binary": True,
+        "_content_type": content_type,
+        "_content_disposition": content_disposition,
+        "_magic": raw[:4].hex(),
+    }
+    if raw.startswith(b"PK"):
+        payload["_container"] = "zip"
+    return {"status": status, "json": payload, "error": None}
 
 
 def expected_sse_events(endpoint: dict[str, Any]) -> list[str]:
@@ -1070,6 +1461,7 @@ def render_markdown_report(report: dict[str, Any]) -> str:
         f"- GO: {report['summary']['go']}",
         f"- NO_GO: {report['summary']['no_go']}",
         f"- Unexpected diffs: {report['summary']['unexpected_diff_count']}",
+        f"- Accepted production changes: {report['summary'].get('accepted_production_change_count', 0)}",
         f"- Permission failure cases: {report['summary'].get('permission_failure_cases', 0)}",
         f"- Fixture validation errors: {report['summary'].get('fixture_error_count', 0)}",
         "",
@@ -1090,11 +1482,38 @@ def render_markdown_report(report: dict[str, Any]) -> str:
                 diffs=result["unexpected_diff_count"],
             )
         )
+    append_markdown_accepted_changes(lines, report.get("accepted_production_changes") or [])
     append_markdown_diff_section(lines, "Diff Details", report["results"], "unexpected_diffs")
     append_markdown_diff_section(lines, "Explained Diffs", report["results"], "explained_diffs")
     lines.append("")
     lines.append("Any endpoint with an unexplained status, field, ordering, money-format, date-format, or value diff keeps the overall gate at `NO_GO`.")
     return "\n".join(lines) + "\n"
+
+
+def append_markdown_accepted_changes(lines: list[str], changes: list[dict[str, Any]]) -> None:
+    if not changes:
+        return
+    lines.extend(
+        [
+            "",
+            "## Accepted Production Changes",
+            "",
+            "| Endpoint | Change | Legacy | Axum | Source Contract | Owner | Next Verification |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+        ]
+    )
+    for change in changes:
+        lines.append(
+            "| {endpoint} | {change_id} | {legacy_status} | {axum_status} | {source_contract} | {owner} | {next_verification} |".format(
+                endpoint=markdown_cell(change.get("endpoint_id") or ""),
+                change_id=markdown_cell(change.get("change_id") or ""),
+                legacy_status=markdown_cell(change.get("legacy_status")),
+                axum_status=markdown_cell(change.get("axum_status")),
+                source_contract=markdown_cell(change.get("source_contract") or ""),
+                owner=markdown_cell(change.get("owner") or ""),
+                next_verification=markdown_cell(change.get("next_verification") or ""),
+            )
+        )
 
 
 def append_markdown_diff_section(
@@ -1184,13 +1603,25 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Also run permission-failure shadow cases using defaults.permission_failure and endpoint contracts.",
     )
+    parser.add_argument(
+        "--before-group-hook",
+        help=(
+            "Shell command run before each mutating isolation group. The command receives "
+            "SHADOW_ISOLATION_GROUP and SHADOW_ENDPOINT_ID and should reapply PostgreSQL seed/cleanup "
+            "and rewrite the isolated legacy data-dir."
+        ),
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     if args.validate_fixture_only:
-        report = validate_shadow_fixture(args.fixture)
+        report = validate_shadow_fixture(
+            args.fixture,
+            endpoint_ids=set(args.endpoint_ids or []),
+            risks=set(args.risks or []),
+        )
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0 if report["status"] == "GO" else 1
     if not args.python_base_url or not args.axum_base_url:
@@ -1205,6 +1636,7 @@ def main() -> int:
         include_permission_failures=args.include_permission_failures,
         endpoint_ids=set(args.endpoint_ids or []),
         risks=set(args.risks or []),
+        before_group_hook=args.before_group_hook,
     )
     print(json.dumps({"status": report["status"], "json_path": report["json_path"], "markdown_path": report["markdown_path"]}, ensure_ascii=False))
     return 0 if report["status"] == "GO" else 2

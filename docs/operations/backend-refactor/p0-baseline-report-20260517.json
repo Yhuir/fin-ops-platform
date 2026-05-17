@@ -1,0 +1,95 @@
+{
+  "report_id": "p0-baseline-20260517",
+  "generated_at": "2026-05-17T10:47:12+08:00",
+  "task": "P0 Prompt 01 baseline: Rust formatting gate and current verification baseline",
+  "decision": "BASELINE_GO",
+  "p0_cutover_decision": "NO_GO",
+  "scope": {
+    "workspace": "/Users/yu/Desktop/fin-ops-platform",
+    "rust_workspace": "/Users/yu/Desktop/fin-ops-platform/rust/fin-ops-api",
+    "behavior_change": false,
+    "notes": [
+      "Only rustfmt formatting changes were applied to Rust source files.",
+      "Existing unrelated user change was preserved."
+    ]
+  },
+  "git_status_before_task": {
+    "unrelated_changes": [
+      "M docs/archive/prompts/codex prompt.md"
+    ]
+  },
+  "changed_files_for_task": [
+    "rust/fin-ops-api/crates/fin-ops-api/src/repositories/platform_legacy.rs",
+    "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs",
+    "docs/exec-plans/active/backend-refactor-progress.md",
+    "docs/operations/backend-refactor/p0-baseline-report-20260517.json"
+  ],
+  "rust_fmt": {
+    "command": "cargo fmt --all --check",
+    "working_directory": "rust/fin-ops-api",
+    "status_before_fix": "FAILED",
+    "initial_failure_files": [
+      "rust/fin-ops-api/crates/fin-ops-api/src/repositories/platform_legacy.rs",
+      "rust/fin-ops-api/crates/fin-ops-api/src/services/platform_legacy.rs"
+    ],
+    "fix_command": "cargo fmt --all",
+    "status_after_fix": "PASSED"
+  },
+  "rust_check": {
+    "command": "cargo check --workspace",
+    "working_directory": "rust/fin-ops-api",
+    "status": "PASSED"
+  },
+  "rust_test": {
+    "command": "cargo test --workspace",
+    "working_directory": "rust/fin-ops-api",
+    "status": "PASSED",
+    "summary": {
+      "library_tests": 107,
+      "failed": 0,
+      "ignored": 0,
+      "binary_tests": 0,
+      "doc_tests": 0
+    }
+  },
+  "python_test": {
+    "command": "PYTHONPATH=backend/src python3 -m unittest discover -s tests -v",
+    "working_directory": ".",
+    "status": "PASSED",
+    "summary": {
+      "tests": 1058,
+      "failed": 0,
+      "skipped": 5,
+      "duration_seconds": 4.127
+    }
+  },
+  "readiness_gate": {
+    "command": "python3 scripts/tools/backend_refactor_readiness_gate.py --format markdown",
+    "working_directory": ".",
+    "decision": "NO_GO",
+    "blocking_checks": 9,
+    "passed_checks": [
+      "app_mongo_backup_restore"
+    ],
+    "failed_checks": [
+      "postgres_backup_pitr",
+      "migration_dry_run",
+      "file_checksum",
+      "api_shadow_validation",
+      "nats_worker_replay",
+      "read_model_rebuild",
+      "monitoring_alerts",
+      "load_test",
+      "cutover_window_rollback"
+    ]
+  },
+  "acceptance": {
+    "cargo_fmt_check_passed": true,
+    "rust_check_passed": true,
+    "rust_tests_passed": true,
+    "python_tests_passed": true,
+    "readiness_gate_blockers_recorded": true,
+    "p0_prompt_01_complete": true,
+    "p0_complete": false
+  }
+}
