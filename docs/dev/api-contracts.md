@@ -996,6 +996,7 @@ python scripts/tools/api_route_inventory_check.py \
 | `GET /api/app-health/stream` | PostgreSQL `app.oa_sync_runs`/`app.oa_sync_watermarks`、`job.worker_tasks`、`read_model.workbench_snapshots`、OA identity adapter | SSE 包装同一 app-health snapshot，按旧 Python 合同发送 `app_health` 和 `heartbeat` 事件；shadow validation 只采样首批事件，不回读 app Mongo alerts/dirty scope state。 |
 | `GET /api/bank-details/accounts?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD` | PostgreSQL `app.bank_transactions` | 账户 key、尾号、余额和日期范围内流水数来自 bank facts；不回读 app Mongo。 |
 | `GET /api/bank-details/transactions?account_key=...&date_from=YYYY-MM-DD&date_to=YYYY-MM-DD&page=1&page_size=100` | PostgreSQL `app.bank_transactions`、`app.bank_transaction_categories` | 返回旧前端 snake_case 行字段、手工分类、分页和分类计数；`page_size` 上限 500。auto category 和 relation tag 只返回当前 PostgreSQL 可证明的默认/空值，作为 shadow validation 解释项。 |
+| `PATCH /api/bank-details/transactions/categories` | PostgreSQL `app.bank_transactions`、`app.bank_transaction_categories`、`app.bank_transaction_category_events`、`audit.events`、`app.write_idempotency_records`、`job.worker_tasks`、`job.outbox_events` | 写入 path 使用 OA session actor、`idempotency_key` 和 `expected_version`；事务内锁定 bank transaction，替换 active category，记录 category event/audit/idempotency，并排队 `read_model.rebuild_requested` 使 workbench、search_index、cost_statistics stale scope 后续重建。不读取 app Mongo 或 OA 源数据库。 |
 | `GET /api/no-oa-bank-batches` | PostgreSQL `app.no_oa_bank_batches` | 列表、汇总和状态桶来自 batch facts；`raw_payload` 仅用于旧前端可选展示字段。 |
 | `GET /api/no-oa-bank-batches/{batch_id}` | PostgreSQL `app.no_oa_bank_batches`、`app.bank_transactions`、`app.bank_transaction_categories` | 详情行锁定在 batch `scope_month` 和 `bank_transaction_ids` 内，不扫描 app Mongo。 |
 | `POST /api/no-oa-bank-batches/{batch_id}/submit` | PostgreSQL `app.no_oa_bank_batches`、transactional workbench write command、job/outbox rebuild marker | 写入 path 必须使用 OA session actor、`expected_version` 和 `idempotency_key`；shadow 样本只能在隔离 staging/local 数据上运行。 |
@@ -1037,7 +1038,7 @@ python scripts/tools/api_route_inventory_check.py \
 
 以下接口在本批次只进入 inventory，不实现 Axum 切换：
 
-- `bank-details`：分类 PATCH 未迁移；需要冻结分类写入 audit/job/outbox 合同。账户/流水 GET 已迁移为 PostgreSQL facts 读取，但 relation tag 投影和 auto category 没有独立 PostgreSQL/read_model 事实源，生产切流前必须通过 shadow report 显式解释或补齐事实源。
+- `bank-details`：账户/流水 GET 与分类 PATCH 已迁移为 PostgreSQL facts + audit/idempotency/job/outbox 写入。relation tag 投影和 auto category 没有独立 PostgreSQL/read_model 事实源，生产切流前必须通过 shadow report 显式解释或补齐事实源。
 - `turnover-ledger`：`GET /api/turnover-ledger` flat/grouped 只读视图、`GET /api/turnover-ledger/export-preview` 和 `GET /api/turnover-ledger/relations/{relation_id}` 已迁移为 PostgreSQL bank/category facts 实时派生；二进制 `export`、extra GET/PUT、confirm/withdraw、manual relation persistence、FIFO allocation lots 仍必须先从 `turnover_ledger_service.py` 和产品文档追溯合同，不能按 `app.turnover_relations` 猜字段。
 - `ETC`：`POST /api/etc/import` 已迁移为静态 410 removed contract；`GET /api/etc/invoices`、`GET /api/etc/batches`、`GET /api/etc/batches/{batch_id}` 已迁移为 PostgreSQL ETC invoice facts 读取。导入 preview/confirm、对账任务、附件/票根文件、OA draft、提交状态写入和批次写操作依赖 job/outbox/object storage 组合合同，未冻结前不得迁移。
 - `settings` 项目同步、项目增删、data-reset 创建/执行：属于管理写操作，必须先有 PostgreSQL settings facts、权限、审计、回滚和 job/outbox 合同。data-reset job 状态 GET 已迁移为 `job.worker_tasks` 读取。

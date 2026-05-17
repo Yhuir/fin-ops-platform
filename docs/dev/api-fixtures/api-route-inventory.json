@@ -61,17 +61,15 @@
       ],
       "rust_routes": [
         "GET /api/bank-details/accounts",
-        "GET /api/bank-details/transactions"
+        "GET /api/bank-details/transactions",
+        "PATCH /api/bank-details/transactions/categories"
       ],
       "frontend_refs": ["web/src/features/bankDetails/api.ts", "web/src/pages/BankDetailsPage.tsx"],
-      "migration_status": "partial",
+      "migration_status": "migrated_shadow_required",
       "risk": "high",
       "owner": "finance-ops",
-      "source_categories": ["postgres_facts", "pending_contract"],
-      "blocked_routes": {
-        "PATCH /api/bank-details/transactions/categories": "分类写入需要 actor、audit、read-model invalidation 和 job/outbox 合同；本批只迁移 bank transaction facts 读取。"
-      },
-      "source": "GET routes use PostgreSQL app.bank_transactions + app.bank_transaction_categories. Auto category and relation tag enrichment remain expected shadow diffs because no dedicated PostgreSQL/read_model source is frozen. PATCH requires audit/job/outbox and was not migrated."
+      "source_categories": ["postgres_facts", "job_outbox", "read_model"],
+      "source": "GET routes use PostgreSQL app.bank_transactions + app.bank_transaction_categories. PATCH category writes lock PostgreSQL app.bank_transactions, replace active app.bank_transaction_categories, append app.bank_transaction_category_events, audit.events, app.write_idempotency_records, and enqueue job.worker_tasks/job.outbox_events read-model rebuild for workbench/search_index/cost_statistics; no app Mongo or OA source database read."
     },
     {
       "domain": "no-oa-bank-batches",

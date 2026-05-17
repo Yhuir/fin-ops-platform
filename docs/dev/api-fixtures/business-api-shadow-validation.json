@@ -274,6 +274,51 @@
       ]
     },
     {
+      "id": "bank-detail-category-write-command",
+      "method": "PATCH",
+      "path": "/api/bank-details/transactions/categories",
+      "body": {
+        "idempotency_key": "shadow-bank-category-${FIN_OPS_SHADOW_RUN_ID}",
+        "updates": [
+          {
+            "transaction_id": "${FIN_OPS_SHADOW_BANK_TRANSACTION_ID}",
+            "category_code": "borrow_in_company_pending_repayment",
+            "expected_version": 1
+          }
+        ]
+      },
+      "expected_status": 200,
+      "owner": "finance-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.bank_transactions, app.bank_transaction_categories, app.bank_transaction_category_events, audit.events, app.write_idempotency_records, job.worker_tasks, and job.outbox_events read-model rebuild; no app Mongo or OA source database read",
+      "frontend_refs": [
+        "web/src/features/bankDetails/api.ts",
+        "web/src/pages/BankDetailsPage.tsx"
+      ],
+      "contract_cases": {
+        "query": [],
+        "body": [
+          "idempotency_key",
+          "updates[].transaction_id",
+          "updates[].category_code",
+          "updates[].expected_version"
+        ],
+        "status": [200, 400, 401, 403, 404, 409, 503],
+        "error_shape": {"error": "string", "message": "string"},
+        "pagination": "not paginated",
+        "empty_result": "unknown transaction_id returns 404 not_found; stale expected_version returns 409 category_version_conflict",
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied"
+      },
+      "explain_diffs": [
+        "$.updated_transaction_ids",
+        "$.updated_categories[*].version",
+        "$.affected_months",
+        "$.rebuild_task_id",
+        "$.outbox_event_id",
+        "$.idempotency_key"
+      ]
+    },
+    {
       "id": "turnover-ledger-flat-readonly",
       "method": "GET",
       "path": "/api/turnover-ledger",

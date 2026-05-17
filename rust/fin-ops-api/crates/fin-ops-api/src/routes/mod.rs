@@ -1,5 +1,6 @@
 pub mod app_health;
 pub mod business_read;
+pub mod finance_writes;
 pub mod health;
 pub mod import_files;
 pub mod low_risk_read;
@@ -43,6 +44,7 @@ pub fn router(state: AppState) -> Router {
         .merge(health::router())
         .merge(app_health::router())
         .merge(business_read::router())
+        .merge(finance_writes::router())
         .merge(import_files::router())
         .merge(low_risk_read::router())
         .merge(platform_legacy::router())

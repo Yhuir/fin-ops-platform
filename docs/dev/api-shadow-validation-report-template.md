@@ -66,6 +66,7 @@ python scripts/tools/api_shadow_validate.py \
 | `/api/app-health/stream` | GET | medium | platform-ops |  |  |  |  |
 | `/api/bank-details/accounts` | GET | high | finance-ops |  |  |  |  |
 | `/api/bank-details/transactions` | GET | high | finance-ops |  |  |  |  |
+| `/api/bank-details/transactions/categories` | PATCH | high | finance-ops |  |  |  |  |
 | `/api/app-metadata` | GET | low | platform-ops |  |  |  |  |
 | `/api/session/me` | GET | medium | platform-ops |  |  |  |  |
 | `/api/search` | GET | medium | platform-ops |  |  |  |  |

@@ -1189,7 +1189,10 @@ with normalized as (
       'unknown'
     ) as account_key,
     t.raw_payload,
-    c.category_type as manual_category_code,
+    case
+      when c.raw_payload ? 'category_code' then nullif(c.raw_payload->>'category_code', '')
+      else c.category_type
+    end as manual_category_code,
     coalesce(c.raw_payload->>'category_source', c.raw_payload->>'source', 'manual') as manual_category_source,
     case
       when c.raw_payload->>'category_version' ~ '^[0-9]+$' then (c.raw_payload->>'category_version')::bigint
@@ -1228,7 +1231,10 @@ filtered as (
         raw_payload->>'purpose',
         bank_name,
         account_last4,
-        manual_category_code,
+        case
+          when category_raw_payload ? 'category_code' then nullif(category_raw_payload->>'category_code', '')
+          else manual_category_code
+        end,
         category_raw_payload->>'category_label'
       ) ilike '%' || $4::text || '%'
     )
@@ -1286,7 +1292,10 @@ with normalized as (
       'unknown'
     ) as account_key,
     t.raw_payload,
-    c.category_type as manual_category_code,
+    case
+      when c.raw_payload ? 'category_code' then nullif(c.raw_payload->>'category_code', '')
+      else c.category_type
+    end as manual_category_code,
     coalesce(c.raw_payload, '{}'::jsonb) as category_raw_payload
   from app.bank_transactions t
   left join lateral (
