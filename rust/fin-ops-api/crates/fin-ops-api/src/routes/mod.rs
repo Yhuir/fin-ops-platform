@@ -3,6 +3,7 @@ pub mod business_read;
 pub mod health;
 pub mod import_files;
 pub mod low_risk_read;
+pub mod platform_legacy;
 pub mod read_models;
 pub mod task_status;
 pub mod turnover_ledger;
@@ -44,6 +45,7 @@ pub fn router(state: AppState) -> Router {
         .merge(business_read::router())
         .merge(import_files::router())
         .merge(low_risk_read::router())
+        .merge(platform_legacy::router())
         .merge(read_models::router())
         .merge(task_status::router())
         .merge(turnover_ledger::router())

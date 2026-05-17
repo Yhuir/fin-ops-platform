@@ -33,6 +33,7 @@
         "GET /api/app-metadata",
         "GET /api/background-jobs/active",
         "GET /api/background-jobs/{job_id}",
+        "POST /api/background-jobs/{job_id}/retry",
         "GET /api/session/me",
         "GET /api/search",
         "GET /api/tasks/{task_id}/status"
@@ -47,10 +48,9 @@
       "owner": "platform-ops",
       "source_categories": ["postgres_facts", "read_model", "job_outbox", "static_contract", "oa_identity", "pending_contract"],
       "blocked_routes": {
-        "POST /api/background-jobs/{job_id}/acknowledge": "旧 Python 写入 acknowledged 状态和 acknowledged_at；当前 job.worker_tasks 状态机没有 acknowledged，需先冻结通知/ack 状态模型。",
-        "POST /api/background-jobs/{job_id}/retry": "旧 Python 会重放 file_import 或 cost_statistics_cache_warmup 副作用；需先冻结 retry job/outbox 和幂等语义。"
+        "POST /api/background-jobs/{job_id}/acknowledge": "旧 Python 写入 acknowledged 状态和 acknowledged_at；当前 job.worker_tasks 状态机没有 acknowledged，需先冻结通知/ack 状态模型。"
       },
-      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope."
+      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope. Background-job retry creates PostgreSQL worker task/outbox/audit/idempotency records and does not execute side effects in the request path."
     },
     {
       "domain": "bank-details",
@@ -359,13 +359,18 @@
         "GET /imports/batches/{batch_id}",
         "GET /imports/files/{file_id}",
         "GET /api/files/objects/{file_object_id}",
-        "POST /imports/files/upload-preflight"
+        "POST /imports/files/upload-preflight",
+        "POST /imports/files/retry",
+        "GET /imports/files/sessions/{session_id}",
+        "POST /matching/run",
+        "GET /matching/results",
+        "GET /matching/results/{result_id}"
       ],
       "frontend_refs": ["web/src/features/imports/api.ts"],
       "migration_status": "partial",
       "risk": "high",
       "owner": "platform-ops",
-      "source_categories": ["postgres_facts", "object_storage", "job_outbox", "legacy_python_state_blocked", "pending_contract"],
+      "source_categories": ["postgres_facts", "read_model", "object_storage", "job_outbox", "legacy_python_state_blocked", "pending_contract"],
       "blocked_routes": {
         "GET|POST /projects": "Legacy project routes remain Python state/source driven; PostgreSQL project facts and mutation contract are not frozen.",
         "GET /projects/{project_id}": "Legacy project detail route lacks frozen PostgreSQL fact/source contract.",
@@ -379,15 +384,10 @@
         "POST /imports/confirm": "Legacy import confirm writes business facts and invalidates read models; needs audit/outbox/idempotency contract.",
         "POST /imports/files/preview": "File preview creates legacy file session state; needs object-storage/session fact contract.",
         "POST /imports/files/confirm": "File confirm writes business facts from legacy session state; needs audit/outbox/idempotency contract.",
-        "POST /imports/files/retry": "File retry reuses legacy file session state and may enqueue follow-up matching work; needs job/outbox contract.",
         "GET /imports/batches/{batch_id}/download": "Batch download is binary/object response behavior requiring object-storage and Content-Disposition contract.",
-        "POST /imports/batches/{batch_id}/revert": "Batch revert mutates imported facts and read models; needs audit/outbox/idempotency and rollback contract.",
-        "GET /imports/files/sessions/{session_id}": "Legacy file sessions remain Python state and have no PostgreSQL session fact contract.",
-        "POST /matching/run": "Matching run is job-producing write path requiring job/outbox/read-model contract.",
-        "GET /matching/results": "Matching results lack frozen PostgreSQL/read_model source separate from legacy Python state.",
-        "GET /matching/results/{result_id}": "Matching result detail lacks frozen PostgreSQL/read_model source separate from legacy Python state."
+        "POST /imports/batches/{batch_id}/revert": "Batch revert mutates imported facts and read models; needs audit/outbox/idempotency and rollback contract."
       },
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts."
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts."
     }
   ]
 }

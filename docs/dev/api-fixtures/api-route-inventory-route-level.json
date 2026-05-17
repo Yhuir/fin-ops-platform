@@ -19,7 +19,7 @@
       "migration_status": "migrated_shadow_required",
       "risk": "medium",
       "owner": "platform-ops",
-      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope.",
+      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope. Background-job retry creates PostgreSQL worker task/outbox/audit/idempotency records and does not execute side effects in the request path.",
       "source_categories": [
         "postgres_facts",
         "read_model",
@@ -47,7 +47,7 @@
       "migration_status": "migrated_shadow_required",
       "risk": "medium",
       "owner": "platform-ops",
-      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope.",
+      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope. Background-job retry creates PostgreSQL worker task/outbox/audit/idempotency records and does not execute side effects in the request path.",
       "source_categories": [
         "postgres_facts",
         "read_model",
@@ -75,7 +75,7 @@
       "migration_status": "migrated_shadow_required",
       "risk": "medium",
       "owner": "platform-ops",
-      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope.",
+      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope. Background-job retry creates PostgreSQL worker task/outbox/audit/idempotency records and does not execute side effects in the request path.",
       "source_categories": [
         "postgres_facts",
         "read_model",
@@ -103,7 +103,7 @@
       "migration_status": "migrated_shadow_required",
       "risk": "medium",
       "owner": "platform-ops",
-      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope.",
+      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope. Background-job retry creates PostgreSQL worker task/outbox/audit/idempotency records and does not execute side effects in the request path.",
       "source_categories": [
         "postgres_facts",
         "read_model",
@@ -130,7 +130,7 @@
       "migration_status": "pending_contract",
       "risk": "medium",
       "owner": "platform-ops",
-      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope.",
+      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope. Background-job retry creates PostgreSQL worker task/outbox/audit/idempotency records and does not execute side effects in the request path.",
       "source_categories": [
         "postgres_facts",
         "read_model",
@@ -146,16 +146,18 @@
       "domain": "app-foundation-ops",
       "route_type": "python",
       "python_route": "POST /api/background-jobs/{job_id}/retry",
-      "rust_routes": [],
+      "rust_routes": [
+        "POST /api/background-jobs/{job_id}/retry"
+      ],
       "frontend_refs": [
         "web/src/features/appHealth/api.ts",
         "web/src/features/backgroundJobs/api.ts",
         "web/src/features/session/api.ts"
       ],
-      "migration_status": "pending_contract",
+      "migration_status": "migrated_shadow_required",
       "risk": "medium",
       "owner": "platform-ops",
-      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope.",
+      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope. Background-job retry creates PostgreSQL worker task/outbox/audit/idempotency records and does not execute side effects in the request path.",
       "source_categories": [
         "postgres_facts",
         "read_model",
@@ -164,8 +166,9 @@
         "oa_identity",
         "pending_contract"
       ],
-      "blocker": "旧 Python 会重放 file_import 或 cost_statistics_cache_warmup 副作用；需先冻结 retry job/outbox 和幂等语义。",
-      "shadow_endpoint_ids": []
+      "shadow_endpoint_ids": [
+        "background-job-retry-request"
+      ]
     },
     {
       "domain": "app-foundation-ops",
@@ -182,7 +185,7 @@
       "migration_status": "migrated_shadow_required",
       "risk": "medium",
       "owner": "platform-ops",
-      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope.",
+      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope. Background-job retry creates PostgreSQL worker task/outbox/audit/idempotency records and does not execute side effects in the request path.",
       "source_categories": [
         "postgres_facts",
         "read_model",
@@ -210,7 +213,7 @@
       "migration_status": "migrated_shadow_required",
       "risk": "medium",
       "owner": "platform-ops",
-      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope.",
+      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope. Background-job retry creates PostgreSQL worker task/outbox/audit/idempotency records and does not execute side effects in the request path.",
       "source_categories": [
         "postgres_facts",
         "read_model",
@@ -238,7 +241,7 @@
       "migration_status": "migrated_shadow_required",
       "risk": "medium",
       "owner": "platform-ops",
-      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope.",
+      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope. Background-job retry creates PostgreSQL worker task/outbox/audit/idempotency records and does not execute side effects in the request path.",
       "source_categories": [
         "postgres_facts",
         "read_model",
@@ -266,7 +269,7 @@
       "migration_status": "migrated_shadow_required",
       "risk": "medium",
       "owner": "platform-ops",
-      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope.",
+      "source": "Session/search/task status/app metadata routes use Axum PostgreSQL/read-model/contracts where implemented. App-health JSON snapshot and SSE stream read PostgreSQL app.oa_sync_runs/app.oa_sync_watermarks, job.worker_tasks, and read_model.workbench_snapshots; neither route reads app Mongo alerts/dirty scope state. Background-job active list reads PostgreSQL job.worker_tasks system tasks and returns the legacy Python list envelope. Background-job retry creates PostgreSQL worker task/outbox/audit/idempotency records and does not execute side effects in the request path.",
       "source_categories": [
         "postgres_facts",
         "read_model",
@@ -2071,9 +2074,10 @@
       "migration_status": "blocked_fact_source",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
@@ -2093,9 +2097,10 @@
       "migration_status": "blocked_fact_source",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
@@ -2115,9 +2120,10 @@
       "migration_status": "blocked_fact_source",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
@@ -2137,9 +2143,10 @@
       "migration_status": "blocked_fact_source",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
@@ -2159,9 +2166,10 @@
       "migration_status": "blocked_fact_source",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
@@ -2181,9 +2189,10 @@
       "migration_status": "blocked_fact_source",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
@@ -2203,9 +2212,10 @@
       "migration_status": "blocked_fact_source",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
@@ -2227,9 +2237,10 @@
       "migration_status": "migrated_shadow_required",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
@@ -2250,9 +2261,10 @@
       "migration_status": "blocked_fact_source",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
@@ -2272,9 +2284,10 @@
       "migration_status": "blocked_fact_source",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
@@ -2294,9 +2307,10 @@
       "migration_status": "blocked_fact_source",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
@@ -2316,9 +2330,10 @@
       "migration_status": "blocked_fact_source",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
@@ -2338,9 +2353,10 @@
       "migration_status": "blocked_fact_source",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
@@ -2353,23 +2369,27 @@
       "domain": "projects-ledgers-reminders-imports-matching-legacy",
       "route_type": "python",
       "python_route": "POST /imports/files/retry",
-      "rust_routes": [],
+      "rust_routes": [
+        "POST /imports/files/retry"
+      ],
       "frontend_refs": [
         "web/src/features/imports/api.ts"
       ],
-      "migration_status": "blocked_fact_source",
+      "migration_status": "migrated_shadow_required",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
         "pending_contract"
       ],
-      "blocker": "File retry reuses legacy file session state and may enqueue follow-up matching work; needs job/outbox contract.",
-      "shadow_endpoint_ids": []
+      "shadow_endpoint_ids": [
+        "import-file-retry-request"
+      ]
     },
     {
       "domain": "projects-ledgers-reminders-imports-matching-legacy",
@@ -2384,9 +2404,10 @@
       "migration_status": "migrated_shadow_required",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
@@ -2407,9 +2428,10 @@
       "migration_status": "blocked_fact_source",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
@@ -2429,9 +2451,10 @@
       "migration_status": "blocked_fact_source",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
@@ -2444,89 +2467,105 @@
       "domain": "projects-ledgers-reminders-imports-matching-legacy",
       "route_type": "python",
       "python_route": "GET /imports/files/sessions/{session_id}",
-      "rust_routes": [],
+      "rust_routes": [
+        "GET /imports/files/sessions/{session_id}"
+      ],
       "frontend_refs": [
         "web/src/features/imports/api.ts"
       ],
-      "migration_status": "blocked_fact_source",
+      "migration_status": "migrated_shadow_required",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
         "pending_contract"
       ],
-      "blocker": "Legacy file sessions remain Python state and have no PostgreSQL session fact contract.",
-      "shadow_endpoint_ids": []
+      "shadow_endpoint_ids": [
+        "import-file-session-projection"
+      ]
     },
     {
       "domain": "projects-ledgers-reminders-imports-matching-legacy",
       "route_type": "python",
       "python_route": "POST /matching/run",
-      "rust_routes": [],
+      "rust_routes": [
+        "POST /matching/run"
+      ],
       "frontend_refs": [
         "web/src/features/imports/api.ts"
       ],
-      "migration_status": "blocked_fact_source",
+      "migration_status": "migrated_shadow_required",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
         "pending_contract"
       ],
-      "blocker": "Matching run is job-producing write path requiring job/outbox/read-model contract.",
-      "shadow_endpoint_ids": []
+      "shadow_endpoint_ids": [
+        "matching-run-request"
+      ]
     },
     {
       "domain": "projects-ledgers-reminders-imports-matching-legacy",
       "route_type": "python",
       "python_route": "GET /matching/results",
-      "rust_routes": [],
+      "rust_routes": [
+        "GET /matching/results"
+      ],
       "frontend_refs": [
         "web/src/features/imports/api.ts"
       ],
-      "migration_status": "blocked_fact_source",
+      "migration_status": "migrated_shadow_required",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
         "pending_contract"
       ],
-      "blocker": "Matching results lack frozen PostgreSQL/read_model source separate from legacy Python state.",
-      "shadow_endpoint_ids": []
+      "shadow_endpoint_ids": [
+        "matching-results-list"
+      ]
     },
     {
       "domain": "projects-ledgers-reminders-imports-matching-legacy",
       "route_type": "python",
       "python_route": "GET /matching/results/{result_id}",
-      "rust_routes": [],
+      "rust_routes": [
+        "GET /matching/results/{result_id}"
+      ],
       "frontend_refs": [
         "web/src/features/imports/api.ts"
       ],
-      "migration_status": "blocked_fact_source",
+      "migration_status": "migrated_shadow_required",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
         "pending_contract"
       ],
-      "blocker": "Matching result detail lacks frozen PostgreSQL/read_model source separate from legacy Python state.",
-      "shadow_endpoint_ids": []
+      "shadow_endpoint_ids": [
+        "matching-result-detail"
+      ]
     },
     {
       "domain": "projects-ledgers-reminders-imports-matching-legacy",
@@ -2541,9 +2580,10 @@
       "migration_status": "migrated_shadow_required",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
@@ -2566,9 +2606,10 @@
       "migration_status": "migrated_shadow_required",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
@@ -2591,9 +2632,10 @@
       "migration_status": "migrated_shadow_required",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",
@@ -2616,9 +2658,10 @@
       "migration_status": "migrated_shadow_required",
       "risk": "high",
       "owner": "platform-ops",
-      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Legacy project, ledger, reminder, import confirm/revert, and matching run/result routes remain blocked pending facts/job/outbox contracts.",
+      "source": "Import metadata and file-object routes use PostgreSQL app.import_batches/import_files/file_objects plus object-storage access provider for bounded presigned access metadata. Import file retry and matching run create PostgreSQL worker task/outbox/audit/idempotency records without request-path side effects. Import session projection maps app.import_batches legacy_session_id to batch/file metadata. Matching results read read_model.workbench_candidate_matches. Legacy project, ledger, reminder, import confirm/revert routes remain blocked pending facts/job/outbox contracts.",
       "source_categories": [
         "postgres_facts",
+        "read_model",
         "object_storage",
         "job_outbox",
         "legacy_python_state_blocked",

@@ -1022,11 +1022,16 @@ python scripts/tools/api_route_inventory_check.py \
 | `GET /api/workbench/rows/{row_id}?month=YYYY-MM` | `read_model.workbench_rows` | 返回单行 read model payload 和状态；敏感字段按 Axum sanitizer 过滤。 |
 | `POST /api/workbench/actions/*`、`POST /api/workbench/exception/apply` | PostgreSQL workbench facts、transactional write command、job/outbox read-model invalidation | 既有 Axum 写命令统一要求 OA actor、`expected_version`、`idempotency_key`；shadow 样本只能在隔离 local/staging fixture 数据上运行。 |
 | `GET /api/background-jobs/active` | PostgreSQL `job.worker_tasks` | 返回旧 Python `jobs/active_jobs/attention_jobs` envelope；只读取 system worker task facts，不读取 Python `background_jobs`。 |
-| `GET /api/background-jobs/{job_id}` | PostgreSQL `job.worker_tasks` | 返回旧 Python `{job}` envelope；只读取 system worker task detail，不迁移 acknowledge/retry 写入。 |
+| `GET /api/background-jobs/{job_id}` | PostgreSQL `job.worker_tasks` | 返回旧 Python `{job}` envelope；只读取 system worker task detail，不迁移 acknowledge 写入。 |
+| `POST /api/background-jobs/{job_id}/retry` | PostgreSQL `job.worker_tasks`、`job.outbox_events`、`audit.events`、`app.write_idempotency_records` | 写入路径只创建 retry worker task/outbox/audit/idempotency 记录，不在请求路径重放外部副作用；请求必须携带 OA actor、`idempotency_key` 和 `reason`。 |
 | `GET /api/workbench/settings/data-reset/jobs/active` | PostgreSQL `job.worker_tasks` | 返回旧 Python 轮询 envelope `{job}`；只读取 `task_type='settings_data_reset'` 且 active 的 system task，不创建、不执行 reset。无 active job 返回 `{job:null}`。 |
 | `GET /api/workbench/settings/data-reset/jobs/{job_id}` | PostgreSQL `job.worker_tasks` | 返回旧 Python data reset job shape；仅 `task_type='settings_data_reset'` 可见，其他 task 或缺失 task 返回 404 `settings_data_reset_job_not_found`。 |
 | `GET /api/files/objects/{file_object_id}` | PostgreSQL `app.file_objects`、object-storage access provider | 返回文件对象元数据和有界 access grant；不返回对象内容、对象存储 secret 或原始 GridFS 内容。 |
 | `GET /api/oa-sync/status` | PostgreSQL `app.oa_sync_runs`、`app.oa_sync_watermarks` | 返回最近 OA sync run/watermark 状态，不访问 OA 源库。 |
+| `POST /imports/files/retry` | PostgreSQL `app.import_files`、`job.worker_tasks`、`job.outbox_events`、`audit.events`、`app.write_idempotency_records` | 按 `file_id` 请求重试解析，只排队 `import.parse` task；不复用 Python file session，不写业务 facts。 |
+| `GET /imports/files/sessions/{session_id}` | PostgreSQL `app.import_batches`、`app.import_files` | 通过 `legacy_collection='import_sessions'` 和 `legacy_id` 投影旧 session envelope；无 PostgreSQL batch fact 时返回 404，不回读 app Mongo 或 Python session state。 |
+| `POST /matching/run` | PostgreSQL `job.worker_tasks`、`job.outbox_events`、`audit.events`、`app.write_idempotency_records` | 按 `scope_month` 请求异步重建 workbench candidate matching；只排队 task/outbox，候选结果由 worker 后续写入 read model。 |
+| `GET /matching/results`、`GET /matching/results/{result_id}` | `read_model.workbench_candidate_matches` | 只读候选匹配 read model，支持 `scope_month`、`status`、`limit`；不读取 app Mongo，不实时重算。 |
 
 ### 仍未迁移的 Prompt G 高风险路径
 
@@ -1039,9 +1044,9 @@ python scripts/tools/api_route_inventory_check.py \
 - `tax-offset`：GET 与 calculate 已迁移为 `read_model.tax_offset_read_models` 只读路径；certified import preview/confirm 仍未迁移，写入、审计、幂等和 read-model invalidation/outbox 合同需先冻结。
 - `cost-statistics`：export-preview 已迁移为 `read_model.cost_statistics_read_models.time_rows` 只读路径；二进制 Excel `export` 仍未迁移，workbook 样式、下载头、导出筛选和后台缓存语义需单独冻结。单项目无 `aggregate_by` 的 Python 项目明细预览依赖 workbench 明细构造，Axum 切流 fixture 应使用前端实际发送的 `aggregate_by=month|year` 聚合预览。
 - `workbench`：单月 snapshot、ignored rows、row detail、read-model status 读取已迁移为 `read_model.workbench_snapshots/workbench_rows`。既有 Axum 写命令已进入 inventory 和 shadow fixture，但只能在隔离 local/staging 数据上验证；`POST /api/workbench/exception/preview` 仍阻塞，因为旧 Python preview 依赖 exception projection 和 matching candidate state，独立 read_model 合同未冻结。
-- `background-jobs`：active/detail GET 已迁移为 `job.worker_tasks` system task 读取；`acknowledge`、`retry` 写操作未迁移，需先冻结通知表/重试 job/outbox 语义。
+- `background-jobs`：active/detail GET 已迁移为 `job.worker_tasks` system task 读取；`retry` 已迁移为 PostgreSQL task/outbox/audit/idempotency 写入；`acknowledge` 写操作未迁移，需先冻结通知表/ack 语义。
 - `app-health`：JSON snapshot 和 SSE stream `/api/app-health/stream` 已迁移；app Mongo alerts 和旧 Python dirty scope state 未迁移。Axum matching 状态只读取 `job.worker_tasks` 和 `read_model.workbench_snapshots`。
-- `projects`、`ledgers`、`reminders`、`imports preview/confirm/revert`、`matching run/results`：旧 Python 仍是事实路径；Axum 只迁移了导入 metadata、file-object metadata/access grant 和 upload preflight 子集。
+- `projects`、`ledgers`、`reminders`、`imports preview/confirm/revert`：旧 Python 仍是事实路径；Axum 只迁移了导入 metadata、file-object metadata/access grant、upload preflight、import file retry、import session projection、matching run 请求和 matching results read model 子集。
 
 ### Shadow Validation Gate
 

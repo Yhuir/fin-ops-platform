@@ -2010,6 +2010,177 @@
         "date_format:$.last_finished_at",
         "date_format:$.last_synced_at"
       ]
+    },
+    {
+      "id": "background-job-retry-request",
+      "method": "POST",
+      "path": "/api/background-jobs/${BACKGROUND_JOB_ID}/retry",
+      "expected_status": 202,
+      "owner": "platform-ops",
+      "risk": "medium",
+      "source": "PostgreSQL job.worker_tasks, job.outbox_events, audit.events and app.write_idempotency_records; request creates retry task only",
+      "frontend_refs": [
+        "web/src/features/backgroundJobs/api.ts"
+      ],
+      "body": {
+        "idempotency_key": "shadow-background-job-retry-${SHADOW_RUN_ID}",
+        "reason": "shadow validation retry request"
+      },
+      "contract_cases": {
+        "query": [],
+        "body": ["idempotency_key", "reason"],
+        "status": [202, 400, 401, 403, 404, 409, 503],
+        "error_shape": {"error": "string", "message": "string"},
+        "pagination": "not paginated",
+        "empty_result": "missing job id returns 404 or database unavailable in unseeded fixture",
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied"
+      },
+      "explain_diffs": [
+        "$.task_id",
+        "$.outbox_event_id",
+        "$.idempotency_key"
+      ]
+    },
+    {
+      "id": "import-file-retry-request",
+      "method": "POST",
+      "path": "/imports/files/retry",
+      "expected_status": 202,
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.import_files metadata plus job.worker_tasks/job.outbox_events/audit/idempotency request record; request creates parse retry task only",
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "body": {
+        "file_id": "${IMPORT_FILE_ID}",
+        "idempotency_key": "shadow-import-file-retry-${SHADOW_RUN_ID}",
+        "reason": "shadow validation retry request"
+      },
+      "contract_cases": {
+        "query": [],
+        "body": ["file_id", "idempotency_key", "reason"],
+        "status": [202, 400, 401, 403, 404, 409, 503],
+        "error_shape": {"error": "string", "message": "string"},
+        "pagination": "not paginated",
+        "empty_result": "missing file id returns 404 or database unavailable in unseeded fixture",
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied"
+      },
+      "explain_diffs": [
+        "$.task_id",
+        "$.outbox_event_id",
+        "$.idempotency_key"
+      ]
+    },
+    {
+      "id": "import-file-session-projection",
+      "method": "GET",
+      "path": "/imports/files/sessions/${IMPORT_SESSION_ID}",
+      "expected_status": 200,
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL app.import_batches legacy_session_id projection joined to app.import_files",
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "contract_cases": {
+        "query": [],
+        "body": null,
+        "status": [200, 401, 403, 404, 503],
+        "error_shape": {"error": "string", "message": "string"},
+        "pagination": "not paginated",
+        "empty_result": "unknown session id returns 404 not_found",
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied"
+      },
+      "explain_diffs": [
+        "date_format:$.session.batches[*].created_at",
+        "date_format:$.session.files[*].updated_at"
+      ]
+    },
+    {
+      "id": "matching-run-request",
+      "method": "POST",
+      "path": "/matching/run",
+      "expected_status": 202,
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL job.worker_tasks, job.outbox_events, audit.events and app.write_idempotency_records; request queues workbench matching only",
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "body": {
+        "scope_month": "2026-05",
+        "idempotency_key": "shadow-matching-run-${SHADOW_RUN_ID}",
+        "reason": "shadow validation matching request"
+      },
+      "contract_cases": {
+        "query": [],
+        "body": ["scope_month", "idempotency_key", "reason"],
+        "status": [202, 400, 401, 403, 409, 503],
+        "error_shape": {"error": "string", "message": "string"},
+        "pagination": "not paginated",
+        "empty_result": "not applicable; request creates a queued task",
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied"
+      },
+      "explain_diffs": [
+        "$.task_id",
+        "$.outbox_event_id",
+        "$.idempotency_key"
+      ]
+    },
+    {
+      "id": "matching-results-list",
+      "method": "GET",
+      "path": "/matching/results",
+      "query": {
+        "scope_month": "2026-05",
+        "status": "active"
+      },
+      "expected_status": 200,
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL read_model.workbench_candidate_matches",
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "contract_cases": {
+        "query": ["scope_month", "status", "limit"],
+        "body": null,
+        "status": [200, 400, 401, 403, 503],
+        "error_shape": {"error": "string", "message": "string"},
+        "pagination": "limit defaults to 50 and is capped at 200",
+        "empty_result": {"total": 0, "results": []},
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied"
+      },
+      "explain_diffs": [
+        "sorting:$.results",
+        "date_format:$.results[*].updated_at"
+      ]
+    },
+    {
+      "id": "matching-result-detail",
+      "method": "GET",
+      "path": "/matching/results/${MATCHING_RESULT_ID}",
+      "expected_status": 200,
+      "owner": "platform-ops",
+      "risk": "high",
+      "source": "PostgreSQL read_model.workbench_candidate_matches",
+      "frontend_refs": [
+        "web/src/features/imports/api.ts"
+      ],
+      "contract_cases": {
+        "query": [],
+        "body": null,
+        "status": [200, 400, 401, 403, 404, 503],
+        "error_shape": {"error": "string", "message": "string"},
+        "pagination": "not paginated",
+        "empty_result": "unknown result id returns 404 not_found",
+        "permission_failure": "401 invalid_oa_session or 403 permission_denied"
+      },
+      "explain_diffs": [
+        "$.result.payload.reasons",
+        "date_format:$.result.updated_at"
+      ]
     }
   ]
 }
