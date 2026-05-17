@@ -8,9 +8,8 @@
       "status": "not_evaluated_without_upload_or_verify"
     },
     "duplicate_files": {
-      "count": null,
-      "groups": [],
-      "status": "not_evaluated_without_source_content_sha256"
+      "count": 0,
+      "groups": []
     },
     "manifest_checksum": {
       "sha256": "88d0fd7787115b29eee8617d31ebd4f25071ea41217782cc85d536ed4369f8e1",
@@ -21,12 +20,11 @@
       "items": [],
       "status": "not_evaluated_without_gridfs_content_read"
     },
-    "output_file_checksums": {},
     "sample_download_hash": {
       "matched": 0,
       "mismatched": 0,
       "sampled": 0,
-      "status": "not_evaluated"
+      "status": "not_evaluated_dry_run"
     },
     "size_differences": {
       "count": null,
@@ -36,461 +34,578 @@
   },
   "decision": {
     "go_no_go": "NO_GO",
-    "reason": "Object storage implementation and local checksum tests are improved, but controlled staging MinIO/S3 upload/verify/sample download and imports/files runtime shadow were not executed.",
-    "required_action": "Run scripts/tools/migrate_gridfs_minio.py in upload or verify mode against controlled staging MinIO/S3 with sample_download_hash.mismatched=0, import legacy-id-map-import.ndjson into staging.legacy_id_map, then run imports/files runtime shadow against Python and Axum base URLs."
+    "reason": "06D dry-run/export metadata report was generated, but app GridFS content checksum, MinIO/S3 upload or verify, sample download checksum, and PostgreSQL metadata import were not executed.",
+    "required_action": "Provide controlled app GridFS, MinIO/S3, and PostgreSQL migration environment variables; rerun 06D live dry-run/upload or verify; require per-file source sha256 and sample_download_hash.mismatched=0."
+  },
+  "environment_presence": {
+    "app_gridfs": {
+      "APP_MONGO_URI": "missing",
+      "FIN_OPS_APP_MONGO_DATABASE": "missing",
+      "FIN_OPS_APP_MONGO_HOST": "missing",
+      "FIN_OPS_APP_MONGO_PASSWORD": "missing",
+      "FIN_OPS_APP_MONGO_USERNAME": "missing",
+      "STAGING_APP_MONGO_URI": "missing"
+    },
+    "object_storage_auth": {
+      "AWS_ACCESS_KEY_ID": "missing",
+      "AWS_SECRET_ACCESS_KEY": "missing",
+      "AWS_SESSION_TOKEN": "missing",
+      "MINIO_ACCESS_KEY": "missing",
+      "MINIO_SECRET_KEY": "missing",
+      "S3_ACCESS_KEY_ID": "missing",
+      "S3_SECRET_ACCESS_KEY": "missing"
+    },
+    "object_storage_bucket": {
+      "FIN_OPS_S3_BUCKET": "missing",
+      "S3_BUCKET": "missing"
+    },
+    "object_storage_endpoint": {
+      "AWS_ENDPOINT_URL_S3": "missing",
+      "FIN_OPS_S3_ENDPOINT_URL": "missing",
+      "S3_ENDPOINT": "missing"
+    },
+    "postgres_migration": {
+      "DATABASE_URL": "missing",
+      "FIN_OPS_POSTGRES_MIGRATION_URL": "missing"
+    }
   },
   "execution": {
-    "api_cutover_executed": false,
     "business_facts_touched": false,
     "dry_run_counts_as_go": false,
-    "mode": "not_executed_metadata_only_blocker_report",
+    "mode": "dry_run_export_manifest_metadata_only",
     "oa_source_database_accessed": false,
-    "required_environment_status": {
-      "axum_base_url": "missing",
-      "bucket": "missing",
-      "endpoint": "missing",
-      "object_storage_auth": "missing",
-      "python_base_url": "missing",
-      "staging_postgres": "missing"
-    },
+    "postgres_written": false,
     "sample_download_executed": false,
     "upload_executed": false,
     "verify_executed": false
   },
   "findings": [
     {
+      "code": "APP_GRIDFS_ENV_MISSING",
+      "dimension": "app_gridfs_environment",
+      "message": "App Mongo/GridFS environment variables are not present; source file bytes cannot be read.",
+      "required_action": "Set app GridFS connection env and rerun live 06D migration against app Mongo only.",
+      "severity": "error"
+    },
+    {
       "code": "OBJECT_STORAGE_ENV_MISSING",
       "dimension": "object_storage_environment",
-      "message": "S3/MinIO authentication and bucket environment were not provided; upload/verify was not executed.",
-      "required_action": "Provide controlled staging object storage environment variables and rerun 06D in upload or verify mode.",
+      "message": "MinIO/S3 endpoint, bucket, or authentication environment is incomplete.",
+      "required_action": "Provide controlled staging object storage env and rerun upload or verify mode.",
+      "severity": "error"
+    },
+    {
+      "code": "POSTGRES_MIGRATION_ENV_MISSING",
+      "dimension": "postgres_metadata_environment",
+      "message": "PostgreSQL migration connection environment is not present; metadata import cannot be executed.",
+      "required_action": "Set FIN_OPS_POSTGRES_MIGRATION_URL for a controlled staging/dry-run database before writing metadata.",
       "severity": "error"
     },
     {
       "code": "DRY_RUN_CANNOT_PASS_FILE_CHECKSUM_GATE",
       "dimension": "sample_download_hash",
-      "message": "No object upload or sample download verification was executed; dry-run/metadata-only evidence cannot be file_checksum GO.",
-      "required_action": "Run upload or verify mode and require sample_download_hash.mismatched=0.",
+      "message": "Dry-run/export metadata mode does not upload objects or download samples.",
+      "required_action": "Run upload or verify mode against controlled staging MinIO/S3 and require mismatched=0.",
       "severity": "error"
     },
     {
-      "actual": {
-        "missing_source_sha256_count": 459,
-        "total_files": 462
-      },
-      "code": "SOURCE_GRIDFS_CONTENT_HASH_NOT_AVAILABLE_IN_06A_METADATA",
+      "code": "SOURCE_SHA256_MISSING",
       "dimension": "source_hash",
-      "message": "06A GridFS metadata manifest does not carry file content SHA-256 for most entries; 06D must compute source sha256 by reading app GridFS before upload/verify.",
+      "message": "06A GridFS metadata manifest does not contain source content SHA-256 for 459 file(s); 06D must read app GridFS before GO.",
+      "required_action": "Provide app GridFS env and rerun live dry-run/upload so source sha256 is computed.",
       "severity": "warning"
     }
   ],
-  "generated_at": "2026-05-17T23:20:00+08:00",
+  "generated_at": "2026-05-17T12:25:51.614990+00:00",
   "go_no_go": "NO_GO",
-  "implementation_evidence": {
-    "gridfs_migration_tool": {
-      "legacy_id_map_targets": [
-        "app.file_objects",
-        "app.import_files"
-      ],
-      "new_fields": [
-        "migration_run_id",
-        "retry_policy",
-        "object_version",
-        "versioning",
-        "content_type",
-        "etag"
-      ],
-      "outputs": [
-        "gridfs-minio-migration-manifest.json",
-        "gridfs-object-mapping.ndjson",
-        "file-objects-import.ndjson",
-        "legacy-id-map-import.ndjson",
-        "gridfs-checksum-validation-report.json",
-        "gridfs-migration-failures.ndjson"
-      ],
-      "status": "implemented_local_verified"
-    },
-    "rust_batch_download_manifest": {
-      "delivery": "object_manifest_with_presigned_get_or_unavailable_reason",
-      "facts": [
-        "app.import_batches",
-        "app.import_files",
-        "app.file_objects"
-      ],
-      "limitations": [
-        "shadow_fixture_missing",
-        "staging_minio_presign_not_executed",
-        "large_archive_worker_not_implemented"
-      ],
-      "route": "GET /imports/batches/{batch_id}/download",
-      "secret_free": true,
-      "status": "implemented_runtime_no_go"
-    }
-  },
   "legacy_id_mapping": {
-    "audit_sample": [
-      {
-        "content_type": "application/octet-stream",
-        "content_type_status": "defaulted",
-        "file_object_id": "1875e919-e797-5026-976f-7b594a4f21f6",
-        "legacy_gridfs_id_sha256": "2380b0d39888ddabe6413143194f28a683d072416c2f0b0f0a5d933201006d25",
-        "migration_status": "blocked_no_object_storage_environment",
-        "purpose": "etc_invoice_attachment",
-        "redacted_storage_key": null,
-        "size": 151506,
-        "source_collection": "import_file_blobs.files",
-        "source_line": 1,
-        "source_sha256": null,
-        "storage_key_sha256": null,
-        "upload_date_month": "2026-05"
-      },
-      {
-        "content_type": "application/octet-stream",
-        "content_type_status": "defaulted",
-        "file_object_id": "9919b481-7755-5fa1-b56a-0f52f7650050",
-        "legacy_gridfs_id_sha256": "b13edf028a02e64c901187fb16ac7c545033ddb889043b2169ac68aa2a41d8fa",
-        "migration_status": "blocked_no_object_storage_environment",
-        "purpose": "etc_invoice_attachment",
-        "redacted_storage_key": null,
-        "size": 2563,
-        "source_collection": "import_file_blobs.files",
-        "source_line": 2,
-        "source_sha256": null,
-        "storage_key_sha256": null,
-        "upload_date_month": "2026-05"
-      },
-      {
-        "content_type": "application/octet-stream",
-        "content_type_status": "defaulted",
-        "file_object_id": "596e08fa-4a57-5755-a01c-5dd2274a07f4",
-        "legacy_gridfs_id_sha256": "f847abe12beb25c88cebfd053989bb1b3fecb355fa8af5897f90800e98f3acf7",
-        "migration_status": "blocked_no_object_storage_environment",
-        "purpose": "etc_invoice_attachment",
-        "redacted_storage_key": null,
-        "size": 151450,
-        "source_collection": "import_file_blobs.files",
-        "source_line": 3,
-        "source_sha256": null,
-        "storage_key_sha256": null,
-        "upload_date_month": "2026-05"
-      },
-      {
-        "content_type": "application/octet-stream",
-        "content_type_status": "defaulted",
-        "file_object_id": "acffbd8a-ef6f-5da4-ac1f-a2a45a300105",
-        "legacy_gridfs_id_sha256": "5165619ed9ecbd1509395edc50880eb63e050ac5f03afeb84e5fd41be80eff0e",
-        "migration_status": "blocked_no_object_storage_environment",
-        "purpose": "etc_invoice_attachment",
-        "redacted_storage_key": null,
-        "size": 2571,
-        "source_collection": "import_file_blobs.files",
-        "source_line": 4,
-        "source_sha256": null,
-        "storage_key_sha256": null,
-        "upload_date_month": "2026-05"
-      },
-      {
-        "content_type": "application/octet-stream",
-        "content_type_status": "defaulted",
-        "file_object_id": "a44f55df-5fca-5252-8f38-71d8110f1e19",
-        "legacy_gridfs_id_sha256": "94aaef209d51b20e168a2e3c85f215e3494d07a6e69883c264525a28ebe259ec",
-        "migration_status": "blocked_no_object_storage_environment",
-        "purpose": "etc_invoice_attachment",
-        "redacted_storage_key": null,
-        "size": 151644,
-        "source_collection": "import_file_blobs.files",
-        "source_line": 5,
-        "source_sha256": null,
-        "storage_key_sha256": null,
-        "upload_date_month": "2026-05"
-      },
-      {
-        "content_type": "application/octet-stream",
-        "content_type_status": "defaulted",
-        "file_object_id": "8a778d06-27ca-557f-aea1-7e36094ab79d",
-        "legacy_gridfs_id_sha256": "ca09c08669fa31ca8ff6a791416e31f59e4829c484bfbf4314ee18d024fe2e3c",
-        "migration_status": "blocked_no_object_storage_environment",
-        "purpose": "etc_invoice_attachment",
-        "redacted_storage_key": null,
-        "size": 2622,
-        "source_collection": "import_file_blobs.files",
-        "source_line": 6,
-        "source_sha256": null,
-        "storage_key_sha256": null,
-        "upload_date_month": "2026-05"
-      },
-      {
-        "content_type": "application/octet-stream",
-        "content_type_status": "defaulted",
-        "file_object_id": "8d485378-5be9-5bb0-b2d1-dc2e1d6fdfb9",
-        "legacy_gridfs_id_sha256": "4cef0a7936daa7996a513a3f3254f8e6faf5aaced285892fce3425f6ea5820b6",
-        "migration_status": "blocked_no_object_storage_environment",
-        "purpose": "etc_invoice_attachment",
-        "redacted_storage_key": null,
-        "size": 151458,
-        "source_collection": "import_file_blobs.files",
-        "source_line": 7,
-        "source_sha256": null,
-        "storage_key_sha256": null,
-        "upload_date_month": "2026-05"
-      },
-      {
-        "content_type": "application/octet-stream",
-        "content_type_status": "defaulted",
-        "file_object_id": "aa552ceb-d39a-54f9-a930-17b630233e6b",
-        "legacy_gridfs_id_sha256": "f0a2255ff088a68abf12c6e82097bd7e359428c2249ee19c5c1ec0734278d98d",
-        "migration_status": "blocked_no_object_storage_environment",
-        "purpose": "etc_invoice_attachment",
-        "redacted_storage_key": null,
-        "size": 2622,
-        "source_collection": "import_file_blobs.files",
-        "source_line": 8,
-        "source_sha256": null,
-        "storage_key_sha256": null,
-        "upload_date_month": "2026-05"
-      },
-      {
-        "content_type": "application/octet-stream",
-        "content_type_status": "defaulted",
-        "file_object_id": "4066b11a-a293-5bce-9bd1-0ccea634ae50",
-        "legacy_gridfs_id_sha256": "e936a3940b4dbe8aa87be1225cb1f3f8c0e8ce3a248c367117d9353029b570dc",
-        "migration_status": "blocked_no_object_storage_environment",
-        "purpose": "etc_invoice_attachment",
-        "redacted_storage_key": null,
-        "size": 151482,
-        "source_collection": "import_file_blobs.files",
-        "source_line": 9,
-        "source_sha256": null,
-        "storage_key_sha256": null,
-        "upload_date_month": "2026-05"
-      },
-      {
-        "content_type": "application/octet-stream",
-        "content_type_status": "defaulted",
-        "file_object_id": "5deec72f-c605-54d4-b6c8-5b4e96d3359f",
-        "legacy_gridfs_id_sha256": "f4c07c01d155bd73b3acd0d33f54902e9f3ef3aa60fb80a33268bc9f8233dc0f",
-        "migration_status": "blocked_no_object_storage_environment",
-        "purpose": "etc_invoice_attachment",
-        "redacted_storage_key": null,
-        "size": 2622,
-        "source_collection": "import_file_blobs.files",
-        "source_line": 10,
-        "source_sha256": null,
-        "storage_key_sha256": null,
-        "upload_date_month": "2026-05"
-      },
-      {
-        "content_type": "application/octet-stream",
-        "content_type_status": "defaulted",
-        "file_object_id": "fe4d8e4c-7abf-5a02-a8eb-af4352d99755",
-        "legacy_gridfs_id_sha256": "32c08149fb38e75ff1b6da713ae7f11bf3d9d78082470ed231ac76fb6f958df0",
-        "migration_status": "blocked_no_object_storage_environment",
-        "purpose": "etc_invoice_attachment",
-        "redacted_storage_key": null,
-        "size": 151617,
-        "source_collection": "import_file_blobs.files",
-        "source_line": 11,
-        "source_sha256": null,
-        "storage_key_sha256": null,
-        "upload_date_month": "2026-05"
-      },
-      {
-        "content_type": "application/octet-stream",
-        "content_type_status": "defaulted",
-        "file_object_id": "9efe1ab0-d217-52c2-a407-b02f7f3b7b71",
-        "legacy_gridfs_id_sha256": "9ed05e9ea5ec0b150f74c7ec27b403223ffc92d8779f7d905c07af068924079d",
-        "migration_status": "blocked_no_object_storage_environment",
-        "purpose": "etc_invoice_attachment",
-        "redacted_storage_key": null,
-        "size": 2622,
-        "source_collection": "import_file_blobs.files",
-        "source_line": 12,
-        "source_sha256": null,
-        "storage_key_sha256": null,
-        "upload_date_month": "2026-05"
-      },
-      {
-        "content_type": "application/octet-stream",
-        "content_type_status": "defaulted",
-        "file_object_id": "cf42cadb-7703-5a51-b543-c6f83d1fc284",
-        "legacy_gridfs_id_sha256": "69b18c49f4bd977e82319384de17a5d3e99465752b4c390eb72be4eba142173a",
-        "migration_status": "blocked_no_object_storage_environment",
-        "purpose": "etc_invoice_attachment",
-        "redacted_storage_key": null,
-        "size": 151897,
-        "source_collection": "import_file_blobs.files",
-        "source_line": 13,
-        "source_sha256": null,
-        "storage_key_sha256": null,
-        "upload_date_month": "2026-05"
-      },
-      {
-        "content_type": "application/octet-stream",
-        "content_type_status": "defaulted",
-        "file_object_id": "c78ea2ca-68c7-5e83-b8a0-7608543f3deb",
-        "legacy_gridfs_id_sha256": "759aca3e94aa7b472d769c75b67270d5f432353dfffb35ccab94711ef6633ee8",
-        "migration_status": "blocked_no_object_storage_environment",
-        "purpose": "etc_invoice_attachment",
-        "redacted_storage_key": null,
-        "size": 2635,
-        "source_collection": "import_file_blobs.files",
-        "source_line": 14,
-        "source_sha256": null,
-        "storage_key_sha256": null,
-        "upload_date_month": "2026-05"
-      },
-      {
-        "content_type": "application/octet-stream",
-        "content_type_status": "defaulted",
-        "file_object_id": "3bc569b3-a158-5caf-82bc-082b306087a8",
-        "legacy_gridfs_id_sha256": "c243c54772095486adcb4e00404fcb698c560f98f9f84d3a542e7b61952782dd",
-        "migration_status": "blocked_no_object_storage_environment",
-        "purpose": "etc_invoice_attachment",
-        "redacted_storage_key": null,
-        "size": 150885,
-        "source_collection": "import_file_blobs.files",
-        "source_line": 15,
-        "source_sha256": null,
-        "storage_key_sha256": null,
-        "upload_date_month": "2026-05"
-      },
-      {
-        "content_type": "application/octet-stream",
-        "content_type_status": "defaulted",
-        "file_object_id": "dd703d51-b5a2-5ab9-9e96-c659419fd1a2",
-        "legacy_gridfs_id_sha256": "12a3cdeb2eeedab41e0d99c3df72082c76366f7c629d45154192a5b43d271a3b",
-        "migration_status": "blocked_no_object_storage_environment",
-        "purpose": "etc_invoice_attachment",
-        "redacted_storage_key": null,
-        "size": 2605,
-        "source_collection": "import_file_blobs.files",
-        "source_line": 16,
-        "source_sha256": null,
-        "storage_key_sha256": null,
-        "upload_date_month": "2026-05"
-      },
-      {
-        "content_type": "application/octet-stream",
-        "content_type_status": "defaulted",
-        "file_object_id": "10bc9e0f-1c61-5987-a62a-7f3ef87739c6",
-        "legacy_gridfs_id_sha256": "eb06d7559261685c3a297976b1726babe42df7792941e1496939a16549cccebf",
-        "migration_status": "blocked_no_object_storage_environment",
-        "purpose": "etc_invoice_attachment",
-        "redacted_storage_key": null,
-        "size": 150937,
-        "source_collection": "import_file_blobs.files",
-        "source_line": 17,
-        "source_sha256": null,
-        "storage_key_sha256": null,
-        "upload_date_month": "2026-05"
-      },
-      {
-        "content_type": "application/octet-stream",
-        "content_type_status": "defaulted",
-        "file_object_id": "8d3edfcf-1644-5ca2-8611-963c1fb20f3c",
-        "legacy_gridfs_id_sha256": "cd7aabf69387ec32c54d64c5e87ff50a92a1e92c63a5b31f1b161f09eb0d4aff",
-        "migration_status": "blocked_no_object_storage_environment",
-        "purpose": "etc_invoice_attachment",
-        "redacted_storage_key": null,
-        "size": 2604,
-        "source_collection": "import_file_blobs.files",
-        "source_line": 18,
-        "source_sha256": null,
-        "storage_key_sha256": null,
-        "upload_date_month": "2026-05"
-      },
-      {
-        "content_type": "application/octet-stream",
-        "content_type_status": "defaulted",
-        "file_object_id": "43c69425-f424-51e9-82eb-602f7ed9d6b2",
-        "legacy_gridfs_id_sha256": "9591cc3c93416fb5347af68577e4ca0483b070ef9db4f6847c876c10d2754813",
-        "migration_status": "blocked_no_object_storage_environment",
-        "purpose": "etc_invoice_attachment",
-        "redacted_storage_key": null,
-        "size": 150945,
-        "source_collection": "import_file_blobs.files",
-        "source_line": 19,
-        "source_sha256": null,
-        "storage_key_sha256": null,
-        "upload_date_month": "2026-05"
-      },
-      {
-        "content_type": "application/octet-stream",
-        "content_type_status": "defaulted",
-        "file_object_id": "8befb156-1c44-54a8-a43b-909e2fe13673",
-        "legacy_gridfs_id_sha256": "967213329781efaf256a9dba25f698d9cd7d9d0faab7cd257f625681c74a9164",
-        "migration_status": "blocked_no_object_storage_environment",
-        "purpose": "etc_invoice_attachment",
-        "redacted_storage_key": null,
-        "size": 2605,
-        "source_collection": "import_file_blobs.files",
-        "source_line": 20,
-        "source_sha256": null,
-        "storage_key_sha256": null,
-        "upload_date_month": "2026-05"
-      }
-    ],
-    "audit_sample_note": "legacy_gridfs_id values are represented by sha256 hashes in this NO_GO metadata-only report; upload/verify GO evidence must include full per-file migration records in the controlled output manifest.",
     "expected_gridfs_files": 462,
     "mapped_file_objects": 0,
     "mapped_import_files": 0,
     "missing_mappings_status": "not_evaluated_upload_or_verify_not_executed"
   },
-  "local_verification": {
-    "commands": [
-      {
-        "command": "PYTHONPATH=backend/src python3 -m unittest tests.test_app_gridfs_migration -v",
-        "result": "8 passed; covers upload, verify, checksum mismatch, missing GridFS file, length mismatch, content type defaulting, legacy id map output",
-        "status": "passed"
-      },
-      {
-        "command": "cargo test -p fin-ops-api import_files -- --nocapture",
-        "result": "10 passed; covers upload preflight, file object presign, batch download object manifest/presign, invalid download format",
-        "status": "passed"
-      },
-      {
-        "command": "cargo fmt --all --check",
-        "status": "passed"
-      },
-      {
-        "command": "cargo check --workspace",
-        "status": "passed"
-      },
-      {
-        "command": "cargo test --workspace",
-        "result": "120 passed",
-        "status": "passed"
-      },
-      {
-        "command": "PYTHONPATH=backend/src pytest tests/test_api_route_inventory_check.py tests/test_api_shadow_validate.py -q",
-        "result": "78 passed",
-        "status": "passed"
-      },
-      {
-        "command": "python3 scripts/tools/api_route_inventory_check.py --scan-root . --include-route-prefix /api --include-route-prefix /projects --include-route-prefix /ledgers --include-route-prefix /reminders --include-route-prefix /imports --include-route-prefix /matching --write-route-level-inventory docs/dev/api-fixtures/api-route-inventory-route-level.json --shadow-fixture docs/dev/api-fixtures/business-api-shadow-validation.json",
-        "result": "missing_rust_routes=[]; shadow_coverage_errors=[]",
-        "status": "GO"
-      },
-      {
-        "command": "python3 scripts/tools/api_shadow_validate.py --fixture docs/dev/api-fixtures/business-api-shadow-validation.json --validate-fixture-only --endpoint-id import-batch-download-object-manifest --endpoint-id file-object-metadata-access --endpoint-id import-file-upload-preflight --endpoint-id import-file-retry-request --endpoint-id import-file-session-projection",
-        "result": "fixture-only validation for 5 imports/files endpoints; no HTTP shadow runtime executed",
-        "status": "GO"
-      }
-    ],
-    "object_storage_double": "InMemoryObjectStorageClient",
-    "real_staging_object_storage_used": false
+  "metadata_plan": {
+    "legacy_mapping": "legacy_gridfs_id -> file_object_id",
+    "planned_file_objects": 462,
+    "planned_import_files": 462,
+    "target_relation": "app.import_files",
+    "target_table": "app.file_objects",
+    "writes_postgresql": false
   },
+  "metadata_plan_sample": [
+    {
+      "bucket": "pending_env_bucket",
+      "byte_size": 151506,
+      "content_type": "application/octet-stream",
+      "domain": "etc_file",
+      "file_name": "invoice.pdf",
+      "file_object_id": "1875e919-e797-5026-976f-7b594a4f21f6",
+      "import_file_id": "d2a2fd3d-dca5-5d03-bcaf-02d3bbc9febd",
+      "legacy_collection": "import_file_blobs.files",
+      "legacy_gridfs_id": "etc_invoice:25537911971200080142:invoice.pdf",
+      "legacy_id": "etc_invoice:25537911971200080142:invoice.pdf",
+      "metadata": {
+        "chunk_count": 1,
+        "legacy_collection": "import_file_blobs.files",
+        "source_line": 1,
+        "upload_date": "2026-05-15T11:26:40.536000"
+      },
+      "object_key": "staging/app-gridfs/etc_file/2026/05/2380b0d39888ddab/1875e919-e797-5026-976f-7b594a4f21f6",
+      "purpose": "etc_invoice_attachment",
+      "sha256": null,
+      "storage_key": "staging/app-gridfs/etc_file/2026/05/2380b0d39888ddab/1875e919-e797-5026-976f-7b594a4f21f6",
+      "storage_provider": "minio"
+    },
+    {
+      "bucket": "pending_env_bucket",
+      "byte_size": 2563,
+      "content_type": "application/octet-stream",
+      "domain": "etc_file",
+      "file_name": "invoice.xml",
+      "file_object_id": "9919b481-7755-5fa1-b56a-0f52f7650050",
+      "import_file_id": "d79eeb39-42be-50af-9070-45dad27b0ff1",
+      "legacy_collection": "import_file_blobs.files",
+      "legacy_gridfs_id": "etc_invoice:25537911971200080142:invoice.xml",
+      "legacy_id": "etc_invoice:25537911971200080142:invoice.xml",
+      "metadata": {
+        "chunk_count": 1,
+        "legacy_collection": "import_file_blobs.files",
+        "source_line": 2,
+        "upload_date": "2026-05-15T11:26:40.374000"
+      },
+      "object_key": "staging/app-gridfs/etc_file/2026/05/b13edf028a02e64c/9919b481-7755-5fa1-b56a-0f52f7650050",
+      "purpose": "etc_invoice_attachment",
+      "sha256": null,
+      "storage_key": "staging/app-gridfs/etc_file/2026/05/b13edf028a02e64c/9919b481-7755-5fa1-b56a-0f52f7650050",
+      "storage_provider": "minio"
+    },
+    {
+      "bucket": "pending_env_bucket",
+      "byte_size": 151450,
+      "content_type": "application/octet-stream",
+      "domain": "etc_file",
+      "file_name": "invoice.pdf",
+      "file_object_id": "596e08fa-4a57-5755-a01c-5dd2274a07f4",
+      "import_file_id": "9a177290-4fc8-5340-b5bd-12553592d9d3",
+      "legacy_collection": "import_file_blobs.files",
+      "legacy_gridfs_id": "etc_invoice:25537911971200085997:invoice.pdf",
+      "legacy_id": "etc_invoice:25537911971200085997:invoice.pdf",
+      "metadata": {
+        "chunk_count": 1,
+        "legacy_collection": "import_file_blobs.files",
+        "source_line": 3,
+        "upload_date": "2026-05-15T11:26:40.851000"
+      },
+      "object_key": "staging/app-gridfs/etc_file/2026/05/f847abe12beb25c8/596e08fa-4a57-5755-a01c-5dd2274a07f4",
+      "purpose": "etc_invoice_attachment",
+      "sha256": null,
+      "storage_key": "staging/app-gridfs/etc_file/2026/05/f847abe12beb25c8/596e08fa-4a57-5755-a01c-5dd2274a07f4",
+      "storage_provider": "minio"
+    },
+    {
+      "bucket": "pending_env_bucket",
+      "byte_size": 2571,
+      "content_type": "application/octet-stream",
+      "domain": "etc_file",
+      "file_name": "invoice.xml",
+      "file_object_id": "acffbd8a-ef6f-5da4-ac1f-a2a45a300105",
+      "import_file_id": "1b2e2d6e-4209-5a01-8119-11558bbd2105",
+      "legacy_collection": "import_file_blobs.files",
+      "legacy_gridfs_id": "etc_invoice:25537911971200085997:invoice.xml",
+      "legacy_id": "etc_invoice:25537911971200085997:invoice.xml",
+      "metadata": {
+        "chunk_count": 1,
+        "legacy_collection": "import_file_blobs.files",
+        "source_line": 4,
+        "upload_date": "2026-05-15T11:26:40.688000"
+      },
+      "object_key": "staging/app-gridfs/etc_file/2026/05/5165619ed9ecbd15/acffbd8a-ef6f-5da4-ac1f-a2a45a300105",
+      "purpose": "etc_invoice_attachment",
+      "sha256": null,
+      "storage_key": "staging/app-gridfs/etc_file/2026/05/5165619ed9ecbd15/acffbd8a-ef6f-5da4-ac1f-a2a45a300105",
+      "storage_provider": "minio"
+    },
+    {
+      "bucket": "pending_env_bucket",
+      "byte_size": 151644,
+      "content_type": "application/octet-stream",
+      "domain": "etc_file",
+      "file_name": "invoice.pdf",
+      "file_object_id": "a44f55df-5fca-5252-8f38-71d8110f1e19",
+      "import_file_id": "03907bc0-efc1-5836-8890-a409229c9e9e",
+      "legacy_collection": "import_file_blobs.files",
+      "legacy_gridfs_id": "etc_invoice:26537910570100003279:invoice.pdf",
+      "legacy_id": "etc_invoice:26537910570100003279:invoice.pdf",
+      "metadata": {
+        "chunk_count": 1,
+        "legacy_collection": "import_file_blobs.files",
+        "source_line": 5,
+        "upload_date": "2026-05-15T11:26:41.493000"
+      },
+      "object_key": "staging/app-gridfs/etc_file/2026/05/94aaef209d51b20e/a44f55df-5fca-5252-8f38-71d8110f1e19",
+      "purpose": "etc_invoice_attachment",
+      "sha256": null,
+      "storage_key": "staging/app-gridfs/etc_file/2026/05/94aaef209d51b20e/a44f55df-5fca-5252-8f38-71d8110f1e19",
+      "storage_provider": "minio"
+    },
+    {
+      "bucket": "pending_env_bucket",
+      "byte_size": 2622,
+      "content_type": "application/octet-stream",
+      "domain": "etc_file",
+      "file_name": "invoice.xml",
+      "file_object_id": "8a778d06-27ca-557f-aea1-7e36094ab79d",
+      "import_file_id": "df5e9f75-d3fc-5585-8734-6916aa7558c5",
+      "legacy_collection": "import_file_blobs.files",
+      "legacy_gridfs_id": "etc_invoice:26537910570100003279:invoice.xml",
+      "legacy_id": "etc_invoice:26537910570100003279:invoice.xml",
+      "metadata": {
+        "chunk_count": 1,
+        "legacy_collection": "import_file_blobs.files",
+        "source_line": 6,
+        "upload_date": "2026-05-15T11:26:41.325000"
+      },
+      "object_key": "staging/app-gridfs/etc_file/2026/05/ca09c08669fa31ca/8a778d06-27ca-557f-aea1-7e36094ab79d",
+      "purpose": "etc_invoice_attachment",
+      "sha256": null,
+      "storage_key": "staging/app-gridfs/etc_file/2026/05/ca09c08669fa31ca/8a778d06-27ca-557f-aea1-7e36094ab79d",
+      "storage_provider": "minio"
+    },
+    {
+      "bucket": "pending_env_bucket",
+      "byte_size": 151458,
+      "content_type": "application/octet-stream",
+      "domain": "etc_file",
+      "file_name": "invoice.pdf",
+      "file_object_id": "8d485378-5be9-5bb0-b2d1-dc2e1d6fdfb9",
+      "import_file_id": "de1e63fa-e6bb-5a63-8960-e4c44ea46f7e",
+      "legacy_collection": "import_file_blobs.files",
+      "legacy_gridfs_id": "etc_invoice:26537910570100007650:invoice.pdf",
+      "legacy_id": "etc_invoice:26537910570100007650:invoice.pdf",
+      "metadata": {
+        "chunk_count": 1,
+        "legacy_collection": "import_file_blobs.files",
+        "source_line": 7,
+        "upload_date": "2026-05-15T11:26:43.104000"
+      },
+      "object_key": "staging/app-gridfs/etc_file/2026/05/4cef0a7936daa799/8d485378-5be9-5bb0-b2d1-dc2e1d6fdfb9",
+      "purpose": "etc_invoice_attachment",
+      "sha256": null,
+      "storage_key": "staging/app-gridfs/etc_file/2026/05/4cef0a7936daa799/8d485378-5be9-5bb0-b2d1-dc2e1d6fdfb9",
+      "storage_provider": "minio"
+    },
+    {
+      "bucket": "pending_env_bucket",
+      "byte_size": 2622,
+      "content_type": "application/octet-stream",
+      "domain": "etc_file",
+      "file_name": "invoice.xml",
+      "file_object_id": "aa552ceb-d39a-54f9-a930-17b630233e6b",
+      "import_file_id": "e7a78802-634a-5fc6-a050-8922d2f260ca",
+      "legacy_collection": "import_file_blobs.files",
+      "legacy_gridfs_id": "etc_invoice:26537910570100007650:invoice.xml",
+      "legacy_id": "etc_invoice:26537910570100007650:invoice.xml",
+      "metadata": {
+        "chunk_count": 1,
+        "legacy_collection": "import_file_blobs.files",
+        "source_line": 8,
+        "upload_date": "2026-05-15T11:26:42.940000"
+      },
+      "object_key": "staging/app-gridfs/etc_file/2026/05/f0a2255ff088a68a/aa552ceb-d39a-54f9-a930-17b630233e6b",
+      "purpose": "etc_invoice_attachment",
+      "sha256": null,
+      "storage_key": "staging/app-gridfs/etc_file/2026/05/f0a2255ff088a68a/aa552ceb-d39a-54f9-a930-17b630233e6b",
+      "storage_provider": "minio"
+    },
+    {
+      "bucket": "pending_env_bucket",
+      "byte_size": 151482,
+      "content_type": "application/octet-stream",
+      "domain": "etc_file",
+      "file_name": "invoice.pdf",
+      "file_object_id": "4066b11a-a293-5bce-9bd1-0ccea634ae50",
+      "import_file_id": "92ac439c-2b1e-5359-ac50-18675c4b2d4f",
+      "legacy_collection": "import_file_blobs.files",
+      "legacy_gridfs_id": "etc_invoice:26537910570200000889:invoice.pdf",
+      "legacy_id": "etc_invoice:26537910570200000889:invoice.pdf",
+      "metadata": {
+        "chunk_count": 1,
+        "legacy_collection": "import_file_blobs.files",
+        "source_line": 9,
+        "upload_date": "2026-05-15T13:26:00.867000"
+      },
+      "object_key": "staging/app-gridfs/etc_file/2026/05/e936a3940b4dbe8a/4066b11a-a293-5bce-9bd1-0ccea634ae50",
+      "purpose": "etc_invoice_attachment",
+      "sha256": null,
+      "storage_key": "staging/app-gridfs/etc_file/2026/05/e936a3940b4dbe8a/4066b11a-a293-5bce-9bd1-0ccea634ae50",
+      "storage_provider": "minio"
+    },
+    {
+      "bucket": "pending_env_bucket",
+      "byte_size": 2622,
+      "content_type": "application/octet-stream",
+      "domain": "etc_file",
+      "file_name": "invoice.xml",
+      "file_object_id": "5deec72f-c605-54d4-b6c8-5b4e96d3359f",
+      "import_file_id": "e1699019-ccf1-5f62-af25-60349c6d1625",
+      "legacy_collection": "import_file_blobs.files",
+      "legacy_gridfs_id": "etc_invoice:26537910570200000889:invoice.xml",
+      "legacy_id": "etc_invoice:26537910570200000889:invoice.xml",
+      "metadata": {
+        "chunk_count": 1,
+        "legacy_collection": "import_file_blobs.files",
+        "source_line": 10,
+        "upload_date": "2026-05-15T13:26:00.864000"
+      },
+      "object_key": "staging/app-gridfs/etc_file/2026/05/f4c07c01d155bd73/5deec72f-c605-54d4-b6c8-5b4e96d3359f",
+      "purpose": "etc_invoice_attachment",
+      "sha256": null,
+      "storage_key": "staging/app-gridfs/etc_file/2026/05/f4c07c01d155bd73/5deec72f-c605-54d4-b6c8-5b4e96d3359f",
+      "storage_provider": "minio"
+    },
+    {
+      "bucket": "pending_env_bucket",
+      "byte_size": 151617,
+      "content_type": "application/octet-stream",
+      "domain": "etc_file",
+      "file_name": "invoice.pdf",
+      "file_object_id": "fe4d8e4c-7abf-5a02-a8eb-af4352d99755",
+      "import_file_id": "e5de6193-7981-54ed-917d-ddafa9287d23",
+      "legacy_collection": "import_file_blobs.files",
+      "legacy_gridfs_id": "etc_invoice:26537910570300012469:invoice.pdf",
+      "legacy_id": "etc_invoice:26537910570300012469:invoice.pdf",
+      "metadata": {
+        "chunk_count": 1,
+        "legacy_collection": "import_file_blobs.files",
+        "source_line": 11,
+        "upload_date": "2026-05-15T13:26:01.098000"
+      },
+      "object_key": "staging/app-gridfs/etc_file/2026/05/32c08149fb38e75f/fe4d8e4c-7abf-5a02-a8eb-af4352d99755",
+      "purpose": "etc_invoice_attachment",
+      "sha256": null,
+      "storage_key": "staging/app-gridfs/etc_file/2026/05/32c08149fb38e75f/fe4d8e4c-7abf-5a02-a8eb-af4352d99755",
+      "storage_provider": "minio"
+    },
+    {
+      "bucket": "pending_env_bucket",
+      "byte_size": 2622,
+      "content_type": "application/octet-stream",
+      "domain": "etc_file",
+      "file_name": "invoice.xml",
+      "file_object_id": "9efe1ab0-d217-52c2-a407-b02f7f3b7b71",
+      "import_file_id": "1c4a59f5-6255-5016-babe-3de52930c592",
+      "legacy_collection": "import_file_blobs.files",
+      "legacy_gridfs_id": "etc_invoice:26537910570300012469:invoice.xml",
+      "legacy_id": "etc_invoice:26537910570300012469:invoice.xml",
+      "metadata": {
+        "chunk_count": 1,
+        "legacy_collection": "import_file_blobs.files",
+        "source_line": 12,
+        "upload_date": "2026-05-15T13:26:01.094000"
+      },
+      "object_key": "staging/app-gridfs/etc_file/2026/05/9ed05e9ea5ec0b15/9efe1ab0-d217-52c2-a407-b02f7f3b7b71",
+      "purpose": "etc_invoice_attachment",
+      "sha256": null,
+      "storage_key": "staging/app-gridfs/etc_file/2026/05/9ed05e9ea5ec0b15/9efe1ab0-d217-52c2-a407-b02f7f3b7b71",
+      "storage_provider": "minio"
+    },
+    {
+      "bucket": "pending_env_bucket",
+      "byte_size": 151897,
+      "content_type": "application/octet-stream",
+      "domain": "etc_file",
+      "file_name": "invoice.pdf",
+      "file_object_id": "cf42cadb-7703-5a51-b543-c6f83d1fc284",
+      "import_file_id": "82c8e8cb-7ea2-5344-beb6-de03212ecedf",
+      "legacy_collection": "import_file_blobs.files",
+      "legacy_gridfs_id": "etc_invoice:26537910570300034573:invoice.pdf",
+      "legacy_id": "etc_invoice:26537910570300034573:invoice.pdf",
+      "metadata": {
+        "chunk_count": 1,
+        "legacy_collection": "import_file_blobs.files",
+        "source_line": 13,
+        "upload_date": "2026-05-15T13:26:01.165000"
+      },
+      "object_key": "staging/app-gridfs/etc_file/2026/05/69b18c49f4bd977e/cf42cadb-7703-5a51-b543-c6f83d1fc284",
+      "purpose": "etc_invoice_attachment",
+      "sha256": null,
+      "storage_key": "staging/app-gridfs/etc_file/2026/05/69b18c49f4bd977e/cf42cadb-7703-5a51-b543-c6f83d1fc284",
+      "storage_provider": "minio"
+    },
+    {
+      "bucket": "pending_env_bucket",
+      "byte_size": 2635,
+      "content_type": "application/octet-stream",
+      "domain": "etc_file",
+      "file_name": "invoice.xml",
+      "file_object_id": "c78ea2ca-68c7-5e83-b8a0-7608543f3deb",
+      "import_file_id": "16e21cfd-8d07-54af-a837-fcf05896fd7f",
+      "legacy_collection": "import_file_blobs.files",
+      "legacy_gridfs_id": "etc_invoice:26537910570300034573:invoice.xml",
+      "legacy_id": "etc_invoice:26537910570300034573:invoice.xml",
+      "metadata": {
+        "chunk_count": 1,
+        "legacy_collection": "import_file_blobs.files",
+        "source_line": 14,
+        "upload_date": "2026-05-15T13:26:01.162000"
+      },
+      "object_key": "staging/app-gridfs/etc_file/2026/05/759aca3e94aa7b47/c78ea2ca-68c7-5e83-b8a0-7608543f3deb",
+      "purpose": "etc_invoice_attachment",
+      "sha256": null,
+      "storage_key": "staging/app-gridfs/etc_file/2026/05/759aca3e94aa7b47/c78ea2ca-68c7-5e83-b8a0-7608543f3deb",
+      "storage_provider": "minio"
+    },
+    {
+      "bucket": "pending_env_bucket",
+      "byte_size": 150885,
+      "content_type": "application/octet-stream",
+      "domain": "etc_file",
+      "file_name": "invoice.pdf",
+      "file_object_id": "3bc569b3-a158-5caf-82bc-082b306087a8",
+      "import_file_id": "7340b040-05fb-57c4-ac1e-462639415851",
+      "legacy_collection": "import_file_blobs.files",
+      "legacy_gridfs_id": "etc_invoice:26537910570300037123:invoice.pdf",
+      "legacy_id": "etc_invoice:26537910570300037123:invoice.pdf",
+      "metadata": {
+        "chunk_count": 1,
+        "legacy_collection": "import_file_blobs.files",
+        "source_line": 15,
+        "upload_date": "2026-05-15T13:26:01.187000"
+      },
+      "object_key": "staging/app-gridfs/etc_file/2026/05/c243c54772095486/3bc569b3-a158-5caf-82bc-082b306087a8",
+      "purpose": "etc_invoice_attachment",
+      "sha256": null,
+      "storage_key": "staging/app-gridfs/etc_file/2026/05/c243c54772095486/3bc569b3-a158-5caf-82bc-082b306087a8",
+      "storage_provider": "minio"
+    },
+    {
+      "bucket": "pending_env_bucket",
+      "byte_size": 2605,
+      "content_type": "application/octet-stream",
+      "domain": "etc_file",
+      "file_name": "invoice.xml",
+      "file_object_id": "dd703d51-b5a2-5ab9-9e96-c659419fd1a2",
+      "import_file_id": "4a4f8b8c-17da-5f37-8078-d0dbc4e0a7be",
+      "legacy_collection": "import_file_blobs.files",
+      "legacy_gridfs_id": "etc_invoice:26537910570300037123:invoice.xml",
+      "legacy_id": "etc_invoice:26537910570300037123:invoice.xml",
+      "metadata": {
+        "chunk_count": 1,
+        "legacy_collection": "import_file_blobs.files",
+        "source_line": 16,
+        "upload_date": "2026-05-15T13:26:01.184000"
+      },
+      "object_key": "staging/app-gridfs/etc_file/2026/05/12a3cdeb2eeedab4/dd703d51-b5a2-5ab9-9e96-c659419fd1a2",
+      "purpose": "etc_invoice_attachment",
+      "sha256": null,
+      "storage_key": "staging/app-gridfs/etc_file/2026/05/12a3cdeb2eeedab4/dd703d51-b5a2-5ab9-9e96-c659419fd1a2",
+      "storage_provider": "minio"
+    },
+    {
+      "bucket": "pending_env_bucket",
+      "byte_size": 150937,
+      "content_type": "application/octet-stream",
+      "domain": "etc_file",
+      "file_name": "invoice.pdf",
+      "file_object_id": "10bc9e0f-1c61-5987-a62a-7f3ef87739c6",
+      "import_file_id": "2298cf70-5fba-5ca5-b095-17271c50f7f4",
+      "legacy_collection": "import_file_blobs.files",
+      "legacy_gridfs_id": "etc_invoice:26537910570400011995:invoice.pdf",
+      "legacy_id": "etc_invoice:26537910570400011995:invoice.pdf",
+      "metadata": {
+        "chunk_count": 1,
+        "legacy_collection": "import_file_blobs.files",
+        "source_line": 17,
+        "upload_date": "2026-05-15T13:26:01.345000"
+      },
+      "object_key": "staging/app-gridfs/etc_file/2026/05/eb06d7559261685c/10bc9e0f-1c61-5987-a62a-7f3ef87739c6",
+      "purpose": "etc_invoice_attachment",
+      "sha256": null,
+      "storage_key": "staging/app-gridfs/etc_file/2026/05/eb06d7559261685c/10bc9e0f-1c61-5987-a62a-7f3ef87739c6",
+      "storage_provider": "minio"
+    },
+    {
+      "bucket": "pending_env_bucket",
+      "byte_size": 2604,
+      "content_type": "application/octet-stream",
+      "domain": "etc_file",
+      "file_name": "invoice.xml",
+      "file_object_id": "8d3edfcf-1644-5ca2-8611-963c1fb20f3c",
+      "import_file_id": "d8efe45b-6e87-5794-ac78-9facb27dcd04",
+      "legacy_collection": "import_file_blobs.files",
+      "legacy_gridfs_id": "etc_invoice:26537910570400011995:invoice.xml",
+      "legacy_id": "etc_invoice:26537910570400011995:invoice.xml",
+      "metadata": {
+        "chunk_count": 1,
+        "legacy_collection": "import_file_blobs.files",
+        "source_line": 18,
+        "upload_date": "2026-05-15T13:26:01.343000"
+      },
+      "object_key": "staging/app-gridfs/etc_file/2026/05/cd7aabf69387ec32/8d3edfcf-1644-5ca2-8611-963c1fb20f3c",
+      "purpose": "etc_invoice_attachment",
+      "sha256": null,
+      "storage_key": "staging/app-gridfs/etc_file/2026/05/cd7aabf69387ec32/8d3edfcf-1644-5ca2-8611-963c1fb20f3c",
+      "storage_provider": "minio"
+    },
+    {
+      "bucket": "pending_env_bucket",
+      "byte_size": 150945,
+      "content_type": "application/octet-stream",
+      "domain": "etc_file",
+      "file_name": "invoice.pdf",
+      "file_object_id": "43c69425-f424-51e9-82eb-602f7ed9d6b2",
+      "import_file_id": "d16d8812-4cfd-5a7b-8dab-35c766abc59c",
+      "legacy_collection": "import_file_blobs.files",
+      "legacy_gridfs_id": "etc_invoice:26537910570400016574:invoice.pdf",
+      "legacy_id": "etc_invoice:26537910570400016574:invoice.pdf",
+      "metadata": {
+        "chunk_count": 1,
+        "legacy_collection": "import_file_blobs.files",
+        "source_line": 19,
+        "upload_date": "2026-05-15T13:26:01.429000"
+      },
+      "object_key": "staging/app-gridfs/etc_file/2026/05/9591cc3c93416fb5/43c69425-f424-51e9-82eb-602f7ed9d6b2",
+      "purpose": "etc_invoice_attachment",
+      "sha256": null,
+      "storage_key": "staging/app-gridfs/etc_file/2026/05/9591cc3c93416fb5/43c69425-f424-51e9-82eb-602f7ed9d6b2",
+      "storage_provider": "minio"
+    },
+    {
+      "bucket": "pending_env_bucket",
+      "byte_size": 2605,
+      "content_type": "application/octet-stream",
+      "domain": "etc_file",
+      "file_name": "invoice.xml",
+      "file_object_id": "8befb156-1c44-54a8-a43b-909e2fe13673",
+      "import_file_id": "e799a95e-fdb5-5d0d-ae34-6e7b5f9c2ff0",
+      "legacy_collection": "import_file_blobs.files",
+      "legacy_gridfs_id": "etc_invoice:26537910570400016574:invoice.xml",
+      "legacy_id": "etc_invoice:26537910570400016574:invoice.xml",
+      "metadata": {
+        "chunk_count": 1,
+        "legacy_collection": "import_file_blobs.files",
+        "source_line": 20,
+        "upload_date": "2026-05-15T13:26:01.425000"
+      },
+      "object_key": "staging/app-gridfs/etc_file/2026/05/967213329781efaf/8befb156-1c44-54a8-a43b-909e2fe13673",
+      "purpose": "etc_invoice_attachment",
+      "sha256": null,
+      "storage_key": "staging/app-gridfs/etc_file/2026/05/967213329781efaf/8befb156-1c44-54a8-a43b-909e2fe13673",
+      "storage_provider": "minio"
+    }
+  ],
   "metadata_summary": {
     "content_type_counts": {
       "application/octet-stream": 462
     },
     "content_type_defaulted_count": 462,
-    "gridfs_metadata_entries": 462,
-    "purpose_counts": {
-      "etc_invoice_attachment": 302,
-      "etc_reconciliation_source": 72,
-      "historical_etc_repair_seed": 3,
-      "unknown": 85
+    "domain_counts": {
+      "etc_file": 374,
+      "import_source_file": 85,
+      "repair_bundle": 3
     },
+    "duplicate_legacy_gridfs_id_count": 0,
+    "gridfs_metadata_entries": 462,
     "source_sha256_missing_count": 459,
     "total_bytes_from_metadata": 102579191,
     "upload_month_counts": {
@@ -499,15 +614,27 @@
       "2026-05": 404
     }
   },
-  "operator": "yu",
+  "migration_run_id": "a4227942-8eff-4876-8648-be1fbd821f43",
+  "object_naming_strategy": {
+    "filename_in_key": false,
+    "pattern": "<environment>/app-gridfs/<domain>/<yyyy>/<mm>/<legacy_gridfs_id_sha256_16>/<file_object_id>",
+    "stable": true,
+    "traceability": [
+      "environment",
+      "domain",
+      "upload yyyy/mm",
+      "legacy GridFS id hash",
+      "file_object_id"
+    ]
+  },
   "phase": "06d_gridfs_minio_migration",
   "readiness_gates": {
     "file_checksum": {
       "decision": "NO_GO",
       "reasons": [
-        "object_storage_environment_missing",
+        "dry_run_does_not_download_verify_objects",
         "upload_or_verify_not_executed",
-        "sample_download_hash_not_evaluated"
+        "environment_gaps_present"
       ],
       "requires_report": "gridfs-checksum-validation-report.json or paired gridfs-minio-migration-report-YYYYMMDD.{json,md}"
     }
@@ -525,12 +652,11 @@
   "status": "NO_GO",
   "target": {
     "auth_material_values_recorded": false,
-    "bucket": "not_recorded_no_environment",
+    "bucket": "missing",
     "endpoint_present": false,
     "environment": "staging",
-    "storage_provider": "minio_or_s3",
+    "storage_provider": "minio",
     "temporary_object_url_recorded": false
   },
-  "task_id": "p4-06-gridfs-minio-06d-checksum-evidence",
   "tool": "app-gridfs-minio-migration-v1"
 }

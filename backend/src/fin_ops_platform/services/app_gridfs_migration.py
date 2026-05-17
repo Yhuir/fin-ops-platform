@@ -7,7 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 import uuid
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Mapping, Protocol
 
 from fin_ops_platform.services.state_store import (
     GRIDFS_BUCKET_NAME,
@@ -19,6 +19,707 @@ GRIDFS_MIGRATION_TOOL_VERSION = "app-gridfs-minio-migration-v1"
 GRIDFS_FILE_OBJECT_NAMESPACE = uuid.UUID("19d5a545-25ce-4e7d-9a99-b9bffab8ff75")
 GRIDFS_IMPORT_FILE_NAMESPACE = uuid.UUID("a4d21d3c-6224-4dd9-b4d4-5cf4a5fc72e3")
 GridFSMigrationMode = Literal["dry-run", "upload", "verify"]
+GRIDFS_MINIO_REPORT_SCHEMA_VERSION = "finops.gridfs_minio_06d_checksum_evidence.v1"
+
+
+def build_gridfs_minio_export_dry_run_report(
+    *,
+    export_dir: Path,
+    migration_run_id: str,
+    environment: str,
+    bucket: str | None,
+    storage_provider: str,
+    env: Mapping[str, str],
+    generated_at: datetime | None = None,
+) -> dict[str, Any]:
+    """Build a secret-free 06D NO_GO report from a 06A GridFS metadata manifest."""
+    generated = generated_at or datetime.now(UTC)
+    source_manifest = _find_gridfs_files_manifest(export_dir)
+    export_manifest_path = export_dir / "manifest.json"
+    source_database = "unknown"
+    findings: list[dict[str, Any]] = []
+    if export_manifest_path.exists():
+        try:
+            export_manifest = json.loads(export_manifest_path.read_text(encoding="utf-8"))
+            source_database = str((export_manifest.get("source") or {}).get("database") or source_database)
+        except json.JSONDecodeError as exc:
+            findings.append(
+                _report_finding(
+                    code="EXPORT_MANIFEST_PARSE_ERROR",
+                    dimension="source_manifest",
+                    message=f"06A manifest.json is not valid JSON: {exc.msg}.",
+                    required_action="Regenerate the 06A export manifest and rerun 06D.",
+                )
+            )
+    else:
+        findings.append(
+            _report_finding(
+                code="EXPORT_MANIFEST_MISSING",
+                dimension="source_manifest",
+                message="06A manifest.json was not found in export-dir.",
+                required_action="Provide the 06A app Mongo export directory.",
+            )
+        )
+
+    records: list[dict[str, Any]] = []
+    if source_manifest.exists():
+        records.extend(_read_gridfs_metadata_manifest(source_manifest, findings))
+    else:
+        findings.append(
+            _report_finding(
+                code="GRIDFS_FILES_MANIFEST_MISSING",
+                dimension="source_manifest",
+                message="06A gridfs-files-manifest.ndjson was not found.",
+                required_action="Regenerate 06A export with GridFS metadata enabled or provide app GridFS env for live dry-run.",
+            )
+        )
+
+    env_presence = _gridfs_minio_env_presence(env)
+    findings.extend(_environment_findings(env_presence, bucket=bucket))
+    findings.extend(_metadata_findings(records))
+    findings.append(
+        _report_finding(
+            code="DRY_RUN_CANNOT_PASS_FILE_CHECKSUM_GATE",
+            dimension="sample_download_hash",
+            message="Dry-run/export metadata mode does not upload objects or download samples.",
+            required_action="Run upload or verify mode against controlled staging MinIO/S3 and require mismatched=0.",
+        )
+    )
+
+    metadata_summary = _metadata_summary(records)
+    source_sha256 = _sha256_file_if_exists(source_manifest)
+    export_sha256 = _sha256_file_if_exists(export_manifest_path)
+    metadata_plan = _metadata_plan(records, environment=environment, bucket=bucket, storage_provider=storage_provider)
+    source_hash_missing_count = metadata_summary["source_sha256_missing_count"]
+    if records and source_hash_missing_count:
+        findings.append(
+            _report_finding(
+                code="SOURCE_SHA256_MISSING",
+                dimension="source_hash",
+                message=(
+                    "06A GridFS metadata manifest does not contain source content SHA-256 for "
+                    f"{source_hash_missing_count} file(s); 06D must read app GridFS before GO."
+                ),
+                required_action="Provide app GridFS env and rerun live dry-run/upload so source sha256 is computed.",
+                severity="warning",
+            )
+        )
+
+    return {
+        "schema_version": GRIDFS_MINIO_REPORT_SCHEMA_VERSION,
+        "tool": GRIDFS_MIGRATION_TOOL_VERSION,
+        "phase": "06d_gridfs_minio_migration",
+        "migration_run_id": migration_run_id,
+        "generated_at": generated.isoformat(),
+        "status": "NO_GO",
+        "go_no_go": "NO_GO",
+        "GO_NO_GO": "NO_GO",
+        "blocking": True,
+        "source": {
+            "kind": "06a_app_mongo_gridfs_metadata_manifest",
+            "database": source_database,
+            "gridfs_bucket": GRIDFS_BUCKET_NAME,
+            "export_manifest_path": str(export_manifest_path),
+            "export_manifest_sha256": export_sha256,
+            "source_manifest_path": str(source_manifest),
+            "source_manifest_sha256": source_sha256,
+        },
+        "target": {
+            "storage_provider": storage_provider,
+            "environment": environment,
+            "bucket": bucket if bucket else "missing",
+            "endpoint_present": _any_present(env_presence["object_storage_endpoint"]),
+            "auth_material_values_recorded": False,
+            "temporary_object_url_recorded": False,
+        },
+        "environment_presence": env_presence,
+        "execution": {
+            "mode": "dry_run_export_manifest_metadata_only",
+            "dry_run_counts_as_go": False,
+            "upload_executed": False,
+            "verify_executed": False,
+            "sample_download_executed": False,
+            "business_facts_touched": False,
+            "postgres_written": False,
+            "oa_source_database_accessed": False,
+        },
+        "object_naming_strategy": {
+            "pattern": "<environment>/app-gridfs/<domain>/<yyyy>/<mm>/<legacy_gridfs_id_sha256_16>/<file_object_id>",
+            "filename_in_key": False,
+            "stable": True,
+            "traceability": ["environment", "domain", "upload yyyy/mm", "legacy GridFS id hash", "file_object_id"],
+        },
+        "metadata_summary": metadata_summary,
+        "metadata_plan": {
+            "target_table": "app.file_objects",
+            "target_relation": "app.import_files",
+            "legacy_mapping": "legacy_gridfs_id -> file_object_id",
+            "planned_file_objects": len(metadata_plan),
+            "planned_import_files": len(metadata_plan),
+            "writes_postgresql": False,
+        },
+        "metadata_plan_sample": metadata_plan[:20],
+        "coverage": {
+            "manifest_checksum": {
+                "status": "covered" if source_sha256 else "missing",
+                "sha256": source_sha256,
+            },
+            "sample_download_hash": {
+                "sampled": 0,
+                "matched": 0,
+                "mismatched": 0,
+                "status": "not_evaluated_dry_run",
+            },
+            "missing_files": {
+                "count": None,
+                "items": [],
+                "status": "not_evaluated_without_gridfs_content_read",
+            },
+            "duplicate_files": {
+                "count": metadata_summary["duplicate_legacy_gridfs_id_count"],
+                "groups": _duplicate_legacy_id_groups(records),
+            },
+            "size_differences": {
+                "count": None,
+                "items": [],
+                "status": "not_evaluated_without_gridfs_content_read",
+            },
+            "checksum_mismatches": {
+                "count": None,
+                "items": [],
+                "status": "not_evaluated_without_upload_or_verify",
+            },
+        },
+        "readiness_gates": {
+            "file_checksum": {
+                "decision": "NO_GO",
+                "reasons": [
+                    "dry_run_does_not_download_verify_objects",
+                    "upload_or_verify_not_executed",
+                    "environment_gaps_present",
+                ],
+                "requires_report": "gridfs-checksum-validation-report.json or paired gridfs-minio-migration-report-YYYYMMDD.{json,md}",
+            }
+        },
+        "legacy_id_mapping": {
+            "expected_gridfs_files": len(records),
+            "mapped_file_objects": 0,
+            "mapped_import_files": 0,
+            "missing_mappings_status": "not_evaluated_upload_or_verify_not_executed",
+        },
+        "findings": findings,
+        "decision": {
+            "go_no_go": "NO_GO",
+            "reason": (
+                "06D dry-run/export metadata report was generated, but app GridFS content checksum, "
+                "MinIO/S3 upload or verify, sample download checksum, and PostgreSQL metadata import were not executed."
+            ),
+            "required_action": (
+                "Provide controlled app GridFS, MinIO/S3, and PostgreSQL migration environment variables; rerun "
+                "06D live dry-run/upload or verify; require per-file source sha256 and sample_download_hash.mismatched=0."
+            ),
+        },
+    }
+
+
+def write_gridfs_minio_report_files(
+    report: dict[str, Any],
+    *,
+    json_path: Path,
+    md_path: Path,
+) -> None:
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    md_path.write_text(_gridfs_minio_report_markdown(report, json_path=json_path), encoding="utf-8")
+
+
+def _find_gridfs_files_manifest(export_dir: Path) -> Path:
+    manifest_path = export_dir / "manifest.json"
+    candidates: list[Path] = []
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            manifest = {}
+        output_files = (manifest.get("output") or {}).get("files") or {}
+        if isinstance(output_files, dict):
+            for value in output_files.values():
+                if isinstance(value, str) and "gridfs" in value.lower():
+                    candidates.append(export_dir / value)
+    candidates.extend(
+        [
+            export_dir / "collections" / "gridfs-files-manifest.ndjson",
+            export_dir / "gridfs-files-manifest.ndjson",
+        ]
+    )
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0] if candidates else export_dir / "collections" / "gridfs-files-manifest.ndjson"
+
+
+def _read_gridfs_metadata_manifest(path: Path, findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line_no, raw_line in enumerate(handle, start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError as exc:
+                findings.append(
+                    _report_finding(
+                        code="GRIDFS_MANIFEST_PARSE_ERROR",
+                        dimension="source_manifest",
+                        message=f"gridfs-files-manifest.ndjson line {line_no} is not valid JSON: {exc.msg}.",
+                        required_action="Regenerate 06A export and rerun 06D.",
+                    )
+                )
+                continue
+            records.append(_normalize_gridfs_manifest_record(payload, line_no=line_no))
+    return records
+
+
+def _normalize_gridfs_manifest_record(payload: dict[str, Any], *, line_no: int) -> dict[str, Any]:
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    legacy_gridfs_id = (
+        payload.get("legacy_gridfs_id")
+        or payload.get("legacy_id")
+        or payload.get("file_id")
+        or payload.get("_id")
+        or ""
+    )
+    content_type = payload.get("content_type") or payload.get("contentType") or metadata.get("content_type")
+    byte_size = payload.get("byte_size")
+    if byte_size is None:
+        byte_size = payload.get("size")
+    if byte_size is None:
+        byte_size = payload.get("length")
+    chunk_count = payload.get("chunk_count")
+    if chunk_count is None:
+        chunk_count = payload.get("chunks")
+    upload_date = payload.get("upload_date") or payload.get("uploadDate")
+    sha256 = (
+        payload.get("sha256")
+        or payload.get("source_sha256")
+        or payload.get("checksum")
+        or metadata.get("sha256")
+    )
+    legacy_collection = payload.get("legacy_collection") or payload.get("source_collection") or f"{GRIDFS_BUCKET_NAME}.files"
+    domain = _classify_gridfs_domain(str(legacy_gridfs_id), str(legacy_collection), metadata)
+    return {
+        "source_line": line_no,
+        "raw": payload,
+        "legacy_collection": str(legacy_collection),
+        "legacy_gridfs_id": str(legacy_gridfs_id),
+        "filename": payload.get("filename") or payload.get("file_name") or metadata.get("file_name"),
+        "byte_size": _int_or_none(byte_size),
+        "chunk_count": _int_or_none(chunk_count),
+        "content_type": content_type or "application/octet-stream",
+        "content_type_status": "provided" if content_type else "defaulted",
+        "upload_date": str(upload_date) if upload_date is not None else None,
+        "sha256": str(sha256).lower() if isinstance(sha256, str) and len(sha256) == 64 else None,
+        "domain": domain,
+        "purpose": _domain_to_purpose(domain, metadata),
+    }
+
+
+def _gridfs_minio_env_presence(env: Mapping[str, str]) -> dict[str, dict[str, str]]:
+    return {
+        "app_gridfs": _presence_map(
+            env,
+            [
+                "APP_MONGO_URI",
+                "STAGING_APP_MONGO_URI",
+                "FIN_OPS_APP_MONGO_HOST",
+                "FIN_OPS_APP_MONGO_DATABASE",
+                "FIN_OPS_APP_MONGO_USERNAME",
+                "FIN_OPS_APP_MONGO_PASSWORD",
+            ],
+        ),
+        "object_storage_endpoint": _presence_map(env, ["FIN_OPS_S3_ENDPOINT_URL", "S3_ENDPOINT", "AWS_ENDPOINT_URL_S3"]),
+        "object_storage_bucket": _presence_map(env, ["FIN_OPS_S3_BUCKET", "S3_BUCKET"]),
+        "object_storage_auth": _presence_map(
+            env,
+            [
+                "AWS_ACCESS_KEY_ID",
+                "AWS_SECRET_ACCESS_KEY",
+                "AWS_SESSION_TOKEN",
+                "MINIO_ACCESS_KEY",
+                "MINIO_SECRET_KEY",
+                "S3_ACCESS_KEY_ID",
+                "S3_SECRET_ACCESS_KEY",
+            ],
+        ),
+        "postgres_migration": _presence_map(env, ["FIN_OPS_POSTGRES_MIGRATION_URL", "DATABASE_URL"]),
+    }
+
+
+def _presence_map(env: Mapping[str, str], names: list[str]) -> dict[str, str]:
+    return {name: "present" if env.get(name) else "missing" for name in names}
+
+
+def _environment_findings(env_presence: dict[str, dict[str, str]], *, bucket: str | None) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    app_gridfs_present = (
+        env_presence["app_gridfs"].get("APP_MONGO_URI") == "present"
+        or env_presence["app_gridfs"].get("STAGING_APP_MONGO_URI") == "present"
+        or (
+            env_presence["app_gridfs"].get("FIN_OPS_APP_MONGO_HOST") == "present"
+            and env_presence["app_gridfs"].get("FIN_OPS_APP_MONGO_DATABASE") == "present"
+        )
+    )
+    if not app_gridfs_present:
+        findings.append(
+            _report_finding(
+                code="APP_GRIDFS_ENV_MISSING",
+                dimension="app_gridfs_environment",
+                message="App Mongo/GridFS environment variables are not present; source file bytes cannot be read.",
+                required_action="Set app GridFS connection env and rerun live 06D migration against app Mongo only.",
+            )
+        )
+    object_storage_ready = (
+        _any_present(env_presence["object_storage_endpoint"])
+        and (bucket is not None or _any_present(env_presence["object_storage_bucket"]))
+        and (
+            env_presence["object_storage_auth"].get("AWS_ACCESS_KEY_ID") == "present"
+            or env_presence["object_storage_auth"].get("MINIO_ACCESS_KEY") == "present"
+            or env_presence["object_storage_auth"].get("S3_ACCESS_KEY_ID") == "present"
+        )
+        and (
+            env_presence["object_storage_auth"].get("AWS_SECRET_ACCESS_KEY") == "present"
+            or env_presence["object_storage_auth"].get("MINIO_SECRET_KEY") == "present"
+            or env_presence["object_storage_auth"].get("S3_SECRET_ACCESS_KEY") == "present"
+        )
+    )
+    if not object_storage_ready:
+        findings.append(
+            _report_finding(
+                code="OBJECT_STORAGE_ENV_MISSING",
+                dimension="object_storage_environment",
+                message="MinIO/S3 endpoint, bucket, or authentication environment is incomplete.",
+                required_action="Provide controlled staging object storage env and rerun upload or verify mode.",
+            )
+        )
+    if not _any_present(env_presence["postgres_migration"]):
+        findings.append(
+            _report_finding(
+                code="POSTGRES_MIGRATION_ENV_MISSING",
+                dimension="postgres_metadata_environment",
+                message="PostgreSQL migration connection environment is not present; metadata import cannot be executed.",
+                required_action="Set FIN_OPS_POSTGRES_MIGRATION_URL for a controlled staging/dry-run database before writing metadata.",
+            )
+        )
+    return findings
+
+
+def _metadata_findings(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    seen: dict[str, int] = {}
+    for record in records:
+        legacy_id = record["legacy_gridfs_id"]
+        seen[legacy_id] = seen.get(legacy_id, 0) + 1
+        if not legacy_id:
+            findings.append(
+                _report_finding(
+                    code="LEGACY_GRIDFS_ID_MISSING",
+                    dimension="source_manifest",
+                    message=f"GridFS metadata line {record['source_line']} is missing legacy GridFS _id.",
+                    required_action="Regenerate 06A export with GridFS _id.",
+                )
+            )
+        if record.get("byte_size") is None:
+            findings.append(
+                _report_finding(
+                    code="GRIDFS_LENGTH_MISSING",
+                    dimension="source_manifest",
+                    message=f"GridFS metadata line {record['source_line']} is missing length/byte_size.",
+                    required_action="Regenerate 06A export with GridFS length.",
+                )
+            )
+        if record.get("chunk_count") is None:
+            findings.append(
+                _report_finding(
+                    code="GRIDFS_CHUNK_COUNT_MISSING",
+                    dimension="source_manifest",
+                    message=f"GridFS metadata line {record['source_line']} is missing chunk count.",
+                    required_action="Regenerate 06A export with GridFS chunk counts or run live GridFS inventory.",
+                )
+            )
+    for legacy_id, count in sorted(seen.items()):
+        if legacy_id and count > 1:
+            findings.append(
+                _report_finding(
+                    code="DUPLICATE_LEGACY_GRIDFS_ID",
+                    dimension="source_manifest",
+                    message=f"GridFS metadata contains duplicate legacy GridFS _id {legacy_id!r}.",
+                    required_action="Fix duplicate GridFS manifest entries before metadata import.",
+                )
+            )
+    return findings
+
+
+def _metadata_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
+    domain_counts: dict[str, int] = {}
+    content_type_counts: dict[str, int] = {}
+    upload_month_counts: dict[str, int] = {}
+    for record in records:
+        domain_counts[record["domain"]] = domain_counts.get(record["domain"], 0) + 1
+        content_type = record["content_type"]
+        content_type_counts[content_type] = content_type_counts.get(content_type, 0) + 1
+        year, month = _year_month(record.get("upload_date"))
+        upload_month = f"{year}-{month}" if year != "unknown" else "unknown"
+        upload_month_counts[upload_month] = upload_month_counts.get(upload_month, 0) + 1
+    duplicate_count = sum(len(group["legacy_gridfs_ids"]) for group in _duplicate_legacy_id_groups(records))
+    return {
+        "gridfs_metadata_entries": len(records),
+        "total_bytes_from_metadata": sum(int(record.get("byte_size") or 0) for record in records),
+        "source_sha256_missing_count": sum(1 for record in records if not record.get("sha256")),
+        "content_type_defaulted_count": sum(1 for record in records if record["content_type_status"] == "defaulted"),
+        "content_type_counts": dict(sorted(content_type_counts.items())),
+        "domain_counts": dict(sorted(domain_counts.items())),
+        "upload_month_counts": dict(sorted(upload_month_counts.items())),
+        "duplicate_legacy_gridfs_id_count": duplicate_count,
+    }
+
+
+def _metadata_plan(
+    records: list[dict[str, Any]],
+    *,
+    environment: str,
+    bucket: str | None,
+    storage_provider: str,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for record in records:
+        legacy_id = record["legacy_gridfs_id"]
+        file_object_id = _stable_file_object_id(legacy_id)
+        object_key = _planned_object_key(
+            environment=environment,
+            domain=record["domain"],
+            upload_date=record.get("upload_date"),
+            legacy_gridfs_id=legacy_id,
+            file_object_id=file_object_id,
+        )
+        rows.append(
+            {
+                "legacy_collection": record["legacy_collection"],
+                "legacy_gridfs_id": legacy_id,
+                "file_object_id": file_object_id,
+                "import_file_id": _stable_import_file_id(legacy_id),
+                "storage_provider": storage_provider,
+                "bucket": bucket if bucket else "pending_env_bucket",
+                "object_key": object_key,
+                "storage_key": object_key,
+                "file_name": record.get("filename"),
+                "content_type": record["content_type"],
+                "byte_size": record.get("byte_size"),
+                "sha256": record.get("sha256"),
+                "legacy_id": legacy_id,
+                "purpose": record["purpose"],
+                "domain": record["domain"],
+                "metadata": {
+                    "legacy_collection": record["legacy_collection"],
+                    "chunk_count": record.get("chunk_count"),
+                    "upload_date": record.get("upload_date"),
+                    "source_line": record["source_line"],
+                },
+            }
+        )
+    return rows
+
+
+def _gridfs_minio_report_markdown(report: dict[str, Any], *, json_path: Path) -> str:
+    summary = report.get("metadata_summary") or {}
+    execution = report.get("execution") or {}
+    source = report.get("source") or {}
+    gate = ((report.get("readiness_gates") or {}).get("file_checksum") or {}).get("decision", "NO_GO")
+    findings = report.get("findings") or []
+    lines = [
+        "# 06D GridFS -> MinIO/S3 checksum validation report",
+        "",
+        "## 判定",
+        "",
+        "| 字段 | 值 |",
+        "| --- | --- |",
+        f"| go/no-go | `{(report.get('decision') or {}).get('go_no_go', report.get('go_no_go', 'NO_GO'))}` |",
+        f"| blocking | `{str(report.get('blocking', True)).lower()}` |",
+        f"| generated_at | `{report.get('generated_at')}` |",
+        f"| source_database | `{source.get('database')}` |",
+        f"| source_manifest | `{source.get('source_manifest_path')}` |",
+        f"| source_manifest_sha256 | `{source.get('source_manifest_sha256')}` |",
+        f"| file_checksum gate | `{gate}` |",
+        f"| upload executed | `{str(execution.get('upload_executed', False)).lower()}` |",
+        f"| verify executed | `{str(execution.get('verify_executed', False)).lower()}` |",
+        f"| sample download executed | `{str(execution.get('sample_download_executed', False)).lower()}` |",
+        "",
+        "本报告只记录环境变量是否存在，不记录 Mongo/PostgreSQL URI、S3 access key、secret key、session token、presigned URL 或其他 secret 值。dry-run/export metadata 不能作为 `file_checksum` GO 证据。",
+        "",
+        "## 06A GridFS metadata 摘要",
+        "",
+        "| 维度 | 值 |",
+        "| --- | ---: |",
+        f"| metadata entries | {summary.get('gridfs_metadata_entries', 0)} |",
+        f"| total bytes from metadata | {summary.get('total_bytes_from_metadata', 0)} |",
+        f"| content type defaulted | {summary.get('content_type_defaulted_count', 0)} |",
+        f"| source content sha256 missing in metadata | {summary.get('source_sha256_missing_count', 0)} |",
+        "",
+        "## Blockers",
+        "",
+        "| code | dimension | action |",
+        "| --- | --- | --- |",
+    ]
+    for finding in findings:
+        lines.append(
+            f"| `{finding.get('code')}` | `{finding.get('dimension', '')}` | {finding.get('required_action', '')} |"
+        )
+    if not findings:
+        lines.append("| - | - | - |")
+    lines.extend(
+        [
+            "",
+            "## 安全边界",
+            "",
+            "- 未访问 OA 源数据库。",
+            "- 未写入 `app`、`read_model`、`job`、`audit` 正式 facts。",
+            "- 未删除 GridFS 原文件。",
+            "- 未记录对象存储认证值、临时对象访问 URL、完整连接串或 bucket 访问材料。",
+            "",
+            "## 配套 JSON",
+            "",
+            f"- `{json_path}`",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _classify_gridfs_domain(legacy_gridfs_id: str, legacy_collection: str, metadata: dict[str, Any]) -> str:
+    purpose = str(metadata.get("purpose") or "").lower()
+    lowered_id = legacy_gridfs_id.lower()
+    lowered_collection = legacy_collection.lower()
+    if "repair" in lowered_id or "repair" in purpose:
+        return "repair_bundle"
+    if lowered_id.startswith("etc_") or lowered_id.startswith("etc-") or "etc" in purpose:
+        return "etc_file"
+    if "oa" in lowered_id or "oa" in lowered_collection or "oa" in purpose:
+        return "oa_attachment_cache"
+    if lowered_id.startswith("import_file_") or metadata.get("session_id") or metadata.get("file_id"):
+        return "import_source_file"
+    return "other"
+
+
+def _domain_to_purpose(domain: str, metadata: dict[str, Any]) -> str:
+    explicit = str(metadata.get("purpose") or "").strip()
+    if explicit:
+        return _safe_segment(explicit)
+    return domain
+
+
+def _planned_object_key(
+    *,
+    environment: str,
+    domain: str,
+    upload_date: str | None,
+    legacy_gridfs_id: str,
+    file_object_id: str,
+) -> str:
+    year, month = _year_month(upload_date)
+    legacy_hash = hashlib.sha256(legacy_gridfs_id.encode("utf-8")).hexdigest()[:16]
+    return "/".join(
+        [
+            _safe_segment(environment),
+            "app-gridfs",
+            _safe_segment(domain),
+            year,
+            month,
+            legacy_hash,
+            file_object_id,
+        ]
+    )
+
+
+def _stable_file_object_id(legacy_gridfs_id: str) -> str:
+    return str(uuid.uuid5(GRIDFS_FILE_OBJECT_NAMESPACE, f"app-gridfs:{legacy_gridfs_id}"))
+
+
+def _stable_import_file_id(legacy_gridfs_id: str) -> str:
+    return str(uuid.uuid5(GRIDFS_IMPORT_FILE_NAMESPACE, f"app-gridfs-import-file:{legacy_gridfs_id}"))
+
+
+def _duplicate_legacy_id_groups(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        legacy_id = record.get("legacy_gridfs_id")
+        if legacy_id:
+            grouped.setdefault(str(legacy_id), []).append(record)
+    return [
+        {
+            "legacy_gridfs_id": legacy_id,
+            "legacy_gridfs_ids": [entry["legacy_gridfs_id"] for entry in entries],
+            "source_lines": [entry["source_line"] for entry in entries],
+        }
+        for legacy_id, entries in sorted(grouped.items())
+        if len(entries) > 1
+    ]
+
+
+def _report_finding(
+    *,
+    code: str,
+    dimension: str,
+    message: str,
+    required_action: str,
+    severity: str = "error",
+) -> dict[str, Any]:
+    return {
+        "severity": severity,
+        "code": code,
+        "dimension": dimension,
+        "message": message,
+        "required_action": required_action,
+    }
+
+
+def _sha256_file_if_exists(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _any_present(statuses: Mapping[str, str]) -> bool:
+    return any(status == "present" for status in statuses.values())
+
+
+def _int_or_none(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _year_month(upload_date: str | None) -> tuple[str, str]:
+    if upload_date:
+        try:
+            parsed = datetime.fromisoformat(upload_date.replace("Z", "+00:00"))
+            return f"{parsed.year:04d}", f"{parsed.month:02d}"
+        except ValueError:
+            pass
+    return "unknown", "unknown"
+
+
+def _safe_segment(value: str) -> str:
+    normalized = "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in str(value).lower())
+    normalized = "-".join(segment for segment in normalized.split("-") if segment)
+    return normalized or "unknown"
 
 
 @dataclass(frozen=True, slots=True)

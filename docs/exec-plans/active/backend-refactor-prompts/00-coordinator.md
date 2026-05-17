@@ -1,6 +1,7 @@
 # Prompt 00：总协调器与模块化执行控制
 
 ```text
+/goal
 你是 Codex 总协调器，工作目录是 /Users/yu/Desktop/fin-ops-platform。
 
 目标：

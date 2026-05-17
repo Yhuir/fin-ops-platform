@@ -9,6 +9,8 @@ from unittest.mock import patch
 from fin_ops_platform.services.app_gridfs_migration import (
     AppGridFSToObjectStorageMigrator,
     InMemoryObjectStorageClient,
+    build_gridfs_minio_export_dry_run_report,
+    write_gridfs_minio_report_files,
 )
 from fin_ops_platform.services.state_store import ApplicationStateStore, GRIDFS_BUCKET_NAME
 from tests.test_state_store import FakeGridFSBucket, FakeMongoClient
@@ -68,6 +70,127 @@ def _build_store_with_gridfs_file(
 
 
 class AppGridFSToObjectStorageMigratorTests(unittest.TestCase):
+    def test_export_manifest_dry_run_report_is_secret_free_and_lists_environment_gaps(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            export_dir = Path(temp_dir) / "export"
+            collections_dir = export_dir / "collections"
+            collections_dir.mkdir(parents=True)
+            (export_dir / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "source": {"database": "fin_ops_platform_app"},
+                        "output": {"files": {"gridfs_files_manifest": "collections/gridfs-files-manifest.ndjson"}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (collections_dir / "gridfs-files-manifest.ndjson").write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "legacy_collection": "import_file_blobs.files",
+                                "legacy_id": "import_file_0001",
+                                "filename": "供应商银行流水明细.xlsx",
+                                "length": 10,
+                                "chunk_count": 1,
+                                "uploadDate": "2026-05-16T00:00:00+00:00",
+                                "metadata": {"session_id": "session-1"},
+                            },
+                            ensure_ascii=False,
+                        ),
+                        json.dumps(
+                            {
+                                "legacy_collection": "import_file_blobs.files",
+                                "legacy_id": "etc_reconciliation:task-1:file-1",
+                                "filename": "card statement.pdf",
+                                "length": 20,
+                                "chunk_count": 2,
+                                "contentType": "application/pdf",
+                                "uploadDate": "2026-05-17T00:00:00+00:00",
+                                "metadata": {"purpose": "etc_reconciliation_source", "sha256": "f" * 64},
+                            },
+                            ensure_ascii=False,
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            env = {
+                "FIN_OPS_APP_MONGO_PASSWORD": "do-not-record",
+                "AWS_SECRET_ACCESS_KEY": "also-do-not-record",
+            }
+
+            report = build_gridfs_minio_export_dry_run_report(
+                export_dir=export_dir,
+                migration_run_id="a4227942-8eff-4876-8648-be1fbd821f43",
+                environment="staging",
+                bucket=None,
+                storage_provider="minio",
+                env=env,
+            )
+
+        encoded = json.dumps(report, ensure_ascii=False, sort_keys=True)
+        self.assertNotIn("do-not-record", encoded)
+        self.assertNotIn("also-do-not-record", encoded)
+        self.assertEqual(report["decision"]["go_no_go"], "NO_GO")
+        self.assertEqual(report["metadata_summary"]["gridfs_metadata_entries"], 2)
+        self.assertEqual(report["metadata_summary"]["total_bytes_from_metadata"], 30)
+        self.assertEqual(report["metadata_summary"]["source_sha256_missing_count"], 1)
+        self.assertEqual(report["metadata_summary"]["domain_counts"]["import_source_file"], 1)
+        self.assertEqual(report["metadata_summary"]["domain_counts"]["etc_file"], 1)
+        self.assertEqual(report["environment_presence"]["app_gridfs"]["FIN_OPS_APP_MONGO_PASSWORD"], "present")
+        self.assertEqual(report["environment_presence"]["object_storage_auth"]["AWS_SECRET_ACCESS_KEY"], "present")
+        self.assertEqual(report["target"]["bucket"], "missing")
+        self.assertEqual(report["metadata_plan_sample"][0]["legacy_gridfs_id"], "import_file_0001")
+        self.assertNotIn("供应商", report["metadata_plan_sample"][0]["object_key"])
+        self.assertTrue(any(finding["code"] == "SOURCE_SHA256_MISSING" for finding in report["findings"]))
+        self.assertTrue(any(finding["code"] == "OBJECT_STORAGE_ENV_MISSING" for finding in report["findings"]))
+        self.assertTrue(any(finding["code"] == "POSTGRES_MIGRATION_ENV_MISSING" for finding in report["findings"]))
+
+    def test_export_manifest_report_writer_outputs_json_and_markdown(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            report_json_path = Path(temp_dir) / "gridfs-report.json"
+            report_md_path = Path(temp_dir) / "gridfs-report.md"
+            report = {
+                "generated_at": "2026-05-17T00:00:00+00:00",
+                "decision": {"go_no_go": "NO_GO", "required_action": "rerun upload"},
+                "blocking": True,
+                "metadata_summary": {
+                    "gridfs_metadata_entries": 2,
+                    "total_bytes_from_metadata": 30,
+                    "source_sha256_missing_count": 1,
+                },
+                "execution": {
+                    "upload_executed": False,
+                    "verify_executed": False,
+                    "sample_download_executed": False,
+                },
+                "readiness_gates": {"file_checksum": {"decision": "NO_GO"}},
+                "findings": [
+                    {
+                        "code": "OBJECT_STORAGE_ENV_MISSING",
+                        "dimension": "object_storage_environment",
+                        "required_action": "provide object storage env",
+                    }
+                ],
+                "source": {
+                    "database": "fin_ops_platform_app",
+                    "source_manifest_path": "/tmp/export/collections/gridfs-files-manifest.ndjson",
+                    "source_manifest_sha256": "a" * 64,
+                },
+            }
+
+            write_gridfs_minio_report_files(report, json_path=report_json_path, md_path=report_md_path)
+
+            parsed = json.loads(report_json_path.read_text(encoding="utf-8"))
+            markdown = report_md_path.read_text(encoding="utf-8")
+
+        self.assertEqual(parsed["decision"]["go_no_go"], "NO_GO")
+        self.assertIn("06D GridFS -> MinIO/S3 checksum validation report", markdown)
+        self.assertIn("OBJECT_STORAGE_ENV_MISSING", markdown)
+
     def test_dry_run_builds_secret_free_manifest_without_uploading_objects(self) -> None:
         with TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir) / "state"

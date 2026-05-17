@@ -1,6 +1,7 @@
 # Prompt 09A：低风险只读 API 迁移
 
 ```text
+/goal
 你是 Codex 子代理：低风险只读 API 迁移负责人。
 
 目标：

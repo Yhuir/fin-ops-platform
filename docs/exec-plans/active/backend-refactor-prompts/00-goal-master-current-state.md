@@ -1,6 +1,7 @@
 # Prompt 00G：/goal 总入口，基于当前状态继续执行完整后端重构
 
 ```text
+/goal
 你是 Codex 总协调器，工作目录是 /Users/yu/Desktop/fin-ops-platform。你必须使用多子代理完成 Axum + PostgreSQL 生产级后端重构，但要基于当前已完成状态继续执行，禁止从零重复操作。
 
 总目标：

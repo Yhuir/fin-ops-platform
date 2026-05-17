@@ -187,14 +187,14 @@
 - 有差异必须失败并列出定位信息。
 ```
 
-## P1-06D：GridFS 到 MinIO/S3 文件迁移
+## P1-06D：GridFS 到 MinIO/S3 checksum 与 file_objects metadata 迁移闭环
 
 ```text
 /goal
 执行 /Users/yu/Desktop/fin-ops-platform/docs/exec-plans/active/backend-refactor-prompts/06d-gridfs-minio-migration.md。
 执行前读取 /Users/yu/Desktop/fin-ops-platform/docs/exec-plans/active/backend-refactor-prompts/00-current-state-and-gates.md。
 
-本次只做 P1-06D：app GridFS 到 MinIO/S3 的迁移工具和校验。
+本次只做 P1-06D：app GridFS 到 MinIO/S3 的文件迁移、checksum 校验和 file_objects metadata 追溯。
 
 允许使用子代理：可以，但最多 3 个：
 - 子代理 A：GridFS manifest 和对象命名策略。
@@ -202,23 +202,31 @@
 - 子代理 C：checksum 抽样下载校验和 file_objects 元数据映射。
 
 目标：
-1. 只处理 app GridFS。
+1. 只处理 app GridFS，优先复用 06A `gridfs-files-manifest.ndjson`。
 2. 设计稳定 object_key，不泄露业务敏感信息。
-3. 支持 dry-run。
-4. 上传后抽样下载校验 SHA-256。
-5. 生成 legacy_gridfs_id -> file_object_id 映射。
+3. 支持 dry-run；dry-run 不写对象存储、不写 PostgreSQL。
+4. 实跑时上传前计算 SHA-256，上传后抽样下载校验 SHA-256。
+5. 生成 legacy_gridfs_id -> file_object_id 映射和 `app.file_objects` metadata plan。
+6. 缺少 app GridFS、MinIO/S3 或 PostgreSQL migration 配置时输出 `NO_GO`，不伪造成功。
 
 严格禁止：
 - 不访问 OA 源数据库。
 - 不删除 GridFS 原文件。
-- 不写 MinIO/S3 secret。
+- 不写 MinIO/S3 access key、secret key、完整 endpoint credential 或数据库 URI。
 - 不跳过 checksum 失败。
+- 不把 dry-run 当作文件迁移成功。
 
 交付物：
 - 文件迁移工具或 runbook。
 - file manifest 格式。
 - MinIO/S3 object naming 规范。
 - data-migration-runbook 文件迁移章节。
+- gridfs-minio-migration-report-YYYYMMDD.json/md。
+
+验收：
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_app_gridfs_migration -v`
+- `PYTHONPATH=backend/src python3 scripts/tools/migrate_gridfs_minio.py --export-dir /tmp/finops-app-mongo-export-06a-20260517 --migration-run-id a4227942-8eff-4876-8648-be1fbd821f43 --dry-run --report-json-path docs/operations/backend-refactor/gridfs-minio-migration-report-20260517.json --report-md-path docs/operations/backend-refactor/gridfs-minio-migration-report-20260517.md`
+- `python3 -m json.tool docs/operations/backend-refactor/gridfs-minio-migration-report-20260517.json`
 ```
 
 ## P2-07A：Outbox publisher
@@ -562,4 +570,3 @@
 - 回滚状态。
 - app Mongo 冻结/归档状态。
 ```
-

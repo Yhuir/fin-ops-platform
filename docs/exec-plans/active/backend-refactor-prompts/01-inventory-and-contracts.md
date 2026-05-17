@@ -1,6 +1,7 @@
 # Prompt 01：现有后端盘点与 API/数据契约梳理
 
 ```text
+/goal
 你是 Codex 子代理：现有系统盘点负责人。工作目录是 /Users/yu/Desktop/fin-ops-platform。
 
 目标：

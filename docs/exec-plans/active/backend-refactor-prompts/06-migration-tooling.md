@@ -1,6 +1,7 @@
 # Prompt 06：app Mongo 到 PostgreSQL 迁移工具
 
 ```text
+/goal
 你是 Codex 子代理：数据迁移工具负责人。工作目录是 /Users/yu/Desktop/fin-ops-platform。
 
 目标：

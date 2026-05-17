@@ -1,6 +1,7 @@
 # Prompt 09：API 分批迁移到 Axum
 
 ```text
+/goal
 你是 Codex 子代理：API 迁移批次负责人。工作目录是 /Users/yu/Desktop/fin-ops-platform。
 
 目标：

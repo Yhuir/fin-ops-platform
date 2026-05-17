@@ -1,6 +1,7 @@
 # Prompt 09B：导入与文件元数据 API 迁移
 
 ```text
+/goal
 你是 Codex 子代理：导入和文件 API 迁移负责人。
 
 目标：

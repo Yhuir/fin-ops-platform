@@ -11,8 +11,10 @@
 | `gridfs-minio-migration-manifest.json` | 本次文件迁移或 dry-run 的总报告。 |
 | `gridfs-object-mapping.ndjson` | `legacy_gridfs_id -> file_object_id` 和对象存储位置映射。 |
 | `file-objects-import.ndjson` | 可导入 `app.file_objects` 的元数据草案。 |
+| `legacy-id-map-import.ndjson` | 可导入 `staging.legacy_id_map` 的 `app.file_objects` / `app.import_files` 映射草案。 |
 | `gridfs-migration-failures.ndjson` | 阻断项和失败文件清单。无失败时为空文件。 |
 | `gridfs-checksum-validation-report.json` | readiness gate 和人工门禁可引用的 checksum validation 报告。 |
+| `gridfs-minio-migration-report-YYYYMMDD.json/.md` | 06D 外层 GO/NO_GO 报告；可由 06A export metadata-only dry-run 生成，也可引用 live upload/verify 输出。 |
 
 ## 执行模式
 
@@ -25,6 +27,19 @@
 | `verify` | 读取 app GridFS 和目标对象；不上传，只验证目标对象存在、metadata checksum 一致，并按抽样下载重新计算 SHA-256。 | 否 | 是 |
 
 旧参数 `--execute` 仅作为 `--mode upload` 的兼容别名。S3/MinIO credential 只能通过环境变量或受控运行配置提供，报告和日志不得输出 access key、secret key、session token、presigned URL 或完整连接串。
+
+也支持 06A export metadata-only 报告模式：
+
+```bash
+PYTHONPATH=backend/src python3 scripts/tools/migrate_gridfs_minio.py \
+  --export-dir /tmp/finops-app-mongo-export-06a-20260517 \
+  --migration-run-id a4227942-8eff-4876-8648-be1fbd821f43 \
+  --dry-run \
+  --report-json-path docs/operations/backend-refactor/gridfs-minio-migration-report-20260517.json \
+  --report-md-path docs/operations/backend-refactor/gridfs-minio-migration-report-20260517.md
+```
+
+该模式只读取 `manifest.json` 和 `gridfs-files-manifest.ndjson`，不连接 app GridFS、不上传对象、不写 PostgreSQL。它会输出稳定 object key 与 metadata plan 样例，但必须保持 `NO_GO`，直到 live GridFS 读取源 bytes、upload/verify 和抽样下载 checksum 通过。
 
 ## Manifest 顶层结构
 
@@ -136,8 +151,12 @@
   "file_object_id": "uuid",
   "target_schema": "app",
   "target_table": "app.file_objects",
+  "target_tables": ["app.file_objects", "app.import_files"],
   "bucket": "fin-ops-files",
   "object_key": "staging/app-gridfs/import_source_file/2026/05/<legacy_hash>/<file_object_id>",
+  "object_version": null,
+  "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "etag": "object-etag",
   "sha256": "64-char-lowercase-hex",
   "byte_size": 4341,
   "purpose": "import_source_file",
@@ -172,6 +191,25 @@
 }
 ```
 
+## legacy_id_map NDJSON
+
+`legacy-id-map-import.ndjson` 每个成功 GridFS 文件输出两行，分别映射到 `app.file_objects` 和 `app.import_files`：
+
+```json
+{
+  "source_system": "app_mongo_gridfs",
+  "legacy_collection": "import_file_blobs.files",
+  "legacy_id": "import_file_0001",
+  "target_schema": "app",
+  "target_table": "file_objects",
+  "target_id": "file-object-uuid",
+  "payload_hash": "sha256",
+  "migration_run_id": "migration-run-uuid"
+}
+```
+
+该文件只作为 `staging.legacy_id_map` 导入计划；除非用户明确授权在受控 staging/dry-run 库执行，工具不得写正式 PostgreSQL facts。
+
 ## 阻断项
 
 以下情况必须将 `status` 置为 `failed` 且 `blocking=true`：
@@ -185,6 +223,10 @@
 | `OBJECT_DOWNLOAD_ERROR` | 抽样下载失败。 |
 | `OBJECT_NOT_FOUND` | verify 模式下目标对象不存在。 |
 | `FILE_CHECKSUM_MISMATCH` | 上传后抽样下载 SHA-256 与源文件 SHA-256 不一致。 |
+| `APP_GRIDFS_ENV_MISSING` | 缺少 app GridFS env，无法读取源文件 bytes。 |
+| `OBJECT_STORAGE_ENV_MISSING` | 缺少 MinIO/S3 endpoint、bucket 或认证环境。 |
+| `POSTGRES_MIGRATION_ENV_MISSING` | 缺少 PostgreSQL migration/staging 连接环境，不能执行 metadata import。 |
+| `SOURCE_SHA256_MISSING` | 06A metadata manifest 缺源文件内容 SHA-256；需要 live GridFS 读取后才能 GO。 |
 
 工具不得把 checksum 失败标记为成功，也不得从报告中删除失败文件。
 

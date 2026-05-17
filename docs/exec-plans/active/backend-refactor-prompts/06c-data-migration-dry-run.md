@@ -1,6 +1,7 @@
 # Prompt 06C：数据迁移 Dry-run 和对账执行
 
 ```text
+/goal
 你是 Codex 子代理：数据迁移 dry-run 执行负责人，工作目录是 /Users/yu/Desktop/fin-ops-platform。
 
 目标：

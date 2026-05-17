@@ -1,6 +1,7 @@
 # Prompt 04A：PostgreSQL 基础 Schema 与公共约束
 
 ```text
+/goal
 你是 Codex 子代理：PostgreSQL 基础 schema 负责人。
 
 目标：

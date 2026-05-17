@@ -1,6 +1,7 @@
 # Prompt 06B：PostgreSQL Staging 导入与对账工具
 
 ```text
+/goal
 你是 Codex 子代理：PostgreSQL 导入和对账负责人。
 
 目标：

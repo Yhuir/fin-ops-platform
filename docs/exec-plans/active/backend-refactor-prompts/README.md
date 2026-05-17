@@ -2,6 +2,8 @@
 
 本目录保存用于 Codex `/goal` 或普通任务执行的多子代理 prompt。当前版本已经按实际进度重排：不再默认从零开始，而是以 `docs/exec-plans/active/backend-refactor-progress.md` 记录的状态为事实源继续执行。
 
+每个编号模块 prompt 文件的主代码块都已经带 `/goal`，可以整段复制到 Codex 执行。`GOAL-PROMPTS.md` 仍保留为按阶段串行执行的索引清单。
+
 ## 当前执行入口
 
 优先使用：

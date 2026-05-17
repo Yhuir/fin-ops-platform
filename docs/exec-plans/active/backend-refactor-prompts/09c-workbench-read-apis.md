@@ -1,6 +1,7 @@
 # Prompt 09C：工作台与搜索只读 API 迁移
 
 ```text
+/goal
 你是 Codex 子代理：工作台和搜索只读 API 迁移负责人。
 
 目标：

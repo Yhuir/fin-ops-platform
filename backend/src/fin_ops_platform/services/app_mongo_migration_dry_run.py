@@ -41,7 +41,19 @@ class DatasetMapping:
     supporting_tables: tuple[str, ...] = ("staging.legacy_id_map", "audit.events")
     partition_kind: str | None = None
     status_values: tuple[str, ...] = ()
+    status_mappings: tuple[tuple[str, str], ...] = ()
     migrates: bool = True
+    migration_strategy: str = "direct"
+    exclusion_reason: str | None = None
+
+    def normalized_status(self, legacy_status: str) -> str | None:
+        status = str(legacy_status)
+        explicit_mappings = dict(self.status_mappings)
+        if status in explicit_mappings:
+            return explicit_mappings[status]
+        if not self.status_values or status in self.status_values:
+            return status
+        return None
 
 
 DATASET_MAPPINGS: dict[str, DatasetMapping] = {
@@ -153,6 +165,7 @@ DATASET_MAPPINGS: dict[str, DatasetMapping] = {
         ("app.reconciliation_cases", "app.reconciliation_case_rows"),
         ("reconciliation_cases", "reconciliation_case_rows"),
         status_values=("draft", "confirmed", "follow_up_required", "cancelled"),
+        status_mappings=(("active", "confirmed"),),
     ),
     "workbench_read_models": DatasetMapping(
         "workbench_read_models",
@@ -167,6 +180,13 @@ DATASET_MAPPINGS: dict[str, DatasetMapping] = {
         ("read_model.workbench_candidate_matches",),
         ("tax_cost_read_model_sources",),
         status_values=("active", "superseded", "dismissed"),
+        status_mappings=(
+            ("auto_closed", "active"),
+            ("conflict", "active"),
+            ("incomplete", "active"),
+            ("needs_review", "active"),
+            ("suppressed", "dismissed"),
+        ),
     ),
     "workbench_matching_dirty_scopes": DatasetMapping(
         "workbench_matching_dirty_scopes",
@@ -228,6 +248,30 @@ DATASET_MAPPINGS: dict[str, DatasetMapping] = {
         ("app.oa_sync_watermarks",),
         ("oa_applications",),
     ),
+    "etc_state": DatasetMapping(
+        "etc_state",
+        ("etc_state",),
+        ("audit.events",),
+        ("imports_files", "tax_cost_read_model_sources"),
+        migration_strategy="archive_raw_payload",
+        exclusion_reason=(
+            "ETC legacy aggregate state is archived as one audit event raw payload; "
+            "canonical ETC invoice/import/file facts are covered by invoices, import_batches, "
+            "file_objects, and GridFS migration evidence."
+        ),
+    ),
+    "etc_reconciliation_state": DatasetMapping(
+        "etc_reconciliation_state",
+        ("etc_reconciliation_state",),
+        ("audit.events",),
+        ("imports_files", "tax_cost_read_model_sources"),
+        migration_strategy="archive_raw_payload",
+        exclusion_reason=(
+            "ETC reconciliation legacy aggregate state is archived as one audit event raw payload; "
+            "structured task/file/item/event fan-out must be performed from this raw archive in "
+            "a later dedicated migration step before production cutover."
+        ),
+    ),
     "oa_applications": DatasetMapping(
         "oa_applications",
         ("oa_applications",),
@@ -257,9 +301,14 @@ DATASET_MAPPINGS: dict[str, DatasetMapping] = {
     "background_jobs": DatasetMapping(
         "background_jobs",
         ("background_jobs",),
-        ("job.worker_tasks",),
+        ("job.worker_tasks", "job.worker_task_acknowledgements"),
         ("background_jobs",),
         status_values=("queued", "running", "succeeded", "failed", "retrying", "dead_lettered", "cancelled"),
+        status_mappings=(
+            ("acknowledged", "succeeded"),
+            ("partial_success", "succeeded"),
+            ("superseded", "cancelled"),
+        ),
     ),
     "app_health_alerts": DatasetMapping(
         "app_health_alerts",
@@ -383,7 +432,10 @@ def dataset_mapping_summary() -> dict[str, dict[str, Any]]:
             "domains": list(mapping.domains),
             "partition_kind": mapping.partition_kind,
             "status_values": list(mapping.status_values),
+            "status_mappings": dict(mapping.status_mappings),
             "migrates": mapping.migrates,
+            "migration_strategy": mapping.migration_strategy,
+            "exclusion_reason": mapping.exclusion_reason,
         }
         for dataset, mapping in sorted(DATASET_MAPPINGS.items())
     }
@@ -722,7 +774,7 @@ class AppMongoMigrationDryRunBuilder:
                     )
                 )
                 continue
-            if mapping is None or not mapping.migrates:
+            if mapping is None:
                 findings.append(
                     self._finding(
                         code="MAPPING_BLOCKER",
@@ -735,8 +787,25 @@ class AppMongoMigrationDryRunBuilder:
                     )
                 )
                 continue
+            if not mapping.migrates:
+                reason = f" Dataset exclusion reason: {mapping.exclusion_reason}" if mapping.exclusion_reason else ""
+                findings.append(
+                    self._finding(
+                        code="MAPPING_BLOCKER",
+                        message="Dataset is explicitly excluded from facts migration and cannot produce a legacy id map row." + reason,
+                        object_type=dataset,
+                        legacy_collection=legacy_collection,
+                        legacy_id=legacy_id,
+                        source_line=row_no,
+                        dimension="legacy_id_coverage",
+                    )
+                )
+                continue
             status = payload.get("status")
-            if status not in (None, "") and mapping.status_values and str(status) not in mapping.status_values:
+            normalized_status: str | None = None
+            if status not in (None, ""):
+                normalized_status = mapping.normalized_status(str(status))
+            if status not in (None, "") and mapping.status_values and normalized_status is None:
                 invalid_enums.setdefault(dataset, {}).setdefault("status", set()).add(str(status))
                 findings.append(
                     self._finding(
@@ -755,6 +824,13 @@ class AppMongoMigrationDryRunBuilder:
             primary_table = mapping.target_tables[0]
             target_id = str(uuid5(NAMESPACE_URL, f"{migration_run_id}:{legacy_collection}:{legacy_id}:{primary_table}"))
             partition_month = self._partition_month(dataset=dataset, payload=payload)
+            target_payload = self._target_payload(
+                dataset=dataset,
+                payload=payload,
+                source_record=source_record,
+                normalized_status=normalized_status,
+                legacy_status=str(status) if status not in (None, "") else None,
+            )
             target_row = {
                 "source_dataset": dataset,
                 "legacy_collection": legacy_collection,
@@ -767,7 +843,7 @@ class AppMongoMigrationDryRunBuilder:
                 "supporting_tables": list(mapping.supporting_tables),
                 "target_partition_month": partition_month,
                 "payload_hash": expected_hash or actual_hash,
-                "payload": self._target_payload(dataset=dataset, payload=payload, source_record=source_record),
+                "payload": target_payload,
             }
             target_rows.append(target_row)
             legacy_id_map_rows.append(
@@ -901,10 +977,20 @@ class AppMongoMigrationDryRunBuilder:
             ("month_distribution", "MONTH_MISMATCH"),
             ("status_distribution", "STATUS_MISMATCH"),
         ):
-            expected = {
-                key: source_metrics.get(dimension, {}).get(key)
-                for key in target_metrics.get(dimension, {})
-            }
+            if dimension == "status_distribution":
+                source_status_distribution = self._normalized_status_distribution(
+                    source_metrics.get(dimension, {}),
+                    target_metrics.get(dimension, {}),
+                )
+                expected = {
+                    key: source_status_distribution.get(key)
+                    for key in target_metrics.get(dimension, {})
+                }
+            else:
+                expected = {
+                    key: source_metrics.get(dimension, {}).get(key)
+                    for key in target_metrics.get(dimension, {})
+                }
             findings.extend(
                 self._compare_mapping(
                     code=code,
@@ -915,6 +1001,25 @@ class AppMongoMigrationDryRunBuilder:
             )
         findings.extend(target_metrics.get("failed_row_reasons", []))
         return findings
+
+    def _normalized_status_distribution(
+        self,
+        source_status_distribution: dict[str, Any],
+        target_status_distribution: dict[str, Any],
+    ) -> dict[str, dict[str, int]]:
+        normalized: dict[str, dict[str, int]] = {}
+        for dataset in target_status_distribution:
+            mapping = DATASET_MAPPINGS.get(dataset)
+            raw_distribution = source_status_distribution.get(dataset, {})
+            if not isinstance(raw_distribution, dict):
+                continue
+            for raw_status, count in raw_distribution.items():
+                target_status = mapping.normalized_status(str(raw_status)) if mapping else str(raw_status)
+                if target_status is None:
+                    continue
+                dataset_distribution = normalized.setdefault(dataset, {})
+                dataset_distribution[target_status] = dataset_distribution.get(target_status, 0) + int(count or 0)
+        return normalized
 
     def _compare_mapping(
         self,
@@ -928,6 +1033,8 @@ class AppMongoMigrationDryRunBuilder:
         for key in sorted(set(expected) | set(actual)):
             expected_value = expected.get(key)
             actual_value = actual.get(key)
+            if dimension == "record_counts" and int(expected_value or 0) == int(actual_value or 0):
+                continue
             if expected_value == actual_value:
                 continue
             finding: dict[str, Any] = self._finding(
@@ -1068,8 +1175,25 @@ class AppMongoMigrationDryRunBuilder:
     def _dataset_for_legacy_collection(self, legacy_collection: str) -> str:
         return LEGACY_COLLECTION_TO_DATASET.get(legacy_collection, legacy_collection)
 
-    def _target_payload(self, *, dataset: str, payload: dict[str, Any], source_record: dict[str, Any]) -> dict[str, Any]:
+    def _target_payload(
+        self,
+        *,
+        dataset: str,
+        payload: dict[str, Any],
+        source_record: dict[str, Any],
+        normalized_status: str | None = None,
+        legacy_status: str | None = None,
+    ) -> dict[str, Any]:
         result = dict(payload)
+        if normalized_status is not None and legacy_status is not None and normalized_status != legacy_status:
+            result["status"] = normalized_status
+            metadata = result.get("migration_metadata") if isinstance(result.get("migration_metadata"), dict) else {}
+            result["migration_metadata"] = {
+                **metadata,
+                "legacy_status": legacy_status,
+                "normalized_status": normalized_status,
+                "status_mapping_applied": True,
+            }
         result.setdefault("legacy_collection", source_record.get("legacy_collection") or dataset)
         result.setdefault("legacy_id", source_record.get("legacy_id"))
         result.setdefault("raw_payload", payload)

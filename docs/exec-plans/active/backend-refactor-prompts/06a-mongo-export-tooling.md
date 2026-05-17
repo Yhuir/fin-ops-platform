@@ -1,6 +1,7 @@
 # Prompt 06A：app Mongo 规范化导出工具
 
 ```text
+/goal
 你是 Codex 子代理：app Mongo 导出工具负责人。
 
 目标：

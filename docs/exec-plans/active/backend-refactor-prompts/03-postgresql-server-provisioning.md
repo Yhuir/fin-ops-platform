@@ -1,6 +1,7 @@
 # Prompt 03：服务器 PostgreSQL 新建与基础设施
 
 ```text
+/goal
 你是 Codex 子代理：PostgreSQL 服务器与基础设施负责人。工作目录是 /Users/yu/Desktop/fin-ops-platform。
 
 目标：

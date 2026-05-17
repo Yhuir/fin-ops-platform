@@ -1,6 +1,7 @@
 # Prompt 04：PostgreSQL Schema、分区、索引与 SQLx Migration
 
 ```text
+/goal
 你是 Codex 子代理：PostgreSQL schema 和 migration 负责人。工作目录是 /Users/yu/Desktop/fin-ops-platform。
 
 目标：

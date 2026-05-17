@@ -7,6 +7,8 @@ import unittest
 
 from fin_ops_platform.services.app_mongo_migration_dry_run import (
     AppMongoMigrationDryRunBuilder,
+    DATASET_MAPPINGS,
+    DatasetMapping,
     PROMPT_B_REQUIRED_DOMAINS,
     dataset_mapping_summary,
 )
@@ -203,6 +205,198 @@ class AppMongoMigrationDryRunTests(unittest.TestCase):
         self.assertEqual(finding["status"], "mystery")
         self.assertEqual(finding["source_line"], 1)
         self.assertEqual(report.unmapped_invalid_enums["invoices"]["status"], ["mystery"])
+
+    def test_known_blocker_datasets_have_explicit_contracts(self) -> None:
+        summary = dataset_mapping_summary()
+
+        self.assertEqual(summary["etc_state"]["target_tables"], ["audit.events"])
+        self.assertEqual(summary["etc_state"]["migration_strategy"], "archive_raw_payload")
+        self.assertIn("ETC legacy aggregate state", summary["etc_state"]["exclusion_reason"])
+        self.assertEqual(summary["etc_reconciliation_state"]["target_tables"], ["audit.events"])
+        self.assertEqual(summary["etc_reconciliation_state"]["migration_strategy"], "archive_raw_payload")
+        self.assertIn("ETC reconciliation legacy aggregate state", summary["etc_reconciliation_state"]["exclusion_reason"])
+
+    def test_legacy_status_normalization_maps_known_blockers_and_preserves_raw_status(self) -> None:
+        records = _fixture_records()
+        records["background_jobs"][0]["payload"]["status"] = "acknowledged"
+        records["workbench_pair_relations"][0]["payload"]["status"] = "active"
+        records["workbench_candidate_matches"] = [
+            {
+                "legacy_collection": "workbench_candidate_matches",
+                "legacy_id": "candidate-1",
+                "payload": {
+                    "candidate_id": "candidate-1",
+                    "candidate_key": "candidate-1",
+                    "scope_month": "2026-05",
+                    "status": "needs_review",
+                    "amount": "125.50",
+                },
+            },
+            {
+                "legacy_collection": "workbench_candidate_matches",
+                "legacy_id": "candidate-2",
+                "payload": {
+                    "candidate_id": "candidate-2",
+                    "candidate_key": "candidate-2",
+                    "scope_month": "2026-05",
+                    "status": "suppressed",
+                    "amount": "125.50",
+                },
+            },
+        ]
+        records["etc_state"] = [
+            {
+                "legacy_collection": "etc_state",
+                "legacy_id": "current_state",
+                "payload": {"batches": {}, "invoices": {}},
+            }
+        ]
+        records["etc_reconciliation_state"] = [
+            {
+                "legacy_collection": "etc_reconciliation_state",
+                "legacy_id": "current_state",
+                "payload": {"tasks": {}, "schema_version": 1},
+            }
+        ]
+
+        with TemporaryDirectory() as temp_dir:
+            export_dir = Path(temp_dir) / "export"
+            _write_fixture_export(export_dir, records=records)
+
+            report = AppMongoMigrationDryRunBuilder().build_report(
+                export_dir=export_dir,
+                migration_run_id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            )
+
+        self.assertEqual(report.decision["go_no_go"], "GO")
+        self.assertEqual(report.legacy_id_coverage["expected"], 8)
+        self.assertEqual(report.legacy_id_coverage["mapped"], 8)
+        payload_by_legacy_id = {row["legacy_id"]: row["payload"] for row in report.target_rows}
+        self.assertEqual(payload_by_legacy_id["job-1"]["status"], "succeeded")
+        self.assertEqual(payload_by_legacy_id["job-1"]["migration_metadata"]["legacy_status"], "acknowledged")
+        self.assertEqual(payload_by_legacy_id["case-1"]["status"], "confirmed")
+        self.assertEqual(payload_by_legacy_id["case-1"]["migration_metadata"]["legacy_status"], "active")
+        self.assertEqual(payload_by_legacy_id["candidate-1"]["status"], "active")
+        self.assertEqual(payload_by_legacy_id["candidate-1"]["migration_metadata"]["legacy_status"], "needs_review")
+        self.assertEqual(payload_by_legacy_id["candidate-2"]["status"], "dismissed")
+        self.assertEqual(payload_by_legacy_id["candidate-2"]["migration_metadata"]["legacy_status"], "suppressed")
+
+    def test_each_known_legacy_status_mapping_is_explicitly_supported(self) -> None:
+        cases = {
+            "background_jobs": {
+                "acknowledged": "succeeded",
+                "superseded": "cancelled",
+            },
+            "workbench_candidate_matches": {
+                "needs_review": "active",
+                "suppressed": "dismissed",
+                "incomplete": "active",
+                "auto_closed": "active",
+                "conflict": "active",
+            },
+            "workbench_pair_relations": {
+                "active": "confirmed",
+            },
+        }
+
+        for dataset, status_cases in cases.items():
+            mapping = DATASET_MAPPINGS[dataset]
+            for legacy_status, target_status in status_cases.items():
+                with self.subTest(dataset=dataset, legacy_status=legacy_status):
+                    self.assertEqual(mapping.normalized_status(legacy_status), target_status)
+
+    def test_unknown_legacy_status_still_blocks_after_normalization_contract(self) -> None:
+        records = _fixture_records()
+        records["workbench_candidate_matches"] = [
+            {
+                "legacy_collection": "workbench_candidate_matches",
+                "legacy_id": "candidate-unknown",
+                "payload": {
+                    "candidate_id": "candidate-unknown",
+                    "candidate_key": "candidate-unknown",
+                    "scope_month": "2026-05",
+                    "status": "mystery",
+                    "amount": "1.00",
+                },
+            }
+        ]
+        with TemporaryDirectory() as temp_dir:
+            export_dir = Path(temp_dir) / "export"
+            _write_fixture_export(export_dir, records=records)
+
+            report = AppMongoMigrationDryRunBuilder().build_report(
+                export_dir=export_dir,
+                migration_run_id="cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            )
+
+        self.assertEqual(report.decision["go_no_go"], "NO_GO")
+        finding = next(item for item in report.findings if item["code"] == "INVALID_ENUM")
+        self.assertEqual(finding["object_type"], "workbench_candidate_matches")
+        self.assertEqual(finding["legacy_id"], "candidate-unknown")
+        self.assertEqual(finding["status"], "mystery")
+
+    def test_empty_dataset_count_does_not_block_when_staging_omits_absent_key(self) -> None:
+        builder = AppMongoMigrationDryRunBuilder()
+        findings = builder._compare_mapping(
+            code="COUNT_MISMATCH",
+            dimension="record_counts",
+            expected={"empty_dataset": 0, "non_empty_dataset": 1},
+            actual={"non_empty_dataset": 1},
+        )
+
+        self.assertEqual(findings, [])
+
+    def test_excluded_dataset_does_not_inflate_legacy_id_map_coverage(self) -> None:
+        DATASET_MAPPINGS["excluded_unit_dataset"] = DatasetMapping(
+            "excluded_unit_dataset",
+            ("excluded_unit_dataset",),
+            (),
+            ("settings",),
+            migrates=False,
+            migration_strategy="exclude",
+            exclusion_reason="Unit test exclusion reason.",
+        )
+        try:
+            report = AppMongoMigrationDryRunBuilder().build_report_from_staging_rows(
+                migration_run_id="dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                staging_rows=[
+                    {
+                        "manifest_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                        "legacy_collection": "excluded_unit_dataset",
+                        "legacy_id": "excluded-1",
+                        "row_no": 1,
+                        "payload": {
+                            "legacy_collection": "excluded_unit_dataset",
+                            "legacy_id": "excluded-1",
+                            "payload": {"status": "archived"},
+                        },
+                        "payload_hash": AppMongoMigrationDryRunBuilder.record_sha256(
+                            {
+                                "legacy_collection": "excluded_unit_dataset",
+                                "legacy_id": "excluded-1",
+                                "payload": {"status": "archived"},
+                            }
+                        ),
+                        "target_table": None,
+                        "status": "parsed",
+                    }
+                ],
+                manifest_record={
+                    "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                    "source_database": "fin_ops_platform_app",
+                    "export_name": "unit-fixture",
+                    "sha256_manifest": "not-a-file-checksum",
+                },
+            )
+        finally:
+            DATASET_MAPPINGS.pop("excluded_unit_dataset", None)
+
+        self.assertEqual(report.decision["go_no_go"], "NO_GO")
+        self.assertEqual(report.legacy_id_coverage["expected"], 1)
+        self.assertEqual(report.legacy_id_coverage["mapped"], 0)
+        finding = next(item for item in report.findings if item["code"] == "MAPPING_BLOCKER")
+        self.assertEqual(finding["object_type"], "excluded_unit_dataset")
+        self.assertIn("Unit test exclusion reason.", finding["message"])
 
     def test_staging_failed_row_blocks_as_blocked_fact_source(self) -> None:
         staging_rows = AppMongoMigrationDryRunBuilder().build_staging_rows_from_records(

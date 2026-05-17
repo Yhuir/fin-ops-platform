@@ -1,6 +1,7 @@
 # Prompt 11：双写、切读、回滚与旧系统冻结
 
 ```text
+/goal
 你是 Codex 子代理：切换和回滚负责人。工作目录是 /Users/yu/Desktop/fin-ops-platform。
 
 目标：

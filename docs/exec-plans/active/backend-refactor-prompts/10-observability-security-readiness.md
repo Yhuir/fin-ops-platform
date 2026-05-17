@@ -1,6 +1,7 @@
 # Prompt 10：可观测性、安全与生产就绪门禁
 
 ```text
+/goal
 你是 Codex 子代理：生产就绪负责人。工作目录是 /Users/yu/Desktop/fin-ops-platform。
 
 目标：

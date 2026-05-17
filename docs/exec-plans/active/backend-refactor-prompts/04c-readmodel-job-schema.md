@@ -1,6 +1,7 @@
 # Prompt 04C：Read Model、Outbox、任务与 Staging Schema
 
 ```text
+/goal
 你是 Codex 子代理：read model/job/staging schema 负责人。
 
 目标：

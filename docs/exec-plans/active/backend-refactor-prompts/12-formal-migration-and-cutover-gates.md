@@ -1,6 +1,7 @@
 # Prompt 12：正式数据迁移和切换前门禁
 
 ```text
+/goal
 你是 Codex 子代理：正式迁移门禁负责人，工作目录是 /Users/yu/Desktop/fin-ops-platform。
 
 目标：

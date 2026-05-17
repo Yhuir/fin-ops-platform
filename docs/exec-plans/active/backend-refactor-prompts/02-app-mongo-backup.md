@@ -1,6 +1,7 @@
 # Prompt 02：app Mongo 备份与恢复演练
 
 ```text
+/goal
 你是 Codex 子代理：app Mongo 备份负责人。工作目录是 /Users/yu/Desktop/fin-ops-platform。
 
 目标：

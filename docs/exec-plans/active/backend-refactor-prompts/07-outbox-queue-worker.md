@@ -1,6 +1,7 @@
 # Prompt 07：Outbox、NATS JetStream 与 Python Worker 协议
 
 ```text
+/goal
 你是 Codex 子代理：异步任务与 Worker 协议负责人。工作目录是 /Users/yu/Desktop/fin-ops-platform。
 
 目标：

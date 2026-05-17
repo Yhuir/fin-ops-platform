@@ -1,0 +1,501 @@
+{
+  "after": {
+    "blocking": false,
+    "blocking_findings": 0,
+    "file_checksum_scope": {
+      "message": "06C records manifest/file checksum metadata only; file content checksum gate belongs to 06D.",
+      "owner_phase": "06D",
+      "status": "not_evaluated_in_06c"
+    },
+    "go_no_go": "GO",
+    "legacy_id_coverage": {
+      "coverage_ratio": "1.0000",
+      "expected": 11084,
+      "mapped": 11084
+    },
+    "legacy_id_map_row_count": 11084,
+    "target_row_count": 11084
+  },
+  "before": {
+    "blocking": true,
+    "blocking_findings": 4932,
+    "finding_counts_by_code": {
+      "COUNT_MISMATCH": 10,
+      "INVALID_ENUM": 2457,
+      "MAPPING_BLOCKER": 2,
+      "MONTH_MISMATCH": 2,
+      "STATUS_MISMATCH": 2,
+      "UNMAPPED_LEGACY_ID": 2459
+    },
+    "finding_counts_by_dataset_code": {
+      "background_jobs": {
+        "COUNT_MISMATCH": 1,
+        "INVALID_ENUM": 6,
+        "MONTH_MISMATCH": 1,
+        "STATUS_MISMATCH": 1,
+        "UNMAPPED_LEGACY_ID": 6
+      },
+      "etc_reconciliation_state": {
+        "MAPPING_BLOCKER": 1,
+        "UNMAPPED_LEGACY_ID": 1
+      },
+      "etc_state": {
+        "MAPPING_BLOCKER": 1,
+        "UNMAPPED_LEGACY_ID": 1
+      },
+      "file_objects": {
+        "COUNT_MISMATCH": 1
+      },
+      "matching_results": {
+        "COUNT_MISMATCH": 1
+      },
+      "matching_runs": {
+        "COUNT_MISMATCH": 1
+      },
+      "tax_certified_import_batches": {
+        "COUNT_MISMATCH": 1
+      },
+      "tax_certified_import_records": {
+        "COUNT_MISMATCH": 1
+      },
+      "tax_certified_import_sessions": {
+        "COUNT_MISMATCH": 1
+      },
+      "turnover_ledger_extras": {
+        "COUNT_MISMATCH": 1
+      },
+      "workbench_candidate_matches": {
+        "INVALID_ENUM": 2420,
+        "UNMAPPED_LEGACY_ID": 2420
+      },
+      "workbench_matching_dirty_scopes": {
+        "COUNT_MISMATCH": 1
+      },
+      "workbench_pair_relations": {
+        "COUNT_MISMATCH": 1,
+        "INVALID_ENUM": 31,
+        "MONTH_MISMATCH": 1,
+        "STATUS_MISMATCH": 1,
+        "UNMAPPED_LEGACY_ID": 31
+      }
+    },
+    "finding_counts_by_dimension": {
+      "legacy_id_coverage": 2461,
+      "month_distribution": 2,
+      "record_counts": 10,
+      "status_distribution": 2459
+    },
+    "go_no_go": "NO_GO",
+    "hash_findings_count": 0,
+    "invalid_enum_status_counts_by_dataset": {
+      "background_jobs": {
+        "acknowledged": 5,
+        "superseded": 1
+      },
+      "workbench_candidate_matches": {
+        "auto_closed": 53,
+        "conflict": 10,
+        "incomplete": 67,
+        "needs_review": 2167,
+        "suppressed": 123
+      },
+      "workbench_pair_relations": {
+        "active": 31
+      }
+    },
+    "legacy_id_coverage": {
+      "coverage_ratio": "0.7781",
+      "expected": 11084,
+      "mapped": 8625
+    },
+    "legacy_id_coverage_findings_by_dataset": {
+      "background_jobs": 6,
+      "etc_reconciliation_state": 2,
+      "etc_state": 2,
+      "workbench_candidate_matches": 2420,
+      "workbench_pair_relations": 31
+    },
+    "month_findings_by_dataset": {
+      "background_jobs": {
+        "2026-05": 1
+      },
+      "workbench_pair_relations": {
+        "2026-05": 1
+      }
+    }
+  },
+  "constraints": {
+    "api_cutover_executed": false,
+    "app_mongo_frozen": false,
+    "dual_write_enabled": false,
+    "oa_source_database_accessed": false,
+    "production_facts_written": false,
+    "readiness_gate_logic_modified": false,
+    "secrets_recorded": false
+  },
+  "contract": {
+    "dataset_contracts": {
+      "background_jobs": {
+        "domains": [
+          "background_jobs"
+        ],
+        "exclusion_reason": null,
+        "legacy_collections": [
+          "background_jobs"
+        ],
+        "migrates": true,
+        "migration_strategy": "direct",
+        "partition_kind": null,
+        "status_mappings": {
+          "acknowledged": "succeeded",
+          "partial_success": "succeeded",
+          "superseded": "cancelled"
+        },
+        "status_values": [
+          "queued",
+          "running",
+          "succeeded",
+          "failed",
+          "retrying",
+          "dead_lettered",
+          "cancelled"
+        ],
+        "supporting_tables": [
+          "staging.legacy_id_map",
+          "audit.events"
+        ],
+        "target_tables": [
+          "job.worker_tasks",
+          "job.worker_task_acknowledgements"
+        ]
+      },
+      "etc_reconciliation_state": {
+        "domains": [
+          "imports_files",
+          "tax_cost_read_model_sources"
+        ],
+        "exclusion_reason": "ETC reconciliation legacy aggregate state is archived as one audit event raw payload; structured task/file/item/event fan-out must be performed from this raw archive in a later dedicated migration step before production cutover.",
+        "legacy_collections": [
+          "etc_reconciliation_state"
+        ],
+        "migrates": true,
+        "migration_strategy": "archive_raw_payload",
+        "partition_kind": null,
+        "status_mappings": {},
+        "status_values": [],
+        "supporting_tables": [
+          "staging.legacy_id_map",
+          "audit.events"
+        ],
+        "target_tables": [
+          "audit.events"
+        ]
+      },
+      "etc_state": {
+        "domains": [
+          "imports_files",
+          "tax_cost_read_model_sources"
+        ],
+        "exclusion_reason": "ETC legacy aggregate state is archived as one audit event raw payload; canonical ETC invoice/import/file facts are covered by invoices, import_batches, file_objects, and GridFS migration evidence.",
+        "legacy_collections": [
+          "etc_state"
+        ],
+        "migrates": true,
+        "migration_strategy": "archive_raw_payload",
+        "partition_kind": null,
+        "status_mappings": {},
+        "status_values": [],
+        "supporting_tables": [
+          "staging.legacy_id_map",
+          "audit.events"
+        ],
+        "target_tables": [
+          "audit.events"
+        ]
+      },
+      "file_objects": {
+        "domains": [
+          "imports_files"
+        ],
+        "exclusion_reason": null,
+        "legacy_collections": [
+          "file_import_files",
+          "file_objects"
+        ],
+        "migrates": true,
+        "migration_strategy": "direct",
+        "partition_kind": null,
+        "status_mappings": {},
+        "status_values": [],
+        "supporting_tables": [
+          "staging.legacy_id_map",
+          "audit.events"
+        ],
+        "target_tables": [
+          "app.file_objects",
+          "app.import_files"
+        ]
+      },
+      "matching_results": {
+        "domains": [
+          "reconciliation_case_rows"
+        ],
+        "exclusion_reason": null,
+        "legacy_collections": [
+          "matching_results"
+        ],
+        "migrates": true,
+        "migration_strategy": "direct",
+        "partition_kind": null,
+        "status_mappings": {},
+        "status_values": [
+          "active",
+          "cancelled",
+          "reverted"
+        ],
+        "supporting_tables": [
+          "staging.legacy_id_map",
+          "audit.events"
+        ],
+        "target_tables": [
+          "app.reconciliation_case_rows"
+        ]
+      },
+      "matching_runs": {
+        "domains": [
+          "reconciliation_cases"
+        ],
+        "exclusion_reason": null,
+        "legacy_collections": [
+          "matching_runs"
+        ],
+        "migrates": true,
+        "migration_strategy": "direct",
+        "partition_kind": null,
+        "status_mappings": {},
+        "status_values": [
+          "draft",
+          "confirmed",
+          "follow_up_required",
+          "cancelled"
+        ],
+        "supporting_tables": [
+          "staging.legacy_id_map",
+          "audit.events"
+        ],
+        "target_tables": [
+          "app.reconciliation_cases"
+        ]
+      },
+      "tax_certified_import_batches": {
+        "domains": [
+          "imports_files",
+          "tax_cost_read_model_sources"
+        ],
+        "exclusion_reason": null,
+        "legacy_collections": [
+          "tax_certified_import_batches"
+        ],
+        "migrates": true,
+        "migration_strategy": "direct",
+        "partition_kind": null,
+        "status_mappings": {},
+        "status_values": [],
+        "supporting_tables": [
+          "staging.legacy_id_map",
+          "audit.events"
+        ],
+        "target_tables": [
+          "app.import_batches"
+        ]
+      },
+      "tax_certified_import_records": {
+        "domains": [
+          "tax_cost_read_model_sources"
+        ],
+        "exclusion_reason": null,
+        "legacy_collections": [
+          "tax_certified_import_records"
+        ],
+        "migrates": true,
+        "migration_strategy": "direct",
+        "partition_kind": null,
+        "status_mappings": {},
+        "status_values": [],
+        "supporting_tables": [
+          "staging.legacy_id_map",
+          "audit.events"
+        ],
+        "target_tables": [
+          "app.invoice_certifications"
+        ]
+      },
+      "tax_certified_import_sessions": {
+        "domains": [
+          "imports_files",
+          "tax_cost_read_model_sources"
+        ],
+        "exclusion_reason": null,
+        "legacy_collections": [
+          "tax_certified_import_sessions"
+        ],
+        "migrates": true,
+        "migration_strategy": "direct",
+        "partition_kind": null,
+        "status_mappings": {},
+        "status_values": [],
+        "supporting_tables": [
+          "staging.legacy_id_map",
+          "audit.events"
+        ],
+        "target_tables": [
+          "app.import_batches"
+        ]
+      },
+      "turnover_ledger_extras": {
+        "domains": [
+          "turnover"
+        ],
+        "exclusion_reason": null,
+        "legacy_collections": [
+          "turnover_ledger_extras"
+        ],
+        "migrates": true,
+        "migration_strategy": "direct",
+        "partition_kind": null,
+        "status_mappings": {},
+        "status_values": [],
+        "supporting_tables": [
+          "staging.legacy_id_map",
+          "audit.events"
+        ],
+        "target_tables": [
+          "audit.events"
+        ]
+      },
+      "workbench_candidate_matches": {
+        "domains": [
+          "tax_cost_read_model_sources"
+        ],
+        "exclusion_reason": null,
+        "legacy_collections": [
+          "workbench_candidate_matches"
+        ],
+        "migrates": true,
+        "migration_strategy": "direct",
+        "partition_kind": null,
+        "status_mappings": {
+          "auto_closed": "active",
+          "conflict": "active",
+          "incomplete": "active",
+          "needs_review": "active",
+          "suppressed": "dismissed"
+        },
+        "status_values": [
+          "active",
+          "superseded",
+          "dismissed"
+        ],
+        "supporting_tables": [
+          "staging.legacy_id_map",
+          "audit.events"
+        ],
+        "target_tables": [
+          "read_model.workbench_candidate_matches"
+        ]
+      },
+      "workbench_matching_dirty_scopes": {
+        "domains": [
+          "background_jobs",
+          "tax_cost_read_model_sources"
+        ],
+        "exclusion_reason": null,
+        "legacy_collections": [
+          "workbench_matching_dirty_scopes"
+        ],
+        "migrates": true,
+        "migration_strategy": "direct",
+        "partition_kind": null,
+        "status_mappings": {},
+        "status_values": [],
+        "supporting_tables": [
+          "staging.legacy_id_map",
+          "audit.events"
+        ],
+        "target_tables": [
+          "job.worker_tasks"
+        ]
+      },
+      "workbench_pair_relations": {
+        "domains": [
+          "reconciliation_cases",
+          "reconciliation_case_rows"
+        ],
+        "exclusion_reason": null,
+        "legacy_collections": [
+          "workbench_pair_relations"
+        ],
+        "migrates": true,
+        "migration_strategy": "direct",
+        "partition_kind": null,
+        "status_mappings": {
+          "active": "confirmed"
+        },
+        "status_values": [
+          "draft",
+          "confirmed",
+          "follow_up_required",
+          "cancelled"
+        ],
+        "supporting_tables": [
+          "staging.legacy_id_map",
+          "audit.events"
+        ],
+        "target_tables": [
+          "app.reconciliation_cases",
+          "app.reconciliation_case_rows"
+        ]
+      }
+    },
+    "empty_dataset_record_count_policy": "record_counts treats source 0 and absent staging/target key as equivalent; non-zero missing counts still block.",
+    "legacy_id_coverage_policy": "Every source legacy id remains in expected coverage. Excluded datasets do not create map rows and do not inflate mapped coverage.",
+    "raw_status_traceability": "Normalized rows preserve raw_payload.status and migration_metadata.legacy_status/normalized_status/status_mapping_applied.",
+    "status_mapping_contract": {
+      "background_jobs": {
+        "acknowledged": "succeeded",
+        "partial_success": "succeeded",
+        "superseded": "cancelled"
+      },
+      "workbench_candidate_matches": {
+        "auto_closed": "active",
+        "conflict": "active",
+        "incomplete": "active",
+        "needs_review": "active",
+        "suppressed": "dismissed"
+      },
+      "workbench_pair_relations": {
+        "active": "confirmed"
+      }
+    },
+    "unknown_dataset_behavior": "MAPPING_BLOCKER and UNMAPPED_LEGACY_ID remain blocking findings.",
+    "unknown_status_behavior": "INVALID_ENUM remains a blocking finding unless status is target enum or explicitly normalized."
+  },
+  "generated_at": "2026-05-17T12:08:44.928917+00:00",
+  "remaining_risks": [
+    "This closure is based on 06A export files and 06C report-only validation; it does not write production app/read_model/job/audit facts.",
+    "06D file content checksum/sample download remains outside 06C and is not marked passed by this report.",
+    "ETC aggregate states are archived as raw audit payload in this contract; structured fan-out into app.etc_reconciliation_* requires a later dedicated migration contract if production needs queryable task/file/item facts."
+  ],
+  "report_date": "2026-05-17",
+  "report_type": "migration_contract_blocker_closure",
+  "source_report": "docs/operations/backend-refactor/migration-dry-run-report-20260517.json",
+  "verification_commands": [
+    "PYTHONPATH=backend/src python3 -m unittest tests.test_app_mongo_migration_dry_run -v",
+    "PYTHONPATH=backend/src python3 scripts/tools/dry_run_app_mongo_migration.py --export-dir /tmp/finops-app-mongo-export-06a-20260517 --migration-run-id a4227942-8eff-4876-8648-be1fbd821f43 --validate-only --report-json-path /tmp/finops-migration-contract-check.json --report-md-path /tmp/finops-migration-contract-check.md",
+    "python3 -m json.tool docs/operations/backend-refactor/migration-contract-blocker-closure-20260517.json"
+  ],
+  "verification_report_paths": {
+    "json": "/tmp/finops-migration-contract-check.json",
+    "markdown": "/tmp/finops-migration-contract-check.md"
+  }
+}

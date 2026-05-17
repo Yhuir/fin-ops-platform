@@ -1,6 +1,7 @@
 # Prompt 05：Axum API 低耦合骨架
 
 ```text
+/goal
 你是 Codex 子代理：Axum API 骨架负责人。工作目录是 /Users/yu/Desktop/fin-ops-platform。
 
 目标：

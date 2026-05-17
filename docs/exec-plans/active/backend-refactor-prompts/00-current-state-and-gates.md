@@ -1,6 +1,7 @@
 # Prompt 00S：当前状态、门禁和禁止重复事项
 
 ```text
+/goal
 你是 Codex 后端重构执行前检查代理，工作目录是 /Users/yu/Desktop/fin-ops-platform。
 
 目标：

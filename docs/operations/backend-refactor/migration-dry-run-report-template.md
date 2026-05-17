@@ -84,6 +84,19 @@
       ]
     }
   },
+  "status_mapping_contract": {
+    "background_jobs": {
+      "acknowledged": "succeeded",
+      "superseded": "cancelled"
+    }
+  },
+  "dataset_migration_contract": {
+    "etc_state": {
+      "migration_strategy": "archive_raw_payload",
+      "target_tables": ["audit.events"],
+      "reason": "legacy aggregate state archived for audit traceability"
+    }
+  },
   "file_checksum_scope": {
     "owner_phase": "06D",
     "status": "not_evaluated_in_06c",
@@ -119,6 +132,28 @@
 | `PARTITION_PLAN_MISSING` | 目标分区表存在待迁移数据，但无法从 source 推导月份。 |
 
 所有阻断项必须至少能定位到 `object_type`、`legacy_id`、`source_line`、`month`、`status` 或 `dimension`。金额、数量、月份、状态差异必须能继续下钻到对应 object type；月份和状态差异必须填充 `month` 或 `status`。
+
+## Status mapping / exclusion section
+
+报告必须单独说明 legacy status normalization 和不可直接迁入 dataset 的命运：
+
+- `status_mapping_contract` 必须列出每个被接受 legacy status 到 PostgreSQL target status 的显式映射。
+- normalized target status 必须属于目标表 check constraint；不得为了过门禁把未知 legacy status 直接追加进目标 enum。
+- 发生 status normalization 时，target payload 必须保留 `raw_payload.status`、`migration_metadata.legacy_status`、`migration_metadata.normalized_status` 和 `migration_metadata.status_mapping_applied=true`。
+- `dataset_migration_contract` 必须列出每个 source dataset 的 primary target、supporting target、迁移策略和归档/排除理由。
+- 归档类 dataset 必须有 `archive_raw_payload` 或等价策略，并保留 `staging.legacy_id_map`；不可迁移且不归档的 dataset 不得计入 mapped coverage，必须继续输出 blocker 和 exclusion reason。
+
+当前 06C blocker closure 合同至少应覆盖：
+
+| dataset | legacy status / dataset issue | target / normalized status | reason |
+| --- | --- | --- | --- |
+| `background_jobs` | `acknowledged` | `job.worker_tasks.status=succeeded` | acknowledge 是展示确认状态，执行事实已终态；确认痕迹保留到 metadata/raw payload，可投影 `job.worker_task_acknowledgements`。 |
+| `background_jobs` | `superseded` | `job.worker_tasks.status=cancelled` | 旧任务被替代，不再处于可执行队列；替代关系保留到 raw payload。 |
+| `workbench_candidate_matches` | `needs_review/incomplete/auto_closed/conflict` | `read_model.workbench_candidate_matches.status=active` | 这些 legacy 值是候选业务细分状态，目标 read model 生命周期仍为 active；细分语义保留到 detail/raw payload。 |
+| `workbench_candidate_matches` | `suppressed` | `read_model.workbench_candidate_matches.status=dismissed` | suppressed 表示候选被抑制，不应作为 active 候选展示。 |
+| `workbench_pair_relations` | `active` | `app.reconciliation_cases.status=confirmed` | active legacy relation 是有效配对事实。 |
+| `etc_state` | missing target mapping | `audit.events` archive raw payload | 旧 ETC aggregate state 单行嵌套多类状态，06C 整包归档，结构化 fan-out 另行迁移。 |
+| `etc_reconciliation_state` | missing target mapping | `audit.events` archive raw payload | 旧 ETC reconciliation aggregate state 单行嵌套 task/file/item/audit event，06C 整包归档。 |
 
 ## 06C/06D 边界
 

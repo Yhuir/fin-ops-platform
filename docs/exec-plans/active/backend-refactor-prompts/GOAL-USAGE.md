@@ -32,11 +32,10 @@
 适合一次只做一个模块，例如只做 app Mongo 导出工具：
 
 ```text
-/goal
-执行 /Users/yu/Desktop/fin-ops-platform/docs/exec-plans/active/backend-refactor-prompts/06a-mongo-export-tooling.md。
-执行前必须读取 00-current-state-and-gates.md 和 backend-refactor-progress.md。
-只实现 app Mongo 只读导出工具，不访问 OA 源数据库，不写 secret，不做生产切流。
+复制 /Users/yu/Desktop/fin-ops-platform/docs/exec-plans/active/backend-refactor-prompts/06a-mongo-export-tooling.md 中的完整代码块。
 ```
+
+编号模块 prompt 文件已经自带 `/goal`，不要再手动再包一层 `/goal`。如果你只引用文件路径执行，也要明确“执行该文件中的完整 `/goal` prompt”。
 
 ## 当前最推荐的下一组 `/goal`
 

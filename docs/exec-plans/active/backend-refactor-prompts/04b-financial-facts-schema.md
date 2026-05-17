@@ -1,6 +1,7 @@
 # Prompt 04B：财务核心事实表 Schema
 
 ```text
+/goal
 你是 Codex 子代理：财务核心事实表负责人。
 
 目标：

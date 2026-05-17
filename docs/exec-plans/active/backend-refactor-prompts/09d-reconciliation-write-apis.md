@@ -1,6 +1,7 @@
 # Prompt 09D：核销、异常与高风险写 API 迁移
 
 ```text
+/goal
 你是 Codex 子代理：核销和异常写 API 迁移负责人。
 
 目标：
