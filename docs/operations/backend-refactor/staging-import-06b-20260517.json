@@ -1,0 +1,694 @@
+{
+  "GO_NO_GO": "NO_GO",
+  "actual_imported_counts": {},
+  "actual_imported_counts_reason": "未执行 --execute，未连接 PostgreSQL staging；实际 DB 写入计数不可用。",
+  "blockers": [
+    {
+      "code": "POSTGRES_STAGING_CONNECTION_NOT_PROVIDED",
+      "message": "FIN_OPS_POSTGRES_MIGRATION_URL 未设置，本次只完成 validate-only；未连接 PostgreSQL staging，未写入 staging 表。",
+      "required_action": "在受控 staging 环境设置 FIN_OPS_POSTGRES_MIGRATION_URL 后重新执行 --execute，并生成新的 06B GO 证据。",
+      "severity": "blocker"
+    }
+  ],
+  "errors": [],
+  "execution": {
+    "command": "PYTHONPATH=backend/src python3 scripts/tools/import_app_mongo_staging.py --export-dir /tmp/finops-app-mongo-export-06a-20260517 --validate-only --plan-path /tmp/finops-staging-import-06b-20260517-plan.json --report-path /tmp/finops-staging-import-06b-20260517-validation-report.json",
+    "database_url_value_recorded": false,
+    "execute_drill": false,
+    "mode": "validate-only",
+    "plan_path": "/tmp/finops-staging-import-06b-20260517-plan.json",
+    "postgres_connection_env": "FIN_OPS_POSTGRES_MIGRATION_URL",
+    "postgres_connection_env_status": "missing",
+    "staging_tables_written": false,
+    "tool_validation_report_path": "/tmp/finops-staging-import-06b-20260517-validation-report.json"
+  },
+  "expected_counts": {
+    "app_health_alerts": 1,
+    "app_settings": 1,
+    "background_jobs": 76,
+    "bank_transaction_categories": 6,
+    "bank_transactions": 431,
+    "cost_statistics_read_models": 34,
+    "etc_reconciliation_state": 1,
+    "etc_state": 1,
+    "file_objects": 0,
+    "gridfs-files-manifest": 462,
+    "import_batches": 6,
+    "invoices": 391,
+    "matching_results": 0,
+    "matching_runs": 0,
+    "no_oa_bank_batch_audit_log": 58,
+    "no_oa_bank_batches": 54,
+    "oa_attachment_invoice_cache": 7026,
+    "oa_sync_state": 1,
+    "tax_certified_import_batches": 0,
+    "tax_certified_import_records": 0,
+    "tax_certified_import_sessions": 0,
+    "tax_offset_read_models": 1,
+    "turnover_ledger_extras": 0,
+    "turnover_relation_audit_log": 1,
+    "turnover_relations": 2,
+    "workbench_candidate_matches": 2420,
+    "workbench_exception_cases": 2,
+    "workbench_matching_dirty_scopes": 0,
+    "workbench_overrides": 2,
+    "workbench_pair_relations": 101,
+    "workbench_read_models": 6
+  },
+  "failed_row_counts": {},
+  "failed_row_total": 0,
+  "generated_at": "2026-05-17T09:00:23+08:00",
+  "go_no_go": "NO_GO",
+  "hash_summary": {
+    "matched_files": 31,
+    "mismatched_files": [],
+    "total_files_checked": 31
+  },
+  "input_file_hash_validation": {
+    "collections/app_health_alerts.ndjson": {
+      "actual_sha256": "e48ef73093352d3c9f7c56bd020a6b049f3c2911029253d291b9658891cd2231",
+      "expected_sha256": "e48ef73093352d3c9f7c56bd020a6b049f3c2911029253d291b9658891cd2231",
+      "matched": true,
+      "object_type": "app_health_alerts"
+    },
+    "collections/app_settings.ndjson": {
+      "actual_sha256": "c7c4e0b918110271adc85c74f85176e9d2660ea8900a230a4d6141803e7055c1",
+      "expected_sha256": "c7c4e0b918110271adc85c74f85176e9d2660ea8900a230a4d6141803e7055c1",
+      "matched": true,
+      "object_type": "app_settings"
+    },
+    "collections/background_jobs.ndjson": {
+      "actual_sha256": "31b5901fb7aa53cd6c587fc05891f735a459fae09b43bf8a224d1512e62e1cd4",
+      "expected_sha256": "31b5901fb7aa53cd6c587fc05891f735a459fae09b43bf8a224d1512e62e1cd4",
+      "matched": true,
+      "object_type": "background_jobs"
+    },
+    "collections/bank_transaction_categories.ndjson": {
+      "actual_sha256": "ddfe8dc5bed52ad98dbb136f57effcfc829f31ea794f08daff1f27e8b3a1f9a5",
+      "expected_sha256": "ddfe8dc5bed52ad98dbb136f57effcfc829f31ea794f08daff1f27e8b3a1f9a5",
+      "matched": true,
+      "object_type": "bank_transaction_categories"
+    },
+    "collections/bank_transactions.ndjson": {
+      "actual_sha256": "cd48c633a49fa401dea787283d5cf794819b23692b0149f57894cc11051e2e81",
+      "expected_sha256": "cd48c633a49fa401dea787283d5cf794819b23692b0149f57894cc11051e2e81",
+      "matched": true,
+      "object_type": "bank_transactions"
+    },
+    "collections/cost_statistics_read_models.ndjson": {
+      "actual_sha256": "9b9a30ad869b0828feb21480e061ceee181a607dd21173fe7167aba157d42f24",
+      "expected_sha256": "9b9a30ad869b0828feb21480e061ceee181a607dd21173fe7167aba157d42f24",
+      "matched": true,
+      "object_type": "cost_statistics_read_models"
+    },
+    "collections/etc_reconciliation_state.ndjson": {
+      "actual_sha256": "2b7fc41f70fd1a7253ebf260f3fdbc8ab16c210027108120c8222df8b5118991",
+      "expected_sha256": "2b7fc41f70fd1a7253ebf260f3fdbc8ab16c210027108120c8222df8b5118991",
+      "matched": true,
+      "object_type": "etc_reconciliation_state"
+    },
+    "collections/etc_state.ndjson": {
+      "actual_sha256": "c700faa1637a04b09413baa6b86c704b4ffb9550698274c574fa96a49790425d",
+      "expected_sha256": "c700faa1637a04b09413baa6b86c704b4ffb9550698274c574fa96a49790425d",
+      "matched": true,
+      "object_type": "etc_state"
+    },
+    "collections/file_objects.ndjson": {
+      "actual_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matched": true,
+      "object_type": "file_objects"
+    },
+    "collections/gridfs-files-manifest.ndjson": {
+      "actual_sha256": "88d0fd7787115b29eee8617d31ebd4f25071ea41217782cc85d536ed4369f8e1",
+      "expected_sha256": "88d0fd7787115b29eee8617d31ebd4f25071ea41217782cc85d536ed4369f8e1",
+      "matched": true,
+      "object_type": "gridfs-files-manifest"
+    },
+    "collections/import_batches.ndjson": {
+      "actual_sha256": "1ae51b6a04b2eaf5a36a9e488e98b708caebe0b4c4fb68258fbab69d094ab56a",
+      "expected_sha256": "1ae51b6a04b2eaf5a36a9e488e98b708caebe0b4c4fb68258fbab69d094ab56a",
+      "matched": true,
+      "object_type": "import_batches"
+    },
+    "collections/invoices.ndjson": {
+      "actual_sha256": "b57d78a91cf8aee259199a299035f90329502d8fe56eca126d1c9ce27d8afed0",
+      "expected_sha256": "b57d78a91cf8aee259199a299035f90329502d8fe56eca126d1c9ce27d8afed0",
+      "matched": true,
+      "object_type": "invoices"
+    },
+    "collections/matching_results.ndjson": {
+      "actual_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matched": true,
+      "object_type": "matching_results"
+    },
+    "collections/matching_runs.ndjson": {
+      "actual_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matched": true,
+      "object_type": "matching_runs"
+    },
+    "collections/no_oa_bank_batch_audit_log.ndjson": {
+      "actual_sha256": "7a6bf9fbfde23a6fe6c8328e950e4d3589be287c7cc691c32819ea7c27db81c5",
+      "expected_sha256": "7a6bf9fbfde23a6fe6c8328e950e4d3589be287c7cc691c32819ea7c27db81c5",
+      "matched": true,
+      "object_type": "no_oa_bank_batch_audit_log"
+    },
+    "collections/no_oa_bank_batches.ndjson": {
+      "actual_sha256": "db86b69b2c2f74e1b57aae3e9f92a63a5e49077d421f1714527ad498c12f2220",
+      "expected_sha256": "db86b69b2c2f74e1b57aae3e9f92a63a5e49077d421f1714527ad498c12f2220",
+      "matched": true,
+      "object_type": "no_oa_bank_batches"
+    },
+    "collections/oa_attachment_invoice_cache.ndjson": {
+      "actual_sha256": "57c4edcb6ce62de9003c01474d9de57215f5f91b10aa9d7d6a8fb23280baef13",
+      "expected_sha256": "57c4edcb6ce62de9003c01474d9de57215f5f91b10aa9d7d6a8fb23280baef13",
+      "matched": true,
+      "object_type": "oa_attachment_invoice_cache"
+    },
+    "collections/oa_sync_state.ndjson": {
+      "actual_sha256": "1ad6459df3db6e7b2c42890b314884f3767db2f7c04306488e3f4cf8f11148c9",
+      "expected_sha256": "1ad6459df3db6e7b2c42890b314884f3767db2f7c04306488e3f4cf8f11148c9",
+      "matched": true,
+      "object_type": "oa_sync_state"
+    },
+    "collections/tax_certified_import_batches.ndjson": {
+      "actual_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matched": true,
+      "object_type": "tax_certified_import_batches"
+    },
+    "collections/tax_certified_import_records.ndjson": {
+      "actual_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matched": true,
+      "object_type": "tax_certified_import_records"
+    },
+    "collections/tax_certified_import_sessions.ndjson": {
+      "actual_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matched": true,
+      "object_type": "tax_certified_import_sessions"
+    },
+    "collections/tax_offset_read_models.ndjson": {
+      "actual_sha256": "f6acb6b570d44855d3d75d35fb3475b3f1d8b7445a23610f7e84c18e238bbf4f",
+      "expected_sha256": "f6acb6b570d44855d3d75d35fb3475b3f1d8b7445a23610f7e84c18e238bbf4f",
+      "matched": true,
+      "object_type": "tax_offset_read_models"
+    },
+    "collections/turnover_ledger_extras.ndjson": {
+      "actual_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matched": true,
+      "object_type": "turnover_ledger_extras"
+    },
+    "collections/turnover_relation_audit_log.ndjson": {
+      "actual_sha256": "903485c3e6c4abaa8caab1dbd6377db1e262267418c91ab9ed95bdc32f2b10ac",
+      "expected_sha256": "903485c3e6c4abaa8caab1dbd6377db1e262267418c91ab9ed95bdc32f2b10ac",
+      "matched": true,
+      "object_type": "turnover_relation_audit_log"
+    },
+    "collections/turnover_relations.ndjson": {
+      "actual_sha256": "0e4fbe6a1b9aced6143dad7683e2d0db0c015d580cd90057a1fe6dd249e3e509",
+      "expected_sha256": "0e4fbe6a1b9aced6143dad7683e2d0db0c015d580cd90057a1fe6dd249e3e509",
+      "matched": true,
+      "object_type": "turnover_relations"
+    },
+    "collections/workbench_candidate_matches.ndjson": {
+      "actual_sha256": "48c67a108ddd9f5e8dedf8824f9ca9792ef2ed376779433771487422b6abe783",
+      "expected_sha256": "48c67a108ddd9f5e8dedf8824f9ca9792ef2ed376779433771487422b6abe783",
+      "matched": true,
+      "object_type": "workbench_candidate_matches"
+    },
+    "collections/workbench_exception_cases.ndjson": {
+      "actual_sha256": "ae5951f0585b36eff510d6f358b522bb61e11fb9c2b4d2fd03ecdfb401b1db98",
+      "expected_sha256": "ae5951f0585b36eff510d6f358b522bb61e11fb9c2b4d2fd03ecdfb401b1db98",
+      "matched": true,
+      "object_type": "workbench_exception_cases"
+    },
+    "collections/workbench_matching_dirty_scopes.ndjson": {
+      "actual_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matched": true,
+      "object_type": "workbench_matching_dirty_scopes"
+    },
+    "collections/workbench_overrides.ndjson": {
+      "actual_sha256": "fbc144e7e04ae5f4c8443cd5be458c4d3fe34eae5788ae9279163c405158528e",
+      "expected_sha256": "fbc144e7e04ae5f4c8443cd5be458c4d3fe34eae5788ae9279163c405158528e",
+      "matched": true,
+      "object_type": "workbench_overrides"
+    },
+    "collections/workbench_pair_relations.ndjson": {
+      "actual_sha256": "9c0292c7662e7f0a3f26aa7208a9605863b37ad7351b47854e02d28290cd297c",
+      "expected_sha256": "9c0292c7662e7f0a3f26aa7208a9605863b37ad7351b47854e02d28290cd297c",
+      "matched": true,
+      "object_type": "workbench_pair_relations"
+    },
+    "collections/workbench_read_models.ndjson": {
+      "actual_sha256": "198b25c40ae2a56a92d48cff11228bc4db80175c836f748bab0a93a455bd391b",
+      "expected_sha256": "198b25c40ae2a56a92d48cff11228bc4db80175c836f748bab0a93a455bd391b",
+      "matched": true,
+      "object_type": "workbench_read_models"
+    }
+  },
+  "inputs_for_06c": {
+    "allowed_to_start_06c": false,
+    "manifest_dir": "/tmp/finops-app-mongo-export-06a-20260517",
+    "manifest_id": "a4227942-8eff-4876-8648-be1fbd821f43",
+    "migration_run_id": "a4227942-8eff-4876-8648-be1fbd821f43",
+    "reason": "06B 为 NO_GO，未产生 PostgreSQL staging 写入结果。",
+    "report_path": "docs/operations/backend-refactor/staging-import-06b-20260517.json"
+  },
+  "manifest_id": "a4227942-8eff-4876-8648-be1fbd821f43",
+  "migration_run_id": "a4227942-8eff-4876-8648-be1fbd821f43",
+  "operator": "yu",
+  "remaining_risks": [
+    "尚未在受控 PostgreSQL staging 执行 --execute，因此无法证明 staging.mongo_export_manifest 与 staging.mongo_import_rows 的真实写入结果。",
+    "06C 不能基于本 NO_GO 证据推进到 staging-to-facts dry-run。"
+  ],
+  "schema_version": "finops.staging_import_06b_evidence.v1",
+  "scope": {
+    "allowed_postgres_schemas": [
+      "staging"
+    ],
+    "facts_modified": false,
+    "forbidden_postgres_schemas": [
+      "app",
+      "read_model",
+      "job",
+      "audit"
+    ],
+    "oa_source_database_accessed": false,
+    "phase": "06B PostgreSQL staging import validation",
+    "rust_migration_modified": false,
+    "source": "06A app Mongo export manifest directory"
+  },
+  "source_database": "fin_ops_platform_app",
+  "source_manifest": {
+    "collection_counts": {
+      "app_health_alerts": 1,
+      "app_settings": 1,
+      "background_jobs": 76,
+      "bank_transaction_categories": 6,
+      "bank_transaction_categories_meta": 1,
+      "bank_transactions": 431,
+      "cost_statistics_read_models": 34,
+      "cost_statistics_read_models_meta": 1,
+      "etc_reconciliation_state": 1,
+      "etc_state": 1,
+      "file_import_files": 31,
+      "file_import_sessions": 11,
+      "file_imports_meta": 1,
+      "historical_etc_repair_bundles": 3,
+      "historical_etc_repair_parsed_seeds": 3,
+      "historical_etc_repair_states": 4,
+      "import_batches": 6,
+      "import_file_blobs.chunks": 726,
+      "import_file_blobs.files": 462,
+      "imports_meta": 1,
+      "invoices": 391,
+      "matching_meta": 1,
+      "matching_results": 0,
+      "matching_runs": 0,
+      "no_oa_bank_batch_audit_log": 58,
+      "no_oa_bank_batches": 54,
+      "no_oa_bank_batches_meta": 1,
+      "oa_attachment_invoice_cache": 7026,
+      "oa_sync_state": 1,
+      "tax_certified_import_batches": 0,
+      "tax_certified_import_records": 0,
+      "tax_certified_import_sessions": 0,
+      "tax_certified_imports_meta": 1,
+      "tax_offset_read_models": 1,
+      "tax_offset_read_models_meta": 1,
+      "turnover_ledger_extras": 0,
+      "turnover_ledger_extras_meta": 1,
+      "turnover_relation_audit_log": 1,
+      "turnover_relations": 2,
+      "turnover_relations_meta": 1,
+      "workbench_candidate_matches": 2420,
+      "workbench_candidate_matches_meta": 1,
+      "workbench_exception_cases": 2,
+      "workbench_exception_cases_meta": 1,
+      "workbench_matching_dirty_scopes": 0,
+      "workbench_matching_dirty_scopes_meta": 1,
+      "workbench_overrides_meta": 1,
+      "workbench_pair_relations": 101,
+      "workbench_pair_relations_meta": 1,
+      "workbench_read_models": 6,
+      "workbench_read_models_meta": 2,
+      "workbench_row_overrides": 2
+    },
+    "export_finished_at": "2026-05-17T00:55:37.659517+00:00",
+    "export_started_at": "2026-05-17T00:55:05.098443+00:00",
+    "hashes": {
+      "aggregate_sha256": "f5283032a599e2ee72a8583fc31725071ae78f40e02ce4c71ec49d387925343c",
+      "algorithm": "sha256",
+      "files": {
+        "collections/app_health_alerts.ndjson": "e48ef73093352d3c9f7c56bd020a6b049f3c2911029253d291b9658891cd2231",
+        "collections/app_settings.ndjson": "c7c4e0b918110271adc85c74f85176e9d2660ea8900a230a4d6141803e7055c1",
+        "collections/background_jobs.ndjson": "31b5901fb7aa53cd6c587fc05891f735a459fae09b43bf8a224d1512e62e1cd4",
+        "collections/bank_transaction_categories.ndjson": "ddfe8dc5bed52ad98dbb136f57effcfc829f31ea794f08daff1f27e8b3a1f9a5",
+        "collections/bank_transactions.ndjson": "cd48c633a49fa401dea787283d5cf794819b23692b0149f57894cc11051e2e81",
+        "collections/cost_statistics_read_models.ndjson": "9b9a30ad869b0828feb21480e061ceee181a607dd21173fe7167aba157d42f24",
+        "collections/etc_reconciliation_state.ndjson": "2b7fc41f70fd1a7253ebf260f3fdbc8ab16c210027108120c8222df8b5118991",
+        "collections/etc_state.ndjson": "c700faa1637a04b09413baa6b86c704b4ffb9550698274c574fa96a49790425d",
+        "collections/file_objects.ndjson": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "collections/gridfs-files-manifest.ndjson": "88d0fd7787115b29eee8617d31ebd4f25071ea41217782cc85d536ed4369f8e1",
+        "collections/import_batches.ndjson": "1ae51b6a04b2eaf5a36a9e488e98b708caebe0b4c4fb68258fbab69d094ab56a",
+        "collections/invoices.ndjson": "b57d78a91cf8aee259199a299035f90329502d8fe56eca126d1c9ce27d8afed0",
+        "collections/matching_results.ndjson": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "collections/matching_runs.ndjson": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "collections/no_oa_bank_batch_audit_log.ndjson": "7a6bf9fbfde23a6fe6c8328e950e4d3589be287c7cc691c32819ea7c27db81c5",
+        "collections/no_oa_bank_batches.ndjson": "db86b69b2c2f74e1b57aae3e9f92a63a5e49077d421f1714527ad498c12f2220",
+        "collections/oa_attachment_invoice_cache.ndjson": "57c4edcb6ce62de9003c01474d9de57215f5f91b10aa9d7d6a8fb23280baef13",
+        "collections/oa_sync_state.ndjson": "1ad6459df3db6e7b2c42890b314884f3767db2f7c04306488e3f4cf8f11148c9",
+        "collections/tax_certified_import_batches.ndjson": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "collections/tax_certified_import_records.ndjson": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "collections/tax_certified_import_sessions.ndjson": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "collections/tax_offset_read_models.ndjson": "f6acb6b570d44855d3d75d35fb3475b3f1d8b7445a23610f7e84c18e238bbf4f",
+        "collections/turnover_ledger_extras.ndjson": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "collections/turnover_relation_audit_log.ndjson": "903485c3e6c4abaa8caab1dbd6377db1e262267418c91ab9ed95bdc32f2b10ac",
+        "collections/turnover_relations.ndjson": "0e4fbe6a1b9aced6143dad7683e2d0db0c015d580cd90057a1fe6dd249e3e509",
+        "collections/workbench_candidate_matches.ndjson": "48c67a108ddd9f5e8dedf8824f9ca9792ef2ed376779433771487422b6abe783",
+        "collections/workbench_exception_cases.ndjson": "ae5951f0585b36eff510d6f358b522bb61e11fb9c2b4d2fd03ecdfb401b1db98",
+        "collections/workbench_matching_dirty_scopes.ndjson": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "collections/workbench_overrides.ndjson": "fbc144e7e04ae5f4c8443cd5be458c4d3fe34eae5788ae9279163c405158528e",
+        "collections/workbench_pair_relations.ndjson": "9c0292c7662e7f0a3f26aa7208a9605863b37ad7351b47854e02d28290cd297c",
+        "collections/workbench_read_models.ndjson": "198b25c40ae2a56a92d48cff11228bc4db80175c836f748bab0a93a455bd391b"
+      }
+    },
+    "manifest_dir": "/tmp/finops-app-mongo-export-06a-20260517",
+    "manifest_json": "/tmp/finops-app-mongo-export-06a-20260517/manifest.json",
+    "schema_version": "finops.app_mongo_export_manifest.v1",
+    "tool_version": "app-mongo-export-v1"
+  },
+  "status": "blocked",
+  "task_id": "p4-04-postgres-staging-import-06b-evidence",
+  "validated_import_plan_counts": {
+    "app_health_alerts": 1,
+    "app_settings": 1,
+    "background_jobs": 76,
+    "bank_transaction_categories": 6,
+    "bank_transactions": 431,
+    "cost_statistics_read_models": 34,
+    "etc_reconciliation_state": 1,
+    "etc_state": 1,
+    "import_batches": 6,
+    "import_file_blobs.files": 462,
+    "invoices": 391,
+    "no_oa_bank_batch_audit_log": 58,
+    "no_oa_bank_batches": 54,
+    "oa_attachment_invoice_cache": 7026,
+    "oa_sync_state": 1,
+    "tax_offset_read_models": 1,
+    "turnover_relation_audit_log": 1,
+    "turnover_relations": 2,
+    "workbench_candidate_matches": 2420,
+    "workbench_exception_cases": 2,
+    "workbench_pair_relations": 101,
+    "workbench_read_models": 6,
+    "workbench_row_overrides": 2
+  },
+  "validation_report": {
+    "blocking": false,
+    "decision": {
+      "go_no_go": "GO",
+      "reason": "Manifest, file hashes, row parsing, and staging import plan validation passed.",
+      "required_action": "Proceed only to the separate 06C staging-to-facts dry-run gate."
+    },
+    "expected_collection_counts": {
+      "app_health_alerts": 1,
+      "app_settings": 1,
+      "background_jobs": 76,
+      "bank_transaction_categories": 6,
+      "bank_transactions": 431,
+      "cost_statistics_read_models": 34,
+      "etc_reconciliation_state": 1,
+      "etc_state": 1,
+      "file_objects": 0,
+      "gridfs-files-manifest": 462,
+      "import_batches": 6,
+      "invoices": 391,
+      "matching_results": 0,
+      "matching_runs": 0,
+      "no_oa_bank_batch_audit_log": 58,
+      "no_oa_bank_batches": 54,
+      "oa_attachment_invoice_cache": 7026,
+      "oa_sync_state": 1,
+      "tax_certified_import_batches": 0,
+      "tax_certified_import_records": 0,
+      "tax_certified_import_sessions": 0,
+      "tax_offset_read_models": 1,
+      "turnover_ledger_extras": 0,
+      "turnover_relation_audit_log": 1,
+      "turnover_relations": 2,
+      "workbench_candidate_matches": 2420,
+      "workbench_exception_cases": 2,
+      "workbench_matching_dirty_scopes": 0,
+      "workbench_overrides": 2,
+      "workbench_pair_relations": 101,
+      "workbench_read_models": 6
+    },
+    "failed_row_counts": {},
+    "findings": [],
+    "finished_at": "2026-05-17T00:59:43.640179+00:00",
+    "hash_summary": {
+      "matched_files": 31,
+      "mismatched_files": [],
+      "total_files_checked": 31
+    },
+    "input_file_hash_validation": {
+      "collections/app_health_alerts.ndjson": {
+        "actual_sha256": "e48ef73093352d3c9f7c56bd020a6b049f3c2911029253d291b9658891cd2231",
+        "expected_sha256": "e48ef73093352d3c9f7c56bd020a6b049f3c2911029253d291b9658891cd2231",
+        "matched": true,
+        "object_type": "app_health_alerts"
+      },
+      "collections/app_settings.ndjson": {
+        "actual_sha256": "c7c4e0b918110271adc85c74f85176e9d2660ea8900a230a4d6141803e7055c1",
+        "expected_sha256": "c7c4e0b918110271adc85c74f85176e9d2660ea8900a230a4d6141803e7055c1",
+        "matched": true,
+        "object_type": "app_settings"
+      },
+      "collections/background_jobs.ndjson": {
+        "actual_sha256": "31b5901fb7aa53cd6c587fc05891f735a459fae09b43bf8a224d1512e62e1cd4",
+        "expected_sha256": "31b5901fb7aa53cd6c587fc05891f735a459fae09b43bf8a224d1512e62e1cd4",
+        "matched": true,
+        "object_type": "background_jobs"
+      },
+      "collections/bank_transaction_categories.ndjson": {
+        "actual_sha256": "ddfe8dc5bed52ad98dbb136f57effcfc829f31ea794f08daff1f27e8b3a1f9a5",
+        "expected_sha256": "ddfe8dc5bed52ad98dbb136f57effcfc829f31ea794f08daff1f27e8b3a1f9a5",
+        "matched": true,
+        "object_type": "bank_transaction_categories"
+      },
+      "collections/bank_transactions.ndjson": {
+        "actual_sha256": "cd48c633a49fa401dea787283d5cf794819b23692b0149f57894cc11051e2e81",
+        "expected_sha256": "cd48c633a49fa401dea787283d5cf794819b23692b0149f57894cc11051e2e81",
+        "matched": true,
+        "object_type": "bank_transactions"
+      },
+      "collections/cost_statistics_read_models.ndjson": {
+        "actual_sha256": "9b9a30ad869b0828feb21480e061ceee181a607dd21173fe7167aba157d42f24",
+        "expected_sha256": "9b9a30ad869b0828feb21480e061ceee181a607dd21173fe7167aba157d42f24",
+        "matched": true,
+        "object_type": "cost_statistics_read_models"
+      },
+      "collections/etc_reconciliation_state.ndjson": {
+        "actual_sha256": "2b7fc41f70fd1a7253ebf260f3fdbc8ab16c210027108120c8222df8b5118991",
+        "expected_sha256": "2b7fc41f70fd1a7253ebf260f3fdbc8ab16c210027108120c8222df8b5118991",
+        "matched": true,
+        "object_type": "etc_reconciliation_state"
+      },
+      "collections/etc_state.ndjson": {
+        "actual_sha256": "c700faa1637a04b09413baa6b86c704b4ffb9550698274c574fa96a49790425d",
+        "expected_sha256": "c700faa1637a04b09413baa6b86c704b4ffb9550698274c574fa96a49790425d",
+        "matched": true,
+        "object_type": "etc_state"
+      },
+      "collections/file_objects.ndjson": {
+        "actual_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "matched": true,
+        "object_type": "file_objects"
+      },
+      "collections/gridfs-files-manifest.ndjson": {
+        "actual_sha256": "88d0fd7787115b29eee8617d31ebd4f25071ea41217782cc85d536ed4369f8e1",
+        "expected_sha256": "88d0fd7787115b29eee8617d31ebd4f25071ea41217782cc85d536ed4369f8e1",
+        "matched": true,
+        "object_type": "gridfs-files-manifest"
+      },
+      "collections/import_batches.ndjson": {
+        "actual_sha256": "1ae51b6a04b2eaf5a36a9e488e98b708caebe0b4c4fb68258fbab69d094ab56a",
+        "expected_sha256": "1ae51b6a04b2eaf5a36a9e488e98b708caebe0b4c4fb68258fbab69d094ab56a",
+        "matched": true,
+        "object_type": "import_batches"
+      },
+      "collections/invoices.ndjson": {
+        "actual_sha256": "b57d78a91cf8aee259199a299035f90329502d8fe56eca126d1c9ce27d8afed0",
+        "expected_sha256": "b57d78a91cf8aee259199a299035f90329502d8fe56eca126d1c9ce27d8afed0",
+        "matched": true,
+        "object_type": "invoices"
+      },
+      "collections/matching_results.ndjson": {
+        "actual_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "matched": true,
+        "object_type": "matching_results"
+      },
+      "collections/matching_runs.ndjson": {
+        "actual_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "matched": true,
+        "object_type": "matching_runs"
+      },
+      "collections/no_oa_bank_batch_audit_log.ndjson": {
+        "actual_sha256": "7a6bf9fbfde23a6fe6c8328e950e4d3589be287c7cc691c32819ea7c27db81c5",
+        "expected_sha256": "7a6bf9fbfde23a6fe6c8328e950e4d3589be287c7cc691c32819ea7c27db81c5",
+        "matched": true,
+        "object_type": "no_oa_bank_batch_audit_log"
+      },
+      "collections/no_oa_bank_batches.ndjson": {
+        "actual_sha256": "db86b69b2c2f74e1b57aae3e9f92a63a5e49077d421f1714527ad498c12f2220",
+        "expected_sha256": "db86b69b2c2f74e1b57aae3e9f92a63a5e49077d421f1714527ad498c12f2220",
+        "matched": true,
+        "object_type": "no_oa_bank_batches"
+      },
+      "collections/oa_attachment_invoice_cache.ndjson": {
+        "actual_sha256": "57c4edcb6ce62de9003c01474d9de57215f5f91b10aa9d7d6a8fb23280baef13",
+        "expected_sha256": "57c4edcb6ce62de9003c01474d9de57215f5f91b10aa9d7d6a8fb23280baef13",
+        "matched": true,
+        "object_type": "oa_attachment_invoice_cache"
+      },
+      "collections/oa_sync_state.ndjson": {
+        "actual_sha256": "1ad6459df3db6e7b2c42890b314884f3767db2f7c04306488e3f4cf8f11148c9",
+        "expected_sha256": "1ad6459df3db6e7b2c42890b314884f3767db2f7c04306488e3f4cf8f11148c9",
+        "matched": true,
+        "object_type": "oa_sync_state"
+      },
+      "collections/tax_certified_import_batches.ndjson": {
+        "actual_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "matched": true,
+        "object_type": "tax_certified_import_batches"
+      },
+      "collections/tax_certified_import_records.ndjson": {
+        "actual_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "matched": true,
+        "object_type": "tax_certified_import_records"
+      },
+      "collections/tax_certified_import_sessions.ndjson": {
+        "actual_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "matched": true,
+        "object_type": "tax_certified_import_sessions"
+      },
+      "collections/tax_offset_read_models.ndjson": {
+        "actual_sha256": "f6acb6b570d44855d3d75d35fb3475b3f1d8b7445a23610f7e84c18e238bbf4f",
+        "expected_sha256": "f6acb6b570d44855d3d75d35fb3475b3f1d8b7445a23610f7e84c18e238bbf4f",
+        "matched": true,
+        "object_type": "tax_offset_read_models"
+      },
+      "collections/turnover_ledger_extras.ndjson": {
+        "actual_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "matched": true,
+        "object_type": "turnover_ledger_extras"
+      },
+      "collections/turnover_relation_audit_log.ndjson": {
+        "actual_sha256": "903485c3e6c4abaa8caab1dbd6377db1e262267418c91ab9ed95bdc32f2b10ac",
+        "expected_sha256": "903485c3e6c4abaa8caab1dbd6377db1e262267418c91ab9ed95bdc32f2b10ac",
+        "matched": true,
+        "object_type": "turnover_relation_audit_log"
+      },
+      "collections/turnover_relations.ndjson": {
+        "actual_sha256": "0e4fbe6a1b9aced6143dad7683e2d0db0c015d580cd90057a1fe6dd249e3e509",
+        "expected_sha256": "0e4fbe6a1b9aced6143dad7683e2d0db0c015d580cd90057a1fe6dd249e3e509",
+        "matched": true,
+        "object_type": "turnover_relations"
+      },
+      "collections/workbench_candidate_matches.ndjson": {
+        "actual_sha256": "48c67a108ddd9f5e8dedf8824f9ca9792ef2ed376779433771487422b6abe783",
+        "expected_sha256": "48c67a108ddd9f5e8dedf8824f9ca9792ef2ed376779433771487422b6abe783",
+        "matched": true,
+        "object_type": "workbench_candidate_matches"
+      },
+      "collections/workbench_exception_cases.ndjson": {
+        "actual_sha256": "ae5951f0585b36eff510d6f358b522bb61e11fb9c2b4d2fd03ecdfb401b1db98",
+        "expected_sha256": "ae5951f0585b36eff510d6f358b522bb61e11fb9c2b4d2fd03ecdfb401b1db98",
+        "matched": true,
+        "object_type": "workbench_exception_cases"
+      },
+      "collections/workbench_matching_dirty_scopes.ndjson": {
+        "actual_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "matched": true,
+        "object_type": "workbench_matching_dirty_scopes"
+      },
+      "collections/workbench_overrides.ndjson": {
+        "actual_sha256": "fbc144e7e04ae5f4c8443cd5be458c4d3fe34eae5788ae9279163c405158528e",
+        "expected_sha256": "fbc144e7e04ae5f4c8443cd5be458c4d3fe34eae5788ae9279163c405158528e",
+        "matched": true,
+        "object_type": "workbench_overrides"
+      },
+      "collections/workbench_pair_relations.ndjson": {
+        "actual_sha256": "9c0292c7662e7f0a3f26aa7208a9605863b37ad7351b47854e02d28290cd297c",
+        "expected_sha256": "9c0292c7662e7f0a3f26aa7208a9605863b37ad7351b47854e02d28290cd297c",
+        "matched": true,
+        "object_type": "workbench_pair_relations"
+      },
+      "collections/workbench_read_models.ndjson": {
+        "actual_sha256": "198b25c40ae2a56a92d48cff11228bc4db80175c836f748bab0a93a455bd391b",
+        "expected_sha256": "198b25c40ae2a56a92d48cff11228bc4db80175c836f748bab0a93a455bd391b",
+        "matched": true,
+        "object_type": "workbench_read_models"
+      }
+    },
+    "manifest_id": "a4227942-8eff-4876-8648-be1fbd821f43",
+    "migration_run_id": "a4227942-8eff-4876-8648-be1fbd821f43",
+    "phase": "staging_import",
+    "schema_notes": [
+      {
+        "code": "LEGACY_ID_MAP_DEFERRED_TO_06C",
+        "message": "staging.legacy_id_map target_schema, target_table, and target_id require facts mapping; 06B emits legacy_id_map_draft but does not write the table."
+      }
+    ],
+    "started_at": "2026-05-17T00:59:43.275601+00:00",
+    "status": "passed",
+    "tool": "app-mongo-staging-import-v1",
+    "validated_import_plan_counts": {
+      "app_health_alerts": 1,
+      "app_settings": 1,
+      "background_jobs": 76,
+      "bank_transaction_categories": 6,
+      "bank_transactions": 431,
+      "cost_statistics_read_models": 34,
+      "etc_reconciliation_state": 1,
+      "etc_state": 1,
+      "import_batches": 6,
+      "import_file_blobs.files": 462,
+      "invoices": 391,
+      "no_oa_bank_batch_audit_log": 58,
+      "no_oa_bank_batches": 54,
+      "oa_attachment_invoice_cache": 7026,
+      "oa_sync_state": 1,
+      "tax_offset_read_models": 1,
+      "turnover_relation_audit_log": 1,
+      "turnover_relations": 2,
+      "workbench_candidate_matches": 2420,
+      "workbench_exception_cases": 2,
+      "workbench_pair_relations": 101,
+      "workbench_read_models": 6,
+      "workbench_row_overrides": 2
+    }
+  },
+  "warnings": [
+    {
+      "code": "VALIDATE_ONLY_NOT_IMPORT_SUCCESS",
+      "message": "导入计划和 hash 校验通过，但 validate-only 不能作为 PostgreSQL staging 导入成功证据。"
+    }
+  ]
+}
