@@ -22,6 +22,10 @@
 - `/api/app-health*`：健康状态。
 - `/health`、`/healthz`、`/readyz`、`/metrics`、`/api/app-metadata`：Axum 基础健康和元数据。
 
+## 剩余未迁移合同冻结
+
+`pending_contract` 和 `blocked_fact_source` route 的逐条生产级合同见 `docs/architecture/backend-refactor/remaining-api-contracts.md`。该文档冻结后续实现所需的 source contract、target tables、write command、audit/outbox event、read model invalidation、idempotency、permission、rollback 和 shadow fixture plan，但不改变 API inventory 状态，也不代表 route 已迁移或 shadow gate 已通过。
+
 ## 工作台 DTO
 
 工作台 DTO 的详细结构见 `reconciliation-workbench-v2-data-contracts.md`。

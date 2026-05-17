@@ -258,4 +258,28 @@
 - 任一未解释 diff 均保持 `NO_GO`，不得切生产流量。
 - `api_shadow_validation` readiness gate 必须同时看到同名 `api-shadow-validation-report-YYYYMMDD.json` 和 `.md` 证据；JSON 需证明 fixture 校验、endpoint 计数和所有结果均为 `GO`，Markdown 需包含 `Gate: **GO**`。
 - Inventory 中任一未迁移 Python route 必须写入 `blocked_routes` 逐路由 blocker；生成的 route-level inventory 会把 blocker 展开到每条 route。缺少 blocker 视为 `NO_GO`，避免用领域级说明掩盖遗漏路由或未冻结响应字段。
+
+## Batch 5：P4-09 剩余 pending/blocked route 合同冻结
+
+范围：
+
+- 18 条 `pending_contract` route。
+- 32 条 `blocked_fact_source` route。
+- 逐条合同见 `docs/architecture/backend-refactor/remaining-api-contracts.md`。
+
+本批只冻结合同和 blocker，不实现半成品 route，不改变 API inventory 状态，不放宽 shadow gate。
+
+分批实现顺序：
+
+| 后续批次 | 范围 | 主要前置 |
+| --- | --- | --- |
+| P4-09A platform legacy | background job ack/retry、settings/project/data reset、projects、ledgers、reminders、imports preview/confirm/retry/revert/session、matching run/results | settings/project/ledger/reminder/import session/matching result schema；job/outbox replay fixture。 |
+| P4-09B finance / tax / ETC | bank category write、turnover relation extra/confirm/withdraw、ETC import/reconciliation/batch/invoice writes、tax certified preview/confirm、workbench exception preview | turnover extra/events、ETC task/batch events、tax certified preview、exception preview projection。 |
+| P4-09C binary export | turnover XLSX、cost statistics XLSX、import batch download/archive | workbook/zip manifest、Content-Disposition、large-result paging/async job、object access envelope。 |
+
+状态要求：
+
+- `pending_contract` 和 `blocked_fact_source` 必须保持原状态，直到实现、shadow fixture 和 readiness evidence 全部通过。
+- 合同文档不得作为实现完成证据。
+- 任一事实源不清楚的 route 继续 `blocked_fact_source`。
 - Inventory 检查同时扫描旧 Python `readiness_summary.entrypoints`。任一 readiness entrypoint 没有被 route inventory 覆盖时视为 `NO_GO`，用于捕捉 dispatch 正则扫描遗漏的委托路由或仅在 readiness 中公布的业务入口。
