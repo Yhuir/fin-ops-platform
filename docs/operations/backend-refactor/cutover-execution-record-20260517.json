@@ -1,121 +1,113 @@
 {
   "record_id": "cutover-execution-record-20260517",
-  "generated_at": "2026-05-17T07:11:51+08:00",
+  "task_id": "p4-16-final-formal-cutover-i-readonly",
+  "status": "blocked_not_executed",
+  "go_no_go": "NO_GO",
+  "generated_at": "2026-05-17T10:15:29+08:00",
   "operator": "Codex",
-  "branch": "refactor-backend",
-  "execution_status": "blocked_not_executed",
-  "blocking_gate": "formal-migration-go-no-go-20260517",
-  "readiness_gate_status": "NO_GO",
+  "scope": "P4-11 cutover/rollback execution record template prepared from final P4-12 review. This record is blocked because readiness gate is NO_GO and no explicit production cutover authorization exists.",
+  "formal_go_no_go_evidence": "docs/operations/backend-refactor/formal-migration-go-no-go-20260517.json",
   "authorization": {
     "production_cutover_requested": false,
     "production_cutover_obtained": false,
-    "authorization_source": "none"
+    "authorization_source": "none; readiness gate did not pass",
+    "conversation_context_treated_as_authorization": false
   },
   "preconditions": {
     "readiness_gate_go": false,
     "maintenance_window_confirmed": false,
     "rollback_path_confirmed": false,
     "latest_app_mongo_freeze_point_backup_confirmed": false,
-    "latest_known_app_mongo_backup_evidence": "docs/operations/backend-refactor/app-mongo-backup-runbook.md"
+    "explicit_user_authorization_confirmed": false
   },
-  "cutover_sequence": [
-    {
-      "order": 1,
-      "phase": "shadow_read",
-      "started_at": null,
-      "ended_at": null,
-      "metrics": "not_collected",
-      "owner": "not_assigned",
-      "rollback_point": "old Python/API routes unchanged",
-      "result": "blocked_not_executed"
-    },
-    {
-      "order": 2,
-      "phase": "small_scope_read_switch",
-      "started_at": null,
-      "ended_at": null,
-      "metrics": "not_collected",
-      "owner": "not_assigned",
-      "rollback_point": "old Python/API routes unchanged",
-      "result": "blocked_not_executed"
-    },
-    {
-      "order": 3,
-      "phase": "dual_write",
-      "started_at": null,
-      "ended_at": null,
-      "metrics": "not_collected",
-      "owner": "not_assigned",
-      "rollback_point": "dual write never enabled",
-      "result": "blocked_not_executed"
-    },
-    {
-      "order": 4,
-      "phase": "full_read_switch",
-      "started_at": null,
-      "ended_at": null,
-      "metrics": "not_collected",
-      "owner": "not_assigned",
-      "rollback_point": "API routes unchanged",
-      "result": "blocked_not_executed"
-    },
-    {
-      "order": 5,
-      "phase": "stop_old_writes",
-      "started_at": null,
-      "ended_at": null,
-      "metrics": "not_collected",
-      "owner": "not_assigned",
-      "rollback_point": "old writes unchanged",
-      "result": "blocked_not_executed"
-    },
-    {
-      "order": 6,
-      "phase": "archive_freeze_app_mongo",
-      "started_at": null,
-      "ended_at": null,
-      "metrics": "not_collected",
-      "owner": "not_assigned",
-      "rollback_point": "app Mongo unchanged",
-      "result": "blocked_not_executed"
-    }
-  ],
   "production_actions": {
-    "cutover_commands_executed": false,
+    "oa_source_database_accessed": false,
     "shadow_read_enabled": false,
     "small_scope_read_switch_executed": false,
     "dual_write_enabled": false,
     "full_read_switch_executed": false,
     "old_writes_stopped": false,
-    "app_mongo_frozen": false,
-    "app_mongo_archived": false,
+    "app_mongo_frozen_or_archived": false,
     "app_mongo_deleted": false,
-    "oa_source_database_accessed": false,
-    "postgres_promoted_to_fact_source": false,
-    "old_mongo_overwrote_postgres": false
+    "destructive_commands_executed": false
   },
-  "observations": {
-    "api_route": "unchanged",
-    "traffic_metrics": "not_collected",
-    "error_rate": "not_collected",
-    "postgres_metrics": "not_collected",
-    "nats_worker_metrics": "not_collected",
-    "read_model_metrics": "not_collected",
-    "alerts": "not_collected"
-  },
-  "rollback_status": {
-    "read_route_rollback": "not_needed",
-    "dual_write_rollback": "not_needed",
-    "outbox_or_compensation_replay": "not_needed",
-    "file_restore": "not_needed",
-    "postgres_destructive_cleanup": "not_executed_not_allowed",
-    "app_mongo_restore": "not_needed"
-  },
-  "blocking_reasons": [
-    "Readiness gate is NO_GO with 9 blocking checks.",
-    "No explicit production cutover authorization was provided.",
-    "Maintenance window is not confirmed.",
-    "Rollback path is not confirmed by drill evidence.",
-    "Required PostgreSQL backup/PITR, migration dry-run, file checksum, API shadow, NATS/worker, read model, monitoring, and load test evidence is missing or failed."
+  "execution_steps": [
+    {
+      "order": 1,
+      "phase": "shadow_read",
+      "status": "blocked_not_executed",
+      "start_time": null,
+      "end_time": null,
+      "operator": "not_assigned",
+      "authorization_required": true,
+      "expected_action_when_authorized": "Enable Axum shadow reads against PostgreSQL while users still receive old Python API responses.",
+      "actual_result": "Not executed because readiness gate is NO_GO and authorization is absent."
+    },
+    {
+      "order": 2,
+      "phase": "small_scope_read_switch",
+      "status": "blocked_not_executed",
+      "start_time": null,
+      "end_time": null,
+      "operator": "not_assigned",
+      "authorization_required": true,
+      "expected_action_when_authorized": "Switch an approved low-risk read route group to Axum and keep rollback route to old Python available.",
+      "actual_result": "Not executed because readiness gate is NO_GO and authorization is absent."
+    },
+    {
+      "order": 3,
+      "phase": "dual_write",
+      "status": "blocked_not_executed",
+      "start_time": null,
+      "end_time": null,
+      "operator": "not_assigned",
+      "authorization_required": true,
+      "expected_action_when_authorized": "Enable reviewed dual-write for approved write paths with idempotency, audit, outbox, and reconciliation evidence.",
+      "actual_result": "Not executed because readiness gate is NO_GO and authorization is absent."
+    },
+    {
+      "order": 4,
+      "phase": "full_read_switch",
+      "status": "blocked_not_executed",
+      "start_time": null,
+      "end_time": null,
+      "operator": "not_assigned",
+      "authorization_required": true,
+      "expected_action_when_authorized": "Switch all approved migrated read route groups to Axum after shadow and small-scope evidence is GO.",
+      "actual_result": "Not executed because readiness gate is NO_GO and authorization is absent."
+    },
+    {
+      "order": 5,
+      "phase": "stop_old_writes",
+      "status": "blocked_not_executed",
+      "start_time": null,
+      "end_time": null,
+      "operator": "not_assigned",
+      "authorization_required": true,
+      "expected_action_when_authorized": "Stop or redirect old Python write paths only after PostgreSQL is accepted as fact source and rollback constraints are approved.",
+      "actual_result": "Not executed because readiness gate is NO_GO and authorization is absent."
+    },
+    {
+      "order": 6,
+      "phase": "archive_freeze_app_mongo",
+      "status": "blocked_not_executed",
+      "start_time": null,
+      "end_time": null,
+      "operator": "not_assigned",
+      "authorization_required": true,
+      "expected_action_when_authorized": "Create and confirm an app Mongo freeze-point backup, then archive/freeze without deleting app Mongo.",
+      "actual_result": "Not executed because readiness gate is NO_GO and authorization is absent."
+    }
+  ],
+  "rollback_constraints": [
+    "App Mongo must not be deleted.",
+    "No old Mongo full overwrite of PostgreSQL is allowed after PostgreSQL becomes the fact source.",
+    "Any future execution must preserve audit evidence, rollback point, owner, and route/feature flag snapshots.",
+    "Any future execution must avoid OA source database access and must not write secrets or complete service URIs to reports."
+  ],
+  "blocked_reason": "Readiness gate status is NO_GO with 9 blocking checks, and explicit production cutover authorization is absent.",
+  "remaining_risks": [
+    "The execution sequence is only a record template until all readiness evidence is GO.",
+    "No operator, approver, business owner, rollback owner, maintenance window, or freeze-point backup is confirmed for execution."
   ]
 }

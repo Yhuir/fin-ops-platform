@@ -1,83 +1,64 @@
-# P4-11 切换执行记录 - 20260517
+# 切换执行记录 - 20260517
 
-本文对应任务 `formal-cutover-i` 和 P4-11：shadow read、small-scope read switch、dual write、full read switch、stop old writes、archive/freeze app Mongo。本次由于 P4-12 readiness gate 为 `NO_GO` 且没有用户明确生产切换授权，切换被阻断，状态为 `blocked_not_executed`。
+本文对应任务 `p4-16-final-formal-cutover-i-readonly`，用于准备 P4-11 cutover/rollback execution record。由于 readiness gate 当前为 `NO_GO`，且没有用户明确文字授权生产切换，本记录状态为 `blocked_not_executed`。
 
-## 执行结论
+## 基本信息
 
-| 项目 | 结果 |
+| 项 | 值 |
 | --- | --- |
-| generated_at | `2026-05-17 07:11:51 CST` |
+| generated_at | `2026-05-17T10:15:29+08:00` |
 | operator | Codex |
-| execution_status | `blocked_not_executed` |
-| blocking_gate | `formal-migration-go-no-go-20260517` |
-| readiness_gate_status | `NO_GO` |
-| user cutover authorization | not_requested_not_obtained |
-| maintenance window confirmed | no |
-| rollback path confirmed | no |
-| latest app Mongo freeze-point backup confirmed | no freeze-point backup created; latest backup/restore evidence only from `2026-05-16 01:29:00 CST` |
-| production cutover commands executed | no |
-| rollback triggered | no |
+| status | `blocked_not_executed` |
+| go/no-go | `NO_GO` |
+| formal go/no-go evidence | `docs/operations/backend-refactor/formal-migration-go-no-go-20260517.json` |
+| production cutover requested | no |
+| production cutover authorized | no |
+| conversation context treated as authorization | no |
 | OA source database accessed | no |
 
-## 阻断原因
+## 前置条件复核
 
-1. Readiness gate 返回 `NO_GO`，`blocking_count=9`。
-2. 用户没有明确文字授权生产切换；本次请求明确要求无授权时只输出 blocked record。
-3. 维护窗口未确认。
-4. 回滚路径只有 runbook/template，未发现演练 GO 记录。
-5. PostgreSQL backup/PITR、dry-run reconciliation、file checksum、API shadow、NATS/worker replay、read model rebuild、monitoring alerts 和 load test 证据缺失或未通过。
-6. 最新 app Mongo 备份/恢复记录存在，但不是本次切换前冻结点备份，且不足以单独进入 P4-11。
-
-## P4-11 串行步骤记录
-
-| 顺序 | 步骤 | started_at | ended_at | metrics | owner | rollback_point | result |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | shadow read | not_started | not_started | not_collected | not_assigned | old Python/API routes unchanged | blocked_not_executed |
-| 2 | small-scope read switch | not_started | not_started | not_collected | not_assigned | old Python/API routes unchanged | blocked_not_executed |
-| 3 | dual write | not_started | not_started | not_collected | not_assigned | dual write never enabled | blocked_not_executed |
-| 4 | full read switch | not_started | not_started | not_collected | not_assigned | API routes unchanged | blocked_not_executed |
-| 5 | stop old writes | not_started | not_started | not_collected | not_assigned | old writes unchanged | blocked_not_executed |
-| 6 | archive/freeze app Mongo | not_started | not_started | not_collected | not_assigned | app Mongo unchanged | blocked_not_executed |
-
-## 观测结果
-
-本次没有执行生产操作，因此没有新的生产指标快照、切流前后对比、流量观测或错误率变化。
-
-| 观测项 | 结果 |
+| 条件 | 状态 |
 | --- | --- |
-| API route | unchanged |
-| shadow read | not_enabled |
-| dual write | not_enabled |
-| old writes | unchanged |
-| PostgreSQL fact source role | not_promoted |
-| app Mongo role | old fact source and rollback reference |
-| app Mongo freeze/archive | not_executed |
-| app Mongo delete | not_executed |
-| rollback | not_needed |
+| readiness gate 为 `GO` | no |
+| 维护窗口确认 | no |
+| 回滚路径确认 | no |
+| latest app Mongo freeze-point backup 确认 | no |
+| 用户明确文字授权生产切换 | no |
 
-## 回滚状态
+## P4-11 执行顺序记录
 
-| 回滚项 | 状态 |
-| --- | --- |
-| read route rollback | not_needed |
-| dual write rollback | not_needed |
-| outbox or compensation replay | not_needed |
-| file restore | not_needed |
-| PostgreSQL destructive cleanup | not_executed_not_allowed |
-| app Mongo restore | not_needed |
+以下是执行顺序模板，不是已执行记录。
 
-如果后续 P4-12 转为 `GO` 并获得明确生产切换授权，P4-11 仍必须按以下顺序从头执行：shadow read -> small-scope read switch -> dual write -> full read switch -> stop old writes -> archive/freeze app Mongo。
+| order | phase | status | start/end | expected action when authorized | actual result |
+| --- | --- | --- | --- | --- | --- |
+| 1 | shadow_read | `blocked_not_executed` | - / - | 启用 Axum shadow read，用户仍看旧 Python API。 | 未执行；readiness gate `NO_GO` 且无授权。 |
+| 2 | small_scope_read_switch | `blocked_not_executed` | - / - | 小范围低风险读 route group 切到 Axum，并保留旧 Python 回滚路由。 | 未执行；readiness gate `NO_GO` 且无授权。 |
+| 3 | dual_write | `blocked_not_executed` | - / - | 对已评审写路径启用 dual-write，并具备 idempotency、audit、outbox 和对账证据。 | 未执行；readiness gate `NO_GO` 且无授权。 |
+| 4 | full_read_switch | `blocked_not_executed` | - / - | shadow 和小范围读证据为 `GO` 后，迁移全部已批准读 route group。 | 未执行；readiness gate `NO_GO` 且无授权。 |
+| 5 | stop_old_writes | `blocked_not_executed` | - / - | PostgreSQL 被接受为事实源后，停止或转发旧 Python 写路径。 | 未执行；readiness gate `NO_GO` 且无授权。 |
+| 6 | archive_freeze_app_mongo | `blocked_not_executed` | - / - | 创建并确认 app Mongo freeze-point backup 后归档/冻结；不得删除 app Mongo。 | 未执行；readiness gate `NO_GO` 且无授权。 |
 
-## 禁止事项确认
+## 未执行动作确认
 
-- 未执行任何生产切流命令。
-- 未开启 shadow read。
+- 未执行 shadow read。
 - 未执行 small-scope read switch。
-- 未开启 dual write。
+- 未开启 dual-write。
 - 未执行 full read switch。
-- 未停止旧写。
-- 未冻结、归档或删除 app Mongo。
-- 未将 PostgreSQL 设为事实源。
-- 未用旧 Mongo 覆盖 PostgreSQL。
+- 未停止 old writes。
+- 未 archive/freeze app Mongo。
+- 未删除 app Mongo。
+- 未执行破坏性命令。
 - 未访问 OA 源数据库。
 - 未写入 secret、完整 URI、密码、token、S3 credential 或 NATS credential。
+
+## 回滚约束
+
+- 禁止删除 app Mongo。
+- PostgreSQL 成为事实源后，禁止旧 Mongo 全量覆盖 PostgreSQL。
+- 任何未来执行必须记录 audit evidence、rollback point、operator、approver、business owner、rollback owner、route snapshot 和 feature flag snapshot。
+- 任何未来执行不得访问 OA 源数据库，不得把 secret 或完整服务 URI 写入报告。
+
+## blocked_not_executed 原因
+
+readiness gate 当前为 `NO_GO`，有 9 个 blocking checks；没有维护窗口确认、回滚路径确认、latest app Mongo freeze-point backup 确认，也没有用户明确文字授权生产切换。因此本任务停止在证据记录阶段，不请求授权、不执行 P4-11。

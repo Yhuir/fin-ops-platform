@@ -1,19 +1,21 @@
 # 正式迁移 Go/No-Go 门禁报告 - 20260517
 
-本文对应任务 `formal-cutover-i` 和 P4-12：正式 app Mongo -> PostgreSQL 迁移与切换前门禁。本次只做证据复核和结论记录，不迁移生产数据，不冻结 app Mongo，不执行双写，不切换 API，不访问 OA 源数据库。
+本文对应任务 `p4-16-final-formal-cutover-i-readonly`：最终复核 P4-12 formal go/no-go，并准备 P4-11 cutover/rollback execution record。本次只做只读证据复核和记录，不迁移生产数据、不冻结 app Mongo、不执行双写、不切换 API、不访问 OA 源数据库。
 
 ## 基本信息
 
 | 项 | 值 |
 | --- | --- |
-| generated_at | `2026-05-17 07:11:51 CST` |
+| generated_at | `2026-05-17T10:15:29+08:00` |
 | operator | Codex |
 | branch | `refactor-backend` |
-| scope | P4-12 formal go/no-go evidence review and P4-11 preparation gate |
+| scope | Final read-only P4-12 formal go/no-go review and P4-11 cutover execution record preparation |
 | readiness command | `python3 scripts/tools/backend_refactor_readiness_gate.py --format json` |
 | readiness status | `NO_GO` |
 | blocking_count | `9` |
-| user cutover authorization | not_requested_not_obtained |
+| passed_count | `1` |
+| user cutover authorization requested | no |
+| user cutover authorization obtained | no |
 | production cutover commands executed | no |
 | OA source database accessed | no |
 
@@ -22,69 +24,66 @@
 | 项目 | 结论 |
 | --- | --- |
 | GO/NO_GO | `NO_GO` |
-| 是否允许正式迁移生产数据 | 否 |
 | 是否允许进入 P4-11 生产切换执行 | 否 |
-| 是否允许影子读 | 否 |
-| 是否允许小流量读切换 | 否 |
-| 是否允许双写 | 否 |
-| 是否允许全量切读 | 否 |
-| 是否允许停止旧写 | 否 |
-| 是否允许冻结或归档 app Mongo | 否 |
+| 是否允许请求生产切换授权 | 否。本次任一 check 未通过即停止，不请求授权。 |
+| execution record | `blocked_not_executed` |
+| 是否执行 shadow read | 否 |
+| 是否执行 small-scope read switch | 否 |
+| 是否执行 dual write | 否 |
+| 是否执行 full read switch | 否 |
+| 是否停止 old writes | 否 |
+| 是否 archive/freeze app Mongo | 否 |
+| 是否删除 app Mongo | 否，禁止删除。 |
 
-`NO_GO` 的直接原因：readiness gate 只有 App Mongo 备份/恢复证据通过；PostgreSQL backup/PITR、06C dry-run、GridFS/MinIO checksum、API shadow validation、NATS/worker replay、read model rebuild、monitoring alerts、load test、maintenance window/rollback drill 均缺失或未通过。
+`NO_GO` 的直接原因：readiness gate 只有 App Mongo backup/restore 通过；PostgreSQL backup/PITR、06C dry-run、GridFS/MinIO checksum、API shadow validation、NATS/worker replay、read model rebuild、monitoring alerts、load test、maintenance window/rollback drill 均为 failed。
 
 ## 证据路径表
 
 | Check | Status | Evidence | Reason | 修复 prompt |
 | --- | --- | --- | --- | --- |
-| `app_mongo_backup_restore` | `passed` | `docs/operations/backend-refactor/app-mongo-backup-runbook.md` | required marker found; backup checksum and restore drill recorded | - |
-| `postgres_backup_pitr` | `missing` | - | required evidence file is missing | `docs/exec-plans/active/backend-refactor-prompts/10-observability-security-readiness.md` |
-| `migration_dry_run` | `failed` | `docs/operations/backend-refactor/migration-dry-run-report-20260516.md` | evidence exists but does not contain a passing marker | `docs/exec-plans/active/backend-refactor-prompts/06c-data-migration-dry-run.md` |
-| `file_checksum` | `missing` | - | required evidence file is missing | `docs/exec-plans/active/backend-refactor-prompts/06d-gridfs-minio-migration.md` |
-| `api_shadow_validation` | `missing` | - | required evidence file is missing | `docs/exec-plans/active/backend-refactor-prompts/09a-low-risk-read-apis.md` |
-| `nats_worker_replay` | `missing` | - | required evidence file is missing | `docs/exec-plans/active/backend-refactor-prompts/07-outbox-queue-worker.md` |
-| `read_model_rebuild` | `missing` | - | required evidence file is missing | `docs/exec-plans/active/backend-refactor-prompts/08-read-models-and-search.md` |
-| `monitoring_alerts` | `missing` | - | required evidence file is missing | `docs/exec-plans/active/backend-refactor-prompts/10-observability-security-readiness.md` |
-| `load_test` | `missing` | - | required evidence file is missing | `docs/exec-plans/active/backend-refactor-prompts/10-observability-security-readiness.md` |
-| `cutover_window_rollback` | `missing` | - | required evidence file is missing | `docs/exec-plans/active/backend-refactor-prompts/11-cutover-and-rollback.md` |
+| `app_mongo_backup_restore` | `passed` | `docs/operations/backend-refactor/app-mongo-backup-restore-report-20260517.json`<br>`docs/operations/backend-refactor/app-mongo-backup-restore-report-20260517.md`<br>`docs/operations/backend-refactor/app-mongo-backup-runbook.md` | machine-readable GO evidence found for app-mongo-backup-restore-report-20260517 | - |
+| `postgres_backup_pitr` | `failed` | `docs/operations/backend-refactor/postgres-pitr-drill-20260517.json`<br>`docs/operations/backend-refactor/postgres-pitr-drill-20260517.md` | evidence exists but does not contain a passing marker | `docs/exec-plans/active/backend-refactor-prompts/10-observability-security-readiness.md` |
+| `migration_dry_run` | `failed` | `docs/operations/backend-refactor/migration-dry-run-report-20260516.md`<br>`docs/operations/backend-refactor/migration-dry-run-report-20260517.json`<br>`docs/operations/backend-refactor/migration-dry-run-report-20260517.md` | evidence exists but does not contain a passing marker | `docs/exec-plans/active/backend-refactor-prompts/06c-data-migration-dry-run.md` |
+| `file_checksum` | `failed` | `docs/operations/backend-refactor/gridfs-minio-migration-report-20260517.json`<br>`docs/operations/backend-refactor/gridfs-minio-migration-report-20260517.md` | evidence exists but does not contain a passing marker | `docs/exec-plans/active/backend-refactor-prompts/06d-gridfs-minio-migration.md` |
+| `api_shadow_validation` | `failed` | `docs/operations/backend-refactor/api-shadow-validation-report-20260517.json`<br>`docs/operations/backend-refactor/api-shadow-validation-report-20260517.md` | paired API shadow reports exist but no pair has complete GO JSON and GO Markdown evidence | `docs/exec-plans/active/backend-refactor-prompts/09a-low-risk-read-apis.md` |
+| `nats_worker_replay` | `failed` | `docs/operations/backend-refactor/nats-worker-validation-report-20260517.json`<br>`docs/operations/backend-refactor/nats-worker-validation-report-20260517.md` | evidence exists but does not contain a passing marker | `docs/exec-plans/active/backend-refactor-prompts/07-outbox-queue-worker.md` |
+| `read_model_rebuild` | `failed` | `docs/operations/backend-refactor/read-model-rebuild-validation-report-20260517.json`<br>`docs/operations/backend-refactor/read-model-rebuild-validation-report-20260517.md` | evidence exists but does not contain a passing marker | `docs/exec-plans/active/backend-refactor-prompts/08-read-models-and-search.md` |
+| `monitoring_alerts` | `failed` | `docs/operations/backend-refactor/monitoring-alert-verification-20260517.json`<br>`docs/operations/backend-refactor/monitoring-alert-verification-20260517.md` | monitoring evidence exists but lacks complete P0/P1 alert verification or has metric gaps | `docs/exec-plans/active/backend-refactor-prompts/10-observability-security-readiness.md` |
+| `load_test` | `failed` | `docs/operations/backend-refactor/load-test-baseline-20260517.json`<br>`docs/operations/backend-refactor/load-test-baseline-20260517.md` | paired load test baseline reports exist but no pair has complete GO JSON and GO Markdown evidence | `docs/exec-plans/active/backend-refactor-prompts/10-observability-security-readiness.md` |
+| `cutover_window_rollback` | `failed` | `docs/operations/backend-refactor/cutover-window-approval-20260517.md`<br>`docs/operations/backend-refactor/rollback-drill-record-20260517.json`<br>`docs/operations/backend-refactor/rollback-drill-record-20260517.md` | evidence exists but does not contain a passing marker | `docs/exec-plans/active/backend-refactor-prompts/11-cutover-and-rollback.md` |
 
-## 复核证据摘要
+## P4-11 进入条件复核
 
-| 证据项 | 当前状态 | 路径 |
+| 条件 | 状态 | 说明 |
 | --- | --- | --- |
-| latest app Mongo backup/restore | `GO` for backup/restore only. Backup time `2026-05-16 01:29:00 CST`, checksum recorded, restore test collection count `diff=0`, GridFS sample `integrity=OK`. | `docs/operations/backend-refactor/app-mongo-backup-runbook.md` |
-| PostgreSQL backup/PITR | `NO_GO`; runbook records PITR not configured and logical backup drill not executed. | `docs/operations/backend-refactor/server-postgresql-runbook.md` |
-| migration dry-run | `NO_GO`; missing actual 06A manifest/NDJSON, 06B staging import report, staging -> facts dry-run, and count/hash/amount/month/status/file checksum reconciliation data. | `docs/operations/backend-refactor/migration-dry-run-report-20260516.md` |
-| GridFS/MinIO checksum | `NO_GO`; only templates/manifest format exist, no executable checksum validation report. | `docs/operations/backend-refactor/gridfs-minio-migration-report-template.md` |
-| API shadow validation | `NO_GO`; no `api-shadow-validation-report-*` or paired JSON/Markdown GO evidence found. | missing |
-| NATS/outbox/worker replay | `NO_GO`; template/runbook exists, no staging validation/replay report found. | `docs/operations/backend-refactor/nats-worker-replay-validation-report-template.md` |
-| read model rebuild | `NO_GO`; template exists, no completed rebuild validation report found. | `docs/operations/backend-refactor/read-model-rebuild-validation-report-template.md` |
-| monitoring alerts | `NO_GO`; alert verification template exists, no completed P0/P1 staging verification report found. | `docs/operations/backend-refactor/monitoring-alert-verification-report-template.md` |
-| load test | `NO_GO`; no staging load test baseline report found. | missing |
-| rollback drill and maintenance window | `NO_GO`; runbook exists, no maintenance approval or rollback drill GO evidence found. | `docs/operations/backend-refactor/cutover-and-rollback-runbook.md` |
+| readiness gate 为 `GO` | `NO_GO` | 9 个阻断项。 |
+| 用户明确文字授权生产切换 | `NO_GO` | 未请求、未获得；当前对话上下文不作为授权。 |
+| 维护窗口确认 | `NO_GO` | `cutover-window-approval-20260517.md` 为候选窗口，未正式批准。 |
+| 回滚路径确认 | `NO_GO` | `rollback-drill-record-20260517.md` 为 `NO_GO`，未执行演练。 |
+| latest app Mongo freeze-point backup 确认 | `NO_GO` | 现有 app Mongo backup/restore 为 `GO`，但不是 cutover-window freeze-point backup。 |
 
 ## 阻断项
 
-| ID | 阻断项 | 修复 prompt |
-| --- | --- | --- |
-| `FORMAL-CUTOVER-I-BLOCK-001` | PostgreSQL backup/PITR or restore drill evidence missing. | `docs/exec-plans/active/backend-refactor-prompts/10-observability-security-readiness.md` |
-| `FORMAL-CUTOVER-I-BLOCK-002` | 06C data dry-run report is present but `NO_GO`; actual 06A/06B/06C reconciliation evidence missing. | `docs/exec-plans/active/backend-refactor-prompts/06c-data-migration-dry-run.md` |
-| `FORMAL-CUTOVER-I-BLOCK-003` | GridFS -> MinIO/S3 checksum validation evidence missing. | `docs/exec-plans/active/backend-refactor-prompts/06d-gridfs-minio-migration.md` |
-| `FORMAL-CUTOVER-I-BLOCK-004` | Python vs Axum shadow read or contract validation evidence missing. | `docs/exec-plans/active/backend-refactor-prompts/09a-low-risk-read-apis.md` |
-| `FORMAL-CUTOVER-I-BLOCK-005` | NATS/outbox/worker staging validation and replay drill evidence missing. | `docs/exec-plans/active/backend-refactor-prompts/07-outbox-queue-worker.md` |
-| `FORMAL-CUTOVER-I-BLOCK-006` | Read model/search rebuild validation evidence missing. | `docs/exec-plans/active/backend-refactor-prompts/08-read-models-and-search.md` |
-| `FORMAL-CUTOVER-I-BLOCK-007` | Prometheus/Grafana/P0/P1 alert verification evidence missing. | `docs/exec-plans/active/backend-refactor-prompts/10-observability-security-readiness.md` |
-| `FORMAL-CUTOVER-I-BLOCK-008` | Staging load test baseline evidence missing. | `docs/exec-plans/active/backend-refactor-prompts/10-observability-security-readiness.md` |
-| `FORMAL-CUTOVER-I-BLOCK-009` | Maintenance window and rollback drill approval evidence missing. | `docs/exec-plans/active/backend-refactor-prompts/11-cutover-and-rollback.md` |
+| ID | check | 阻断项 | 修复 prompt |
+| --- | --- | --- | --- |
+| `P4-16-BLOCK-001` | `postgres_backup_pitr` | PostgreSQL backup/PITR or restore drill evidence is `NO_GO`. | `docs/exec-plans/active/backend-refactor-prompts/10-observability-security-readiness.md` |
+| `P4-16-BLOCK-002` | `migration_dry_run` | 06C data dry-run reconciliation evidence is `NO_GO`. | `docs/exec-plans/active/backend-refactor-prompts/06c-data-migration-dry-run.md` |
+| `P4-16-BLOCK-003` | `file_checksum` | GridFS to MinIO/S3 checksum validation evidence is `NO_GO`. | `docs/exec-plans/active/backend-refactor-prompts/06d-gridfs-minio-migration.md` |
+| `P4-16-BLOCK-004` | `api_shadow_validation` | Python vs Axum shadow validation evidence is `NO_GO`. | `docs/exec-plans/active/backend-refactor-prompts/09a-low-risk-read-apis.md` |
+| `P4-16-BLOCK-005` | `nats_worker_replay` | NATS/outbox/worker staging validation and replay drill evidence is `NO_GO`. | `docs/exec-plans/active/backend-refactor-prompts/07-outbox-queue-worker.md` |
+| `P4-16-BLOCK-006` | `read_model_rebuild` | Read model/search rebuild validation evidence is `NO_GO`. | `docs/exec-plans/active/backend-refactor-prompts/08-read-models-and-search.md` |
+| `P4-16-BLOCK-007` | `monitoring_alerts` | Prometheus/Grafana/P0/P1 alert verification evidence is `NO_GO`. | `docs/exec-plans/active/backend-refactor-prompts/10-observability-security-readiness.md` |
+| `P4-16-BLOCK-008` | `load_test` | Staging load test baseline evidence is `NO_GO`. | `docs/exec-plans/active/backend-refactor-prompts/10-observability-security-readiness.md` |
+| `P4-16-BLOCK-009` | `cutover_window_rollback` | Maintenance window approval and rollback drill evidence is `NO_GO`. | `docs/exec-plans/active/backend-refactor-prompts/11-cutover-and-rollback.md` |
 
 ## Remaining Risks
 
-- PostgreSQL cannot yet be treated as recoverable because backup/PITR evidence is missing.
-- Migration correctness is unproven because dry-run reconciliation is missing actual source/staging/target metrics.
-- File migration correctness is unproven because object store download checksum validation is missing.
-- API compatibility is unproven because no paired shadow/contract validation GO report exists.
-- Worker, read model, monitoring, load, and rollback readiness are unproven in staging.
-- There is no explicit production cutover authorization, no confirmed maintenance window, and no confirmed rollback drill.
+- PostgreSQL recoverability is not production-proven because backup/PITR evidence remains `NO_GO`.
+- Migration correctness is not proven because 06C reconciliation remains `NO_GO`.
+- File migration correctness is not proven because object-store checksum validation remains `NO_GO`.
+- API compatibility is not proven because full unscoped shadow validation remains `NO_GO`.
+- Worker replay, read model rebuild, monitoring alerts, load baseline, maintenance window, rollback drill, and freeze-point backup are not `GO`.
+- There is no explicit production cutover authorization, and no cutover command may be executed from this report.
 
 ## 禁止事项确认
 
@@ -96,4 +95,5 @@
 - 未访问 OA 源数据库。
 - 未开放 PostgreSQL 公网。
 - 未写入 secret、完整 URI、密码、token、S3 credential 或 NATS credential。
+- PostgreSQL 成为事实源后，禁止旧 Mongo 全量覆盖 PostgreSQL。
 - 当前 `NO_GO` 不得解释为生产切换授权。

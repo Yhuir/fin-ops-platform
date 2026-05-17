@@ -1,10 +1,12 @@
 {
   "report_id": "formal-migration-go-no-go-20260517",
-  "generated_at": "2026-05-17T07:11:51+08:00",
+  "task_id": "p4-16-final-formal-cutover-i-readonly",
+  "status": "NO_GO",
+  "go_no_go": "NO_GO",
+  "generated_at": "2026-05-17T10:15:29+08:00",
   "operator": "Codex",
   "branch": "refactor-backend",
-  "scope": "P4-12 formal go/no-go evidence review and P4-11 preparation gate",
-  "decision": "NO_GO",
+  "scope": "Final read-only P4-12 formal go/no-go review and P4-11 cutover execution record preparation. No production cutover, freeze, dual-write, route switch, or destructive command is authorized or executed by this report.",
   "readiness_gate": {
     "command": "python3 scripts/tools/backend_refactor_readiness_gate.py --format json",
     "status": "NO_GO",
@@ -16,17 +18,22 @@
         "label": "App Mongo backup, checksum and restore drill",
         "status": "passed",
         "evidence": [
+          "docs/operations/backend-refactor/app-mongo-backup-restore-report-20260517.json",
+          "docs/operations/backend-refactor/app-mongo-backup-restore-report-20260517.md",
           "docs/operations/backend-refactor/app-mongo-backup-runbook.md"
         ],
-        "reason": "required marker found in docs/operations/backend-refactor/app-mongo-backup-runbook.md",
+        "reason": "machine-readable GO evidence found for app-mongo-backup-restore-report-20260517",
         "blocking_prompt": null
       },
       {
         "check_id": "postgres_backup_pitr",
         "label": "PostgreSQL backup and PITR or restore drill",
-        "status": "missing",
-        "evidence": [],
-        "reason": "required evidence file is missing",
+        "status": "failed",
+        "evidence": [
+          "docs/operations/backend-refactor/postgres-pitr-drill-20260517.json",
+          "docs/operations/backend-refactor/postgres-pitr-drill-20260517.md"
+        ],
+        "reason": "evidence exists but does not contain a passing marker",
         "blocking_prompt": "docs/exec-plans/active/backend-refactor-prompts/10-observability-security-readiness.md"
       },
       {
@@ -34,7 +41,9 @@
         "label": "06C data dry-run reconciliation report",
         "status": "failed",
         "evidence": [
-          "docs/operations/backend-refactor/migration-dry-run-report-20260516.md"
+          "docs/operations/backend-refactor/migration-dry-run-report-20260516.md",
+          "docs/operations/backend-refactor/migration-dry-run-report-20260517.json",
+          "docs/operations/backend-refactor/migration-dry-run-report-20260517.md"
         ],
         "reason": "evidence exists but does not contain a passing marker",
         "blocking_prompt": "docs/exec-plans/active/backend-refactor-prompts/06c-data-migration-dry-run.md"
@@ -42,57 +51,79 @@
       {
         "check_id": "file_checksum",
         "label": "GridFS to MinIO/S3 checksum validation",
-        "status": "missing",
-        "evidence": [],
-        "reason": "required evidence file is missing",
+        "status": "failed",
+        "evidence": [
+          "docs/operations/backend-refactor/gridfs-minio-migration-report-20260517.json",
+          "docs/operations/backend-refactor/gridfs-minio-migration-report-20260517.md"
+        ],
+        "reason": "evidence exists but does not contain a passing marker",
         "blocking_prompt": "docs/exec-plans/active/backend-refactor-prompts/06d-gridfs-minio-migration.md"
       },
       {
         "check_id": "api_shadow_validation",
         "label": "Python vs Axum shadow read or contract validation",
-        "status": "missing",
-        "evidence": [],
-        "reason": "required evidence file is missing",
+        "status": "failed",
+        "evidence": [
+          "docs/operations/backend-refactor/api-shadow-validation-report-20260517.json",
+          "docs/operations/backend-refactor/api-shadow-validation-report-20260517.md"
+        ],
+        "reason": "paired API shadow reports exist but no pair has complete GO JSON and GO Markdown evidence",
         "blocking_prompt": "docs/exec-plans/active/backend-refactor-prompts/09a-low-risk-read-apis.md"
       },
       {
         "check_id": "nats_worker_replay",
         "label": "NATS/outbox/worker staging validation and replay drill",
-        "status": "missing",
-        "evidence": [],
-        "reason": "required evidence file is missing",
+        "status": "failed",
+        "evidence": [
+          "docs/operations/backend-refactor/nats-worker-validation-report-20260517.json",
+          "docs/operations/backend-refactor/nats-worker-validation-report-20260517.md"
+        ],
+        "reason": "evidence exists but does not contain a passing marker",
         "blocking_prompt": "docs/exec-plans/active/backend-refactor-prompts/07-outbox-queue-worker.md"
       },
       {
         "check_id": "read_model_rebuild",
         "label": "Read model/search rebuild validation",
-        "status": "missing",
-        "evidence": [],
-        "reason": "required evidence file is missing",
+        "status": "failed",
+        "evidence": [
+          "docs/operations/backend-refactor/read-model-rebuild-validation-report-20260517.json",
+          "docs/operations/backend-refactor/read-model-rebuild-validation-report-20260517.md"
+        ],
+        "reason": "evidence exists but does not contain a passing marker",
         "blocking_prompt": "docs/exec-plans/active/backend-refactor-prompts/08-read-models-and-search.md"
       },
       {
         "check_id": "monitoring_alerts",
         "label": "Prometheus/Grafana/P0/P1 alert verification",
-        "status": "missing",
-        "evidence": [],
-        "reason": "required evidence file is missing",
+        "status": "failed",
+        "evidence": [
+          "docs/operations/backend-refactor/monitoring-alert-verification-20260517.json",
+          "docs/operations/backend-refactor/monitoring-alert-verification-20260517.md"
+        ],
+        "reason": "monitoring evidence exists but lacks complete P0/P1 alert verification or has metric gaps",
         "blocking_prompt": "docs/exec-plans/active/backend-refactor-prompts/10-observability-security-readiness.md"
       },
       {
         "check_id": "load_test",
         "label": "Staging load test baseline",
-        "status": "missing",
-        "evidence": [],
-        "reason": "required evidence file is missing",
+        "status": "failed",
+        "evidence": [
+          "docs/operations/backend-refactor/load-test-baseline-20260517.json",
+          "docs/operations/backend-refactor/load-test-baseline-20260517.md"
+        ],
+        "reason": "paired load test baseline reports exist but no pair has complete GO JSON and GO Markdown evidence",
         "blocking_prompt": "docs/exec-plans/active/backend-refactor-prompts/10-observability-security-readiness.md"
       },
       {
         "check_id": "cutover_window_rollback",
         "label": "Maintenance window and rollback drill approval",
-        "status": "missing",
-        "evidence": [],
-        "reason": "required evidence file is missing",
+        "status": "failed",
+        "evidence": [
+          "docs/operations/backend-refactor/cutover-window-approval-20260517.md",
+          "docs/operations/backend-refactor/rollback-drill-record-20260517.json",
+          "docs/operations/backend-refactor/rollback-drill-record-20260517.md"
+        ],
+        "reason": "evidence exists but does not contain a passing marker",
         "blocking_prompt": "docs/exec-plans/active/backend-refactor-prompts/11-cutover-and-rollback.md"
       }
     ]
@@ -100,7 +131,15 @@
   "authorization": {
     "production_cutover_requested": false,
     "production_cutover_obtained": false,
-    "authorization_source": "none"
+    "authorization_source": "none; readiness gate is NO_GO so authorization was not requested",
+    "conversation_context_treated_as_authorization": false
+  },
+  "cutover_prerequisites": {
+    "readiness_gate_go": false,
+    "explicit_user_production_cutover_authorization": false,
+    "maintenance_window_confirmed": false,
+    "rollback_path_confirmed": false,
+    "latest_app_mongo_freeze_point_backup_confirmed": false
   },
   "production_actions": {
     "oa_source_database_accessed": false,
@@ -111,112 +150,76 @@
     "full_read_switch_executed": false,
     "old_writes_stopped": false,
     "app_mongo_frozen_or_archived": false,
-    "app_mongo_deleted": false
-  },
-  "evidence_review": {
-    "app_mongo_backup_restore": {
-      "status": "GO",
-      "evidence": "docs/operations/backend-refactor/app-mongo-backup-runbook.md",
-      "summary": "Backup time 2026-05-16 01:29:00 CST, checksum recorded, restore collection count diff=0, GridFS sample integrity=OK."
-    },
-    "postgres_backup_pitr": {
-      "status": "NO_GO",
-      "evidence": "docs/operations/backend-refactor/server-postgresql-runbook.md",
-      "summary": "PITR is not configured and logical backup drill is not executed."
-    },
-    "migration_dry_run": {
-      "status": "NO_GO",
-      "evidence": "docs/operations/backend-refactor/migration-dry-run-report-20260516.md",
-      "summary": "Actual 06A/06B/06C reconciliation evidence is missing."
-    },
-    "file_checksum": {
-      "status": "NO_GO",
-      "evidence": "missing",
-      "summary": "No GridFS to MinIO/S3 checksum validation GO report found."
-    },
-    "api_shadow_validation": {
-      "status": "NO_GO",
-      "evidence": "missing",
-      "summary": "No paired API shadow validation GO JSON and Markdown reports found."
-    },
-    "nats_worker_replay": {
-      "status": "NO_GO",
-      "evidence": "missing",
-      "summary": "No staging NATS/outbox/worker replay validation GO report found."
-    },
-    "read_model_rebuild": {
-      "status": "NO_GO",
-      "evidence": "missing",
-      "summary": "No read model/search rebuild validation GO report found."
-    },
-    "monitoring_alerts": {
-      "status": "NO_GO",
-      "evidence": "missing",
-      "summary": "No P0/P1 alert verification GO report found."
-    },
-    "load_test": {
-      "status": "NO_GO",
-      "evidence": "missing",
-      "summary": "No staging load test baseline GO report found."
-    },
-    "maintenance_window_rollback": {
-      "status": "NO_GO",
-      "evidence": "missing",
-      "summary": "No maintenance window approval or rollback drill GO evidence found."
-    }
+    "app_mongo_deleted": false,
+    "destructive_commands_executed": false
   },
   "blocking_items": [
     {
-      "id": "FORMAL-CUTOVER-I-BLOCK-001",
-      "item": "PostgreSQL backup/PITR or restore drill evidence missing.",
+      "id": "P4-16-BLOCK-001",
+      "check_id": "postgres_backup_pitr",
+      "item": "PostgreSQL backup/PITR or restore drill evidence is NO_GO.",
       "repair_prompt": "docs/exec-plans/active/backend-refactor-prompts/10-observability-security-readiness.md"
     },
     {
-      "id": "FORMAL-CUTOVER-I-BLOCK-002",
-      "item": "06C data dry-run report is present but NO_GO.",
+      "id": "P4-16-BLOCK-002",
+      "check_id": "migration_dry_run",
+      "item": "06C data dry-run reconciliation evidence is NO_GO.",
       "repair_prompt": "docs/exec-plans/active/backend-refactor-prompts/06c-data-migration-dry-run.md"
     },
     {
-      "id": "FORMAL-CUTOVER-I-BLOCK-003",
-      "item": "GridFS to MinIO/S3 checksum validation evidence missing.",
+      "id": "P4-16-BLOCK-003",
+      "check_id": "file_checksum",
+      "item": "GridFS to MinIO/S3 checksum validation evidence is NO_GO.",
       "repair_prompt": "docs/exec-plans/active/backend-refactor-prompts/06d-gridfs-minio-migration.md"
     },
     {
-      "id": "FORMAL-CUTOVER-I-BLOCK-004",
-      "item": "Python vs Axum shadow read or contract validation evidence missing.",
+      "id": "P4-16-BLOCK-004",
+      "check_id": "api_shadow_validation",
+      "item": "Python vs Axum shadow validation evidence is NO_GO.",
       "repair_prompt": "docs/exec-plans/active/backend-refactor-prompts/09a-low-risk-read-apis.md"
     },
     {
-      "id": "FORMAL-CUTOVER-I-BLOCK-005",
-      "item": "NATS/outbox/worker staging validation and replay drill evidence missing.",
+      "id": "P4-16-BLOCK-005",
+      "check_id": "nats_worker_replay",
+      "item": "NATS/outbox/worker staging validation and replay drill evidence is NO_GO.",
       "repair_prompt": "docs/exec-plans/active/backend-refactor-prompts/07-outbox-queue-worker.md"
     },
     {
-      "id": "FORMAL-CUTOVER-I-BLOCK-006",
-      "item": "Read model/search rebuild validation evidence missing.",
+      "id": "P4-16-BLOCK-006",
+      "check_id": "read_model_rebuild",
+      "item": "Read model/search rebuild validation evidence is NO_GO.",
       "repair_prompt": "docs/exec-plans/active/backend-refactor-prompts/08-read-models-and-search.md"
     },
     {
-      "id": "FORMAL-CUTOVER-I-BLOCK-007",
-      "item": "Prometheus/Grafana/P0/P1 alert verification evidence missing.",
+      "id": "P4-16-BLOCK-007",
+      "check_id": "monitoring_alerts",
+      "item": "Prometheus/Grafana/P0/P1 alert verification evidence is NO_GO.",
       "repair_prompt": "docs/exec-plans/active/backend-refactor-prompts/10-observability-security-readiness.md"
     },
     {
-      "id": "FORMAL-CUTOVER-I-BLOCK-008",
-      "item": "Staging load test baseline evidence missing.",
+      "id": "P4-16-BLOCK-008",
+      "check_id": "load_test",
+      "item": "Staging load test baseline evidence is NO_GO.",
       "repair_prompt": "docs/exec-plans/active/backend-refactor-prompts/10-observability-security-readiness.md"
     },
     {
-      "id": "FORMAL-CUTOVER-I-BLOCK-009",
-      "item": "Maintenance window and rollback drill approval evidence missing.",
+      "id": "P4-16-BLOCK-009",
+      "check_id": "cutover_window_rollback",
+      "item": "Maintenance window approval and rollback drill evidence is NO_GO.",
       "repair_prompt": "docs/exec-plans/active/backend-refactor-prompts/11-cutover-and-rollback.md"
     }
   ],
   "remaining_risks": [
-    "PostgreSQL recoverability is unproven without backup/PITR evidence.",
-    "Migration correctness is unproven without actual dry-run reconciliation metrics.",
-    "File migration correctness is unproven without object-store checksum validation.",
-    "API compatibility is unproven without paired shadow/contract validation evidence.",
-    "Worker, read model, monitoring, load, maintenance window, and rollback readiness are unproven."
-  ]
+    "PostgreSQL recoverability is not production-proven because backup/PITR evidence remains NO_GO.",
+    "Migration correctness is not proven because 06C reconciliation remains NO_GO.",
+    "File migration correctness is not proven because object-store checksum validation remains NO_GO.",
+    "API compatibility is not proven because full unscoped shadow validation remains NO_GO.",
+    "Worker replay, read model rebuild, monitoring alerts, load baseline, maintenance window, rollback drill, and freeze-point backup are not GO.",
+    "There is no explicit production cutover authorization, and no cutover command may be executed from this report."
+  ],
+  "decision_summary": {
+    "formal_go_no_go": "NO_GO",
+    "p4_11_entry_allowed": false,
+    "execution_record_status": "blocked_not_executed"
+  }
 }
