@@ -111,6 +111,15 @@ export const CATEGORY_TREE: Array<{
           { code: "salary", status: "工资", label: "工资", menuLabel: "自动识别 / 工资" },
           { code: "holiday_bonus", status: "过节费", label: "过节费", menuLabel: "自动识别 / 过节费" },
           { code: "bonus", status: "奖金", label: "奖金", menuLabel: "自动识别 / 奖金" },
+          { code: "tax_payment", status: "税款", label: "税款", menuLabel: "自动识别 / 税款" },
+          {
+            code: "treasury_tax_collection",
+            status: "代理国库税收收缴",
+            label: "代理国库税收收缴",
+            menuLabel: "自动识别 / 代理国库税收收缴",
+          },
+          { code: "social_security", status: "社保款", label: "社保款", menuLabel: "自动识别 / 社保款" },
+          { code: "internal_transfer", status: "内部往来款", label: "内部往来款", menuLabel: "自动识别 / 内部往来款" },
         ],
       },
     ],
@@ -167,6 +176,12 @@ export function getBankCategoryToneClass(categoryCode: BankTransactionCategoryCo
   }
   if (categoryCode === "bonus") {
     return "category-tone-bonus";
+  }
+  if (categoryCode === "tax_payment" || categoryCode === "treasury_tax_collection") {
+    return "category-tone-tax";
+  }
+  if (categoryCode === "social_security") {
+    return "category-tone-social-security";
   }
   if (categoryCode.startsWith("business_")) {
     return "category-tone-business";

@@ -806,10 +806,18 @@ class EtcReconciliationTaskService:
         *,
         task_id: str,
         oa_draft_batch_id: str,
+        etc_batch_id: str | None = None,
         actor: str = "system",
     ) -> EtcReconciliationTask:
         task = self._tasks[task_id]
-        if str(task.oa_draft_batch_id or "").strip() != str(oa_draft_batch_id or "").strip():
+        normalized_oa_draft_batch_id = str(oa_draft_batch_id or "").strip()
+        normalized_etc_batch_id = str(etc_batch_id or "").strip()
+        current_oa_draft_batch_id = str(task.oa_draft_batch_id or "").strip()
+        current_etc_batch_id = str(task.etc_batch_id or "").strip()
+        if current_oa_draft_batch_id:
+            if current_oa_draft_batch_id != normalized_oa_draft_batch_id:
+                return _copy_task(task)
+        elif current_etc_batch_id and current_etc_batch_id not in {normalized_oa_draft_batch_id, normalized_etc_batch_id}:
             return _copy_task(task)
         task.oa_draft_batch_id = None
         task.oa_draft_status = None
@@ -820,7 +828,11 @@ class EtcReconciliationTaskService:
                 task_id=task_id,
                 event_type="oa_draft_deleted",
                 actor=actor,
-                affected_item_ids=[oa_draft_batch_id],
+                affected_item_ids=[
+                    item
+                    for item in [normalized_oa_draft_batch_id, normalized_etc_batch_id]
+                    if item
+                ],
             )
         )
         self._persist()

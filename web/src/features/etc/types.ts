@@ -1,9 +1,15 @@
 import type { BackgroundJob } from "../backgroundJobs/types";
 import type { ImportPreviewAuditCounts } from "../imports/types";
 
-export type EtcBatchStatus = "unsubmitted" | "submitted";
+export type EtcBatchStatus =
+  | "unsubmitted"
+  | "draft_creating"
+  | "draft_created"
+  | "not_submitted"
+  | "failed"
+  | "submitted";
 
-export type EtcInvoiceStatus = EtcBatchStatus;
+export type EtcInvoiceStatus = "unsubmitted" | "submitted";
 
 export type EtcInvoice = {
   id: string;

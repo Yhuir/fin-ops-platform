@@ -68,6 +68,7 @@ TAX_OFFSET_READ_MODELS_META_COLLECTION = "tax_offset_read_models_meta"
 TAX_OFFSET_READ_MODELS_COLLECTION = "tax_offset_read_models"
 OA_ATTACHMENT_INVOICE_CACHE_COLLECTION = "oa_attachment_invoice_cache"
 OA_SYNC_STATE_COLLECTION = "oa_sync_state"
+MANUAL_OA_IMPORTS_COLLECTION = "manual_oa_imports"
 APP_SETTINGS_COLLECTION = "app_settings"
 TAX_CERTIFIED_IMPORTS_META_COLLECTION = "tax_certified_imports_meta"
 TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION = "tax_certified_import_sessions"
@@ -183,6 +184,7 @@ class ApplicationStateStore:
         self._app_settings_path = root / "app_settings.json"
         self._oa_attachment_invoice_cache_path = root / "oa_attachment_invoice_cache.json"
         self._oa_sync_state_path = root / "oa_sync_state.pkl"
+        self._manual_oa_imports_path = root / "manual_oa_imports.json"
         self._tax_certified_imports_path = root / "tax_certified_imports.pkl"
         self._etc_state_path = root / "etc" / "etc_state.pkl"
         self._etc_invoice_file_root = root / "etc" / "invoice_attachments"
@@ -266,6 +268,7 @@ class ApplicationStateStore:
                 "tax_offset_read_models": self._mongo_database[TAX_OFFSET_READ_MODELS_COLLECTION],
                 "oa_attachment_invoice_cache": self._mongo_database[OA_ATTACHMENT_INVOICE_CACHE_COLLECTION],
                 "oa_sync_state": self._mongo_database[OA_SYNC_STATE_COLLECTION],
+                "manual_oa_imports": self._mongo_database[MANUAL_OA_IMPORTS_COLLECTION],
                 "app_settings": self._mongo_database[APP_SETTINGS_COLLECTION],
                 "tax_certified_imports_meta": self._mongo_database[TAX_CERTIFIED_IMPORTS_META_COLLECTION],
                 "tax_certified_import_sessions": self._mongo_database[TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION],
@@ -505,6 +508,117 @@ class ApplicationStateStore:
             raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
         with self._oa_sync_state_path.open("wb") as handle:
             pickle.dump(normalized_snapshot, handle)
+
+    def load_manual_oa_imports(self) -> dict[str, object]:
+        if self._mongo_database is not None:
+            document = self._run_mongo_operation(
+                lambda: self._mongo_detailed_collections["manual_oa_imports"].find_one({"_id": STATE_DOCUMENT_ID})
+            )
+            payload = self._load_binary_payload(document)
+            return self._normalize_manual_oa_imports(payload)
+
+        if not self._manual_oa_imports_path.exists():
+            return self._normalize_manual_oa_imports({})
+        try:
+            loaded = json.loads(self._manual_oa_imports_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return self._normalize_manual_oa_imports({})
+        return self._normalize_manual_oa_imports(loaded)
+
+    def save_manual_oa_imports(self, payload: dict[str, object]) -> None:
+        normalized_payload = self._normalize_manual_oa_imports(payload)
+        if self._mongo_database is not None:
+            self._run_mongo_operation(
+                lambda: self._mongo_detailed_collections["manual_oa_imports"].update_one(
+                    {"_id": STATE_DOCUMENT_ID},
+                    {
+                        "$set": {
+                            "payload": Binary(pickle.dumps(normalized_payload)),
+                            "updated_at": datetime.now(UTC),
+                        }
+                    },
+                    upsert=True,
+                )
+            )
+            return
+
+        if self._storage_mode == MONGO_ONLY_STORAGE_MODE:
+            raise RuntimeError("Mongo state storage is required when FIN_OPS_STORAGE_MODE=mongo_only.")
+        self._manual_oa_imports_path.write_text(
+            json.dumps(normalized_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def add_manual_oa_imports(
+        self,
+        row_ids: list[str],
+        actor_id: str,
+        audit: dict[str, object],
+    ) -> dict[str, object]:
+        payload = self.load_manual_oa_imports()
+        entries = dict(payload.get("entries") or {})
+        imported: list[str] = []
+        already_imported: list[str] = []
+        now = datetime.now(UTC).isoformat()
+        normalized_actor_id = str(actor_id or "").strip() or "system"
+        for row_id in self._dedupe_text_values(row_ids):
+            if row_id in entries:
+                already_imported.append(row_id)
+                continue
+            entries[row_id] = {
+                "row_id": row_id,
+                "source": "manual_oa_import",
+                "actor_id": normalized_actor_id,
+                "imported_at": now,
+                "audit": self._serialize_value(dict(audit if isinstance(audit, dict) else {})),
+            }
+            imported.append(row_id)
+        payload["entries"] = entries
+        payload["row_ids"] = sorted(entries)
+        payload.setdefault("audit_log", [])
+        audit_log = list(payload.get("audit_log") or [])
+        audit_log.append(
+            {
+                "operation": "import",
+                "actor_id": normalized_actor_id,
+                "row_ids": self._dedupe_text_values(row_ids),
+                "imported": list(imported),
+                "already_imported": list(already_imported),
+                "audit": self._serialize_value(dict(audit if isinstance(audit, dict) else {})),
+                "created_at": now,
+            }
+        )
+        payload["audit_log"] = audit_log
+        self.save_manual_oa_imports(payload)
+        return {
+            "imported": imported,
+            "already_imported": already_imported,
+            "entries": dict(entries),
+            "row_ids": sorted(entries),
+        }
+
+    def remove_manual_oa_import(self, row_id: str, actor_id: str) -> bool:
+        normalized_row_id = str(row_id or "").strip()
+        if not normalized_row_id:
+            return False
+        payload = self.load_manual_oa_imports()
+        entries = dict(payload.get("entries") or {})
+        removed = entries.pop(normalized_row_id, None) is not None
+        payload["entries"] = entries
+        payload["row_ids"] = sorted(entries)
+        audit_log = list(payload.get("audit_log") or [])
+        audit_log.append(
+            {
+                "operation": "remove",
+                "actor_id": str(actor_id or "").strip() or "system",
+                "row_ids": [normalized_row_id],
+                "removed": removed,
+                "created_at": datetime.now(UTC).isoformat(),
+            }
+        )
+        payload["audit_log"] = audit_log
+        self.save_manual_oa_imports(payload)
+        return removed
 
     def load_tax_certified_imports(self) -> dict[str, Any]:
         if self._mongo_database is not None:
@@ -3293,6 +3407,42 @@ class ApplicationStateStore:
         if isinstance(raw_payload, (Binary, bytes, bytearray)):
             return pickle.loads(bytes(raw_payload))  # noqa: S301 - trusted app state
         return None
+
+    @classmethod
+    def _normalize_manual_oa_imports(cls, payload: object) -> dict[str, object]:
+        raw_payload = payload if isinstance(payload, dict) else {}
+        raw_entries = raw_payload.get("entries")
+        entries: dict[str, object] = {}
+        if isinstance(raw_entries, dict):
+            for row_id, entry in raw_entries.items():
+                normalized_row_id = str(row_id or "").strip()
+                if not normalized_row_id:
+                    continue
+                entry_payload = dict(entry) if isinstance(entry, dict) else {}
+                entry_payload["row_id"] = normalized_row_id
+                entries[normalized_row_id] = entry_payload
+        for row_id in cls._dedupe_text_values(raw_payload.get("row_ids") if isinstance(raw_payload, dict) else []):
+            entries.setdefault(row_id, {"row_id": row_id, "source": "manual_oa_import"})
+        audit_log = raw_payload.get("audit_log")
+        return {
+            "row_ids": sorted(entries),
+            "entries": entries,
+            "audit_log": list(audit_log) if isinstance(audit_log, list) else [],
+        }
+
+    @staticmethod
+    def _dedupe_text_values(values: object) -> list[str]:
+        if not isinstance(values, list):
+            return []
+        result: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            text = str(value or "").strip()
+            if not text or text in seen:
+                continue
+            result.append(text)
+            seen.add(text)
+        return result
 
     def _clear_legacy_snapshot_collections(self) -> None:
         if self._legacy_mongo_collection is not None:

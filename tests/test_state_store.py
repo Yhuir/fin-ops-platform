@@ -20,6 +20,7 @@ from fin_ops_platform.services.state_store import (
     FILE_METADATA_COLLECTION,
     LEGACY_APP_MONGO_COLLECTION,
     META_COLLECTION,
+    MANUAL_OA_IMPORTS_COLLECTION,
     OA_ATTACHMENT_INVOICE_CACHE_COLLECTION,
     STATE_COLLECTIONS,
     TAX_OFFSET_READ_MODELS_COLLECTION,
@@ -181,6 +182,46 @@ class StateStoreTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             with patch.dict(os.environ, {"FIN_OPS_DATA_DIR": temp_dir}):
                 self.assertEqual(default_data_dir(), Path(temp_dir))
+
+    def test_local_manual_oa_imports_are_persisted_idempotently_and_removable(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = ApplicationStateStore(Path(temp_dir))
+
+            first = store.add_manual_oa_imports(["oa-exp-1981", "oa-exp-1981"], "tester", {"source": "unit"})
+            second = store.add_manual_oa_imports(["oa-exp-1981"], "tester", {"source": "unit"})
+            removed = store.remove_manual_oa_import("oa-exp-1981", "tester")
+            loaded = store.load_manual_oa_imports()
+
+        self.assertEqual(first["imported"], ["oa-exp-1981"])
+        self.assertEqual(first["already_imported"], [])
+        self.assertEqual(second["imported"], [])
+        self.assertEqual(second["already_imported"], ["oa-exp-1981"])
+        self.assertTrue(removed)
+        self.assertEqual(loaded["row_ids"], [])
+        self.assertEqual(loaded["entries"], {})
+        self.assertEqual([event["operation"] for event in loaded["audit_log"]], ["import", "import", "remove"])
+
+    def test_mongo_manual_oa_imports_are_persisted_in_dedicated_collection(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "app_mongo_config.json").write_text(
+                json.dumps({"host": "127.0.0.1", "database": "fin_ops_platform_app"}),
+                encoding="utf-8",
+            )
+            fake_client = FakeMongoClient()
+
+            with patch("fin_ops_platform.services.state_store.MongoClient", return_value=fake_client):
+                with patch(
+                    "fin_ops_platform.services.state_store.GridFSBucket",
+                    side_effect=lambda db, bucket_name: FakeGridFSBucket(db, bucket_name),
+                ):
+                    store = ApplicationStateStore(data_dir)
+                    store.add_manual_oa_imports(["oa-exp-1981"], "tester", {"source": "unit"})
+                    loaded = store.load_manual_oa_imports()
+
+        self.assertEqual(loaded["row_ids"], ["oa-exp-1981"])
+        db = fake_client["fin_ops_platform_app"]
+        self.assertIn("current_state", db[MANUAL_OA_IMPORTS_COLLECTION].documents)
 
     def test_serialize_file_import_preview_item_tolerates_missing_new_fields_from_old_pickle(self) -> None:
         with TemporaryDirectory() as temp_dir:

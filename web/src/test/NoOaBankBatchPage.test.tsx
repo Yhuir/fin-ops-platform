@@ -19,6 +19,9 @@ const listPayload = {
       { code: "salary", label: "工资", total: 1, draft: 0, submitted: 1, withdrawn: 0, conflict: 0, stale: 0, total_amount: "20000.00" },
       { code: "holiday_bonus", label: "过节费", total: 1, draft: 1, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, total_amount: "5000.00" },
       { code: "bonus", label: "奖金", total: 0, draft: 0, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, total_amount: "0.00" },
+      { code: "tax_payment", label: "税款", total: 0, draft: 0, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, total_amount: "0.00" },
+      { code: "treasury_tax_collection", label: "代理国库税收收缴", total: 0, draft: 0, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, total_amount: "0.00" },
+      { code: "social_security", label: "社保款", total: 0, draft: 0, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, total_amount: "0.00" },
       { code: "internal_transfer", label: "内部往来款", total: 1, draft: 0, submitted: 0, withdrawn: 0, conflict: 1, stale: 0, total_amount: "30000.00" },
     ],
   },
@@ -184,15 +187,18 @@ describe("NoOaBankBatchPage", () => {
     expect(screen.getByLabelText("银行账户")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "刷新" })).toBeInTheDocument();
     const categoryRail = screen.getByRole("region", { name: "免OA分类" });
-    expect(within(categoryRail).getByRole("button", { name: "手续费 2 条" })).toHaveAttribute("aria-pressed", "true");
-    expect(within(categoryRail).getByRole("button", { name: "工资 0 条" })).toBeInTheDocument();
-    expect(within(categoryRail).getByRole("button", { name: "过节费 5 条" })).toBeInTheDocument();
-    expect(within(categoryRail).getByRole("button", { name: "奖金 0 条" })).toBeInTheDocument();
-    expect(within(categoryRail).getByRole("button", { name: "内部往来款 3 条" })).toBeInTheDocument();
+    expect(within(categoryRail).getByRole("button", { name: "手续费 1 批 2 条" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(categoryRail).getByRole("button", { name: "工资 0 批 0 条" })).toBeInTheDocument();
+    expect(within(categoryRail).getByRole("button", { name: "过节费 1 批 5 条" })).toBeInTheDocument();
+    expect(within(categoryRail).getByRole("button", { name: "奖金 0 批 0 条" })).toBeInTheDocument();
+    expect(within(categoryRail).getByRole("button", { name: "税款 0 批 0 条" })).toBeInTheDocument();
+    expect(within(categoryRail).getByRole("button", { name: "代理国库税收收缴 0 批 0 条" })).toBeInTheDocument();
+    expect(within(categoryRail).getByRole("button", { name: "社保款 0 批 0 条" })).toBeInTheDocument();
+    expect(within(categoryRail).getByRole("button", { name: "内部往来款 1 批 3 条" })).toBeInTheDocument();
 
     expect(screen.getByRole("region", { name: "免OA批次与明细" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "批次明细" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "手续费 2 条" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "手续费 1 批 / 2 条" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /手续费.*建设银行8106.*2026-05.*88.00/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /内部往来款.*多账户.*2026-05.*存在多解/ })).not.toBeInTheDocument();
 
@@ -210,11 +216,11 @@ describe("NoOaBankBatchPage", () => {
     installFetchMock();
     renderPage();
 
-    await screen.findByRole("heading", { name: "手续费 2 条" });
+    await screen.findByRole("heading", { name: "手续费 1 批 / 2 条" });
     const list = screen.getByRole("region", { name: "免OA批次与明细" });
     expect(within(list).getByRole("checkbox", { name: "选择 手续费 建设银行8106 2026-05" })).toBeEnabled();
 
-    await userEvent.setup().click(screen.getByRole("button", { name: "内部往来款 3 条" }));
+    await userEvent.setup().click(screen.getByRole("button", { name: "内部往来款 1 批 3 条" }));
     expect(within(list).getByRole("checkbox", { name: "选择 内部往来款 多账户 2026-05" })).toBeDisabled();
   });
 
@@ -232,15 +238,15 @@ describe("NoOaBankBatchPage", () => {
       );
     });
     const categoryRail = screen.getByRole("region", { name: "免OA分类" });
-    expect(within(categoryRail).getByRole("button", { name: "手续费 0 条" })).toHaveAttribute("aria-pressed", "true");
-    expect(within(categoryRail).getByRole("button", { name: "工资 8 条" })).toBeInTheDocument();
-    expect(within(categoryRail).getByRole("button", { name: "奖金 0 条" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "手续费 0 条" })).toBeInTheDocument();
+    expect(within(categoryRail).getByRole("button", { name: "手续费 0 批 0 条" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(categoryRail).getByRole("button", { name: "工资 1 批 8 条" })).toBeInTheDocument();
+    expect(within(categoryRail).getByRole("button", { name: "奖金 0 批 0 条" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "手续费 0 批 / 0 条" })).toBeInTheDocument();
     expect(screen.getByText("当前状态下暂无手续费批次")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "工资 8 条" }));
+    await user.click(screen.getByRole("button", { name: "工资 1 批 8 条" }));
     expect(await screen.findByText(/finance-user/)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "工资 8 条" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "工资 1 批 / 8 条" })).toBeInTheDocument();
   });
 
   test("submits and withdraws batches, refreshes cache, and dispatches affected months", async () => {
@@ -264,7 +270,7 @@ describe("NoOaBankBatchPage", () => {
       }));
 
       await user.click(screen.getByRole("button", { name: "已提交 1" }));
-      await user.click(await screen.findByRole("button", { name: "工资 8 条" }));
+      await user.click(await screen.findByRole("button", { name: "工资 1 批 8 条" }));
       await user.click(screen.getByRole("button", { name: /工资.*工商银行6386/ }));
       await user.click(screen.getByRole("button", { name: "撤回批次" }));
       await user.type(screen.getByLabelText("撤回原因"), "金额复核");
@@ -287,6 +293,84 @@ describe("NoOaBankBatchPage", () => {
     } finally {
       window.removeEventListener("workbenchRelationUpdated", relationListener);
     }
+  });
+
+  test("moves a submitted draft batch into the submitted bucket and refreshes header counts", async () => {
+    const user = userEvent.setup();
+    let feeSubmitted = false;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      const currentPayload = feeSubmitted
+        ? {
+            ...listPayload,
+            summary: {
+              ...listPayload.summary,
+              draft_count: 1,
+              submitted_count: 2,
+              categories: listPayload.summary.categories.map((category) => {
+                if (category.code !== "fee") {
+                  return category;
+                }
+                return { ...category, draft: 0, submitted: 1 };
+              }),
+            },
+            batches: listPayload.batches.map((batch) => {
+              if (batch.batch_id !== "batch-draft-fee") {
+                return batch;
+              }
+              return {
+                ...batch,
+                status: "submitted",
+                status_bucket: "submitted",
+                can_submit: false,
+                can_withdraw: true,
+                submitted_by: "finance-user",
+                submitted_at: "2026-05-18T01:30:00",
+                version: 2,
+              };
+            }),
+          }
+        : listPayload;
+
+      if (url.pathname === "/api/no-oa-bank-batches" && (!init?.method || init.method === "GET")) {
+        const bucket = url.searchParams.get("bucket");
+        const batches = bucket && bucket !== "all"
+          ? currentPayload.batches.filter((batch) => batch.status_bucket === bucket)
+          : currentPayload.batches;
+        return new Response(JSON.stringify({ ...currentPayload, batches }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.pathname === "/api/no-oa-bank-batches/batch-draft-fee") {
+        return new Response(JSON.stringify({
+          ...detailPayload,
+          batch: currentPayload.batches.find((batch) => batch.batch_id === "batch-draft-fee"),
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.pathname === "/api/no-oa-bank-batches/batch-draft-fee/submit") {
+        feeSubmitted = true;
+        return new Response(JSON.stringify({
+          batch: currentPayload.batches.find((batch) => batch.batch_id === "batch-draft-fee"),
+          affected_months: ["2026-05"],
+          workbench_rebuild_queued: true,
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ message: `Unhandled ${url.pathname}` }), { status: 404, headers: { "Content-Type": "application/json" } });
+    }));
+
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "提交批次" }));
+
+    expect(await screen.findByText("批次已提交")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "未提交 2" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "已提交 2" })).toBeInTheDocument();
+    });
+    expect(screen.getByText("当前状态下暂无手续费批次")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "已提交 2" }));
+
+    expect(await screen.findByRole("heading", { name: "手续费 1 批 / 2 条" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /手续费.*建设银行8106.*2026-05.*88.00/ })).toBeInTheDocument();
   });
 
   test("bulk submits only selected draft batches", async () => {

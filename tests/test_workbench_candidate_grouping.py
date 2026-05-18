@@ -1558,6 +1558,44 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in group["bank_rows"]], ["bk-same-counterparty-2000"])
         self.assertEqual([row["id"] for row in group["invoice_rows"]], ["iv-same-counterparty-2000"])
 
+    def test_keeps_oa_bank_candidate_group_when_bank_counterparty_is_payee_prefix(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        payload = service.group_payload(
+            "2026-02",
+            oa_rows=[
+                {
+                    "id": "oa-lodging-1090",
+                    "type": "oa",
+                    "case_id": "candidate:lodging-agent",
+                    "apply_type": "支付申请",
+                    "amount": "1090.00",
+                    "counterparty_name": "安雨超（代收红塔区友余宾馆住宿费）",
+                    "pay_receive_time": "2026-02-02",
+                    "oa_bank_relation": {"code": "candidate_incomplete", "label": "候选未闭环", "tone": "warn"},
+                }
+            ],
+            bank_rows=[
+                {
+                    "id": "bk-lodging-1090",
+                    "type": "bank",
+                    "case_id": "candidate:lodging-agent",
+                    "debit_amount": "1090.00",
+                    "credit_amount": "",
+                    "counterparty_name": "安雨超",
+                    "trade_time": "2026-02-04 15:10:44",
+                    "invoice_relation": {"code": "candidate_incomplete", "label": "候选未闭环", "tone": "warn"},
+                }
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(payload["summary"]["open_count"], 1)
+        group = payload["open"]["groups"][0]
+        self.assertEqual(group["group_type"], "candidate")
+        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-lodging-1090"])
+        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bk-lodging-1090"])
+
     def test_keeps_same_counterparty_oa_multi_invoice_sum_candidate_case_group_together(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(

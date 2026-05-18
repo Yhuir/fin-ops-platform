@@ -135,6 +135,21 @@ BANK_TRANSACTION_AUTO_CATEGORY_DEFINITIONS: dict[str, dict[str, Any]] = {
         "category_label": "奖金",
         "category_path": ["自动识别", "奖金"],
     },
+    "tax_payment": {
+        "category_code": "tax_payment",
+        "category_label": "税款",
+        "category_path": ["自动识别", "税款"],
+    },
+    "treasury_tax_collection": {
+        "category_code": "treasury_tax_collection",
+        "category_label": "代理国库税收收缴",
+        "category_path": ["自动识别", "代理国库税收收缴"],
+    },
+    "social_security": {
+        "category_code": "social_security",
+        "category_label": "社保款",
+        "category_path": ["自动识别", "社保款"],
+    },
 }
 BANK_TRANSACTION_LEGACY_CATEGORY_DEFINITIONS: dict[str, dict[str, Any]] = {
     "external_turnover": {

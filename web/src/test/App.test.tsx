@@ -12,13 +12,14 @@ describe("Finance operations shell", () => {
     expect(sidebarGroups.map((group) => group.title)).toEqual(["财务业务", "系统操作"]);
   });
 
-  test("places no OA bank batches between bank details and turnover ledger in the finance sidebar", () => {
+  test("places batch accounting and no OA bank batches between bank details and turnover ledger in the finance sidebar", () => {
     const financeLabels = sidebarGroups.find((group) => group.title === "财务业务")?.items.map((item) => item.label);
     expect(financeLabels).toBeDefined();
     const bankDetailsIndex = financeLabels?.indexOf("银行明细") ?? -1;
     expect(bankDetailsIndex).toBeGreaterThanOrEqual(0);
     expect(financeLabels?.[bankDetailsIndex + 1]).toBe("免OA流水批量处理");
-    expect(financeLabels?.[bankDetailsIndex + 2]).toBe("往来款管理");
+    expect(financeLabels?.[bankDetailsIndex + 2]).toBe("批量账务");
+    expect(financeLabels?.[bankDetailsIndex + 3]).toBe("往来款管理");
   });
 
   test("loads the workbench as an all-time view and keeps the month picker scoped to tax offset", async () => {

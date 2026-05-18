@@ -31,6 +31,13 @@ import type {
   WorkbenchOaSyncStatus,
   WorkbenchInvoiceInventory,
   WorkbenchSourceKind,
+  OaManualAttachmentRefreshResult,
+  OaManualImportList,
+  OaManualImportResult,
+  OaManualSearchFilters,
+  OaManualSearchItem,
+  OaManualSearchResult,
+  OaManualSearchRow,
 } from "./types";
 import { countWorkbenchGroupsRows } from "./groupDisplayModel";
 
@@ -524,6 +531,73 @@ type ApiWorkbenchSettingsProjectMutationResult = {
 
 type ApiWorkbenchSettingsProjectSyncResult = {
   settings: ApiWorkbenchSettings;
+};
+
+type ApiOaManualSearchItem = {
+  date?: string | null;
+  amount?: string | null;
+  content?: string | null;
+  project_name?: string | null;
+  reason?: string | null;
+  attachment_file_count?: number | null;
+  importable_invoice_count?: number | null;
+};
+
+type ApiOaManualSearchRow = {
+  row_id?: string | null;
+  oa_no?: string | null;
+  applicant?: string | null;
+  application_date?: string | null;
+  form_type?: string | null;
+  form_type_label?: string | null;
+  status?: string | null;
+  status_label?: string | null;
+  project_name?: string | null;
+  reason?: string | null;
+  amount?: string | null;
+  attachment_file_count?: number | null;
+  importable_invoice_count?: number | null;
+  unrecognized_attachment_count?: number | null;
+  import_status?: string | null;
+  imported_at?: string | null;
+  can_import?: boolean | null;
+  disabled_reason?: string | null;
+  items?: ApiOaManualSearchItem[] | null;
+};
+
+type ApiOaManualSearchResult = {
+  rows?: ApiOaManualSearchRow[] | null;
+  total?: number | null;
+  page?: number | null;
+  page_size?: number | null;
+};
+
+type ApiOaManualAttachmentRefreshResult = {
+  rows?: Array<{
+    row_id?: string | null;
+    attachment_file_count?: number | null;
+    importable_invoice_count?: number | null;
+    unrecognized_attachment_count?: number | null;
+  }> | null;
+  errors?: Array<Record<string, unknown>> | null;
+};
+
+type ApiOaManualImportResult = {
+  imported?: string[] | null;
+  already_imported?: string[] | null;
+  failed?: Array<Record<string, unknown>> | null;
+  rows?: ApiOaManualSearchRow[] | null;
+};
+
+type ApiOaManualImportList = {
+  row_ids?: string[] | null;
+  entries?: Array<{
+    row_id?: string | null;
+    actor_id?: string | null;
+    imported_at?: string | null;
+    source?: string | null;
+    audit?: Record<string, unknown> | null;
+  }> | null;
 };
 
 type WorkbenchSettingsProjectCreatePayload = {
@@ -1195,6 +1269,78 @@ function mapWorkbenchSettings(payload: ApiWorkbenchSettings): WorkbenchSettings 
   };
 }
 
+function toCount(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function mapOaManualSearchItem(item: ApiOaManualSearchItem): OaManualSearchItem {
+  return {
+    date: toDisplayValue(item.date),
+    amount: toDisplayValue(item.amount),
+    content: toDisplayValue(item.content),
+    projectName: toDisplayValue(item.project_name),
+    reason: toDisplayValue(item.reason),
+    attachmentFileCount: toCount(item.attachment_file_count),
+    importableInvoiceCount: toCount(item.importable_invoice_count),
+  };
+}
+
+function mapOaManualSearchRow(row: ApiOaManualSearchRow): OaManualSearchRow {
+  return {
+    rowId: toDisplayValue(row.row_id, ""),
+    oaNo: toDisplayValue(row.oa_no),
+    applicant: toDisplayValue(row.applicant),
+    applicationDate: toDisplayValue(row.application_date),
+    formType: toDisplayValue(row.form_type, ""),
+    formTypeLabel: toDisplayValue(row.form_type_label),
+    status: toDisplayValue(row.status, ""),
+    statusLabel: toDisplayValue(row.status_label),
+    projectName: toDisplayValue(row.project_name),
+    reason: toDisplayValue(row.reason),
+    amount: toDisplayValue(row.amount, "0.00"),
+    attachmentFileCount: toCount(row.attachment_file_count),
+    importableInvoiceCount: toCount(row.importable_invoice_count),
+    unrecognizedAttachmentCount: toCount(row.unrecognized_attachment_count),
+    importStatus: toDisplayValue(row.import_status, "not_imported"),
+    importedAt: row.imported_at ?? null,
+    canImport: row.can_import === true,
+    disabledReason: toDisplayValue(row.disabled_reason, ""),
+    items: Array.isArray(row.items) ? row.items.map(mapOaManualSearchItem) : [],
+  };
+}
+
+function mapOaManualSearchResult(payload: ApiOaManualSearchResult): OaManualSearchResult {
+  return {
+    rows: (payload.rows ?? []).map(mapOaManualSearchRow).filter((row) => row.rowId.length > 0),
+    total: toCount(payload.total),
+    page: toCount(payload.page),
+    pageSize: toCount(payload.page_size),
+  };
+}
+
+function buildManualSearchQuery(filters: OaManualSearchFilters) {
+  const params = new URLSearchParams();
+  const query = String(filters.query ?? "").trim();
+  if (query) {
+    params.set("q", query);
+  }
+  if (filters.formTypes && filters.formTypes.length > 0) {
+    params.set("form_types", filters.formTypes.join(","));
+  }
+  if (filters.statuses && filters.statuses.length > 0) {
+    params.set("statuses", filters.statuses.join(","));
+  }
+  if (filters.dateFrom) {
+    params.set("date_from", filters.dateFrom);
+  }
+  if (filters.dateTo) {
+    params.set("date_to", filters.dateTo);
+  }
+  params.set("page", String(filters.page ?? 0));
+  params.set("page_size", String(filters.pageSize ?? 20));
+  return params.toString();
+}
+
 async function requestJson<T>(url: string, init: RequestInit = {}) {
   const response = await fetch(url, init);
   const rawText = await response.text();
@@ -1507,6 +1653,92 @@ export async function saveWorkbenchSettings(
     }),
   });
   return mapWorkbenchSettings(payload);
+}
+
+export async function searchManualOaImports(
+  filters: OaManualSearchFilters,
+  signal?: AbortSignal,
+): Promise<OaManualSearchResult> {
+  const query = buildManualSearchQuery(filters);
+  const payload = await requestJson<ApiOaManualSearchResult>(
+    `/api/workbench/settings/oa/manual-search?${query}`,
+    { method: "GET", signal },
+  );
+  return mapOaManualSearchResult(payload);
+}
+
+export async function refreshManualOaImportAttachments(
+  rowIds: string[],
+): Promise<OaManualAttachmentRefreshResult> {
+  const payload = await requestJson<ApiOaManualAttachmentRefreshResult>(
+    "/api/workbench/settings/oa/manual-search/refresh-attachments",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ row_ids: rowIds }),
+    },
+  );
+  return {
+    rows: (payload.rows ?? []).map((row) => ({
+      rowId: toDisplayValue(row.row_id, ""),
+      attachmentFileCount: toCount(row.attachment_file_count),
+      importableInvoiceCount: toCount(row.importable_invoice_count),
+      unrecognizedAttachmentCount: toCount(row.unrecognized_attachment_count),
+    })).filter((row) => row.rowId.length > 0),
+    errors: payload.errors ?? [],
+  };
+}
+
+export async function importManualOaRows(rowIds: string[]): Promise<OaManualImportResult> {
+  const payload = await requestJson<ApiOaManualImportResult>(
+    "/api/workbench/settings/oa/manual-imports",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        row_ids: rowIds,
+        actor_id: "settings_manual_import",
+      }),
+    },
+  );
+  return {
+    imported: (payload.imported ?? []).map((rowId) => String(rowId)),
+    alreadyImported: (payload.already_imported ?? []).map((rowId) => String(rowId)),
+    failed: payload.failed ?? [],
+    rows: (payload.rows ?? []).map(mapOaManualSearchRow).filter((row) => row.rowId.length > 0),
+  };
+}
+
+export async function fetchManualOaImports(): Promise<OaManualImportList> {
+  const payload = await requestJson<ApiOaManualImportList>(
+    "/api/workbench/settings/oa/manual-imports",
+    { method: "GET" },
+  );
+  return {
+    rowIds: (payload.row_ids ?? []).map((rowId) => String(rowId)),
+    entries: (payload.entries ?? []).map((entry) => ({
+      rowId: toDisplayValue(entry.row_id, ""),
+      actorId: entry.actor_id ?? undefined,
+      importedAt: entry.imported_at ?? null,
+      source: entry.source ?? undefined,
+      audit: entry.audit ?? undefined,
+    })).filter((entry) => entry.rowId.length > 0),
+  };
+}
+
+export async function removeManualOaImport(rowId: string): Promise<{ removed: boolean; rowId: string }> {
+  const payload = await requestJson<{ removed?: boolean; row_id?: string | null }>(
+    `/api/workbench/settings/oa/manual-imports/${encodeURIComponent(rowId)}`,
+    { method: "DELETE" },
+  );
+  return {
+    removed: payload.removed === true,
+    rowId: toDisplayValue(payload.row_id, rowId),
+  };
 }
 
 function mapDataResetResult(result: ApiWorkbenchSettingsDataResetResult): WorkbenchSettingsDataResetResult {

@@ -45,6 +45,9 @@ def categories_for(rows: list[dict[str, object]]) -> dict[str, dict[str, object]
                 "salary": "工资",
                 "holiday_bonus": "过节费",
                 "bonus": "奖金",
+                "tax_payment": "税款",
+                "treasury_tax_collection": "代理国库税收收缴",
+                "social_security": "社保款",
                 "internal_transfer": "内部往来款",
             }[str(row["category_code"])],
             "category_source": "auto",
@@ -86,11 +89,44 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
         self.assertFalse(ccb_batch["can_withdraw"])
         self.assertEqual(ccb_batch["blocked_reason"], "")
 
+    def test_new_fee_rows_after_submitted_same_month_account_batch_generate_incremental_draft(self) -> None:
+        pair_service = WorkbenchPairRelationService()
+        service = NoOaBankBatchService(pair_relation_service=pair_service)
+        submitted_rows = [bank_row("fee-submitted", category_code="fee", debit_amount="0.90")]
+        submitted_batch = self.assert_single_batch(
+            service.build_batches(submitted_rows, categories_for(submitted_rows), [], {}),
+            "draft",
+        )
+        service.submit_batch(submitted_batch["batch_id"], actor="finance-user", expected_version=1, note="确认")
+        current_rows = [
+            *submitted_rows,
+            bank_row("fee-new", category_code="fee", debit_amount="1.25"),
+        ]
+
+        batches = service.build_batches(
+            current_rows,
+            categories_for(current_rows),
+            pair_service.list_active_relations(),
+            {},
+        )
+
+        submitted = [batch for batch in batches if batch["status"] == "submitted" and batch["batch_type"] == "fee"]
+        drafts = [batch for batch in batches if batch["status"] == "draft" and batch["batch_type"] == "fee"]
+        self.assertEqual(len(submitted), 1)
+        self.assertEqual(submitted[0]["row_ids"], ["fee-submitted"])
+        self.assertEqual(len(drafts), 1)
+        self.assertEqual(drafts[0]["row_ids"], ["fee-new"])
+        self.assertEqual(drafts[0]["total_amount"], "1.25")
+        self.assertNotEqual(drafts[0]["batch_id"], submitted[0]["batch_id"])
+
     def test_salary_holiday_bonus_and_bonus_rows_generate_drafts(self) -> None:
         rows = [
             bank_row("salary-1", category_code="salary", debit_amount="1000.00"),
             bank_row("holiday-1", category_code="holiday_bonus", debit_amount="200.00"),
             bank_row("bonus-1", category_code="bonus", debit_amount="300.00"),
+            bank_row("tax-1", category_code="tax_payment", debit_amount="400.00"),
+            bank_row("treasury-tax-1", category_code="treasury_tax_collection", debit_amount="500.00"),
+            bank_row("social-security-1", category_code="social_security", debit_amount="600.00"),
         ]
         service = NoOaBankBatchService()
 
@@ -100,6 +136,9 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
         self.assertEqual(by_type["salary"]["batch_label"], "工资")
         self.assertEqual(by_type["holiday_bonus"]["batch_label"], "过节费")
         self.assertEqual(by_type["bonus"]["batch_label"], "奖金")
+        self.assertEqual(by_type["tax_payment"]["batch_label"], "税款")
+        self.assertEqual(by_type["treasury_tax_collection"]["batch_label"], "代理国库税收收缴")
+        self.assertEqual(by_type["social_security"]["batch_label"], "社保款")
 
     def test_internal_transfer_pair_generates_draft_with_evidence(self) -> None:
         rows = [
@@ -158,6 +197,62 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
         self.assertFalse(batch["can_submit"])
         self.assertFalse(batch["can_withdraw"])
         self.assertEqual(batch["blocked_reason"], "内部往来存在多解，不能自动形成可提交批次。")
+
+    def test_internal_transfer_equal_multi_rows_pair_by_nearest_time(self) -> None:
+        rows = [
+            bank_row(
+                "transfer-in-late",
+                category_code="internal_transfer",
+                credit_amount="4000.00",
+                account_key="ICBC:6386",
+                bank_name="工商银行",
+                account_no="6386",
+                pay_receive_time="2026-04-16T11:18:05",
+            ),
+            bank_row(
+                "transfer-in-early",
+                category_code="internal_transfer",
+                credit_amount="4000.00",
+                account_key="ICBC:6386",
+                bank_name="工商银行",
+                account_no="6386",
+                pay_receive_time="2026-04-16T11:09:16",
+            ),
+            bank_row(
+                "transfer-out-late",
+                category_code="internal_transfer",
+                debit_amount="4000.00",
+                account_key="CCB:8106",
+                bank_name="建设银行",
+                account_no="8106",
+                pay_receive_time="2026-04-16T11:17:51",
+            ),
+            bank_row(
+                "transfer-out-early",
+                category_code="internal_transfer",
+                debit_amount="4000.00",
+                account_key="CCB:8106",
+                bank_name="建设银行",
+                account_no="8106",
+                pay_receive_time="2026-04-16T11:09:13",
+            ),
+        ]
+        service = NoOaBankBatchService()
+
+        batches = service.build_batches(rows, categories_for(rows), [], {})
+
+        draft_batches = sorted(
+            [batch for batch in batches if batch["status"] == "draft"],
+            key=lambda batch: batch["evidence"]["time_delta_seconds"],
+        )
+        self.assertEqual(len(draft_batches), 2)
+        self.assertEqual([batch for batch in batches if batch["status"] == "conflict"], [])
+        self.assertEqual(draft_batches[0]["income_row_ids"], ["transfer-in-early"])
+        self.assertEqual(draft_batches[0]["expense_row_ids"], ["transfer-out-early"])
+        self.assertEqual(draft_batches[0]["evidence"]["time_delta_seconds"], 3)
+        self.assertEqual(draft_batches[1]["income_row_ids"], ["transfer-in-late"])
+        self.assertEqual(draft_batches[1]["expense_row_ids"], ["transfer-out-late"])
+        self.assertEqual(draft_batches[1]["evidence"]["time_delta_seconds"], 14)
 
     def test_internal_transfer_single_sided_group_generates_conflict(self) -> None:
         rows = [bank_row("transfer-out", category_code="internal_transfer", debit_amount="500.00")]

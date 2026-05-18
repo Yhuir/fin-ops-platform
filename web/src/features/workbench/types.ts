@@ -263,3 +263,82 @@ export type WorkbenchSettingsDataResetJob = {
   result: WorkbenchSettingsDataResetResult | null;
   error: string | null;
 };
+
+export type OaManualSearchItem = {
+  date: string;
+  amount: string;
+  content: string;
+  projectName: string;
+  reason: string;
+  attachmentFileCount: number;
+  importableInvoiceCount: number;
+};
+
+export type OaManualSearchRow = {
+  rowId: string;
+  oaNo: string;
+  applicant: string;
+  applicationDate: string;
+  formType: string;
+  formTypeLabel: string;
+  status: string;
+  statusLabel: string;
+  projectName: string;
+  reason: string;
+  amount: string;
+  attachmentFileCount: number;
+  importableInvoiceCount: number;
+  unrecognizedAttachmentCount: number;
+  importStatus: string;
+  importedAt: string | null;
+  canImport: boolean;
+  disabledReason: string;
+  items: OaManualSearchItem[];
+};
+
+export type OaManualSearchResult = {
+  rows: OaManualSearchRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+export type OaManualImportEntry = {
+  rowId: string;
+  actorId?: string;
+  importedAt?: string | null;
+  source?: string;
+  audit?: Record<string, unknown>;
+};
+
+export type OaManualImportResult = {
+  imported: string[];
+  alreadyImported: string[];
+  failed: Array<Record<string, unknown>>;
+  rows: OaManualSearchRow[];
+};
+
+export type OaManualImportList = {
+  rowIds: string[];
+  entries: OaManualImportEntry[];
+};
+
+export type OaManualAttachmentRefreshResult = {
+  rows: Array<{
+    rowId: string;
+    attachmentFileCount: number;
+    importableInvoiceCount: number;
+    unrecognizedAttachmentCount: number;
+  }>;
+  errors: Array<Record<string, unknown>>;
+};
+
+export type OaManualSearchFilters = {
+  query?: string;
+  formTypes?: string[];
+  statuses?: string[];
+  dateFrom?: string;
+  dateTo?: string;
+  page?: number;
+  pageSize?: number;
+};

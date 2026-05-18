@@ -45,6 +45,7 @@ from fin_ops_platform.services.app_health_alert_service import AppHealthAlertSer
 from fin_ops_platform.services.app_health_service import AppHealthService
 from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.audit import AuditTrailService
+from fin_ops_platform.services.batch_accounting_service import BatchAccountingError, BatchAccountingService
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
 from fin_ops_platform.services.bank_details_relation_tag_projection_service import (
     BankDetailsRelationTagProjectionService,
@@ -119,6 +120,7 @@ from fin_ops_platform.services.no_oa_managed_rule_policy import (
     is_no_oa_managed_old_relation_mode,
     workbench_mode_may_auto_close,
 )
+from fin_ops_platform.services.oa_manual_import_service import OAManualImportService
 from fin_ops_platform.services.oa_identity_service import (
     OAIdentityConfigurationError,
     OAIdentityService,
@@ -420,6 +422,15 @@ class Application:
         bank_account_resolver = BankAccountResolver(self._app_settings_service.get_bank_account_mapping_dict)
         self._candidate_grouping_service = WorkbenchCandidateGroupingService()
         self._workbench_query_service = WorkbenchQueryService(oa_adapter=oa_adapter)
+        self._oa_manual_import_service = (
+            OAManualImportService(
+                state_store=self._state_store,
+                oa_adapter=oa_adapter,
+                workbench_query_service=self._workbench_query_service,
+            )
+            if self._state_store is not None and oa_adapter is not None
+            else None
+        )
         self._workbench_matching_rules = WorkbenchMatchingRules(include_special_rules=False)
         self._workbench_special_pair_rule_service = WorkbenchSpecialPairRuleService()
         self._workbench_matching_orchestrator = WorkbenchMatchingOrchestrator(
@@ -702,6 +713,13 @@ class Application:
             return self._handle_api_no_oa_bank_batches(query)
         if method == "POST" and route_path == "/api/no-oa-bank-batches/submit":
             return self._handle_api_no_oa_bank_batches_bulk_submit(body, headers)
+        if method == "GET" and route_path == "/api/batch-accounting":
+            return self._handle_api_batch_accounting(query)
+        if method == "POST" and route_path == "/api/batch-accounting/submit":
+            return self._handle_api_batch_accounting_submit(body, headers)
+        if method == "POST" and route_path.startswith("/api/batch-accounting/") and route_path.endswith("/withdraw"):
+            relation_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_batch_accounting_withdraw(relation_id, body, headers)
         if method == "GET" and route_path.startswith("/api/no-oa-bank-batches/"):
             batch_id = unquote(route_path.rsplit("/", 1)[-1])
             return self._handle_api_no_oa_bank_batch_detail(batch_id)
@@ -823,6 +841,17 @@ class Application:
             return self._handle_api_workbench_settings()
         if method == "POST" and route_path == "/api/workbench/settings":
             return self._handle_api_workbench_settings_update(body)
+        if method == "GET" and route_path == "/api/workbench/settings/oa/manual-search":
+            return self._handle_api_workbench_settings_oa_manual_search(query)
+        if method == "POST" and route_path == "/api/workbench/settings/oa/manual-search/refresh-attachments":
+            return self._handle_api_workbench_settings_oa_manual_search_refresh_attachments(body)
+        if method == "GET" and route_path == "/api/workbench/settings/oa/manual-imports":
+            return self._handle_api_workbench_settings_oa_manual_imports()
+        if method == "POST" and route_path == "/api/workbench/settings/oa/manual-imports":
+            return self._handle_api_workbench_settings_oa_manual_imports_create(body)
+        if method == "DELETE" and route_path.startswith("/api/workbench/settings/oa/manual-imports/"):
+            row_id = unquote(route_path.rsplit("/", 1)[-1])
+            return self._handle_api_workbench_settings_oa_manual_import_delete(row_id, body)
         if method == "POST" and route_path == "/api/workbench/settings/projects/sync":
             return self._handle_api_workbench_settings_projects_sync(body)
         if method == "POST" and route_path == "/api/workbench/settings/projects":
@@ -1122,9 +1151,15 @@ class Application:
                 "/api/no-oa-bank-batches/{batch_id}",
                 "/api/no-oa-bank-batches/{batch_id}/submit",
                 "/api/no-oa-bank-batches/{batch_id}/withdraw",
+                "/api/batch-accounting",
+                "/api/batch-accounting/submit",
+                "/api/batch-accounting/{relation_id}/withdraw",
                 "/api/session/me",
                 "/api/workbench/ignored",
                 "/api/workbench/settings",
+                "/api/workbench/settings/oa/manual-search",
+                "/api/workbench/settings/oa/manual-search/refresh-attachments",
+                "/api/workbench/settings/oa/manual-imports",
                 "/api/workbench/settings/data-reset",
                 "/api/workbench/rows/{row_id}",
                 "/api/workbench/exception/preview",
@@ -1857,6 +1892,7 @@ class Application:
         if error is not None:
             return error
         removed_import_batch: dict[str, object] | None = None
+        removed_submission_batch: dict[str, object] | None = None
         changed_months: list[str] = []
         try:
             expected_version = self._expected_version_from_payload(payload)
@@ -1866,16 +1902,22 @@ class Application:
                 raise ValueError("task_version_conflict")
             task_status = getattr(getattr(task, "status", None), "value", getattr(task, "status", None))
             if task_status == "imported" and str(getattr(task, "import_batch_id", "") or "").strip():
+                task, removed_submission_batch, submission_changed_months = self._delete_reconciliation_task_unsubmitted_submission_batch(
+                    task=task,
+                    actor=actor,
+                )
+                changed_months.extend(submission_changed_months)
                 (
                     removed_import_batch,
                     _removed_canonical_invoice_count,
-                    changed_months,
+                    import_changed_months,
                 ) = self._delete_reconciliation_task_import_batch_sources(task)
+                changed_months.extend(import_changed_months)
             result = self._etc_reconciliation_task_service.delete_task(
                 task_id=task_id,
-                expected_version=expected_version,
+                expected_version=int(getattr(task, "version", expected_version) or expected_version),
                 actor=actor,
-                import_cleanup_confirmed=removed_import_batch is not None,
+                import_cleanup_confirmed=removed_import_batch is not None or removed_submission_batch is not None,
             )
         except KeyError:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
@@ -1905,6 +1947,10 @@ class Application:
         import_batch_id = str(getattr(task, "import_batch_id", "") or "").strip()
         if not import_batch_id:
             raise ValueError("reconciliation_task_import_batch_required")
+        task, _removed_submission_batch, submission_changed_months = self._delete_reconciliation_task_unsubmitted_submission_batch(
+            task=task,
+            actor=actor,
+        )
         if (
             str(getattr(task, "oa_draft_batch_id", "") or "").strip()
             or str(getattr(task, "etc_batch_id", "") or "").strip()
@@ -1912,13 +1958,46 @@ class Application:
         ):
             raise ValueError("reconciliation_task_has_submission_link")
         delete_result, canonical_deleted, changed_months = self._delete_reconciliation_task_import_batch_sources(task)
+        changed_months = [*submission_changed_months, *changed_months]
         updated_task = self._etc_reconciliation_task_service.remove_imported_invoices(
             task_id=str(getattr(task, "task_id", "")),
-            expected_version=expected_version,
+            expected_version=int(getattr(task, "version", expected_version) or expected_version),
             import_batch_id=import_batch_id,
             actor=actor,
         )
         return updated_task, delete_result, canonical_deleted, changed_months
+
+    def _delete_reconciliation_task_unsubmitted_submission_batch(
+        self,
+        *,
+        task: object,
+        actor: str,
+    ) -> tuple[object, dict[str, object] | None, list[str]]:
+        if getattr(task, "submitted_confirmed_at", None) is not None:
+            raise ValueError("reconciliation_task_has_submission_link")
+        oa_draft_batch_id = str(getattr(task, "oa_draft_batch_id", "") or "").strip()
+        etc_batch_id = str(getattr(task, "etc_batch_id", "") or "").strip()
+        if not oa_draft_batch_id and not etc_batch_id:
+            return task, None, []
+
+        delete_batch_id = oa_draft_batch_id or etc_batch_id
+        batch = self._etc_service.get_batch(delete_batch_id)
+        invoice_ids = [str(invoice_id) for invoice_id in list(getattr(batch, "invoice_ids", []) or [])]
+        changed_months = self._etc_invoice_changed_months(self._etc_service.list_invoices_by_ids(invoice_ids))
+        delete_result = self._etc_service.delete_batch(delete_batch_id)
+        refreshed_invoices = self._etc_service.list_invoices_by_ids(invoice_ids)
+        changed_months.extend(self._etc_invoice_changed_months(refreshed_invoices))
+        if refreshed_invoices:
+            sync_changed_months = self._sync_etc_invoices_to_canonical_invoices(refreshed_invoices)
+            changed_months.extend(sync_changed_months)
+        if delete_result.get("kind") == "submission_batch":
+            task = self._etc_reconciliation_task_service.record_oa_draft_deleted(
+                task_id=str(getattr(task, "task_id", "")),
+                oa_draft_batch_id=str(getattr(batch, "id", "") or delete_batch_id),
+                etc_batch_id=str(getattr(batch, "etc_batch_id", "") or etc_batch_id),
+                actor=actor,
+            )
+        return task, delete_result, sorted(set(changed_months))
 
     def _delete_reconciliation_task_import_batch_sources(self, task: object) -> tuple[dict[str, object], int, list[str]]:
         import_batch_id = str(getattr(task, "import_batch_id", "") or "").strip()
@@ -1998,6 +2077,7 @@ class Application:
             "ticket_root_source_mode_conflict_pdf": "已有票根网 PDF/JPG 源文件，请先删除已有票根来源后才能切换导入方式。",
             "ticket_root_source_mode_conflict_text_file": "已有票根网 TXT 源文件，请先删除已有票根来源后才能切换导入方式。",
             "ticket_root_source_mode_conflict_mixed_upload": "票根网 TXT 文件和 PDF/JPG 不能同时上传，请先选择一种票根来源导入方式。",
+            "reconciliation_task_has_submission_link": "已确认提交 OA 或存在不可删除的提交链路，不能删除。",
         }
         normalized_code = "ticket_root_source_mode_conflict" if code.startswith("ticket_root_source_mode_conflict") else code
         return self._json_response(status, {"error": normalized_code, "message": messages.get(code, code)})
@@ -2741,11 +2821,14 @@ class Application:
         start = (safe_page - 1) * safe_page_size
         paged_items = batches[start:start + safe_page_size]
         selected = paged_items[0] if paged_items else None
-        selected_for_payload = (
-            self._etc_batch_detail_filtered_for_query(selected, plate=plate, keyword=keyword)
-            if isinstance(selected, dict)
-            else None
-        )
+        selected_summary = selected.get("summary", {}) if isinstance(selected, dict) else {}
+        selected_batch_id = str(selected_summary.get("id", "") or "").strip() if isinstance(selected_summary, dict) else ""
+        selected_detail = self._etc_batch_detail_payload(selected_batch_id) if selected_batch_id else None
+        selected_for_payload = self._etc_batch_detail_filtered_for_query(
+            selected_detail,
+            plate=plate,
+            keyword=keyword,
+        ) if selected_detail is not None else None
         return self._json_response(
             HTTPStatus.OK,
             {
@@ -2770,9 +2853,11 @@ class Application:
     def _handle_api_etc_batch_delete(self, batch_id: str) -> Response:
         task = None
         resolved_submission_batch_id = batch_id
+        submission_invoice_ids: list[str] = []
         try:
             existing_batch = self._etc_service.get_batch(batch_id)
             resolved_submission_batch_id = str(getattr(existing_batch, "id", "") or batch_id)
+            submission_invoice_ids = [str(invoice_id) for invoice_id in list(getattr(existing_batch, "invoice_ids", []) or [])]
             task = self._etc_reconciliation_task_service.find_task_for_oa_batch_id(str(getattr(existing_batch, "id", "")))
         except EtcBatchNotFoundError:
             task = None
@@ -2782,8 +2867,14 @@ class Application:
                 self._etc_reconciliation_task_service.record_oa_draft_deleted(
                     task_id=str(getattr(task, "task_id")),
                     oa_draft_batch_id=resolved_submission_batch_id,
+                    etc_batch_id=str(getattr(existing_batch, "etc_batch_id", "") or ""),
                     actor="system",
                 )
+            if result.get("kind") == "submission_batch" and submission_invoice_ids:
+                changed_months = self._sync_etc_invoices_to_canonical_invoices(
+                    self._etc_service.list_invoices_by_ids(submission_invoice_ids),
+                )
+                self._refresh_after_etc_invoice_sync(changed_months, reason="etc_oa_draft_deleted")
         except EtcBatchNotFoundError as error:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_batch_not_found", "message": str(error)})
         except EtcBatchDeleteError as error:
@@ -2803,8 +2894,9 @@ class Application:
             and int(getattr(batch, "invoice_count", 0) or 0) > 0
             and not self._is_reconciliation_import_batch(batch)
         ]
+        unsubmitted_submission_batches = self._etc_service.list_batches(status="unsubmitted")
         submitted_batches = self._etc_service.list_batches(status="submitted")
-        return {"unsubmitted": len(import_batches), "submitted": len(submitted_batches)}
+        return {"unsubmitted": len(import_batches) + len(unsubmitted_submission_batches), "submitted": len(submitted_batches)}
 
     def _etc_batch_list_items(
         self,
@@ -2818,16 +2910,27 @@ class Application:
         include_unsubmitted = status in {"", "unsubmitted"}
         items: list[dict[str, object]] = []
         if include_submitted:
-            for batch in self._etc_service.list_batches(
-                status="submitted",
-                month=month,
-                plate=plate,
-                keyword=keyword,
-            ):
-                detail = self._etc_submission_batch_detail_payload(batch)
-                if detail is not None:
-                    items.append(detail)
+            for batch in self._etc_service.list_batches(status="submitted"):
+                item = self._etc_submission_batch_summary_payload(batch)
+                if self._etc_batch_summary_matches_filters(
+                    item,
+                    month=month,
+                    plate=plate,
+                    keyword=keyword,
+                    invoice_ids=list(getattr(batch, "invoice_ids", []) or []),
+                ):
+                    items.append(item)
         if include_unsubmitted:
+            for batch in self._etc_service.list_batches(status="unsubmitted"):
+                item = self._etc_submission_batch_summary_payload(batch)
+                if self._etc_batch_summary_matches_filters(
+                    item,
+                    month=month,
+                    plate=plate,
+                    keyword=keyword,
+                    invoice_ids=list(getattr(batch, "invoice_ids", []) or []),
+                ):
+                    items.append(item)
             for import_batch in self._etc_service.list_import_batches():
                 if self._is_reconciliation_import_batch(import_batch):
                     continue
@@ -2835,11 +2938,17 @@ class Application:
                     continue
                 if int(getattr(import_batch, "invoice_count", 0) or 0) <= 0:
                     continue
-                detail = self._etc_import_batch_detail_payload(import_batch)
-                if detail is None:
-                    continue
-                if self._etc_batch_payload_matches_filters(detail, month=month, plate=plate, keyword=keyword):
-                    items.append(detail)
+                invoice_ids = [str(invoice_id) for invoice_id in list(getattr(import_batch, "invoice_ids", []) or [])]
+                invoices = self._etc_service.list_invoices_by_ids(invoice_ids)
+                item = self._etc_import_batch_summary_payload(import_batch, invoices=invoices)
+                if self._etc_batch_summary_matches_filters(
+                    item,
+                    month=month,
+                    plate=plate,
+                    keyword=keyword,
+                    invoices=invoices,
+                ):
+                    items.append(item)
         return sorted(
             items,
             key=lambda item: str(item.get("summary", {}).get("created_at", "") if isinstance(item.get("summary"), dict) else ""),
@@ -2877,7 +2986,29 @@ class Application:
         detail = self._etc_service.get_batch_detail(str(getattr(batch, "id", "")))
         invoices = list(detail.get("invoice_items") or [])
         supplement_items = list(detail.get("supplement_items") or getattr(batch, "supplement_items", []) or [])
-        summary = self._serialize_etc_batch_summary(
+        summary = self._etc_submission_batch_summary(batch)
+        summary.update(self._etc_batch_reconciliation_summary_payload(batch))
+        return {
+            "batch": self._serialize_value(batch),
+            "summary": summary,
+            "plateSummary": summary["plate_summary"],
+            "invoiceItems": invoices,
+            "supplementItems": self._serialize_value(supplement_items),
+        }
+
+    def _etc_submission_batch_summary_payload(self, batch: object) -> dict[str, object]:
+        summary = self._etc_submission_batch_summary(batch)
+        summary.update(self._etc_batch_reconciliation_summary_payload(batch))
+        return {
+            "batch": self._serialize_value(batch),
+            "summary": summary,
+            "plateSummary": summary["plate_summary"],
+            "invoiceItems": [],
+            "supplementItems": self._serialize_value(list(getattr(batch, "supplement_items", []) or [])),
+        }
+
+    def _etc_submission_batch_summary(self, batch: object) -> dict[str, object]:
+        return self._serialize_etc_batch_summary(
             id_value=str(getattr(batch, "id", "")),
             etc_batch_id=str(getattr(batch, "etc_batch_id", "")),
             status="submitted" if str(getattr(batch, "status", "")) == "submitted_confirmed" else str(getattr(batch, "status", "")),
@@ -2895,19 +3026,16 @@ class Application:
             note=getattr(batch, "note", ""),
             created_at=getattr(batch, "created_at", None),
         )
-        summary.update(self._etc_batch_reconciliation_summary_payload(batch))
-        return {
-            "batch": self._serialize_value(batch),
-            "summary": summary,
-            "plateSummary": summary["plate_summary"],
-            "invoiceItems": invoices,
-            "supplementItems": self._serialize_value(supplement_items),
-        }
 
     def _etc_import_batch_detail_payload(self, import_batch: object) -> dict[str, object] | None:
         invoice_ids = list(getattr(import_batch, "invoice_ids", []) or [])
         invoices = self._etc_service.list_invoices_by_ids([str(invoice_id) for invoice_id in invoice_ids])
         invoice_items = [self._serialize_etc_invoice(invoice) for invoice in invoices]
+        payload = self._etc_import_batch_summary_payload(import_batch, invoices=invoices)
+        payload["invoiceItems"] = invoice_items
+        return payload
+
+    def _etc_import_batch_summary_payload(self, import_batch: object, *, invoices: list[object]) -> dict[str, object]:
         plate_summary = self._etc_plate_summary_for_invoices(invoices)
         summary = self._serialize_etc_batch_summary(
             id_value=str(getattr(import_batch, "id", "")),
@@ -2931,7 +3059,7 @@ class Application:
             "batch": self._serialize_value(import_batch),
             "summary": summary,
             "plateSummary": summary["plate_summary"],
-            "invoiceItems": invoice_items,
+            "invoiceItems": [],
         }
 
     def _serialize_etc_batch_summary(
@@ -3077,6 +3205,46 @@ class Application:
             if not any(normalized_keyword in value for value in haystack):
                 return False
         return True
+
+    def _etc_batch_summary_matches_filters(
+        self,
+        detail: dict[str, object],
+        *,
+        month: str | None,
+        plate: str | None,
+        keyword: str | None,
+        invoices: list[object] | None = None,
+        invoice_ids: list[str] | None = None,
+    ) -> bool:
+        if not str(month or "").strip() and not str(plate or "").strip() and not str(keyword or "").strip():
+            return True
+        resolved_invoices = invoices
+        if resolved_invoices is None and invoice_ids:
+            resolved_invoices = self._etc_service.list_invoices_by_ids([str(invoice_id) for invoice_id in invoice_ids])
+        return self._etc_batch_payload_matches_filters(
+            {
+                **detail,
+                "invoiceItems": [
+                    self._etc_invoice_filter_payload(invoice)
+                    for invoice in list(resolved_invoices or [])
+                ],
+            },
+            month=month,
+            plate=plate,
+            keyword=keyword,
+        )
+
+    @staticmethod
+    def _etc_invoice_filter_payload(invoice: object) -> dict[str, object]:
+        return {
+            "invoice_number": getattr(invoice, "invoice_number", ""),
+            "issue_date": getattr(invoice, "issue_date", ""),
+            "passage_start_date": getattr(invoice, "passage_start_date", ""),
+            "passage_end_date": getattr(invoice, "passage_end_date", ""),
+            "plate_number": getattr(invoice, "plate_number", ""),
+            "seller_name": getattr(invoice, "seller_name", ""),
+            "buyer_name": getattr(invoice, "buyer_name", ""),
+        }
 
     @staticmethod
     def _etc_batch_detail_filtered_for_query(
@@ -4033,6 +4201,217 @@ class Application:
             )
         self._search_service.clear_cache()
         return self._json_response(HTTPStatus.OK, updated_payload)
+
+    def _handle_api_workbench_settings_oa_manual_search(self, query: dict[str, list[str]]) -> Response:
+        service = self._oa_manual_import_service_or_response()
+        if isinstance(service, Response):
+            return service
+        pagination, error = self._parse_oa_manual_search_pagination(query)
+        if error is not None:
+            return error
+        payload = service.search(
+            q=query.get("q", [None])[0],
+            form_types=self._parse_csv_query_values(query, "form_types"),
+            statuses=self._parse_csv_query_values(query, "statuses"),
+            date_from=query.get("date_from", [None])[0],
+            date_to=query.get("date_to", [None])[0],
+            page=pagination["page"],
+            page_size=pagination["page_size"],
+        )
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_workbench_settings_oa_manual_search_refresh_attachments(
+        self,
+        body: str | bytes | None,
+    ) -> Response:
+        service = self._oa_manual_import_service_or_response()
+        if isinstance(service, Response):
+            return service
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        row_ids, row_ids_error = self._parse_oa_manual_import_row_ids(payload)
+        if row_ids_error is not None:
+            return row_ids_error
+        result = service.refresh_attachments(row_ids)
+        self._invalidate_after_oa_manual_import_mutation(result, row_ids=row_ids)
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _handle_api_workbench_settings_oa_manual_imports(self) -> Response:
+        service = self._oa_manual_import_service_or_response()
+        if isinstance(service, Response):
+            return service
+        return self._json_response(HTTPStatus.OK, service.list_manual_imports())
+
+    def _handle_api_workbench_settings_oa_manual_imports_create(self, body: str | bytes | None) -> Response:
+        service = self._oa_manual_import_service_or_response()
+        if isinstance(service, Response):
+            return service
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        row_ids, row_ids_error = self._parse_oa_manual_import_row_ids(payload)
+        if row_ids_error is not None:
+            return row_ids_error
+        actor_id = str(payload.get("actor_id") or payload.get("actor") or "workbench_settings").strip()
+        result = service.import_row_ids(row_ids, actor_id=actor_id or "workbench_settings")
+        self._invalidate_after_oa_manual_import_mutation(result, row_ids=row_ids)
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _handle_api_workbench_settings_oa_manual_import_delete(
+        self,
+        row_id: str,
+        body: str | bytes | None,
+    ) -> Response:
+        service = self._oa_manual_import_service_or_response()
+        if isinstance(service, Response):
+            return service
+        payload: dict[str, object] = {}
+        if body:
+            payload, error = self._load_json_body(body)
+            if error is not None:
+                return error
+        normalized_row_id = str(row_id or "").strip()
+        if not normalized_row_id:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_oa_manual_import_request", "message": "row_id is required."},
+            )
+        actor_id = str(payload.get("actor_id") or payload.get("actor") or "workbench_settings").strip()
+        result = service.remove_manual_import(normalized_row_id, actor_id=actor_id or "workbench_settings")
+        self._invalidate_after_oa_manual_import_mutation(result, row_ids=[normalized_row_id])
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _oa_manual_import_service_or_response(self) -> OAManualImportService | Response:
+        service = getattr(self, "_oa_manual_import_service", None)
+        if service is None:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "oa_manual_import_unavailable",
+                    "message": "OA 手动导入服务不可用，请检查 OA Mongo 与状态存储配置。",
+                },
+            )
+        return service
+
+    @staticmethod
+    def _parse_csv_query_values(query: dict[str, list[str]], key: str) -> list[str] | None:
+        raw_values = query.get(key)
+        if raw_values is None:
+            return None
+        values: list[str] = []
+        for raw_value in raw_values:
+            values.extend(str(part).strip() for part in str(raw_value or "").split(","))
+        return [value for value in values if value]
+
+    def _parse_oa_manual_search_pagination(
+        self,
+        query: dict[str, list[str]],
+    ) -> tuple[dict[str, int], Response | None]:
+        try:
+            page = int(query.get("page", ["0"])[0] or 0)
+            page_size = int(query.get("page_size", ["20"])[0] or 20)
+        except (TypeError, ValueError):
+            return {}, self._invalid_oa_manual_search_request("page and page_size must be integers.")
+        if page < 0:
+            return {}, self._invalid_oa_manual_search_request("page must be greater than or equal to 0.")
+        if page_size < 1 or page_size > 100:
+            return {}, self._invalid_oa_manual_search_request("page_size must be between 1 and 100.")
+        return {"page": page, "page_size": page_size}, None
+
+    def _invalid_oa_manual_search_request(self, message: str) -> Response:
+        return self._json_response(
+            HTTPStatus.BAD_REQUEST,
+            {"error": "invalid_oa_manual_search_request", "message": message},
+        )
+
+    def _parse_oa_manual_import_row_ids(
+        self,
+        payload: dict[str, object],
+    ) -> tuple[list[str], Response | None]:
+        row_ids = payload.get("row_ids")
+        if not isinstance(row_ids, list):
+            return [], self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_oa_manual_import_request", "message": "row_ids must be an array."},
+            )
+        normalized = []
+        seen: set[str] = set()
+        for row_id in row_ids:
+            text = str(row_id or "").strip()
+            if not text or text in seen:
+                continue
+            normalized.append(text)
+            seen.add(text)
+        if not normalized:
+            return [], self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_oa_manual_import_request", "message": "row_ids is required."},
+            )
+        return normalized, None
+
+    def _invalidate_after_oa_manual_import_mutation(
+        self,
+        result: dict[str, object],
+        *,
+        row_ids: list[str],
+    ) -> None:
+        scope_keys = self._oa_manual_import_affected_scope_keys(result, row_ids=row_ids)
+        self._invalidate_workbench_read_model_scopes(scope_keys)
+        self._search_service.clear_cache()
+        invalidate_records_cache = getattr(self._workbench_query_service._oa_adapter, "invalidate_records_cache", None)
+        if callable(invalidate_records_cache):
+            invalidate_records_cache([scope_key for scope_key in scope_keys if scope_key != "all"])
+
+    def _oa_manual_import_affected_scope_keys(
+        self,
+        result: dict[str, object],
+        *,
+        row_ids: list[str],
+    ) -> list[str]:
+        scope_keys: set[str] = {"all"}
+        rows = result.get("rows") if isinstance(result, dict) else None
+        if isinstance(rows, list):
+            for row in rows:
+                if isinstance(row, dict):
+                    month = self._month_from_oa_manual_import_row(row)
+                    if month:
+                        scope_keys.add(month)
+        normalized_row_ids = {str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()}
+        if normalized_row_ids:
+            for row in self._workbench_query_service.list_record_snapshots():
+                if str(row.get("id", "")).strip() in normalized_row_ids:
+                    month = str(row.get("_month", "")).strip()
+                    if SEARCH_MONTH_RE.match(month):
+                        scope_keys.add(month)
+            list_application_records_by_row_ids = getattr(
+                self._workbench_query_service._oa_adapter,
+                "list_application_records_by_row_ids",
+                None,
+            )
+            if callable(list_application_records_by_row_ids):
+                try:
+                    for record in list_application_records_by_row_ids(sorted(normalized_row_ids)):
+                        month = str(getattr(record, "month", "") or "").strip()
+                        if SEARCH_MONTH_RE.match(month):
+                            scope_keys.add(month)
+                except Exception:
+                    pass
+        return sorted(scope_keys)
+
+    @staticmethod
+    def _month_from_oa_manual_import_row(row: dict[str, object]) -> str:
+        for key in ("month", "application_date", "apply_date", "date"):
+            value = str(row.get(key) or "").strip()
+            if len(value) >= 7 and SEARCH_MONTH_RE.match(value[:7]):
+                return value[:7]
+        for item in list(row.get("items") or []):
+            if not isinstance(item, dict):
+                continue
+            value = str(item.get("date") or "").strip()
+            if len(value) >= 7 and SEARCH_MONTH_RE.match(value[:7]):
+                return value[:7]
+        return ""
 
     def _handle_api_workbench_settings_projects_sync(self, body: str | bytes | None) -> Response:
         payload, error = self._load_json_body(body)
@@ -5598,6 +5977,147 @@ class Application:
             return self._no_oa_bank_batch_value_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
 
+    def _batch_accounting_service(self) -> BatchAccountingService:
+        return BatchAccountingService(
+            grouped_workbench_loader=lambda month: self._build_api_workbench_payload(month),
+            pair_relation_service=self._workbench_pair_relation_service,
+            case_id_provider=self._workbench_override_service._next_case_id,
+        )
+
+    def _handle_api_batch_accounting(self, query: dict[str, list[str]]) -> Response:
+        year = query.get("year", [""])[0]
+        bucket = query.get("bucket", ["unsubmitted"])[0] or "unsubmitted"
+        try:
+            payload = self._batch_accounting_service().build_payload(year=year, bucket=bucket)
+        except BatchAccountingError as exc:
+            return self._batch_accounting_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_batch_accounting_submit(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session = self._batch_accounting_mutation_session(headers)
+        if isinstance(session, Response):
+            return session
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        actor = str(payload.get("actor") or session.identity.username or session.identity.user_id or "web_finance_user")
+        try:
+            result = self._batch_accounting_service().submit(
+                year=str(payload.get("year") or ""),
+                bank_row_id=str(payload.get("bank_row_id") or ""),
+                oa_row_ids=list(payload.get("oa_row_ids") or []),
+                actor=actor,
+                expected_version=self._optional_int(payload.get("expected_version")),
+            )
+        except BatchAccountingError as exc:
+            return self._batch_accounting_error_response(exc)
+        except (TypeError, ValueError) as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_batch_accounting_request", "message": str(exc)},
+            )
+
+        changed_scope_keys = sorted(
+            self._scope_keys_for_row_ids(
+                month="all",
+                row_ids=list(result.get("affected_row_ids") or []),
+                month_scope=str(result.get("month_scope") or ""),
+            )
+        )
+        changed_case_ids = [str(case_id) for case_id in list(result.get("changed_case_ids") or []) if str(case_id).strip()]
+        self._invalidate_workbench_read_model_scopes(changed_scope_keys)
+        self._schedule_workbench_pair_relation_persist(
+            changed_case_ids=changed_case_ids,
+            action_name="submit_batch_accounting",
+        )
+        self._schedule_workbench_read_model_persist(
+            changed_scope_keys=changed_scope_keys,
+            action_name="submit_batch_accounting",
+        )
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                **result,
+                "affected_months": changed_scope_keys,
+            },
+        )
+
+    def _handle_api_batch_accounting_withdraw(
+        self,
+        relation_id: str,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session = self._batch_accounting_mutation_session(headers)
+        if isinstance(session, Response):
+            return session
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        actor = str(payload.get("actor") or session.identity.username or session.identity.user_id or "web_finance_user")
+        try:
+            result = self._batch_accounting_service().withdraw(
+                relation_id=relation_id,
+                actor=actor,
+                reason=str(payload.get("reason") or payload.get("note") or ""),
+                expected_version=self._optional_int(payload.get("expected_version")),
+            )
+        except BatchAccountingError as exc:
+            return self._batch_accounting_error_response(exc)
+        except KeyError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": str(exc).strip("'") or "workbench_pair_relation_no_withdraw_history", "message": str(exc)},
+            )
+
+        changed_scope_keys = sorted(
+            self._scope_keys_for_row_ids(
+                month="all",
+                row_ids=list(result.get("affected_row_ids") or []),
+                month_scope=str(result.get("month_scope") or ""),
+            )
+        )
+        changed_case_ids = [str(case_id) for case_id in list(result.get("changed_case_ids") or []) if str(case_id).strip()]
+        self._invalidate_workbench_read_model_scopes(changed_scope_keys)
+        self._schedule_workbench_pair_relation_persist(
+            changed_case_ids=changed_case_ids,
+            action_name="withdraw_batch_accounting",
+        )
+        self._schedule_workbench_read_model_persist(
+            changed_scope_keys=changed_scope_keys,
+            action_name="withdraw_batch_accounting",
+        )
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                **result,
+                "affected_months": changed_scope_keys,
+            },
+        )
+
+    def _batch_accounting_mutation_session(self, headers: dict[str, str] | None) -> OARequestSession | Response:
+        session = resolve_oa_request_session(
+            headers,
+            identity_service=self._oa_identity_service,
+            access_control_service=self._access_control_service,
+        )
+        if not session.can_mutate_data:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "permission_denied", "message": "当前账户没有提交或撤回批量账务关联的权限。"},
+            )
+        return session
+
+    def _batch_accounting_error_response(self, exc: BatchAccountingError) -> Response:
+        status = HTTPStatus.CONFLICT if exc.code == "batch_accounting_version_conflict" else HTTPStatus.BAD_REQUEST
+        payload: dict[str, object] = {"error": exc.code, "message": str(exc)}
+        payload.update(exc.payload)
+        return self._json_response(status, payload)
+
     def _handle_api_no_oa_bank_batches_bulk_submit(
         self,
         body: str | bytes | None,
@@ -6462,8 +6982,8 @@ class Application:
                 {"error": "invalid_confirm_link_request", "message": str(exc)},
             )
 
-        row_types = self._resolved_row_types_for_row_ids(row_ids, month=month)
-        if not self._can_confirm_link_row_types(row_ids=row_ids, row_types=row_types, month=month):
+        requested_row_types = self._resolved_row_types_for_row_ids(row_ids, month=month)
+        if not self._can_confirm_link_row_types(row_ids=row_ids, row_types=requested_row_types, month=month):
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
@@ -6471,6 +6991,8 @@ class Application:
                     "message": "confirm link requires rows from at least two panes.",
                 },
             )
+        row_ids = self._expand_confirm_link_row_ids_for_existing_context(row_ids, month=month)
+        row_types = self._resolved_row_types_for_row_ids(row_ids, month=month)
         amount_check = self._amount_check_for_row_ids(row_ids, month=month, allow_direct=False)
         if amount_check.get("requires_note") and not note:
             return self._json_response(
@@ -6572,9 +7094,11 @@ class Application:
     def _preview_confirm_link(self, payload: dict[str, object]) -> dict[str, object]:
         month = str(payload["month"])
         row_ids = self._normalize_row_ids(list(payload["row_ids"]))
-        row_types = self._resolved_row_types_for_row_ids(row_ids, month=month)
-        if not self._can_confirm_link_row_types(row_ids=row_ids, row_types=row_types, month=month):
+        requested_row_types = self._resolved_row_types_for_row_ids(row_ids, month=month)
+        if not self._can_confirm_link_row_types(row_ids=row_ids, row_types=requested_row_types, month=month):
             raise ValueError("confirm link requires rows from at least two panes.")
+        row_ids = self._expand_confirm_link_row_ids_for_existing_context(row_ids, month=month)
+        row_types = self._resolved_row_types_for_row_ids(row_ids, month=month)
         rows = self._resolve_rows_for_amount_check(row_ids, month=month, allow_direct=True)
         rows_by_type = self._rows_by_type(rows)
         amount_check = self._amount_check_for_rows_by_type(rows_by_type)
@@ -9564,6 +10088,7 @@ class Application:
         else:
             payload = self._build_oa_workbench_row_payload(month)
         self._sync_oa_invoice_offset_auto_pair_relations(payload)
+        self._repair_active_relations_with_oa_attachment_context(payload)
         paired_payload = self._apply_pair_relations_to_payload(payload)
         return self._workbench_override_service.apply_to_payload(paired_payload)
 
@@ -9644,7 +10169,7 @@ class Application:
         return datetime.now().strftime("%Y-%m")
 
     def _supplemental_retained_oa_row_ids(self, cutoff_date: datetime) -> list[str]:
-        retained_row_ids: set[str] = set()
+        retained_row_ids: set[str] = set(self._manual_retained_oa_row_ids())
         for relation in self._workbench_pair_relation_service.list_active_relations():
             row_ids = [
                 str(row_id).strip()
@@ -9672,6 +10197,17 @@ class Application:
                 retained_row_ids.update(oa_row_ids)
         return sorted(retained_row_ids)
 
+    def _manual_retained_oa_row_ids(self) -> list[str]:
+        service = getattr(self, "_oa_manual_import_service", None)
+        manual_retained_row_ids = getattr(service, "manual_retained_row_ids", None)
+        if not callable(manual_retained_row_ids):
+            return []
+        try:
+            row_ids = manual_retained_row_ids()
+        except Exception:
+            return []
+        return sorted({str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()})
+
     def _raw_oa_payload_for_selected_scope(
         self,
         *,
@@ -9680,15 +10216,16 @@ class Application:
     ) -> dict[str, object]:
         paired: dict[str, list[dict[str, object]]] = {"oa": [], "bank": [], "invoice": []}
         open_rows: dict[str, list[dict[str, object]]] = {"oa": [], "bank": [], "invoice": []}
+        retained_oa_row_ids = set(supplemental_oa_row_ids) | set(self._manual_retained_oa_row_ids())
 
         for row in self._workbench_query_service.list_record_snapshots():
             row_type = str(row.get("type", "")).strip()
             row_month = str(row.get("_month", "")).strip()
             include_row = False
             if row_type == "oa":
-                include_row = row_month in months or str(row.get("id", "")) in supplemental_oa_row_ids
+                include_row = row_month in months or str(row.get("id", "")) in retained_oa_row_ids
             elif row_type == "invoice" and str(row.get("source_kind", "")) == "oa_attachment_invoice":
-                include_row = row_month in months or str(row.get("derived_from_oa_id", "")) in supplemental_oa_row_ids
+                include_row = row_month in months or str(row.get("derived_from_oa_id", "")) in retained_oa_row_ids
             if not include_row:
                 continue
             section_payload = paired if row.get("_section") == "paired" else open_rows
@@ -9864,6 +10401,7 @@ class Application:
         if cutoff_date is None:
             return self._serialize_value(payload)
 
+        manual_retained_oa_row_ids = set(self._manual_retained_oa_row_ids())
         result = self._serialize_value(payload)
         changed = False
         for section in ("paired", "open"):
@@ -9878,16 +10416,34 @@ class Application:
                 keep_all_group_oa = any(self._row_is_on_or_after(row, cutoff_date, row_type="oa") for row in oa_rows) or any(
                     self._row_is_on_or_after(row, cutoff_date, row_type="bank") for row in bank_rows
                 )
-                retained_oa_rows = [
-                    row
-                    for row in oa_rows
-                    if keep_all_group_oa or not self._row_has_parseable_retention_date(row, row_type="oa")
-                ]
+                retained_oa_rows = []
+                filtered_oa_row_ids: set[str] = set()
+                for row in oa_rows:
+                    row_id = str(row.get("id", "")).strip() if isinstance(row, dict) else ""
+                    retain_row = (
+                        keep_all_group_oa
+                        or row_id in manual_retained_oa_row_ids
+                        or not self._row_has_parseable_retention_date(row, row_type="oa")
+                    )
+                    if retain_row:
+                        retained_oa_rows.append(row)
+                    elif row_id:
+                        filtered_oa_row_ids.add(row_id)
                 if len(retained_oa_rows) != len(oa_rows):
                     changed = True
+                retained_invoice_rows = []
+                for row in invoice_rows:
+                    if (
+                        isinstance(row, dict)
+                        and str(row.get("source_kind", "")).strip() == "oa_attachment_invoice"
+                        and str(row.get("derived_from_oa_id", "")).strip() in filtered_oa_row_ids
+                    ):
+                        changed = True
+                        continue
+                    retained_invoice_rows.append(row)
                 normalized_group["oa_rows"] = retained_oa_rows
                 normalized_group["bank_rows"] = bank_rows
-                normalized_group["invoice_rows"] = invoice_rows
+                normalized_group["invoice_rows"] = retained_invoice_rows
                 if normalized_group["oa_rows"] or normalized_group["bank_rows"] or normalized_group["invoice_rows"]:
                     filtered_groups.append(normalized_group)
             if len(filtered_groups) != len(original_groups):
@@ -10309,6 +10865,153 @@ class Application:
         self._search_service.clear_cache()
         self._invalidate_workbench_read_model_scopes(list(changed_scope_keys))
         self._persist_workbench_pair_relations(changed_case_ids=changed_case_ids)
+
+    def _repair_active_relations_with_oa_attachment_context(self, payload: dict[str, object]) -> None:
+        rows_by_id = self._raw_workbench_payload_rows_by_id(payload)
+        if not rows_by_id:
+            return
+        attachment_row_ids_by_oa_id = self._oa_attachment_context_row_ids_by_oa_id(rows_by_id)
+        if not attachment_row_ids_by_oa_id:
+            return
+
+        changed_case_ids: list[str] = []
+        changed_scope_keys: set[str] = {"all"}
+        timestamp = datetime.now(UTC).isoformat()
+        for relation in self._workbench_pair_relation_service.list_active_relations():
+            if self._relation_requires_dedicated_withdraw_action(relation):
+                continue
+            row_ids = [str(row_id).strip() for row_id in list(relation.get("row_ids") or []) if str(row_id).strip()]
+            if not row_ids:
+                continue
+            row_types = [str(row_type).strip() for row_type in list(relation.get("row_types") or [])]
+            relation_row_ids = set(row_ids)
+            relation_has_bank = any(
+                (row_types[index] if index < len(row_types) else self._row_type_for_row_id(row_id)) == "bank"
+                for index, row_id in enumerate(row_ids)
+            )
+            if not relation_has_bank:
+                continue
+            oa_row_ids = [
+                row_id
+                for index, row_id in enumerate(row_ids)
+                if (row_types[index] if index < len(row_types) else self._row_type_for_row_id(row_id)) == "oa"
+            ]
+            missing_attachment_row_ids: list[str] = []
+            for oa_row_id in oa_row_ids:
+                for attachment_row_id in attachment_row_ids_by_oa_id.get(oa_row_id, []):
+                    if attachment_row_id not in relation_row_ids and attachment_row_id in rows_by_id:
+                        missing_attachment_row_ids.append(attachment_row_id)
+            if not missing_attachment_row_ids:
+                continue
+
+            repaired_row_ids = [*row_ids, *missing_attachment_row_ids]
+            repaired_row_types = [
+                *[
+                    row_types[index] if index < len(row_types) and row_types[index] else self._row_type_for_row_id(row_id)
+                    for index, row_id in enumerate(row_ids)
+                ],
+                *(["invoice"] * len(missing_attachment_row_ids)),
+            ]
+            repaired_rows = [rows_by_id[row_id] for row_id in repaired_row_ids if row_id in rows_by_id]
+            before_relation = self._serialize_value(relation)
+            amount_check = self._amount_check_for_rows_by_type(self._rows_by_type(repaired_rows))
+            repaired_relation = self._workbench_pair_relation_service.create_active_relation(
+                case_id=str(relation.get("case_id") or ""),
+                row_ids=repaired_row_ids,
+                row_types=repaired_row_types,
+                relation_mode=str(relation.get("relation_mode") or "manual_confirmed"),
+                created_by=str(relation.get("created_by") or "system_repair"),
+                month_scope=str(relation.get("month_scope") or "all"),
+                note=str(relation.get("note") or ""),
+                amount_check=amount_check,
+                special_metadata=relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else None,
+                exception_case_id=str(relation.get("exception_case_id") or ""),
+                rule_version=str(relation.get("rule_version") or ""),
+                evidence=relation.get("evidence") if isinstance(relation.get("evidence"), dict) else None,
+                oa_exemption=relation.get("oa_exemption") if isinstance(relation.get("oa_exemption"), dict) else None,
+                display_tags=[
+                    str(tag).strip()
+                    for tag in list(relation.get("display_tags") or [])
+                    if str(tag).strip()
+                ],
+                created_at=timestamp,
+            )
+            self._workbench_pair_relation_service.record_history(
+                operation_type="repair_missing_oa_attachment_context",
+                before_relations=[before_relation],
+                after_relations=[repaired_relation],
+                affected_row_ids=repaired_row_ids,
+                created_by="system_repair",
+                note="修复已有关联缺失的 OA 附件证据行。",
+                amount_check=amount_check,
+                created_at=timestamp,
+            )
+            case_id = str(repaired_relation.get("case_id") or "").strip()
+            if case_id:
+                changed_case_ids.append(case_id)
+            changed_scope_keys.update(
+                self._scope_keys_for_row_ids(
+                    month=str(payload.get("month") or "all"),
+                    row_ids=repaired_row_ids,
+                    month_scope=str(repaired_relation.get("month_scope") or ""),
+                )
+            )
+
+        if not changed_case_ids:
+            return
+        self._search_service.clear_cache()
+        self._invalidate_workbench_read_model_scopes(list(changed_scope_keys))
+        self._persist_workbench_pair_relations(changed_case_ids=changed_case_ids)
+
+    @staticmethod
+    def _raw_workbench_payload_rows_by_id(payload: dict[str, object]) -> dict[str, dict[str, object]]:
+        rows_by_id: dict[str, dict[str, object]] = {}
+        for section_name in ("paired", "open"):
+            section_payload = payload.get(section_name)
+            if not isinstance(section_payload, dict):
+                continue
+            for pane in ("oa", "bank", "invoice"):
+                for row in list(section_payload.get(pane) or []):
+                    if not isinstance(row, dict):
+                        continue
+                    row_id = str(row.get("id") or "").strip()
+                    if row_id:
+                        rows_by_id[row_id] = row
+        return rows_by_id
+
+    def _oa_attachment_context_row_ids_by_oa_id(
+        self,
+        rows_by_id: dict[str, dict[str, object]],
+    ) -> dict[str, list[str]]:
+        attachment_row_ids_by_oa_id: dict[str, list[str]] = {}
+        oa_row_ids = {
+            row_id
+            for row_id, row in rows_by_id.items()
+            if str(row.get("type") or "").strip() == "oa"
+        }
+        if not oa_row_ids:
+            return attachment_row_ids_by_oa_id
+        for row_id, row in rows_by_id.items():
+            if not self._invoice_row_is_oa_attachment_context(row):
+                continue
+            derived_from_oa_id = str(row.get("derived_from_oa_id") or "").strip()
+            if derived_from_oa_id in oa_row_ids:
+                attachment_row_ids_by_oa_id.setdefault(derived_from_oa_id, []).append(row_id)
+                continue
+            source_oa_id = self._oa_id_from_attachment_invoice_id(row_id, list(oa_row_ids))
+            if source_oa_id:
+                attachment_row_ids_by_oa_id.setdefault(source_oa_id, []).append(row_id)
+        return attachment_row_ids_by_oa_id
+
+    @staticmethod
+    def _invoice_row_is_oa_attachment_context(row: dict[str, object]) -> bool:
+        if str(row.get("type") or "").strip() != "invoice":
+            return False
+        return str(row.get("source_kind") or "").strip() in {
+            "oa_attachment_invoice",
+            "oa_attachment_payment_receipt",
+            "oa_attachment_unknown",
+        }
 
     @staticmethod
     def _raw_workbench_payload_row_ids(payload: dict[str, object]) -> set[str]:
@@ -11395,6 +12098,157 @@ class Application:
             rows.append({"id": row_id, "type": self._row_type_for_row_id(row_id)})
         return rows
 
+    def _expand_confirm_link_row_ids_for_existing_context(self, row_ids: list[str], *, month: str) -> list[str]:
+        expanded_row_ids = self._normalize_row_ids(row_ids)
+        seen = set(expanded_row_ids)
+
+        def add(row_id: object) -> None:
+            normalized_row_id = str(row_id or "").strip()
+            if not normalized_row_id or normalized_row_id in seen:
+                return
+            seen.add(normalized_row_id)
+            expanded_row_ids.append(normalized_row_id)
+
+        for relation in self._workbench_pair_relation_service.active_relations_for_row_ids(expanded_row_ids):
+            for relation_row_id in list(relation.get("row_ids") or []):
+                add(relation_row_id)
+
+        for group in self._cached_existing_context_groups_for_row_ids(expanded_row_ids, month_hint=month):
+            for context_row_id in self._confirm_link_context_row_ids_to_preserve(
+                group,
+                selected_row_ids=seen,
+            ):
+                add(context_row_id)
+        return expanded_row_ids
+
+    def _cached_existing_context_groups_for_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        month_hint: str | None,
+    ) -> list[dict[str, object]]:
+        selected_row_ids = {str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()}
+        if not selected_row_ids:
+            return []
+
+        normalized_month_hint = str(month_hint).strip() if month_hint not in (None, "") else None
+        scope_keys: list[str] = []
+        if normalized_month_hint:
+            scope_keys.append(normalized_month_hint)
+        if normalized_month_hint != "all":
+            scope_keys.append("all")
+        if normalized_month_hint is None:
+            scope_keys.extend(self._workbench_read_model_service.list_scope_keys())
+
+        groups: list[dict[str, object]] = []
+        seen_group_keys: set[tuple[str, str]] = set()
+        seen_scope_keys: set[str] = set()
+        for scope_key in scope_keys:
+            if not scope_key or scope_key in seen_scope_keys:
+                continue
+            seen_scope_keys.add(scope_key)
+            read_model = self._workbench_read_model_service.get_read_model(scope_key)
+            if not isinstance(read_model, dict):
+                continue
+            payload = read_model.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            for section_name in ("paired", "open"):
+                section_payload = payload.get(section_name)
+                if not isinstance(section_payload, dict):
+                    continue
+                for group in list(section_payload.get("groups") or []):
+                    if not isinstance(group, dict):
+                        continue
+                    group_row_ids = {
+                        str(row.get("id") or "").strip()
+                        for row_key in ("oa_rows", "bank_rows", "invoice_rows")
+                        for row in list(group.get(row_key) or [])
+                        if isinstance(row, dict) and str(row.get("id") or "").strip()
+                    }
+                    if not group_row_ids.intersection(selected_row_ids):
+                        continue
+                    group_key = (scope_key, str(group.get("group_id") or ""))
+                    if group_key in seen_group_keys:
+                        continue
+                    seen_group_keys.add(group_key)
+                    groups.append(self._serialize_value(group))
+        return groups
+
+    @staticmethod
+    def _workbench_group_preserves_existing_pair_context(group: dict[str, object]) -> bool:
+        reason = str(group.get("reason") or "").strip()
+        if reason in {"relation_snapshot", "oa_attachment_source_relation", "unique_candidate_chain"}:
+            return True
+        group_type = str(group.get("group_type") or "").strip()
+        if group_type in {"", "candidate", "selection", "processed_exception"}:
+            return False
+        if reason in {"selected_row", "selected_rows"}:
+            return False
+        return str(group.get("group_id") or "").startswith("case:")
+
+    def _confirm_link_context_row_ids_to_preserve(
+        self,
+        group: dict[str, object],
+        *,
+        selected_row_ids: set[str],
+    ) -> list[str]:
+        if not self._workbench_group_preserves_existing_pair_context(group):
+            return []
+        if str(group.get("reason") or "").strip() == "relation_snapshot":
+            return [
+                str(row.get("id") or "").strip()
+                for row_key in ("oa_rows", "bank_rows", "invoice_rows")
+                for row in list(group.get(row_key) or [])
+                if isinstance(row, dict) and str(row.get("id") or "").strip()
+            ]
+
+        selected_oa_ids = {
+            row_id
+            for row in list(group.get("oa_rows") or [])
+            if isinstance(row, dict)
+            and (row_id := str(row.get("id") or "").strip())
+            and row_id in selected_row_ids
+        }
+        has_selected_bank = any(
+            isinstance(row, dict) and str(row.get("id") or "").strip() in selected_row_ids
+            for row in list(group.get("bank_rows") or [])
+        )
+        if not selected_oa_ids or not has_selected_bank:
+            return []
+
+        preserved_row_ids: list[str] = []
+        for row in list(group.get("invoice_rows") or []):
+            if not isinstance(row, dict):
+                continue
+            row_id = str(row.get("id") or "").strip()
+            if not row_id or row_id in selected_row_ids:
+                continue
+            if self._invoice_row_belongs_to_selected_oa_attachment(row, selected_oa_ids):
+                preserved_row_ids.append(row_id)
+        return preserved_row_ids
+
+    @staticmethod
+    def _invoice_row_belongs_to_selected_oa_attachment(
+        row: dict[str, object],
+        selected_oa_ids: set[str],
+    ) -> bool:
+        source_kind = str(row.get("source_kind") or "").strip()
+        if source_kind not in {
+            "oa_attachment_invoice",
+            "oa_attachment_payment_receipt",
+            "oa_attachment_unknown",
+        }:
+            return False
+        derived_from_oa_id = str(row.get("derived_from_oa_id") or "").strip()
+        if derived_from_oa_id in selected_oa_ids:
+            return True
+        row_id = str(row.get("id") or "").strip()
+        return any(
+            row_id.startswith(f"oa-att-inv-{oa_row_id}-") or row_id == f"oa-att-inv-{oa_row_id}"
+            for oa_row_id in selected_oa_ids
+        )
+
     @staticmethod
     def _rows_by_type(rows: list[dict[str, object]]) -> dict[str, list[dict[str, object]]]:
         rows_by_type: dict[str, list[dict[str, object]]] = {"oa": [], "bank": [], "invoice": []}
@@ -11856,11 +12710,18 @@ class Application:
                 if not isinstance(group, dict):
                     continue
                 relation = self._relation_for_group(group)
+                if isinstance(relation, dict) and not self._relation_requires_dedicated_withdraw_action(relation):
+                    group["can_withdraw"] = True
                 for key in ("oa_rows", "bank_rows", "invoice_rows"):
                     for row in list(group.get(key, [])):
                         if isinstance(row, dict):
                             row["tags"] = self._derive_workbench_row_tags(row, group, relation)
         return result
+
+    @staticmethod
+    def _relation_requires_dedicated_withdraw_action(relation: dict[str, object]) -> bool:
+        relation_mode = str(relation.get("relation_mode") or "").strip()
+        return relation_mode == NO_OA_BANK_BATCH_RELATION_MODE
 
     def _relation_for_group(self, group: dict[str, object]) -> dict[str, object] | None:
         for key in ("oa_rows", "bank_rows", "invoice_rows"):

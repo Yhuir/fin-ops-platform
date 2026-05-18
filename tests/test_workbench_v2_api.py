@@ -1154,7 +1154,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             },
         }
 
-        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+        with (
+            patch.object(app._live_workbench_service, "has_rows_for_month", return_value=False),
+            patch.object(app, "_build_oa_workbench_row_payload", return_value=raw_payload),
+        ):
             payload = app._build_api_workbench_payload("2026-05")
 
         paired_groups = payload["paired"]["groups"]
@@ -1231,7 +1234,10 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             },
         }
 
-        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+        with (
+            patch.object(app._live_workbench_service, "has_rows_for_month", return_value=False),
+            patch.object(app, "_build_oa_workbench_row_payload", return_value=raw_payload),
+        ):
             payload = app._build_api_workbench_payload("2026-05")
 
         self.assertEqual(payload["paired"]["groups"], [])
@@ -2951,6 +2957,55 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(oa_ids, {"oa-existing-001", "oa-existing-002"})
         self.assertEqual(payload["summary"]["oa_count"], 2)
 
+    def test_retained_all_scope_includes_manual_imported_oa_and_attachment_invoices(self) -> None:
+        app = build_application()
+        app._app_settings_service.update_settings(
+            completed_project_ids=[],
+            bank_account_mappings=[],
+            allowed_usernames=[],
+            readonly_export_usernames=[],
+            admin_usernames=[],
+            oa_retention={"cutoff_date": "2026-03-01"},
+        )
+        app._workbench_query_service._records_by_id = {
+            "oa-manual-202512": {
+                "id": "oa-manual-202512",
+                "type": "oa",
+                "_month": "2025-12",
+                "_section": "open",
+                "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"},
+            },
+            "oa-att-inv-oa-manual-202512-01": {
+                "id": "oa-att-inv-oa-manual-202512-01",
+                "type": "invoice",
+                "_month": "2025-12",
+                "_section": "open",
+                "source_kind": "oa_attachment_invoice",
+                "derived_from_oa_id": "oa-manual-202512",
+                "invoice_bank_relation": {"code": "pending_collection", "label": "待匹配流水", "tone": "warn"},
+            },
+            "oa-old-not-retained": {
+                "id": "oa-old-not-retained",
+                "type": "oa",
+                "_month": "2025-12",
+                "_section": "open",
+                "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"},
+            },
+        }
+        app._oa_manual_import_service = SimpleNamespace(
+            manual_retained_row_ids=lambda: ["oa-manual-202512"]
+        )
+
+        payload = app._raw_oa_payload_for_selected_scope(months={"2026-03"}, supplemental_oa_row_ids=set())
+
+        self.assertEqual([row["id"] for row in payload["open"]["oa"]], ["oa-manual-202512"])
+        self.assertEqual(
+            [row["id"] for row in payload["open"]["invoice"]],
+            ["oa-att-inv-oa-manual-202512-01"],
+        )
+        self.assertEqual(payload["summary"]["oa_count"], 1)
+        self.assertEqual(payload["summary"]["invoice_count"], 1)
+
     def test_get_api_workbench_keeps_salary_auto_match_as_candidate_until_no_oa_submit(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(
@@ -4630,6 +4685,157 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             ["oa-o-202603-001", "bk-o-202603-001"],
         )
 
+    def test_confirm_link_includes_existing_oa_attachment_context_rows(self) -> None:
+        app = build_application()
+        raw_payload = build_relation_amount_raw_payload(invoice_amount="100.00")
+        raw_payload["open"]["oa"][0]["id"] = "oa-exp-202605-attachment"
+        raw_payload["open"]["oa"][0]["case_id"] = "CASE-OA-ATT-oa-exp-202605-attachment"
+        raw_payload["open"]["bank"][0]["id"] = "bk-o-202605-attachment"
+        raw_payload["open"]["invoice"][0]["id"] = "oa-att-inv-oa-exp-202605-attachment-01"
+        raw_payload["open"]["invoice"][0]["case_id"] = "CASE-OA-ATT-oa-exp-202605-attachment"
+        raw_payload["open"]["invoice"][0]["source_kind"] = "oa_attachment_invoice"
+        raw_payload["open"]["invoice"][0]["derived_from_oa_id"] = "oa-exp-202605-attachment"
+
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            initial_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-05").body)
+
+        source_group = next(
+            group
+            for group in initial_payload["paired"]["groups"]
+            if group["group_id"] == "case:CASE-OA-ATT-oa-exp-202605-attachment"
+        )
+        self.assertEqual(source_group["reason"], "unique_candidate_chain")
+        self.assertEqual([row["id"] for row in source_group["oa_rows"]], ["oa-exp-202605-attachment"])
+        self.assertEqual(
+            [row["id"] for row in source_group["invoice_rows"]],
+            ["oa-att-inv-oa-exp-202605-attachment-01"],
+        )
+
+        preview_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link/preview",
+            json.dumps(
+                {
+                    "month": "2026-05",
+                    "row_ids": ["oa-exp-202605-attachment", "bk-o-202605-attachment"],
+                    "case_id": "CASE-FULL-WITH-ATTACHMENT",
+                }
+            ),
+        )
+        self.assertEqual(preview_response.status_code, 200)
+        preview_payload = json.loads(preview_response.body)
+        after_group = preview_payload["after"]["groups"][0]
+        self.assertCountEqual(
+            [row["id"] for row in after_group["invoice_rows"]],
+            ["oa-att-inv-oa-exp-202605-attachment-01"],
+        )
+
+        confirm_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link",
+            json.dumps(
+                {
+                    "month": "2026-05",
+                    "row_ids": ["oa-exp-202605-attachment", "bk-o-202605-attachment"],
+                    "case_id": "CASE-FULL-WITH-ATTACHMENT",
+                }
+            ),
+        )
+
+        self.assertEqual(confirm_response.status_code, 200)
+        confirm_payload = json.loads(confirm_response.body)
+        self.assertCountEqual(
+            confirm_payload["affected_row_ids"],
+            [
+                "oa-exp-202605-attachment",
+                "bk-o-202605-attachment",
+                "oa-att-inv-oa-exp-202605-attachment-01",
+            ],
+        )
+        relation = app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-FULL-WITH-ATTACHMENT")
+        assert relation is not None
+        self.assertCountEqual(
+            relation["row_ids"],
+            [
+                "oa-exp-202605-attachment",
+                "bk-o-202605-attachment",
+                "oa-att-inv-oa-exp-202605-attachment-01",
+            ],
+        )
+
+    def test_open_group_with_active_partial_relation_is_withdrawable(self) -> None:
+        app = build_application()
+        raw_payload = build_relation_amount_raw_payload(invoice_amount="100.00")
+        raw_payload["paired"]["oa"] = [raw_payload["open"]["oa"][0]]
+        raw_payload["paired"]["bank"] = [raw_payload["open"]["bank"][0]]
+        raw_payload["open"]["oa"] = []
+        raw_payload["open"]["bank"] = []
+        raw_payload["open"]["invoice"] = []
+        app._workbench_pair_relation_service.create_active_relation(
+            case_id="CASE-PARTIAL-WITHDRAWABLE",
+            row_ids=["oa-o-202605-001", "bk-o-202605-001"],
+            row_types=["oa", "bank"],
+            relation_mode="manual_confirmed",
+            created_by="test",
+            month_scope="2026-05",
+        )
+
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            payload = app._build_api_workbench_payload("2026-05")
+
+        self.assertEqual(payload["paired"]["groups"], [])
+        open_group = next(
+            group
+            for group in payload["open"]["groups"]
+            if group["group_id"] == "case:CASE-PARTIAL-WITHDRAWABLE"
+        )
+        self.assertTrue(open_group["can_withdraw"])
+
+    def test_read_model_repairs_active_relation_missing_oa_attachment_invoice(self) -> None:
+        app = build_application()
+        raw_payload = build_relation_amount_raw_payload(invoice_amount="100.00")
+        raw_payload["open"]["oa"][0]["id"] = "oa-exp-202605-repair"
+        raw_payload["open"]["bank"][0]["id"] = "bk-o-202605-repair"
+        raw_payload["open"]["invoice"][0]["id"] = "oa-att-inv-oa-exp-202605-repair-01"
+        raw_payload["open"]["invoice"][0]["source_kind"] = "oa_attachment_invoice"
+        raw_payload["open"]["invoice"][0]["derived_from_oa_id"] = "oa-exp-202605-repair"
+        app._workbench_pair_relation_service.create_active_relation(
+            case_id="CASE-REPAIR-MISSING-ATTACHMENT",
+            row_ids=["oa-exp-202605-repair", "bk-o-202605-repair"],
+            row_types=["oa", "bank"],
+            relation_mode="manual_confirmed",
+            created_by="test",
+            month_scope="2026-05",
+        )
+
+        with (
+            patch.object(app._live_workbench_service, "has_rows_for_month", return_value=False),
+            patch.object(app, "_build_oa_workbench_row_payload", return_value=raw_payload),
+        ):
+            payload = app._build_api_workbench_payload("2026-05")
+
+        relation = app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-REPAIR-MISSING-ATTACHMENT")
+        assert relation is not None
+        self.assertCountEqual(
+            relation["row_ids"],
+            ["oa-exp-202605-repair", "bk-o-202605-repair", "oa-att-inv-oa-exp-202605-repair-01"],
+        )
+        self.assertEqual(
+            app._workbench_pair_relation_service.list_history()[-1]["operation_type"],
+            "repair_missing_oa_attachment_context",
+        )
+        repaired_group = next(
+            group
+            for group in payload["paired"]["groups"]
+            if group["group_id"] == "case:CASE-REPAIR-MISSING-ATTACHMENT"
+        )
+        self.assertEqual([row["id"] for row in repaired_group["oa_rows"]], ["oa-exp-202605-repair"])
+        self.assertEqual([row["id"] for row in repaired_group["bank_rows"]], ["bk-o-202605-repair"])
+        self.assertEqual(
+            [row["id"] for row in repaired_group["invoice_rows"]],
+            ["oa-att-inv-oa-exp-202605-repair-01"],
+        )
+
     def test_confirm_and_cancel_link_defer_read_model_persistence_to_background(self) -> None:
         app = build_application()
         payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
@@ -5649,6 +5855,110 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertIn("oa-recent-001", refreshed_oa_ids)
         self.assertIn("bank-recent-001", refreshed_bank_ids)
         self.assertEqual(refreshed_payload["summary"]["oa_count"], 2)
+
+    def test_oa_retention_keeps_manual_imported_oa_and_derived_attachment_invoice_in_grouped_payload(self) -> None:
+        app = build_application()
+        app._app_settings_service.update_settings(
+            completed_project_ids=[],
+            bank_account_mappings=[],
+            allowed_usernames=[],
+            readonly_export_usernames=[],
+            admin_usernames=[],
+            oa_retention={"cutoff_date": "2026-03-01"},
+        )
+        app._oa_manual_import_service = SimpleNamespace(manual_retained_row_ids=lambda: ["oa-exp-1981"])
+        oa_row = build_oa_retention_oa_row("oa-exp-1981", "CASE-OA-1981", "2025-12-23")
+        attachment_invoice_row = {
+            **build_oa_retention_invoice_row(
+                "oa-att-inv-oa-exp-1981-001",
+                "CASE-OA-1981",
+                "2025-12-23",
+            ),
+            "source_kind": "oa_attachment_invoice",
+            "derived_from_oa_id": "oa-exp-1981",
+        }
+        grouped_payload = {
+            "month": "all",
+            "summary": {
+                "oa_count": 1,
+                "bank_count": 0,
+                "invoice_count": 1,
+                "paired_count": 0,
+                "open_count": 1,
+                "exception_count": 0,
+            },
+            "paired": {"groups": []},
+            "open": {
+                "groups": [
+                    {
+                        "id": "open-source-linked-oa-exp-1981",
+                        "group_type": "source_linked",
+                        "oa_rows": [oa_row],
+                        "bank_rows": [],
+                        "invoice_rows": [attachment_invoice_row],
+                    }
+                ]
+            },
+        }
+
+        payload = app._apply_oa_retention_to_grouped_payload(grouped_payload)
+
+        group = payload["open"]["groups"][0]
+        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-exp-1981"])
+        self.assertEqual([row["id"] for row in group["invoice_rows"]], ["oa-att-inv-oa-exp-1981-001"])
+        self.assertEqual(payload["summary"]["oa_count"], 1)
+        self.assertEqual(payload["summary"]["invoice_count"], 1)
+
+    def test_oa_retention_filters_attachment_invoice_when_derived_old_oa_is_filtered(self) -> None:
+        app = build_application()
+        app._app_settings_service.update_settings(
+            completed_project_ids=[],
+            bank_account_mappings=[],
+            allowed_usernames=[],
+            readonly_export_usernames=[],
+            admin_usernames=[],
+            oa_retention={"cutoff_date": "2026-03-01"},
+        )
+        app._oa_manual_import_service = SimpleNamespace(manual_retained_row_ids=lambda: [])
+        oa_row = build_oa_retention_oa_row("oa-exp-1981", "CASE-OA-1981", "2025-12-23")
+        attachment_invoice_row = {
+            **build_oa_retention_invoice_row(
+                "oa-att-inv-oa-exp-1981-001",
+                "CASE-OA-1981",
+                "2025-12-23",
+            ),
+            "source_kind": "oa_attachment_invoice",
+            "derived_from_oa_id": "oa-exp-1981",
+        }
+        grouped_payload = {
+            "month": "all",
+            "summary": {
+                "oa_count": 1,
+                "bank_count": 0,
+                "invoice_count": 1,
+                "paired_count": 0,
+                "open_count": 1,
+                "exception_count": 0,
+            },
+            "paired": {"groups": []},
+            "open": {
+                "groups": [
+                    {
+                        "id": "open-source-linked-oa-exp-1981",
+                        "group_type": "source_linked",
+                        "oa_rows": [oa_row],
+                        "bank_rows": [],
+                        "invoice_rows": [attachment_invoice_row],
+                    }
+                ]
+            },
+        }
+
+        payload = app._apply_oa_retention_to_grouped_payload(grouped_payload)
+
+        self.assertEqual(payload["open"]["groups"], [])
+        self.assertEqual(payload["summary"]["oa_count"], 0)
+        self.assertEqual(payload["summary"]["invoice_count"], 0)
 
     def test_oa_attachment_invoice_cache_update_marks_related_scopes_dirty_without_evicting(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -21,7 +21,7 @@ CENT = Decimal("0.01")
 ZERO = Decimal("0.00")
 
 NO_OA_BANK_BATCH_LABELS = dict(NO_OA_MANAGED_LABELS)
-SINGLE_SIDE_BATCH_TYPES = {"fee", "salary", "holiday_bonus", "bonus"}
+SINGLE_SIDE_BATCH_TYPES = set(NO_OA_MANAGED_LABELS) - {"internal_transfer"}
 SUPPORTED_BATCH_TYPES = {*SINGLE_SIDE_BATCH_TYPES, "internal_transfer"}
 NO_OA_BANK_BATCH_STATUS_BUCKETS = {
     "draft": "unsubmitted",
@@ -1297,8 +1297,17 @@ class NoOaBankBatchService:
         batches: dict[str, dict[str, Any]] = {}
         for (batch_type, scope_month, account_key), group_rows in grouped.items():
             sorted_rows = sorted(group_rows, key=self._row_id)
-            batch_key = f"single:{batch_type}:{scope_month}:{account_key}"
+            base_batch_key = f"single:{batch_type}:{scope_month}:{account_key}"
+            batch_key = base_batch_key
             row_ids = [self._row_id(row) for row in sorted_rows]
+            evidence = {
+                "matched_fields": ["category_code", "account_key", "scope_month"],
+                "category_sources": self._category_sources(row_ids, categories),
+            }
+            existing_base_batch = self._batches.get(self._batch_id(base_batch_key))
+            if existing_base_batch and str(existing_base_batch.get("status") or "") == "submitted":
+                batch_key = f"{base_batch_key}:incremental:{self._row_set_digest(row_ids)}"
+                evidence["incremental_after_submitted_batch_id"] = str(existing_base_batch.get("batch_id") or "")
             batches[self._batch_id(batch_key)] = self._draft_batch(
                 batch_key=batch_key,
                 batch_type=batch_type,
@@ -1308,10 +1317,7 @@ class NoOaBankBatchService:
                 row_ids=row_ids,
                 total_amount=sum((self._amount(row) or ZERO for row in sorted_rows), ZERO),
                 source_versions=source_versions,
-                evidence={
-                    "matched_fields": ["category_code", "account_key", "scope_month"],
-                    "category_sources": self._category_sources(row_ids, categories),
-                },
+                evidence=evidence,
             )
         return batches
 
@@ -1374,7 +1380,7 @@ class NoOaBankBatchService:
                 )
                 continue
 
-            if len(inflows) != 1 or len(outflows) != 1:
+            if len(inflows) != len(outflows):
                 batches[self._batch_id(batch_key)] = self._conflict_batch(
                     batch_key=batch_key,
                     scope_month=scope_month,
@@ -1388,9 +1394,8 @@ class NoOaBankBatchService:
                 )
                 continue
 
-            outflow = outflows[0]
-            inflow = inflows[0]
-            if self._account_key(outflow) == self._account_key(inflow):
+            matched_pairs = self._nearest_internal_transfer_pairs(outflows, inflows)
+            if len(matched_pairs) != len(outflows):
                 batches[self._batch_id(batch_key)] = self._conflict_batch(
                     batch_key=batch_key,
                     scope_month=scope_month,
@@ -1398,53 +1403,87 @@ class NoOaBankBatchService:
                     row_ids=row_ids,
                     total_amount=Decimal(amount_text),
                     source_versions=source_versions,
-                    conflict_code="same_account_internal_transfer",
-                    conflict_reason="内部往来收入和支出不能来自同一账户。",
-                    evidence={},
+                    conflict_code="multiple_internal_transfer_matches",
+                    conflict_reason="内部往来存在多解，不能自动形成可提交批次。",
+                    evidence={
+                        "income_count": len(inflows),
+                        "expense_count": len(outflows),
+                        "matched_pair_count": len(matched_pairs),
+                        "match_window_hours": 48,
+                    },
                 )
                 continue
 
-            outflow_time = self._row_time(outflow)
-            inflow_time = self._row_time(inflow)
-            if outflow_time is None or inflow_time is None or abs(inflow_time - outflow_time) > INTERNAL_TRANSFER_MATCH_WINDOW:
-                batches[self._batch_id(batch_key)] = self._conflict_batch(
-                    batch_key=batch_key,
+            for outflow, inflow, time_delta_seconds in matched_pairs:
+                pair_rows = sorted([outflow, inflow], key=self._row_id)
+                pair_row_ids = [self._row_id(row) for row in pair_rows]
+                pair_batch_key = f"internal_transfer:{scope_month}:{amount_text}:{':'.join(pair_row_ids)}"
+                evidence = {
+                    "rule_code": "internal_transfer_pair",
+                    "match_window_hours": 48,
+                    "matched_fields": ["amount", "direction", "account", "transaction_at"],
+                    "time_delta_seconds": time_delta_seconds,
+                    "source_group_row_ids": row_ids,
+                }
+                batch = self._draft_batch(
+                    batch_key=pair_batch_key,
+                    batch_type="internal_transfer",
                     scope_month=scope_month,
-                    rows=sorted_rows,
-                    row_ids=row_ids,
+                    account_key="",
+                    rows=pair_rows,
+                    row_ids=pair_row_ids,
                     total_amount=Decimal(amount_text),
                     source_versions=source_versions,
-                    conflict_code="internal_transfer_time_window_exceeded",
-                    conflict_reason="内部往来收入和支出不在匹配时间窗口内。",
-                    evidence={"match_window_hours": 48},
+                    evidence=evidence,
                 )
-                continue
-
-            evidence = {
-                "rule_code": "internal_transfer_pair",
-                "match_window_hours": 48,
-                "matched_fields": ["amount", "direction", "account", "transaction_at"],
-                "time_delta_seconds": int(abs(inflow_time - outflow_time).total_seconds()),
-            }
-            batch = self._draft_batch(
-                batch_key=batch_key,
-                batch_type="internal_transfer",
-                scope_month=scope_month,
-                account_key="",
-                rows=sorted_rows,
-                row_ids=row_ids,
-                total_amount=Decimal(amount_text),
-                source_versions=source_versions,
-                evidence=evidence,
-            )
-            batch["income_row_ids"] = [self._row_id(inflow)]
-            batch["expense_row_ids"] = [self._row_id(outflow)]
-            batch["account_pairs"] = [
-                self._account_payload(outflow),
-                self._account_payload(inflow),
-            ]
-            batches[str(batch["batch_id"])] = batch
+                batch["income_row_ids"] = [self._row_id(inflow)]
+                batch["expense_row_ids"] = [self._row_id(outflow)]
+                batch["account_pairs"] = [
+                    self._account_payload(outflow),
+                    self._account_payload(inflow),
+                ]
+                batches[str(batch["batch_id"])] = batch
         return batches
+
+    def _nearest_internal_transfer_pairs(
+        self,
+        outflows: list[dict[str, Any]],
+        inflows: list[dict[str, Any]],
+    ) -> list[tuple[dict[str, Any], dict[str, Any], int]]:
+        candidates: list[tuple[int, str, str, dict[str, Any], dict[str, Any]]] = []
+        for outflow in outflows:
+            outflow_time = self._row_time(outflow)
+            if outflow_time is None:
+                continue
+            for inflow in inflows:
+                if self._account_key(outflow) == self._account_key(inflow):
+                    continue
+                inflow_time = self._row_time(inflow)
+                if inflow_time is None:
+                    continue
+                delta = abs(inflow_time - outflow_time)
+                if delta > INTERNAL_TRANSFER_MATCH_WINDOW:
+                    continue
+                candidates.append(
+                    (
+                        int(delta.total_seconds()),
+                        self._row_id(outflow),
+                        self._row_id(inflow),
+                        outflow,
+                        inflow,
+                    )
+                )
+
+        pairs: list[tuple[dict[str, Any], dict[str, Any], int]] = []
+        used_outflow_ids: set[str] = set()
+        used_inflow_ids: set[str] = set()
+        for delta_seconds, outflow_id, inflow_id, outflow, inflow in sorted(candidates):
+            if outflow_id in used_outflow_ids or inflow_id in used_inflow_ids:
+                continue
+            used_outflow_ids.add(outflow_id)
+            used_inflow_ids.add(inflow_id)
+            pairs.append((outflow, inflow, delta_seconds))
+        return pairs
 
     def _draft_batch(
         self,
@@ -1894,6 +1933,11 @@ class NoOaBankBatchService:
     def _batch_id(batch_key: str) -> str:
         digest = hashlib.sha256(batch_key.encode("utf-8")).hexdigest()[:20]
         return f"no_oa_batch_{digest}"
+
+    @staticmethod
+    def _row_set_digest(row_ids: list[str]) -> str:
+        normalized_row_ids = sorted(str(row_id) for row_id in row_ids if str(row_id))
+        return hashlib.sha256("|".join(normalized_row_ids).encode("utf-8")).hexdigest()[:12]
 
     @staticmethod
     def _timestamp() -> str:

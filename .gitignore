@@ -5,6 +5,8 @@ __pycache__/
 .coverage
 dist/
 build/
+tmp/
+rust/**/target/
 .runtime/
 .worktrees/
 .impeccable.md

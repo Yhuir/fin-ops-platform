@@ -747,6 +747,7 @@ describe("Workbench row selection and detail modal", () => {
     expect(within(settingsPage).getByRole("heading", { name: "银行账户映射" })).toBeInTheDocument();
     await user.click(within(settingsTree).getByRole("treeitem", { name: /OA导入设置/ }));
     expect(within(settingsPage).getByRole("heading", { name: "OA导入设置" })).toBeInTheDocument();
+    expect(within(settingsPage).getByRole("heading", { name: "OA全量搜索导入" })).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "支付申请" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "日常报销" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "已完成" })).toBeChecked();

@@ -48,6 +48,9 @@ const NO_OA_CATEGORIES: Array<{ value: NoOaBankBatchType; label: string }> = [
   { value: "salary", label: "工资" },
   { value: "holiday_bonus", label: "过节费" },
   { value: "bonus", label: "奖金" },
+  { value: "tax_payment", label: "税款" },
+  { value: "treasury_tax_collection", label: "代理国库税收收缴" },
+  { value: "social_security", label: "社保款" },
   { value: "internal_transfer", label: "内部往来款" },
 ];
 
@@ -77,6 +80,9 @@ const TAG_LABELS: Record<string, string> = {
   salary: "工资",
   holiday_bonus: "过节费",
   bonus: "奖金",
+  tax_payment: "税款",
+  treasury_tax_collection: "代理国库税收收缴",
+  social_security: "社保款",
   internal_transfer: "内部往来款",
 };
 
@@ -170,6 +176,17 @@ function formatDirectionCounts(counts: NoOaBankBatchCountMap) {
   return `收入 ${income} / 支出 ${expense}`;
 }
 
+function categoryRowCount(batch: NoOaBankBatch, category: NoOaBankBatchType) {
+  const explicitCount = batch.tagCounts[category];
+  if (typeof explicitCount === "number" && Number.isFinite(explicitCount)) {
+    return explicitCount;
+  }
+  if (batch.batchType === category) {
+    return batch.rowCount;
+  }
+  return 0;
+}
+
 function mutationEventDetail(result: { affectedMonths?: string[] }) {
   return { affectedMonths: result.affectedMonths ?? [] };
 }
@@ -207,22 +224,22 @@ export default function NoOaBankBatchPage() {
     return categories.length > 0 ? categories : NO_OA_CATEGORIES;
   }, [payload.summary.categories]);
 
-  const categoryCounts = useMemo(() => {
-    const counts = new Map<NoOaBankBatchType, number>();
-    noOaCategories.forEach((category) => counts.set(category.value, 0));
+  const categoryStats = useMemo(() => {
+    const stats = new Map<NoOaBankBatchType, { batchCount: number; rowCount: number }>();
+    noOaCategories.forEach((category) => stats.set(category.value, { batchCount: 0, rowCount: 0 }));
     visibleBucketBatches.forEach((batch) => {
       noOaCategories.forEach((category) => {
-        const explicitCount = batch.tagCounts[category.value];
-        if (typeof explicitCount === "number") {
-          counts.set(category.value, (counts.get(category.value) ?? 0) + explicitCount);
-          return;
-        }
-        if (batch.batchType === category.value) {
-          counts.set(category.value, (counts.get(category.value) ?? 0) + batch.rowCount);
+        const rowCount = categoryRowCount(batch, category.value);
+        if (rowCount > 0 || batch.batchType === category.value) {
+          const current = stats.get(category.value) ?? { batchCount: 0, rowCount: 0 };
+          stats.set(category.value, {
+            batchCount: current.batchCount + 1,
+            rowCount: current.rowCount + rowCount,
+          });
         }
       });
     });
-    return counts;
+    return stats;
   }, [noOaCategories, visibleBucketBatches]);
 
   const visibleBatches = useMemo(
@@ -231,7 +248,7 @@ export default function NoOaBankBatchPage() {
   );
 
   const selectedCategoryMeta = noOaCategories.find((category) => category.value === selectedCategory) ?? noOaCategories[0];
-  const selectedCategoryCount = categoryCounts.get(selectedCategory) ?? 0;
+  const selectedCategoryStats = categoryStats.get(selectedCategory) ?? { batchCount: 0, rowCount: 0 };
   const unsubmittedCount = payload.summary.draftCount + payload.summary.conflictCount + payload.summary.staleCount;
 
   const selectedBatch = useMemo(
@@ -504,11 +521,11 @@ export default function NoOaBankBatchPage() {
           <Divider />
           <Stack divider={<Divider flexItem />}>
             {noOaCategories.map((category) => {
-              const count = categoryCounts.get(category.value) ?? 0;
+              const stats = categoryStats.get(category.value) ?? { batchCount: 0, rowCount: 0 };
               const selected = selectedCategory === category.value;
               return (
                 <Box
-                  aria-label={`${category.label} ${count} 条`}
+                  aria-label={`${category.label} ${stats.batchCount} 批 ${stats.rowCount} 条`}
                   aria-pressed={selected}
                   key={category.value}
                   onClick={() => handleCategoryChange(category.value)}
@@ -525,7 +542,7 @@ export default function NoOaBankBatchPage() {
                 >
                   <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1}>
                     <Typography fontWeight={900}>{category.label}</Typography>
-                    <Chip label={`${count} 条`} size="small" variant={selected ? "filled" : "outlined"} />
+                    <Chip label={`${stats.batchCount} 批 / ${stats.rowCount} 条`} size="small" variant={selected ? "filled" : "outlined"} />
                   </Stack>
                 </Box>
               );
@@ -537,9 +554,8 @@ export default function NoOaBankBatchPage() {
           <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1.5} sx={{ px: 2, py: 1.5 }}>
             <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
               <Typography component="h2" variant="h6" fontWeight={900}>
-                {selectedCategoryMeta.label} {selectedCategoryCount} 条
+                {selectedCategoryMeta.label} {selectedCategoryStats.batchCount} 批 / {selectedCategoryStats.rowCount} 条
               </Typography>
-              <Chip label={`${visibleBatches.length} 批`} size="small" variant="outlined" />
             </Stack>
             <Button disabled={selectedDraftBatches.length === 0 || mutating} onClick={handleBulkSubmit} size="small" variant="contained">
               批量提交选中

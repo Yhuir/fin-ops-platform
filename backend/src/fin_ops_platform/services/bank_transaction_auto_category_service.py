@@ -11,7 +11,7 @@ from fin_ops_platform.services.workbench_special_rule_detectors import (
 )
 
 
-BANK_TRANSACTION_AUTO_CATEGORY_RULE_VERSION = "2026-05-bank-auto-category"
+BANK_TRANSACTION_AUTO_CATEGORY_RULE_VERSION = "2026-05-bank-auto-category-sms-fee"
 
 _TEXT_FIELDS = ("summary", "remark", "purpose", "note")
 _NESTED_TEXT_FIELDS = ("detail_fields", "_detail_fields", "summary_fields", "_summary_fields")
@@ -19,20 +19,41 @@ _TEXT_RULES: tuple[dict[str, Any], ...] = (
     {
         "category_code": "fee",
         "rule_code": "fee_text_keyword",
-        "keywords": ("手续费", "网银手续费", "转账手续费", "账户管理费", "汇划费", "短信服务费"),
-        "reason": "摘要、用途、备注或明细字段包含手续费相关关键词",
+        "keywords": ("手续费", "短信服务费"),
+        "fields": ("counterparty_name", "summary", "remark"),
+        "nested_fields": (),
+        "reason": "对方户名、摘要或备注包含手续费或短信服务费",
     },
     {
         "category_code": "holiday_bonus",
         "rule_code": "holiday_bonus_text_keyword",
-        "keywords": ("过节费", "节日费", "慰问金"),
-        "reason": "摘要、用途、备注或明细字段包含过节费相关关键词",
+        "keywords": ("过节费",),
+        "reason": "摘要、用途、备注或明细字段包含过节费",
     },
     {
         "category_code": "bonus",
         "rule_code": "bonus_text_keyword",
         "keywords": ("奖金", "绩效奖", "年终奖"),
         "reason": "摘要、用途、备注或明细字段包含奖金相关关键词",
+    },
+    {
+        "category_code": "treasury_tax_collection",
+        "rule_code": "treasury_tax_collection_text_keyword",
+        "keywords": ("代理国库税收收缴", "国库税收收缴"),
+        "reason": "摘要、用途、备注或明细字段包含代理国库税收收缴相关关键词",
+    },
+    {
+        "category_code": "social_security",
+        "rule_code": "social_security_text_keyword",
+        "keywords": ("社保款", "社保费", "社会保险费", "缴纳社保"),
+        "reason": "摘要、用途、备注或明细字段包含社保相关关键词",
+    },
+    {
+        "category_code": "tax_payment",
+        "rule_code": "tax_payment_text_keyword",
+        "keywords": ("税款", "缴纳税款", "电子缴税", "税库银", "税务局", "完税"),
+        "exclude_keywords": ("社保及税款", "社保和税款", "社保税款", "社保、税款"),
+        "reason": "摘要、用途、备注或明细字段包含税款相关关键词",
     },
 )
 
@@ -83,13 +104,14 @@ class BankTransactionAutoCategoryService:
         return suggestions
 
     def _text_suggestion(self, row: dict[str, Any], *, transaction_id: str) -> dict[str, Any] | None:
-        matches = self._text_matches(row)
         for rule in _TEXT_RULES:
-            rule_matches = [
-                match
-                for match in matches
-                if match["matched_keyword"] in set(rule["keywords"])
-            ]
+            rule_matches = self._text_matches(
+                row,
+                keywords=tuple(rule["keywords"]),
+                exclude_keywords=tuple(rule.get("exclude_keywords") or ()),
+                fields=tuple(rule.get("fields") or _TEXT_FIELDS),
+                nested_fields=tuple(rule.get("nested_fields") if "nested_fields" in rule else _NESTED_TEXT_FIELDS),
+            )
             if not rule_matches:
                 continue
             matched_fields = sorted({match["matched_field"] for match in rule_matches})
@@ -125,21 +147,24 @@ class BankTransactionAutoCategoryService:
         }
 
     @classmethod
-    def _text_matches(cls, row: dict[str, Any]) -> list[dict[str, str]]:
+    def _text_matches(
+        cls,
+        row: dict[str, Any],
+        *,
+        keywords: tuple[str, ...],
+        exclude_keywords: tuple[str, ...],
+        fields: tuple[str, ...],
+        nested_fields: tuple[str, ...],
+    ) -> list[dict[str, str]]:
         matches: list[dict[str, str]] = []
-        keywords = tuple(
-            keyword
-            for rule in _TEXT_RULES
-            for keyword in tuple(rule["keywords"])
-        )
-        for field_name in _TEXT_FIELDS:
-            cls._append_matches(matches, field_name, row.get(field_name), keywords)
-        for field_name in _NESTED_TEXT_FIELDS:
+        for field_name in fields:
+            cls._append_matches(matches, field_name, row.get(field_name), keywords, exclude_keywords)
+        for field_name in nested_fields:
             nested = row.get(field_name)
             if not isinstance(nested, dict):
                 continue
             for key, value in nested.items():
-                cls._append_matches(matches, f"{field_name}.{key}", value, keywords)
+                cls._append_matches(matches, f"{field_name}.{key}", value, keywords, exclude_keywords)
         return cls._dedupe_matches(matches)
 
     @staticmethod
@@ -148,9 +173,12 @@ class BankTransactionAutoCategoryService:
         field_name: str,
         value: Any,
         keywords: tuple[str, ...],
+        exclude_keywords: tuple[str, ...],
     ) -> None:
         text = str(value or "")
         if not text:
+            return
+        if any(exclude_keyword in text for exclude_keyword in exclude_keywords):
             return
         for keyword in keywords:
             if keyword in text:

@@ -32,6 +32,7 @@ export const sidebarGroups: SidebarGroup[] = [
       { label: "成本统计", to: "/cost-statistics", icon: AssessmentOutlinedIcon },
       { label: "银行明细", to: "/bank-details", icon: AccountBalanceOutlinedIcon },
       { label: "免OA流水批量处理", to: "/no-oa-bank-batches", icon: AccountBalanceOutlinedIcon },
+      { label: "批量账务", to: "/batch-accounting", icon: AccountBalanceOutlinedIcon },
       { label: "往来款管理", to: "/turnover-ledger", icon: HandshakeOutlinedIcon },
       { label: "ETC票据管理", to: "/etc-tickets", icon: DirectionsCarFilledOutlinedIcon },
     ],

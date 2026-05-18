@@ -227,6 +227,7 @@ class MongoOAAdapter(OAAdapter):
         self._attachment_invoice_parse_inflight: set[str] = set()
         self._attachment_invoice_parse_suppression_depth = 0
         self._attachment_invoice_sync_parse_depth = 0
+        self._attachment_invoice_force_reparse_depth = 0
         self._client: MongoClient | None = None
         self._project_name_cache: dict[str, str] | None = None
         self._records_cache: dict[str, tuple[float, list[OAApplicationRecord]]] = {}
@@ -367,6 +368,22 @@ class MongoOAAdapter(OAAdapter):
             self._attachment_invoice_sync_parse_depth = max(
                 0,
                 self._attachment_invoice_sync_parse_depth - 1,
+            )
+
+    @contextmanager
+    def force_attachment_invoice_reparse(self):
+        self._attachment_invoice_sync_parse_depth += 1
+        self._attachment_invoice_force_reparse_depth += 1
+        try:
+            yield
+        finally:
+            self._attachment_invoice_sync_parse_depth = max(
+                0,
+                self._attachment_invoice_sync_parse_depth - 1,
+            )
+            self._attachment_invoice_force_reparse_depth = max(
+                0,
+                self._attachment_invoice_force_reparse_depth - 1,
             )
 
     def parse_attachment_invoices_for_months(self, months: list[str]) -> None:
@@ -545,6 +562,131 @@ class MongoOAAdapter(OAAdapter):
             requested_records.append(record)
             seen_record_ids.add(record.id)
         return requested_records
+
+    def search_application_records(
+        self,
+        *,
+        q: str | None = None,
+        form_types: list[str] | None = None,
+        statuses: list[str] | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> list[OAApplicationRecord]:
+        if self._mongo_temporarily_unavailable():
+            self._set_read_status("error", "OA 连接失败")
+            return []
+        search_settings = self._normalize_search_import_settings(form_types=form_types, statuses=statuses)
+        project_names = self._project_name_index()
+        if self._mongo_temporarily_unavailable():
+            self._set_read_status("error", "OA 连接失败")
+            return []
+
+        records: list[OAApplicationRecord] = []
+        with self._temporary_import_settings(search_settings):
+            if OA_IMPORT_FORM_TYPE_PAYMENT in set(search_settings["form_types"]):
+                for document in self._load_form_documents(self._settings.payment_request_form_id):
+                    record = self._build_payment_request_record(document, project_names)
+                    if record is not None:
+                        records.append(record)
+            if OA_IMPORT_FORM_TYPE_EXPENSE in set(search_settings["form_types"]):
+                for document in self._load_form_documents(self._settings.expense_claim_form_id):
+                    records.extend(self._build_expense_claim_records(document, project_names))
+
+        filtered_records = [
+            record
+            for record in records
+            if self._record_matches_date_range(record, date_from=date_from, date_to=date_to)
+            and self._record_matches_query(record, q)
+        ]
+        self._set_read_status("ready", "OA 已同步")
+        return sorted(filtered_records, key=lambda item: (item.month, item.id))
+
+    def search_application_record_rows(
+        self,
+        *,
+        q: str | None = None,
+        form_types: list[str] | None = None,
+        statuses: list[str] | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        page: int = 0,
+        page_size: int = 20,
+        imported_entries: dict[str, Any] | None = None,
+    ) -> dict[str, object]:
+        if self._mongo_temporarily_unavailable():
+            self._set_read_status("error", "OA 连接失败")
+            return {"rows": [], "total": 0, "page": page, "page_size": page_size}
+        search_settings = self._normalize_search_import_settings(form_types=form_types, statuses=statuses)
+        normalized_page = max(0, int(page or 0))
+        normalized_page_size = max(1, min(int(page_size or 20), 100))
+        if not search_settings["form_types"] or not search_settings["statuses"]:
+            return {"rows": [], "total": 0, "page": normalized_page, "page_size": normalized_page_size}
+        window_limit = (normalized_page + 1) * normalized_page_size
+        project_names = self._project_name_index()
+        project_query_values = self._project_query_values(q, project_names)
+        imported_by_id = dict(imported_entries or {})
+
+        rows: list[dict[str, object]] = []
+        total = 0
+        projection = self._search_document_projection()
+        for form_type in search_settings["form_types"]:
+            form_id = (
+                self._settings.payment_request_form_id
+                if form_type == OA_IMPORT_FORM_TYPE_PAYMENT
+                else self._settings.expense_claim_form_id
+            )
+            query = self._build_search_form_query(
+                form_id=form_id,
+                form_type=form_type,
+                q=q,
+                statuses=search_settings["statuses"],
+                date_from=date_from,
+                date_to=date_to,
+                project_query_values=project_query_values,
+            )
+            total += self._count_search_documents(query)
+            documents = self._search_form_documents(
+                form_id,
+                query,
+                projection=projection,
+                limit=window_limit,
+            )
+            for document in documents:
+                row = self._search_document_to_row(
+                    document,
+                    form_type=form_type,
+                    project_names=project_names,
+                    imported_entries=imported_by_id,
+                )
+                if row is not None:
+                    rows.append(row)
+
+        rows.sort(key=lambda item: (clean_string(item.get("application_date") or ""), clean_string(item.get("row_id") or "")))
+        start = normalized_page * normalized_page_size
+        end = start + normalized_page_size
+        self._set_read_status("ready", "OA 已同步")
+        return {
+            "rows": rows[start:end],
+            "total": total,
+            "page": normalized_page,
+            "page_size": normalized_page_size,
+        }
+
+    def refresh_application_record_attachments(self, row_ids: list[str]) -> list[OAApplicationRecord]:
+        normalized_row_ids = [str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()]
+        if not normalized_row_ids:
+            return []
+        refresh_settings = {
+            "form_types": [item["id"] for item in OA_IMPORT_FORM_TYPE_OPTIONS],
+            "statuses": [item["id"] for item in OA_IMPORT_STATUS_OPTIONS],
+        }
+        with self._temporary_import_settings(refresh_settings):
+            with self.force_attachment_invoice_reparse():
+                records = self.list_application_records_by_row_ids(normalized_row_ids)
+        months = sorted({record.month for record in records if MONTH_RE.match(str(record.month))})
+        if months:
+            self.invalidate_records_cache(months)
+        return records
 
     def list_available_months(self) -> list[str]:
         now = self._now()
@@ -982,6 +1124,209 @@ class MongoOAAdapter(OAAdapter):
             )
         ]
 
+    def _search_document_to_row(
+        self,
+        document: dict[str, Any],
+        *,
+        form_type: str,
+        project_names: dict[str, str],
+        imported_entries: dict[str, Any],
+    ) -> dict[str, object] | None:
+        if form_type == OA_IMPORT_FORM_TYPE_PAYMENT:
+            return self._payment_search_document_to_row(
+                document,
+                project_names=project_names,
+                imported_entries=imported_entries,
+            )
+        return self._expense_search_document_to_row(
+            document,
+            project_names=project_names,
+            imported_entries=imported_entries,
+        )
+
+    def _payment_search_document_to_row(
+        self,
+        document: dict[str, Any],
+        *,
+        project_names: dict[str, str],
+        imported_entries: dict[str, Any],
+    ) -> dict[str, object] | None:
+        data = self._document_data(document)
+        applicant = self._first_text(data, "userName", "applicant")
+        reason = self._first_text(data, "cause")
+        amount = self._first_text(data, "amount")
+        if not applicant or not reason or not amount:
+            return None
+        external_id = self._payment_external_id(data, document)
+        project_id = self._first_text(data, "projectName")
+        project_name = project_names.get(project_id, project_id or "--")
+        return self._search_row(
+            row_id=f"oa-pay-{external_id}",
+            oa_no=self._payment_form_no(data, document),
+            applicant=applicant,
+            application_date=self._first_text(data, "applicationDate", "ApplicationDate") or self._derive_month(data, document),
+            form_type=OA_IMPORT_FORM_TYPE_PAYMENT,
+            status=self._canonical_status_key(data),
+            project_name=project_name,
+            reason=reason,
+            amount=amount,
+            attachment_file_count=0,
+            importable_invoice_count=0,
+            items=[],
+            imported_entries=imported_entries,
+        )
+
+    def _expense_search_document_to_row(
+        self,
+        document: dict[str, Any],
+        *,
+        project_names: dict[str, str],
+        imported_entries: dict[str, Any],
+    ) -> dict[str, object] | None:
+        data = self._document_data(document)
+        applicant = self._first_text(data, "Reimbursement Personnel", "applicant", "userName")
+        if not applicant:
+            return None
+        items = data.get("schedule")
+        if not isinstance(items, list) or not items:
+            items = [data]
+        external_id = self._expense_external_id(data, document)
+        record_month = self._derive_month(data, document)
+        project_names_summary: list[str] = []
+        expense_contents_summary: list[str] = []
+        detail_amounts: list[Decimal] = []
+        item_rows: list[dict[str, object]] = []
+        attachment_file_count = 0
+        importable_invoice_count = 0
+        for index, item in enumerate(items):
+            if not isinstance(item, dict):
+                continue
+            item_amount = self._first_text(item, "detailReimbursementAmount", "amount")
+            item_amount_decimal = self._parse_amount(item_amount)
+            if item_amount_decimal is not None:
+                detail_amounts.append(item_amount_decimal)
+            reason = self._first_text(item, "feeContent", "detailCostStatement") or self._first_text(data, "notes")
+            project_id = self._first_text(item, "detailProjectName") or self._first_text(data, "projectName")
+            project_name = project_names.get(project_id, project_id or "--")
+            if project_name:
+                self._append_unique(project_names_summary, project_name)
+            if reason:
+                self._append_unique(expense_contents_summary, reason)
+            row_index = clean_string(item.get("row_index", index))
+            reimbursement_date = self._first_text(item, "detailReimbursementDate", "reimbursementDate")
+            item_attachment_files = self._attachment_files(item)
+            item_attachment_file_count = len(item_attachment_files)
+            expense_item_id = self._expense_item_id(
+                external_id=external_id,
+                row_index=row_index,
+                item=item,
+                project_id=project_id,
+                amount=item_amount,
+                reimbursement_date=reimbursement_date,
+            )
+            contextual_attachment_files = self._attachment_files_with_source_context(
+                item_attachment_files,
+                oa_external_id=external_id,
+                source_expense_row_index=row_index,
+                source_expense_item_id=expense_item_id,
+            )
+            item_invoice_count = self._cached_attachment_invoice_count(contextual_attachment_files)
+            attachment_file_count += item_attachment_file_count
+            importable_invoice_count += item_invoice_count
+            item_rows.append(
+                {
+                    "date": reimbursement_date or self._first_text(data, "ApplicationDate", "applicationDate") or record_month,
+                    "amount": item_amount,
+                    "content": reason,
+                    "project_name": project_name,
+                    "reason": reason,
+                    "attachment_file_count": item_attachment_file_count,
+                    "importable_invoice_count": item_invoice_count,
+                }
+            )
+        detail_sum = sum(detail_amounts, Decimal("0")) if detail_amounts else None
+        header_amount_text = self._first_text(data, "amount", "Amount", "totalAmount", "TotalAmount")
+        header_amount = self._parse_amount(header_amount_text)
+        amount = header_amount_text if header_amount is not None else self._format_decimal(detail_sum)
+        if not amount:
+            return None
+        real_project_names = self._unique_real_project_names(project_names_summary)
+        if not real_project_names:
+            header_project_id = self._first_text(data, "projectName")
+            real_project_names = self._unique_real_project_names(
+                [project_names.get(header_project_id, header_project_id or "")]
+            )
+        project_name_summary = "；".join(real_project_names) or "--"
+        reason_summary = "；".join(expense_contents_summary) or self._first_text(data, "notes") or "—"
+        return self._search_row(
+            row_id=f"oa-exp-{external_id}",
+            oa_no=self._expense_form_no(data, document),
+            applicant=applicant,
+            application_date=self._first_text(data, "ApplicationDate", "applicationDate") or record_month,
+            form_type=OA_IMPORT_FORM_TYPE_EXPENSE,
+            status=self._canonical_status_key(data),
+            project_name=project_name_summary,
+            reason=reason_summary,
+            amount=amount,
+            attachment_file_count=attachment_file_count,
+            importable_invoice_count=importable_invoice_count,
+            items=item_rows,
+            imported_entries=imported_entries,
+        )
+
+    def _search_row(
+        self,
+        *,
+        row_id: str,
+        oa_no: str,
+        applicant: str,
+        application_date: str,
+        form_type: str,
+        status: str,
+        project_name: str,
+        reason: str,
+        amount: str,
+        attachment_file_count: int,
+        importable_invoice_count: int,
+        items: list[dict[str, object]],
+        imported_entries: dict[str, Any],
+    ) -> dict[str, object]:
+        imported_entry = imported_entries.get(row_id, {})
+        can_import = status == OA_IMPORT_STATUS_COMPLETED
+        return {
+            "row_id": row_id,
+            "oa_no": oa_no or row_id,
+            "applicant": applicant,
+            "application_date": application_date,
+            "form_type": form_type,
+            "form_type_label": "支付申请" if form_type == OA_IMPORT_FORM_TYPE_PAYMENT else "日常报销",
+            "status": status,
+            "status_label": "已完成" if status == OA_IMPORT_STATUS_COMPLETED else "进行中",
+            "project_name": project_name,
+            "reason": reason,
+            "amount": amount,
+            "attachment_file_count": attachment_file_count,
+            "importable_invoice_count": importable_invoice_count,
+            "unrecognized_attachment_count": max(0, attachment_file_count - importable_invoice_count),
+            "import_status": "imported" if row_id in imported_entries else "not_imported",
+            "imported_at": imported_entry.get("imported_at") if isinstance(imported_entry, dict) else None,
+            "can_import": can_import,
+            "disabled_reason": "" if can_import else "流程未完成",
+            "items": items,
+        }
+
+    def _cached_attachment_invoice_count(self, files: list[dict[str, object]]) -> int:
+        cache = self._attachment_invoice_cache
+        if cache is None or not files:
+            return 0
+        total = 0
+        for file_entry in files:
+            cached_entry = cache.load_oa_attachment_invoice_cache_entry(self._attachment_invoice_cache_key(file_entry))
+            if cached_entry is None or not self._is_current_attachment_invoice_cache_entry(cached_entry):
+                continue
+            total += len([invoice for invoice in cached_entry.get("invoices", []) if isinstance(invoice, dict)])
+        return total
+
     @classmethod
     def _project_name_display(cls, project_names: list[str]) -> str:
         real_project_names = cls._unique_real_project_names(project_names)
@@ -1367,8 +1712,12 @@ class MongoOAAdapter(OAAdapter):
         missing_files: list[tuple[str, dict[str, object]]] = []
         for file_entry in files:
             cache_key = self._attachment_invoice_cache_key(file_entry)
-            cached_entry = cache.load_oa_attachment_invoice_cache_entry(cache_key)
-            if self._is_current_attachment_invoice_cache_entry(cached_entry):
+            cached_entry = (
+                None
+                if self._attachment_invoice_force_reparse_depth > 0
+                else cache.load_oa_attachment_invoice_cache_entry(cache_key)
+            )
+            if cached_entry is not None and self._is_current_attachment_invoice_cache_entry(cached_entry):
                 normalized_entry, changed = self._normalize_attachment_invoice_cache_entry(cached_entry)
                 if changed:
                     cache.save_oa_attachment_invoice_cache_entry(cache_key, normalized_entry)
@@ -1833,6 +2182,54 @@ class MongoOAAdapter(OAAdapter):
             self._mark_mongo_unavailable()
         return []
 
+    def _search_form_documents(
+        self,
+        form_id: str,
+        query: dict[str, Any],
+        *,
+        projection: dict[str, int] | None = None,
+        limit: int,
+    ) -> list[dict]:
+        last_error: Exception | None = None
+        normalized_limit = max(1, int(limit or 1))
+        for attempt in range(2):
+            try:
+                normalized_form_id = clean_string(form_id)
+                application_date_field = (
+                    "data.applicationDate"
+                    if normalized_form_id == clean_string(self._settings.payment_request_form_id)
+                    else "data.ApplicationDate"
+                )
+                cursor = (
+                    self._collection()
+                    .find(query, projection)
+                    .sort([(application_date_field, 1), ("_id", 1)])
+                    .limit(normalized_limit)
+                )
+                return list(cursor)
+            except (OSError, PyMongoError, TimeoutError, ValueError) as exc:
+                last_error = exc
+                self._reset_client()
+                if attempt == 0:
+                    continue
+        if last_error is not None:
+            self._mark_mongo_unavailable()
+        return []
+
+    def _count_search_documents(self, query: dict[str, Any]) -> int:
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                return int(self._collection().count_documents(query))
+            except (OSError, PyMongoError, TimeoutError, ValueError) as exc:
+                last_error = exc
+                self._reset_client()
+                if attempt == 0:
+                    continue
+        if last_error is not None:
+            self._mark_mongo_unavailable()
+        return 0
+
     def _collection(self):
         if self._client is None:
             self._client = MongoClient(
@@ -1907,6 +2304,140 @@ class MongoOAAdapter(OAAdapter):
             missing_application_date,
         ]
         return query
+
+    def _build_search_form_query(
+        self,
+        *,
+        form_id: str,
+        form_type: str,
+        q: str | None,
+        statuses: list[str],
+        date_from: str | None,
+        date_to: str | None,
+        project_query_values: list[str],
+    ) -> dict[str, Any]:
+        clauses: list[dict[str, Any]] = [{"form_id": self._form_id_query_value(form_id)}]
+        status_clause = self._search_status_clause(statuses)
+        if status_clause:
+            clauses.append(status_clause)
+        date_clause = self._search_application_date_clause(date_from=date_from, date_to=date_to)
+        if date_clause:
+            clauses.append(date_clause)
+        query_clause = self._search_text_clause(
+            q,
+            form_type=form_type,
+            project_query_values=project_query_values,
+        )
+        if query_clause:
+            clauses.append(query_clause)
+        if len(clauses) == 1:
+            return clauses[0]
+        return {"$and": clauses}
+
+    @staticmethod
+    def _search_document_projection() -> dict[str, int]:
+        return {"data": 1, "form_id": 1, "modifiedTime": 1}
+
+    @staticmethod
+    def _search_status_clause(statuses: list[str]) -> dict[str, Any] | None:
+        status_or: list[dict[str, Any]] = []
+        if OA_IMPORT_STATUS_COMPLETED in set(statuses):
+            status_or.append({"data.processStatus": {"$in": list(COMPLETED_PROCESS_VALUES)}})
+            status_or.append({"data.status": {"$in": list(COMPLETED_STATUS_VALUES)}})
+        if OA_IMPORT_STATUS_IN_PROGRESS in set(statuses):
+            status_or.append({"data.processStatus": {"$in": list(IN_PROGRESS_PROCESS_VALUES)}})
+        if not status_or:
+            return None
+        return {"$or": status_or}
+
+    @staticmethod
+    def _search_application_date_clause(*, date_from: str | None, date_to: str | None) -> dict[str, Any] | None:
+        bounds: dict[str, str] = {}
+        normalized_date_from = clean_string(date_from)
+        normalized_date_to = clean_string(date_to)
+        if normalized_date_from:
+            bounds["$gte"] = normalized_date_from
+        if normalized_date_to:
+            bounds["$lte"] = normalized_date_to
+        if not bounds:
+            return None
+        return {
+            "$or": [
+                {"data.applicationDate": dict(bounds)},
+                {"data.ApplicationDate": dict(bounds)},
+            ]
+        }
+
+    def _search_text_clause(
+        self,
+        q: str | None,
+        *,
+        form_type: str,
+        project_query_values: list[str],
+    ) -> dict[str, Any] | None:
+        query = clean_string(q)
+        if not query:
+            return None
+        regex = {"$regex": re.escape(query), "$options": "i"}
+        if form_type == OA_IMPORT_FORM_TYPE_PAYMENT:
+            fields = [
+                "data.applicationDate",
+                "data.ApplicationDate",
+                "data.userName",
+                "data.applicant",
+                "data.cause",
+                "data.beneficiary",
+                "data.amount",
+                "data.projectName",
+                "data.flowRequestId",
+                "data.processId",
+                "data.paymentMethod",
+                "data.paymentProof",
+                "data.bank",
+                "data.payeeAccount",
+                "data.fromTitle",
+            ]
+        else:
+            fields = [
+                "data.applicationDate",
+                "data.ApplicationDate",
+                "data.Reimbursement Personnel",
+                "data.applicant",
+                "data.userName",
+                "data.titleName",
+                "data.notes",
+                "data.amount",
+                "data.Amount",
+                "data.totalAmount",
+                "data.TotalAmount",
+                "data.projectName",
+                "data.flowRequestId",
+                "data.processId",
+                "data.schedule.detailProjectName",
+                "data.schedule.detailReimbursementAmount",
+                "data.schedule.amount",
+                "data.schedule.feeContent",
+                "data.schedule.detailCostStatement",
+                "data.schedule.detailReimbursementDate",
+                "data.schedule.detailReimbursementAttachment.files.fileName",
+                "data.schedule.detailReimbursementAttachment.list.name",
+            ]
+        text_or = [{field: regex} for field in fields]
+        if project_query_values:
+            text_or.append({"data.projectName": {"$in": project_query_values}})
+            text_or.append({"data.schedule.detailProjectName": {"$in": project_query_values}})
+        return {"$or": text_or}
+
+    @staticmethod
+    def _project_query_values(q: str | None, project_names: dict[str, str]) -> list[str]:
+        query = clean_string(q).lower()
+        if not query:
+            return []
+        values: list[str] = []
+        for project_id, project_name in project_names.items():
+            if query in clean_string(project_id).lower() or query in clean_string(project_name).lower():
+                values.append(project_id)
+        return values
 
     def _build_external_id_query(self, form_id: str, external_ids: set[str]) -> dict[str, Any]:
         query: dict[str, Any] = {
@@ -2282,6 +2813,18 @@ class MongoOAAdapter(OAAdapter):
             payload = {}
         return self._normalize_import_settings(payload)
 
+    @contextmanager
+    def _temporary_import_settings(self, settings: dict[str, list[str]]):
+        previous_provider = self._import_settings_provider
+        previous_signature = self._import_settings_signature
+        normalized_settings = self._normalize_import_settings(settings)
+        self._import_settings_provider = lambda: normalized_settings
+        try:
+            yield
+        finally:
+            self._import_settings_provider = previous_provider
+            self._import_settings_signature = previous_signature
+
     @staticmethod
     def _normalize_import_settings(payload: object) -> dict[str, list[str]]:
         raw_payload = payload if isinstance(payload, dict) else {}
@@ -2315,6 +2858,87 @@ class MongoOAAdapter(OAAdapter):
             if normalized in allowed_values:
                 seen.add(normalized)
         return [value for value in allowed_values if value in seen]
+
+    @classmethod
+    def _normalize_search_import_settings(
+        cls,
+        *,
+        form_types: list[str] | None,
+        statuses: list[str] | None,
+    ) -> dict[str, list[str]]:
+        form_type_ids = [item["id"] for item in OA_IMPORT_FORM_TYPE_OPTIONS]
+        status_ids = [item["id"] for item in OA_IMPORT_STATUS_OPTIONS]
+        return {
+            "form_types": cls._normalize_import_option_list(
+                form_types,
+                allowed_values=form_type_ids,
+                default_values=form_type_ids,
+            ),
+            "statuses": cls._normalize_import_option_list(
+                statuses,
+                allowed_values=status_ids,
+                default_values=status_ids,
+            ),
+        }
+
+    @classmethod
+    def _record_matches_date_range(
+        cls,
+        record: OAApplicationRecord,
+        *,
+        date_from: str | None,
+        date_to: str | None,
+    ) -> bool:
+        application_date = clean_string(record.detail_fields.get("申请日期") or "")
+        if date_from and application_date and application_date < clean_string(date_from):
+            return False
+        if date_to and application_date and application_date > clean_string(date_to):
+            return False
+        return True
+
+    @classmethod
+    def _record_matches_query(cls, record: OAApplicationRecord, q: str | None) -> bool:
+        query = clean_string(q).lower()
+        if not query:
+            return True
+        haystack = "\n".join(cls._iter_record_search_text(record)).lower()
+        return query in haystack
+
+    @classmethod
+    def _iter_record_search_text(cls, record: OAApplicationRecord) -> list[str]:
+        values: list[str] = [
+            record.id,
+            record.month,
+            record.applicant,
+            record.project_name,
+            record.apply_type,
+            record.amount,
+            record.counterparty_name,
+            record.reason,
+            record.expense_type or "",
+            record.expense_content or "",
+        ]
+
+        def visit(value: Any) -> None:
+            if value in (None, ""):
+                return
+            if isinstance(value, dict):
+                for child in value.values():
+                    visit(child)
+                return
+            if isinstance(value, (list, tuple, set)):
+                for child in value:
+                    visit(child)
+                return
+            text = clean_string(value)
+            if text:
+                values.append(text)
+
+        visit(record.detail_fields)
+        visit(record.attachment_invoices)
+        visit(record.attachment_artifacts)
+        visit(record.expense_items)
+        return values
 
     def _should_include_form_type(self, form_type: str) -> bool:
         return clean_string(form_type) in set(self._current_import_settings()["form_types"])

@@ -2103,6 +2103,54 @@ class EtcApiTests(unittest.TestCase):
         self.assertTrue(final_task_payload["hasImportedInvoices"])
         self.assertEqual(final_invoices["total"], 1)
 
+    def test_remove_reconciliation_task_imported_invoices_deletes_unsubmitted_oa_draft(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._etc_service.oa_client = FakeEtcOAClient()
+
+            task_id, import_batch_id = self._import_supplement_reconciliation_zip(app)
+            draft_response = app.handle_request("POST", f"/api/etc/batches/{import_batch_id}/draft")
+            draft_payload = json.loads(draft_response.body)
+            app.handle_request("POST", f"/api/etc/batches/{draft_payload['batchId']}/mark-not-submitted")
+            linked_task = app._etc_reconciliation_task_service.get_task(task_id)
+
+            remove_response = app.handle_request(
+                "DELETE",
+                f"/api/etc/reconciliation-tasks/{task_id}/imported-invoices",
+                json.dumps({"expectedVersion": linked_task.version, "actor": "alice"}),
+            )
+            removed_payload = json.loads(remove_response.body)
+            invoices_after_remove = json.loads(app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20").body)
+
+        self.assertEqual(draft_response.status_code, 200)
+        self.assertEqual(remove_response.status_code, 200)
+        self.assertEqual(removed_payload["status"], "ready_for_import")
+        self.assertIsNone(removed_payload["importBatchId"])
+        self.assertIsNone(removed_payload["oaDraftBatchId"])
+        self.assertIsNone(removed_payload["etcBatchId"])
+        self.assertEqual(invoices_after_remove["total"], 0)
+        self.assertEqual(app._etc_service.list_import_batches(), [])
+
+    def test_unsubmitted_oa_draft_batch_is_listed_and_deletable(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._etc_service.oa_client = FakeEtcOAClient()
+
+            task_id, import_batch_id = self._import_supplement_reconciliation_zip(app)
+            draft_response = app.handle_request("POST", f"/api/etc/batches/{import_batch_id}/draft")
+            draft_payload = json.loads(draft_response.body)
+            app.handle_request("POST", f"/api/etc/batches/{draft_payload['batchId']}/mark-not-submitted")
+            unsubmitted_before_delete = json.loads(app.handle_request("GET", "/api/etc/batches?status=unsubmitted").body)
+            delete_response = app.handle_request("DELETE", f"/api/etc/batches/{draft_payload['batchId']}")
+            task_payload = json.loads(app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}").body)
+
+        listed_ids = [item["id"] for item in unsubmitted_before_delete["items"]]
+        self.assertIn(draft_payload["batchId"], listed_ids)
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertEqual(json.loads(delete_response.body)["kind"], "submission_batch")
+        self.assertIsNone(task_payload["oaDraftBatchId"])
+        self.assertIsNone(task_payload["etcBatchId"])
+
     def test_task_aware_etc_import_confirm_imports_sum_matched_invoices_only(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -2868,6 +2916,52 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(detail_payload["summary"]["linked_oa_row_id"], "oa-exp-1994")
         self.assertEqual(detail_payload["plateSummary"][1]["plate_number"], "云A361SY")
         self.assertEqual(detail_payload["invoiceItems"][0]["has_pdf"], True)
+
+    def test_etc_batch_list_only_checks_attachment_status_for_selected_detail(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            for batch_index in range(4):
+                invoice_numbers = [f"ETC{batch_index}{invoice_index}" for invoice_index in range(2)]
+                app._etc_service.import_zips([UploadedEtcZipFile(f"batch-{batch_index}.zip", etc_zip(invoice_numbers))])
+
+            for batch_index in (2, 3):
+                invoice_numbers = [f"ETC{batch_index}{invoice_index}" for invoice_index in range(2)]
+                submitted_batch = app._etc_service.create_historical_submitted_batch(
+                    case_id=f"etc-historical-{batch_index}",
+                    external_batch_id=f"ETC-HIST-{batch_index}",
+                    invoice_numbers=invoice_numbers,
+                    linked_oa_row_id=f"oa-exp-{batch_index}",
+                    oa_amount=Decimal("26.14"),
+                    note="历史补关联",
+                )
+                import_batch = next(
+                    batch
+                    for batch in app._etc_service.list_import_batches()
+                    if batch.source_names == [f"batch-{batch_index}.zip"]
+                )
+                import_batch.submission_batch_id = submitted_batch.id
+
+            attachment_exists_calls = 0
+
+            def count_attachment_exists(_path: object) -> bool:
+                nonlocal attachment_exists_calls
+                attachment_exists_calls += 1
+                return True
+
+            app._etc_service._stored_invoice_file_exists = count_attachment_exists
+
+            unsubmitted_response = app.handle_request("GET", "/api/etc/batches?status=unsubmitted&page=1&page_size=20")
+            unsubmitted_attachment_checks = attachment_exists_calls
+            attachment_exists_calls = 0
+            submitted_response = app.handle_request("GET", "/api/etc/batches?status=submitted&page=1&page_size=20")
+            submitted_attachment_checks = attachment_exists_calls
+
+        self.assertEqual(unsubmitted_response.status_code, 200)
+        self.assertEqual(submitted_response.status_code, 200)
+        self.assertEqual(json.loads(unsubmitted_response.body)["pagination"]["total"], 2)
+        self.assertEqual(json.loads(submitted_response.body)["pagination"]["total"], 2)
+        self.assertEqual(unsubmitted_attachment_checks, 4)
+        self.assertEqual(submitted_attachment_checks, 4)
 
     def test_preview_rejects_non_zip_upload(self) -> None:
         with TemporaryDirectory() as temp_dir:

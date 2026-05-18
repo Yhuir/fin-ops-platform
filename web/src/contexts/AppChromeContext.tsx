@@ -11,6 +11,7 @@ export type WorkbenchHeaderActions = {
 export type WorkbenchShellStatus = {
   level: "ok" | "pending" | "error";
   reason: string;
+  percent?: number | null;
 };
 
 type AppChromeContextValue = {

@@ -197,6 +197,18 @@ function actionAffectedMonths(result: {
   return [WORKBENCH_VIEW_MONTH];
 }
 
+function actionAffectedRowIds(result: {
+  affectedRowIds?: unknown[];
+  affected_row_ids?: unknown[];
+}) {
+  const affectedRowIds = cleanWorkbenchScopeList(result.affectedRowIds);
+  if (affectedRowIds.length > 0) {
+    return affectedRowIds;
+  }
+  const affectedSnakeRowIds = cleanWorkbenchScopeList(result.affected_row_ids);
+  return affectedSnakeRowIds;
+}
+
 export default function ReconciliationWorkbenchPage() {
   const { currentMonth } = useMonth();
   const { setWorkbenchStatus } = useAppChrome();
@@ -1257,8 +1269,9 @@ export default function ReconciliationWorkbenchPage() {
             caseId,
             note,
           });
+          const affectedRowIds = actionAffectedRowIds(result);
           clearOpenSelection();
-          applyLocalConfirmLink(rowIds, caseId);
+          applyLocalConfirmLink(affectedRowIds.length > 0 ? affectedRowIds : rowIds, result.case_id || caseId);
           window.dispatchEvent(new CustomEvent("workbenchRelationUpdated", {
             detail: { affectedMonths: actionAffectedMonths(result) },
           }));

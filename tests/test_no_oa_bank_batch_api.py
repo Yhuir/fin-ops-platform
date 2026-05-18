@@ -80,7 +80,7 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertFalse(payload["batches"][0]["can_withdraw"])
         self.assertEqual(payload["batches"][0]["blocked_reason"], "")
 
-    def test_list_summary_always_returns_fixed_five_no_oa_categories(self) -> None:
+    def test_list_summary_always_returns_managed_no_oa_categories(self) -> None:
         app = self._app_with_transactions(
             [
                 bank_transaction("bank-202603-fee-1", amount="3.00"),
@@ -94,17 +94,29 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         categories = payload["summary"]["categories"]
         self.assertEqual(
             [category["code"] for category in categories],
-            ["fee", "salary", "holiday_bonus", "bonus", "internal_transfer"],
+            [
+                "fee",
+                "salary",
+                "holiday_bonus",
+                "bonus",
+                "tax_payment",
+                "treasury_tax_collection",
+                "social_security",
+                "internal_transfer",
+            ],
         )
         self.assertEqual(
             [category["label"] for category in categories],
-            ["手续费", "工资", "过节费", "奖金", "内部往来款"],
+            ["手续费", "工资", "过节费", "奖金", "税款", "代理国库税收收缴", "社保款", "内部往来款"],
         )
         by_code = {category["code"]: category for category in categories}
         self.assertEqual(by_code["fee"]["total"], 1)
         self.assertEqual(by_code["salary"]["total"], 1)
         self.assertEqual(by_code["bonus"]["total"], 0)
         self.assertEqual(by_code["bonus"]["draft"], 0)
+        self.assertEqual(by_code["tax_payment"]["total_amount"], "0.00")
+        self.assertEqual(by_code["treasury_tax_collection"]["total_amount"], "0.00")
+        self.assertEqual(by_code["social_security"]["total_amount"], "0.00")
         self.assertEqual(by_code["internal_transfer"]["total_amount"], "0.00")
 
     def test_detail_returns_batch_and_serialized_rows(self) -> None:

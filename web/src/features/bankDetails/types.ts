@@ -48,7 +48,10 @@ export type BankTransactionCategoryCode =
   | "fee"
   | "salary"
   | "holiday_bonus"
-  | "bonus";
+  | "bonus"
+  | "tax_payment"
+  | "treasury_tax_collection"
+  | "social_security";
 
 export type BankTransactionCategoryCounts = Record<string, number> & { uncategorized: number };
 

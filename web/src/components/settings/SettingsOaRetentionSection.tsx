@@ -9,6 +9,7 @@ import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 
+import OaManualSearchImportTable from "./OaManualSearchImportTable";
 import { settingsTokens } from "./settingsDesign";
 import type { SettingsOaRetentionSectionProps } from "./types";
 
@@ -130,6 +131,8 @@ export default function SettingsOaRetentionSection({
             保留该日期及之后的 OA；保留与这些 OA 同组的流水和发票；如果旧 OA 与该日期及之后的流水同组，也会重新保留。
           </Typography>
         </Alert>
+
+        <OaManualSearchImportTable />
       </Box>
     </Box>
   );

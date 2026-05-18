@@ -15,6 +15,7 @@ import type {
   EtcReconciliationBlockingIssue,
   EtcReconciliationFilterPreview,
   EtcInvoice,
+  EtcInvoiceStatus,
   EtcInvoiceListPayload,
   EtcInvoiceQuery,
   EtcOaDraftPayload,
@@ -50,7 +51,7 @@ type ApiEtcInvoice = {
   taxAmount?: string | number | null;
   total_amount?: string | number | null;
   totalAmount?: string | number | null;
-  status: EtcBatchStatus;
+  status: EtcInvoiceStatus;
   has_pdf?: boolean | null;
   hasPdf?: boolean | null;
   has_xml?: boolean | null;

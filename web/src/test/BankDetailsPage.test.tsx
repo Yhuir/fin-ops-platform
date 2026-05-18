@@ -246,8 +246,10 @@ describe("Bank details page", () => {
     await user.click(within(page).getByLabelText("bank-detail-001 类型"));
     const uncategorizedOption = await screen.findByRole("option", { name: "未分类" });
     const salaryOption = screen.getByRole("option", { name: "自动识别 / 工资" });
+    const internalTransferOption = screen.getByRole("option", { name: "自动识别 / 内部往来款" });
     expect(uncategorizedOption).toBeInTheDocument();
     expect(salaryOption).toHaveAttribute("aria-selected", "true");
+    expect(internalTransferOption).toBeInTheDocument();
     expect(salaryOption).toHaveFocus();
     expect(screen.queryByRole("option", { name: "无" })).not.toBeInTheDocument();
     expect(screen.queryByText(exactTextContent("无"))).not.toBeInTheDocument();

@@ -86,6 +86,53 @@ class CountingStubMongoOAAdapter(StubMongoOAAdapter):
         return super()._load_form_documents(form_id, month)
 
 
+class SearchSummaryStubMongoOAAdapter(CountingStubMongoOAAdapter):
+    def __init__(
+        self,
+        *,
+        form_documents: dict[str, list[dict]],
+        project_documents: list[dict],
+        settings: MongoOASettings | None = None,
+    ) -> None:
+        super().__init__(form_documents=form_documents, project_documents=project_documents, settings=settings)
+        self.search_document_calls: list[dict[str, object]] = []
+        self.count_document_calls: list[dict[str, object]] = []
+
+    def _search_form_documents(
+        self,
+        form_id: str,
+        query: dict,
+        *,
+        projection: dict[str, int] | None = None,
+        limit: int,
+    ) -> list[dict]:
+        self.search_document_calls.append(
+            {
+                "form_id": str(form_id),
+                "query": dict(query),
+                "projection": projection,
+                "limit": limit,
+            }
+        )
+        return [self._with_default_completed_status(document) for document in self._form_documents.get(str(form_id), [])][:limit]
+
+    def _count_search_documents(self, query: dict) -> int:
+        self.count_document_calls.append(dict(query))
+        form_id = query.get("form_id")
+        if form_id is None:
+            for clause in list(query.get("$and") or []):
+                if isinstance(clause, dict) and clause.get("form_id") is not None:
+                    form_id = clause.get("form_id")
+                    break
+        if isinstance(form_id, dict):
+            candidates = sorted({str(value) for value in list(form_id.get("$in") or [])})
+            return sum(len(self._form_documents.get(candidate, [])) for candidate in candidates)
+        return len(self._form_documents.get(str(form_id), []))
+
+    def _parse_attachment_evidence_pool(self, files: list[dict[str, object]], *, month: str | None = None) -> dict[str, list[dict[str, str]]]:
+        raise AssertionError("search summary must not parse or schedule attachment invoices")
+
+
 class AttachmentStubMongoOAAdapter(StubMongoOAAdapter):
     def __init__(
         self,
@@ -620,6 +667,190 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual([record.id for record in records], ["oa-pay-2047"])
         self.assertEqual(records[0].apply_type, "支付申请")
         self.assertEqual(adapter.form_load_calls, [("2", "2026-03")])
+
+    def test_search_application_records_uses_full_range_filters_without_global_import_settings(self) -> None:
+        adapter = CountingStubMongoOAAdapter(
+            form_documents={
+                "2": [
+                    {
+                        "_id": "payment-in-progress",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2025-12-17",
+                            "userName": "樊祖芳",
+                            "fromTitle": "支付申请",
+                            "amount": "88050",
+                            "beneficiary": "云南辰飞机电工程有限公司",
+                            "cause": "空气源热泵预付款",
+                            "projectName": "6486ca70cd6cae5d4e2b0b48",
+                            "flowRequestId": "2048",
+                            "processStatus": "1",
+                        },
+                    },
+                ],
+                "32": [
+                    {
+                        "_id": "expense-doc-1981",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2025-12-23",
+                            "Reimbursement Personnel": "陈雄兵",
+                            "titleName": "日常报销",
+                            "processId": "1981",
+                            "processStatus": "2",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailProjectName": "6486ca70cd6cae5d4e2b0b48",
+                                    "detailReimbursementAmount": "135",
+                                    "feeContent": "去大理检修中水系统餐费",
+                                    "detailReimbursementDate": "2025-12-23",
+                                }
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[
+                {"_id": "6486ca70cd6cae5d4e2b0b48", "data": {"name": "大理卷烟厂动力车间中水处理系统升级改造项目"}},
+            ],
+        )
+        adapter.set_import_filter_provider(lambda: {"form_types": ["payment_request"], "statuses": ["completed"]})
+
+        records = adapter.search_application_records(
+            q="大理",
+            form_types=["expense_claim"],
+            statuses=["completed"],
+            date_from="2025-01-01",
+            date_to="2025-12-31",
+        )
+
+        self.assertEqual([record.id for record in records], ["oa-exp-1981"])
+        self.assertEqual(records[0].month, "2025-12")
+
+    def test_search_application_record_rows_uses_paged_summary_without_attachment_parse(self) -> None:
+        adapter = SearchSummaryStubMongoOAAdapter(
+            form_documents={
+                "2": [
+                    {
+                        "_id": "payment-doc-2048",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2026-01-15",
+                            "userName": "樊祖芳",
+                            "amount": "88050",
+                            "beneficiary": "云南辰飞机电工程有限公司",
+                            "cause": "空气源热泵预付款",
+                            "projectName": "oa-project-001",
+                            "flowRequestId": "2048",
+                            "processStatus": "2",
+                        },
+                    }
+                ],
+                "32": [
+                    {
+                        "_id": "expense-doc-1981",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2026-01-15",
+                            "Reimbursement Personnel": "陈雄兵",
+                            "titleName": "日常报销",
+                            "processId": "1981",
+                            "processStatus": "2",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailProjectName": "oa-project-001",
+                                    "detailReimbursementAmount": "135",
+                                    "feeContent": "餐费",
+                                    "detailReimbursementDate": "2025-12-23",
+                                    "detailReimbursementAttachment": {
+                                        "files": [
+                                            {"fileName": "invoice.pdf", "filePath": "/tmp/invoice.pdf", "suffix": "pdf"}
+                                        ]
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[
+                {"_id": "oa-project-001", "data": {"name": "大理卷烟厂动力车间中水处理系统升级改造项目"}},
+            ],
+        )
+
+        payload = adapter.search_application_record_rows(
+            q="大理",
+            form_types=["expense_claim"],
+            statuses=["completed"],
+            date_from="2026-01-01",
+            date_to="2026-01-31",
+            page=0,
+            page_size=20,
+            imported_entries={"oa-exp-1981": {"imported_at": "2026-05-18T10:00:00"}},
+        )
+
+        self.assertEqual(payload["total"], 1)
+        row = payload["rows"][0]
+        self.assertEqual(row["row_id"], "oa-exp-1981")
+        self.assertEqual(row["application_date"], "2026-01-15")
+        self.assertEqual(row["project_name"], "大理卷烟厂动力车间中水处理系统升级改造项目")
+        self.assertEqual(row["attachment_file_count"], 1)
+        self.assertEqual(row["importable_invoice_count"], 0)
+        self.assertEqual(row["import_status"], "imported")
+        self.assertEqual(adapter.form_load_calls, [])
+        self.assertEqual(adapter.search_document_calls[0]["form_id"], "32")
+        self.assertEqual(adapter.search_document_calls[0]["limit"], 20)
+        self.assertIn("$and", adapter.count_document_calls[0])
+
+    def test_refresh_application_record_attachments_forces_selected_records_only(self) -> None:
+        adapter = AttachmentStubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-1981",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2025-12-23",
+                            "Reimbursement Personnel": "陈雄兵",
+                            "titleName": "日常报销",
+                            "processId": "1981",
+                            "processStatus": "2",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailProjectName": "oa-project-001",
+                                    "detailReimbursementAmount": "135",
+                                    "feeContent": "餐费",
+                                    "detailReimbursementDate": "2025-12-23",
+                                    "detailReimbursementAttachment": {
+                                        "files": [
+                                            {"fileName": "invoice.pdf", "filePath": "/tmp/invoice.pdf", "suffix": "pdf"},
+                                            {"fileName": "meal.jpg", "filePath": "/tmp/meal.jpg", "suffix": "jpg"},
+                                        ]
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[
+                {"_id": "oa-project-001", "data": {"name": "大理卷烟厂动力车间中水处理系统升级改造项目"}},
+            ],
+            attachment_invoice_rows={
+                "invoice.pdf": [{"invoice_no": "INV-001", "attachment_name": "invoice.pdf", "total_with_tax": "135.00"}],
+            },
+        )
+
+        records = adapter.refresh_application_record_attachments(["oa-exp-1981"])
+
+        self.assertEqual([record.id for record in records], ["oa-exp-1981"])
+        self.assertEqual(records[0].attachment_file_count, 2)
+        self.assertEqual(len(records[0].attachment_invoices), 1)
+        self.assertNotIn("2025-12", adapter._records_cache)
 
     def test_list_oa_import_filter_options_normalizes_oa_names_and_excludes_unsupported_statuses(self) -> None:
         adapter = StubMongoOAAdapter(

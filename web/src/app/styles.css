@@ -261,6 +261,21 @@ body.workbench-focus-mode .global-header {
   overflow: visible;
 }
 
+.app-sidebar-brand-status-percent {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
 .app-sidebar-brand-status-track,
 .app-sidebar-brand-status-sweep {
   fill: none;
@@ -7518,6 +7533,18 @@ body.column-layout-dragging {
   border-color: #f1c21b;
   background: #fff8e1;
   color: #8a6d00;
+}
+
+.bank-category-tag.category-tone-tax {
+  border-color: #ff7eb6;
+  background: #fff0f6;
+  color: #9f1853;
+}
+
+.bank-category-tag.category-tone-social-security {
+  border-color: #08bdba;
+  background: #e5fffd;
+  color: #005d5d;
 }
 
 .bank-category-tag.category-tone-business,

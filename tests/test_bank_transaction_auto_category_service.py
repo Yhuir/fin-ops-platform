@@ -18,19 +18,25 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.service = BankTransactionAutoCategoryService()
 
-    def test_detects_fee_from_summary_remark_and_nested_fields(self) -> None:
+    def test_detects_fee_from_counterparty_summary_or_remark_only(self) -> None:
         suggestions = self.service.suggest_for_rows(
             [
                 {
-                    "id": "txn-fee",
+                    "id": "txn-fee-remark",
                     "summary": "普通转账",
                     "remark": "网银手续费",
                     "detail_fields": {"补充说明": "转账手续费"},
-                }
+                },
+                {
+                    "id": "txn-fee-counterparty",
+                    "counterparty_name": "中国建设银行手续费专户",
+                    "summary": "普通转账",
+                    "remark": "",
+                },
             ]
         )
 
-        suggestion = suggestions["txn-fee"]
+        suggestion = suggestions["txn-fee-remark"]
         self.assertEqual(suggestion["category_code"], "fee")
         self.assertEqual(suggestion["category_label"], "手续费")
         self.assertEqual(suggestion["category_path"], ["自动识别", "手续费"])
@@ -38,6 +44,7 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
         self.assertEqual(suggestion["rule_code"], "fee_text_keyword")
         self.assertEqual(suggestion["confidence"], "high")
         self.assertEqual(suggestion["rule_version"], BANK_TRANSACTION_AUTO_CATEGORY_RULE_VERSION)
+        self.assertEqual(suggestions["txn-fee-counterparty"]["category_code"], "fee")
 
     def test_plain_service_fee_text_is_not_bank_fee(self) -> None:
         suggestions = self.service.suggest_for_rows(
@@ -50,11 +57,30 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
                     "debit_amount": "10000.00",
                     "credit_amount": "",
                     "pay_receive_time": "2026-04-23 17:33:58",
-                }
+                },
+                {
+                    "id": "txn-detail-fee-only",
+                    "summary": "普通转账",
+                    "remark": "",
+                    "detail_fields": {"补充说明": "转账手续费"},
+                },
             ]
         )
 
         self.assertNotIn("txn-service-fee", suggestions)
+        self.assertNotIn("txn-detail-fee-only", suggestions)
+
+    def test_detects_sms_service_fee_as_bank_fee_without_broadening_service_fee(self) -> None:
+        suggestions = self.service.suggest_for_rows(
+            [
+                {"id": "txn-sms-service-fee", "summary": "短信服务费", "remark": ""},
+                {"id": "txn-plain-service-fee", "summary": "服务费", "remark": ""},
+            ]
+        )
+
+        self.assertEqual(suggestions["txn-sms-service-fee"]["category_code"], "fee")
+        self.assertEqual(suggestions["txn-sms-service-fee"]["rule_code"], "fee_text_keyword")
+        self.assertNotIn("txn-plain-service-fee", suggestions)
 
     def test_detects_salary_by_reusing_workbench_special_rule_detector(self) -> None:
         suggestions = self.service.suggest_for_rows(
@@ -94,6 +120,40 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
         self.assertEqual(suggestions["txn-bonus"]["category_label"], "奖金")
         self.assertEqual(suggestions["txn-bonus"]["rule_code"], "bonus_text_keyword")
 
+    def test_detects_tax_treasury_tax_collection_and_social_security_from_keywords(self) -> None:
+        suggestions = self.service.suggest_for_rows(
+            [
+                {"id": "txn-tax", "summary": "税款扣缴"},
+                {"id": "txn-treasury-tax", "remark": "代理国库税收收缴"},
+                {"id": "txn-social-security", "purpose": "社保款缴纳"},
+            ]
+        )
+
+        self.assertEqual(suggestions["txn-tax"]["category_code"], "tax_payment")
+        self.assertEqual(suggestions["txn-tax"]["category_label"], "税款")
+        self.assertEqual(suggestions["txn-tax"]["rule_code"], "tax_payment_text_keyword")
+        self.assertEqual(suggestions["txn-treasury-tax"]["category_code"], "treasury_tax_collection")
+        self.assertEqual(suggestions["txn-treasury-tax"]["category_label"], "代理国库税收收缴")
+        self.assertEqual(suggestions["txn-treasury-tax"]["rule_code"], "treasury_tax_collection_text_keyword")
+        self.assertEqual(suggestions["txn-social-security"]["category_code"], "social_security")
+        self.assertEqual(suggestions["txn-social-security"]["category_label"], "社保款")
+        self.assertEqual(suggestions["txn-social-security"]["rule_code"], "social_security_text_keyword")
+
+    def test_tax_and_social_security_rules_do_not_match_broad_generic_words(self) -> None:
+        suggestions = self.service.suggest_for_rows(
+            [
+                {"id": "txn-tax-fee", "summary": "税费咨询服务"},
+                {"id": "txn-tax-deduct", "remark": "员工扣税差额"},
+                {"id": "txn-social-insurance", "purpose": "社会保险咨询"},
+                {"id": "txn-condolence", "note": "员工慰问金"},
+                {"id": "txn-holiday-generic", "note": "节日慰问金"},
+                {"id": "txn-tax-social-security", "summary": "社保及税款"},
+                {"id": "txn-treasury-generic", "remark": "税收收缴"},
+            ]
+        )
+
+        self.assertEqual(suggestions, {})
+
     def test_detects_internal_transfer_pair_by_reusing_detector_semantics(self) -> None:
         suggestions = self.service.suggest_for_rows(
             [
@@ -125,6 +185,35 @@ class BankTransactionAutoCategoryServiceTests(unittest.TestCase):
             self.assertEqual(suggestion["category_path"], ["自动识别", "内部往来款"])
             self.assertEqual(suggestion["rule_code"], INTERNAL_TRANSFER_PAIR)
             self.assertIn("workbench_special_rule_detector", suggestion["reason"])
+
+    def test_internal_transfer_detector_takes_priority_over_text_labels(self) -> None:
+        suggestions = self.service.suggest_for_rows(
+            [
+                {
+                    "id": "txn-transfer-out-fee-text",
+                    "account_name": "云南溯源科技有限公司",
+                    "counterparty_name": "云南溯源科技有限公司建设银行账户",
+                    "account_no": "62220001",
+                    "debit_amount": "13000.00",
+                    "credit_amount": "",
+                    "pay_receive_time": "2026-03-10 10:00:00",
+                    "summary": "手续费",
+                },
+                {
+                    "id": "txn-transfer-in-fee-text",
+                    "account_name": "云南溯源科技有限公司",
+                    "counterparty_name": "云南溯源科技有限公司工商银行账户",
+                    "account_no": "62220002",
+                    "debit_amount": "",
+                    "credit_amount": "13000.00",
+                    "pay_receive_time": "2026-03-10 12:00:00",
+                    "remark": "手续费",
+                },
+            ]
+        )
+
+        self.assertEqual(suggestions["txn-transfer-out-fee-text"]["category_code"], "internal_transfer")
+        self.assertEqual(suggestions["txn-transfer-in-fee-text"]["category_code"], "internal_transfer")
 
     def test_effective_category_uses_manual_before_auto(self) -> None:
         category_service = BankTransactionCategoryService.from_snapshot(

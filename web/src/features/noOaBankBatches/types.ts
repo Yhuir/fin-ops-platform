@@ -3,6 +3,9 @@ export type NoOaBankBatchType =
   | "salary"
   | "holiday_bonus"
   | "bonus"
+  | "tax_payment"
+  | "treasury_tax_collection"
+  | "social_security"
   | "internal_transfer";
 
 export type NoOaBankBatchTypeFilter = "all" | NoOaBankBatchType;

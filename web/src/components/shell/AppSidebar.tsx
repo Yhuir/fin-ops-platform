@@ -15,6 +15,7 @@ import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import { Link, NavLink, useLocation } from "react-router-dom";
 
+import type { WorkbenchShellStatus } from "../../contexts/AppChromeContext";
 import type { AppHealthStatus } from "../../features/appHealth/types";
 import { sidebarGroups } from "./sidebarItems";
 
@@ -32,7 +33,7 @@ type AppSidebarProps = {
   mobileOpen: boolean;
   expanded: boolean;
   healthStatus: AppHealthStatus;
-  workbenchStatus: { level: "ok" | "pending" | "error"; reason: string } | null;
+  workbenchStatus: WorkbenchShellStatus | null;
   onCloseMobile: () => void;
   onToggleExpanded: () => void;
 };
@@ -41,20 +42,21 @@ type SidebarBrandStatus = {
   level: "ok" | "pending" | "error";
   reason: string;
   details: string[];
+  percent?: number | null;
 };
 
 function toSidebarBrandStatus(healthStatus: AppHealthStatus, workbenchStatus: AppSidebarProps["workbenchStatus"]): SidebarBrandStatus {
   if (healthStatus.level === "blocked") {
     return { level: "error", reason: healthStatus.reason, details: healthStatus.details };
   }
-  if (healthStatus.level === "busy") {
-    return { level: "pending", reason: healthStatus.reason, details: healthStatus.details };
-  }
   if (workbenchStatus?.level === "error") {
     return { level: "error", reason: workbenchStatus.reason, details: [] };
   }
   if (workbenchStatus?.level === "pending") {
-    return { level: "pending", reason: workbenchStatus.reason, details: [] };
+    return { level: "pending", reason: workbenchStatus.reason, details: [], percent: workbenchStatus.percent };
+  }
+  if (healthStatus.level === "busy") {
+    return { level: "pending", reason: healthStatus.reason, details: healthStatus.details };
   }
   return { level: "ok", reason: healthStatus.reason, details: healthStatus.details };
 }
@@ -72,6 +74,9 @@ function isSidebarItemActive(pathname: string, search: string, to: string, end?:
 
 function SidebarBrandStatusMark({ status }: { status: SidebarBrandStatus }) {
   const tooltipTitle = [status.reason, ...status.details].filter(Boolean).slice(0, 3).join("\n");
+  const pendingPercent = status.level === "pending" && typeof status.percent === "number"
+    ? Math.max(0, Math.min(100, Math.round(status.percent)))
+    : null;
   return (
     <Tooltip title={tooltipTitle} placement="right">
       <span
@@ -81,10 +86,16 @@ function SidebarBrandStatusMark({ status }: { status: SidebarBrandStatus }) {
         data-status-reason={status.reason}
         role="status"
       >
-        <SvgIcon className="app-sidebar-brand-status-icon" viewBox="0 0 100 100" aria-hidden="true">
-          <circle className="app-sidebar-brand-status-track" cx="50" cy="50" r="37" />
-          <circle className="app-sidebar-brand-status-sweep" cx="50" cy="50" r="37" />
-        </SvgIcon>
+        {pendingPercent === null ? (
+          <SvgIcon className="app-sidebar-brand-status-icon" viewBox="0 0 100 100" aria-hidden="true">
+            <circle className="app-sidebar-brand-status-track" cx="50" cy="50" r="37" />
+            <circle className="app-sidebar-brand-status-sweep" cx="50" cy="50" r="37" />
+          </SvgIcon>
+        ) : (
+          <span className="app-sidebar-brand-status-percent" aria-hidden="true">
+            {pendingPercent}%
+          </span>
+        )}
       </span>
     </Tooltip>
   );

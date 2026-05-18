@@ -505,9 +505,10 @@ class WorkbenchSpecialPairRuleService:
         return f"{value.quantize(CENT):.2f}"
 
     def _is_company_bank_row(self, row: dict[str, Any]) -> bool:
-        return is_company_identity(None, self._bank_account_name(row)) and is_company_identity(
-            None, row.get("counterparty_name")
-        )
+        return self._has_bank_account_identity(row) and is_company_identity(None, row.get("counterparty_name"))
+
+    def _has_bank_account_identity(self, row: dict[str, Any]) -> bool:
+        return is_company_identity(None, self._bank_account_name(row)) or bool(clean_account_no(self._bank_account_no(row)))
 
     def _bank_accounts_distinct(self, left: dict[str, Any], right: dict[str, Any]) -> bool:
         left_account = clean_account_no(self._bank_account_no(left))
@@ -533,9 +534,19 @@ class WorkbenchSpecialPairRuleService:
 
     @staticmethod
     def _bank_account_no(row: dict[str, Any]) -> str:
-        value = row.get("account_no")
-        if value not in (None, "", "--", "—"):
-            return str(value)
+        for field_name in ("account_no", "account_number"):
+            value = row.get(field_name)
+            if value not in (None, "", "--", "—") and len(clean_account_no(str(value))) > 4:
+                return str(value)
+        for field_name in ("imported_bank_name", "bank_name"):
+            bank_name = row.get(field_name)
+            last4 = row.get("imported_bank_last4") or row.get("account_last4")
+            if bank_name not in (None, "", "--", "—") and last4 not in (None, "", "--", "—"):
+                return f"{bank_name}:{last4}"
+        for field_name in ("account_key", "account_no", "account_number", "account_last4", "imported_bank_last4"):
+            value = row.get(field_name)
+            if value not in (None, "", "--", "—"):
+                return str(value)
         detail_fields = row.get("detail_fields")
         if isinstance(detail_fields, dict):
             value = detail_fields.get("账号")

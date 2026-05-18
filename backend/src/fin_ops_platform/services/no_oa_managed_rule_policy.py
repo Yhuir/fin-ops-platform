@@ -6,6 +6,9 @@ NO_OA_MANAGED_LABELS: dict[str, str] = {
     "salary": "工资",
     "holiday_bonus": "过节费",
     "bonus": "奖金",
+    "tax_payment": "税款",
+    "treasury_tax_collection": "代理国库税收收缴",
+    "social_security": "社保款",
     "internal_transfer": "内部往来款",
 }
 
@@ -14,6 +17,9 @@ NO_OA_MANAGED_BATCH_TYPE_ORDER: tuple[str, ...] = (
     "salary",
     "holiday_bonus",
     "bonus",
+    "tax_payment",
+    "treasury_tax_collection",
+    "social_security",
     "internal_transfer",
 )
 

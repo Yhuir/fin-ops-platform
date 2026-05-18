@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from itertools import count
+import re
 from typing import Any
 
 from fin_ops_platform.services.imports import normalize_name
@@ -701,7 +702,7 @@ class WorkbenchCandidateGroupingService:
             return False
         if len(group.oa_rows) > 1 or len(group.bank_rows) > 1:
             return False
-        if self._group_counterparty(group) is None or self._group_direction(group) is None:
+        if not self._has_group_counterparty_evidence(group) or self._group_direction(group) is None:
             return False
 
         target_amount = self._amount(group.oa_rows[0]) if group.oa_rows else None
@@ -723,6 +724,29 @@ class WorkbenchCandidateGroupingService:
                 return False
 
         return True
+
+    def _has_group_counterparty_evidence(self, group: CandidateGroup) -> bool:
+        if self._group_counterparty(group) is not None:
+            return True
+        return self._has_oa_bank_counterparty_alias(group)
+
+    def _has_oa_bank_counterparty_alias(self, group: CandidateGroup) -> bool:
+        if len(group.oa_rows) != 1 or len(group.bank_rows) != 1 or group.invoice_rows:
+            return False
+        oa_counterparty = self._counterparty_alias_key(self._counterparty(group.oa_rows[0]))
+        bank_counterparty = self._counterparty_alias_key(self._counterparty(group.bank_rows[0]))
+        if not oa_counterparty or not bank_counterparty:
+            return False
+        if oa_counterparty == bank_counterparty:
+            return True
+        shorter, longer = sorted((oa_counterparty, bank_counterparty), key=len)
+        return len(shorter) >= 3 and longer.startswith(shorter)
+
+    @staticmethod
+    def _counterparty_alias_key(value: str | None) -> str:
+        if not value:
+            return ""
+        return re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "", value)
 
     def _single_row_candidate_groups(self, group: CandidateGroup) -> list[CandidateGroup]:
         return [

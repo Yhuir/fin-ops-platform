@@ -5,6 +5,7 @@ import TaxOffsetPage from "../pages/TaxOffsetPage";
 import CostStatisticsPage from "../pages/CostStatisticsPage";
 import SettingsPage from "../pages/SettingsPage";
 import AppHealthOperationsPage from "../pages/AppHealthOperationsPage";
+import BatchAccountingPage from "../pages/BatchAccountingPage";
 import BankDetailsPage from "../pages/BankDetailsPage";
 import EtcTicketManagementPage from "../pages/EtcTicketManagementPage";
 import NoOaBankBatchPage from "../pages/NoOaBankBatchPage";
@@ -24,6 +25,7 @@ export default function AppRouter() {
       <Route path="/cost-statistics" element={<CostStatisticsPage />} />
       <Route path="/bank-details" element={<BankDetailsPage />} />
       <Route path="/no-oa-bank-batches" element={<NoOaBankBatchPage />} />
+      <Route path="/batch-accounting" element={<BatchAccountingPage />} />
       <Route path="/turnover-ledger" element={<TurnoverLedgerPage />} />
       <Route path="/etc-tickets" element={<EtcTicketManagementPage />} />
       <Route path="/settings" element={<SettingsPage />} />

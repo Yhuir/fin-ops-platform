@@ -183,7 +183,15 @@ function attachmentLabel(invoice: EtcInvoice) {
 }
 
 function batchStatusLabel(status: EtcBatchStatus) {
-  return status === "submitted" ? "已提交" : "未提交";
+  const labels: Record<EtcBatchStatus, string> = {
+    unsubmitted: "未提交",
+    draft_creating: "草稿创建中",
+    draft_created: "OA草稿已创建",
+    not_submitted: "未提交OA",
+    failed: "创建失败",
+    submitted: "已提交",
+  };
+  return labels[status] ?? status;
 }
 
 function batchOaLabel(batch: EtcBatchSummary) {
@@ -614,7 +622,12 @@ export default function EtcTicketManagementPage() {
       ? taskImportBatchDetail.totalAmount
       : sumInvoiceTotalAmount(taskImportInvoiceItems))
     : (selectedTask?.importedInvoiceAmount || "0.00");
-  const canRemoveImportedInvoices = Boolean(selectedTask && selectedTaskImportBatchId && importedInvoiceCount > 0);
+  const canRemoveImportedInvoices = Boolean(
+    selectedTask
+    && selectedTaskImportBatchId
+    && importedInvoiceCount > 0
+    && !selectedTask.submittedConfirmedAt,
+  );
 
   useEffect(() => {
     if (!selectedTaskImportBatchId) {
@@ -734,13 +747,13 @@ export default function EtcTicketManagementPage() {
   }, [selectedTask?.taskId, ticketRootManualSources, ticketRootTextFileSources, ticketRootDocumentSources, selectedTask]);
 
   const invoiceRows = batchDetail?.invoiceItems ?? [];
-  const taskHasSubmissionLink = (task: EtcReconciliationTask) =>
-    Boolean(task.oaDraftBatchId?.trim() || task.etcBatchId?.trim() || task.submittedConfirmedAt?.trim());
+  const taskHasSubmittedLink = (task: EtcReconciliationTask) =>
+    Boolean(task.submittedConfirmedAt?.trim());
   const canDeleteTask = (task: EtcReconciliationTask) =>
-    ["draft", "reviewing", "ready_for_import", "imported"].includes(task.status) && !taskHasSubmissionLink(task);
+    ["draft", "reviewing", "ready_for_import", "imported"].includes(task.status) && !taskHasSubmittedLink(task);
   const deleteTaskDisabledReason = (task: EtcReconciliationTask) => {
-    if (taskHasSubmissionLink(task)) {
-      return "已进入OA/提交链路，不能删除";
+    if (taskHasSubmittedLink(task)) {
+      return "已确认提交OA，不能删除";
     }
     if (task.status === "importing") {
       return "导入中，不能删除";
@@ -759,7 +772,7 @@ export default function EtcTicketManagementPage() {
     }
     return "将删除该对账任务、上传源文件和核对结果。已进入 OA/提交链路的数据不会被允许删除。";
   };
-  const canDeleteBatch = (batch: EtcBatchSummary) => batch.status === "unsubmitted";
+  const canDeleteBatch = (batch: EtcBatchSummary) => batch.status !== "submitted";
   const evidenceRows = useMemo<EvidenceRow[]>(() => {
     const ticketRows = (selectedTask?.ticketRootItems ?? []).map((item: EtcTicketRootItem) => ({
       id: item.itemId,
@@ -908,7 +921,7 @@ export default function EtcTicketManagementPage() {
   const canSubmitCurrentBatch = activeStatus === "unsubmitted"
     && (selectedTaskImportBatchSelected
       ? selectedTaskImportBatchCanSubmit
-      : Boolean(currentOaDraftBatchId) && !detailLoading);
+      : Boolean(currentOaDraftBatchId) && selectedBatch?.status === "unsubmitted" && !detailLoading);
   const canRevokeCurrentBatch = activeStatus === "submitted" && Boolean(selectedBatchId) && !detailLoading;
   const taskIsMutable = Boolean(selectedTask && ["draft", "reviewing"].includes(selectedTask.status));
   const canConfirmSelectedTask = taskIsMutable && selectedConfirmedCreditCardItemIds.length > 0;
