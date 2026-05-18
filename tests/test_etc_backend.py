@@ -2131,6 +2131,34 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(invoices_after_remove["total"], 0)
         self.assertEqual(app._etc_service.list_import_batches(), [])
 
+    def test_remove_reconciliation_task_imported_invoices_repairs_missing_unsubmitted_oa_draft_link(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._etc_service.oa_client = FakeEtcOAClient()
+
+            task_id, import_batch_id = self._import_supplement_reconciliation_zip(app)
+            draft_response = app.handle_request("POST", f"/api/etc/batches/{import_batch_id}/draft")
+            draft_payload = json.loads(draft_response.body)
+            app.handle_request("POST", f"/api/etc/batches/{draft_payload['batchId']}/mark-not-submitted")
+            app._etc_service._batches.pop(draft_payload["batchId"])
+            linked_task = app._etc_reconciliation_task_service.get_task(task_id)
+
+            remove_response = app.handle_request(
+                "DELETE",
+                f"/api/etc/reconciliation-tasks/{task_id}/imported-invoices",
+                json.dumps({"expectedVersion": linked_task.version, "actor": "alice"}),
+            )
+            removed_payload = json.loads(remove_response.body)
+            invoices_after_remove = json.loads(app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20").body)
+
+        self.assertEqual(remove_response.status_code, 200)
+        self.assertEqual(removed_payload["status"], "ready_for_import")
+        self.assertIsNone(removed_payload["importBatchId"])
+        self.assertIsNone(removed_payload["oaDraftBatchId"])
+        self.assertIsNone(removed_payload["etcBatchId"])
+        self.assertEqual(invoices_after_remove["total"], 0)
+        self.assertEqual(app._etc_service.list_import_batches(), [])
+
     def test_unsubmitted_oa_draft_batch_is_listed_and_deletable(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -2150,6 +2178,31 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(json.loads(delete_response.body)["kind"], "submission_batch")
         self.assertIsNone(task_payload["oaDraftBatchId"])
         self.assertIsNone(task_payload["etcBatchId"])
+
+    def test_delete_missing_unsubmitted_oa_draft_batch_repairs_reconciliation_task_link(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._etc_service.oa_client = FakeEtcOAClient()
+
+            task_id, import_batch_id = self._import_supplement_reconciliation_zip(app)
+            draft_response = app.handle_request("POST", f"/api/etc/batches/{import_batch_id}/draft")
+            draft_payload = json.loads(draft_response.body)
+            app.handle_request("POST", f"/api/etc/batches/{draft_payload['batchId']}/mark-not-submitted")
+            app._etc_service._batches.pop(draft_payload["batchId"])
+
+            delete_response = app.handle_request("DELETE", f"/api/etc/batches/{draft_payload['batchId']}")
+            task_payload = json.loads(app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}").body)
+            import_batch = app._etc_service.list_import_batches()[0]
+
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertEqual(json.loads(delete_response.body), {
+            "deleted": True,
+            "batchId": draft_payload["batchId"],
+            "kind": "missing_submission_batch",
+        })
+        self.assertIsNone(task_payload["oaDraftBatchId"])
+        self.assertIsNone(task_payload["etcBatchId"])
+        self.assertIsNone(import_batch.submission_batch_id)
 
     def test_task_aware_etc_import_confirm_imports_sum_matched_invoices_only(self) -> None:
         with TemporaryDirectory() as temp_dir:

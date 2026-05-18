@@ -744,6 +744,18 @@ class EtcReconciliationTaskService:
                 return _copy_task(task)
         return None
 
+    def find_task_for_submission_batch_id(self, batch_id: str) -> EtcReconciliationTask | None:
+        normalized_batch_id = str(batch_id or "").strip()
+        if not normalized_batch_id:
+            return None
+        for task in self._tasks.values():
+            if normalized_batch_id in {
+                str(task.oa_draft_batch_id or "").strip(),
+                str(task.etc_batch_id or "").strip(),
+            }:
+                return _copy_task(task)
+        return None
+
     def record_oa_draft_created(
         self,
         *,

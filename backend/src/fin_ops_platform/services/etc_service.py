@@ -1205,6 +1205,30 @@ class EtcService:
         self._persist()
         return result
 
+    def release_missing_submission_batch_link(self, batch_id: str) -> list[EtcInvoice]:
+        resolved_batch_id = str(batch_id or "").strip()
+        if not resolved_batch_id:
+            raise EtcBatchNotFoundError("ETC batch not found: empty batch id")
+        if self._batch_by_id_or_external_id(resolved_batch_id) is not None:
+            raise EtcBatchDeleteError("ETC batch still exists and must be deleted through the batch delete flow.")
+
+        now = datetime.now(UTC)
+        changed_invoice_ids: set[str] = set()
+        for import_batch in self._import_batches.values():
+            if str(import_batch.submission_batch_id or "").strip() == resolved_batch_id:
+                import_batch.submission_batch_id = None
+                import_batch.updated_at = now
+                changed_invoice_ids.update(str(invoice_id) for invoice_id in list(import_batch.invoice_ids or []))
+        for invoice in self._invoices.values():
+            if str(invoice.current_batch_id or "").strip() == resolved_batch_id:
+                invoice.current_batch_id = None
+                invoice.status = EtcInvoiceStatus.UNSUBMITTED
+                invoice.updated_at = now
+                changed_invoice_ids.add(invoice.id)
+        if changed_invoice_ids:
+            self._persist()
+        return [replace(self._get_invoice(invoice_id)) for invoice_id in sorted(changed_invoice_ids) if invoice_id in self._invoices]
+
     def list_invoices_by_ids(self, invoice_ids: list[str]) -> list[EtcInvoice]:
         return [replace(self._get_invoice(invoice_id)) for invoice_id in invoice_ids]
 

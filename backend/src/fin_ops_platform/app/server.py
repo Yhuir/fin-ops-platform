@@ -1981,7 +1981,21 @@ class Application:
             return task, None, []
 
         delete_batch_id = oa_draft_batch_id or etc_batch_id
-        batch = self._etc_service.get_batch(delete_batch_id)
+        try:
+            batch = self._etc_service.get_batch(delete_batch_id)
+        except EtcBatchNotFoundError:
+            refreshed_invoices = self._etc_service.release_missing_submission_batch_link(delete_batch_id)
+            changed_months = self._etc_invoice_changed_months(refreshed_invoices)
+            if refreshed_invoices:
+                sync_changed_months = self._sync_etc_invoices_to_canonical_invoices(refreshed_invoices)
+                changed_months.extend(sync_changed_months)
+            task = self._etc_reconciliation_task_service.record_oa_draft_deleted(
+                task_id=str(getattr(task, "task_id", "")),
+                oa_draft_batch_id=oa_draft_batch_id or delete_batch_id,
+                etc_batch_id=etc_batch_id,
+                actor=actor,
+            )
+            return task, {"deleted": True, "batchId": delete_batch_id, "kind": "missing_submission_batch"}, sorted(set(changed_months))
         invoice_ids = [str(invoice_id) for invoice_id in list(getattr(batch, "invoice_ids", []) or [])]
         changed_months = self._etc_invoice_changed_months(self._etc_service.list_invoices_by_ids(invoice_ids))
         delete_result = self._etc_service.delete_batch(delete_batch_id)
@@ -2854,13 +2868,14 @@ class Application:
         task = None
         resolved_submission_batch_id = batch_id
         submission_invoice_ids: list[str] = []
+        existing_batch = None
         try:
             existing_batch = self._etc_service.get_batch(batch_id)
             resolved_submission_batch_id = str(getattr(existing_batch, "id", "") or batch_id)
             submission_invoice_ids = [str(invoice_id) for invoice_id in list(getattr(existing_batch, "invoice_ids", []) or [])]
             task = self._etc_reconciliation_task_service.find_task_for_oa_batch_id(str(getattr(existing_batch, "id", "")))
         except EtcBatchNotFoundError:
-            task = None
+            task = self._etc_reconciliation_task_service.find_task_for_submission_batch_id(batch_id)
         try:
             result = self._etc_service.delete_batch(batch_id)
             if result.get("kind") == "submission_batch" and task is not None:
@@ -2876,6 +2891,18 @@ class Application:
                 )
                 self._refresh_after_etc_invoice_sync(changed_months, reason="etc_oa_draft_deleted")
         except EtcBatchNotFoundError as error:
+            if task is not None:
+                try:
+                    task, result, changed_months = self._delete_reconciliation_task_unsubmitted_submission_batch(
+                        task=task,
+                        actor="system",
+                    )
+                except EtcBatchNotFoundError:
+                    return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_batch_not_found", "message": str(error)})
+                if result is not None:
+                    self._refresh_after_etc_invoice_sync(changed_months, reason="etc_missing_oa_draft_link_repaired")
+                    self._persist_state()
+                    return self._json_response(HTTPStatus.OK, result)
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_batch_not_found", "message": str(error)})
         except EtcBatchDeleteError as error:
             return self._json_response(
