@@ -1269,8 +1269,6 @@ class EtcService:
             if str(getattr(invoice, "import_batch_id", "") or "").strip() == normalized_batch_id
         ]
         for invoice in invoices:
-            if invoice.status != EtcInvoiceStatus.UNSUBMITTED:
-                raise EtcBatchDeleteError("import batch contains submitted invoices and cannot be deleted.")
             if str(invoice.current_batch_id or "").strip():
                 raise EtcBatchDeleteError("import batch contains invoices assigned to an OA batch and cannot be deleted.")
         for invoice in invoices:
@@ -1706,8 +1704,6 @@ class EtcService:
         invoice_ids = [str(invoice_id) for invoice_id in list(import_batch.invoice_ids or [])]
         invoices = [self._invoices[invoice_id] for invoice_id in invoice_ids if invoice_id in self._invoices]
         for invoice in invoices:
-            if invoice.status != EtcInvoiceStatus.UNSUBMITTED:
-                raise EtcBatchDeleteError("import batch contains submitted invoices and cannot be deleted.")
             if str(invoice.current_batch_id or "").strip():
                 raise EtcBatchDeleteError("import batch contains invoices assigned to an OA batch and cannot be deleted.")
         for invoice in invoices:
@@ -1735,9 +1731,6 @@ class EtcService:
 
         now = datetime.now(UTC)
         invoices = [self._get_invoice(invoice_id) for invoice_id in batch.invoice_ids if invoice_id in self._invoices]
-        for invoice in invoices:
-            if invoice.status == EtcInvoiceStatus.SUBMITTED:
-                raise EtcBatchDeleteError("ETC batch contains submitted invoices and cannot be deleted.")
         for invoice in invoices:
             if invoice.current_batch_id == batch.id:
                 invoice.current_batch_id = None

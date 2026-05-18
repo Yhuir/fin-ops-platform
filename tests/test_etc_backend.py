@@ -824,6 +824,22 @@ class EtcServiceTests(unittest.TestCase):
         self.assertEqual(total, 0)
         self.assertEqual(counts["unsubmitted"], 0)
 
+    def test_delete_import_batch_removes_locally_submitted_invoices_without_oa_link(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir))
+            service.import_zips([UploadedEtcZipFile("invoices.zip", etc_zip(["ETC001", "ETC002"]))])
+            import_batch_id = service.list_import_batches()[0].id
+            service.update_invoice_status(["etc_invoice_0001", "etc_invoice_0002"], EtcInvoiceStatus.SUBMITTED)
+
+            result = service.delete_batch(import_batch_id)
+            invoices, total, counts = service.list_invoices(page=1, page_size=20)
+
+        self.assertEqual(result, {"deleted": True, "batchId": import_batch_id, "kind": "import_batch"})
+        self.assertEqual(service.list_import_batches(), [])
+        self.assertEqual(invoices, [])
+        self.assertEqual(total, 0)
+        self.assertEqual(counts["submitted"], 0)
+
     def test_delete_submission_batch_releases_import_batch_and_invoices(self) -> None:
         with TemporaryDirectory() as temp_dir:
             fake_oa = FakeEtcOAClient()
@@ -839,6 +855,25 @@ class EtcServiceTests(unittest.TestCase):
         self.assertEqual(result, {"deleted": True, "batchId": draft.batch_id, "kind": "submission_batch"})
         self.assertEqual(service.list_batches(), [])
         self.assertEqual(import_batch.id, import_batch_id)
+        self.assertIsNone(import_batch.submission_batch_id)
+        self.assertEqual({invoice.status for invoice in invoices}, {EtcInvoiceStatus.UNSUBMITTED})
+        self.assertEqual({invoice.current_batch_id for invoice in invoices}, {None})
+        self.assertEqual(counts["unsubmitted"], 2)
+
+    def test_delete_submission_batch_releases_locally_submitted_invoices_without_confirmed_oa(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            fake_oa = FakeEtcOAClient()
+            service = EtcService(data_dir=Path(temp_dir), oa_client=fake_oa)
+            service.import_zips([UploadedEtcZipFile("invoices.zip", etc_zip(["ETC001", "ETC002"]))])
+            draft = service.create_oa_draft(["etc_invoice_0001", "etc_invoice_0002"])
+            service.update_invoice_status(["etc_invoice_0001", "etc_invoice_0002"], EtcInvoiceStatus.SUBMITTED)
+
+            result = service.delete_batch(draft.batch_id)
+            invoices, _total, counts = service.list_invoices(page=1, page_size=20)
+            import_batch = service.list_import_batches()[0]
+
+        self.assertEqual(result, {"deleted": True, "batchId": draft.batch_id, "kind": "submission_batch"})
+        self.assertEqual(service.list_batches(), [])
         self.assertIsNone(import_batch.submission_batch_id)
         self.assertEqual({invoice.status for invoice in invoices}, {EtcInvoiceStatus.UNSUBMITTED})
         self.assertEqual({invoice.current_batch_id for invoice in invoices}, {None})
@@ -1879,6 +1914,24 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(submitted_delete.status_code, 409)
         self.assertEqual(json.loads(submitted_delete.body)["error"], "etc_batch_delete_conflict")
 
+    def test_delete_etc_submission_batch_route_cascades_mutable_batch_contents(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._etc_service.oa_client = FakeEtcOAClient()
+            app._etc_service.import_zips([UploadedEtcZipFile("draft.zip", etc_zip(["ETC001", "ETC002"]))])
+            draft = app._etc_service.create_oa_draft(["etc_invoice_0001", "etc_invoice_0002"])
+            app._etc_service.update_invoice_status(["etc_invoice_0001", "etc_invoice_0002"], EtcInvoiceStatus.SUBMITTED)
+
+            delete_response = app.handle_request("DELETE", f"/api/etc/batches/{draft.batch_id}")
+            invoices = json.loads(app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20").body)
+            batches = json.loads(app.handle_request("GET", "/api/etc/batches?status=unsubmitted").body)
+
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertEqual(json.loads(delete_response.body), {"deleted": True, "batchId": draft.batch_id, "kind": "submission_batch"})
+        self.assertEqual(invoices["total"], 0)
+        self.assertEqual(batches["items"], [])
+        self.assertEqual(app._etc_service.list_import_batches(), [])
+
     def test_reconciliation_item_patch_conflict_returns_task_version_conflict(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -2192,7 +2245,7 @@ class EtcApiTests(unittest.TestCase):
 
             delete_response = app.handle_request("DELETE", f"/api/etc/batches/{draft_payload['batchId']}")
             task_payload = json.loads(app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}").body)
-            import_batch = app._etc_service.list_import_batches()[0]
+            invoices = json.loads(app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20").body)
 
         self.assertEqual(delete_response.status_code, 200)
         self.assertEqual(json.loads(delete_response.body), {
@@ -2202,7 +2255,10 @@ class EtcApiTests(unittest.TestCase):
         })
         self.assertIsNone(task_payload["oaDraftBatchId"])
         self.assertIsNone(task_payload["etcBatchId"])
-        self.assertIsNone(import_batch.submission_batch_id)
+        self.assertIsNone(task_payload["importBatchId"])
+        self.assertEqual(task_payload["status"], "ready_for_import")
+        self.assertEqual(invoices["total"], 0)
+        self.assertEqual(app._etc_service.list_import_batches(), [])
 
     def test_task_aware_etc_import_confirm_imports_sum_matched_invoices_only(self) -> None:
         with TemporaryDirectory() as temp_dir:

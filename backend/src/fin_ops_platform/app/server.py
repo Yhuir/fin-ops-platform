@@ -2023,6 +2023,9 @@ class Application:
             or getattr(task, "submitted_confirmed_at", None) is not None
         ):
             raise ValueError("reconciliation_task_has_submission_link")
+        return self._delete_etc_import_batch_sources(import_batch_id)
+
+    def _delete_etc_import_batch_sources(self, import_batch_id: str) -> tuple[dict[str, object], int, list[str]]:
         import_batch = self._etc_import_batch_by_id(import_batch_id)
         if import_batch is not None:
             etc_invoices = self._etc_service.list_invoices_by_ids(
@@ -2034,6 +2037,25 @@ class Application:
         delete_result = self._etc_service.delete_import_batch_sources(import_batch_id)
         canonical_deleted = self._import_service.remove_etc_invoices_by_import_batch_id(import_batch_id)
         return delete_result, canonical_deleted, changed_months
+
+    def _clear_reconciliation_task_import_after_batch_delete(self, task: object | None, import_batch_id: str) -> object | None:
+        if task is None:
+            return None
+        normalized_import_batch_id = str(import_batch_id or "").strip()
+        if not normalized_import_batch_id or str(getattr(task, "import_batch_id", "") or "").strip() != normalized_import_batch_id:
+            return task
+        if (
+            str(getattr(task, "oa_draft_batch_id", "") or "").strip()
+            or str(getattr(task, "etc_batch_id", "") or "").strip()
+            or getattr(task, "submitted_confirmed_at", None) is not None
+        ):
+            return task
+        return self._etc_reconciliation_task_service.remove_imported_invoices(
+            task_id=str(getattr(task, "task_id", "")),
+            expected_version=int(getattr(task, "version", 0) or 0),
+            import_batch_id=normalized_import_batch_id,
+            actor="system",
+        )
 
     @staticmethod
     def _expected_version_from_payload(payload: dict[str, object]) -> int:
@@ -2868,28 +2890,58 @@ class Application:
         task = None
         resolved_submission_batch_id = batch_id
         submission_invoice_ids: list[str] = []
+        submission_import_batch_ids: list[str] = []
+        import_batch_changed_months: list[str] = []
         existing_batch = None
         try:
             existing_batch = self._etc_service.get_batch(batch_id)
             resolved_submission_batch_id = str(getattr(existing_batch, "id", "") or batch_id)
             submission_invoice_ids = [str(invoice_id) for invoice_id in list(getattr(existing_batch, "invoice_ids", []) or [])]
+            submission_invoices = self._etc_service.list_invoices_by_ids(submission_invoice_ids)
+            submission_import_batch_ids = sorted({
+                str(getattr(invoice, "import_batch_id", "") or "").strip()
+                for invoice in submission_invoices
+                if str(getattr(invoice, "import_batch_id", "") or "").strip()
+            })
             task = self._etc_reconciliation_task_service.find_task_for_oa_batch_id(str(getattr(existing_batch, "id", "")))
         except EtcBatchNotFoundError:
+            import_batch = self._etc_import_batch_by_id(batch_id)
+            if import_batch is not None:
+                import_batch_invoices = self._etc_service.list_invoices_by_ids(
+                    [str(invoice_id) for invoice_id in list(getattr(import_batch, "invoice_ids", []) or [])]
+                )
+                import_batch_changed_months = self._etc_invoice_changed_months(import_batch_invoices)
             task = self._etc_reconciliation_task_service.find_task_for_submission_batch_id(batch_id)
+            if task is None and import_batch is not None:
+                task = self._etc_reconciliation_task_service.find_task_for_import_batch_ids([batch_id])
         try:
             result = self._etc_service.delete_batch(batch_id)
             if result.get("kind") == "submission_batch" and task is not None:
-                self._etc_reconciliation_task_service.record_oa_draft_deleted(
+                task = self._etc_reconciliation_task_service.record_oa_draft_deleted(
                     task_id=str(getattr(task, "task_id")),
                     oa_draft_batch_id=resolved_submission_batch_id,
                     etc_batch_id=str(getattr(existing_batch, "etc_batch_id", "") or ""),
                     actor="system",
                 )
-            if result.get("kind") == "submission_batch" and submission_invoice_ids:
+            if result.get("kind") == "submission_batch" and submission_import_batch_ids:
+                changed_months = []
+                for import_batch_id in submission_import_batch_ids:
+                    _delete_result, _canonical_deleted, import_changed_months = self._delete_etc_import_batch_sources(import_batch_id)
+                    changed_months.extend(import_changed_months)
+                    task = self._clear_reconciliation_task_import_after_batch_delete(task, import_batch_id)
+                self._refresh_after_etc_invoice_sync(changed_months, reason="etc_submission_batch_contents_deleted")
+                self._persist_state()
+            if result.get("kind") == "submission_batch" and submission_invoice_ids and not submission_import_batch_ids:
                 changed_months = self._sync_etc_invoices_to_canonical_invoices(
                     self._etc_service.list_invoices_by_ids(submission_invoice_ids),
                 )
                 self._refresh_after_etc_invoice_sync(changed_months, reason="etc_oa_draft_deleted")
+            if result.get("kind") == "import_batch":
+                canonical_deleted = self._import_service.remove_etc_invoices_by_import_batch_id(str(result.get("batchId") or batch_id))
+                task = self._clear_reconciliation_task_import_after_batch_delete(task, str(result.get("batchId") or batch_id))
+                if canonical_deleted or import_batch_changed_months:
+                    self._refresh_after_etc_invoice_sync(import_batch_changed_months, reason="etc_import_batch_deleted")
+                    self._persist_state()
         except EtcBatchNotFoundError as error:
             if task is not None:
                 try:
@@ -2900,6 +2952,11 @@ class Application:
                 except EtcBatchNotFoundError:
                     return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_batch_not_found", "message": str(error)})
                 if result is not None:
+                    import_batch_id = str(getattr(task, "import_batch_id", "") or "").strip()
+                    if import_batch_id:
+                        _delete_result, _canonical_deleted, import_changed_months = self._delete_etc_import_batch_sources(import_batch_id)
+                        changed_months.extend(import_changed_months)
+                        task = self._clear_reconciliation_task_import_after_batch_delete(task, import_batch_id)
                     self._refresh_after_etc_invoice_sync(changed_months, reason="etc_missing_oa_draft_link_repaired")
                     self._persist_state()
                     return self._json_response(HTTPStatus.OK, result)
