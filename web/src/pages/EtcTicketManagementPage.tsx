@@ -802,7 +802,7 @@ export default function EtcTicketManagementPage() {
     && selectedTaskImportBatchId
     && !selectedTaskBusinessBatch
     && importedInvoiceCount > 0
-    && !selectedTask.submittedConfirmedAt,
+    && !taskHasOaSubmissionLink(selectedTask),
   );
   const showTaskImportedInvoices = Boolean(selectedTask && selectedTaskImportBatchId && !selectedTaskBusinessBatch);
 
@@ -892,13 +892,17 @@ export default function EtcTicketManagementPage() {
   }, [selectedTaskId]);
 
   const invoiceRows = batchDetail?.invoiceItems ?? [];
-  const taskHasSubmittedLink = (task: EtcReconciliationTask) =>
-    Boolean(task.submittedConfirmedAt?.trim());
+  function taskHasOaSubmissionLink(task: EtcReconciliationTask) {
+    return Boolean(task.oaDraftBatchId?.trim() || task.submittedConfirmedAt?.trim());
+  }
   const canDeleteTask = (task: EtcReconciliationTask) =>
-    ["draft", "reviewing", "ready_for_import", "imported"].includes(task.status) && !taskHasSubmittedLink(task);
+    ["draft", "reviewing", "ready_for_import", "imported"].includes(task.status) && !taskHasOaSubmissionLink(task);
   const deleteTaskDisabledReason = (task: EtcReconciliationTask) => {
-    if (taskHasSubmittedLink(task)) {
-      return "已确认提交OA，不能删除";
+    if (task.submittedConfirmedAt?.trim()) {
+      return "OA已提交，不能删除";
+    }
+    if (task.oaDraftBatchId?.trim()) {
+      return "OA草稿已创建，请先撤销草稿";
     }
     if (task.status === "importing") {
       return "导入中，不能删除";

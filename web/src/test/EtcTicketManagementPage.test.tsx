@@ -296,6 +296,55 @@ describe("ETC ticket management page", () => {
     expect(within(page).queryByRole("region", { name: "已导入ETC发票" })).not.toBeInTheDocument();
   });
 
+  test("blocks physical task deletion after an OA draft link exists", async () => {
+    installMockApiFetch();
+    const taskWithDraft = {
+      taskId: "etc-recon-imported-draft-linked-001",
+      status: "imported",
+      version: 12,
+      title: "2026-03 ETC 已建草稿",
+      periodStart: "2026-03-01",
+      periodEnd: "2026-03-31",
+      statementPeriodStart: "2026-03-01",
+      statementPeriodEnd: "2026-03-31",
+      approvedDelta: "0.00",
+      approvedDeltaNote: "",
+      cardLast4: "7788",
+      oaTotalAmount: "30.00",
+      etcInvoiceAmount: "30.00",
+      supplementAmount: "0.00",
+      etcInvoiceCount: 1,
+      supplementCount: 0,
+      canConfirm: false,
+      vehiclePlates: ["云ADA0381"],
+      confirmedItemSetHash: "sha256:selected",
+      importBatchId: "import-session-draft-linked-001",
+      etcBatchId: "ETC-2026-DRAFT-LINKED",
+      hasImportedInvoices: true,
+      importedInvoiceCount: 1,
+      importedInvoiceAmount: "30.00",
+      oaDraftBatchId: "etc_batch_submission_draft_linked_001",
+      oaDraftStatus: "draft_created",
+      submittedConfirmedAt: "",
+      creditCardItems: [],
+      ticketRootItems: [],
+      supplementEvidences: [],
+      sourceFiles: [],
+      parseIssues: [],
+    };
+    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [taskWithDraft] } as never);
+    const deleteTask = vi.spyOn(etcApi, "deleteEtcReconciliationTask").mockResolvedValue(undefined as never);
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const blockedDeleteButton = await within(page).findByRole("button", { name: "OA草稿已创建，请先撤销草稿" });
+    expect(blockedDeleteButton).toBeDisabled();
+
+    expect(screen.queryByRole("dialog", { name: "删除任务" })).not.toBeInTheDocument();
+    expect(deleteTask).not.toHaveBeenCalled();
+  });
+
   test("shows the reconciliation workspace with upload blocks, statuses, supplements, and parse issues", async () => {
     installMockApiFetch();
     renderAppAt("/etc-tickets");
