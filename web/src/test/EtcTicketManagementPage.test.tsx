@@ -432,7 +432,8 @@ describe("ETC ticket management page", () => {
     expect(within(page).queryByRole("region", { name: "已导入ETC发票" })).not.toBeInTheDocument();
   });
 
-  test("blocks physical task deletion after an OA draft link exists", async () => {
+  test("allows physical task deletion after an unsubmitted OA draft link exists", async () => {
+    const user = userEvent.setup();
     installMockApiFetch();
     const taskWithDraft = {
       taskId: "etc-recon-imported-draft-linked-001",
@@ -469,19 +470,26 @@ describe("ETC ticket management page", () => {
       parseIssues: [],
     };
     vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [taskWithDraft] } as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(taskWithDraft as never);
     const deleteTask = vi.spyOn(etcApi, "deleteEtcReconciliationTask").mockResolvedValue(undefined as never);
 
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    const blockedDeleteButton = await within(page).findByRole("button", { name: "存在OA提交链路，不能删除" });
-    expect(blockedDeleteButton).toBeDisabled();
+    const deleteButton = await within(page).findByRole("button", { name: "删除任务 2026-03 ETC 已建草稿" });
+    expect(deleteButton).toBeEnabled();
+    await user.click(deleteButton);
 
-    expect(screen.queryByRole("dialog", { name: "删除任务" })).not.toBeInTheDocument();
-    expect(deleteTask).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole("dialog", { name: "删除任务" });
+    await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => {
+      expect(deleteTask).toHaveBeenCalledWith("etc-recon-imported-draft-linked-001", 12);
+    });
   });
 
-  test("blocks physical task deletion when only the external ETC OA batch link exists", async () => {
+  test("allows physical task deletion when only the external ETC OA batch link exists", async () => {
+    const user = userEvent.setup();
     installMockApiFetch();
     const taskWithExternalOaBatch = {
       taskId: "etc-recon-imported-external-link-001",
@@ -518,16 +526,22 @@ describe("ETC ticket management page", () => {
       parseIssues: [],
     };
     vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [taskWithExternalOaBatch] } as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(taskWithExternalOaBatch as never);
     const deleteTask = vi.spyOn(etcApi, "deleteEtcReconciliationTask").mockResolvedValue(undefined as never);
 
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    const blockedDeleteButton = await within(page).findByRole("button", { name: "存在OA提交链路，不能删除" });
-    expect(blockedDeleteButton).toBeDisabled();
+    const deleteButton = await within(page).findByRole("button", { name: "删除任务 2026-03 ETC 外部批次链路" });
+    expect(deleteButton).toBeEnabled();
+    await user.click(deleteButton);
 
-    expect(screen.queryByRole("dialog", { name: "删除任务" })).not.toBeInTheDocument();
-    expect(deleteTask).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole("dialog", { name: "删除任务" });
+    await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => {
+      expect(deleteTask).toHaveBeenCalledWith("etc-recon-imported-external-link-001", 12);
+    });
   });
 
   test("allows reconciliation task deletion when its linked business batch only has an unsubmitted OA draft", async () => {

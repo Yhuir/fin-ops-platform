@@ -940,14 +940,29 @@ class EtcReconciliationServiceTests(unittest.TestCase):
             actor="alice",
         )
 
-        with self.assertRaisesRegex(ValueError, "reconciliation_task_has_submission_link"):
-            recovered_service.delete_task(
-                task_id=task_id,
-                expected_version=linked.version,
-                actor="alice",
-                import_cleanup_confirmed=True,
-            )
+        deleted = recovered_service.delete_task(
+            task_id=task_id,
+            expected_version=linked.version,
+            actor="alice",
+            import_cleanup_confirmed=True,
+        )
+        self.assertEqual(deleted, {"deleted": True, "taskId": task_id, "kind": "reconciliation_task"})
 
+        recovered_service = EtcReconciliationTaskService.from_snapshot(service.snapshot(), data_dir=Path(self.temp_dir.name))
+        recovered_ready = recovered_service.get_task(task_id)
+        imported = recovered_service.mark_imported(
+            task_id=task_id,
+            task_version=recovered_ready.version,
+            confirmed_item_set_hash=recovered_ready.confirmed_item_set_hash or "",
+            import_batch_id="import-batch-1",
+            actor="alice",
+        )
+        recovered_service.record_oa_draft_created(
+            task_id=task_id,
+            oa_draft_batch_id="oa-draft-1",
+            etc_batch_id="etc-submission-1",
+            actor="alice",
+        )
         recovered_service.record_oa_submitted_confirmed(task_id=task_id, oa_draft_batch_id="oa-draft-1", actor="alice")
         closed = recovered_service.get_task(task_id)
         with self.assertRaisesRegex(ValueError, "reconciliation_task_has_submission_link"):

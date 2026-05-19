@@ -2157,6 +2157,40 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(invoices["total"], 0)
         self.assertEqual(app._import_service.list_invoices(), [])
 
+    def test_delete_imported_reconciliation_task_cleans_unsubmitted_external_oa_link(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task_id, _preview_response, preview_payload = self._preview_task_zip(app, ["ETC001"])
+            confirm_response = app.handle_request(
+                "POST",
+                "/api/etc/import/confirm",
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+            )
+            self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
+            imported_task = app._etc_reconciliation_task_service.get_task(task_id)
+            linked_task = app._etc_reconciliation_task_service.record_oa_draft_created(
+                task_id=task_id,
+                oa_draft_batch_id="missing-local-draft-batch-001",
+                etc_batch_id="ETC-EXTERNAL-LINK-001",
+                actor="test",
+            )
+
+            response = app.handle_request(
+                "DELETE",
+                f"/api/etc/reconciliation-tasks/{task_id}",
+                body=json.dumps({"expectedVersion": linked_task.version}),
+            )
+            payload = json.loads(response.body)
+            invoices = json.loads(app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20").body)
+            missing = app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}")
+
+        self.assertEqual(imported_task.status.value, "imported")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload, {"deleted": True, "taskId": task_id, "kind": "reconciliation_task"})
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(invoices["total"], 0)
+        self.assertEqual(app._import_service.list_invoices(), [])
+
     def test_delete_etc_batch_route_deletes_unsubmitted_and_rejects_submitted(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

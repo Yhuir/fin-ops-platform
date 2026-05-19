@@ -948,11 +948,7 @@ export default function EtcTicketManagementPage() {
     if (linkedBusinessBatch) {
       return Boolean(task.submittedConfirmedAt?.trim() || businessBatchDeleteBlockReason(linkedBusinessBatch));
     }
-    return Boolean(
-      task.oaDraftBatchId?.trim()
-      || task.etcBatchId?.trim()
-      || task.submittedConfirmedAt?.trim()
-    );
+    return Boolean(task.submittedConfirmedAt?.trim());
   }
   const canRemoveImportedInvoicesFromTask = (task: EtcReconciliationTask) =>
     task.status === "imported" && Boolean(task.importBatchId?.trim()) && !task.submittedConfirmedAt?.trim();
@@ -965,9 +961,6 @@ export default function EtcTicketManagementPage() {
     const linkedBusinessBatchReason = taskLinkedBusinessBatchDeleteBlockReason(task);
     if (linkedBusinessBatchReason) {
       return linkedBusinessBatchReason;
-    }
-    if (task.oaDraftBatchId?.trim() || task.etcBatchId?.trim()) {
-      return "存在OA提交链路，不能删除";
     }
     if (task.status === "importing") {
       return "导入中，不能删除";
