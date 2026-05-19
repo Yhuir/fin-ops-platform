@@ -345,6 +345,55 @@ describe("ETC ticket management page", () => {
     expect(deleteTask).not.toHaveBeenCalled();
   });
 
+  test("blocks physical task deletion when only the external ETC OA batch link exists", async () => {
+    installMockApiFetch();
+    const taskWithExternalOaBatch = {
+      taskId: "etc-recon-imported-external-link-001",
+      status: "imported",
+      version: 12,
+      title: "2026-03 ETC 外部批次链路",
+      periodStart: "2026-03-01",
+      periodEnd: "2026-03-31",
+      statementPeriodStart: "2026-03-01",
+      statementPeriodEnd: "2026-03-31",
+      approvedDelta: "0.00",
+      approvedDeltaNote: "",
+      cardLast4: "7788",
+      oaTotalAmount: "30.00",
+      etcInvoiceAmount: "30.00",
+      supplementAmount: "0.00",
+      etcInvoiceCount: 1,
+      supplementCount: 0,
+      canConfirm: false,
+      vehiclePlates: ["云ADA0381"],
+      confirmedItemSetHash: "sha256:selected",
+      importBatchId: "import-session-external-link-001",
+      etcBatchId: "ETC-2026-EXTERNAL-LINK",
+      hasImportedInvoices: true,
+      importedInvoiceCount: 1,
+      importedInvoiceAmount: "30.00",
+      oaDraftBatchId: "",
+      oaDraftStatus: "",
+      submittedConfirmedAt: "",
+      creditCardItems: [],
+      ticketRootItems: [],
+      supplementEvidences: [],
+      sourceFiles: [],
+      parseIssues: [],
+    };
+    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [taskWithExternalOaBatch] } as never);
+    const deleteTask = vi.spyOn(etcApi, "deleteEtcReconciliationTask").mockResolvedValue(undefined as never);
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const blockedDeleteButton = await within(page).findByRole("button", { name: "存在OA批次链路，请先撤销草稿" });
+    expect(blockedDeleteButton).toBeDisabled();
+
+    expect(screen.queryByRole("dialog", { name: "删除任务" })).not.toBeInTheDocument();
+    expect(deleteTask).not.toHaveBeenCalled();
+  });
+
   test("shows the reconciliation workspace with upload blocks, statuses, supplements, and parse issues", async () => {
     installMockApiFetch();
     renderAppAt("/etc-tickets");
@@ -1366,8 +1415,8 @@ describe("ETC ticket management page", () => {
     const page = await screen.findByTestId("etc-ticket-management-page");
     expect(await within(page).findByRole("heading", { name: "已导入发票" })).toBeInTheDocument();
     const importedInvoiceSection = within(page).getByRole("region", { name: "已导入ETC发票" });
-    expect(within(importedInvoiceSection).getByText("1 张")).toBeInTheDocument();
-    const removeButton = within(importedInvoiceSection).getByRole("button", { name: "移除发票" });
+    expect(await within(importedInvoiceSection).findByText("1 张")).toBeInTheDocument();
+    const removeButton = await within(importedInvoiceSection).findByRole("button", { name: "移除发票" });
     expect(removeButton).toBeEnabled();
     expect(within(importedInvoiceSection).getByRole("table", { name: "已导入ETC发票明细" })).toBeInTheDocument();
     expect(within(importedInvoiceSection).getByText("ETC-IMPORTED-001")).toBeInTheDocument();

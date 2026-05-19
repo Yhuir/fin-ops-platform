@@ -802,7 +802,7 @@ export default function EtcTicketManagementPage() {
     && selectedTaskImportBatchId
     && !selectedTaskBusinessBatch
     && importedInvoiceCount > 0
-    && !taskHasOaSubmissionLink(selectedTask),
+    && !taskHasOaDraftOrSubmittedLink(selectedTask),
   );
   const showTaskImportedInvoices = Boolean(selectedTask && selectedTaskImportBatchId && !selectedTaskBusinessBatch);
 
@@ -892,17 +892,25 @@ export default function EtcTicketManagementPage() {
   }, [selectedTaskId]);
 
   const invoiceRows = batchDetail?.invoiceItems ?? [];
-  function taskHasOaSubmissionLink(task: EtcReconciliationTask) {
+  function taskHasOaDraftOrSubmittedLink(task: EtcReconciliationTask) {
     return Boolean(task.oaDraftBatchId?.trim() || task.submittedConfirmedAt?.trim());
   }
+  function taskHasDeleteBlockingSubmissionLink(task: EtcReconciliationTask) {
+    return Boolean(task.oaDraftBatchId?.trim() || task.etcBatchId?.trim() || task.submittedConfirmedAt?.trim());
+  }
+  const canRemoveImportedInvoicesFromTask = (task: EtcReconciliationTask) =>
+    task.status === "imported" && Boolean(task.importBatchId?.trim()) && !task.submittedConfirmedAt?.trim();
   const canDeleteTask = (task: EtcReconciliationTask) =>
-    ["draft", "reviewing", "ready_for_import", "imported"].includes(task.status) && !taskHasOaSubmissionLink(task);
+    ["draft", "reviewing", "ready_for_import", "imported"].includes(task.status) && !taskHasDeleteBlockingSubmissionLink(task);
   const deleteTaskDisabledReason = (task: EtcReconciliationTask) => {
     if (task.submittedConfirmedAt?.trim()) {
       return "OA已提交，不能删除";
     }
     if (task.oaDraftBatchId?.trim()) {
       return "OA草稿已创建，请先撤销草稿";
+    }
+    if (task.etcBatchId?.trim()) {
+      return "存在OA批次链路，请先撤销草稿";
     }
     if (task.status === "importing") {
       return "导入中，不能删除";
@@ -1381,7 +1389,7 @@ export default function EtcTicketManagementPage() {
     try {
       const latestTask = await fetchEtcReconciliationTask(selectedTask.taskId);
       mergeReconciliationTask(latestTask);
-      if (!canDeleteTask(latestTask) || latestTask.status !== "imported") {
+      if (!canRemoveImportedInvoicesFromTask(latestTask)) {
         throw new Error(deleteTaskDisabledReason(latestTask));
       }
       const task = await deleteEtcReconciliationTaskImportedInvoices(latestTask.taskId, latestTask.version);
