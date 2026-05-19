@@ -16,6 +16,7 @@ from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.etc_service import (
     EtcBusinessBatchActiveExistsError,
     EtcBusinessBatchInvalidTransitionError,
+    EtcBusinessBatchNotFoundError,
     EtcBusinessBatchStatus,
     EtcDraftRequestError,
     EtcOAHttpClientSettings,
@@ -414,6 +415,27 @@ class EtcServiceTests(unittest.TestCase):
 
             with self.assertRaises(EtcBusinessBatchInvalidTransitionError):
                 service.delete_business_batch(batch.business_batch_id, expected_version=submitted.version)
+
+    def test_business_batch_delete_is_idempotent_and_hides_deleted_batch(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir), oa_client=FakeEtcOAClient())
+            batch = service.create_business_batch(task_id="ETC-TASK-001")
+            first = service.delete_business_batch(
+                batch.business_batch_id,
+                expected_version=batch.version,
+                reason="user_deleted_unsubmitted_batch",
+            )
+            second = service.delete_business_batch(
+                batch.business_batch_id,
+                expected_version=batch.version,
+                reason="user_deleted_unsubmitted_batch_retry",
+            )
+
+            self.assertEqual(first, {"deleted": True, "businessBatchId": batch.business_batch_id, "kind": "business_batch"})
+            self.assertEqual(second, {"deleted": True, "businessBatchId": batch.business_batch_id, "kind": "business_batch"})
+            self.assertEqual(service.list_business_batches(), [])
+            with self.assertRaises(EtcBusinessBatchNotFoundError):
+                service.get_business_batch(batch.business_batch_id)
 
     def test_business_batch_oa_detection_marks_submitted_and_updates_invoices(self) -> None:
         with TemporaryDirectory() as temp_dir:

@@ -350,6 +350,14 @@ function taskCountText(task: Pick<EtcReconciliationTask, "etcInvoiceCount" | "su
   return `ETC票 ${task.etcInvoiceCount} + 补充凭证 ${task.supplementCount}`;
 }
 
+function isBusinessBatchSource(batch: EtcBatchSummary) {
+  return batch.sourceType === "business_batch" || batch.sourceType === "etc_business_batch";
+}
+
+function isEtcBusinessBatchNotFoundError(error: unknown) {
+  return error instanceof Error && /ETC business batch not found:/i.test(error.message);
+}
+
 type UploadBlockProps = {
   label: string;
   accept: string;
@@ -448,8 +456,12 @@ type ReconciliationSelectionSummary = {
   supplementCount: number;
 };
 
+type BatchDeletePlan =
+  | { kind: "businessBatch"; batchId: string; expectedVersion?: number }
+  | { kind: "legacyBatch"; batchId: string };
+
 type DeleteTarget =
-  | { kind: "batch"; item: EtcBatchSummary }
+  | { kind: "batch"; item: EtcBatchSummary; plan: BatchDeletePlan }
   | { kind: "task"; item: EtcReconciliationTask }
   | { kind: "sourceFile"; task: EtcReconciliationTask; item: EtcSourceFile };
 
@@ -962,17 +974,33 @@ export default function EtcTicketManagementPage() {
     }
     return "将删除该任务、上传文件和核对结果。已进入 OA 的数据不能删除。";
   };
+  const businessBatchForBatchSummary = (batch: EtcBatchSummary) =>
+    businessBatches.find((item) => item.businessBatchId === batch.id) ?? null;
+  const batchDeletePlan = (batch: EtcBatchSummary): BatchDeletePlan => {
+    const businessBatch = businessBatchForBatchSummary(batch);
+    if (businessBatch || isBusinessBatchSource(batch)) {
+      return {
+        kind: "businessBatch",
+        batchId: businessBatch?.businessBatchId || batch.id,
+        ...(businessBatch ? { expectedVersion: businessBatch.version } : {}),
+      };
+    }
+    return { kind: "legacyBatch", batchId: batch.id };
+  };
   const canDeleteBatch = (batch: EtcBatchSummary) => {
-    const businessBatch = businessBatches.find((item) => item.businessBatchId === batch.id);
-    if (!businessBatch) {
+    const businessBatch = businessBatchForBatchSummary(batch);
+    if (businessBatch) {
+      return canDeleteBusinessBatch(businessBatch);
+    }
+    if (isBusinessBatchSource(batch)) {
       return batch.status !== "submitted";
     }
-    return canDeleteBusinessBatch(businessBatch);
+    return batch.status !== "submitted";
   };
   const deleteBusinessBatchDisabledReason = (batch: EtcBusinessBatchSummary) =>
     businessBatchDeleteBlockReason(batch) || "当前状态不能删除";
   const deleteBatchDisabledReason = (batch: EtcBatchSummary) => {
-    const businessBatch = businessBatches.find((item) => item.businessBatchId === batch.id);
+    const businessBatch = businessBatchForBatchSummary(batch);
     if (businessBatch) {
       return deleteBusinessBatchDisabledReason(businessBatch);
     }
@@ -1472,7 +1500,7 @@ export default function EtcTicketManagementPage() {
       return;
     }
     setActionError(null);
-    setDeleteTarget({ kind: "batch", item: batch });
+    setDeleteTarget({ kind: "batch", item: batch, plan: batchDeletePlan(batch) });
   };
 
   const openDeleteSourceFileDialog = (sourceFile: EtcSourceFile, event: MouseEvent<HTMLButtonElement>) => {
@@ -1500,6 +1528,43 @@ export default function EtcTicketManagementPage() {
       throw new Error(deleteTaskDisabledReason(latestTask));
     }
     return latestTask;
+  };
+
+  const removeDeletedBatchFromState = (batchId: string) => {
+    setBusinessBatches((current) => current.filter((batch) => batch.businessBatchId !== batchId));
+    setBatches((current) => current.filter((batch) =>
+      batch.id !== batchId
+      && batch.etcBatchId !== batchId
+      && batch.externalBatchId !== batchId
+    ));
+    setSelectedBatchId((current) => (current === batchId ? "" : current));
+    setBatchDetail((current) => (current?.id === batchId ? null : current));
+    setBusinessBatchDetail((current) => (current?.businessBatchId === batchId ? null : current));
+  };
+
+  const deleteBusinessBatchByPlan = async (plan: Extract<BatchDeletePlan, { kind: "businessBatch" }>) => {
+    let payload: { expectedVersion?: number; reason: string } = {
+      ...(plan.expectedVersion !== undefined ? { expectedVersion: plan.expectedVersion } : {}),
+      reason: "用户在 ETC 页面删除未提交业务批次。",
+    };
+    try {
+      const latestBusinessBatch = await fetchEtcBusinessBatchDetail(plan.batchId);
+      mergeBusinessBatch(latestBusinessBatch);
+      if (!canDeleteBusinessBatch(latestBusinessBatch)) {
+        throw new Error(deleteBusinessBatchDisabledReason(latestBusinessBatch));
+      }
+      payload = {
+        expectedVersion: latestBusinessBatch.version,
+        reason: payload.reason,
+      };
+    } catch (caught) {
+      if (!isEtcBusinessBatchNotFoundError(caught)) {
+        throw caught;
+      }
+      payload = { reason: payload.reason };
+    }
+    await deleteEtcBusinessBatch(plan.batchId, payload);
+    removeDeletedBatchFromState(plan.batchId);
   };
 
   const handleDeleteConfirmed = async () => {
@@ -1547,25 +1612,13 @@ export default function EtcTicketManagementPage() {
         );
         mergeReconciliationTask(task);
       } else {
-        const batchId = deleteTarget.item.id;
-        const businessBatch = businessBatches.find((item) => item.businessBatchId === batchId);
-        if (businessBatch) {
-          const latestBusinessBatch = await fetchEtcBusinessBatchDetail(batchId);
-          mergeBusinessBatch(latestBusinessBatch);
-          if (!canDeleteBusinessBatch(latestBusinessBatch)) {
-            throw new Error(deleteBusinessBatchDisabledReason(latestBusinessBatch));
-          }
-          await deleteEtcBusinessBatch(batchId, {
-            expectedVersion: latestBusinessBatch.version,
-            reason: "用户在 ETC 页面删除未提交业务批次。",
-          });
+        const { plan } = deleteTarget;
+        const batchId = plan.batchId;
+        if (plan.kind === "businessBatch") {
+          await deleteBusinessBatchByPlan(plan);
         } else {
           await deleteEtcBatch(batchId);
-        }
-        setSelectedBatchId((current) => (current === batchId ? "" : current));
-        if (selectedBatchId === batchId) {
-          setBatchDetail(null);
-          setBusinessBatchDetail(null);
+          removeDeletedBatchFromState(batchId);
         }
         await loadBatches();
       }

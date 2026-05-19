@@ -1126,8 +1126,16 @@ class EtcService:
         expected_version: int | None = None,
         reason: str | None = None,
     ) -> dict[str, object]:
+        normalized_id = str(business_batch_id or "").strip()
         with self._business_batch_lock:
-            batch = self._get_business_batch_mutable(business_batch_id)
+            try:
+                batch = self._get_business_batch_mutable(normalized_id)
+            except EtcBusinessBatchNotFoundError:
+                if normalized_id.startswith("etc_business_batch_"):
+                    return {"deleted": True, "businessBatchId": normalized_id, "kind": "business_batch"}
+                raise
+            if batch.status == EtcBusinessBatchStatus.DELETED.value:
+                return {"deleted": True, "businessBatchId": normalized_id, "kind": "business_batch"}
             self._assert_business_batch_version(batch, expected_version)
             if batch.status in {
                 EtcBusinessBatchStatus.OA_SUBMITTED.value,
@@ -1167,9 +1175,8 @@ class EtcService:
                 after_status=EtcBusinessBatchStatus.DELETED.value,
                 reason=str(reason or "").strip() or None,
             )
-            self._business_batches.pop(batch.business_batch_id, None)
             self._persist()
-            return {"deleted": True, "businessBatchId": business_batch_id, "kind": "business_batch"}
+            return {"deleted": True, "businessBatchId": normalized_id, "kind": "business_batch"}
 
     def business_batch_payload(self, batch_or_id: EtcBusinessBatch | str) -> dict[str, object]:
         batch = self._get_business_batch_mutable(batch_or_id) if isinstance(batch_or_id, str) else batch_or_id
