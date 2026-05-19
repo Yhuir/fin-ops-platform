@@ -86,6 +86,19 @@ class WorkbenchPairRelationService:
 
         timestamp = created_at or self._timestamp()
         existing_relation = self._pair_relations.get(resolved_case_id)
+        if isinstance(existing_relation, dict) and existing_relation.get("status") == ACTIVE_PAIR_RELATION_STATUS:
+            existing_row_ids = {
+                str(row_id).strip()
+                for row_id in list(existing_relation.get("row_ids") or [])
+                if str(row_id).strip()
+            }
+            requested_row_ids = {
+                str(row_id).strip()
+                for row_id in list(row_ids or [])
+                if str(row_id).strip()
+            }
+            if existing_row_ids and requested_row_ids and existing_row_ids.isdisjoint(requested_row_ids):
+                raise ValueError(f"pair relation case_id already active for different rows: {resolved_case_id}")
         relation = self._normalize_relation(
             {
                 **(deepcopy(existing_relation) if isinstance(existing_relation, dict) else {}),

@@ -5,6 +5,8 @@ import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application, build_application
+from fin_ops_platform.services.batch_accounting_service import BatchAccountingService
+from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
 class BatchAccountingApiTests(unittest.TestCase):
@@ -270,6 +272,7 @@ class BatchAccountingApiTests(unittest.TestCase):
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual(payload["relation_id"], "CASE-BATCH-txn_imported_202601_batch_001")
         relation = app._workbench_pair_relation_service.get_active_relation_by_case_id(payload["relation_id"])
         assert relation is not None
         self.assertEqual(relation["relation_mode"], "manual_confirmed")
@@ -297,6 +300,222 @@ class BatchAccountingApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(payload["affected_months"], ["2026-01", "all"])
+
+    def test_submit_uses_bank_row_scoped_relation_id_without_consuming_auto_override_ids(self) -> None:
+        app, _payload_patcher = self._app_with_grouped_payload()
+
+        response = app.handle_request(
+            "POST",
+            "/api/batch-accounting/submit",
+            json.dumps(
+                {
+                    "year": "2026",
+                    "bank_row_id": "txn_imported_202601_batch_001",
+                    "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
+                    "actor": "finance-user",
+                }
+            ),
+        )
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual(payload["relation_id"], "CASE-BATCH-txn_imported_202601_batch_001")
+        self.assertEqual(app._workbench_override_service._next_case_id(), "CASE-AUTO-0001")
+
+    def test_repair_legacy_case_id_collision_restores_lost_batch_relation_from_history(self) -> None:
+        pair_service = WorkbenchPairRelationService()
+        lost_relation = {
+            "case_id": "CASE-AUTO-0002",
+            "row_ids": ["txn_imported_1263", "oa-exp-1981", "oa-exp-1984"],
+            "row_types": ["bank", "oa", "oa"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-01",
+            "created_by": "local_finops_admin",
+            "created_at": "2026-05-19T02:58:05+00:00",
+            "updated_at": "2026-05-19T02:58:05+00:00",
+            "amount_check": {"status": "matched", "bank_amount": "429.31", "oa_amount": "429.31"},
+            "special_metadata": {
+                "source": "batch_accounting",
+                "bank_row_id": "txn_imported_1263",
+                "oa_row_ids": ["oa-exp-1981", "oa-exp-1984"],
+                "year": "2026",
+            },
+        }
+        later_relation = {
+            **lost_relation,
+            "row_ids": ["txn_imported_1234", "oa-exp-1962"],
+            "row_types": ["bank", "oa"],
+            "amount_check": {"status": "matched", "bank_amount": "1872.93", "oa_amount": "1872.93"},
+            "special_metadata": {
+                "source": "batch_accounting",
+                "bank_row_id": "txn_imported_1234",
+                "oa_row_ids": ["oa-exp-1962"],
+                "year": "2026",
+            },
+        }
+        pair_service.record_history(
+            operation_type="confirm_link",
+            before_relations=[],
+            after_relations=[lost_relation],
+            affected_row_ids=list(lost_relation["row_ids"]),
+            created_by="local_finops_admin",
+            created_at="2026-05-19T02:58:05+00:00",
+        )
+        pair_service.record_history(
+            operation_type="confirm_link",
+            before_relations=[],
+            after_relations=[later_relation],
+            affected_row_ids=list(later_relation["row_ids"]),
+            created_by="local_finops_admin",
+            created_at="2026-05-19T03:43:10+00:00",
+        )
+        pair_service.create_active_relation(
+            case_id="CASE-AUTO-0002",
+            row_ids=["txn_imported_1234", "oa-exp-1962"],
+            row_types=["bank", "oa"],
+            relation_mode="manual_confirmed",
+            created_by="local_finops_admin",
+            special_metadata=later_relation["special_metadata"],
+            amount_check=later_relation["amount_check"],
+        )
+        service = BatchAccountingService(
+            grouped_workbench_loader=lambda _month: {},
+            pair_relation_service=pair_service,
+        )
+
+        result = service.repair_legacy_case_id_collisions()
+
+        self.assertTrue(result["changed"])
+        self.assertEqual(result["changed_case_ids"], ["CASE-BATCH-txn_imported_1263"])
+        repaired = pair_service.get_active_relation_by_row_id("txn_imported_1263")
+        assert repaired is not None
+        self.assertEqual(repaired["case_id"], "CASE-BATCH-txn_imported_1263")
+        self.assertEqual(repaired["special_metadata"]["legacy_case_id"], "CASE-AUTO-0002")
+        self.assertEqual(repaired["special_metadata"]["repair_source"], "batch_accounting_case_id_collision")
+        still_active = pair_service.get_active_relation_by_row_id("txn_imported_1234")
+        assert still_active is not None
+        self.assertEqual(still_active["case_id"], "CASE-AUTO-0002")
+        self.assertEqual(pair_service.list_history()[-1]["operation_type"], "repair_batch_accounting_relation_id_collision")
+
+    def test_repair_legacy_case_id_collision_does_not_restore_withdrawn_batch_relation(self) -> None:
+        pair_service = WorkbenchPairRelationService()
+        withdrawn_relation = {
+            "case_id": "CASE-AUTO-0002",
+            "row_ids": ["txn_imported_1263", "oa-exp-1981"],
+            "row_types": ["bank", "oa"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-01",
+            "created_by": "local_finops_admin",
+            "special_metadata": {
+                "source": "batch_accounting",
+                "bank_row_id": "txn_imported_1263",
+                "oa_row_ids": ["oa-exp-1981"],
+            },
+        }
+        pair_service.record_history(
+            operation_type="confirm_link",
+            before_relations=[],
+            after_relations=[withdrawn_relation],
+            affected_row_ids=list(withdrawn_relation["row_ids"]),
+            created_by="local_finops_admin",
+        )
+        pair_service.record_history(
+            operation_type="withdraw_link",
+            before_relations=[withdrawn_relation],
+            after_relations=[],
+            affected_row_ids=list(withdrawn_relation["row_ids"]),
+            created_by="local_finops_admin",
+        )
+        service = BatchAccountingService(
+            grouped_workbench_loader=lambda _month: {},
+            pair_relation_service=pair_service,
+        )
+
+        result = service.repair_legacy_case_id_collisions()
+
+        self.assertFalse(result["changed"])
+        self.assertIsNone(pair_service.get_active_relation_by_row_id("txn_imported_1263"))
+
+    def test_repair_legacy_case_id_collision_does_not_override_current_non_batch_relation(self) -> None:
+        pair_service = WorkbenchPairRelationService()
+        lost_relation = {
+            "case_id": "CASE-AUTO-0002",
+            "row_ids": ["txn_imported_1263", "oa-exp-1981"],
+            "row_types": ["bank", "oa"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-01",
+            "created_by": "local_finops_admin",
+            "special_metadata": {
+                "source": "batch_accounting",
+                "bank_row_id": "txn_imported_1263",
+                "oa_row_ids": ["oa-exp-1981"],
+            },
+        }
+        pair_service.record_history(
+            operation_type="confirm_link",
+            before_relations=[],
+            after_relations=[lost_relation],
+            affected_row_ids=list(lost_relation["row_ids"]),
+            created_by="local_finops_admin",
+        )
+        pair_service.create_active_relation(
+            case_id="CASE-MANUAL-CURRENT",
+            row_ids=["txn_imported_1263", "oa-exp-current"],
+            row_types=["bank", "oa"],
+            relation_mode="manual_confirmed",
+            created_by="finance-user",
+        )
+        service = BatchAccountingService(
+            grouped_workbench_loader=lambda _month: {},
+            pair_relation_service=pair_service,
+        )
+
+        result = service.repair_legacy_case_id_collisions()
+
+        self.assertFalse(result["changed"])
+        active = pair_service.get_active_relation_by_row_id("txn_imported_1263")
+        assert active is not None
+        self.assertEqual(active["case_id"], "CASE-MANUAL-CURRENT")
+
+    def test_repair_legacy_case_id_collision_uses_actual_bank_row_when_metadata_is_stale(self) -> None:
+        pair_service = WorkbenchPairRelationService()
+        stale_metadata_relation = {
+            "case_id": "CASE-AUTO-0001",
+            "row_ids": ["txn_imported_1240", "oa-exp-1952"],
+            "row_types": ["bank", "oa"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-02",
+            "created_by": "local_finops_admin",
+            "special_metadata": {
+                "source": "batch_accounting",
+                "bank_row_id": "txn_imported_1453",
+                "oa_row_ids": ["oa-exp-1952"],
+            },
+        }
+        pair_service.record_history(
+            operation_type="confirm_link",
+            before_relations=[],
+            after_relations=[stale_metadata_relation],
+            affected_row_ids=list(stale_metadata_relation["row_ids"]),
+            created_by="local_finops_admin",
+        )
+        service = BatchAccountingService(
+            grouped_workbench_loader=lambda _month: {},
+            pair_relation_service=pair_service,
+        )
+
+        result = service.repair_legacy_case_id_collisions()
+
+        self.assertEqual(result["changed_case_ids"], ["CASE-BATCH-txn_imported_1240"])
+        self.assertIsNone(pair_service.get_active_relation_by_case_id("CASE-BATCH-txn_imported_1453"))
+        repaired = pair_service.get_active_relation_by_row_id("txn_imported_1240")
+        assert repaired is not None
+        self.assertEqual(repaired["special_metadata"]["bank_row_id"], "txn_imported_1240")
+        self.assertEqual(repaired["special_metadata"]["legacy_case_id"], "CASE-AUTO-0001")
 
     def test_submit_allows_cross_year_bank_and_oa_selection(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()

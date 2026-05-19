@@ -30,6 +30,33 @@ class WorkbenchPairRelationServiceTests(unittest.TestCase):
             },
         )
 
+    def test_create_active_relation_rejects_active_case_id_reuse_for_different_rows(self) -> None:
+        service = WorkbenchPairRelationService()
+        service.create_active_relation(
+            case_id="CASE-PAIR-001",
+            row_ids=["oa-001", "bk-001"],
+            row_types=["oa", "bank"],
+            relation_mode="manual_confirmed",
+            created_by="YNSYLP005",
+            month_scope="all",
+            created_at="2026-04-08T10:00:00+00:00",
+        )
+
+        with self.assertRaisesRegex(ValueError, "already active"):
+            service.create_active_relation(
+                case_id="CASE-PAIR-001",
+                row_ids=["oa-002", "bk-002"],
+                row_types=["oa", "bank"],
+                relation_mode="manual_confirmed",
+                created_by="YNSYLP005",
+                month_scope="all",
+                created_at="2026-04-08T11:00:00+00:00",
+            )
+
+        active_relation = service.get_active_relation_by_case_id("CASE-PAIR-001")
+        assert active_relation is not None
+        self.assertCountEqual(active_relation["row_ids"], ["oa-001", "bk-001"])
+
     def test_cancel_relation_marks_relation_cancelled_and_removes_active_lookup(self) -> None:
         service = WorkbenchPairRelationService.from_snapshot(
             {

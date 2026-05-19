@@ -3726,7 +3726,7 @@ class Application:
                 snapshot,
                 changed_scope_keys=changed_scope_keys,
             )
-        except Exception:
+        except Exception as exc:
             self._emit_workbench_persistence_warning(operation=operation, detail=str(exc))
 
     def _persist_cost_statistics_read_models_best_effort(
@@ -6117,7 +6117,6 @@ class Application:
         return BatchAccountingService(
             grouped_workbench_loader=lambda month: self._build_api_workbench_payload(month),
             pair_relation_service=self._workbench_pair_relation_service,
-            case_id_provider=self._workbench_override_service._next_case_id,
         )
 
     def _handle_api_batch_accounting(self, query: dict[str, list[str]]) -> Response:
@@ -6125,6 +6124,7 @@ class Application:
         bank_year = query.get("bank_year", [year])[0]
         oa_year = query.get("oa_year", [year])[0]
         bucket = query.get("bucket", ["unsubmitted"])[0] or "unsubmitted"
+        repair_result = self._repair_batch_accounting_relation_case_ids()
         try:
             payload = self._batch_accounting_service().build_payload(
                 year=year,
@@ -6134,7 +6134,48 @@ class Application:
             )
         except BatchAccountingError as exc:
             return self._batch_accounting_error_response(exc)
+        if repair_result.get("changed"):
+            payload["repair_result"] = repair_result
         return self._json_response(HTTPStatus.OK, payload)
+
+    def _repair_batch_accounting_relation_case_ids(self) -> dict[str, object]:
+        repair_result = self._batch_accounting_service().repair_legacy_case_id_collisions()
+        if not repair_result.get("changed"):
+            return repair_result
+        affected_row_ids = [
+            str(row_id)
+            for row_id in list(repair_result.get("affected_row_ids") or [])
+            if str(row_id).strip()
+        ]
+        affected_months = {
+            str(month)
+            for month in list(repair_result.get("affected_months") or [])
+            if str(month).strip()
+        }
+        changed_scope_keys = sorted(
+            {
+                *affected_months,
+                *self._scope_keys_for_row_ids(month="all", row_ids=affected_row_ids, month_scope="all"),
+            }
+        )
+        changed_case_ids = [
+            str(case_id)
+            for case_id in list(repair_result.get("changed_case_ids") or [])
+            if str(case_id).strip()
+        ]
+        self._invalidate_workbench_read_model_scopes(changed_scope_keys)
+        self._schedule_workbench_pair_relation_persist(
+            changed_case_ids=changed_case_ids,
+            action_name="repair_batch_accounting_relation_case_ids",
+        )
+        self._schedule_workbench_read_model_persist(
+            changed_scope_keys=changed_scope_keys,
+            action_name="repair_batch_accounting_relation_case_ids",
+        )
+        return {
+            **repair_result,
+            "affected_months": changed_scope_keys,
+        }
 
     def _handle_api_batch_accounting_submit(
         self,

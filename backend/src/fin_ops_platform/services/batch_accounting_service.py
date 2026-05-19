@@ -5,13 +5,13 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import re
 from typing import Any, Callable, Iterable
-from uuid import uuid4
 
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
 BATCH_ACCOUNTING_SOURCE = "batch_accounting"
 BATCH_ACCOUNTING_COUNTERPARTY_NAME = "批量账务集中处理"
+BATCH_ACCOUNTING_RELATION_REPAIR_ACTOR = "batch_accounting_relation_repair"
 
 
 class BatchAccountingError(ValueError):
@@ -38,11 +38,11 @@ class BatchAccountingService:
         *,
         grouped_workbench_loader: Callable[[str], dict[str, Any]],
         pair_relation_service: WorkbenchPairRelationService,
-        case_id_provider: Callable[[], str] | None = None,
+        case_id_provider: Callable[[str], str] | None = None,
     ) -> None:
         self._grouped_workbench_loader = grouped_workbench_loader
         self._pair_relation_service = pair_relation_service
-        self._case_id_provider = case_id_provider or (lambda: f"CASE-BATCH-{uuid4().hex[:16].upper()}")
+        self._case_id_provider = case_id_provider or self._default_case_id_for_bank_row
 
     def build_payload(
         self,
@@ -149,7 +149,7 @@ class BatchAccountingService:
             "amount_delta": "0.00",
         }
         relation, _history = self._pair_relation_service.replace_with_confirmed_relation(
-            case_id=self._case_id_provider(),
+            case_id=self._case_id_provider(normalized_bank_row_id),
             row_ids=row_ids,
             row_types=row_types,
             relation_mode="manual_confirmed",
@@ -185,6 +185,112 @@ class BatchAccountingService:
             "month_scope": str(relation.get("month_scope") or "all"),
             "amount_check": amount_check,
             "message": f"已关联批量账务流水与 {len(normalized_oa_row_ids)} 项 OA。",
+        }
+
+    def repair_legacy_case_id_collisions(
+        self,
+        *,
+        actor: str = BATCH_ACCOUNTING_RELATION_REPAIR_ACTOR,
+    ) -> dict[str, Any]:
+        latest_relations_by_bank_row_id: dict[str, dict[str, Any]] = {}
+        for history in self._pair_relation_service.list_history():
+            if not isinstance(history, dict):
+                continue
+            for relation in list(history.get("before_relations") or []):
+                bank_row_id = self._batch_relation_bank_row_id(relation)
+                if bank_row_id:
+                    latest_relations_by_bank_row_id.pop(bank_row_id, None)
+            for relation in list(history.get("after_relations") or []):
+                bank_row_id = self._batch_relation_bank_row_id(relation)
+                if bank_row_id:
+                    latest_relations_by_bank_row_id[bank_row_id] = deepcopy(relation)
+
+        if not latest_relations_by_bank_row_id:
+            return {"changed": False, "changed_case_ids": [], "affected_row_ids": [], "affected_months": []}
+
+        active_row_ids = {
+            str(row_id).strip()
+            for relation in self._pair_relation_service.list_active_relations()
+            for row_id in list(relation.get("row_ids") or [])
+            if str(row_id).strip()
+        }
+        repaired_case_ids: list[str] = []
+        affected_row_ids: list[str] = []
+        affected_months: list[str] = []
+        repaired_at = self._pair_relation_service._timestamp()
+        repair_note = "修复批量账务关系号复用导致的关联丢失"
+
+        for bank_row_id, relation in sorted(latest_relations_by_bank_row_id.items()):
+            if bank_row_id in active_row_ids:
+                continue
+            target_case_id = self._case_id_provider(bank_row_id)
+            existing_target_relation = self._pair_relation_service.get_active_relation_by_case_id(target_case_id)
+            if isinstance(existing_target_relation, dict):
+                continue
+            row_ids = self._dedupe(str(row_id) for row_id in list(relation.get("row_ids") or []))
+            if not row_ids:
+                continue
+            row_types = [
+                str(row_type).strip()
+                for row_type in list(relation.get("row_types") or [])
+                if str(row_type).strip()
+            ]
+            if len(row_types) != len(row_ids):
+                row_types = [self._row_type_for_row_id(row_id) for row_id in row_ids]
+            metadata = deepcopy(relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else {})
+            legacy_case_id = str(relation.get("case_id") or "").strip()
+            metadata.update(
+                {
+                    "source": BATCH_ACCOUNTING_SOURCE,
+                    "bank_row_id": bank_row_id,
+                    "legacy_case_id": legacy_case_id,
+                    "repair_source": "batch_accounting_case_id_collision",
+                    "repaired_at": repaired_at,
+                }
+            )
+            repaired_relation = self._pair_relation_service.create_active_relation(
+                case_id=target_case_id,
+                row_ids=row_ids,
+                row_types=row_types,
+                relation_mode=str(relation.get("relation_mode") or "manual_confirmed"),
+                created_by=actor,
+                month_scope=str(relation.get("month_scope") or "all"),
+                created_at=repaired_at,
+                note=repair_note,
+                amount_check=deepcopy(relation.get("amount_check") if isinstance(relation.get("amount_check"), dict) else {}),
+                special_metadata=metadata,
+                exception_case_id=str(relation.get("exception_case_id") or ""),
+                rule_version=str(relation.get("rule_version") or ""),
+                evidence=deepcopy(relation.get("evidence") if isinstance(relation.get("evidence"), dict) else {}),
+                oa_exemption=deepcopy(relation.get("oa_exemption") if isinstance(relation.get("oa_exemption"), dict) else None),
+                display_tags=[
+                    str(tag).strip()
+                    for tag in list(relation.get("display_tags") or [])
+                    if str(tag).strip()
+                ],
+            )
+            self._pair_relation_service.record_history(
+                operation_type="repair_batch_accounting_relation_id_collision",
+                before_relations=[],
+                after_relations=[repaired_relation],
+                affected_row_ids=row_ids,
+                created_by=actor,
+                note=repair_note,
+                amount_check=dict(repaired_relation.get("amount_check") or {}),
+                created_at=repaired_at,
+            )
+            repaired_case_ids.append(target_case_id)
+            affected_row_ids.extend(row_ids)
+            month_scope = str(repaired_relation.get("month_scope") or "").strip()
+            if month_scope:
+                affected_months.append(month_scope)
+
+        changed_case_ids = self._dedupe(repaired_case_ids)
+        return {
+            "changed": bool(changed_case_ids),
+            "changed_case_ids": changed_case_ids,
+            "affected_row_ids": self._dedupe(affected_row_ids),
+            "affected_months": self._dedupe(affected_months),
         }
 
     def withdraw(
@@ -535,6 +641,33 @@ class BatchAccountingService:
             seen.add(normalized)
             result.append(normalized)
         return result
+
+    @staticmethod
+    def _default_case_id_for_bank_row(bank_row_id: str) -> str:
+        safe_bank_row_id = re.sub(r"[^A-Za-z0-9_-]+", "-", str(bank_row_id or "").strip()).strip("-")
+        if not safe_bank_row_id:
+            raise BatchAccountingError("invalid_batch_accounting_bank_row", "银行流水 ID 不能为空。")
+        return f"CASE-BATCH-{safe_bank_row_id[:96]}"
+
+    @classmethod
+    def _batch_relation_bank_row_id(cls, relation: Any) -> str:
+        if not isinstance(relation, dict):
+            return ""
+        metadata = relation.get("special_metadata")
+        if not isinstance(metadata, dict) or metadata.get("source") != BATCH_ACCOUNTING_SOURCE:
+            return ""
+        relation_row_ids = [cls._clean_text(row_id) for row_id in list(relation.get("row_ids") or []) if cls._clean_text(row_id)]
+        relation_bank_row_ids = [
+            row_id
+            for row_id in relation_row_ids
+            if cls._row_type_for_row_id(row_id) == "bank"
+        ]
+        bank_row_id = cls._clean_text(metadata.get("bank_row_id"))
+        if bank_row_id and bank_row_id in relation_row_ids:
+            return bank_row_id
+        if len(relation_bank_row_ids) == 1:
+            return relation_bank_row_ids[0]
+        return ""
 
     @staticmethod
     def _clean_text(value: Any) -> str:
