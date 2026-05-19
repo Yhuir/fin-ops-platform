@@ -92,7 +92,7 @@ describe("ETC ticket management page", () => {
     expect(within(page).queryByTestId("etc-batch-row-etc-batch-unsubmitted-01")).not.toBeInTheDocument();
   });
 
-  test("blocks business batch deletion when the latest batch has an active OA draft link", async () => {
+  test("allows business batch deletion when the latest batch only has an unsubmitted OA draft link", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     const listedBusinessBatch = {
@@ -150,9 +150,11 @@ describe("ETC ticket management page", () => {
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
 
     await waitFor(() => {
-      expect(within(page).getByText("OA草稿已创建，请先撤销草稿")).toBeInTheDocument();
+      expect(deleteBusinessBatch).toHaveBeenCalledWith("etc-business-batch-stale-delete-001", {
+        expectedVersion: 8,
+        reason: "用户在 ETC 页面删除未提交业务批次。",
+      });
     });
-    expect(deleteBusinessBatch).not.toHaveBeenCalled();
   });
 
   test("treats an already-deleted business batch as a successful delete and refreshes stale rows", async () => {
@@ -472,7 +474,7 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    const blockedDeleteButton = await within(page).findByRole("button", { name: "OA草稿已创建，请先撤销草稿" });
+    const blockedDeleteButton = await within(page).findByRole("button", { name: "存在OA提交链路，不能删除" });
     expect(blockedDeleteButton).toBeDisabled();
 
     expect(screen.queryByRole("dialog", { name: "删除任务" })).not.toBeInTheDocument();
@@ -521,14 +523,15 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    const blockedDeleteButton = await within(page).findByRole("button", { name: "存在OA批次链路，请先撤销草稿" });
+    const blockedDeleteButton = await within(page).findByRole("button", { name: "存在OA提交链路，不能删除" });
     expect(blockedDeleteButton).toBeDisabled();
 
     expect(screen.queryByRole("dialog", { name: "删除任务" })).not.toBeInTheDocument();
     expect(deleteTask).not.toHaveBeenCalled();
   });
 
-  test("blocks reconciliation task deletion when its linked business batch has an active OA draft", async () => {
+  test("allows reconciliation task deletion when its linked business batch only has an unsubmitted OA draft", async () => {
+    const user = userEvent.setup();
     installMockApiFetch();
     const importedTask = {
       taskId: "etc-recon-imported-business-linked-001",
@@ -594,6 +597,7 @@ describe("ETC ticket management page", () => {
       updatedAt: "2026-05-19T09:00:00+08:00",
     };
     vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [importedTask] } as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(importedTask as never);
     vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
       counts: { active: 1, submitted: 0 },
       items: [linkedBusinessBatch],
@@ -608,13 +612,19 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    const blockedDeleteButton = await within(page).findByRole("button", { name: "OA草稿已创建，请先撤销草稿" });
-    expect(blockedDeleteButton).toBeDisabled();
-    expect(deleteTask).not.toHaveBeenCalled();
+    const deleteButton = await within(page).findByRole("button", { name: "删除任务 新建ETC对账批次" });
+    expect(deleteButton).toBeEnabled();
+    await user.click(deleteButton);
+
+    const dialog = await screen.findByRole("dialog", { name: "删除任务" });
+    await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => {
+      expect(deleteTask).toHaveBeenCalledWith("etc-recon-imported-business-linked-001", 13);
+    });
   });
 
-  test("lets users revoke an OA draft from a task-linked business batch", async () => {
-    const user = userEvent.setup();
+  test("does not expose OA draft revoke action for a task-linked business batch", async () => {
     installMockApiFetch();
     const importedTask = {
       taskId: "etc-recon-imported-business-linked-001",
@@ -679,16 +689,6 @@ describe("ETC ticket management page", () => {
       createdAt: "2026-05-19T09:00:00+08:00",
       updatedAt: "2026-05-19T09:00:00+08:00",
     };
-    const revokedBusinessBatch = {
-      ...linkedBusinessBatch,
-      status: "not_submitted",
-      version: 9,
-      submissionBatchId: "",
-      oaDraftId: "",
-      oaDraftUrl: "",
-      oaDetectionStatus: "revoked",
-      oaDetectionReason: "用户撤销草稿。",
-    };
     vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [importedTask] } as never);
     vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
       counts: { active: 1, submitted: 0 },
@@ -699,24 +699,15 @@ describe("ETC ticket management page", () => {
       ...linkedBusinessBatch,
       invoiceItems: [],
     } as never);
-    const revokeDraft = vi.spyOn(etcApi, "revokeEtcBusinessBatchOaDraft").mockResolvedValue({
-      ...revokedBusinessBatch,
-      invoiceItems: [],
-    } as never);
 
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     const workspace = await within(page).findByRole("region", { name: "ETC对账工作区" });
     const oaStatusPanel = await within(workspace).findByRole("region", { name: "OA草稿与检测状态" });
-    await user.click(within(oaStatusPanel).getByRole("button", { name: "撤销草稿" }));
-
-    await waitFor(() => {
-      expect(revokeDraft).toHaveBeenCalledWith("etc-business-linked-001", {
-        expectedVersion: 8,
-        reason: "用户在 ETC 页面撤销草稿并释放发票。",
-      });
-    });
+    expect(within(oaStatusPanel).getByRole("button", { name: "打开草稿" })).toBeEnabled();
+    expect(within(oaStatusPanel).getByRole("button", { name: "刷新检测" })).toBeEnabled();
+    expect(within(oaStatusPanel).queryByRole("button", { name: "撤销草稿" })).not.toBeInTheDocument();
   });
 
   test("shows the reconciliation workspace with upload blocks, statuses, supplements, and parse issues", async () => {
@@ -1775,13 +1766,7 @@ describe("ETC ticket management page", () => {
   test("creates OA draft from the selected imported reconciliation task batch", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
-    const openedWindow = {
-      closed: false,
-      close: vi.fn(),
-      location: { href: "about:blank" },
-      opener: {},
-    };
-    const openMock = vi.fn(() => openedWindow);
+    const openMock = vi.fn();
     vi.stubGlobal("open", openMock);
     vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({
       items: [
@@ -1954,9 +1939,8 @@ describe("ETC ticket management page", () => {
     expect(dialog).toHaveTextContent("批次：ETC-2026-OA-001");
     await user.click(within(dialog).getByRole("button", { name: "创建草稿" }));
 
-    expect(openMock).toHaveBeenCalledWith("about:blank", "_blank");
     await waitFor(() => expect(createDraft).toHaveBeenCalledWith("etc_business_batch_imported_submit_001", { expectedVersion: 11 }));
-    await waitFor(() => expect(openedWindow.location.href).toContain("https://oa.example.test/oa/#/normal/forms/form/2"));
+    expect(openMock).not.toHaveBeenCalled();
   });
 
   test("deletes an imported reconciliation task through confirmation", async () => {
@@ -2352,13 +2336,7 @@ describe("ETC ticket management page", () => {
 
   test("creates OA draft through the selected business batch and waits for OA detection", async () => {
     const user = userEvent.setup();
-    const openedWindow = {
-      closed: false,
-      close: vi.fn(),
-      location: { href: "about:blank" },
-      opener: {},
-    };
-    const openMock = vi.fn(() => openedWindow);
+    const openMock = vi.fn();
     vi.stubGlobal("open", openMock);
     installMockApiFetch();
     const businessBatch = {
@@ -2446,15 +2424,14 @@ describe("ETC ticket management page", () => {
     expect(dialog).toHaveTextContent("批次：ETC-2026-03-A");
     await user.click(within(dialog).getByRole("button", { name: "创建草稿" }));
 
-    expect(openMock).toHaveBeenCalledWith("about:blank", "_blank");
-    await waitFor(() => expect(openedWindow.location.href).toContain("https://oa.example.test/oa/#/normal/forms/form/2"));
     await waitFor(() => expect(createDraft).toHaveBeenCalledWith("etc_business_batch_0001", { expectedVersion: 7 }));
+    expect(openMock).not.toHaveBeenCalled();
 
     const resultDialog = await screen.findByRole("dialog", { name: "OA自动检测" });
     expect(resultDialog).toHaveTextContent("OA草稿已创建，等待提交确认。");
     expect(within(resultDialog).getByRole("button", { name: "打开草稿" })).toBeEnabled();
     expect(within(resultDialog).getByRole("button", { name: "刷新检测" })).toBeEnabled();
-    expect(within(resultDialog).getByRole("button", { name: "撤销草稿" })).toBeEnabled();
+    expect(within(resultDialog).queryByRole("button", { name: "撤销草稿" })).not.toBeInTheDocument();
     expect(within(resultDialog).queryByRole("button", { name: "确认已提交OA" })).not.toBeInTheDocument();
     expect(within(resultDialog).queryByRole("button", { name: "未提交OA" })).not.toBeInTheDocument();
   });

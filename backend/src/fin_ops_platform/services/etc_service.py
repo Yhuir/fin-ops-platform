@@ -1143,14 +1143,6 @@ class EtcService:
                 EtcBusinessBatchStatus.CLOSED.value,
             }:
                 raise EtcBusinessBatchInvalidTransitionError("submitted or closed ETC business batch cannot be deleted.")
-            if batch.submission_batch_id and batch.status not in {
-                EtcBusinessBatchStatus.NOT_SUBMITTED.value,
-                EtcBusinessBatchStatus.MANUALLY_MARKED_NOT_SUBMITTED.value,
-            }:
-                raise EtcBusinessBatchInvalidTransitionError(
-                    "ETC business batch has an active OA draft; revoke it before deleting.",
-                    code="oa_draft_already_exists",
-                )
             if batch.submission_batch_id and batch.submission_batch_id in self._batches:
                 self._delete_submission_batch(self._batches[batch.submission_batch_id])
             for invoice_id in list(batch.invoice_ids):

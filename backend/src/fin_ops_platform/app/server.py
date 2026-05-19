@@ -2081,15 +2081,16 @@ class Application:
         import_batch_id = str(getattr(task, "import_batch_id", "") or "").strip()
         if not import_batch_id:
             raise ValueError("reconciliation_task_import_batch_required")
-        if (
-            str(getattr(task, "oa_draft_batch_id", "") or "").strip()
-            or str(getattr(task, "etc_batch_id", "") or "").strip()
-            or getattr(task, "submitted_confirmed_at", None) is not None
-        ):
+        if getattr(task, "submitted_confirmed_at", None) is not None:
             raise ValueError("reconciliation_task_has_submission_link")
         business_delete_result = self._delete_reconciliation_task_business_batch_sources(task)
         if business_delete_result is not None:
             return business_delete_result
+        if (
+            str(getattr(task, "oa_draft_batch_id", "") or "").strip()
+            or str(getattr(task, "etc_batch_id", "") or "").strip()
+        ):
+            raise ValueError("reconciliation_task_has_submission_link")
         return self._delete_etc_import_batch_sources(import_batch_id)
 
     def _delete_reconciliation_task_business_batch_sources(self, task: object) -> tuple[dict[str, object], int, list[str]] | None:
@@ -2108,8 +2109,13 @@ class Application:
         )
         if business_batch is None:
             return None
-        if str(getattr(business_batch, "submission_batch_id", "") or "").strip():
-            raise ValueError("reconciliation_task_has_submission_link")
+        if str(getattr(business_batch, "submission_batch_id", "") or "").strip() or str(getattr(business_batch, "oa_draft_id", "") or "").strip():
+            business_batch = self._refresh_etc_business_batch_before_delete(
+                str(getattr(business_batch, "business_batch_id", "")),
+                expected_version=int(getattr(business_batch, "version", 0) or 0),
+            )
+            if str(getattr(business_batch, "status", "")) == EtcBusinessBatchStatus.OA_SUBMITTED.value:
+                raise ValueError("reconciliation_task_has_submission_link")
         import_batch_ids = [
             str(value).strip()
             for value in list(getattr(business_batch, "import_batch_ids", []) or [])
@@ -2125,10 +2131,34 @@ class Application:
             expected_version=int(getattr(business_batch, "version", 0) or 0),
             reason="reconciliation_task_import_removed",
         )
+        if str(getattr(task, "oa_draft_batch_id", "") or "").strip() or str(getattr(task, "etc_batch_id", "") or "").strip():
+            self._etc_reconciliation_task_service.record_oa_draft_deleted(
+                task_id=task_id,
+                oa_draft_batch_id=str(getattr(business_batch, "submission_batch_id", "") or ""),
+                etc_batch_id=str(getattr(business_batch, "external_etc_batch_id", "") or ""),
+                actor="system",
+            )
         for linked_import_batch_id in import_batch_ids:
             if self._etc_service.list_invoices_by_import_batch_id(linked_import_batch_id):
                 self._etc_service.delete_import_batch_sources(linked_import_batch_id)
         return delete_result, canonical_deleted, sorted(set(changed_months))
+
+    def _refresh_etc_business_batch_before_delete(self, business_batch_id: str, *, expected_version: int | None):
+        try:
+            return self._refresh_etc_business_batch_oa_detection(
+                business_batch_id,
+                expected_version=expected_version,
+            )
+        except EtcBusinessBatchVersionConflictError:
+            latest = self._etc_service.get_business_batch(business_batch_id)
+            if str(getattr(latest, "status", "")) == EtcBusinessBatchStatus.OA_SUBMITTED.value:
+                return latest
+            if str(getattr(latest, "submission_batch_id", "") or "").strip() or str(getattr(latest, "oa_draft_id", "") or "").strip():
+                return self._refresh_etc_business_batch_oa_detection(
+                    business_batch_id,
+                    expected_version=int(getattr(latest, "version", 0) or 0),
+                )
+            return latest
 
     def _delete_etc_import_batch_sources(self, import_batch_id: str) -> tuple[dict[str, object], int, list[str]]:
         import_batch = self._etc_import_batch_by_id(import_batch_id)
@@ -3374,11 +3404,68 @@ class Application:
             if error is not None:
                 return error
         try:
+            batch = self._etc_service.get_business_batch(business_batch_id)
+            expected_version = self._optional_int(payload.get("expectedVersion") or payload.get("expected_version"))
+            if str(getattr(batch, "submission_batch_id", "") or "").strip() or str(getattr(batch, "oa_draft_id", "") or "").strip():
+                batch = self._refresh_etc_business_batch_before_delete(
+                    business_batch_id,
+                    expected_version=expected_version,
+                )
+                if str(getattr(batch, "status", "")) == EtcBusinessBatchStatus.OA_SUBMITTED.value:
+                    changed_months = self._sync_etc_invoices_to_canonical_invoices(
+                        self._existing_etc_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or [])),
+                    )
+                    self._refresh_after_etc_invoice_sync(changed_months, reason="etc_business_delete_detected_submitted")
+                    return self._etc_business_response(
+                        HTTPStatus.CONFLICT,
+                        None,
+                        code="oa_already_submitted",
+                        message="OA 已进入进行中，不能删除批次。",
+                        details={"businessBatch": self._etc_service.business_batch_payload(batch)},
+                    )
+                expected_version = int(getattr(batch, "version", 0) or 0)
+            invoice_ids = [str(invoice_id) for invoice_id in list(getattr(batch, "invoice_ids", []) or [])]
+            import_batch_ids = [
+                str(import_batch_id).strip()
+                for import_batch_id in list(getattr(batch, "import_batch_ids", []) or [])
+                if str(import_batch_id).strip()
+            ]
+            task = None
+            if str(getattr(batch, "task_id", "") or "").strip():
+                try:
+                    task = self._etc_reconciliation_task_service.get_task(str(getattr(batch, "task_id")))
+                except KeyError:
+                    task = None
+            changed_months = self._etc_invoice_changed_months(self._existing_etc_invoices_by_ids(invoice_ids))
             result = self._etc_service.delete_business_batch(
                 business_batch_id,
-                expected_version=self._optional_int(payload.get("expectedVersion") or payload.get("expected_version")),
+                expected_version=expected_version,
                 reason=str(payload.get("reason") or "").strip() or None,
             )
+            canonical_deleted = 0
+            for import_batch_id in import_batch_ids:
+                canonical_deleted += self._import_service.remove_etc_invoices_by_import_batch_id(import_batch_id)
+            if task is not None and (str(getattr(task, "oa_draft_batch_id", "") or "").strip() or str(getattr(task, "etc_batch_id", "") or "").strip()):
+                task = self._etc_reconciliation_task_service.record_oa_draft_deleted(
+                    task_id=str(getattr(task, "task_id", "")),
+                    oa_draft_batch_id=str(getattr(batch, "submission_batch_id", "") or ""),
+                    etc_batch_id=str(getattr(batch, "external_etc_batch_id", "") or ""),
+                    actor="system",
+                )
+            for import_batch_id in import_batch_ids:
+                task = self._clear_reconciliation_task_import_after_batch_delete(task, import_batch_id)
+            if canonical_deleted or changed_months:
+                self._refresh_after_etc_invoice_sync(changed_months, reason="etc_business_batch_deleted")
+                self._persist_state()
+        except EtcBusinessBatchNotFoundError:
+            try:
+                result = self._etc_service.delete_business_batch(
+                    business_batch_id,
+                    expected_version=self._optional_int(payload.get("expectedVersion") or payload.get("expected_version")),
+                    reason=str(payload.get("reason") or "").strip() or None,
+                )
+            except Exception as error:
+                return self._etc_business_error_response(error)
         except Exception as error:
             return self._etc_business_error_response(error)
         return self._etc_business_response(HTTPStatus.OK, result)

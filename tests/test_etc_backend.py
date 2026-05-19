@@ -437,6 +437,35 @@ class EtcServiceTests(unittest.TestCase):
             with self.assertRaises(EtcBusinessBatchNotFoundError):
                 service.get_business_batch(batch.business_batch_id)
 
+    def test_business_batch_delete_removes_unsubmitted_oa_draft_contents(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir), oa_client=FakeEtcOAClient())
+            batch = service.create_business_batch(task_id="ETC-TASK-001")
+            preview = service.preview_business_batch_import_zips(
+                batch.business_batch_id,
+                [UploadedEtcZipFile("etc.zip", etc_zip(["ETC001", "ETC002"]))],
+                expected_version=batch.version,
+            )
+            batch, _result = service.confirm_business_batch_import(
+                batch.business_batch_id,
+                str(preview["sessionId"]),
+                expected_version=batch.version,
+            )
+            drafted = service.create_business_batch_oa_draft(batch.business_batch_id, expected_version=batch.version)
+
+            deleted = service.delete_business_batch(
+                drafted.business_batch_id,
+                expected_version=drafted.version,
+                reason="delete_unsubmitted_business_batch_with_draft",
+            )
+
+            self.assertEqual(deleted, {"deleted": True, "businessBatchId": drafted.business_batch_id, "kind": "business_batch"})
+            self.assertEqual(service.list_business_batches(), [])
+            self.assertEqual(service.list_import_batches(), [])
+            self.assertEqual(service.list_invoices()[0], [])
+            with self.assertRaises(EtcBusinessBatchNotFoundError):
+                service.get_business_batch(drafted.business_batch_id)
+
     def test_business_batch_oa_detection_marks_submitted_and_updates_invoices(self) -> None:
         with TemporaryDirectory() as temp_dir:
             service = EtcService(data_dir=Path(temp_dir), oa_client=FakeEtcOAClient())
@@ -2220,9 +2249,18 @@ class EtcApiTests(unittest.TestCase):
                 f"/api/etc/business-batches/{created['businessBatchId']}/oa-draft",
                 json.dumps({"expectedVersion": confirmed["version"]}),
             )
+            drafted = json.loads(draft_response.body)["data"]["businessBatch"]
             detail_response = app.handle_request("GET", f"/api/etc/business-batches/{created['businessBatchId']}")
             list_response = app.handle_request("GET", "/api/etc/business-batches")
             legacy_response = app.handle_request("GET", "/api/etc/batches")
+            delete_response = app.handle_request(
+                "DELETE",
+                f"/api/etc/business-batches/{created['businessBatchId']}",
+                json.dumps({"expectedVersion": drafted["version"], "reason": "api_delete_unsubmitted_draft"}),
+            )
+            deleted_detail_response = app.handle_request("GET", f"/api/etc/business-batches/{created['businessBatchId']}")
+            deleted_list_response = app.handle_request("GET", "/api/etc/business-batches")
+            deleted_legacy_response = app.handle_request("GET", "/api/etc/batches")
 
         self.assertEqual(create_response.status_code, 201)
         self.assertEqual(preview_response.status_code, 200)
@@ -2233,6 +2271,10 @@ class EtcApiTests(unittest.TestCase):
         legacy_items = json.loads(legacy_response.body)["items"]
         self.assertEqual([item["id"] for item in legacy_items], [created["businessBatchId"]])
         self.assertEqual(legacy_items[0]["source_type"], "etc_business_batch")
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertEqual(deleted_detail_response.status_code, 404)
+        self.assertEqual(json.loads(deleted_list_response.body)["data"]["items"], [])
+        self.assertEqual(json.loads(deleted_legacy_response.body)["items"], [])
 
     def test_reconciliation_item_patch_conflict_returns_task_version_conflict(self) -> None:
         with TemporaryDirectory() as temp_dir:

@@ -45,7 +45,6 @@ import {
   confirmEtcReconciliationTask,
   createEtcBusinessBatchOaDraft,
   createEtcReconciliationTask,
-  createEtcOaDraftForBatch,
   deleteEtcBusinessBatch,
   deleteEtcBatch,
   deleteEtcReconciliationTask,
@@ -63,7 +62,6 @@ import {
   refreshEtcBusinessBatchOaStatus,
   refreshEtcReconciliationMatches,
   reopenEtcReconciliationTask,
-  revokeEtcBusinessBatchOaDraft,
   uploadEtcCreditCardStatement,
   uploadEtcSupplementEvidenceForCard,
   uploadEtcTicketRootFiles,
@@ -911,10 +909,24 @@ export default function EtcTicketManagementPage() {
     if (isSubmittedBusinessStatus(batch.status) || batch.oaProcessStatus === "in_progress") {
       return "OA已提交，不能删除";
     }
-    if (batch.submissionBatchId?.trim() || batch.oaDraftId?.trim()) {
-      return "OA草稿已创建，请先撤销草稿";
+    if (batch.status === "importing" || batch.status === "oa_draft_creating") {
+      return "处理中，不能删除";
     }
-    if (!["draft", "reviewing", "ready_for_import", "imported", "import_failed", "import_partial_failed", "oa_draft_failed", "not_submitted", "manually_marked_not_submitted"].includes(batch.status)) {
+    if (![
+      "draft",
+      "reviewing",
+      "ready_for_import",
+      "imported",
+      "import_failed",
+      "import_partial_failed",
+      "oa_draft_failed",
+      "oa_submission_detecting",
+      "oa_detection_timeout",
+      "oa_detection_conflict",
+      "oa_detection_unavailable",
+      "not_submitted",
+      "manually_marked_not_submitted",
+    ].includes(batch.status)) {
       return "当前状态不能删除";
     }
     return "";
@@ -932,11 +944,14 @@ export default function EtcTicketManagementPage() {
     return linkedBusinessBatch ? businessBatchDeleteBlockReason(linkedBusinessBatch) : "";
   };
   function taskHasDeleteBlockingSubmissionLink(task: EtcReconciliationTask) {
+    const linkedBusinessBatch = taskLinkedBusinessBatch(task);
+    if (linkedBusinessBatch) {
+      return Boolean(task.submittedConfirmedAt?.trim() || businessBatchDeleteBlockReason(linkedBusinessBatch));
+    }
     return Boolean(
       task.oaDraftBatchId?.trim()
       || task.etcBatchId?.trim()
       || task.submittedConfirmedAt?.trim()
-      || taskLinkedBusinessBatchDeleteBlockReason(task),
     );
   }
   const canRemoveImportedInvoicesFromTask = (task: EtcReconciliationTask) =>
@@ -947,15 +962,12 @@ export default function EtcTicketManagementPage() {
     if (task.submittedConfirmedAt?.trim()) {
       return "OA已提交，不能删除";
     }
-    if (task.oaDraftBatchId?.trim()) {
-      return "OA草稿已创建，请先撤销草稿";
-    }
-    if (task.etcBatchId?.trim()) {
-      return "存在OA批次链路，请先撤销草稿";
-    }
     const linkedBusinessBatchReason = taskLinkedBusinessBatchDeleteBlockReason(task);
     if (linkedBusinessBatchReason) {
       return linkedBusinessBatchReason;
+    }
+    if (task.oaDraftBatchId?.trim() || task.etcBatchId?.trim()) {
+      return "存在OA提交链路，不能删除";
     }
     if (task.status === "importing") {
       return "导入中，不能删除";
@@ -1636,10 +1648,6 @@ export default function EtcTicketManagementPage() {
     }
     setActionError(null);
     setDraftCreating(true);
-    const draftWindow = window.open("about:blank", "_blank");
-    if (draftWindow) {
-      draftWindow.opener = null;
-    }
     try {
       const result = await createEtcBusinessBatchOaDraft(currentOaDraftBatchId, {
         expectedVersion: currentBusinessBatch.version,
@@ -1651,19 +1659,7 @@ export default function EtcTicketManagementPage() {
         oaDraftId: result.oaDraftId,
         oaDraftUrl: result.oaDraftUrl,
       });
-      if (!result.oaDraftUrl) {
-        throw new Error("OA 草稿地址为空，请在 OA 系统中手动查找刚创建的草稿。");
-      }
-      const reviewUrl = buildEtcOaDraftReviewUrl(result.oaDraftUrl);
-      if (draftWindow && !draftWindow.closed) {
-        draftWindow.location.href = reviewUrl;
-      } else {
-        window.location.assign(reviewUrl);
-      }
     } catch (caught) {
-      if (draftWindow && !draftWindow.closed) {
-        draftWindow.close();
-      }
       setActionError(caught instanceof Error ? caught.message : "OA 草稿创建失败。");
     } finally {
       setDraftCreating(false);
@@ -1716,28 +1712,6 @@ export default function EtcTicketManagementPage() {
       mergeBusinessBatch(result);
     } catch (caught) {
       setActionError(caught instanceof Error ? caught.message : "OA 检测刷新失败。");
-    } finally {
-      setOaActionLoading(false);
-    }
-  };
-
-  const handleRevokeBusinessBatchDraft = async (batch?: EtcBusinessBatchDetail | EtcBusinessBatchSummary | null) => {
-    const target = resolveOaActionBatch(batch);
-    if (!target) {
-      return;
-    }
-    setOaActionLoading(true);
-    setActionError(null);
-    try {
-      const result = await revokeEtcBusinessBatchOaDraft(target.businessBatchId, {
-        expectedVersion: target.version,
-        reason: "用户在 ETC 页面撤销草稿并释放发票。",
-      });
-      mergeBusinessBatch(result);
-      setDraftResult(null);
-      setCreateDialogOpen(false);
-    } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : "撤销草稿失败。");
     } finally {
       setOaActionLoading(false);
     }
@@ -1815,17 +1789,6 @@ export default function EtcTicketManagementPage() {
               onClick={() => void handleRefreshBusinessBatchOaStatus(batch)}
             >
               刷新检测
-            </Button>
-            <Button
-              type="button"
-              size="small"
-              variant="outlined"
-              color="warning"
-              startIcon={<UndoOutlinedIcon />}
-              disabled={oaActionLoading}
-              onClick={() => void handleRevokeBusinessBatchDraft(batch)}
-            >
-              撤销草稿
             </Button>
             {isManualOaFallbackStatus(batch.status) ? (
               <Button
@@ -3061,16 +3024,6 @@ export default function EtcTicketManagementPage() {
                   onClick={() => void handleRefreshBusinessBatchOaStatus()}
                 >
                   刷新检测
-                </Button>
-                <Button
-                  type="button"
-                  variant="outlined"
-                  color="warning"
-                  startIcon={<UndoOutlinedIcon />}
-                  disabled={oaActionLoading}
-                  onClick={() => void handleRevokeBusinessBatchDraft()}
-                >
-                  撤销草稿
                 </Button>
                 <Button type="button" onClick={() => setCreateDialogOpen(false)}>关闭</Button>
               </>
