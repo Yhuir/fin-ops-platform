@@ -162,6 +162,7 @@ describe("ETC ticket management page", () => {
       }
       return new Promise(() => undefined);
     });
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(task);
     const deleteTask = vi.spyOn(etcApi, "deleteEtcReconciliationTask").mockResolvedValue(undefined);
 
     renderAppAt("/etc-tickets");
@@ -182,7 +183,7 @@ describe("ETC ticket management page", () => {
     expect(screen.queryByText("正在删除...")).not.toBeInTheDocument();
   });
 
-  test("deletes an imported reconciliation task with expected version and removes it from the list", async () => {
+  test("deletes an imported reconciliation task with the latest task version and removes it from the list", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     const importedTask = {
@@ -222,6 +223,10 @@ describe("ETC ticket management page", () => {
     vi.spyOn(etcApi, "fetchEtcReconciliationTasks")
       .mockResolvedValueOnce({ items: [importedTask] } as never)
       .mockResolvedValueOnce({ items: [] } as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue({
+      ...importedTask,
+      version: 9,
+    } as never);
     vi.spyOn(etcApi, "fetchEtcBatchDetail").mockResolvedValue({
       id: "import-session-delete-001",
       etcBatchId: "ETC-2026-IMPORTED-DELETE",
@@ -282,7 +287,7 @@ describe("ETC ticket management page", () => {
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
 
     await waitFor(() => {
-      expect(deleteTask).toHaveBeenCalledWith("etc-recon-imported-delete-001", 8);
+      expect(deleteTask).toHaveBeenCalledWith("etc-recon-imported-delete-001", 9);
     });
     await waitFor(() => {
       expect(within(page).queryByTestId("etc-reconciliation-task-row-etc-recon-imported-delete-001")).not.toBeInTheDocument();
@@ -588,6 +593,7 @@ describe("ETC ticket management page", () => {
     };
 
     vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [taskWithSourceFiles] } as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(taskWithSourceFiles as never);
     vi.spyOn(etcApi as Record<string, unknown>, "deleteEtcReconciliationSourceFile").mockResolvedValue(taskAfterFileDelete as never);
     vi.spyOn(etcApi, "createEtcReconciliationTask").mockResolvedValue(freshTask as never);
 
@@ -1301,6 +1307,10 @@ describe("ETC ticket management page", () => {
       importBatchId: "",
       etcBatchId: "",
     } as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue({
+      ...importedTask,
+      version: 9,
+    } as never);
 
     renderAppAt("/etc-tickets");
 
@@ -1321,7 +1331,7 @@ describe("ETC ticket management page", () => {
     await user.click(within(dialog).getByRole("button", { name: "确认移除" }));
 
     await waitFor(() => {
-      expect(etcApi.deleteEtcReconciliationTaskImportedInvoices).toHaveBeenCalledWith("etc-recon-imported-001", 8);
+      expect(etcApi.deleteEtcReconciliationTaskImportedInvoices).toHaveBeenCalledWith("etc-recon-imported-001", 9);
     });
     await waitFor(() => {
       expect(within(page).queryByRole("region", { name: "已导入ETC发票" })).not.toBeInTheDocument();
@@ -1566,6 +1576,7 @@ describe("ETC ticket management page", () => {
     vi.spyOn(etcApi, "fetchEtcReconciliationTasks")
       .mockResolvedValueOnce({ items: [importedTask] } as never)
       .mockResolvedValue({ items: [] } as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(importedTask as never);
     vi.spyOn(etcApi, "fetchEtcBatchDetail").mockResolvedValue({
       id: "import-session-delete-001",
       etcBatchId: "import-session-delete-001",

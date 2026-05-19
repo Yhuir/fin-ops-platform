@@ -55,6 +55,7 @@ import {
   fetchEtcBusinessBatches,
   fetchEtcBatchDetail,
   fetchEtcBatches,
+  fetchEtcReconciliationTask,
   manualEtcBusinessBatchOaStatus,
   fetchEtcReconciliationTasks,
   markEtcBatchNotSubmitted,
@@ -1374,7 +1375,12 @@ export default function EtcTicketManagementPage() {
     setRemoveImportedInvoicesSubmitting(true);
     setActionError(null);
     try {
-      const task = await deleteEtcReconciliationTaskImportedInvoices(selectedTask.taskId, selectedTask.version);
+      const latestTask = await fetchEtcReconciliationTask(selectedTask.taskId);
+      mergeReconciliationTask(latestTask);
+      if (!canDeleteTask(latestTask) || latestTask.status !== "imported") {
+        throw new Error(deleteTaskDisabledReason(latestTask));
+      }
+      const task = await deleteEtcReconciliationTaskImportedInvoices(latestTask.taskId, latestTask.version);
       setTaskImportBatchDetail(null);
       setTaskImportDetailError(null);
       setBatches((current) => current.filter((batch) =>
@@ -1418,6 +1424,15 @@ export default function EtcTicketManagementPage() {
     setDeleteTarget({ kind: "sourceFile", task: selectedTask, item: sourceFile });
   };
 
+  const fetchLatestDeletableTask = async (task: EtcReconciliationTask) => {
+    const latestTask = await fetchEtcReconciliationTask(task.taskId);
+    mergeReconciliationTask(latestTask);
+    if (!canDeleteTask(latestTask)) {
+      throw new Error(deleteTaskDisabledReason(latestTask));
+    }
+    return latestTask;
+  };
+
   const handleDeleteConfirmed = async () => {
     if (!deleteTarget) {
       return;
@@ -1426,10 +1441,11 @@ export default function EtcTicketManagementPage() {
     setActionError(null);
     try {
       if (deleteTarget.kind === "task") {
-        const taskId = deleteTarget.item.taskId;
+        const latestTask = await fetchLatestDeletableTask(deleteTarget.item);
+        const taskId = latestTask.taskId;
         const wasSelectedTask = selectedTaskId === taskId;
-        const removedBatchId = deleteTarget.item.etcBatchId || deleteTarget.item.importBatchId || "";
-        await deleteEtcReconciliationTask(taskId, deleteTarget.item.version);
+        const removedBatchId = latestTask.etcBatchId || latestTask.importBatchId || "";
+        await deleteEtcReconciliationTask(taskId, latestTask.version);
         setReconciliationTasks((current) => current.filter((task) => task.taskId !== taskId));
         setTaskImportBatchDetail(null);
         setTaskImportDetailError(null);
@@ -1446,10 +1462,19 @@ export default function EtcTicketManagementPage() {
         }
         void loadReconciliationTasks();
       } else if (deleteTarget.kind === "sourceFile") {
+        const latestTask = await fetchEtcReconciliationTask(deleteTarget.task.taskId);
+        mergeReconciliationTask(latestTask);
+        if (!["draft", "reviewing"].includes(latestTask.status)) {
+          throw new Error("当前任务状态不能删除源文件");
+        }
+        const sourceFileExists = latestTask.sourceFiles.some((sourceFile) => sourceFile.fileId === deleteTarget.item.fileId);
+        if (!sourceFileExists) {
+          throw new Error("源文件已变化，请刷新后重试。");
+        }
         const task = await deleteEtcReconciliationSourceFile(
-          deleteTarget.task.taskId,
+          latestTask.taskId,
           deleteTarget.item.fileId,
-          deleteTarget.task.version,
+          latestTask.version,
         );
         mergeReconciliationTask(task);
       } else {
