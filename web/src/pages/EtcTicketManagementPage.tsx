@@ -1140,6 +1140,12 @@ export default function EtcTicketManagementPage() {
       ? selectedTaskImportBatchCanSubmit
       : currentBusinessBatch !== null && canCreateOaDraft(currentBusinessBatch.status) && !detailLoading);
   const canRevokeCurrentBatch = activeStatus === "submitted" && Boolean(selectedBatchId) && !detailLoading;
+  const currentOaActionBatch = useMemo(() => {
+    if (draftResult?.batchId) {
+      return businessBatches.find((batch) => batch.businessBatchId === draftResult.batchId) ?? currentBusinessBatch;
+    }
+    return currentBusinessBatch;
+  }, [businessBatches, currentBusinessBatch, draftResult?.batchId]);
   const taskIsMutable = Boolean(selectedTask && ["draft", "reviewing"].includes(selectedTask.status));
   const canConfirmSelectedTask = taskIsMutable && selectedConfirmedCreditCardItemIds.length > 0;
   const selectedCardItem = useMemo(
@@ -1627,18 +1633,26 @@ export default function EtcTicketManagementPage() {
     await loadReconciliationTasks();
   };
 
-  const handleOpenCurrentDraft = () => {
-    const draftUrl = draftResult?.oaDraftUrl || selectedBusinessBatch?.oaDraftUrl || "";
+  const resolveOaActionBatch = (batch?: EtcBusinessBatchDetail | EtcBusinessBatchSummary | null) => {
+    if (draftResult?.batchId) {
+      return businessBatches.find((item) => item.businessBatchId === draftResult.batchId) ?? batch ?? currentOaActionBatch;
+    }
+    return batch ?? currentOaActionBatch;
+  };
+
+  const openOaDraftUrl = (draftUrl: string) => {
     if (!draftUrl) {
       return;
     }
     window.open(buildEtcOaDraftReviewUrl(draftUrl), "_blank", "noopener,noreferrer");
   };
 
-  const handleRefreshBusinessBatchOaStatus = async () => {
-    const target = draftResult?.batchId
-      ? businessBatches.find((batch) => batch.businessBatchId === draftResult.batchId) ?? selectedBusinessBatch
-      : selectedBusinessBatch;
+  const handleOpenCurrentDraft = () => {
+    openOaDraftUrl(draftResult?.oaDraftUrl || currentOaActionBatch?.oaDraftUrl || "");
+  };
+
+  const handleRefreshBusinessBatchOaStatus = async (batch?: EtcBusinessBatchDetail | EtcBusinessBatchSummary | null) => {
+    const target = resolveOaActionBatch(batch);
     if (!target) {
       return;
     }
@@ -1654,10 +1668,8 @@ export default function EtcTicketManagementPage() {
     }
   };
 
-  const handleRevokeBusinessBatchDraft = async () => {
-    const target = draftResult?.batchId
-      ? businessBatches.find((batch) => batch.businessBatchId === draftResult.batchId) ?? selectedBusinessBatch
-      : selectedBusinessBatch;
+  const handleRevokeBusinessBatchDraft = async (batch?: EtcBusinessBatchDetail | EtcBusinessBatchSummary | null) => {
+    const target = resolveOaActionBatch(batch);
     if (!target) {
       return;
     }
@@ -1678,8 +1690,12 @@ export default function EtcTicketManagementPage() {
     }
   };
 
-  const handleManualBusinessBatchOaStatus = async (decision: "submitted" | "not_submitted") => {
-    if (!selectedBusinessBatch) {
+  const handleManualBusinessBatchOaStatus = async (
+    decision: "submitted" | "not_submitted",
+    batch?: EtcBusinessBatchDetail | EtcBusinessBatchSummary | null,
+  ) => {
+    const target = resolveOaActionBatch(batch);
+    if (!target) {
       return;
     }
     const reason = manualOaReason.trim();
@@ -1690,10 +1706,10 @@ export default function EtcTicketManagementPage() {
     setOaActionLoading(true);
     setActionError(null);
     try {
-      const result = await manualEtcBusinessBatchOaStatus(selectedBusinessBatch.businessBatchId, {
+      const result = await manualEtcBusinessBatchOaStatus(target.businessBatchId, {
         decision,
         reason,
-        expectedVersion: selectedBusinessBatch.version,
+        expectedVersion: target.version,
       });
       mergeBusinessBatch(result);
       setManualOaReason("");
@@ -1714,6 +1730,101 @@ export default function EtcTicketManagementPage() {
     setRevokeDialogOpen(false);
     await loadBatches();
   };
+
+  const renderOaStatusPanel = (batch: EtcBusinessBatchDetail | EtcBusinessBatchSummary) => (
+    <Box className="etc-oa-status-panel" component="section" aria-label="OA草稿与检测状态">
+      <Stack spacing={1.25}>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "stretch", sm: "center" }} justifyContent="space-between">
+          <Box>
+            <Typography fontWeight={800}>OA草稿已创建，等待提交确认。</Typography>
+            <Typography variant="body2" color="text.secondary">
+              {batch.oaDetectionReason || batch.oaDetectionError || "后台持续检测流程状态。"}
+            </Typography>
+          </Box>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            {batch.oaDraftUrl ? (
+              <Button
+                type="button"
+                size="small"
+                variant="outlined"
+                startIcon={<OpenInNewOutlinedIcon />}
+                onClick={() => openOaDraftUrl(batch.oaDraftUrl)}
+              >
+                打开草稿
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              size="small"
+              variant="outlined"
+              startIcon={<RefreshOutlinedIcon />}
+              disabled={oaActionLoading}
+              onClick={() => void handleRefreshBusinessBatchOaStatus(batch)}
+            >
+              刷新检测
+            </Button>
+            <Button
+              type="button"
+              size="small"
+              variant="outlined"
+              color="warning"
+              startIcon={<UndoOutlinedIcon />}
+              disabled={oaActionLoading}
+              onClick={() => void handleRevokeBusinessBatchDraft(batch)}
+            >
+              撤销草稿
+            </Button>
+            {isManualOaFallbackStatus(batch.status) ? (
+              <Button
+                type="button"
+                size="small"
+                variant="outlined"
+                color="warning"
+                startIcon={<ReportProblemOutlinedIcon />}
+                onClick={() => setManualOaPanelOpen((current) => !current)}
+              >
+                异常处理
+              </Button>
+            ) : null}
+          </Stack>
+        </Stack>
+        {isManualOaFallbackStatus(batch.status) && manualOaPanelOpen ? (
+          <Box className="etc-oa-manual-panel">
+            <TextField
+              label="人工处理原因"
+              size="small"
+              value={manualOaReason}
+              onChange={(event) => setManualOaReason(event.target.value)}
+              multiline
+              minRows={2}
+              fullWidth
+              required
+            />
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              <Button
+                type="button"
+                variant="contained"
+                size="small"
+                disabled={oaActionLoading || !manualOaReason.trim()}
+                onClick={() => void handleManualBusinessBatchOaStatus("submitted", batch)}
+              >
+                我已提交 OA
+              </Button>
+              <Button
+                type="button"
+                variant="outlined"
+                size="small"
+                disabled={oaActionLoading || !manualOaReason.trim()}
+                onClick={() => void handleManualBusinessBatchOaStatus("not_submitted", batch)}
+              >
+                未提交 OA
+              </Button>
+            </Stack>
+          </Box>
+        ) : null}
+      </Stack>
+    </Box>
+  );
 
   const renderCardDateCell = (card: EtcCreditCardItem | null) => {
     if (!card) {
@@ -2520,6 +2631,9 @@ export default function EtcTicketManagementPage() {
                           </Table>
                         </TableContainer>
                       </Box>
+                      {selectedTaskBusinessBatch && isOaDetectionStatus(selectedTaskBusinessBatch.status)
+                        ? renderOaStatusPanel(selectedTaskBusinessBatch)
+                        : null}
                       {showTaskImportedInvoices ? (
                       <Box component="section" className="etc-task-imported-invoices" aria-label="已导入ETC发票">
                         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
@@ -2633,100 +2747,7 @@ export default function EtcTicketManagementPage() {
                     ) : null}
                   </Stack>
 
-                  {selectedBusinessBatch && isOaDetectionStatus(selectedBusinessBatch.status) ? (
-                    <Box className="etc-oa-status-panel" component="section" aria-label="OA草稿与检测状态">
-                      <Stack spacing={1.25}>
-                        <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "stretch", sm: "center" }} justifyContent="space-between">
-                          <Box>
-                            <Typography fontWeight={800}>OA草稿已创建，等待提交确认。</Typography>
-                            <Typography variant="body2" color="text.secondary">
-                              {selectedBusinessBatch.oaDetectionReason || selectedBusinessBatch.oaDetectionError || "后台持续检测流程状态。"}
-                            </Typography>
-                          </Box>
-                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                            {selectedBusinessBatch.oaDraftUrl ? (
-                              <Button
-                                type="button"
-                                size="small"
-                                variant="outlined"
-                                startIcon={<OpenInNewOutlinedIcon />}
-                                onClick={handleOpenCurrentDraft}
-                              >
-                                打开草稿
-                              </Button>
-                            ) : null}
-                            <Button
-                              type="button"
-                              size="small"
-                              variant="outlined"
-                              startIcon={<RefreshOutlinedIcon />}
-                              disabled={oaActionLoading}
-                              onClick={() => void handleRefreshBusinessBatchOaStatus()}
-                            >
-                              刷新检测
-                            </Button>
-                            <Button
-                              type="button"
-                              size="small"
-                              variant="outlined"
-                              color="warning"
-                              startIcon={<UndoOutlinedIcon />}
-                              disabled={oaActionLoading}
-                              onClick={() => void handleRevokeBusinessBatchDraft()}
-                            >
-                              撤销草稿
-                            </Button>
-                            {isManualOaFallbackStatus(selectedBusinessBatch.status) ? (
-                              <Button
-                                type="button"
-                                size="small"
-                                variant="outlined"
-                                color="warning"
-                                startIcon={<ReportProblemOutlinedIcon />}
-                                onClick={() => setManualOaPanelOpen((current) => !current)}
-                              >
-                                异常处理
-                              </Button>
-                            ) : null}
-                          </Stack>
-                        </Stack>
-                        {isManualOaFallbackStatus(selectedBusinessBatch.status) && manualOaPanelOpen ? (
-                          <Box className="etc-oa-manual-panel">
-                            <TextField
-                              label="人工处理原因"
-                              size="small"
-                              value={manualOaReason}
-                              onChange={(event) => setManualOaReason(event.target.value)}
-                              multiline
-                              minRows={2}
-                              fullWidth
-                              required
-                            />
-                            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                              <Button
-                                type="button"
-                                variant="contained"
-                                size="small"
-                                disabled={oaActionLoading || !manualOaReason.trim()}
-                                onClick={() => void handleManualBusinessBatchOaStatus("submitted")}
-                              >
-                                我已提交 OA
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="outlined"
-                                size="small"
-                                disabled={oaActionLoading || !manualOaReason.trim()}
-                                onClick={() => void handleManualBusinessBatchOaStatus("not_submitted")}
-                              >
-                                未提交 OA
-                              </Button>
-                            </Stack>
-                          </Box>
-                        ) : null}
-                      </Stack>
-                    </Box>
-                  ) : null}
+                  {selectedBusinessBatch && isOaDetectionStatus(selectedBusinessBatch.status) ? renderOaStatusPanel(selectedBusinessBatch) : null}
 
                   <Box className="etc-detail-metrics" aria-label="批次指标">
                     <Box>
