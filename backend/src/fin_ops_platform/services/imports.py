@@ -580,8 +580,6 @@ class ImportNormalizationService:
         normalized["source_unique_key"] = source_unique_key
         normalized["data_fingerprint"] = data_fingerprint
 
-        if identity.missing_fields:
-            errors.append(f"stable bank transaction identity is missing fields: {', '.join(identity.missing_fields)}")
         row_display_fields = self._transaction_row_result_display_fields(normalized, identity)
 
         if errors:

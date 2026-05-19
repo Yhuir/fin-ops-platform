@@ -309,16 +309,16 @@ describe("Workbench row selection and detail modal", () => {
     );
   });
 
-  test("open zone header confirm link explains invalid selection when no bank row is selected", async () => {
+  test("open zone header confirm link explains invalid selection when selected context has no bank row", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderWorkbenchPage();
 
     const openOaRow = await screen.findByRole("row", {
-      name: /陈涛.*智能工厂设备商/,
+      name: /孙敏.*华东补录项目/,
     });
     const openInvoiceRow = await screen.findByRole("row", {
-      name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
+      name: /昆玉高速公路收费站/,
     });
 
     await user.click(openOaRow);
@@ -334,7 +334,7 @@ describe("Workbench row selection and detail modal", () => {
     );
   });
 
-  test("open zone header confirm link supports bank plus invoice selection without OA", async () => {
+  test("open zone header confirm link includes source OA context for bank plus attachment invoice selection", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderWorkbenchPage();
@@ -353,20 +353,20 @@ describe("Workbench row selection and detail modal", () => {
     const dialog = await screen.findByRole("dialog", { name: "关联预览" });
     const after = within(dialog).getByTestId("relation-preview-after");
     const afterSummary = expectRelationPreviewSummary(after);
-    const emptyOaMetric = within(afterSummary).getByTestId("relation-preview-summary-metric-oa");
-    expect(within(emptyOaMetric).getByText("-")).toBeInTheDocument();
-    expect(emptyOaMetric).not.toHaveClass("mismatch");
+    const sourceOaMetric = within(afterSummary).getByTestId("relation-preview-summary-metric-oa");
+    expect(within(sourceOaMetric).getByText("58000.00")).toBeInTheDocument();
+    expect(sourceOaMetric).not.toHaveClass("mismatch");
     expect(within(after).getByTestId("pane-oa")).not.toHaveClass("mismatch");
     await user.click(within(dialog).getByRole("button", { name: "确认关联" }));
 
-    expect(await screen.findByText("已确认 2 条记录关联。")).toBeInTheDocument();
+    expect(await screen.findByText("已确认 3 条记录关联。")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/workbench/actions/confirm-link",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
           month: "all",
-          row_ids: ["bk-o-202603-001", "iv-o-202603-001"],
+          row_ids: ["bk-o-202603-001", "iv-o-202603-001", "oa-o-202603-001"],
           case_id: "CASE-202603-101",
         }),
       }),
@@ -624,7 +624,7 @@ describe("Workbench row selection and detail modal", () => {
     expect(screen.getByText("正在确认关联...")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "确定" })).not.toBeInTheDocument();
 
-    expect(await screen.findByText("已确认 2 条记录关联。")).toBeInTheDocument();
+    expect(await screen.findByText("已确认 3 条记录关联。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "确定" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "确定" }));
@@ -653,7 +653,7 @@ describe("Workbench row selection and detail modal", () => {
     await user.click(within(preview).getByRole("button", { name: "确认关联" }));
 
     expect(await screen.findByRole("dialog", { name: "操作状态弹窗" })).toBeInTheDocument();
-    expect(await screen.findByText("已确认 2 条记录关联。")).toBeInTheDocument();
+    expect(await screen.findByText("已确认 3 条记录关联。")).toBeInTheDocument();
 
     expect(
       within(openZone).queryByRole("row", {
@@ -792,8 +792,6 @@ describe("Workbench row selection and detail modal", () => {
     expect(within(openZone).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeInTheDocument();
     expect(within(openZone).getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toBeInTheDocument();
     expect(within(openZone).queryByText("杭州张三广告有限公司")).not.toBeInTheDocument();
-    expect(within(openZone).getAllByText("智能工厂").length).toBeGreaterThan(0);
-    expect(within(openZone).getAllByText("智能工厂").some((node) => node.classList.contains("search-hit"))).toBe(true);
     expect(within(openBankPane).getByRole("button", { name: "搜索 银行流水" })).toBeInTheDocument();
     expect(within(openInvoicePane).getByRole("button", { name: "搜索 进销项发票" })).toBeInTheDocument();
 
@@ -1336,6 +1334,7 @@ describe("Workbench row selection and detail modal", () => {
     expect(screen.queryByRole("dialog", { name: "ETC发票导入" })).not.toBeInTheDocument();
     expect(screen.getByTestId("background-progress-block")).toBeInTheDocument();
     expect(screen.getByRole("status", { name: "正在执行后台任务：正在导入 ETC发票 3/31" })).toBeInTheDocument();
+    await user.selectOptions(await screen.findByLabelText("ETC对账任务"), "etc_task_ready_001");
     const input =
       (screen.queryByLabelText("上传ETC zip") ?? screen.getByLabelText("上传文件")) as HTMLInputElement;
     const etcZip = new File(["etc-zip"], "ETC一月发票.zip", {

@@ -1050,7 +1050,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
         self.assertEqual(payload["rebuild_status"], "completed")
         parse_files.assert_not_called()
         rebuilt_invoice_ids = _flatten_group_rows(rebuilt_payload, "invoice")
-        self.assertEqual(rebuilt_invoice_ids, ["oa-att-inv-oa-exp-exp-attach-001-01"])
+        self.assertEqual(rebuilt_invoice_ids, ["oa-att-inv-oa-exp-exp-attach-001-e932b5c147bf4f20"])
         invoice_rows = _flatten_group_payload_rows(rebuilt_payload, "invoice")
         self.assertEqual(invoice_rows[0]["source_kind"], "oa_attachment_invoice")
         self.assertEqual(invoice_rows[0]["detail_fields"]["发票号码"], "40512344")

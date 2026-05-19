@@ -1712,11 +1712,27 @@ class MongoOAAdapter(OAAdapter):
         missing_files: list[tuple[str, dict[str, object]]] = []
         for file_entry in files:
             cache_key = self._attachment_invoice_cache_key(file_entry)
+            legacy_cache_key = self._legacy_attachment_invoice_cache_key(file_entry)
             cached_entry = (
                 None
                 if self._attachment_invoice_force_reparse_depth > 0
                 else cache.load_oa_attachment_invoice_cache_entry(cache_key)
             )
+            if (
+                cached_entry is None
+                and legacy_cache_key != cache_key
+                and self._attachment_invoice_force_reparse_depth <= 0
+            ):
+                cached_entry = cache.load_oa_attachment_invoice_cache_entry(legacy_cache_key)
+            if cached_entry is not None and not self._is_current_attachment_invoice_cache_entry(cached_entry):
+                migrated_entry = self._migrate_legacy_attachment_invoice_cache_entry(
+                    cached_entry,
+                    cache_key=cache_key,
+                    file_entry=file_entry,
+                )
+                if migrated_entry is not None:
+                    cache.save_oa_attachment_invoice_cache_entry(cache_key, migrated_entry)
+                    cached_entry = migrated_entry
             if cached_entry is not None and self._is_current_attachment_invoice_cache_entry(cached_entry):
                 normalized_entry, changed = self._normalize_attachment_invoice_cache_entry(cached_entry)
                 if changed:
@@ -1785,6 +1801,50 @@ class MongoOAAdapter(OAAdapter):
             )
         )
 
+    @classmethod
+    def _migrate_legacy_attachment_invoice_cache_entry(
+        cls,
+        entry: object,
+        *,
+        cache_key: str,
+        file_entry: dict[str, object],
+    ) -> dict[str, object] | None:
+        if not isinstance(entry, dict):
+            return None
+        if entry.get("parser_version") != OAAttachmentInvoiceService.PARSER_VERSION:
+            return None
+        raw_evidences = entry.get("evidences")
+        raw_invoices = entry.get("invoices")
+        if not isinstance(raw_evidences, list):
+            raw_evidences = []
+        if not isinstance(raw_invoices, list):
+            raw_invoices = []
+        if not raw_evidences and not raw_invoices:
+            return None
+
+        evidences = [
+            cls._normalize_parsed_attachment_evidence(evidence, file_entry=file_entry)
+            for evidence in raw_evidences
+            if isinstance(evidence, dict)
+        ]
+        invoice_evidences = [
+            cls._normalize_parsed_attachment_invoice(invoice, file_entry=file_entry)
+            for invoice in raw_invoices
+            if isinstance(invoice, dict)
+        ]
+        evidences.extend(invoice_evidences)
+        invoices = cls._dedupe_attachment_invoices(cls._attachment_invoices_from_evidences(evidences))
+        artifacts = [cls._attachment_artifact_for_file(file_entry, evidences=evidences)]
+        return {
+            "cache_key": cache_key,
+            "parser_version": cls._attachment_invoice_cache_parser_version(),
+            "cache_schema_version": ATTACHMENT_INVOICE_CACHE_SCHEMA_VERSION,
+            "evidences": evidences,
+            "invoices": invoices,
+            "artifacts": artifacts,
+            "parsed_at": clean_string(entry.get("parsed_at") or "") or datetime.now().isoformat(),
+        }
+
     @staticmethod
     def _attachment_invoice_has_source_fields(invoice: dict[str, object]) -> bool:
         return all(
@@ -1847,6 +1907,17 @@ class MongoOAAdapter(OAAdapter):
         }
         raw_fingerprint = json.dumps(fingerprint, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(raw_fingerprint.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _legacy_attachment_invoice_cache_key(file_entry: dict[str, object]) -> str:
+        if ATTACHMENT_INVOICE_SOURCE_CONTEXT_KEY not in file_entry:
+            return MongoOAAdapter._attachment_invoice_cache_key(file_entry)
+        legacy_file_entry = {
+            key: value
+            for key, value in file_entry.items()
+            if key != ATTACHMENT_INVOICE_SOURCE_CONTEXT_KEY
+        }
+        return MongoOAAdapter._attachment_invoice_cache_key(legacy_file_entry)
 
     @classmethod
     def _attachment_invoice_source_fields(cls, file_entry: dict[str, object]) -> dict[str, str]:

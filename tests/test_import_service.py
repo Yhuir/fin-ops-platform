@@ -262,7 +262,7 @@ class ImportNormalizationServiceTests(unittest.TestCase):
 
         self.assertEqual(preview.row_results[0].decision, ImportDecision.CREATED)
 
-    def test_bank_transaction_missing_second_level_time_is_error(self) -> None:
+    def test_bank_transaction_missing_second_level_time_imports_without_stable_identity(self) -> None:
         preview = self.service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
             source_name="bank-missing-time-demo.json",
@@ -274,13 +274,21 @@ class ImportNormalizationServiceTests(unittest.TestCase):
                     "counterparty_name": "Acme Supplies Ltd.",
                     "debit_amount": "88.00",
                     "credit_amount": "",
-                    "bank_serial_no": "SERIAL-001",
+                    "bank_serial_no": "SERIAL-DATE-ONLY-001",
                 },
             ],
         )
 
-        self.assertEqual(preview.row_results[0].decision, ImportDecision.ERROR)
-        self.assertIn("trade_time", preview.row_results[0].decision_reason)
+        self.assertEqual(preview.row_results[0].decision, ImportDecision.CREATED)
+        self.assertIsNone(preview.row_results[0].source_unique_key)
+        self.assertIsNone(preview.row_results[0].identity_kind)
+        self.assertEqual(preview.normalized_rows[0]["source_unique_key"], None)
+
+        self.service.confirm_import(preview.id)
+
+        created = next(transaction for transaction in self.service.list_transactions() if transaction.bank_serial_no == "SERIAL-DATE-ONLY-001")
+        self.assertEqual(created.txn_date, "2026-03-23")
+        self.assertIsNone(created.source_unique_key)
 
     def test_confirm_import_persists_created_rows_and_updates_source_status(self) -> None:
         preview = self.service.preview_import(

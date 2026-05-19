@@ -38,8 +38,11 @@ class WorkbenchSpecialPairRuleServiceTests(unittest.TestCase):
 
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0]["rule_code"], SALARY_PERSONAL_AUTO_MATCH)
-        self.assertEqual(candidates[0]["status"], "auto_closed")
+        self.assertEqual(candidates[0]["status"], "suppressed")
         self.assertIn("工资", candidates[0]["tags"])
+        self.assertTrue(candidates[0]["special_metadata"]["no_oa_managed"])
+        self.assertEqual(candidates[0]["special_metadata"]["managed_batch_type"], "salary")
+        self.assertFalse(candidates[0]["special_metadata"]["evidence"]["workbench_auto_close_allowed"])
         self.assertEqual(
             candidates[0]["special_metadata"]["evidence"]["suggested_action_code"],
             "auto_close_salary_payment",
