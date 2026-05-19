@@ -2087,7 +2087,48 @@ class Application:
             or getattr(task, "submitted_confirmed_at", None) is not None
         ):
             raise ValueError("reconciliation_task_has_submission_link")
+        business_delete_result = self._delete_reconciliation_task_business_batch_sources(task)
+        if business_delete_result is not None:
+            return business_delete_result
         return self._delete_etc_import_batch_sources(import_batch_id)
+
+    def _delete_reconciliation_task_business_batch_sources(self, task: object) -> tuple[dict[str, object], int, list[str]] | None:
+        task_id = str(getattr(task, "task_id", "") or "").strip()
+        import_batch_id = str(getattr(task, "import_batch_id", "") or "").strip()
+        if not task_id or not import_batch_id:
+            return None
+        business_batches = self._etc_service.list_business_batches(task_id=task_id)
+        business_batch = next(
+            (
+                batch
+                for batch in business_batches
+                if import_batch_id in {str(value) for value in list(getattr(batch, "import_batch_ids", []) or [])}
+            ),
+            None,
+        )
+        if business_batch is None:
+            return None
+        if str(getattr(business_batch, "submission_batch_id", "") or "").strip():
+            raise ValueError("reconciliation_task_has_submission_link")
+        import_batch_ids = [
+            str(value).strip()
+            for value in list(getattr(business_batch, "import_batch_ids", []) or [])
+            if str(value).strip()
+        ]
+        invoice_ids = [str(value) for value in list(getattr(business_batch, "invoice_ids", []) or [])]
+        changed_months = self._etc_invoice_changed_months(self._existing_etc_invoices_by_ids(invoice_ids))
+        canonical_deleted = 0
+        for linked_import_batch_id in import_batch_ids:
+            canonical_deleted += self._import_service.remove_etc_invoices_by_import_batch_id(linked_import_batch_id)
+        delete_result = self._etc_service.delete_business_batch(
+            str(getattr(business_batch, "business_batch_id", "")),
+            expected_version=int(getattr(business_batch, "version", 0) or 0),
+            reason="reconciliation_task_import_removed",
+        )
+        for linked_import_batch_id in import_batch_ids:
+            if self._etc_service.list_invoices_by_import_batch_id(linked_import_batch_id):
+                self._etc_service.delete_import_batch_sources(linked_import_batch_id)
+        return delete_result, canonical_deleted, sorted(set(changed_months))
 
     def _delete_etc_import_batch_sources(self, import_batch_id: str) -> tuple[dict[str, object], int, list[str]]:
         import_batch = self._etc_import_batch_by_id(import_batch_id)
@@ -2625,8 +2666,16 @@ class Application:
                 )
 
             try:
-                result = self._etc_service.confirm_import_session_with_progress(
+                business_batch = self._resolve_task_etc_business_batch(
+                    task_id=normalized_task_id,
+                    owner_user_id=owner_user_id,
+                    idempotency_key=f"etc_business_task_import:{normalized_task_id}:{normalized_session_id}",
+                )
+                business_batch, result = self._etc_service.confirm_business_batch_import(
+                    business_batch.business_batch_id,
                     normalized_session_id,
+                    expected_version=business_batch.version,
+                    idempotency_key=f"etc_import_session:{normalized_session_id}",
                     progress_callback=progress_callback,
                 )
             except Exception as exc:
@@ -2642,7 +2691,7 @@ class Application:
                 (
                     batch
                     for batch in self._etc_service.list_import_batches()
-                    if batch.source_session_id == normalized_session_id
+                    if batch.id in set(getattr(business_batch, "import_batch_ids", []) or [])
                 ),
                 None,
             )
@@ -2680,6 +2729,23 @@ class Application:
         return self._json_response(
             HTTPStatus.ACCEPTED,
             {"job": job.to_payload()},
+        )
+
+    def _resolve_task_etc_business_batch(
+        self,
+        *,
+        task_id: str,
+        owner_user_id: str,
+        idempotency_key: str,
+    ):
+        existing_batches = self._etc_service.list_business_batches(task_id=task_id)
+        for batch in existing_batches:
+            if getattr(batch, "is_active", False):
+                return batch
+        return self._etc_service.create_business_batch(
+            task_id=task_id,
+            owner_user_id=owner_user_id,
+            idempotency_key=idempotency_key,
         )
 
     def _handle_api_etc_import_confirm_legacy(self, normalized_session_id: str, headers: dict[str, str] | None) -> Response:
@@ -3587,6 +3653,9 @@ class Application:
 
     def _etc_batch_counts(self) -> dict[str, int]:
         business_batches = self._etc_service.list_business_batches()
+        visible_business_batches = [
+            batch for batch in business_batches if not self._is_task_scoped_active_business_batch(batch)
+        ]
         business_import_batch_ids = {
             import_batch_id
             for batch in business_batches
@@ -3599,10 +3668,10 @@ class Application:
         }
         business_submitted_count = sum(
             1
-            for batch in business_batches
+            for batch in visible_business_batches
             if self._etc_business_batch_legacy_status(batch) == "submitted"
         )
-        business_unsubmitted_count = len(business_batches) - business_submitted_count
+        business_unsubmitted_count = len(visible_business_batches) - business_submitted_count
         import_batches = [
             batch
             for batch in self._etc_service.list_import_batches()
@@ -3649,6 +3718,8 @@ class Application:
             if str(getattr(batch, "submission_batch_id", "") or "").strip()
         }
         for business_batch in business_batches:
+            if self._is_task_scoped_active_business_batch(business_batch):
+                continue
             legacy_status = self._etc_business_batch_legacy_status(business_batch)
             if (legacy_status == "submitted" and not include_submitted) or (legacy_status == "unsubmitted" and not include_unsubmitted):
                 continue
@@ -3727,6 +3798,16 @@ class Application:
         if not batch_id:
             return False
         return self._etc_reconciliation_task_service.find_task_for_import_batch_ids([batch_id]) is not None
+
+    def _is_task_scoped_active_business_batch(self, batch: object) -> bool:
+        task_id = str(getattr(batch, "task_id", "") or "").strip()
+        if not task_id:
+            return False
+        try:
+            self._etc_reconciliation_task_service.get_task(task_id)
+        except KeyError:
+            return False
+        return self._etc_business_batch_legacy_status(batch) != "submitted"
 
     def _etc_batch_detail_payload(self, batch_id: str) -> dict[str, object] | None:
         try:

@@ -767,6 +767,7 @@ class EtcService:
         *,
         expected_version: int | None = None,
         idempotency_key: str | None = None,
+        progress_callback: Callable[[EtcImportResult], None] | None = None,
     ) -> tuple[EtcBusinessBatch, EtcImportResult]:
         normalized_session_id = str(session_id or "").strip()
         normalized_idempotency_key = str(idempotency_key or "").strip() or None
@@ -792,7 +793,10 @@ class EtcService:
             self._assert_business_batch_version(batch, expected_version)
             self._assert_business_batch_allows_import(batch)
             before_status = batch.status
-            result = self.confirm_import_session(normalized_session_id)
+            result = self.confirm_import_session_with_progress(
+                normalized_session_id,
+                progress_callback=progress_callback,
+            ) if progress_callback is not None else self.confirm_import_session(normalized_session_id)
             linked_import_batches = [
                 import_batch
                 for import_batch in self._import_batches.values()

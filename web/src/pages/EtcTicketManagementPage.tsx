@@ -716,7 +716,10 @@ export default function EtcTicketManagementPage() {
     }
     completedImportJobs.forEach((job) => refreshedImportJobIdsRef.current.add(job.jobId));
     void loadBatches();
-  }, [jobs, loadBatches]);
+    if (activeStatus === "unsubmitted") {
+      void loadReconciliationTasks();
+    }
+  }, [activeStatus, jobs, loadBatches, loadReconciliationTasks]);
 
   const selectedBatch = useMemo(
     () => batchDetail ?? batches.find((batch) => batch.id === selectedBatchId) ?? null,
@@ -742,13 +745,40 @@ export default function EtcTicketManagementPage() {
     });
     return ids;
   }, [reconciliationTasks]);
+  const activeTaskIds = useMemo(
+    () => new Set(reconciliationTasks.map((task) => task.taskId).filter(Boolean)),
+    [reconciliationTasks],
+  );
+  const taskImportBatchIdByTaskId = useMemo(
+    () => new Map(
+      reconciliationTasks
+        .filter((task) => task.taskId && task.importBatchId)
+        .map((task) => [task.taskId, task.importBatchId] as const),
+    ),
+    [reconciliationTasks],
+  );
+  const taskScopedBusinessBatchIds = useMemo(
+    () => new Set(
+      businessBatches
+        .filter((batch) => {
+          if (!batch.taskId || !activeTaskIds.has(batch.taskId)) {
+            return false;
+          }
+          const taskImportBatchId = taskImportBatchIdByTaskId.get(batch.taskId);
+          return Boolean(taskImportBatchId && batch.importBatchIds.includes(taskImportBatchId));
+        })
+        .map((batch) => batch.businessBatchId),
+    ),
+    [activeTaskIds, businessBatches, taskImportBatchIdByTaskId],
+  );
   const visibleBatches = useMemo(
     () => batches.filter((batch) =>
       !taskImportBatchIds.has(batch.id)
       && !taskImportBatchIds.has(batch.etcBatchId)
       && !taskImportBatchIds.has(batch.externalBatchId)
+      && !taskScopedBusinessBatchIds.has(batch.id)
     ),
-    [batches, taskImportBatchIds],
+    [batches, taskImportBatchIds, taskScopedBusinessBatchIds],
   );
   const selectedTaskBusinessBatch = useMemo(
     () => selectedTask
@@ -797,7 +827,7 @@ export default function EtcTicketManagementPage() {
       })
       .catch((caught) => {
         if (!(caught instanceof DOMException && caught.name === "AbortError")) {
-          setTaskImportDetailError(caught instanceof Error ? caught.message : "已导入ETC发票加载失败。");
+          setTaskImportDetailError(caught instanceof Error ? caught.message : "已导入发票加载失败。");
         }
       })
       .finally(() => {
@@ -879,12 +909,12 @@ export default function EtcTicketManagementPage() {
   };
   const deleteTaskDescription = (task: EtcReconciliationTask) => {
     if (task.status === "imported") {
-      return "将删除该对账任务及其未进入 OA 链路的数据，并一并删除已导入 ETC 发票。用户需要重新导入时只能重新建/导。";
+      return "将删除该任务及未进入 OA 的数据，并一并删除已导入发票。";
     }
     if (task.status === "ready_for_import") {
-      return "将删除该对账任务及其未进入 OA 链路的数据。请确认相关上传文件、核对结果和待导入数据不再需要。";
+      return "将删除该任务及未进入 OA 的数据。";
     }
-    return "将删除该对账任务、上传源文件和核对结果。已进入 OA/提交链路的数据不会被允许删除。";
+    return "将删除该任务、上传文件和核对结果。已进入 OA 的数据不能删除。";
   };
   const canDeleteBatch = (batch: EtcBatchSummary) => {
     const businessBatch = businessBatches.find((item) => item.businessBatchId === batch.id);
@@ -1048,8 +1078,8 @@ export default function EtcTicketManagementPage() {
     ? (selectedTaskBusinessBatch?.externalEtcBatchId || selectedTaskBusinessBatch?.businessBatchId || "")
     : (selectedBusinessBatch?.externalEtcBatchId || selectedBusinessBatch?.businessBatchId || "");
   const currentOaDraftDescription = selectedTaskImportBatchSelected
-    ? `将为当前 ETC 对账任务下已导入的 ${importedInvoiceCount} 张发票创建 OA 支付申请草稿，发票合计 ${importedInvoiceAmount}。`
-    : "将为当前 ETC 批次创建 OA 支付申请草稿。";
+    ? `为当前任务的 ${importedInvoiceCount} 张发票创建 OA 草稿，合计 ${importedInvoiceAmount}。`
+    : "为当前批次创建 OA 草稿。";
   const canSubmitCurrentBatch = activeStatus === "unsubmitted"
     && (selectedTaskImportBatchSelected
       ? selectedTaskImportBatchCanSubmit
@@ -1355,7 +1385,7 @@ export default function EtcTicketManagementPage() {
       mergeReconciliationTask(task);
       setRemoveImportedInvoicesDialogOpen(false);
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : "已导入ETC发票移除失败。");
+      setActionError(caught instanceof Error ? caught.message : "移除发票失败。");
     } finally {
       setRemoveImportedInvoicesSubmitting(false);
     }
@@ -1549,7 +1579,7 @@ export default function EtcTicketManagementPage() {
       setDraftResult(null);
       setCreateDialogOpen(false);
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : "撤销草稿/释放发票失败。");
+      setActionError(caught instanceof Error ? caught.message : "撤销草稿失败。");
     } finally {
       setOaActionLoading(false);
     }
@@ -1763,7 +1793,7 @@ export default function EtcTicketManagementPage() {
     <Box data-testid="etc-ticket-management-page">
       <PageScaffold
         className="etc-page"
-        title="ETC票据管理"
+        title="ETC票据"
         actions={
           <Button
             component={RouterLink}
@@ -1771,7 +1801,7 @@ export default function EtcTicketManagementPage() {
             variant="outlined"
             endIcon={<ArrowForwardOutlinedIcon />}
           >
-            导入 ETC 发票
+            导入发票
           </Button>
         }
       >
@@ -1823,7 +1853,7 @@ export default function EtcTicketManagementPage() {
                 disabled={!canSubmitCurrentBatch || draftCreating}
                 onClick={() => setCreateDialogOpen(true)}
               >
-                提交OA支付申请
+                提交OA
               </Button>
             ) : null}
           </Paper>
@@ -1855,9 +1885,9 @@ export default function EtcTicketManagementPage() {
                   <Typography variant="caption" color="text.secondary" fontWeight={800}>
                     对账任务
                   </Typography>
-                  {taskLoading ? <StatePanel tone="loading" compact>正在加载对账任务。</StatePanel> : null}
+                  {taskLoading ? <StatePanel tone="loading" compact>加载中。</StatePanel> : null}
                   {!taskLoading && reconciliationTasks.length === 0 ? (
-                    <StatePanel tone="empty" compact>暂无对账任务。</StatePanel>
+                    <StatePanel tone="empty" compact>暂无任务。</StatePanel>
                   ) : null}
                   <List disablePadding aria-label="ETC对账任务">
                     {reconciliationTasks.map((task) => {
@@ -1870,13 +1900,13 @@ export default function EtcTicketManagementPage() {
                           data-testid={`etc-reconciliation-task-row-${task.taskId}`}
                           disablePadding
                           secondaryAction={
-                            <Tooltip title={deletable ? "删除对账任务" : deleteTaskDisabledReason(task)}>
+                            <Tooltip title={deletable ? "删除任务" : deleteTaskDisabledReason(task)}>
                               <span>
                                 <IconButton
                                   edge="end"
                                   size="small"
                                   color="error"
-                                  aria-label={deletable ? `删除对账任务 ${taskTitle}` : deleteTaskDisabledReason(task)}
+                                  aria-label={deletable ? `删除任务 ${taskTitle}` : deleteTaskDisabledReason(task)}
                                   disabled={!deletable || deleteSubmitting}
                                   onClick={(event) => openDeleteTaskDialog(task, event)}
                                 >
@@ -1917,8 +1947,8 @@ export default function EtcTicketManagementPage() {
                   </List>
                 </Box>
               ) : null}
-              {loading ? <StatePanel tone="loading" compact>正在加载ETC批次。</StatePanel> : null}
-              {!loading && visibleBatches.length === 0 ? <StatePanel tone="empty" compact>当前筛选下没有ETC批次。</StatePanel> : null}
+              {loading ? <StatePanel tone="loading" compact>加载中。</StatePanel> : null}
+              {!loading && visibleBatches.length === 0 ? <StatePanel tone="empty" compact>无匹配批次。</StatePanel> : null}
               <List className="etc-batch-list" aria-label="ETC批次列表" disablePadding>
                 {visibleBatches.map((batch) => {
                   const deletable = canDeleteBatch(batch);
@@ -1931,13 +1961,13 @@ export default function EtcTicketManagementPage() {
                       data-testid={`etc-batch-row-${batch.id}`}
                       disablePadding
                       secondaryAction={
-                        <Tooltip title={deletable ? "删除ETC批次" : "已提交批次不能删除"}>
+                        <Tooltip title={deletable ? "删除批次" : "已提交批次不能删除"}>
                           <span>
                             <IconButton
                               edge="end"
                               size="small"
                               color="error"
-                              aria-label={deletable ? `删除ETC批次 ${batchTitle}` : "已提交批次不能删除"}
+                              aria-label={deletable ? `删除批次 ${batchTitle}` : "已提交批次不能删除"}
                               disabled={!deletable || deleteSubmitting}
                               onClick={(event) => openDeleteBatchDialog(batch, event)}
                             >
@@ -1994,10 +2024,10 @@ export default function EtcTicketManagementPage() {
                   <Stack className="etc-detail-heading" direction={{ xs: "column", md: "row" }} alignItems={{ xs: "stretch", md: "flex-start" }} spacing={1.5}>
                     <Box>
                       <Typography component="h2" variant="h6" fontWeight={800}>
-                        ETC对账任务
+                        对账任务
                       </Typography>
                       <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                        {selectedTask ? `${formatTaskTitle(selectedTask)} / v${selectedTask.version}` : "请选择左侧对账任务或新建批次。"}
+                        {selectedTask ? `${formatTaskTitle(selectedTask)} / v${selectedTask.version}` : "选择左侧任务，或新建批次。"}
                       </Typography>
                     </Box>
                     <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
@@ -2022,7 +2052,7 @@ export default function EtcTicketManagementPage() {
                         startIcon={taskPanelExpanded ? <ExpandLessOutlinedIcon /> : <ExpandMoreOutlinedIcon />}
                         onClick={() => setTaskPanelExpanded((current) => !current)}
                       >
-                        {taskPanelExpanded ? "折叠ETC对账任务" : "展开ETC对账任务"}
+                        {taskPanelExpanded ? "折叠任务" : "展开任务"}
                       </Button>
                     </Stack>
                   </Stack>
@@ -2034,19 +2064,19 @@ export default function EtcTicketManagementPage() {
                           <Box className="etc-upload-blocks" aria-label="ETC对账文件上传">
                             <Box className="etc-upload-drop-grid" aria-label="ETC导入动作">
                               <UploadBlock
-                                label="信用卡账单 PDF"
+                                label="信用卡账单"
                                 accept=".pdf,application/pdf"
                                 helperText="拖拽 PDF 到这里，或点击选择文件。"
                                 disabled={!taskIsMutable || taskActionLoading}
                                 onFiles={handleUploadCreditCardStatement}
                               />
                               <UploadBlock
-                                label="票根网 TXT"
+                                label="票根网"
                                 accept=".txt,text/plain"
-                                helperText="仅支持票根网 TXT，可拖拽多个 TXT 文件。"
+                                helperText="支持多个 TXT 文件。"
                                 multiple
                                 disabled={!taskIsMutable || taskActionLoading || hasLegacyNonTxtTicketRootSource}
-                                disabledReason={hasLegacyNonTxtTicketRootSource ? "已有非 TXT 票根来源，删除后可导入 TXT。" : undefined}
+                                disabledReason={hasLegacyNonTxtTicketRootSource ? "已有非 TXT 来源，删除后可导入。" : undefined}
                                 onFiles={handleUploadTicketRootFiles}
                               />
                             </Box>
@@ -2058,7 +2088,7 @@ export default function EtcTicketManagementPage() {
                           <Typography fontWeight={800}>{formatMoney(selectedReconciliationSummary.oaTotalAmount)}</Typography>
                         </Box>
                         <Box>
-                          <Typography variant="caption" color="text.secondary">任务范围</Typography>
+                          <Typography variant="caption" color="text.secondary">范围</Typography>
                           <Typography fontWeight={800}>{formatDateRange(selectedReconciliationSummary.periodStart, selectedReconciliationSummary.periodEnd)}</Typography>
                         </Box>
                         <Box>
@@ -2071,12 +2101,12 @@ export default function EtcTicketManagementPage() {
                         <Stack spacing={1}>
                           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
                             <Typography component="h3" variant="subtitle1" fontWeight={800}>
-                              已上传文件
+                              上传文件
                             </Typography>
                             <Chip label={`${selectedTask.sourceFiles.length} 个文件`} size="small" variant="outlined" />
                           </Stack>
                           {selectedTask.sourceFiles.length === 0 ? (
-                            <StatePanel tone="empty" compact>暂无上传文件。</StatePanel>
+                            <StatePanel tone="empty" compact>暂无文件。</StatePanel>
                           ) : (
                             <List disablePadding aria-label="已上传文件列表">
                               {selectedTask.sourceFiles.map((sourceFile) => {
@@ -2401,12 +2431,12 @@ export default function EtcTicketManagementPage() {
                       <Box component="section" className="etc-task-imported-invoices" aria-label="已导入ETC发票">
                         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
                           <Typography component="h3" variant="subtitle1" fontWeight={800}>
-                            已导入ETC发票
+                            已导入发票
                           </Typography>
-                          {taskImportBatchDetail ? (
+                          {importedInvoiceCount > 0 ? (
                             <Chip label={`${importedInvoiceCount} 张`} size="small" variant="outlined" />
                           ) : null}
-                          {taskImportBatchDetail ? (
+                          {Number(importedInvoiceAmount) > 0 ? (
                             <Chip label={`合计 ${importedInvoiceAmount}`} size="small" color="success" variant="outlined" />
                           ) : null}
                           {canRemoveImportedInvoices ? (
@@ -2419,12 +2449,12 @@ export default function EtcTicketManagementPage() {
                               disabled={removeImportedInvoicesSubmitting || taskActionLoading}
                               onClick={() => setRemoveImportedInvoicesDialogOpen(true)}
                             >
-                              移除已导入的发票
+                              移除发票
                             </Button>
                           ) : null}
                         </Stack>
                         {!selectedTaskImportBatchId ? (
-                          <StatePanel tone="info" compact>确认对账后，请到 ETC 发票导入页导入 zip。</StatePanel>
+                          <StatePanel tone="info" compact>确认后导入 ZIP。</StatePanel>
                         ) : taskImportDetailError ? (
                           <StatePanel tone="error" compact>{taskImportDetailError}</StatePanel>
                         ) : (
@@ -2432,8 +2462,8 @@ export default function EtcTicketManagementPage() {
                             taskImportBatchDetail?.invoiceItems ?? [],
                             {
                               ariaLabel: "已导入ETC发票明细",
-                              emptyText: "暂无已导入ETC发票明细。",
-                              loadingText: taskImportDetailLoading ? "正在加载已导入ETC发票。" : "",
+                              emptyText: "暂无明细。",
+                              loadingText: taskImportDetailLoading ? "加载中。" : "",
                               tableKey: selectedTaskImportBatchId,
                             },
                           )
@@ -2442,7 +2472,7 @@ export default function EtcTicketManagementPage() {
                       ) : null}
                     </Stack>
                   ) : (
-                    <StatePanel tone="empty">暂无可展示的ETC对账任务。</StatePanel>
+                    <StatePanel tone="empty">暂无任务。</StatePanel>
                   )}
                     </Box>
                   </Collapse>
@@ -2454,10 +2484,10 @@ export default function EtcTicketManagementPage() {
                   <Stack className="etc-detail-heading" direction="row" alignItems="center" justifyContent="space-between" spacing={1.5}>
                     <Box>
                       <Typography component="h2" variant="h6" fontWeight={800}>
-                        ETC批次详情
+                        批次详情
                       </Typography>
                       <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                        {selectedBatch ? selectedBatch.externalBatchId || selectedBatch.etcBatchId : "请选择左侧批次。"}
+                        {selectedBatch ? selectedBatch.externalBatchId || selectedBatch.etcBatchId : "选择左侧批次。"}
                       </Typography>
                     </Box>
                     <Button
@@ -2468,13 +2498,13 @@ export default function EtcTicketManagementPage() {
                       startIcon={batchDetailPanelExpanded ? <ExpandLessOutlinedIcon /> : <ExpandMoreOutlinedIcon />}
                       onClick={() => setBatchDetailPanelExpanded((current) => !current)}
                     >
-                      {batchDetailPanelExpanded ? "折叠ETC批次详情" : "展开ETC批次详情"}
+                        {batchDetailPanelExpanded ? "折叠详情" : "展开详情"}
                     </Button>
                   </Stack>
                   <Collapse in={batchDetailPanelExpanded} timeout="auto" unmountOnExit>
                     <Box id="etc-batch-detail-content">
                       {!selectedBatch ? (
-                        <StatePanel tone="empty">请选择左侧批次。</StatePanel>
+                        <StatePanel tone="empty">选择左侧批次。</StatePanel>
                       ) : (
                         <Stack spacing={2}>
                   <Stack className="etc-detail-heading" direction={{ xs: "column", md: "row" }} alignItems={{ xs: "stretch", md: "flex-start" }} spacing={1.5}>
@@ -2515,9 +2545,9 @@ export default function EtcTicketManagementPage() {
                       <Stack spacing={1.25}>
                         <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "stretch", sm: "center" }} justifyContent="space-between">
                           <Box>
-                            <Typography fontWeight={800}>OA 草稿已创建，等待 OA 系统确认提交。</Typography>
+                            <Typography fontWeight={800}>OA草稿已创建，等待提交确认。</Typography>
                             <Typography variant="body2" color="text.secondary">
-                              {selectedBusinessBatch.oaDetectionReason || selectedBusinessBatch.oaDetectionError || "后台会继续检测 OA 流程状态。"}
+                              {selectedBusinessBatch.oaDetectionReason || selectedBusinessBatch.oaDetectionError || "后台持续检测流程状态。"}
                             </Typography>
                           </Box>
                           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
@@ -2529,7 +2559,7 @@ export default function EtcTicketManagementPage() {
                                 startIcon={<OpenInNewOutlinedIcon />}
                                 onClick={handleOpenCurrentDraft}
                               >
-                                打开 OA 草稿
+                                打开草稿
                               </Button>
                             ) : null}
                             <Button
@@ -2551,7 +2581,7 @@ export default function EtcTicketManagementPage() {
                               disabled={oaActionLoading}
                               onClick={() => void handleRevokeBusinessBatchDraft()}
                             >
-                              撤销草稿/释放发票
+                              撤销草稿
                             </Button>
                             {isManualOaFallbackStatus(selectedBusinessBatch.status) ? (
                               <Button
@@ -2636,13 +2666,13 @@ export default function EtcTicketManagementPage() {
 
                   <Divider />
 
-                          {detailLoading ? <StatePanel tone="loading" compact>正在加载批次明细。</StatePanel> : null}
+                          {detailLoading ? <StatePanel tone="loading" compact>加载中。</StatePanel> : null}
                           {renderEtcInvoiceTable(
                             invoiceRows,
                             {
                               ariaLabel: "ETC发票明细",
-                              emptyText: "暂无发票明细。",
-                              loadingText: detailLoading ? "正在加载批次明细。" : "",
+                              emptyText: "暂无明细。",
+                              loadingText: detailLoading ? "加载中。" : "",
                               tableKey: selectedBatchId,
                             },
                           )}
@@ -2657,7 +2687,7 @@ export default function EtcTicketManagementPage() {
                                   <Box key={attempt.attemptId || `${attempt.importBatchId}-${index}`} className="etc-import-attempt-row">
                                     <Typography fontWeight={800}>{attempt.importBatchId || `第 ${index + 1} 次导入`}</Typography>
                                     <Typography variant="body2" color="text.secondary">
-                                      导入 {attempt.imported}，重复 {attempt.duplicatesSkipped}，补齐附件 {attempt.attachmentsCompleted}，失败 {attempt.failed}
+                                      导入 {attempt.imported}，重复 {attempt.duplicatesSkipped}，补齐 {attempt.attachmentsCompleted}，失败 {attempt.failed}
                                     </Typography>
                                     <Typography variant="caption" color="text.secondary">{splitDateTimeParts(attempt.createdAt).date}</Typography>
                                   </Box>
@@ -2737,12 +2767,12 @@ export default function EtcTicketManagementPage() {
 
         <AppDialog
           open={Boolean(deleteTarget)}
-          title={deleteTarget?.kind === "task" ? "删除对账任务" : deleteTarget?.kind === "sourceFile" ? "删除源文件" : "删除ETC批次"}
+          title={deleteTarget?.kind === "task" ? "删除任务" : deleteTarget?.kind === "sourceFile" ? "删除源文件" : "删除批次"}
           description={deleteTarget?.kind === "task"
             ? deleteTaskDescription(deleteTarget.item)
             : deleteTarget?.kind === "sourceFile"
               ? "将删除该上传源文件及其解析结果、解析错误和解析产物。"
-              : "将删除该未提交 ETC 批次。已提交或已关联 OA 的批次不会被允许删除。"}
+              : "将删除该未提交批次。已提交或已关联 OA 的批次不能删除。"}
           onClose={() => {
             if (!deleteSubmitting) {
               setDeleteTarget(null);
@@ -2764,7 +2794,7 @@ export default function EtcTicketManagementPage() {
               <Typography>数量：{taskCountText(deleteTarget.item)}</Typography>
               {deleteTarget.item.status === "imported" || deleteTarget.item.hasImportedInvoices ? (
                 <Typography color="warning.main">
-                  将一并删除该任务下已导入的 ETC 发票；如需恢复，需要重新创建/确认任务并重新导入 zip。
+                  将一并删除已导入发票；如需恢复，需重新确认并导入 ZIP。
                 </Typography>
               ) : null}
               <Typography>版本：v{deleteTarget.item.version}</Typography>
@@ -2788,8 +2818,8 @@ export default function EtcTicketManagementPage() {
 
         <AppDialog
           open={removeImportedInvoicesDialogOpen}
-          title="移除已导入发票"
-          description="将清空该对账任务下已导入的 ETC 发票关联，任务可重新进入 ETC 发票导入流程。"
+          title="移除发票"
+          description="清空本任务下已导入发票，任务可重新导入。"
           onClose={() => {
             if (!removeImportedInvoicesSubmitting) {
               setRemoveImportedInvoicesDialogOpen(false);
@@ -2820,7 +2850,7 @@ export default function EtcTicketManagementPage() {
             <Stack spacing={1}>
               <Typography>任务：{formatTaskTitle(selectedTask)}</Typography>
               <Typography>期间：{formatDateRange(selectedTask.periodStart, selectedTask.periodEnd)}</Typography>
-              <Typography>已导入发票：{importedInvoiceCount} 张</Typography>
+              <Typography>已导入：{importedInvoiceCount} 张</Typography>
               <Typography>版本：v{selectedTask.version}</Typography>
             </Stack>
           ) : null}
@@ -2829,7 +2859,7 @@ export default function EtcTicketManagementPage() {
         <AppDialog
           open={revokeDialogOpen}
           title="撤销提交状态"
-          description="只修改 fin-ops 内部 ETC 批次状态，不撤回 OA 流程，不修改 OA 数据。"
+          description="只修改内部批次状态，不撤回 OA 流程。"
           onClose={() => setRevokeDialogOpen(false)}
           actions={
             <>
@@ -2841,7 +2871,7 @@ export default function EtcTicketManagementPage() {
 
         <AppDialog
           open={createDialogOpen}
-          title={draftResult ? "OA草稿自动检测" : "创建OA支付申请草稿"}
+          title={draftResult ? "OA自动检测" : "创建OA草稿"}
           onClose={() => setCreateDialogOpen(false)}
           actions={
             draftResult ? (
@@ -2853,7 +2883,7 @@ export default function EtcTicketManagementPage() {
                     startIcon={<OpenInNewOutlinedIcon />}
                     onClick={handleOpenCurrentDraft}
                   >
-                    打开 OA 草稿
+                    打开草稿
                   </Button>
                 ) : null}
                 <Button
@@ -2873,7 +2903,7 @@ export default function EtcTicketManagementPage() {
                   disabled={oaActionLoading}
                   onClick={() => void handleRevokeBusinessBatchDraft()}
                 >
-                  撤销草稿/释放发票
+                  撤销草稿
                 </Button>
                 <Button type="button" onClick={() => setCreateDialogOpen(false)}>关闭</Button>
               </>
@@ -2881,7 +2911,7 @@ export default function EtcTicketManagementPage() {
               <>
                 <Button type="button" onClick={() => setCreateDialogOpen(false)}>取消</Button>
                 <Button type="button" variant="contained" onClick={handleCreateDraft} disabled={draftCreating}>
-                  {draftCreating ? "正在创建..." : "确认创建草稿"}
+                  {draftCreating ? "正在创建..." : "创建草稿"}
                 </Button>
               </>
             )
@@ -2889,13 +2919,13 @@ export default function EtcTicketManagementPage() {
         >
           {draftResult ? (
             <Stack spacing={1}>
-              <Typography>OA 草稿已创建，等待 OA 系统确认提交。</Typography>
-              <Typography>批次号：{draftResult.etcBatchId}</Typography>
+              <Typography>OA草稿已创建，等待提交确认。</Typography>
+              <Typography>批次：{draftResult.etcBatchId}</Typography>
             </Stack>
           ) : (
             <Stack spacing={1}>
               <Typography>{currentOaDraftDescription}</Typography>
-              <Typography>当前批次：{currentOaDraftBatchLabel || "-"}</Typography>
+              <Typography>批次：{currentOaDraftBatchLabel || "-"}</Typography>
             </Stack>
           )}
         </AppDialog>

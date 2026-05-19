@@ -2662,6 +2662,9 @@ class EtcApiTests(unittest.TestCase):
             )
             completed_job = self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
             invoices = json.loads(app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20").body)
+            business_batches = json.loads(
+                app.handle_request("GET", f"/api/etc/business-batches?taskId={confirmed.task_id}").body
+            )
 
         self.assertEqual(preview_response.status_code, 200)
         self.assertEqual(preview_payload["reconciliationFilter"]["allowedInvoiceNumbers"], ["ETC2950", "ETC4175"])
@@ -2675,6 +2678,12 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(completed_job["status"], "succeeded")
         self.assertEqual(invoices["total"], 2)
         self.assertEqual({item["invoice_number"] for item in invoices["items"]}, {"ETC2950", "ETC4175"})
+        self.assertEqual(business_batches["data"]["total"], 1)
+        business_batch = business_batches["data"]["items"][0]
+        self.assertEqual(business_batch["taskId"], confirmed.task_id)
+        self.assertEqual(business_batch["status"], "imported")
+        self.assertEqual(business_batch["invoiceSummary"]["count"], 2)
+        self.assertEqual(business_batch["importBatchIds"], ["etc_import_batch_0001"])
 
     def test_etc_import_preview_requires_ready_task_even_when_no_tasks_exist(self) -> None:
         with TemporaryDirectory() as temp_dir:

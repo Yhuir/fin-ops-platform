@@ -42,6 +42,10 @@ describe("ETC ticket management page", () => {
       const batchListCalls = fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/etc/business-batches?"));
       expect(batchListCalls.length).toBeGreaterThanOrEqual(2);
     });
+    await waitFor(() => {
+      const taskCalls = fetchMock.mock.calls.filter(([url]) => String(url) === "/api/etc/reconciliation-tasks");
+      expect(taskCalls.length).toBeGreaterThanOrEqual(2);
+    });
   });
 
   test("unsubmitted mode shows batch list and whole-batch OA submit action", async () => {
@@ -49,12 +53,12 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(within(page).getByRole("heading", { name: "ETC票据管理" })).toBeInTheDocument();
+    expect(within(page).getByRole("heading", { name: "ETC票据" })).toBeInTheDocument();
     expect(await within(page).findByRole("button", { name: "未提交 2" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "已提交 1" })).toBeInTheDocument();
     expect(within(page).getByRole("list", { name: "ETC批次列表" })).toBeInTheDocument();
     expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("ETC-2026-03-A");
-    await waitFor(() => expect(within(page).getByRole("button", { name: "提交OA支付申请" })).toBeEnabled());
+    await waitFor(() => expect(within(page).getByRole("button", { name: "提交OA" })).toBeEnabled());
     expect(within(page).getAllByText("ETC-2026-03-A").length).toBeGreaterThanOrEqual(1);
     expect(await within(page).findByText("ETC-2026-001")).toBeInTheDocument();
 
@@ -72,9 +76,9 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     const row = await within(page).findByTestId("etc-batch-row-etc-batch-unsubmitted-01");
-    await user.click(within(row).getByRole("button", { name: "删除ETC批次 ETC-2026-03-A" }));
+    await user.click(within(row).getByRole("button", { name: "删除批次 ETC-2026-03-A" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "删除ETC批次" });
+    const dialog = await screen.findByRole("dialog", { name: "删除批次" });
     expect(dialog).toHaveTextContent("ETC-2026-03-A");
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
 
@@ -95,9 +99,9 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     const row = await within(page).findByTestId("etc-reconciliation-task-row-etc-recon-task-001");
-    await user.click(within(row).getByRole("button", { name: "删除对账任务 2026-02 ETC 对账" }));
+    await user.click(within(row).getByRole("button", { name: "删除任务 2026-02 ETC 对账" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "删除对账任务" });
+    const dialog = await screen.findByRole("dialog", { name: "删除任务" });
     expect(dialog).toHaveTextContent("2026-02 ETC 对账");
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
 
@@ -164,15 +168,15 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     const row = await within(page).findByTestId("etc-reconciliation-task-row-etc-recon-delete-refresh-hangs-001");
-    await user.click(within(row).getByRole("button", { name: "删除对账任务 2026-02 ETC 对账" }));
-    const dialog = await screen.findByRole("dialog", { name: "删除对账任务" });
+    await user.click(within(row).getByRole("button", { name: "删除任务 2026-02 ETC 对账" }));
+    const dialog = await screen.findByRole("dialog", { name: "删除任务" });
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
 
     await waitFor(() => {
       expect(deleteTask).toHaveBeenCalledWith("etc-recon-delete-refresh-hangs-001", 3);
     });
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "删除对账任务" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: "删除任务" })).not.toBeInTheDocument();
     });
     expect(within(page).queryByTestId("etc-reconciliation-task-row-etc-recon-delete-refresh-hangs-001")).not.toBeInTheDocument();
     expect(screen.queryByText("正在删除...")).not.toBeInTheDocument();
@@ -269,12 +273,12 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     const row = await within(page).findByTestId("etc-reconciliation-task-row-etc-recon-imported-delete-001");
-    await user.click(within(row).getByRole("button", { name: "删除对账任务 2026-03 ETC 已导入" }));
+    await user.click(within(row).getByRole("button", { name: "删除任务 2026-03 ETC 已导入" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "删除对账任务" });
-    expect(dialog).toHaveTextContent("将删除该对账任务及其未进入 OA 链路的数据");
-    expect(dialog).toHaveTextContent("一并删除已导入 ETC 发票");
-    expect(dialog.textContent).toContain("重新导入时只能重新建/导");
+    const dialog = await screen.findByRole("dialog", { name: "删除任务" });
+    expect(dialog).toHaveTextContent("将删除该任务及未进入 OA 的数据");
+    expect(dialog).toHaveTextContent("一并删除已导入发票");
+    expect(dialog.textContent).toContain("重新确认并导入 ZIP");
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
 
     await waitFor(() => {
@@ -283,7 +287,7 @@ describe("ETC ticket management page", () => {
     await waitFor(() => {
       expect(within(page).queryByTestId("etc-reconciliation-task-row-etc-recon-imported-delete-001")).not.toBeInTheDocument();
     });
-    expect(within(page).getByText("请选择左侧对账任务或新建批次。")).toBeInTheDocument();
+    expect(within(page).getByText("选择左侧任务，或新建批次。")).toBeInTheDocument();
     expect(within(page).queryByRole("region", { name: "已导入ETC发票" })).not.toBeInTheDocument();
   });
 
@@ -299,9 +303,9 @@ describe("ETC ticket management page", () => {
     expect(within(page).queryByRole("group", { name: "票根网导入方式" })).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "票根网 PDF/JPG" })).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "手工输入" })).not.toBeInTheDocument();
-    expect(within(page).getByLabelText("上传信用卡账单 PDF")).toBeInTheDocument();
+    expect(within(page).getByLabelText("上传信用卡账单")).toBeInTheDocument();
     expect(within(page).queryByLabelText("上传补充凭证")).not.toBeInTheDocument();
-    expect(within(page).getByLabelText("上传票根网 TXT")).toBeInTheDocument();
+    expect(within(page).getByLabelText("上传票根网")).toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "补ETC发票" })).not.toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "确认对账" })).toBeDisabled();
 
@@ -321,7 +325,7 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    await within(page).findByLabelText("上传信用卡账单 PDF");
+    await within(page).findByLabelText("上传信用卡账单");
     const uploadRegion = page.querySelector('[aria-label="ETC对账文件上传"]');
     if (!(uploadRegion instanceof HTMLElement)) {
       throw new Error("Expected upload region to render.");
@@ -329,9 +333,9 @@ describe("ETC ticket management page", () => {
     const dropGrid = uploadRegion.querySelector(".etc-upload-drop-grid");
 
     expect(dropGrid).toBeInstanceOf(HTMLElement);
-    expect(within(dropGrid as HTMLElement).getByLabelText("上传信用卡账单 PDF")).toBeInTheDocument();
+    expect(within(dropGrid as HTMLElement).getByLabelText("上传信用卡账单")).toBeInTheDocument();
     expect(within(dropGrid as HTMLElement).queryByLabelText("上传补充凭证")).not.toBeInTheDocument();
-    expect(within(dropGrid as HTMLElement).getByLabelText("上传票根网 TXT")).toBeInTheDocument();
+    expect(within(dropGrid as HTMLElement).getByLabelText("上传票根网")).toBeInTheDocument();
     expect(within(dropGrid as HTMLElement).queryByRole("button", { name: "票根网 PDF/JPG" })).not.toBeInTheDocument();
     expect(within(dropGrid as HTMLElement).queryByRole("button", { name: "补ETC发票" })).not.toBeInTheDocument();
   });
@@ -463,7 +467,7 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    const txtUploadBox = await within(page).findByLabelText("上传票根网 TXT");
+    const txtUploadBox = await within(page).findByLabelText("上传票根网");
     expect(txtUploadBox).toBeEnabled();
     expect(within(page).queryByRole("button", { name: "票根网 PDF/JPG" })).not.toBeInTheDocument();
 
@@ -493,7 +497,7 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    const txtUploadBox = await within(page).findByLabelText("上传票根网 TXT");
+    const txtUploadBox = await within(page).findByLabelText("上传票根网");
     const txtFile = new File(["车牌号：云A516HJ\n交易时间：2026-04-02 13:30:29交易金额：￥57.95"], "云A516HJ.txt", { type: "text/plain" });
 
     fireEvent.dragEnter(txtUploadBox, { dataTransfer: { files: [txtFile] } });
@@ -590,7 +594,7 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByText("已上传文件")).toBeInTheDocument();
+    expect(await within(page).findByText("上传文件")).toBeInTheDocument();
     expect(within(page).getByText("票根网-成功.pdf")).toBeInTheDocument();
     expect(within(page).getAllByText("票根网-失败.pdf").length).toBeGreaterThanOrEqual(1);
     expect(within(page).getAllByText("票根网").length).toBeGreaterThanOrEqual(2);
@@ -628,7 +632,7 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByLabelText("上传票根网 TXT")).toBeInTheDocument();
+    expect(await within(page).findByLabelText("上传票根网")).toBeInTheDocument();
     expect(within(page).queryByRole("group", { name: "票根网导入方式" })).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "手工输入" })).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "TXT文件" })).not.toBeInTheDocument();
@@ -680,8 +684,8 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByLabelText("上传票根网 TXT")).toHaveAttribute("aria-disabled", "true");
-    expect(within(page).getByText("已有非 TXT 票根来源，删除后可导入 TXT。")).toBeInTheDocument();
+    expect(await within(page).findByLabelText("上传票根网")).toHaveAttribute("aria-disabled", "true");
+    expect(within(page).getByText("已有非 TXT 来源，删除后可导入。")).toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "票根网 PDF/JPG" })).not.toBeInTheDocument();
   });
 
@@ -773,7 +777,7 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByLabelText("上传票根网 TXT")).toBeEnabled();
+    expect(await within(page).findByLabelText("上传票根网")).toBeEnabled();
     expect(within(page).queryByRole("button", { name: "手工输入" })).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "PDF/JPG" })).not.toBeInTheDocument();
     expect(within(page).queryByText("已有 TXT 源文件，删除后可切换。")).not.toBeInTheDocument();
@@ -947,8 +951,8 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByLabelText("上传票根网 TXT")).toHaveAttribute("aria-disabled", "true");
-    expect(within(page).getByText("已有非 TXT 票根来源，删除后可导入 TXT。")).toBeInTheDocument();
+    expect(await within(page).findByLabelText("上传票根网")).toHaveAttribute("aria-disabled", "true");
+    expect(within(page).getByText("已有非 TXT 来源，删除后可导入。")).toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "手工输入" })).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "票根网 PDF/JPG" })).not.toBeInTheDocument();
   });
@@ -1078,7 +1082,7 @@ describe("ETC ticket management page", () => {
 
     expect(metrics).toHaveTextContent("金额");
     expect(metrics).toHaveTextContent("0.00");
-    expect(metrics).toHaveTextContent("任务范围");
+    expect(metrics).toHaveTextContent("范围");
     expect(metrics).toHaveTextContent("-");
     expect(metrics).toHaveTextContent("数量");
     expect(metrics).toHaveTextContent("ETC票 0 + 补充凭证 0");
@@ -1301,17 +1305,17 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByRole("heading", { name: "已导入ETC发票" })).toBeInTheDocument();
+    expect(await within(page).findByRole("heading", { name: "已导入发票" })).toBeInTheDocument();
     const importedInvoiceSection = within(page).getByRole("region", { name: "已导入ETC发票" });
     expect(within(importedInvoiceSection).getByText("1 张")).toBeInTheDocument();
-    const removeButton = within(importedInvoiceSection).getByRole("button", { name: "移除已导入的发票" });
+    const removeButton = within(importedInvoiceSection).getByRole("button", { name: "移除发票" });
     expect(removeButton).toBeEnabled();
     expect(within(importedInvoiceSection).getByRole("table", { name: "已导入ETC发票明细" })).toBeInTheDocument();
     expect(within(importedInvoiceSection).getByText("ETC-IMPORTED-001")).toBeInTheDocument();
     expect(etcApi.fetchEtcBatchDetail).toHaveBeenCalledWith("import-session-001", expect.any(AbortSignal));
 
     await user.click(removeButton);
-    const dialog = await screen.findByRole("dialog", { name: "移除已导入发票" });
+    const dialog = await screen.findByRole("dialog", { name: "移除发票" });
     expect(dialog).toHaveTextContent("2026-03 ETC 已导入");
     expect(dialog).toHaveTextContent("1 张");
     await user.click(within(dialog).getByRole("button", { name: "确认移除" }));
@@ -1323,16 +1327,16 @@ describe("ETC ticket management page", () => {
       expect(within(page).queryByRole("region", { name: "已导入ETC发票" })).not.toBeInTheDocument();
     });
     expect(within(page).getByText("2026-03 ETC 已导入 / v9")).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "移除已导入发票" })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "移除发票" })).not.toBeInTheDocument());
 
-    await user.click(within(page).getByRole("button", { name: "折叠ETC对账任务" }));
-    expect(within(page).queryByText("已导入ETC发票")).not.toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "展开ETC对账任务" })).toHaveAttribute("aria-expanded", "false");
+    await user.click(within(page).getByRole("button", { name: "折叠任务" }));
+    expect(within(page).queryByText("已导入发票")).not.toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "展开任务" })).toHaveAttribute("aria-expanded", "false");
 
     expect(within(page).getByRole("region", { name: "ETC批次详情" })).toBeInTheDocument();
-    await user.click(within(page).getByRole("button", { name: "折叠ETC批次详情" }));
+    await user.click(within(page).getByRole("button", { name: "折叠详情" }));
     expect(within(page).queryByRole("table", { name: "ETC发票明细" })).not.toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "展开ETC批次详情" })).toHaveAttribute("aria-expanded", "false");
+    expect(within(page).getByRole("button", { name: "展开详情" })).toHaveAttribute("aria-expanded", "false");
   });
 
   test("creates OA draft from the selected imported reconciliation task batch", async () => {
@@ -1506,16 +1510,16 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     expect(await within(page).findByRole("region", { name: "导入记录" })).toBeInTheDocument();
-    expect(within(page).getByText(/导入 36，重复 0，补齐附件 0，失败 0/)).toBeInTheDocument();
+    expect(within(page).getByText(/导入 36，重复 0，补齐 0，失败 0/)).toBeInTheDocument();
 
-    const submitButton = within(page).getByRole("button", { name: "提交OA支付申请" });
+    const submitButton = within(page).getByRole("button", { name: "提交OA" });
     await waitFor(() => expect(submitButton).toBeEnabled());
     await user.click(submitButton);
 
-    const dialog = await screen.findByRole("dialog", { name: "创建OA支付申请草稿" });
-    expect(dialog).toHaveTextContent("将为当前 ETC 对账任务下已导入的 36 张发票创建 OA 支付申请草稿，发票合计 1673.30。");
-    expect(dialog).toHaveTextContent("当前批次：ETC-2026-OA-001");
-    await user.click(within(dialog).getByRole("button", { name: "确认创建草稿" }));
+    const dialog = await screen.findByRole("dialog", { name: "创建OA草稿" });
+    expect(dialog).toHaveTextContent("为当前任务的 36 张发票创建 OA 草稿，合计 1673.30。");
+    expect(dialog).toHaveTextContent("批次：ETC-2026-OA-001");
+    await user.click(within(dialog).getByRole("button", { name: "创建草稿" }));
 
     expect(openMock).toHaveBeenCalledWith("about:blank", "_blank");
     await waitFor(() => expect(createDraft).toHaveBeenCalledWith("etc_business_batch_imported_submit_001", { expectedVersion: 11 }));
@@ -1595,11 +1599,11 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    const deleteButton = await within(page).findByRole("button", { name: /删除对账任务 2026-03 ETC 已导入/ });
+    const deleteButton = await within(page).findByRole("button", { name: /删除任务 2026-03 ETC 已导入/ });
     expect(deleteButton).toBeEnabled();
     await user.click(deleteButton);
-    const dialog = await screen.findByRole("dialog", { name: "删除对账任务" });
-    expect(dialog).toHaveTextContent("将一并删除该任务下已导入的 ETC 发票");
+    const dialog = await screen.findByRole("dialog", { name: "删除任务" });
+    expect(dialog).toHaveTextContent("将一并删除已导入发票");
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
 
     await waitFor(() => {
@@ -1872,7 +1876,7 @@ describe("ETC ticket management page", () => {
     await user.click(await within(page).findByRole("button", { name: "已提交 1" }));
 
     await waitFor(() => expect(within(page).getAllByText("ETC-HIST-2026-01").length).toBeGreaterThanOrEqual(1));
-    expect(within(page).queryByRole("button", { name: "提交OA支付申请" })).not.toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "提交OA" })).not.toBeInTheDocument();
     expect(within(page).getAllByText("OA已提交").length).toBeGreaterThanOrEqual(1);
     expect(within(page).getByRole("button", { name: "撤销提交状态" })).toBeEnabled();
     expect(within(page).getByRole("button", { name: "已提交批次不能删除" })).toBeDisabled();
@@ -1999,24 +2003,24 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     await waitFor(() => expect(within(page).getAllByText("ETC-2026-03-A").length).toBeGreaterThanOrEqual(1));
-    const submitButton = within(page).getByRole("button", { name: "提交OA支付申请" });
+    const submitButton = within(page).getByRole("button", { name: "提交OA" });
     await waitFor(() => expect(submitButton).toBeEnabled());
     await user.click(submitButton);
 
-    const dialog = await screen.findByRole("dialog", { name: "创建OA支付申请草稿" });
-    expect(dialog).toHaveTextContent("将为当前 ETC 对账任务下已导入的 2 张发票创建 OA 支付申请草稿");
-    expect(dialog).toHaveTextContent("当前批次：ETC-2026-03-A");
-    await user.click(within(dialog).getByRole("button", { name: "确认创建草稿" }));
+    const dialog = await screen.findByRole("dialog", { name: "创建OA草稿" });
+    expect(dialog).toHaveTextContent("为当前任务的 2 张发票创建 OA 草稿");
+    expect(dialog).toHaveTextContent("批次：ETC-2026-03-A");
+    await user.click(within(dialog).getByRole("button", { name: "创建草稿" }));
 
     expect(openMock).toHaveBeenCalledWith("about:blank", "_blank");
     await waitFor(() => expect(openedWindow.location.href).toContain("https://oa.example.test/oa/#/normal/forms/form/2"));
     await waitFor(() => expect(createDraft).toHaveBeenCalledWith("etc_business_batch_0001", { expectedVersion: 7 }));
 
-    const resultDialog = await screen.findByRole("dialog", { name: "OA草稿自动检测" });
-    expect(resultDialog).toHaveTextContent("OA 草稿已创建，等待 OA 系统确认提交。");
-    expect(within(resultDialog).getByRole("button", { name: "打开 OA 草稿" })).toBeEnabled();
+    const resultDialog = await screen.findByRole("dialog", { name: "OA自动检测" });
+    expect(resultDialog).toHaveTextContent("OA草稿已创建，等待提交确认。");
+    expect(within(resultDialog).getByRole("button", { name: "打开草稿" })).toBeEnabled();
     expect(within(resultDialog).getByRole("button", { name: "刷新检测" })).toBeEnabled();
-    expect(within(resultDialog).getByRole("button", { name: "撤销草稿/释放发票" })).toBeEnabled();
+    expect(within(resultDialog).getByRole("button", { name: "撤销草稿" })).toBeEnabled();
     expect(within(resultDialog).queryByRole("button", { name: "确认已提交OA" })).not.toBeInTheDocument();
     expect(within(resultDialog).queryByRole("button", { name: "未提交OA" })).not.toBeInTheDocument();
   });
