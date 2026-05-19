@@ -895,8 +895,37 @@ export default function EtcTicketManagementPage() {
   function taskHasOaDraftOrSubmittedLink(task: EtcReconciliationTask) {
     return Boolean(task.oaDraftBatchId?.trim() || task.submittedConfirmedAt?.trim());
   }
+  const businessBatchDeleteBlockReason = (batch: EtcBusinessBatchSummary) => {
+    if (isSubmittedBusinessStatus(batch.status) || batch.oaProcessStatus === "in_progress") {
+      return "OA已提交，不能删除";
+    }
+    if (batch.submissionBatchId?.trim() || batch.oaDraftId?.trim()) {
+      return "OA草稿已创建，请先撤销草稿";
+    }
+    if (!["draft", "reviewing", "ready_for_import", "imported", "import_failed", "import_partial_failed", "oa_draft_failed", "not_submitted", "manually_marked_not_submitted"].includes(batch.status)) {
+      return "当前状态不能删除";
+    }
+    return "";
+  };
+  const canDeleteBusinessBatch = (batch: EtcBusinessBatchSummary) => !businessBatchDeleteBlockReason(batch);
+  const taskLinkedBusinessBatch = (task: EtcReconciliationTask) => {
+    const importBatchId = task.importBatchId?.trim();
+    return businessBatches.find((batch) =>
+      batch.taskId === task.taskId
+      && (!importBatchId || batch.importBatchIds.includes(importBatchId))
+    ) ?? null;
+  };
+  const taskLinkedBusinessBatchDeleteBlockReason = (task: EtcReconciliationTask) => {
+    const linkedBusinessBatch = taskLinkedBusinessBatch(task);
+    return linkedBusinessBatch ? businessBatchDeleteBlockReason(linkedBusinessBatch) : "";
+  };
   function taskHasDeleteBlockingSubmissionLink(task: EtcReconciliationTask) {
-    return Boolean(task.oaDraftBatchId?.trim() || task.etcBatchId?.trim() || task.submittedConfirmedAt?.trim());
+    return Boolean(
+      task.oaDraftBatchId?.trim()
+      || task.etcBatchId?.trim()
+      || task.submittedConfirmedAt?.trim()
+      || taskLinkedBusinessBatchDeleteBlockReason(task),
+    );
   }
   const canRemoveImportedInvoicesFromTask = (task: EtcReconciliationTask) =>
     task.status === "imported" && Boolean(task.importBatchId?.trim()) && !task.submittedConfirmedAt?.trim();
@@ -911,6 +940,10 @@ export default function EtcTicketManagementPage() {
     }
     if (task.etcBatchId?.trim()) {
       return "存在OA批次链路，请先撤销草稿";
+    }
+    const linkedBusinessBatchReason = taskLinkedBusinessBatchDeleteBlockReason(task);
+    if (linkedBusinessBatchReason) {
+      return linkedBusinessBatchReason;
     }
     if (task.status === "importing") {
       return "导入中，不能删除";
@@ -936,19 +969,8 @@ export default function EtcTicketManagementPage() {
     }
     return canDeleteBusinessBatch(businessBatch);
   };
-  const canDeleteBusinessBatch = (batch: EtcBusinessBatchSummary) =>
-    ["draft", "reviewing", "ready_for_import", "imported", "import_failed", "import_partial_failed", "oa_draft_failed", "not_submitted", "manually_marked_not_submitted"].includes(batch.status)
-    && !batch.submissionBatchId?.trim()
-    && !batch.oaDraftId?.trim();
-  const deleteBusinessBatchDisabledReason = (batch: EtcBusinessBatchSummary) => {
-    if (isSubmittedBusinessStatus(batch.status) || batch.oaProcessStatus === "in_progress") {
-      return "OA已提交，不能删除";
-    }
-    if (batch.submissionBatchId?.trim() || batch.oaDraftId?.trim()) {
-      return "OA草稿已创建，请先撤销草稿";
-    }
-    return "当前状态不能删除";
-  };
+  const deleteBusinessBatchDisabledReason = (batch: EtcBusinessBatchSummary) =>
+    businessBatchDeleteBlockReason(batch) || "当前状态不能删除";
   const deleteBatchDisabledReason = (batch: EtcBatchSummary) => {
     const businessBatch = businessBatches.find((item) => item.businessBatchId === batch.id);
     if (businessBatch) {
@@ -1459,6 +1481,15 @@ export default function EtcTicketManagementPage() {
   const fetchLatestDeletableTask = async (task: EtcReconciliationTask) => {
     const latestTask = await fetchEtcReconciliationTask(task.taskId);
     mergeReconciliationTask(latestTask);
+    const linkedBusinessBatch = taskLinkedBusinessBatch(latestTask);
+    if (linkedBusinessBatch) {
+      const latestBusinessBatch = await fetchEtcBusinessBatchDetail(linkedBusinessBatch.businessBatchId);
+      mergeBusinessBatch(latestBusinessBatch);
+      const linkedBusinessBatchReason = businessBatchDeleteBlockReason(latestBusinessBatch);
+      if (linkedBusinessBatchReason) {
+        throw new Error(linkedBusinessBatchReason);
+      }
+    }
     if (!canDeleteTask(latestTask)) {
       throw new Error(deleteTaskDisabledReason(latestTask));
     }

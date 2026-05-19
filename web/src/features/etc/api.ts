@@ -693,6 +693,7 @@ async function requestJson<T>(url: string, init: EtcRequestInit = {}): Promise<T
       }
       if (!response.ok) {
         const errorPayload = payload as { message?: unknown; error?: unknown };
+        const message = typeof errorPayload.message === "string" ? errorPayload.message : "";
         if (errorPayload.error === "preview_stale") {
           throw new Error("预览后数据已变化，请重新预览后再确认。");
         }
@@ -705,10 +706,12 @@ async function requestJson<T>(url: string, init: EtcRequestInit = {}): Promise<T
             throw new Error(envelopeMessage);
           }
         }
+        if (message) {
+          throw new Error(message);
+        }
         if (typeof errorPayload.error === "string" && errorPayload.error.trim()) {
           throw new Error(errorPayload.error);
         }
-        const message = typeof errorPayload.message === "string" ? errorPayload.message : "";
         throw new Error(message || trimmedText || "ETC API request failed");
       }
       return payload;

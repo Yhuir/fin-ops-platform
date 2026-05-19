@@ -457,6 +457,91 @@ describe("ETC ticket management page", () => {
     expect(deleteTask).not.toHaveBeenCalled();
   });
 
+  test("blocks reconciliation task deletion when its linked business batch has an active OA draft", async () => {
+    installMockApiFetch();
+    const importedTask = {
+      taskId: "etc-recon-imported-business-linked-001",
+      status: "imported",
+      version: 13,
+      title: "新建ETC对账批次",
+      periodStart: "2026-03-28",
+      periodEnd: "2026-04-27",
+      statementPeriodStart: "2026-03-01",
+      statementPeriodEnd: "2026-04-30",
+      approvedDelta: "0.00",
+      approvedDeltaNote: "",
+      cardLast4: "7788",
+      oaTotalAmount: "1673.30",
+      etcInvoiceAmount: "1673.30",
+      supplementAmount: "0.00",
+      etcInvoiceCount: 37,
+      supplementCount: 0,
+      canConfirm: false,
+      vehiclePlates: ["云A361HX", "云A516HJ", "云ADA0381"],
+      confirmedItemSetHash: "sha256:selected",
+      importBatchId: "etc-import-business-linked-001",
+      etcBatchId: "",
+      hasImportedInvoices: true,
+      importedInvoiceCount: 37,
+      importedInvoiceAmount: "1673.30",
+      oaDraftBatchId: "",
+      oaDraftStatus: "",
+      submittedConfirmedAt: "",
+      creditCardItems: [],
+      ticketRootItems: [],
+      supplementEvidences: [],
+      sourceFiles: [],
+      parseIssues: [],
+    };
+    const linkedBusinessBatch = {
+      businessBatchId: "etc-business-linked-001",
+      taskId: "etc-recon-imported-business-linked-001",
+      status: "oa_submission_detecting",
+      version: 8,
+      ownerUserId: "web_finance_user",
+      ownerOrgId: "finance",
+      importBatchIds: ["etc-import-business-linked-001"],
+      submissionBatchId: "etc-submission-linked-001",
+      externalEtcBatchId: "ETC-2026-LINKED",
+      oaDraftId: "oa-draft-linked-001",
+      oaDraftUrl: "https://oa.example.test/draft/oa-draft-linked-001",
+      oaRowId: "",
+      oaProcessStatus: "",
+      oaDetectionStatus: "detecting",
+      oaDetectionReason: "",
+      oaDetectionError: "",
+      oaDetectionStartedAt: "",
+      oaDetectionNextRunAt: "",
+      oaDetectionDeadlineAt: "",
+      oaDetectionFinalRetryUntil: "",
+      oaDetectionAttempts: 1,
+      invoiceSummary: { count: 37, amount: "1673.30" },
+      invoiceIds: [],
+      importAttempts: [],
+      auditEvents: [],
+      createdAt: "2026-05-19T09:00:00+08:00",
+      updatedAt: "2026-05-19T09:00:00+08:00",
+    };
+    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [importedTask] } as never);
+    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
+      counts: { active: 1, submitted: 0 },
+      items: [linkedBusinessBatch],
+      pagination: { page: 1, pageSize: 100, total: 1 },
+    } as never);
+    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue({
+      ...linkedBusinessBatch,
+      invoiceItems: [],
+    } as never);
+    const deleteTask = vi.spyOn(etcApi, "deleteEtcReconciliationTask").mockResolvedValue(undefined as never);
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const blockedDeleteButton = await within(page).findByRole("button", { name: "OA草稿已创建，请先撤销草稿" });
+    expect(blockedDeleteButton).toBeDisabled();
+    expect(deleteTask).not.toHaveBeenCalled();
+  });
+
   test("shows the reconciliation workspace with upload blocks, statuses, supplements, and parse issues", async () => {
     installMockApiFetch();
     renderAppAt("/etc-tickets");

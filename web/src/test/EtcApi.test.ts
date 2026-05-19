@@ -363,6 +363,21 @@ describe("etc api", () => {
     await expect(createEtcOaDraft(["etc-inv-001"])).rejects.toThrow("ETC 接口返回了 HTML 页面");
   });
 
+  test("prefers API error messages over raw error codes", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => (
+      new Response(JSON.stringify({
+        error: "reconciliation_task_has_submission_link",
+        message: "已确认提交 OA 或存在不可删除的提交链路，不能删除。",
+      }), {
+        status: 409,
+        headers: { "Content-Type": "application/json" },
+      })
+    ));
+    global.fetch = fetchMock as typeof fetch;
+
+    await expect(deleteEtcReconciliationTask("etc-recon-task-001", 13)).rejects.toThrow("已确认提交 OA 或存在不可删除的提交链路，不能删除。");
+  });
+
   test("retries alternate API entrypoint when current ETC endpoint returns HTML", async () => {
     const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
