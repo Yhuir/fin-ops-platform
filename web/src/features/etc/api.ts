@@ -309,6 +309,8 @@ type ApiEtcReconciliationTask = {
   ticket_root_items?: ApiEtcTicketRootItem[];
   supplementEvidences?: ApiEtcSupplementEvidence[];
   supplement_evidences?: ApiEtcSupplementEvidence[];
+  reconciledItems?: ApiEtcReconciledItem[];
+  reconciled_items?: ApiEtcReconciledItem[];
   sourceFiles?: ApiEtcSourceFile[];
   source_files?: ApiEtcSourceFile[];
   parseIssues?: ApiEtcParseIssue[];
@@ -320,6 +322,27 @@ type ApiEtcReconciliationTask = {
 type ApiEtcImportBlocker = {
   code?: string;
   message?: string;
+};
+
+type ApiEtcReconciledItem = {
+  itemId?: string;
+  item_id?: string;
+  creditCardItemId?: string;
+  credit_card_item_id?: string;
+  ticketRootItemIds?: string[];
+  ticket_root_item_ids?: string[];
+  supplementEvidenceIds?: string[];
+  supplement_evidence_ids?: string[];
+  resolution?: string;
+  note?: string | null;
+  claimAmount?: string | number | null;
+  claim_amount?: string | number | null;
+  evidenceAmount?: string | number | null;
+  evidence_amount?: string | number | null;
+  amountDelta?: string | number | null;
+  amount_delta?: string | number | null;
+  amountDeltaNote?: string | null;
+  amount_delta_note?: string | null;
 };
 
 type ApiEtcCreditCardItem = {
@@ -838,6 +861,21 @@ function mapSupplementEvidence(item: ApiEtcSupplementEvidence) {
   };
 }
 
+function mapReconciledItem(item: ApiEtcReconciledItem) {
+  return {
+    itemId: item.itemId ?? item.item_id ?? "",
+    creditCardItemId: item.creditCardItemId ?? item.credit_card_item_id ?? "",
+    ticketRootItemIds: item.ticketRootItemIds ?? item.ticket_root_item_ids ?? [],
+    supplementEvidenceIds: item.supplementEvidenceIds ?? item.supplement_evidence_ids ?? [],
+    resolution: item.resolution ?? "",
+    note: item.note ?? "",
+    claimAmount: normalizeMoney(item.claimAmount ?? item.claim_amount),
+    evidenceAmount: normalizeMoney(item.evidenceAmount ?? item.evidence_amount),
+    amountDelta: normalizeMoney(item.amountDelta ?? item.amount_delta),
+    amountDeltaNote: item.amountDeltaNote ?? item.amount_delta_note ?? "",
+  };
+}
+
 function mapSourceFile(file: ApiEtcSourceFile): EtcSourceFile {
   return {
     fileId: file.fileId ?? file.file_id ?? "",
@@ -886,6 +924,7 @@ function mapEtcReconciliationTask(task: ApiEtcReconciliationTask): EtcReconcilia
     creditCardItems: (task.creditCardItems ?? task.credit_card_items ?? []).map(mapCreditCardItem),
     ticketRootItems: (task.ticketRootItems ?? task.ticket_root_items ?? []).map(mapTicketRootItem),
     supplementEvidences: (task.supplementEvidences ?? task.supplement_evidences ?? []).map(mapSupplementEvidence),
+    reconciledItems: (task.reconciledItems ?? task.reconciled_items ?? []).map(mapReconciledItem),
     sourceFiles: (task.sourceFiles ?? task.source_files ?? []).map(mapSourceFile),
     parseIssues: (task.parseIssues ?? task.parse_issues ?? []).map(mapParseIssue),
   };
@@ -956,7 +995,7 @@ function reconciliationUploadFormData(files: File[], expectedVersion: number, ex
 
 async function uploadEtcReconciliationFiles(
   taskId: string,
-  endpoint: "credit-card-statement" | "ticket-root-files" | "supplement-evidences",
+  endpoint: string,
   files: File[],
   expectedVersion: number,
   extra?: Record<string, string>,
@@ -1009,6 +1048,29 @@ export async function uploadEtcSupplementEvidences(
     files,
     expectedVersion,
     options.evidenceKind ? { evidenceKind: options.evidenceKind } : undefined,
+  );
+}
+
+export async function uploadEtcSupplementEvidenceForCard(
+  taskId: string,
+  cardItemId: string,
+  files: File[],
+  expectedVersion: number,
+  options: { evidenceKind?: string; note?: string } = {},
+): Promise<EtcReconciliationTask> {
+  const extraFields: Record<string, string> = {};
+  if (options.evidenceKind) {
+    extraFields.evidenceKind = options.evidenceKind;
+  }
+  if (options.note) {
+    extraFields.note = options.note;
+  }
+  return uploadEtcReconciliationFiles(
+    taskId,
+    `supplement-evidences/${encodeURIComponent(cardItemId)}`,
+    files,
+    expectedVersion,
+    extraFields,
   );
 }
 

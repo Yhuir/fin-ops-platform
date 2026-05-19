@@ -1,7 +1,6 @@
 import AddOutlinedIcon from "@mui/icons-material/AddOutlined";
 import ArrowForwardOutlinedIcon from "@mui/icons-material/ArrowForwardOutlined";
 import DeleteOutlineOutlinedIcon from "@mui/icons-material/DeleteOutlineOutlined";
-import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
 import ExpandLessOutlinedIcon from "@mui/icons-material/ExpandLessOutlined";
 import ExpandMoreOutlinedIcon from "@mui/icons-material/ExpandMoreOutlined";
 import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined";
@@ -32,7 +31,7 @@ import ToggleButton from "@mui/material/ToggleButton";
 import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from "react";
 import { Link as RouterLink } from "react-router-dom";
 
 import AppDialog from "../components/common/AppDialog";
@@ -56,9 +55,8 @@ import {
   refreshEtcReconciliationMatches,
   reopenEtcReconciliationTask,
   uploadEtcCreditCardStatement,
-  uploadEtcSupplementEvidences,
+  uploadEtcSupplementEvidenceForCard,
   uploadEtcTicketRootFiles,
-  uploadEtcTicketRootTexts,
 } from "../features/etc/api";
 import { buildEtcOaDraftReviewUrl } from "../features/etc/oaNavigation";
 import type {
@@ -286,20 +284,55 @@ type UploadBlockProps = {
   label: string;
   accept: string;
   disabled: boolean;
+  helperText: string;
+  disabledReason?: string;
   multiple?: boolean;
   onFiles: (files: File[]) => void;
 };
 
-function UploadBlock({ label, accept, disabled, multiple = false, onFiles }: UploadBlockProps) {
+function UploadBlock({ label, accept, disabled, helperText, disabledReason, multiple = false, onFiles }: UploadBlockProps) {
+  const [dragActive, setDragActive] = useState(false);
+  const handleFiles = (files: File[]) => {
+    if (disabled || files.length === 0) {
+      return;
+    }
+    onFiles(files);
+  };
+  const handleDrag = (event: DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!disabled) {
+      setDragActive(event.type === "dragenter" || event.type === "dragover");
+    }
+  };
+  const handleDrop = (event: DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setDragActive(false);
+    handleFiles(Array.from(event.dataTransfer.files ?? []));
+  };
+
   return (
     <Button
       component="label"
       variant="outlined"
       startIcon={<UploadFileOutlinedIcon />}
       disabled={disabled}
-      className="etc-upload-button"
+      aria-label={`上传${label}`}
+      aria-disabled={disabled ? "true" : undefined}
+      className={`etc-upload-drop-box${dragActive ? " dragging" : ""}`}
+      onDragEnter={handleDrag}
+      onDragOver={handleDrag}
+      onDragLeave={handleDrag}
+      onDrop={handleDrop}
     >
-      {label}
+      <Stack spacing={0.5} alignItems="flex-start" className="etc-upload-drop-content">
+        <Typography component="span" fontWeight={800}>{label}</Typography>
+        <Typography component="span" variant="caption" color="text.secondary">{helperText}</Typography>
+        {disabled && disabledReason ? (
+          <Typography component="span" variant="caption" color="warning.main">{disabledReason}</Typography>
+        ) : null}
+      </Stack>
       <input
         hidden
         type="file"
@@ -308,9 +341,7 @@ function UploadBlock({ label, accept, disabled, multiple = false, onFiles }: Upl
         onChange={(event) => {
           const files = Array.from(event.target.files ?? []);
           event.target.value = "";
-          if (files.length > 0) {
-            onFiles(files);
-          }
+          handleFiles(files);
         }}
       />
     </Button>
@@ -328,20 +359,6 @@ type EvidenceRow = {
   highlight: string;
   tags: string[];
 };
-
-type TicketRootImportMode = "clipboard" | "textFile" | "file";
-
-type TicketRootPasteBlock = {
-  clientId: string;
-  text: string;
-  sourceFileId?: string;
-  originalName?: string;
-};
-
-type TicketRootTextDialogState = {
-  clientId: string;
-  text: string;
-} | null;
 
 type ReconciliationRow = {
   id: string;
@@ -458,6 +475,10 @@ export default function EtcTicketManagementPage() {
   const [selectedReconciliationRowIds, setSelectedReconciliationRowIds] = useState<Set<string>>(() => new Set());
   const [expandedDescriptionRowIds, setExpandedDescriptionRowIds] = useState<Set<string>>(() => new Set());
   const [reviewNote, setReviewNote] = useState("");
+  const [supplementUploadCard, setSupplementUploadCard] = useState<EtcCreditCardItem | null>(null);
+  const [supplementUploadFiles, setSupplementUploadFiles] = useState<File[]>([]);
+  const [supplementUploadNote, setSupplementUploadNote] = useState("");
+  const [supplementUploadSubmitting, setSupplementUploadSubmitting] = useState(false);
   const [loading, setLoading] = useState(false);
   const [taskLoading, setTaskLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -475,9 +496,6 @@ export default function EtcTicketManagementPage() {
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const [draftCreating, setDraftCreating] = useState(false);
   const [draftResult, setDraftResult] = useState<EtcOaDraftPayload | null>(null);
-  const [ticketRootImportMode, setTicketRootImportMode] = useState<TicketRootImportMode>("file");
-  const [ticketRootPasteBlocks, setTicketRootPasteBlocks] = useState<TicketRootPasteBlock[]>([{ clientId: "paste-1", text: "" }]);
-  const [ticketRootTextDialog, setTicketRootTextDialog] = useState<TicketRootTextDialogState>(null);
   const refreshedImportJobIdsRef = useRef<Set<string>>(new Set());
 
   const loadBatches = useCallback(async (signal?: AbortSignal) => {
@@ -673,10 +691,6 @@ export default function EtcTicketManagementPage() {
     () => (selectedTask?.sourceFiles ?? []).filter(isManualTicketRootSource),
     [selectedTask],
   );
-  const ticketRootTextFileSources = useMemo(
-    () => (selectedTask?.sourceFiles ?? []).filter(isTextFileTicketRootSource),
-    [selectedTask],
-  );
   const ticketRootDocumentSources = useMemo(
     () => (selectedTask?.sourceFiles ?? []).filter(isDocumentTicketRootSource),
     [selectedTask],
@@ -704,8 +718,8 @@ export default function EtcTicketManagementPage() {
     return summaries;
   }, [selectedTask, ticketRootItemsBySourceFileId]);
   const hasTicketRootManualSource = ticketRootManualSources.length > 0;
-  const hasTicketRootTextFileSource = ticketRootTextFileSources.length > 0;
   const hasTicketRootDocumentSource = ticketRootDocumentSources.length > 0;
+  const hasLegacyNonTxtTicketRootSource = hasTicketRootManualSource || hasTicketRootDocumentSource;
 
   useEffect(() => {
     setSelectedCardItemId("");
@@ -714,37 +728,6 @@ export default function EtcTicketManagementPage() {
     setExpandedDescriptionRowIds(new Set());
     setReviewNote("");
   }, [selectedTaskId]);
-
-  useEffect(() => {
-    if (!selectedTask) {
-      setTicketRootImportMode("file");
-      setTicketRootPasteBlocks([{ clientId: "paste-1", text: "" }]);
-      return;
-    }
-    if (ticketRootManualSources.length > 0) {
-      setTicketRootImportMode("clipboard");
-      setTicketRootPasteBlocks(
-        ticketRootManualSources.map((sourceFile, index) => ({
-          clientId: `paste-${index + 1}`,
-          text: "",
-          sourceFileId: sourceFile.fileId,
-          originalName: sourceFile.originalName,
-        })),
-      );
-      return;
-    }
-    if (ticketRootTextFileSources.length > 0) {
-      setTicketRootImportMode("textFile");
-      setTicketRootPasteBlocks([{ clientId: "paste-1", text: "" }]);
-      return;
-    }
-    if (ticketRootDocumentSources.length > 0) {
-      setTicketRootImportMode("file");
-      setTicketRootPasteBlocks([{ clientId: "paste-1", text: "" }]);
-      return;
-    }
-    setTicketRootPasteBlocks((current) => (current.length > 0 ? current : [{ clientId: "paste-1", text: "" }]));
-  }, [selectedTask?.taskId, ticketRootManualSources, ticketRootTextFileSources, ticketRootDocumentSources, selectedTask]);
 
   const invoiceRows = batchDetail?.invoiceItems ?? [];
   const taskHasSubmittedLink = (task: EtcReconciliationTask) =>
@@ -804,6 +787,9 @@ export default function EtcTicketManagementPage() {
     }
 
     const evidenceById = new Map(evidenceRows.map((item) => [item.id, item]));
+    const reconciledByCardId = new Map(
+      (selectedTask.reconciledItems ?? []).map((item) => [item.creditCardItemId, item]),
+    );
     const consumedEvidenceIds = new Set<string>();
     const rows: ReconciliationRow[] = [];
 
@@ -811,20 +797,26 @@ export default function EtcTicketManagementPage() {
       const linkedTicket = selectedTask.ticketRootItems.find((ticket) =>
         ticket.linkedCreditCardItemIds.includes(card.itemId)
       );
-      const matchedEvidence = linkedTicket ? evidenceById.get(linkedTicket.itemId) ?? null : null;
+      const linkedSupplementId = reconciledByCardId.get(card.itemId)?.supplementEvidenceIds[0] ?? "";
+      const matchedEvidence = linkedTicket
+        ? evidenceById.get(linkedTicket.itemId) ?? null
+        : evidenceById.get(linkedSupplementId) ?? null;
       if (matchedEvidence) {
         consumedEvidenceIds.add(matchedEvidence.id);
       }
 
       const manual = manualHighlight(card.manualResolution);
       const rowHighlight = matchedEvidence ? "matched" : manual || "missing";
+      const evidenceHighlight = matchedEvidence
+        ? (matchedEvidence.source === "supplement" ? "covered" : "matched")
+        : "";
       rows.push({
         id: card.itemId,
         card,
         evidence: matchedEvidence,
-        highlight: rowHighlight,
+        highlight: matchedEvidence?.source === "supplement" ? "covered" : rowHighlight,
         cardHighlight: matchedEvidence ? "matched" : rowHighlight,
-        evidenceHighlight: matchedEvidence ? "matched" : "",
+        evidenceHighlight,
       });
     });
 
@@ -1048,63 +1040,50 @@ export default function EtcTicketManagementPage() {
     });
   };
 
-  const handleTicketRootImportModeChange = (_event: MouseEvent<HTMLElement>, nextMode: TicketRootImportMode | null) => {
-    if (!nextMode) {
-      return;
-    }
-    setTicketRootImportMode(nextMode);
-    if (nextMode === "clipboard") {
-      setTicketRootPasteBlocks((current) => (current.length > 0 ? current : [{ clientId: "paste-1", text: "" }]));
-    }
+  const openSupplementUploadDialog = (card: EtcCreditCardItem) => {
+    setActionError(null);
+    setSupplementUploadCard(card);
+    setSupplementUploadFiles([]);
+    setSupplementUploadNote(card.reviewNote || "");
   };
 
-  const openTicketRootTextDialog = (block: TicketRootPasteBlock) => {
-    if (!taskIsMutable || hasTicketRootTextFileSource || hasTicketRootDocumentSource) {
+  const closeSupplementUploadDialog = () => {
+    if (supplementUploadSubmitting) {
       return;
     }
-    setTicketRootTextDialog({ clientId: block.clientId, text: block.text });
+    setSupplementUploadCard(null);
+    setSupplementUploadFiles([]);
+    setSupplementUploadNote("");
   };
 
-  const handleAddTicketRootPasteBlock = () => {
-    setTicketRootPasteBlocks((current) => [
-      ...current,
-      { clientId: `paste-${current.length + 1}`, text: "" },
-    ]);
-  };
-
-  const handleRemoveTicketRootPasteBlock = async (block: TicketRootPasteBlock) => {
-    if (block.sourceFileId && selectedTask) {
-      await runTaskAction(() => deleteEtcReconciliationSourceFile(selectedTask.taskId, block.sourceFileId ?? "", selectedTask.version));
+  const handleUploadSupplementForCard = async () => {
+    if (!selectedTask || !supplementUploadCard || supplementUploadFiles.length === 0) {
+      setActionError("请先选择补充凭证文件。");
       return;
     }
-    setTicketRootPasteBlocks((current) => {
-      const nextBlocks = current.filter((item) => item.clientId !== block.clientId);
-      return nextBlocks.length > 0 ? nextBlocks : [{ clientId: "paste-1", text: "" }];
-    });
-  };
-
-  const handleSubmitTicketRootText = async () => {
-    if (!selectedTask || !ticketRootTextDialog) {
-      return;
+    setSupplementUploadSubmitting(true);
+    setActionError(null);
+    try {
+      const task = await uploadEtcSupplementEvidenceForCard(
+        selectedTask.taskId,
+        supplementUploadCard.itemId,
+        supplementUploadFiles,
+        selectedTask.version,
+        {
+          evidenceKind: "non_etc_invoice",
+          note: supplementUploadNote.trim(),
+        },
+      );
+      mergeReconciliationTask(task);
+      setSupplementUploadCard(null);
+      setSupplementUploadFiles([]);
+      setSupplementUploadNote("");
+      setSelectedCardItemId(supplementUploadCard.itemId);
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : "补充凭证上传失败。");
+    } finally {
+      setSupplementUploadSubmitting(false);
     }
-    const text = ticketRootTextDialog.text.trim();
-    if (!text) {
-      setActionError("票根网文本不能为空。");
-      return;
-    }
-    const entry = { clientId: ticketRootTextDialog.clientId, text };
-    setTicketRootTextDialog(null);
-    setTicketRootPasteBlocks((current) =>
-      current.map((block) => (block.clientId === entry.clientId ? { ...block, text: entry.text } : block))
-    );
-    await runTaskAction(() => uploadEtcTicketRootTexts(selectedTask.taskId, [entry], selectedTask.version));
-  };
-
-  const handleUploadSupplementEvidences = async (files: File[]) => {
-    if (!selectedTask || files.length === 0) {
-      return;
-    }
-    await runTaskAction(() => uploadEtcSupplementEvidences(selectedTask.taskId, files, selectedTask.version, { evidenceKind: "non_etc_invoice" }));
   };
 
   const patchSelectedCard = async (payload: Parameters<typeof patchEtcReconciliationItem>[3]) => {
@@ -1409,9 +1388,33 @@ export default function EtcTicketManagementPage() {
     );
   };
 
-  const renderEvidenceSummaryCell = (evidence: EvidenceRow | null) => {
+  const renderEvidenceSummaryCell = (evidence: EvidenceRow | null, card: EtcCreditCardItem | null) => {
     if (!evidence) {
-      return <span className="etc-reconciliation-empty">-</span>;
+      if (!card || !taskIsMutable || card.manualResolution !== "unresolved") {
+        return <span className="etc-reconciliation-empty">-</span>;
+      }
+      const label = `上传补充凭证覆盖 ${card.description || card.itemId}`;
+      return (
+        <Stack className="etc-reconciliation-empty-action" direction="row" spacing={0.75} alignItems="center" justifyContent="center">
+          <span>未匹配</span>
+          <Tooltip title="上传补充凭证并覆盖该信用卡项">
+            <span>
+              <IconButton
+                type="button"
+                size="small"
+                aria-label={label}
+                disabled={taskActionLoading}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openSupplementUploadDialog(card);
+                }}
+              >
+                <UploadFileOutlinedIcon fontSize="small" />
+              </IconButton>
+            </span>
+          </Tooltip>
+        </Stack>
+      );
     }
     return (
       <Stack className="etc-reconciliation-evidence-cell" spacing={0.7}>
@@ -1770,170 +1773,28 @@ export default function EtcTicketManagementPage() {
                     <Box id="etc-reconciliation-task-content">
                       {selectedTask ? (
                         <Stack spacing={2}>
-                      <Box className="etc-upload-blocks" aria-label="ETC对账文件上传">
-                        <Box className="etc-ticket-root-import-panel">
-                          <Stack spacing={1}>
-                            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                              <Typography component="h3" variant="subtitle2" fontWeight={800}>
-                                票根网导入方式
-                              </Typography>
-                              <ToggleButtonGroup
-                                size="small"
-                                exclusive
-                                value={ticketRootImportMode}
-                                onChange={handleTicketRootImportModeChange}
-                                aria-label="票根网导入方式"
-                              >
-                                <ToggleButton value="clipboard" disabled={!taskIsMutable || hasTicketRootTextFileSource || hasTicketRootDocumentSource}>
-                                  手工输入
-                                </ToggleButton>
-                                <ToggleButton value="textFile" disabled={!taskIsMutable || hasTicketRootManualSource || hasTicketRootDocumentSource}>
-                                  TXT文件
-                                </ToggleButton>
-                                <ToggleButton value="file" disabled={!taskIsMutable || hasTicketRootManualSource || hasTicketRootTextFileSource}>
-                                  PDF/JPG
-                                </ToggleButton>
-                              </ToggleButtonGroup>
-                            </Stack>
-                            {hasTicketRootDocumentSource ? (
-                              <Typography variant="caption" color="text.secondary">已有 PDF/JPG 源文件，删除后可切换。</Typography>
-                            ) : null}
-                            {hasTicketRootTextFileSource ? (
-                              <Typography variant="caption" color="text.secondary">已有 TXT 源文件，删除后可切换。</Typography>
-                            ) : null}
-                            {hasTicketRootManualSource ? (
-                              <Typography variant="caption" color="text.secondary">已有手工粘贴源，删除后可切换。</Typography>
-                            ) : null}
-                            {ticketRootImportMode === "clipboard" ? (
-                              <Stack spacing={1}>
-                                <Box className="etc-ticket-root-paste-grid">
-                                  {ticketRootPasteBlocks.map((block, index) => {
-                                    const sourceItems = block.sourceFileId ? ticketRootItemsBySourceFileId.get(block.sourceFileId) ?? [] : [];
-                                    const sourceSummary = block.sourceFileId ? ticketRootSourceSummary(sourceItems) : null;
-                                    const summary = block.sourceFileId
-                                      ? `${sourceSummary?.plateLabel ?? "未识别车牌"} / 已解析 ${sourceSummary?.parsedCount ?? 0} 条`
-                                      : block.text.trim()
-                                        ? "待提交"
-                                        : "点击粘贴票根网文本";
-                                    return (
-                                      <Paper key={block.clientId} className="etc-ticket-root-paste-card" variant="outlined">
-                                        <Button
-                                          type="button"
-                                          className="etc-ticket-root-paste-open"
-                                          aria-label={block.sourceFileId || block.text.trim() ? `编辑票根网文本 ${index + 1}` : "点击粘贴票根网文本"}
-                                          disabled={!taskIsMutable || taskActionLoading || hasTicketRootTextFileSource || hasTicketRootDocumentSource}
-                                          onClick={() => openTicketRootTextDialog(block)}
-                                        >
-                                          <Stack className="etc-ticket-root-paste-main" spacing={0.25} alignItems="stretch">
-                                            <Stack className="etc-ticket-root-paste-summary" direction="row" spacing={0.75} alignItems="center">
-                                              <Typography component="span" variant="caption" color="text.secondary" className="etc-ticket-root-paste-index">
-                                                #{index + 1}
-                                              </Typography>
-                                              {sourceSummary ? (
-                                                <>
-                                                  <Typography component="span" fontWeight={800} className="etc-ticket-root-paste-plate" title={sourceSummary.plateLabel}>
-                                                    {sourceSummary.plateLabel}
-                                                  </Typography>
-                                                  <Chip component="span" label={`已解析 ${sourceSummary.parsedCount} 条`} size="small" variant="outlined" />
-                                                  <Typography component="span" variant="caption" color="text.secondary" className="etc-ticket-root-paste-meta">
-                                                    金额合计 {sourceSummary.totalAmount}
-                                                  </Typography>
-                                                  <Typography component="span" variant="caption" color="text.secondary" className="etc-ticket-root-paste-meta" title={sourceSummary.dateRange}>
-                                                    日期 {sourceSummary.dateRange}
-                                                  </Typography>
-                                                </>
-                                              ) : (
-                                                <Typography component="span" fontWeight={800} className="etc-ticket-root-paste-plate">
-                                                  {summary}
-                                                </Typography>
-                                              )}
-                                            </Stack>
-                                            {block.originalName ? (
-                                              <Tooltip title={block.originalName}>
-                                                <Typography component="span" variant="caption" color="text.secondary" className="etc-ticket-root-paste-filename">
-                                                  {block.originalName}
-                                                </Typography>
-                                              </Tooltip>
-                                            ) : null}
-                                          </Stack>
-                                        </Button>
-                                        <Stack direction="row" spacing={0.5} justifyContent="flex-end">
-                                          <Tooltip title="编辑">
-                                            <span>
-                                              <IconButton
-                                                size="small"
-                                                aria-label={`编辑票根网文本 ${index + 1}`}
-                                                disabled={!taskIsMutable || taskActionLoading || hasTicketRootTextFileSource || hasTicketRootDocumentSource}
-                                                onClick={() => openTicketRootTextDialog(block)}
-                                              >
-                                                <EditOutlinedIcon fontSize="small" />
-                                              </IconButton>
-                                            </span>
-                                          </Tooltip>
-                                          <Tooltip title="删除">
-                                            <span>
-                                              <IconButton
-                                                size="small"
-                                                color="error"
-                                                aria-label={`删除票根网文本 ${index + 1}`}
-                                                disabled={!taskIsMutable || taskActionLoading || ticketRootPasteBlocks.length === 1 && !block.sourceFileId}
-                                                onClick={() => void handleRemoveTicketRootPasteBlock(block)}
-                                              >
-                                                <DeleteOutlineOutlinedIcon fontSize="small" />
-                                              </IconButton>
-                                            </span>
-                                          </Tooltip>
-                                        </Stack>
-                                      </Paper>
-                                    );
-                                  })}
-                                </Box>
-                                <Button
-                                  type="button"
-                                  variant="outlined"
-                                  size="small"
-                                  startIcon={<AddOutlinedIcon />}
-                                  disabled={!taskIsMutable || taskActionLoading || hasTicketRootTextFileSource || hasTicketRootDocumentSource}
-                                  onClick={handleAddTicketRootPasteBlock}
-                                >
-                                  增加粘贴框
-                                </Button>
-                              </Stack>
-                            ) : null}
-                          </Stack>
-                        </Box>
-                        <Box className="etc-upload-actions" aria-label="ETC导入动作">
-                          <UploadBlock
-                            label="信用卡账单 PDF"
-                            accept=".pdf,application/pdf"
-                            disabled={!taskIsMutable || taskActionLoading}
-                            onFiles={handleUploadCreditCardStatement}
-                          />
-                          <UploadBlock
-                            label="补充凭证"
-                            accept=".pdf,.jpg,.jpeg,image/jpeg,application/pdf"
-                            multiple
-                            disabled={!taskIsMutable || taskActionLoading}
-                            onFiles={handleUploadSupplementEvidences}
-                          />
-                          <UploadBlock
-                            label="票根网 TXT"
-                            accept=".txt,text/plain"
-                            multiple
-                            disabled={!taskIsMutable || taskActionLoading || ticketRootImportMode !== "textFile" || hasTicketRootManualSource || hasTicketRootDocumentSource}
-                            onFiles={handleUploadTicketRootFiles}
-                          />
-                          <UploadBlock
-                            label="票根网 PDF/JPG"
-                            accept=".pdf,.jpg,.jpeg,image/jpeg,application/pdf"
-                            multiple
-                            disabled={!taskIsMutable || taskActionLoading || ticketRootImportMode !== "file" || hasTicketRootManualSource || hasTicketRootTextFileSource}
-                            onFiles={handleUploadTicketRootFiles}
-                          />
-                        </Box>
-                      </Box>
+                          <Box className="etc-upload-blocks" aria-label="ETC对账文件上传">
+                            <Box className="etc-upload-drop-grid" aria-label="ETC导入动作">
+                              <UploadBlock
+                                label="信用卡账单 PDF"
+                                accept=".pdf,application/pdf"
+                                helperText="拖拽 PDF 到这里，或点击选择文件。"
+                                disabled={!taskIsMutable || taskActionLoading}
+                                onFiles={handleUploadCreditCardStatement}
+                              />
+                              <UploadBlock
+                                label="票根网 TXT"
+                                accept=".txt,text/plain"
+                                helperText="仅支持票根网 TXT，可拖拽多个 TXT 文件。"
+                                multiple
+                                disabled={!taskIsMutable || taskActionLoading || hasLegacyNonTxtTicketRootSource}
+                                disabledReason={hasLegacyNonTxtTicketRootSource ? "已有非 TXT 票根来源，删除后可导入 TXT。" : undefined}
+                                onFiles={handleUploadTicketRootFiles}
+                              />
+                            </Box>
+                          </Box>
 
-                      <Box className="etc-reconciliation-metrics" aria-label="本次确认预览">
+                          <Box className="etc-reconciliation-metrics" aria-label="本次确认预览">
                         <Box>
                           <Typography variant="caption" color="text.secondary">金额</Typography>
                           <Typography fontWeight={800}>{formatMoney(selectedReconciliationSummary.oaTotalAmount)}</Typography>
@@ -2036,7 +1897,8 @@ export default function EtcTicketManagementPage() {
                             <TextField
                               select
                               SelectProps={{ native: true }}
-                              label="关联票根/补充凭证"
+                              InputLabelProps={{ shrink: true }}
+                              label="选择票根/凭证"
                               size="small"
                               value={selectedEvidenceRowId}
                               onChange={(event) => setSelectedEvidenceRowId(event.target.value)}
@@ -2269,7 +2131,7 @@ export default function EtcTicketManagementPage() {
                                     align="center"
                                     onClick={() => row.evidence && setSelectedEvidenceRowId(row.evidence.id)}
                                   >
-                                    {renderEvidenceSummaryCell(row.evidence)}
+                                    {renderEvidenceSummaryCell(row.evidence, row.card)}
                                   </TableCell>
                                 </TableRow>
                               ))}
@@ -2440,31 +2302,63 @@ export default function EtcTicketManagementPage() {
         </Stack>
 
         <AppDialog
-          open={Boolean(ticketRootTextDialog)}
-          title="粘贴票根网文本"
-          maxWidth="md"
-          onClose={() => setTicketRootTextDialog(null)}
+          open={Boolean(supplementUploadCard)}
+          title="上传补充凭证"
+          description="补充凭证会直接覆盖当前信用卡项；金额不一致或无法识别时，差异说明会进入审计和 OA 提交口径。"
+          onClose={closeSupplementUploadDialog}
           actions={
             <>
-              <Button type="button" onClick={() => setTicketRootTextDialog(null)}>取消</Button>
-              <Button type="button" variant="contained" onClick={() => void handleSubmitTicketRootText()} disabled={taskActionLoading}>
-                确定
+              <Button type="button" onClick={closeSupplementUploadDialog} disabled={supplementUploadSubmitting}>取消</Button>
+              <Button
+                type="button"
+                variant="contained"
+                onClick={() => void handleUploadSupplementForCard()}
+                disabled={supplementUploadSubmitting || supplementUploadFiles.length === 0}
+              >
+                {supplementUploadSubmitting ? "正在上传..." : "上传并覆盖"}
               </Button>
             </>
           }
         >
-          <TextField
-            label="票根网文本"
-            value={ticketRootTextDialog?.text ?? ""}
-            onChange={(event) => {
-              const nextText = event.target.value;
-              setTicketRootTextDialog((current) => current ? { ...current, text: nextText } : current);
-            }}
-            multiline
-            minRows={10}
-            fullWidth
-            autoFocus
-          />
+          {supplementUploadCard ? (
+            <Stack spacing={1.5}>
+              <Box className="etc-supplement-upload-target">
+                <Typography variant="caption" color="text.secondary">信用卡项</Typography>
+                <Typography fontWeight={800}>
+                  {supplementUploadCard.transactionDate} / {formatMoney(supplementUploadCard.settlementAmount)}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">{supplementUploadCard.description || "-"}</Typography>
+              </Box>
+              <Button
+                component="label"
+                variant="outlined"
+                startIcon={<UploadFileOutlinedIcon />}
+                disabled={supplementUploadSubmitting}
+              >
+                {supplementUploadFiles.length > 0 ? supplementUploadFiles.map((file) => file.name).join("、") : "选择补充凭证文件"}
+                <input
+                  aria-label="选择补充凭证文件"
+                  hidden
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,image/jpeg,application/pdf"
+                  onChange={(event) => {
+                    setSupplementUploadFiles(Array.from(event.target.files ?? []));
+                    event.target.value = "";
+                  }}
+                />
+              </Button>
+              <TextField
+                label="差异说明"
+                size="small"
+                value={supplementUploadNote}
+                onChange={(event) => setSupplementUploadNote(event.target.value)}
+                placeholder="金额不一致、金额无法识别或业务特殊情况时必填"
+                disabled={supplementUploadSubmitting}
+                multiline
+                minRows={2}
+              />
+            </Stack>
+          ) : null}
         </AppDialog>
 
         <AppDialog

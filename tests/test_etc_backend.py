@@ -1992,6 +1992,55 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(ready_upload.status_code, 400)
         self.assertEqual(json.loads(ready_upload.body)["error"], "reconciliation_task_not_mutable")
 
+    def test_reconciliation_item_supplement_upload_requires_note_for_amount_delta(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task = app._etc_reconciliation_task_service.create_task(title="2026-03 ETC", created_by="alice")
+            task = app._etc_reconciliation_task_service.apply_parse_result(
+                task_id=task.task_id,
+                parse_result=CcbCreditCardStatementParser().parse_text(file_id="CARD-FILE-1", text=CCB_STATEMENT_TEXT),
+                actor="alice",
+            )
+            card = next(item for item in task.credit_card_items if item.settlement_amount == Decimal("25.00"))
+            body, headers = multipart(
+                {"parking.pdf": "商户 停车场\n付款时间 2026年3月3日\n金额 23.00".encode("utf-8")},
+                fields={"expectedVersion": str(task.version), "evidenceKind": "non_etc_invoice"},
+            )
+
+            missing_note_response = app.handle_request(
+                "POST",
+                f"/api/etc/reconciliation-tasks/{task.task_id}/supplement-evidences/{card.item_id}",
+                body=body,
+                headers=headers,
+            )
+            task_after_failed_upload = app._etc_reconciliation_task_service.get_task(task.task_id)
+
+            body_with_note, headers_with_note = multipart(
+                {"parking.pdf": "商户 停车场\n付款时间 2026年3月3日\n金额 23.00".encode("utf-8")},
+                fields={
+                    "expectedVersion": str(task.version),
+                    "evidenceKind": "non_etc_invoice",
+                    "note": "停车费凭证少开 2 元，按信用卡实际支出提交。",
+                },
+            )
+            linked_response = app.handle_request(
+                "POST",
+                f"/api/etc/reconciliation-tasks/{task.task_id}/supplement-evidences/{card.item_id}",
+                body=body_with_note,
+                headers=headers_with_note,
+            )
+            linked_payload = json.loads(linked_response.body)
+
+        self.assertEqual(missing_note_response.status_code, 400)
+        self.assertEqual(json.loads(missing_note_response.body)["error"], "supplement_amount_delta_note_required")
+        self.assertEqual(task_after_failed_upload.supplement_evidences, [])
+        self.assertEqual(linked_response.status_code, 200)
+        self.assertEqual(linked_payload["creditCardItems"][0]["manual_resolution"], "covered_by_supplement")
+        self.assertEqual(linked_payload["creditCardItems"][0]["review_note"], "停车费凭证少开 2 元，按信用卡实际支出提交。")
+        self.assertEqual(linked_payload["reconciledItems"][0]["claim_amount"], "25.00")
+        self.assertEqual(linked_payload["reconciledItems"][0]["evidence_amount"], "23.00")
+        self.assertEqual(linked_payload["reconciledItems"][0]["amount_delta"], "2.00")
+
     def test_task_aware_etc_import_requires_task_filters_extra_and_marks_imported(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

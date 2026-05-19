@@ -3006,6 +3006,59 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["oa_count"], 1)
         self.assertEqual(payload["summary"]["invoice_count"], 1)
 
+    def test_pair_relation_application_supplements_missing_active_oa_rows(self) -> None:
+        app = build_application()
+        oa_row = {
+            **build_oa_retention_oa_row("oa-exp-ba-2025", "CASE-BATCH-CROSS-YEAR", "2025-12-23"),
+            "_month": "2025-12",
+            "_section": "open",
+        }
+        bank_row = build_oa_retention_bank_row(
+            "txn_imported_202601_batch_001",
+            "CASE-BATCH-CROSS-YEAR",
+            "2026-01-28 16:34:04",
+        )
+        invoice_row = {
+            **build_oa_retention_invoice_row(
+                "oa-att-inv-oa-exp-ba-2025-001",
+                "CASE-BATCH-CROSS-YEAR",
+                "2025-12-23",
+            ),
+            "source_kind": "oa_attachment_invoice",
+            "derived_from_oa_id": "oa-exp-ba-2025",
+        }
+        app._workbench_query_service._records_by_id = {oa_row["id"]: oa_row}
+        app._workbench_pair_relation_service.create_active_relation(
+            case_id="CASE-BATCH-CROSS-YEAR",
+            row_ids=[bank_row["id"], oa_row["id"], invoice_row["id"]],
+            row_types=["bank", "oa", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="tester",
+            special_metadata={
+                "source": "batch_accounting",
+                "bank_row_id": bank_row["id"],
+                "oa_row_ids": [oa_row["id"]],
+                "invoice_row_ids": [invoice_row["id"]],
+                "bank_year": "2026",
+                "oa_year": "2025",
+            },
+        )
+        raw_payload = build_oa_retention_raw_payload(
+            oa_rows=[],
+            bank_rows=[bank_row],
+            invoice_rows=[invoice_row],
+        )
+
+        relation_payload = app._apply_pair_relations_to_payload(raw_payload)
+        grouped_payload = app._group_row_payload(relation_payload)
+
+        self.assertEqual([row["id"] for row in relation_payload["paired"]["oa"]], ["oa-exp-ba-2025"])
+        paired_groups = grouped_payload["paired"]["groups"]
+        self.assertEqual(len(paired_groups), 1)
+        self.assertEqual([row["id"] for row in paired_groups[0]["oa_rows"]], ["oa-exp-ba-2025"])
+        self.assertEqual([row["id"] for row in paired_groups[0]["bank_rows"]], ["txn_imported_202601_batch_001"])
+        self.assertEqual([row["id"] for row in paired_groups[0]["invoice_rows"]], ["oa-att-inv-oa-exp-ba-2025-001"])
+
     def test_get_api_workbench_keeps_salary_auto_match_as_candidate_until_no_oa_submit(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(

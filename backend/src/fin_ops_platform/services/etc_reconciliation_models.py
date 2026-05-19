@@ -116,6 +116,10 @@ class ReconciledItem:
     supplement_evidence_ids: list[str] = field(default_factory=list)
     resolution: str = "unresolved"
     note: str | None = None
+    claim_amount: Decimal | None = None
+    evidence_amount: Decimal | None = None
+    amount_delta: Decimal | None = None
+    amount_delta_note: str | None = None
     reviewed_by: str | None = None
     reviewed_at: datetime | None = None
 

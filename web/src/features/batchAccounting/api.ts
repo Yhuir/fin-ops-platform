@@ -188,12 +188,14 @@ function mapMutationResult(payload: ApiMutationResult): BatchAccountingMutationR
 }
 
 export async function fetchBatchAccounting({
-  year,
+  bankYear,
+  oaYear,
   bucket,
   signal,
 }: FetchBatchAccountingRequest): Promise<BatchAccountingResponse> {
   const params = new URLSearchParams();
-  params.set("year", year);
+  params.set("bank_year", bankYear);
+  params.set("oa_year", oaYear);
   params.set("bucket", bucket);
   const payload = await requestJson<ApiResponse>(`/api/batch-accounting?${params.toString()}`, { method: "GET", signal });
   return {
@@ -208,7 +210,8 @@ export async function fetchBatchAccounting({
 }
 
 export async function submitBatchAccounting({
-  year,
+  bankYear,
+  oaYear,
   bankRowId,
   oaRowIds,
   expectedVersion,
@@ -218,7 +221,8 @@ export async function submitBatchAccounting({
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      year,
+      bank_year: bankYear,
+      oa_year: oaYear,
       bank_row_id: bankRowId,
       oa_row_ids: oaRowIds,
       expected_version: expectedVersion,

@@ -12,7 +12,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from fin_ops_platform.services.etc_document_parsers import with_task_id
+from fin_ops_platform.services.etc_document_parsers import SupplementEvidenceParser, with_task_id
 from fin_ops_platform.services.etc_reconciliation_matcher import refresh_reconciliation_matches
 from fin_ops_platform.services.etc_reconciliation_models import (
     AuditEvent,
@@ -229,6 +229,144 @@ class EtcReconciliationTaskService:
         self._persist()
         return _copy_task(task)
 
+    def upload_supplement_evidences_for_card(
+        self,
+        *,
+        task_id: str,
+        item_id: str,
+        expected_version: int,
+        actor: str,
+        files: list[dict[str, Any]],
+        note: str | None = None,
+        evidence_kind_override: str | None = None,
+    ) -> EtcReconciliationTask:
+        task = self._tasks[task_id]
+        self._assert_expected_version(task, expected_version)
+        self._assert_mutable_task(task)
+        if not files:
+            raise ValueError("invalid_reconciliation_upload")
+        card = self._card_item(task, item_id)
+        if self._card_has_linked_etc_evidence(task, card.item_id) or self._card_has_linked_non_etc_submission_supplement(task, card.item_id):
+            raise ValueError("credit_card_item_already_covered")
+        if card.manual_resolution not in {"unresolved", ""}:
+            raise ValueError("credit_card_item_already_resolved")
+
+        previous_task = deepcopy(task)
+        previous_file_counter = self._file_counter
+        previous_audit_counter = self._audit_counter
+        created_source_files: list[UploadedSourceFileMetadata] = []
+        try:
+            parse_results: list[FileParseResult] = []
+            for upload in files:
+                original_name = str(upload.get("original_name") or upload.get("file_name") or "supplement-evidence")
+                content_type = str(upload.get("content_type") or "application/octet-stream")
+                content_bytes = bytes(upload.get("content") or b"")
+                sha256 = hashlib.sha256(content_bytes).hexdigest()
+                if any(
+                    source_file.source_kind == SourceFileKind.SUPPLEMENT_EVIDENCE and source_file.sha256 == sha256
+                    for source_file in task.source_files
+                ):
+                    raise ValueError("duplicate_supplement_evidence_file")
+
+                self._file_counter += 1
+                file_id = f"ETC-RECON-FILE-{self._file_counter:06d}"
+                stored_path = self._store_file(task_id=task_id, file_id=file_id, original_name=original_name, content=content_bytes)
+                source_file = UploadedSourceFileMetadata(
+                    file_id=file_id,
+                    task_id=task_id,
+                    source_kind=SourceFileKind.SUPPLEMENT_EVIDENCE,
+                    original_name=original_name,
+                    content_type=content_type,
+                    size_bytes=len(content_bytes),
+                    sha256=sha256,
+                    stored_path=stored_path,
+                    created_by=actor,
+                )
+                created_source_files.append(source_file)
+                task.source_files.append(source_file)
+                task.audit_events.append(
+                    self._new_audit_event(
+                        task_id=task_id,
+                        event_type="source_file_uploaded",
+                        actor=actor,
+                        file_id=file_id,
+                        file_name=original_name,
+                        file_sha256=sha256,
+                        affected_item_ids=[card.item_id],
+                    )
+                )
+                parse_result = SupplementEvidenceParser().parse_text(
+                    file_id=source_file.file_id,
+                    text=content_bytes.decode("utf-8", errors="ignore"),
+                    source_name=source_file.original_name,
+                    evidence_kind_override=evidence_kind_override,
+                )
+                result = with_task_id(parse_result, task_id)
+                if not result.ok:
+                    raise ValueError("invalid_supplement_evidence")
+                if not result.supplement_evidences:
+                    raise ValueError("invalid_supplement_evidence")
+                parse_results.append(result)
+
+            task.parse_results.extend(parse_results)
+            self._rebuild_task_from_parse_results(task)
+            new_evidence_ids = [
+                evidence.evidence_id
+                for result in parse_results
+                for evidence in result.supplement_evidences
+            ]
+            claim_amount, evidence_amount, amount_delta = self._supplement_claim_amounts(task, card.item_id, new_evidence_ids)
+            normalized_note = str(note or "").strip()
+            if evidence_amount is None or amount_delta != Decimal("0.00"):
+                normalized_note = _required_delta_note(normalized_note)
+            amount_delta_note = normalized_note if evidence_amount is None or amount_delta != Decimal("0.00") else None
+            updated_card = self._card_item(task, card.item_id)
+            self._replace_card(
+                task,
+                replace(
+                    updated_card,
+                    manual_resolution="covered_by_supplement",
+                    manual_resolution_reason=normalized_note or None,
+                    review_note=normalized_note or None,
+                ),
+            )
+            self._upsert_reconciled_item(
+                task,
+                credit_card_item_id=card.item_id,
+                supplement_evidence_ids=new_evidence_ids,
+                resolution="covered_by_supplement",
+                note=normalized_note or None,
+                actor=actor,
+                claim_amount=claim_amount,
+                evidence_amount=evidence_amount,
+                amount_delta=amount_delta,
+                amount_delta_note=amount_delta_note,
+            )
+            self._touch(task)
+            task.audit_events.append(
+                self._new_audit_event(
+                    task_id=task_id,
+                    event_type="supplement_evidence_uploaded_and_linked",
+                    actor=actor,
+                    note=normalized_note or None,
+                    before_status=previous_task.status.value,
+                    after_status=task.status.value,
+                    affected_item_ids=[card.item_id, *new_evidence_ids],
+                )
+            )
+            self._persist()
+        except Exception:
+            self._tasks[task_id] = previous_task
+            self._file_counter = previous_file_counter
+            self._audit_counter = previous_audit_counter
+            for source_file in created_source_files:
+                try:
+                    self._delete_uploaded_source_file(source_file)
+                except OSError:
+                    pass
+            raise
+        return _copy_task(task)
+
     def delete_source_file(
         self,
         *,
@@ -388,7 +526,18 @@ class EtcReconciliationTaskService:
             evidence_id = _required_text(payload, "supplementEvidenceId")
             card = self._card_item(task, item_id)
             evidence = self._supplement_evidence(task, evidence_id)
-            self._replace_card(task, replace(card, manual_resolution="covered_by_supplement", review_note=note))
+            claim_amount, evidence_amount, amount_delta = self._supplement_claim_amounts(task, card.item_id, [evidence.evidence_id])
+            if evidence_amount is None or amount_delta != Decimal("0.00"):
+                note = _required_delta_note(note)
+            self._replace_card(
+                task,
+                replace(
+                    card,
+                    manual_resolution="covered_by_supplement",
+                    manual_resolution_reason=note,
+                    review_note=note,
+                ),
+            )
             self._upsert_reconciled_item(
                 task,
                 credit_card_item_id=card.item_id,
@@ -396,6 +545,10 @@ class EtcReconciliationTaskService:
                 resolution="covered_by_supplement",
                 note=note,
                 actor=actor,
+                claim_amount=claim_amount,
+                evidence_amount=evidence_amount,
+                amount_delta=amount_delta,
+                amount_delta_note=note if evidence_amount is None or amount_delta != Decimal("0.00") else None,
             )
             event_type = "supplement_evidence_linked"
             affected = [card.item_id, evidence.evidence_id]
@@ -497,6 +650,11 @@ class EtcReconciliationTaskService:
         for item in items_to_validate:
             if item.manual_resolution == "included_etc" and not self._card_has_linked_etc_evidence(task, item.item_id):
                 raise ValueError("linked_etc_evidence_required")
+            if item.manual_resolution == "covered_by_supplement":
+                if not self._card_has_linked_non_etc_submission_supplement(task, item.item_id):
+                    raise ValueError("linked_supplement_evidence_required")
+                if self._card_supplement_delta_requires_note(task, item.item_id) and not (item.review_note or "").strip():
+                    raise ValueError("supplement_amount_delta_note_required")
             if item.manual_resolution in {"excluded_non_etc", "excluded_error"} and not (item.manual_resolution_reason or "").strip():
                 raise ValueError("review_note_required")
             if item.manual_resolution == "manual_confirmed" and not (item.review_note or "").strip():
@@ -526,10 +684,15 @@ class EtcReconciliationTaskService:
             and (selected_card_ids is None or reconciled.credit_card_item_id in selected_card_ids)
         }
         task.supplement_count = len(linked_non_etc_ids)
+        linked_non_etc_card_ids = {
+            reconciled.credit_card_item_id
+            for reconciled in task.reconciled_items
+            if any(evidence_id in linked_non_etc_ids for evidence_id in reconciled.supplement_evidence_ids)
+        }
         task.supplement_amount = _sum_money(
-            evidence.amount
-            for evidence in task.supplement_evidences
-            if evidence.evidence_id in linked_non_etc_ids
+            item.settlement_amount
+            for item in task.credit_card_items
+            if item.item_id in linked_non_etc_card_ids
         )
         task.etc_invoice_count = sum(requirement.invoice_count for requirement in requirements)
         task.approved_delta = _decimal_or_zero(approved_delta)
@@ -1106,6 +1269,10 @@ class EtcReconciliationTaskService:
         resolution: str,
         note: str | None,
         actor: str,
+        claim_amount: Decimal | None = None,
+        evidence_amount: Decimal | None = None,
+        amount_delta: Decimal | None = None,
+        amount_delta_note: str | None = None,
     ) -> None:
         existing = next((item for item in task.reconciled_items if item.credit_card_item_id == credit_card_item_id), None)
         if existing is None:
@@ -1119,6 +1286,10 @@ class EtcReconciliationTaskService:
                     supplement_evidence_ids=list(supplement_evidence_ids or []),
                     resolution=resolution,
                     note=note,
+                    claim_amount=claim_amount,
+                    evidence_amount=evidence_amount,
+                    amount_delta=amount_delta,
+                    amount_delta_note=amount_delta_note,
                     reviewed_by=actor,
                     reviewed_at=datetime.now(UTC),
                 )
@@ -1128,6 +1299,10 @@ class EtcReconciliationTaskService:
         existing.supplement_evidence_ids = list(dict.fromkeys([*existing.supplement_evidence_ids, *(supplement_evidence_ids or [])]))
         existing.resolution = resolution
         existing.note = note
+        existing.claim_amount = claim_amount
+        existing.evidence_amount = evidence_amount
+        existing.amount_delta = amount_delta
+        existing.amount_delta_note = amount_delta_note
         existing.reviewed_by = actor
         existing.reviewed_at = datetime.now(UTC)
 
@@ -1176,6 +1351,33 @@ class EtcReconciliationTaskService:
                 evidence = self._supplement_evidence(task, evidence_id)
                 if not _is_etc_evidence_kind(evidence.evidence_kind) and evidence.include_in_oa_submission:
                     return True
+        return False
+
+    def _supplement_claim_amounts(
+        self,
+        task: EtcReconciliationTask,
+        card_id: str,
+        evidence_ids: list[str],
+    ) -> tuple[Decimal, Decimal | None, Decimal]:
+        card = self._card_item(task, card_id)
+        claim_amount = Decimal(card.settlement_amount).quantize(Decimal("0.01"))
+        evidences = [self._supplement_evidence(task, evidence_id) for evidence_id in evidence_ids]
+        if any(evidence.amount is None for evidence in evidences):
+            return claim_amount, None, claim_amount
+        evidence_amount = _sum_money(evidence.amount for evidence in evidences)
+        return claim_amount, evidence_amount, (claim_amount - evidence_amount).quantize(Decimal("0.01"))
+
+    def _card_supplement_delta_requires_note(self, task: EtcReconciliationTask, card_id: str) -> bool:
+        for reconciled in task.reconciled_items:
+            if reconciled.credit_card_item_id != card_id or not reconciled.supplement_evidence_ids:
+                continue
+            _claim_amount, evidence_amount, amount_delta = self._supplement_claim_amounts(
+                task,
+                card_id,
+                list(reconciled.supplement_evidence_ids),
+            )
+            if evidence_amount is None or amount_delta != Decimal("0.00"):
+                return True
         return False
 
     def _build_expected_requirements(
@@ -1543,6 +1745,12 @@ def _required_text(payload: dict[str, Any], key: str) -> str:
 def _required_note(note: str | None) -> str:
     if not (note or "").strip():
         raise ValueError("review_note_required")
+    return str(note).strip()
+
+
+def _required_delta_note(note: str | None) -> str:
+    if not (note or "").strip():
+        raise ValueError("supplement_amount_delta_note_required")
     return str(note).strip()
 
 

@@ -36,13 +36,15 @@ export type BatchAccountingResponse = {
 };
 
 export type FetchBatchAccountingRequest = {
-  year: string;
+  bankYear: string;
+  oaYear: string;
   bucket: BatchAccountingBucket;
   signal?: AbortSignal;
 };
 
 export type SubmitBatchAccountingRequest = {
-  year: string;
+  bankYear: string;
+  oaYear: string;
   bankRowId: string;
   oaRowIds: string[];
   expectedVersion?: number | null;

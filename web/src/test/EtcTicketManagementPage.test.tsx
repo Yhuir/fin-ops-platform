@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 
@@ -296,9 +296,12 @@ describe("ETC ticket management page", () => {
     expect(within(page).getByTestId("etc-reconciliation-task-row-etc-recon-task-001")).toHaveTextContent("2.27-2.28");
     expect(within(page).getByTestId("etc-reconciliation-task-row-etc-recon-task-001")).toHaveTextContent("ETC票 2 + 补充凭证 1");
 
-    expect(within(page).getByRole("button", { name: "票根网 PDF/JPG" })).toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "信用卡账单 PDF" })).toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "补充凭证" })).toBeInTheDocument();
+    expect(within(page).queryByRole("group", { name: "票根网导入方式" })).not.toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "票根网 PDF/JPG" })).not.toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "手工输入" })).not.toBeInTheDocument();
+    expect(within(page).getByLabelText("上传信用卡账单 PDF")).toBeInTheDocument();
+    expect(within(page).queryByLabelText("上传补充凭证")).not.toBeInTheDocument();
+    expect(within(page).getByLabelText("上传票根网 TXT")).toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "补ETC发票" })).not.toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "确认对账" })).toBeDisabled();
 
@@ -313,23 +316,145 @@ describe("ETC ticket management page", () => {
     expect(within(page).getByRole("region", { name: "ETC批次详情" })).toBeInTheDocument();
   });
 
-  test("keeps the three import buttons in a separate upload action rail", async () => {
+  test("renders the batch-level file drop upload boxes in the ticket-root import area", async () => {
     installMockApiFetch();
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    await within(page).findByRole("button", { name: "信用卡账单 PDF" });
+    await within(page).findByLabelText("上传信用卡账单 PDF");
     const uploadRegion = page.querySelector('[aria-label="ETC对账文件上传"]');
     if (!(uploadRegion instanceof HTMLElement)) {
       throw new Error("Expected upload region to render.");
     }
-    const actionRail = uploadRegion.querySelector(".etc-upload-actions");
+    const dropGrid = uploadRegion.querySelector(".etc-upload-drop-grid");
 
-    expect(actionRail).toBeInstanceOf(HTMLElement);
-    expect(within(actionRail as HTMLElement).getByRole("button", { name: "信用卡账单 PDF" })).toBeInTheDocument();
-    expect(within(actionRail as HTMLElement).getByRole("button", { name: "补充凭证" })).toBeInTheDocument();
-    expect(within(actionRail as HTMLElement).getByRole("button", { name: "票根网 PDF/JPG" })).toBeInTheDocument();
-    expect(within(actionRail as HTMLElement).queryByRole("button", { name: "补ETC发票" })).not.toBeInTheDocument();
+    expect(dropGrid).toBeInstanceOf(HTMLElement);
+    expect(within(dropGrid as HTMLElement).getByLabelText("上传信用卡账单 PDF")).toBeInTheDocument();
+    expect(within(dropGrid as HTMLElement).queryByLabelText("上传补充凭证")).not.toBeInTheDocument();
+    expect(within(dropGrid as HTMLElement).getByLabelText("上传票根网 TXT")).toBeInTheDocument();
+    expect(within(dropGrid as HTMLElement).queryByRole("button", { name: "票根网 PDF/JPG" })).not.toBeInTheDocument();
+    expect(within(dropGrid as HTMLElement).queryByRole("button", { name: "补ETC发票" })).not.toBeInTheDocument();
+  });
+
+  test("uploads a supplement from an unmatched card row with a delta note", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const initialTask = {
+      taskId: "etc-recon-row-supplement-001",
+      status: "reviewing",
+      version: 5,
+      title: "2026-03 ETC 对账",
+      periodStart: "2026-03-03",
+      periodEnd: "2026-03-03",
+      statementPeriodStart: "2026-03-01",
+      statementPeriodEnd: "2026-03-31",
+      oaTotalAmount: "0.00",
+      etcInvoiceAmount: "0.00",
+      supplementAmount: "0.00",
+      etcInvoiceCount: 0,
+      supplementCount: 0,
+      canConfirm: false,
+      vehiclePlates: [],
+      confirmedItemSetHash: "",
+      importBatchId: "",
+      etcBatchId: "",
+      hasImportedInvoices: false,
+      importedInvoiceCount: 0,
+      importedInvoiceAmount: "0.00",
+      oaDraftBatchId: "",
+      oaDraftStatus: "",
+      submittedConfirmedAt: "",
+      sourceFiles: [],
+      parseIssues: [],
+      creditCardItems: [
+        {
+          itemId: "card-unmatched-001",
+          transactionDate: "2026-03-03",
+          postingDate: "2026-03-04",
+          cardLast4: "3632",
+          description: "高速停车费",
+          amount: "25.00",
+          settlementAmount: "25.00",
+          isEtcCandidate: true,
+          candidateReason: "ETC关键词",
+          recommendationStatus: "missing_ticket",
+          manualResolution: "unresolved",
+          manualResolutionReason: "",
+          reviewNote: "",
+        },
+      ],
+      ticketRootItems: [],
+      supplementEvidences: [],
+      reconciledItems: [],
+    };
+    const updatedTask = {
+      ...initialTask,
+      version: 6,
+      supplementAmount: "25.00",
+      supplementCount: 1,
+      canConfirm: true,
+      creditCardItems: [
+        {
+          ...initialTask.creditCardItems[0],
+          manualResolution: "covered_by_supplement",
+          reviewNote: "凭证少开 2 元，按信用卡实际支出提交。",
+        },
+      ],
+      supplementEvidences: [
+        {
+          evidenceId: "supplement-row-001",
+          sourceName: "parking.pdf",
+          evidenceKind: "non_etc_invoice",
+          amount: "23.00",
+          paidAt: "2026-03-03",
+          merchantName: "停车场",
+          tags: ["ETC补充凭证"],
+          includeInEtcZipCheck: false,
+          includeInOaSubmission: true,
+          includeInWorkbench: true,
+        },
+      ],
+      reconciledItems: [
+        {
+          itemId: "RECONCILED-card-unmatched-001",
+          creditCardItemId: "card-unmatched-001",
+          ticketRootItemIds: [],
+          supplementEvidenceIds: ["supplement-row-001"],
+          resolution: "covered_by_supplement",
+          note: "凭证少开 2 元，按信用卡实际支出提交。",
+          claimAmount: "25.00",
+          evidenceAmount: "23.00",
+          amountDelta: "2.00",
+          amountDeltaNote: "凭证少开 2 元，按信用卡实际支出提交。",
+        },
+      ],
+    };
+    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [initialTask] } as never);
+    const uploadSupplement = vi.spyOn(etcApi, "uploadEtcSupplementEvidenceForCard").mockResolvedValue(updatedTask as never);
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    await user.click(await within(page).findByRole("button", { name: "上传补充凭证覆盖 高速停车费" }));
+    const dialog = await screen.findByRole("dialog", { name: "上传补充凭证" });
+    await user.upload(within(dialog).getByLabelText("选择补充凭证文件"), new File(["金额 23.00"], "parking.pdf", { type: "application/pdf" }));
+    await user.type(within(dialog).getByLabelText("差异说明"), "凭证少开 2 元，按信用卡实际支出提交。");
+    await user.click(within(dialog).getByRole("button", { name: "上传并覆盖" }));
+
+    await waitFor(() => {
+      expect(uploadSupplement).toHaveBeenCalledWith(
+        "etc-recon-row-supplement-001",
+        "card-unmatched-001",
+        [expect.objectContaining({ name: "parking.pdf" })],
+        5,
+        {
+          evidenceKind: "non_etc_invoice",
+          note: "凭证少开 2 元，按信用卡实际支出提交。",
+        },
+      );
+    });
+    expect(await within(page).findByText("ETC补充凭证")).toBeInTheDocument();
+    expect(within(page).getByTestId("etc-reconciliation-row-card-unmatched-001")).toHaveTextContent("23.00");
   });
 
   test("uploads ticket-root TXT files through the ticket-root files endpoint", async () => {
@@ -338,14 +463,11 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    await within(page).findByRole("group", { name: "票根网导入方式" });
-    await user.click(within(page).getByRole("button", { name: "TXT文件" }));
+    const txtUploadBox = await within(page).findByLabelText("上传票根网 TXT");
+    expect(txtUploadBox).toBeEnabled();
+    expect(within(page).queryByRole("button", { name: "票根网 PDF/JPG" })).not.toBeInTheDocument();
 
-    const txtUploadButton = within(page).getByRole("button", { name: "票根网 TXT" });
-    expect(txtUploadButton).toBeEnabled();
-    expect(within(page).getByRole("button", { name: "票根网 PDF/JPG" })).toHaveAttribute("aria-disabled", "true");
-
-    const txtInput = txtUploadButton.querySelector('input[type="file"]');
+    const txtInput = txtUploadBox.querySelector('input[type="file"]');
     if (!(txtInput instanceof HTMLInputElement)) {
       throw new Error("Expected ticket-root TXT upload input to render.");
     }
@@ -364,6 +486,29 @@ describe("ETC ticket management page", () => {
     const formData = request.body as FormData;
     expect(formData.get("expectedVersion")).toBe("3");
     expect((formData.getAll("files") as File[])[0]).toMatchObject({ name: "云A516HJ", type: "text/plain" });
+  });
+
+  test("uploads ticket-root TXT files by dropping them on the upload box", async () => {
+    const fetchMock = installMockApiFetch();
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const txtUploadBox = await within(page).findByLabelText("上传票根网 TXT");
+    const txtFile = new File(["车牌号：云A516HJ\n交易时间：2026-04-02 13:30:29交易金额：￥57.95"], "云A516HJ.txt", { type: "text/plain" });
+
+    fireEvent.dragEnter(txtUploadBox, { dataTransfer: { files: [txtFile] } });
+    fireEvent.dragOver(txtUploadBox, { dataTransfer: { files: [txtFile] } });
+    fireEvent.drop(txtUploadBox, { dataTransfer: { files: [txtFile] } });
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/etc/reconciliation-tasks/etc-recon-task-001/ticket-root-files",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+    const request = fetchMock.mock.calls.find(([url]) => url === "/api/etc/reconciliation-tasks/etc-recon-task-001/ticket-root-files")?.[1] as RequestInit;
+    const formData = request.body as FormData;
+    expect((formData.getAll("files") as File[])[0]).toMatchObject({ name: "云A516HJ.txt", type: "text/plain" });
   });
 
   test("shows source file context, deletes a mutable source file, and fresh tasks do not inherit old issues", async () => {
@@ -478,91 +623,21 @@ describe("ETC ticket management page", () => {
     expect(within(page).queryByText(/票根网通行项缺少车牌号/)).not.toBeInTheDocument();
   });
 
-  test("switches to manual ticket-root text mode, opens paste dialog, and submits text", async () => {
-    const user = userEvent.setup();
+  test("removes legacy ticket-root mode controls and keeps only TXT ticket-root upload", async () => {
     installMockApiFetch();
-    const task = {
-      taskId: "etc-recon-task-manual-001",
-      status: "draft",
-      version: 2,
-      title: "2026-04 ETC 对账",
-      periodStart: null,
-      periodEnd: null,
-      statementPeriodStart: null,
-      statementPeriodEnd: null,
-      approvedDelta: "0.00",
-      approvedDeltaNote: "",
-      cardLast4: "",
-      oaTotalAmount: "0.00",
-      etcInvoiceAmount: "0.00",
-      supplementAmount: "0.00",
-      etcInvoiceCount: 0,
-      supplementCount: 0,
-      canConfirm: false,
-      vehiclePlates: [],
-      confirmedItemSetHash: "",
-      creditCardItems: [],
-      ticketRootItems: [],
-      supplementEvidences: [],
-      sourceFiles: [],
-      parseIssues: [],
-    };
-    const updatedTask = {
-      ...task,
-      version: 3,
-      ticketRootItems: [
-        {
-          itemId: "ticket-paste-1",
-          sourceFileId: "paste-source-1",
-          vehiclePlate: "云ADA0381",
-          transactionAt: "2026-04-08 18:57:17",
-          amount: "71.25",
-          entryStation: "云南弥勒南站",
-          exitStation: "云南小喜村站",
-          invoiceCount: 2,
-          recommendationStatus: "unmatched",
-          linkedCreditCardItemIds: [],
-        },
-      ],
-      sourceFiles: [
-        {
-          fileId: "paste-source-1",
-          sourceKind: "ticket_root",
-          originalName: "票根网手工粘贴-云ADA0381-202604-1.txt",
-          contentType: "text/plain; charset=utf-8",
-          hasBlockingIssue: false,
-        },
-      ],
-      vehiclePlates: ["云ADA0381"],
-      etcInvoiceCount: 2,
-    };
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [task] } as never);
-    vi.spyOn(etcApi, "uploadEtcTicketRootTexts").mockResolvedValue(updatedTask as never);
-
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByRole("group", { name: "票根网导入方式" })).toBeInTheDocument();
-    await user.click(within(page).getByRole("button", { name: "手工输入" }));
-    expect(within(page).getByRole("button", { name: "点击粘贴票根网文本" })).toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "增加粘贴框" })).toBeInTheDocument();
-
-    await user.click(within(page).getByRole("button", { name: "点击粘贴票根网文本" }));
-    const dialog = await screen.findByRole("dialog", { name: "粘贴票根网文本" });
-    await user.type(within(dialog).getByLabelText("票根网文本"), "车牌号：云ADA0381\n交易时间：2026-04-08 18:57:17交易金额：￥71.25");
-    await user.click(within(dialog).getByRole("button", { name: "确定" }));
-
-    await waitFor(() => {
-      expect(etcApi.uploadEtcTicketRootTexts).toHaveBeenCalledWith(
-        "etc-recon-task-manual-001",
-        [{ clientId: "paste-1", text: "车牌号：云ADA0381\n交易时间：2026-04-08 18:57:17交易金额：￥71.25" }],
-        2,
-      );
-    });
-    await waitFor(() => expect(within(page).getAllByText(/已解析 1 条/).length).toBeGreaterThanOrEqual(1));
+    expect(await within(page).findByLabelText("上传票根网 TXT")).toBeInTheDocument();
+    expect(within(page).queryByRole("group", { name: "票根网导入方式" })).not.toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "手工输入" })).not.toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "TXT文件" })).not.toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "PDF/JPG" })).not.toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "点击粘贴票根网文本" })).not.toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "票根网 PDF/JPG" })).not.toBeInTheDocument();
   });
 
-  test("disables PDF/JPG upload when manual ticket-root text source exists", async () => {
+  test("disables ticket-root TXT upload when a legacy non-TXT ticket-root source exists", async () => {
     installMockApiFetch();
     vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({
       items: [
@@ -606,9 +681,9 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByRole("button", { name: "PDF/JPG" })).toBeDisabled();
-    expect(within(page).getByRole("button", { name: "票根网 PDF/JPG" })).toHaveAttribute("aria-disabled", "true");
-    expect(within(page).getByText("已有手工粘贴源，删除后可切换。")).toBeInTheDocument();
+    expect(await within(page).findByLabelText("上传票根网 TXT")).toHaveAttribute("aria-disabled", "true");
+    expect(within(page).getByText("已有非 TXT 票根来源，删除后可导入 TXT。")).toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "票根网 PDF/JPG" })).not.toBeInTheDocument();
   });
 
   test("auto-selects TXT mode for text ticket-root files and shows each source summary", async () => {
@@ -699,10 +774,10 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByRole("button", { name: "TXT文件" })).toHaveAttribute("aria-pressed", "true");
-    expect(within(page).getByRole("button", { name: "手工输入" })).toBeDisabled();
-    expect(within(page).getByRole("button", { name: "PDF/JPG" })).toBeDisabled();
-    expect(within(page).getByText("已有 TXT 源文件，删除后可切换。")).toBeInTheDocument();
+    expect(await within(page).findByLabelText("上传票根网 TXT")).toBeEnabled();
+    expect(within(page).queryByRole("button", { name: "手工输入" })).not.toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "PDF/JPG" })).not.toBeInTheDocument();
+    expect(within(page).queryByText("已有 TXT 源文件，删除后可切换。")).not.toBeInTheDocument();
 
     const sourceList = within(page).getByRole("list", { name: "已上传文件列表" });
     const firstSource = within(sourceList).getByText("云A516HJ").closest("li");
@@ -722,7 +797,7 @@ describe("ETC ticket management page", () => {
     expect(within(page).queryByRole("button", { name: /编辑票根网文本/ })).not.toBeInTheDocument();
   });
 
-  test("shows per manual ticket-root paste source audit summaries", async () => {
+  test("shows legacy manual ticket-root source summaries only in the uploaded source list", async () => {
     installMockApiFetch();
     vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({
       items: [
@@ -810,11 +885,11 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    const sourceButtons = await within(page).findAllByRole("button", { name: /编辑票根网文本 [12]/ });
-    const firstSource = sourceButtons.find((button) => button.textContent?.includes("云A516HJ"));
-    const secondSource = sourceButtons.find((button) => button.textContent?.includes("云ADA0381"));
+    const sourceList = await within(page).findByRole("list", { name: "已上传文件列表" });
+    const firstSource = within(sourceList).getByText("票根网手工粘贴-云A516HJ-202604-1.txt").closest("li");
+    const secondSource = within(sourceList).getByText("票根网手工粘贴-云ADA0381-202604-1.txt").closest("li");
     if (!firstSource || !secondSource) {
-      throw new Error("Expected both manual ticket-root source cards to be rendered.");
+      throw new Error("Expected both legacy ticket-root source rows to be rendered.");
     }
     expect(firstSource).toHaveTextContent("云A516HJ");
     expect(firstSource).toHaveTextContent("已解析 2 条");
@@ -825,10 +900,11 @@ describe("ETC ticket management page", () => {
     expect(secondSource).toHaveTextContent("已解析 1 条");
     expect(secondSource).toHaveTextContent("金额合计 71.25");
     expect(secondSource).toHaveTextContent("日期 2026-04-08");
+    expect(within(page).queryByRole("button", { name: /编辑票根网文本/ })).not.toBeInTheDocument();
     expect(within(page).queryByText("已解析 3 条")).not.toBeInTheDocument();
   });
 
-  test("disables manual ticket-root text mode when PDF/JPG ticket-root source exists", async () => {
+  test("disables ticket-root TXT upload when a legacy PDF ticket-root source exists", async () => {
     installMockApiFetch();
     vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({
       items: [
@@ -872,8 +948,10 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByRole("button", { name: "手工输入" })).toBeDisabled();
-    expect(within(page).getByText("已有 PDF/JPG 源文件，删除后可切换。")).toBeInTheDocument();
+    expect(await within(page).findByLabelText("上传票根网 TXT")).toHaveAttribute("aria-disabled", "true");
+    expect(within(page).getByText("已有非 TXT 票根来源，删除后可导入 TXT。")).toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "手工输入" })).not.toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "票根网 PDF/JPG" })).not.toBeInTheDocument();
   });
 
   test("renders paired reconciliation table without row status chips or station wording", async () => {
@@ -970,7 +1048,6 @@ describe("ETC ticket management page", () => {
       within(table).getByRole("checkbox", { name: "选择核对行 card-item-missing" }),
       within(table).getByRole("checkbox", { name: "选择核对行 card-item-covered" }),
       within(table).getByRole("checkbox", { name: "选择核对行 right-ticket-item-extra" }),
-      within(table).getByRole("checkbox", { name: "选择核对行 right-supplement-001" }),
     ];
 
     rowCheckboxes.forEach((checkbox) => expect(checkbox).not.toBeChecked());
@@ -987,7 +1064,9 @@ describe("ETC ticket management page", () => {
 
     await user.click(within(page).getByRole("button", { name: "全选配对项" }));
     expect(rowCheckboxes[0]).toBeChecked();
-    rowCheckboxes.slice(1).forEach((checkbox) => expect(checkbox).not.toBeChecked());
+    expect(rowCheckboxes[2]).toBeChecked();
+    expect(rowCheckboxes[1]).not.toBeChecked();
+    expect(rowCheckboxes[3]).not.toBeChecked();
   });
 
   test("updates confirmation metrics from the checked paired rows", async () => {
@@ -1007,9 +1086,10 @@ describe("ETC ticket management page", () => {
 
     await user.click(within(page).getByRole("button", { name: "全选配对项" }));
 
-    expect(metrics).toHaveTextContent("30.00");
+    expect(metrics).toHaveTextContent("60.00");
     expect(metrics).toHaveTextContent("2026-02-27");
-    expect(metrics).toHaveTextContent("ETC票 1 + 补充凭证 0");
+    expect(metrics).toHaveTextContent("2026-02-28");
+    expect(metrics).toHaveTextContent("ETC票 1 + 补充凭证 1");
 
     await user.click(within(page).getByRole("button", { name: "清空" }));
 
@@ -1764,7 +1844,7 @@ describe("ETC ticket management page", () => {
     expect(within(page).queryByText("提交篮子")).not.toBeInTheDocument();
     expect(within(page).queryByText("加入提交篮子")).not.toBeInTheDocument();
     expect(within(page).queryByText("移回未提交")).not.toBeInTheDocument();
-    expect(within(page).getAllByRole("checkbox", { name: /选择核对行/ })).toHaveLength(5);
+    expect(within(page).getAllByRole("checkbox", { name: /选择核对行/ })).toHaveLength(4);
   });
 
   test("creates OA draft through the selected batch endpoint and refreshes after confirmation", async () => {

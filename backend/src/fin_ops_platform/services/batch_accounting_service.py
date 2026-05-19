@@ -44,12 +44,21 @@ class BatchAccountingService:
         self._pair_relation_service = pair_relation_service
         self._case_id_provider = case_id_provider or (lambda: f"CASE-BATCH-{uuid4().hex[:16].upper()}")
 
-    def build_payload(self, *, year: str, bucket: str) -> dict[str, Any]:
-        resolved_year = self._validate_year(year)
+    def build_payload(
+        self,
+        *,
+        year: str | None = None,
+        bank_year: str | None = None,
+        oa_year: str | None = None,
+        bucket: str,
+    ) -> dict[str, Any]:
+        fallback_year = str(year or "").strip()
+        resolved_bank_year = self._validate_year(bank_year or fallback_year)
+        resolved_oa_year = self._validate_year(oa_year or fallback_year)
         if bucket not in {"unsubmitted", "submitted"}:
             raise BatchAccountingError("invalid_batch_accounting_bucket", "bucket must be unsubmitted or submitted.")
-        context = self._build_context(resolved_year)
-        submitted_relations = self._submitted_relations(resolved_year, context)
+        context = self._build_context(bank_year=resolved_bank_year, oa_year=resolved_oa_year)
+        submitted_relations = self._submitted_relations(resolved_bank_year, context)
         if bucket == "submitted":
             bank_rows, relations_by_bank_row_id = self._submitted_payload(submitted_relations, context)
             oa_rows: list[dict[str, Any]] = []
@@ -61,6 +70,8 @@ class BatchAccountingService:
             "summary": {
                 "unsubmitted_count": len(context.eligible_bank_rows),
                 "submitted_count": len(submitted_relations),
+                "bank_year": resolved_bank_year,
+                "oa_year": resolved_oa_year,
             },
             "bank_rows": bank_rows,
             "oa_rows": oa_rows,
@@ -70,18 +81,22 @@ class BatchAccountingService:
     def submit(
         self,
         *,
-        year: str,
+        year: str | None = None,
+        bank_year: str | None = None,
+        oa_year: str | None = None,
         bank_row_id: str,
         oa_row_ids: list[str],
         actor: str,
         expected_version: int | None = None,
     ) -> dict[str, Any]:
-        resolved_year = self._validate_year(year)
+        fallback_year = str(year or "").strip()
+        resolved_bank_year = self._validate_year(bank_year or fallback_year)
+        resolved_oa_year = self._validate_year(oa_year or fallback_year)
         normalized_bank_row_id = self._required_id(bank_row_id, "bank_row_id")
         normalized_oa_row_ids = self._normalize_ids(oa_row_ids)
-        context = self._build_context(resolved_year)
+        context = self._build_context(bank_year=resolved_bank_year, oa_year=resolved_oa_year)
         bank_row = context.rows_by_id.get(normalized_bank_row_id)
-        if not isinstance(bank_row, dict) or not self._is_batch_bank_row(bank_row, resolved_year, require_unlinked=False):
+        if not isinstance(bank_row, dict) or not self._is_batch_bank_row(bank_row, resolved_bank_year, require_unlinked=False):
             raise BatchAccountingError("invalid_batch_accounting_bank_row", "银行流水不符合批量账务提交条件。")
         active_bank_relation = self._pair_relation_service.get_active_relation_by_row_id(normalized_bank_row_id)
         if isinstance(active_bank_relation, dict):
@@ -91,7 +106,11 @@ class BatchAccountingService:
             if row_version is not None and row_version != expected_version:
                 raise BatchAccountingError("batch_accounting_version_conflict", "银行流水版本已变化，请刷新后重试。")
 
-        eligible_oa_by_id = {str(row.get("id")): row for row in context.eligible_oa_rows}
+        eligible_oa_by_id = {
+            str(row.get("id")): row
+            for row in context.open_oa_rows
+            if self._is_eligible_oa_row_for_submission(row)
+        }
         selected_oa_rows: list[dict[str, Any]] = []
         for oa_row_id in normalized_oa_row_ids:
             oa_row = eligible_oa_by_id.get(oa_row_id)
@@ -113,6 +132,7 @@ class BatchAccountingService:
             )
 
         invoice_row_ids = self._linked_invoice_row_ids(normalized_oa_row_ids, context)
+        selected_oa_years = self._selected_oa_years(selected_oa_rows)
         row_ids = self._dedupe([normalized_bank_row_id, *normalized_oa_row_ids, *invoice_row_ids])
         rows = [context.rows_by_id.get(row_id, {"id": row_id, "type": self._row_type_for_row_id(row_id)}) for row_id in row_ids]
         row_types = [self._row_type(row, row_id) for row, row_id in zip(rows, row_ids, strict=False)]
@@ -142,7 +162,10 @@ class BatchAccountingService:
                 "bank_row_id": normalized_bank_row_id,
                 "oa_row_ids": normalized_oa_row_ids,
                 "invoice_row_ids": invoice_row_ids,
-                "year": resolved_year,
+                "year": resolved_bank_year,
+                "bank_year": resolved_bank_year,
+                "oa_year": resolved_oa_year,
+                "oa_years": selected_oa_years,
                 "created_by": actor,
             },
             before_relations=history_before_relations,
@@ -213,7 +236,7 @@ class BatchAccountingService:
             "message": "已撤回批量账务关联。",
         }
 
-    def _build_context(self, year: str) -> _WorkbenchContext:
+    def _build_context(self, *, bank_year: str, oa_year: str) -> _WorkbenchContext:
         payload = self._grouped_workbench_loader("all")
         groups = self._groups_from_payload(payload)
         rows_by_id: dict[str, dict[str, Any]] = {}
@@ -246,8 +269,8 @@ class BatchAccountingService:
                 rows_by_id[str(row.get("id"))] = row
             if section == "open":
                 self._index_group_invoice_links(group_oa_rows, invoice_rows, invoice_ids_by_oa_id)
-        eligible_bank_rows = [row for row in bank_rows if self._is_batch_bank_row(row, year, require_unlinked=True)]
-        eligible_oa_rows = [row for row in open_oa_rows if self._is_eligible_oa_row(row, year)]
+        eligible_bank_rows = [row for row in bank_rows if self._is_batch_bank_row(row, bank_year, require_unlinked=True)]
+        eligible_oa_rows = [row for row in open_oa_rows if self._is_eligible_oa_row(row, oa_year)]
         return _WorkbenchContext(
             rows_by_id=rows_by_id,
             groups=groups,
@@ -315,6 +338,16 @@ class BatchAccountingService:
         return True
 
     def _is_eligible_oa_row(self, row: dict[str, Any], year: str) -> bool:
+        if not self._is_eligible_oa_row_for_submission(row):
+            return False
+        return self._row_year_matches(
+            row,
+            year,
+            keys=("apply_time", "application_time", "application_date", "date", "created_at"),
+            nested_date_keys=("申请日期", "单据日期", "日期"),
+        )
+
+    def _is_eligible_oa_row_for_submission(self, row: dict[str, Any]) -> bool:
         row_id = str(row.get("id") or "").strip()
         if not row_id:
             return False
@@ -326,12 +359,7 @@ class BatchAccountingService:
             return False
         if not self._contains_daily_reimbursement(row):
             return False
-        return self._row_year_matches(
-            row,
-            year,
-            keys=("apply_time", "application_time", "application_date", "date", "created_at"),
-            nested_date_keys=("申请日期", "单据日期", "日期"),
-        )
+        return True
 
     def _submitted_relations(self, year: str, context: _WorkbenchContext) -> list[dict[str, Any]]:
         relations: list[dict[str, Any]] = []
@@ -681,3 +709,21 @@ class BatchAccountingService:
                 if re.match(r"20\d{2}-\d{2}", value):
                     return value[:7]
         return None
+
+    @classmethod
+    def _row_year(cls, row: dict[str, Any]) -> str | None:
+        month = cls._row_month(row)
+        if month and re.fullmatch(r"20\d{2}-\d{2}", month):
+            return month[:4]
+        return None
+
+    @classmethod
+    def _selected_oa_years(cls, rows: Iterable[dict[str, Any]]) -> list[str]:
+        return sorted(
+            {
+                year
+                for row in rows
+                for year in [cls._row_year(row)]
+                if year is not None
+            }
+        )

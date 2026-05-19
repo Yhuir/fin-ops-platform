@@ -624,6 +624,70 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertEqual(updated_card.manual_resolution, "unresolved")
         self.assertIsNone(updated_card.review_note)
 
+    def test_upload_supplement_for_card_requires_delta_note_and_claims_card_amount(self) -> None:
+        service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))
+        task = service.create_task(title="ETC", created_by="alice")
+        task = service.apply_parse_result(
+            task_id=task.task_id,
+            parse_result=CcbCreditCardStatementParser().parse_text(file_id="CARD-FILE-1", text=CCB_STATEMENT_TEXT),
+            actor="alice",
+        )
+        card = next(item for item in task.credit_card_items if item.settlement_amount == Decimal("25.00"))
+
+        with self.assertRaisesRegex(ValueError, "supplement_amount_delta_note_required"):
+            service.upload_supplement_evidences_for_card(
+                task_id=task.task_id,
+                item_id=card.item_id,
+                expected_version=task.version,
+                actor="alice",
+                files=[
+                    {
+                        "original_name": "parking.pdf",
+                        "content_type": "application/pdf",
+                        "content": "商户 停车场\n付款时间 2026年3月3日\n金额 23.00".encode("utf-8"),
+                    }
+                ],
+                note="",
+                evidence_kind_override="non_etc_invoice",
+            )
+        self.assertEqual(len(service.get_task(task.task_id).supplement_evidences), 0)
+
+        updated = service.upload_supplement_evidences_for_card(
+            task_id=task.task_id,
+            item_id=card.item_id,
+            expected_version=task.version,
+            actor="alice",
+            files=[
+                {
+                    "original_name": "parking.pdf",
+                    "content_type": "application/pdf",
+                    "content": "商户 停车场\n付款时间 2026年3月3日\n金额 23.00".encode("utf-8"),
+                }
+            ],
+            note="停车费凭证少开 2 元，按信用卡实际支出提交。",
+            evidence_kind_override="non_etc_invoice",
+        )
+        updated_card = next(item for item in updated.credit_card_items if item.item_id == card.item_id)
+        reconciled = next(item for item in updated.reconciled_items if item.credit_card_item_id == card.item_id)
+
+        self.assertEqual(updated_card.manual_resolution, "covered_by_supplement")
+        self.assertEqual(updated_card.review_note, "停车费凭证少开 2 元，按信用卡实际支出提交。")
+        self.assertEqual(reconciled.claim_amount, Decimal("25.00"))
+        self.assertEqual(reconciled.evidence_amount, Decimal("23.00"))
+        self.assertEqual(reconciled.amount_delta, Decimal("2.00"))
+        self.assertEqual(reconciled.amount_delta_note, "停车费凭证少开 2 元，按信用卡实际支出提交。")
+
+        confirmed = service.confirm_task(
+            task_id=updated.task_id,
+            expected_version=updated.version,
+            actor="alice",
+            confirmed_credit_card_item_ids=[card.item_id],
+        )
+        self.assertEqual(confirmed.oa_total_amount, Decimal("25.00"))
+        self.assertEqual(confirmed.supplement_amount, Decimal("25.00"))
+        self.assertEqual(confirmed.etc_invoice_amount, Decimal("0.00"))
+        self.assertEqual(confirmed.approved_delta, Decimal("0.00"))
+
     def test_delete_source_file_rolls_back_memory_state_when_persist_fails(self) -> None:
         class FlakyStateStore:
             data_dir = None

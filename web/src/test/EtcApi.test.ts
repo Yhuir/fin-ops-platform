@@ -21,6 +21,7 @@ import {
   reopenEtcReconciliationTask,
   revokeEtcSubmittedInvoices,
   uploadEtcCreditCardStatement,
+  uploadEtcSupplementEvidenceForCard,
   uploadEtcSupplementEvidences,
   uploadEtcTicketRootFiles,
   uploadEtcTicketRootTexts,
@@ -510,6 +511,7 @@ describe("etc api", () => {
         || url === "/api/etc/reconciliation-tasks/etc-recon-task-001/ticket-root-files"
         || url === "/api/etc/reconciliation-tasks/etc-recon-task-001/ticket-root-texts"
         || url === "/api/etc/reconciliation-tasks/etc-recon-task-001/supplement-evidences"
+        || url === "/api/etc/reconciliation-tasks/etc-recon-task-001/supplement-evidences/card-item-001"
         || url === "/api/etc/reconciliation-tasks/etc-recon-task-001/items/card-item-001"
         || url === "/api/etc/reconciliation-tasks/etc-recon-task-001/confirm"
         || url === "/api/etc/reconciliation-tasks/etc-recon-task-001/reopen"
@@ -575,6 +577,10 @@ describe("etc api", () => {
     await uploadEtcTicketRootFiles("etc-recon-task-001", [new File(["ticket"], "ticket.jpg")], 3);
     await uploadEtcTicketRootTexts("etc-recon-task-001", [{ clientId: "paste-1", text: "车牌号：云ADA0381" }], 3);
     await uploadEtcSupplementEvidences("etc-recon-task-001", [new File(["supplement"], "parking.pdf")], 3, { evidenceKind: "non_etc_invoice" });
+    await uploadEtcSupplementEvidenceForCard("etc-recon-task-001", "card-item-001", [new File(["supplement"], "parking-row.pdf")], 3, {
+      evidenceKind: "non_etc_invoice",
+      note: "凭证金额差异已说明。",
+    });
     await patchEtcReconciliationItem("etc-recon-task-001", "card-item-001", 3, { action: "set_manual_resolution", manualResolution: "included_etc" });
     await confirmEtcReconciliationTask("etc-recon-task-001", 3, {
       confirmedCreditCardItemIds: ["card-item-001", "card-item-002"],
@@ -592,6 +598,9 @@ describe("etc api", () => {
     expect(((creditUpload.body as FormData).getAll("files") as File[])[0].name).toBe("statement.pdf");
     const supplementUpload = fetchMock.mock.calls.find(([url]) => url === "/api/etc/reconciliation-tasks/etc-recon-task-001/supplement-evidences")?.[1] as RequestInit;
     expect((supplementUpload.body as FormData).get("evidenceKind")).toBe("non_etc_invoice");
+    const rowSupplementUpload = fetchMock.mock.calls.find(([url]) => url === "/api/etc/reconciliation-tasks/etc-recon-task-001/supplement-evidences/card-item-001")?.[1] as RequestInit;
+    expect((rowSupplementUpload.body as FormData).get("evidenceKind")).toBe("non_etc_invoice");
+    expect((rowSupplementUpload.body as FormData).get("note")).toBe("凭证金额差异已说明。");
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/etc/reconciliation-tasks/etc-recon-task-001/confirm",

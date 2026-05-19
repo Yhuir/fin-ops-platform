@@ -7803,103 +7803,49 @@ body.column-layout-dragging {
 }
 
 .etc-upload-blocks {
+  min-width: 0;
+}
+
+.etc-upload-drop-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(180px, 220px);
-  align-items: start;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
-.etc-upload-button {
-  width: fit-content;
-  max-width: 100%;
-  white-space: normal;
-}
-
-.etc-ticket-root-import-panel {
+.etc-upload-drop-box.MuiButton-root {
   min-width: 0;
-  padding: 10px;
-  border: 1px solid #dbe3ef;
+  min-height: 104px;
+  justify-content: flex-start;
+  align-items: stretch;
+  padding: 12px;
+  border-color: #c9d6e5;
+  border-style: dashed;
   border-radius: 8px;
   background: #f9fbfe;
-}
-
-.etc-upload-actions {
-  align-self: start;
-  display: grid;
-  gap: 8px;
-}
-
-.etc-upload-actions .etc-upload-button {
-  width: 100%;
-  min-height: 36px;
-  justify-content: flex-start;
-}
-
-.etc-ticket-root-paste-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 8px;
-}
-
-.etc-ticket-root-paste-card {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px;
-  align-items: center;
-  min-height: 56px;
-  padding: 6px;
-  border-radius: 8px;
-  background: #ffffff;
-}
-
-.etc-ticket-root-paste-open.MuiButton-root {
-  justify-content: flex-start;
-  min-width: 0;
-  min-height: 44px;
-  padding: 4px 6px;
   color: #243b53;
   text-align: left;
   text-transform: none;
+  white-space: normal;
 }
 
-.etc-ticket-root-paste-main,
-.etc-ticket-root-paste-summary {
+.etc-upload-drop-box.MuiButton-root:hover,
+.etc-upload-drop-box.MuiButton-root.dragging {
+  border-color: #2563eb;
+  background: #f5f9ff;
+}
+
+.etc-upload-drop-box.Mui-disabled {
+  background: #f6f8fb;
+  border-color: #dbe3ef;
+}
+
+.etc-upload-drop-content {
   min-width: 0;
-}
-
-.etc-ticket-root-paste-summary {
-  overflow: hidden;
-}
-
-.etc-ticket-root-paste-index {
-  flex: 0 0 auto;
-}
-
-.etc-ticket-root-paste-plate,
-.etc-ticket-root-paste-meta,
-.etc-ticket-root-paste-filename {
-  max-width: 100%;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.etc-ticket-root-paste-plate {
-  flex: 1 1 auto;
-}
-
-.etc-ticket-root-paste-meta {
-  flex: 0 1 auto;
-}
-
-.etc-ticket-root-paste-filename {
-  display: block;
-  font-size: 0.72rem;
+  width: 100%;
 }
 
 @media (max-width: 900px) {
-  .etc-upload-blocks {
+  .etc-upload-drop-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -8141,6 +8087,28 @@ body.column-layout-dragging {
   align-items: center;
   justify-content: center;
   text-align: center;
+}
+
+.etc-reconciliation-empty-action {
+  width: 100%;
+  min-width: 0;
+  color: #6b7c93;
+  font-size: 0.72rem;
+}
+
+.etc-reconciliation-empty-action .MuiIconButton-root {
+  padding: 2px;
+  border: 1px dashed #cbd5e1;
+  background: #ffffff;
+}
+
+.etc-supplement-upload-target {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f9fbfe;
 }
 
 @media (max-width: 1100px) {

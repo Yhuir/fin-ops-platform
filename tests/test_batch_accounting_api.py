@@ -155,6 +155,16 @@ class BatchAccountingApiTests(unittest.TestCase):
                                 "expense_type": "差旅费",
                                 "summary_fields": {"申请日期": "2025-12-31"},
                             },
+                            {
+                                "id": "oa-exp-ba-2025b",
+                                "type": "oa",
+                                "applicant": "旧年补充",
+                                "apply_time": "2025-12-30",
+                                "amount": "700.00",
+                                "apply_type": "日常报销",
+                                "expense_type": "交通费",
+                                "summary_fields": {"申请日期": "2025-12-30"},
+                            },
                         ],
                         "bank_rows": [],
                         "invoice_rows": [],
@@ -186,6 +196,21 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(payload["oa_rows"][2]["apply_time"], "2026-01-08")
         self.assertEqual(payload["summary"]["unsubmitted_count"], 1)
         self.assertEqual(payload["summary"]["submitted_count"], 0)
+
+    def test_unsubmitted_list_uses_independent_bank_and_oa_years(self) -> None:
+        app, _payload_patcher = self._app_with_grouped_payload()
+
+        response = app.handle_request(
+            "GET",
+            "/api/batch-accounting?bank_year=2026&oa_year=2025&bucket=unsubmitted",
+        )
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn_imported_202601_batch_001"])
+        self.assertEqual([row["id"] for row in payload["oa_rows"]], ["oa-exp-ba-2025", "oa-exp-ba-2025b"])
+        self.assertEqual(payload["summary"]["bank_year"], "2026")
+        self.assertEqual(payload["summary"]["oa_year"], "2025")
 
     def test_unsubmitted_list_excludes_bank_rows_already_linked_elsewhere(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
@@ -265,10 +290,47 @@ class BatchAccountingApiTests(unittest.TestCase):
                 "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
                 "invoice_row_ids": ["oa-att-inv-oa-exp-ba-001-01"],
                 "year": "2026",
+                "bank_year": "2026",
+                "oa_year": "2026",
+                "oa_years": ["2026"],
                 "created_by": "finance-user",
             },
         )
         self.assertEqual(payload["affected_months"], ["2026-01", "all"])
+
+    def test_submit_allows_cross_year_bank_and_oa_selection(self) -> None:
+        app, _payload_patcher = self._app_with_grouped_payload()
+        response = app.handle_request(
+            "POST",
+            "/api/batch-accounting/submit",
+            json.dumps(
+                {
+                    "bank_year": "2026",
+                    "oa_year": "2025",
+                    "bank_row_id": "txn_imported_202601_batch_001",
+                    "oa_row_ids": ["oa-exp-ba-2025", "oa-exp-ba-001"],
+                    "actor": "finance-user",
+                }
+            ),
+        )
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200, response.body)
+        relation = app._workbench_pair_relation_service.get_active_relation_by_case_id(payload["relation_id"])
+        assert relation is not None
+        self.assertEqual(relation["special_metadata"]["bank_year"], "2026")
+        self.assertEqual(relation["special_metadata"]["oa_year"], "2025")
+        self.assertEqual(relation["special_metadata"]["oa_years"], ["2025", "2026"])
+        self.assertEqual(relation["special_metadata"]["year"], "2026")
+        self.assertCountEqual(
+            relation["row_ids"],
+            [
+                "txn_imported_202601_batch_001",
+                "oa-exp-ba-2025",
+                "oa-exp-ba-001",
+                "oa-att-inv-oa-exp-ba-001-01",
+            ],
+        )
 
     def test_submitted_list_is_derived_from_active_batch_accounting_relations(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()

@@ -241,6 +241,19 @@ export type EtcSupplementEvidence = {
   includeInWorkbench: boolean;
 };
 
+export type EtcReconciledItem = {
+  itemId: string;
+  creditCardItemId: string;
+  ticketRootItemIds: string[];
+  supplementEvidenceIds: string[];
+  resolution: string;
+  note: string;
+  claimAmount: string;
+  evidenceAmount: string;
+  amountDelta: string;
+  amountDeltaNote: string;
+};
+
 export type EtcSourceFile = {
   fileId: string;
   sourceKind: string;
@@ -298,6 +311,7 @@ export type EtcReconciliationTask = {
   creditCardItems: EtcCreditCardItem[];
   ticketRootItems: EtcTicketRootItem[];
   supplementEvidences: EtcSupplementEvidence[];
+  reconciledItems: EtcReconciledItem[];
   sourceFiles: EtcSourceFile[];
   parseIssues: EtcParseIssue[];
 };

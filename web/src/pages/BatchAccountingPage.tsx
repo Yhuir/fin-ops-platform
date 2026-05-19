@@ -56,6 +56,10 @@ function currentYear() {
   return String(new Date().getFullYear());
 }
 
+function isValidYear(value: string) {
+  return /^20\d{2}$/.test(value);
+}
+
 function isAbortLikeError(caught: unknown) {
   if (caught instanceof DOMException && caught.name === "AbortError") {
     return true;
@@ -139,11 +143,14 @@ function ExpandableText({ text }: { text: string }) {
 }
 
 export default function BatchAccountingPage() {
-  const [year, setYear] = useState(currentYear);
+  const [bankYear, setBankYear] = useState(currentYear);
+  const [oaYear, setOaYear] = useState(currentYear);
   const [bucket, setBucket] = useState<BatchAccountingBucket>("unsubmitted");
   const [payload, setPayload] = useState<BatchAccountingResponse>(EMPTY_PAYLOAD);
   const [selectedBankRowId, setSelectedBankRowId] = useState<string | null>(null);
   const [selectedOaRowIds, setSelectedOaRowIds] = useState<Set<string>>(() => new Set());
+  const [bankRowsById, setBankRowsById] = useState<Record<string, BatchAccountingBankRow>>({});
+  const [oaRowsById, setOaRowsById] = useState<Record<string, BatchAccountingOaRow>>({});
   const [loading, setLoading] = useState(false);
   const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -153,8 +160,12 @@ export default function BatchAccountingPage() {
   const [snackbar, setSnackbar] = useState<{ severity: "success" | "error"; message: string } | null>(null);
 
   const selectedBankRow = useMemo(
-    () => payload.bankRows.find((row) => row.id === selectedBankRowId) ?? null,
-    [payload.bankRows, selectedBankRowId],
+    () => (
+      payload.bankRows.find((row) => row.id === selectedBankRowId)
+      ?? (selectedBankRowId ? bankRowsById[selectedBankRowId] : undefined)
+      ?? null
+    ),
+    [bankRowsById, payload.bankRows, selectedBankRowId],
   );
 
   const sourceOaRows = useMemo(() => {
@@ -176,8 +187,10 @@ export default function BatchAccountingPage() {
   }, [normalizedOaSearchQuery, sourceOaRows]);
 
   const selectedOaRows = useMemo(
-    () => sourceOaRows.filter((row) => selectedOaRowIds.has(row.id)),
-    [selectedOaRowIds, sourceOaRows],
+    () => Array.from(selectedOaRowIds)
+      .map((rowId) => sourceOaRows.find((row) => row.id === rowId) ?? oaRowsById[rowId])
+      .filter((row): row is BatchAccountingOaRow => Boolean(row)),
+    [oaRowsById, selectedOaRowIds, sourceOaRows],
   );
 
   const bankAmountCents = selectedBankRow ? parseMoneyCents(selectedBankRow.amount) : 0;
@@ -186,33 +199,44 @@ export default function BatchAccountingPage() {
   const canSubmit = Boolean(selectedBankRow)
     && selectedOaRows.length > 0
     && differenceCents === 0
+    && isValidYear(bankYear)
+    && isValidYear(oaYear)
     && !mutating;
   const canWithdraw = Boolean(selectedBankRow?.relationId) && !mutating;
 
   const loadData = useCallback((signal?: AbortSignal) => {
+    if (!isValidYear(bankYear) || !isValidYear(oaYear)) {
+      return;
+    }
     setLoading(true);
     setError(null);
-    fetchBatchAccounting({ year, bucket, signal })
+    fetchBatchAccounting({ bankYear, oaYear, bucket, signal })
       .then((nextPayload) => {
         setPayload(nextPayload);
+        setBankRowsById((current) => ({
+          ...current,
+          ...Object.fromEntries(nextPayload.bankRows.map((row) => [row.id, row])),
+        }));
+        const relationOaRows = Object.values(nextPayload.relationsByBankRowId).flat();
+        setOaRowsById((current) => ({
+          ...current,
+          ...Object.fromEntries([...nextPayload.oaRows, ...relationOaRows].map((row) => [row.id, row])),
+        }));
         setSelectedBankRowId((current) => (
-          current && nextPayload.bankRows.some((row) => row.id === current)
+          current
             ? current
             : nextPayload.bankRows[0]?.id ?? null
         ));
-        setSelectedOaRowIds(new Set());
       })
       .catch((caught: unknown) => {
         if (isAbortLikeError(caught)) {
           return;
         }
         setPayload(EMPTY_PAYLOAD);
-        setSelectedBankRowId(null);
-        setSelectedOaRowIds(new Set());
         setError(caught instanceof Error ? caught.message : "批量账务数据加载失败");
       })
       .finally(() => setLoading(false));
-  }, [bucket, year]);
+  }, [bankYear, bucket, oaYear]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -230,11 +254,13 @@ export default function BatchAccountingPage() {
   };
 
   const handleSelectBankRow = (row: BatchAccountingBankRow) => {
+    setBankRowsById((current) => ({ ...current, [row.id]: row }));
     setSelectedBankRowId(row.id);
     setSelectedOaRowIds(new Set());
   };
 
   const handleOaToggle = (row: BatchAccountingOaRow, checked: boolean) => {
+    setOaRowsById((current) => ({ ...current, [row.id]: row }));
     setSelectedOaRowIds((current) => {
       const next = new Set(current);
       if (checked) {
@@ -259,7 +285,8 @@ export default function BatchAccountingPage() {
     setMutating(true);
     try {
       const result = await submitBatchAccounting({
-        year,
+        bankYear,
+        oaYear,
         bankRowId: selectedBankRow.id,
         oaRowIds: selectedOaRows.map((row) => row.id),
         expectedVersion: selectedBankRow.version,
@@ -320,15 +347,6 @@ export default function BatchAccountingPage() {
             <ToggleButton value="unsubmitted">未提交 {payload.summary.unsubmittedCount}</ToggleButton>
             <ToggleButton value="submitted">已提交 {payload.summary.submittedCount}</ToggleButton>
           </ToggleButtonGroup>
-          <TextField
-            InputLabelProps={{ shrink: true }}
-            inputProps={{ min: 2000, max: 2100 }}
-            label="年份"
-            onChange={(event) => setYear(event.target.value)}
-            size="small"
-            type="number"
-            value={year}
-          />
         </Stack>
       </Paper>
 
@@ -343,9 +361,21 @@ export default function BatchAccountingPage() {
         }}
       >
         <Paper aria-label="批量账务流水" role="region" variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
-          <Stack spacing={0.5} sx={{ px: 2, py: 1.5 }}>
-            <Typography fontWeight={900}>批量账务流水</Typography>
-            <Typography color="text.secondary" variant="caption">对方户名精确匹配批量账务集中处理</Typography>
+          <Stack alignItems={{ xs: "stretch", sm: "center" }} direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={1.25} sx={{ px: 2, py: 1.5 }}>
+            <Box>
+              <Typography fontWeight={900}>批量账务流水</Typography>
+              <Typography color="text.secondary" variant="caption">对方户名精确匹配批量账务集中处理</Typography>
+            </Box>
+            <TextField
+              InputLabelProps={{ shrink: true }}
+              inputProps={{ min: 2000, max: 2100 }}
+              label="流水年份"
+              onChange={(event) => setBankYear(event.target.value)}
+              size="small"
+              sx={{ width: { xs: "100%", sm: 128 } }}
+              type="number"
+              value={bankYear}
+            />
           </Stack>
           <Divider />
           {loading ? (
@@ -404,6 +434,16 @@ export default function BatchAccountingPage() {
                 <Chip label={`已选 OA 金额 ${formatCents(selectedOaTotalCents)}`} />
                 <Chip color={differenceCents === 0 ? "success" : "warning"} label={`差额 ${formatCents(differenceCents)}`} />
               </Stack>
+              <TextField
+                InputLabelProps={{ shrink: true }}
+                inputProps={{ min: 2000, max: 2100 }}
+                label="OA年份"
+                onChange={(event) => setOaYear(event.target.value)}
+                size="small"
+                sx={{ width: { xs: "100%", lg: 128 } }}
+                type="number"
+                value={oaYear}
+              />
               <TextField
                 InputProps={{
                   startAdornment: (

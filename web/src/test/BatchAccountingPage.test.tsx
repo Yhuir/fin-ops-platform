@@ -113,6 +113,18 @@ const submittedPayload = {
   },
 };
 
+const oa2025Rows = [
+  {
+    id: "oa-exp-1981",
+    applicant: "陈雄兵",
+    apply_time: "2025-12-23",
+    project_name: "大理卷烟厂动力车间中水处理系统升级改造项目",
+    amount: "500.00",
+    reason: "日常报销",
+    linked_invoice_row_ids: [],
+  },
+];
+
 function renderPage() {
   return render(
     <MuiProviders>
@@ -126,7 +138,19 @@ function installFetchMock() {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     if (url.pathname === "/api/batch-accounting" && (!init?.method || init.method === "GET")) {
       const bucket = url.searchParams.get("bucket");
-      const payload = bucket === "submitted" ? submittedPayload : unsubmittedPayload;
+      const bankYear = url.searchParams.get("bank_year");
+      const oaYear = url.searchParams.get("oa_year");
+      const payload = bucket === "submitted"
+        ? submittedPayload
+        : {
+          ...unsubmittedPayload,
+          summary: {
+            ...unsubmittedPayload.summary,
+            unsubmitted_count: bankYear === "2026" ? unsubmittedPayload.bank_rows.length : 0,
+          },
+          bank_rows: bankYear === "2026" ? unsubmittedPayload.bank_rows : [],
+          oa_rows: oaYear === "2025" ? oa2025Rows : unsubmittedPayload.oa_rows,
+        };
       return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
     }
     if (url.pathname === "/api/batch-accounting/submit") {
@@ -164,7 +188,9 @@ describe("BatchAccountingPage", () => {
     expect(await screen.findByRole("heading", { name: "日常报销批量账务管理" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "未提交 2" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "已提交 1" })).toBeInTheDocument();
-    expect(screen.getByLabelText("年份")).toHaveValue(2026);
+    expect(screen.queryByLabelText("年份")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("流水年份")).toHaveValue(2026);
+    expect(screen.getByLabelText("OA年份")).toHaveValue(2026);
     expect(screen.getByRole("button", { name: "刷新" })).toBeInTheDocument();
 
     const bankList = screen.getByRole("region", { name: "批量账务流水" });
@@ -213,7 +239,8 @@ describe("BatchAccountingPage", () => {
           expect.objectContaining({
             method: "POST",
             body: JSON.stringify({
-              year: "2026",
+              bank_year: "2026",
+              oa_year: "2026",
               bank_row_id: "bank-row-001",
               oa_row_ids: ["oa-exp-1001", "oa-exp-1002"],
               expected_version: 1,
@@ -228,6 +255,51 @@ describe("BatchAccountingPage", () => {
     } finally {
       window.removeEventListener("workbenchRelationUpdated", relationListener);
     }
+  });
+
+  test("keeps selected bank and OA rows when changing only the OA year", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock();
+
+    renderPage();
+    await screen.findByRole("heading", { name: "日常报销批量账务管理" });
+
+    await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    expect(screen.getByText("已选 OA 1 项")).toBeInTheDocument();
+    expect(screen.getByText("已选 OA 金额 700.00")).toBeInTheDocument();
+
+    const oaYearInput = screen.getByLabelText("OA年份");
+    await user.clear(oaYearInput);
+    await user.type(oaYearInput, "2025");
+
+    const oaTable = await screen.findByRole("table", { name: "可关联OA项" });
+    expect(within(oaTable).getByText("陈雄兵")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /批量账务集中处理.*1,200.00.*2026-01-07 15:54:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("已选 OA 1 项")).toBeInTheDocument();
+    expect(screen.getByText("已选 OA 金额 700.00")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "选择 陈雄兵 2025-12-23" }));
+    expect(screen.getByText("已选 OA 2 项")).toBeInTheDocument();
+    expect(screen.getByText("已选 OA 金额 1,200.00")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "关联OA项与流水" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/batch-accounting/submit",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            bank_year: "2026",
+            oa_year: "2025",
+            bank_row_id: "bank-row-001",
+            oa_row_ids: ["oa-exp-1001", "oa-exp-1981"],
+            expected_version: 1,
+          }),
+        }),
+      );
+    });
   });
 
   test("filters right side OA rows across applicant, project, amount, and reason", async () => {

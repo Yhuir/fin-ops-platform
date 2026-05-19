@@ -678,6 +678,20 @@ function createEtcReconciliationTaskStore() {
           include_in_workbench: true,
         },
       ],
+      reconciledItems: [
+        {
+          item_id: "RECONCILED-card-item-covered",
+          credit_card_item_id: "card-item-covered",
+          ticket_root_item_ids: [],
+          supplement_evidence_ids: ["supplement-001"],
+          resolution: "covered_by_supplement",
+          note: "补充非ETC凭证",
+          claim_amount: "30.00",
+          evidence_amount: "30.00",
+          amount_delta: "0.00",
+          amount_delta_note: "",
+        },
+      ],
       parseIssues: [
         {
           issue_id: "parse-issue-001",
@@ -800,6 +814,7 @@ function createEtcReconciliationTaskStore() {
         creditCardItems: [],
         ticketRootItems: [],
         supplementEvidences: [],
+        reconciledItems: [],
         parseIssues: [],
       };
       nextTaskNumber += 1;
@@ -808,6 +823,53 @@ function createEtcReconciliationTaskStore() {
     },
     upload(taskId: string) {
       return bump(taskId);
+    },
+    uploadSupplementForCard(taskId: string, itemId: string) {
+      const existing = findTask(taskId);
+      if (!existing) {
+        return null;
+      }
+      const evidenceId = `supplement-${String((existing.supplementEvidences ?? []).length + 1).padStart(3, "0")}`;
+      return bump(taskId, {
+        canConfirm: true,
+        supplementAmount: "25.00",
+        supplementCount: (existing.supplementEvidences ?? []).length + 1,
+        creditCardItems: existing.creditCardItems.map((item) =>
+          item.item_id === itemId || item.itemId === itemId
+            ? { ...item, manual_resolution: "covered_by_supplement", manualResolution: "covered_by_supplement", review_note: "补充凭证覆盖" }
+            : item,
+        ),
+        supplementEvidences: [
+          ...(existing.supplementEvidences ?? []),
+          {
+            evidence_id: evidenceId,
+            source_name: "parking.pdf",
+            evidence_kind: "non_etc_invoice",
+            amount: "23.00",
+            paid_at: "2026-03-03",
+            merchant_name: "停车场",
+            tags: ["ETC补充凭证"],
+            include_in_etc_zip_check: false,
+            include_in_oa_submission: true,
+            include_in_workbench: true,
+          },
+        ],
+        reconciledItems: [
+          ...(existing.reconciledItems ?? []),
+          {
+            item_id: `RECONCILED-${itemId}`,
+            credit_card_item_id: itemId,
+            ticket_root_item_ids: [],
+            supplement_evidence_ids: [evidenceId],
+            resolution: "covered_by_supplement",
+            note: "补充凭证覆盖",
+            claim_amount: "25.00",
+            evidence_amount: "23.00",
+            amount_delta: "2.00",
+            amount_delta_note: "补充凭证覆盖",
+          },
+        ],
+      });
     },
     patchItem(taskId: string, itemId: string, payload: Record<string, unknown>) {
       const existing = findTask(taskId);
@@ -5707,6 +5769,12 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           etcInvoiceStore.deleteBatch(importedBatchId);
         }
         return jsonResponse({ status: result.status, body: result.body });
+      }
+      if (method === "POST" && segment === "supplement-evidences" && trailing) {
+        const task = etcReconciliationTaskStore.uploadSupplementForCard(taskId, trailing);
+        return task
+          ? jsonResponse({ body: task })
+          : jsonResponse({ status: 404, body: { message: "ETC对账任务不存在。" } });
       }
       if (method === "POST" && ["credit-card-statement", "ticket-root-files", "ticket-root-texts", "supplement-evidences"].includes(segment)) {
         const task = etcReconciliationTaskStore.upload(taskId);

@@ -1604,6 +1604,13 @@ class Application:
                 body=body,
                 headers=headers,
             )
+        if method == "POST" and len(parts) == 3 and parts[1] == "supplement-evidences":
+            return self._handle_api_etc_reconciliation_supplement_for_card_upload(
+                task_id=task_id,
+                item_id=parts[2],
+                body=body,
+                headers=headers,
+            )
         if method == "PATCH" and len(parts) == 3 and parts[1] == "items":
             return self._handle_api_etc_reconciliation_item_patch(task_id, parts[2], body)
         if method == "POST" and len(parts) == 2 and parts[1] == "confirm":
@@ -1698,6 +1705,44 @@ class Application:
                         evidence_kind_override=(fields.get("evidenceKind") or [None])[0],
                     )
                 task = self._etc_reconciliation_task_service.apply_parse_result(task_id=task_id, parse_result=parse_result, actor=actor)
+        except ValueError as error:
+            return self._reconciliation_error_response(error)
+        return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
+
+    def _handle_api_etc_reconciliation_supplement_for_card_upload(
+        self,
+        *,
+        task_id: str,
+        item_id: str,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        fields, files, error = self._load_multipart_body(body, headers)
+        if error is not None:
+            return error
+        if not files:
+            return self._json_response(HTTPStatus.BAD_REQUEST, {"error": "invalid_reconciliation_upload", "message": "file is required."})
+        actor = (fields.get("actor") or ["web_finance_user"])[0]
+        try:
+            expected_version = self._expected_version_from_fields(fields)
+            task = self._etc_reconciliation_task_service.upload_supplement_evidences_for_card(
+                task_id=task_id,
+                item_id=item_id,
+                expected_version=expected_version,
+                actor=actor,
+                files=[
+                    {
+                        "original_name": upload.file_name,
+                        "content_type": "application/octet-stream",
+                        "content": upload.content,
+                    }
+                    for upload in files
+                ],
+                note=(fields.get("note") or fields.get("reviewNote") or fields.get("reason") or [""])[0],
+                evidence_kind_override=(fields.get("evidenceKind") or [None])[0],
+            )
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
         except ValueError as error:
             return self._reconciliation_error_response(error)
         return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
@@ -2114,6 +2159,11 @@ class Application:
             "ticket_root_source_mode_conflict_text_file": "已有票根网 TXT 源文件，请先删除已有票根来源后才能切换导入方式。",
             "ticket_root_source_mode_conflict_mixed_upload": "票根网 TXT 文件和 PDF/JPG 不能同时上传，请先选择一种票根来源导入方式。",
             "reconciliation_task_has_submission_link": "已确认提交 OA 或存在不可删除的提交链路，不能删除。",
+            "supplement_amount_delta_note_required": "补充凭证金额与信用卡项不一致或无法识别金额，请填写差异说明。",
+            "credit_card_item_already_covered": "该信用卡项已有关联票根或补充凭证。",
+            "credit_card_item_already_resolved": "该信用卡项已有处理结果，不能直接上传补充凭证覆盖。",
+            "linked_supplement_evidence_required": "补充凭证覆盖项缺少已关联的补充凭证。",
+            "duplicate_supplement_evidence_file": "该补充凭证文件已经上传。",
         }
         normalized_code = "ticket_root_source_mode_conflict" if code.startswith("ticket_root_source_mode_conflict") else code
         return self._json_response(status, {"error": normalized_code, "message": messages.get(code, code)})
@@ -6070,9 +6120,16 @@ class Application:
 
     def _handle_api_batch_accounting(self, query: dict[str, list[str]]) -> Response:
         year = query.get("year", [""])[0]
+        bank_year = query.get("bank_year", [year])[0]
+        oa_year = query.get("oa_year", [year])[0]
         bucket = query.get("bucket", ["unsubmitted"])[0] or "unsubmitted"
         try:
-            payload = self._batch_accounting_service().build_payload(year=year, bucket=bucket)
+            payload = self._batch_accounting_service().build_payload(
+                year=year,
+                bank_year=bank_year,
+                oa_year=oa_year,
+                bucket=bucket,
+            )
         except BatchAccountingError as exc:
             return self._batch_accounting_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
@@ -6089,9 +6146,12 @@ class Application:
         if error is not None:
             return error
         actor = str(payload.get("actor") or session.identity.username or session.identity.user_id or "web_finance_user")
+        year = str(payload.get("year") or "")
         try:
             result = self._batch_accounting_service().submit(
-                year=str(payload.get("year") or ""),
+                year=year,
+                bank_year=str(payload.get("bank_year") or year),
+                oa_year=str(payload.get("oa_year") or year),
                 bank_row_id=str(payload.get("bank_row_id") or ""),
                 oa_row_ids=list(payload.get("oa_row_ids") or []),
                 actor=actor,
@@ -10614,6 +10674,7 @@ class Application:
         result = self._serialize_value(payload)
         paired_section = result.setdefault("paired", {})
         open_section = result.setdefault("open", {})
+        self._supplement_missing_active_pair_relation_rows(paired_section, open_section)
         for row_type in ("oa", "bank", "invoice"):
             source_paired_rows = list(paired_section.get(row_type, []))
             source_open_rows = list(open_section.get(row_type, []))
@@ -10629,6 +10690,69 @@ class Application:
                     patched_open_rows.append(self._serialize_value(row))
             paired_section[row_type] = patched_paired_rows
             open_section[row_type] = patched_open_rows
+        return result
+
+    def _supplement_missing_active_pair_relation_rows(
+        self,
+        paired_section: dict[str, object],
+        open_section: dict[str, object],
+    ) -> None:
+        rows_by_id: dict[str, dict[str, object]] = {}
+        for section in (paired_section, open_section):
+            for row_type in ("oa", "bank", "invoice"):
+                for row in list(section.get(row_type) or []):
+                    if not isinstance(row, dict):
+                        continue
+                    row_id = str(row.get("id") or "").strip()
+                    if row_id:
+                        rows_by_id[row_id] = row
+
+        missing_row_ids: list[str] = []
+        for relation in self._workbench_pair_relation_service.list_active_relations():
+            for row_id in list(relation.get("row_ids") or []):
+                normalized_row_id = str(row_id or "").strip()
+                if normalized_row_id and normalized_row_id not in rows_by_id:
+                    missing_row_ids.append(normalized_row_id)
+        missing_row_ids = self._dedupe_workbench_row_ids(missing_row_ids)
+        if not missing_row_ids:
+            return
+
+        try:
+            missing_rows = self._resolve_live_rows_direct(missing_row_ids, month_hint="all")
+        except KeyError:
+            missing_rows = self._resolve_pair_relation_rows_best_effort(missing_row_ids)
+
+        for row in missing_rows:
+            if not isinstance(row, dict):
+                continue
+            row_id = str(row.get("id") or "").strip()
+            row_type = str(row.get("type") or self._row_type_for_row_id(row_id)).strip()
+            if not row_id or row_id in rows_by_id or row_type not in {"oa", "bank", "invoice"}:
+                continue
+            open_rows = open_section.setdefault(row_type, [])
+            if isinstance(open_rows, list):
+                open_rows.append(self._serialize_value(row))
+                rows_by_id[row_id] = row
+
+    def _resolve_pair_relation_rows_best_effort(self, row_ids: list[str]) -> list[dict[str, object]]:
+        resolved_rows: list[dict[str, object]] = []
+        for row_id in row_ids:
+            try:
+                resolved_rows.extend(self._resolve_live_rows_direct([row_id], month_hint="all"))
+            except KeyError:
+                continue
+        return resolved_rows
+
+    @staticmethod
+    def _dedupe_workbench_row_ids(row_ids: list[str]) -> list[str]:
+        result: list[str] = []
+        seen: set[str] = set()
+        for row_id in row_ids:
+            normalized = str(row_id or "").strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            result.append(normalized)
         return result
 
     def _apply_candidate_matches_to_payload(self, payload: dict[str, object], month: str) -> dict[str, object]:
@@ -13492,6 +13616,7 @@ class Application:
             "creditCardItems": [Application._serialize_value(item) for item in getattr(task, "credit_card_items", [])],
             "ticketRootItems": [Application._serialize_value(item) for item in getattr(task, "ticket_root_items", [])],
             "supplementEvidences": [Application._serialize_value(item) for item in getattr(task, "supplement_evidences", [])],
+            "reconciledItems": [Application._serialize_value(item) for item in getattr(task, "reconciled_items", [])],
             "expectedEtcInvoiceRequirements": [
                 Application._serialize_value(item) for item in getattr(task, "expected_etc_invoice_requirements", [])
             ],
@@ -13637,6 +13762,12 @@ class Application:
                 return False
             if manual_resolution == "covered_by_supplement" and not Application._etc_task_card_has_linked_supplement(task, str(getattr(item, "item_id", ""))):
                 return False
+            if (
+                manual_resolution == "covered_by_supplement"
+                and Application._etc_task_card_supplement_delta_requires_note(task, str(getattr(item, "item_id", "")))
+                and not str(getattr(item, "review_note", "") or "").strip()
+            ):
+                return False
             if manual_resolution in {"excluded_non_etc", "excluded_error"} and not str(getattr(item, "manual_resolution_reason", "") or "").strip():
                 return False
             if manual_resolution == "manual_confirmed" and not str(getattr(item, "review_note", "") or "").strip():
@@ -13675,6 +13806,41 @@ class Application:
             and any(str(evidence_id) in evidence_ids for evidence_id in list(getattr(reconciled, "supplement_evidence_ids", []) or []))
             for reconciled in getattr(task, "reconciled_items", []) or []
         )
+
+    @staticmethod
+    def _etc_task_card_supplement_delta_requires_note(task: object, card_id: str) -> bool:
+        cards = {
+            str(getattr(item, "item_id", "")): item
+            for item in getattr(task, "credit_card_items", []) or []
+        }
+        evidences = {
+            str(getattr(evidence, "evidence_id", "")): evidence
+            for evidence in getattr(task, "supplement_evidences", []) or []
+        }
+        card = cards.get(card_id)
+        if card is None:
+            return False
+        try:
+            claim_amount = Decimal(str(getattr(card, "settlement_amount", "0.00") or "0.00")).quantize(Decimal("0.01"))
+        except Exception:
+            return True
+        for reconciled in getattr(task, "reconciled_items", []) or []:
+            if str(getattr(reconciled, "credit_card_item_id", "")) != card_id:
+                continue
+            evidence_amount = Decimal("0.00")
+            found = False
+            for evidence_id in list(getattr(reconciled, "supplement_evidence_ids", []) or []):
+                evidence = evidences.get(str(evidence_id))
+                if evidence is None:
+                    continue
+                raw_amount = getattr(evidence, "amount", None)
+                if raw_amount in (None, ""):
+                    return True
+                evidence_amount += Decimal(str(raw_amount)).quantize(Decimal("0.01"))
+                found = True
+            if found and (claim_amount - evidence_amount).quantize(Decimal("0.01")) != Decimal("0.00"):
+                return True
+        return False
 
     @staticmethod
     def _normalize_route_path(route_path: str) -> str:
