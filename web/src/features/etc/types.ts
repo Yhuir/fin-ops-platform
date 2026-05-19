@@ -9,6 +9,30 @@ export type EtcBatchStatus =
   | "failed"
   | "submitted";
 
+export type EtcBusinessBatchStatus =
+  | "draft"
+  | "reviewing"
+  | "ready_for_import"
+  | "importing"
+  | "imported"
+  | "import_failed"
+  | "import_partial_failed"
+  | "oa_draft_creating"
+  | "oa_draft_failed"
+  | "oa_submission_detecting"
+  | "oa_submitted"
+  | "oa_detection_timeout"
+  | "oa_detection_conflict"
+  | "oa_detection_unavailable"
+  | "not_submitted"
+  | "manually_marked_submitted"
+  | "manually_marked_not_submitted"
+  | "migration_conflict"
+  | "business_batch_invariant_broken"
+  | "closed"
+  | "deleted"
+  | "superseded";
+
 export type EtcInvoiceStatus = "unsubmitted" | "submitted";
 
 export type EtcInvoice = {
@@ -106,6 +130,111 @@ export type EtcBatchListPayload = {
     pageSize: number;
     total: number;
   };
+};
+
+export type EtcBusinessBatchCounts = {
+  active: number;
+  submitted: number;
+};
+
+export type EtcBusinessBatchQuery = {
+  status?: "active" | "submitted" | EtcBusinessBatchStatus;
+  month?: string;
+  plate?: string;
+  keyword?: string;
+  page?: number;
+  pageSize?: number;
+  signal?: AbortSignal;
+};
+
+export type EtcBusinessBatchInvoiceSummary = {
+  count: number;
+  amount: string;
+};
+
+export type EtcBusinessBatchImportAttempt = {
+  attemptId: string;
+  importBatchId: string;
+  status: string;
+  imported: number;
+  duplicatesSkipped: number;
+  attachmentsCompleted: number;
+  failed: number;
+  createdAt: string;
+};
+
+export type EtcBusinessBatchAuditEvent = {
+  eventId: string;
+  eventType: string;
+  beforeStatus: string;
+  afterStatus: string;
+  reason: string;
+  createdAt: string;
+};
+
+export type EtcBusinessBatchSummary = {
+  businessBatchId: string;
+  taskId: string;
+  status: EtcBusinessBatchStatus;
+  version: number;
+  ownerUserId: string;
+  ownerOrgId: string;
+  importBatchIds: string[];
+  submissionBatchId: string;
+  externalEtcBatchId: string;
+  oaDraftId: string;
+  oaDraftUrl: string;
+  oaRowId: string;
+  oaProcessStatus: string;
+  oaDetectionStatus: string;
+  oaDetectionReason: string;
+  oaDetectionError: string;
+  oaDetectionStartedAt: string;
+  oaDetectionNextRunAt: string;
+  oaDetectionDeadlineAt: string;
+  oaDetectionFinalRetryUntil: string;
+  oaDetectionAttempts: number;
+  invoiceSummary: EtcBusinessBatchInvoiceSummary;
+  invoiceIds: string[];
+  importAttempts: EtcBusinessBatchImportAttempt[];
+  auditEvents: EtcBusinessBatchAuditEvent[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type EtcBusinessBatchDetail = EtcBusinessBatchSummary & {
+  invoiceItems: EtcInvoice[];
+};
+
+export type EtcBusinessBatchListPayload = {
+  counts: EtcBusinessBatchCounts;
+  items: EtcBusinessBatchSummary[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+  };
+};
+
+export type EtcCreateBusinessBatchPayload = {
+  taskId: string;
+  idempotencyKey?: string;
+};
+
+export type EtcBusinessBatchVersionedPayload = {
+  expectedVersion?: number;
+  idempotencyKey?: string;
+};
+
+export type EtcBusinessBatchReasonedPayload = EtcBusinessBatchVersionedPayload & {
+  reason: string;
+};
+
+export type EtcManualOaStatusPayload = {
+  decision: "submitted" | "not_submitted";
+  reason: string;
+  expectedVersion?: number;
+  candidateOaRowId?: string;
 };
 
 export type EtcImportSummary = {

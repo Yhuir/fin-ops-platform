@@ -3,11 +3,21 @@ import { mapBackgroundJob, type ApiBackgroundJob } from "../backgroundJobs/api";
 import { apiUrl } from "../../app/runtime";
 import type { ImportPreviewAuditCounts } from "../imports/types";
 import type {
+  EtcBusinessBatchAuditEvent,
+  EtcBusinessBatchDetail,
+  EtcBusinessBatchImportAttempt,
+  EtcBusinessBatchListPayload,
+  EtcBusinessBatchQuery,
+  EtcBusinessBatchReasonedPayload,
+  EtcBusinessBatchStatus,
+  EtcBusinessBatchSummary,
+  EtcBusinessBatchVersionedPayload,
   EtcBatchDetail,
   EtcBatchListPayload,
   EtcBatchQuery,
   EtcBatchStatus,
   EtcBatchSummary,
+  EtcCreateBusinessBatchPayload,
   EtcImportConfirmResult,
   EtcImportItem,
   EtcImportPreviewResult,
@@ -18,6 +28,7 @@ import type {
   EtcInvoiceStatus,
   EtcInvoiceListPayload,
   EtcInvoiceQuery,
+  EtcManualOaStatusPayload,
   EtcOaDraftPayload,
   EtcPatchReconciliationItemPayload,
   EtcReadyReconciliationTasksPayload,
@@ -88,7 +99,7 @@ type ApiEtcBatch = {
   etcBatchId?: string;
   external_batch_id?: string;
   externalBatchId?: string;
-  status?: EtcBatchStatus;
+  status?: EtcBatchStatus | EtcBusinessBatchStatus;
   source_type?: string | null;
   sourceType?: string | null;
   invoice_count?: number | null;
@@ -150,6 +161,132 @@ type ApiEtcBatchPayload = {
     total?: number;
   };
 };
+
+type ApiEnvelope<T> = {
+  ok?: boolean;
+  data?: T | null;
+  error?: {
+    code?: string;
+    message?: string;
+    details?: unknown;
+  } | string | null;
+  requestId?: string;
+};
+
+type ApiEtcBusinessBatchImportAttempt = {
+  attemptId?: string;
+  attempt_id?: string;
+  importBatchId?: string;
+  import_batch_id?: string;
+  status?: string;
+  imported?: number | null;
+  duplicatesSkipped?: number | null;
+  duplicates_skipped?: number | null;
+  attachmentsCompleted?: number | null;
+  attachments_completed?: number | null;
+  failed?: number | null;
+  createdAt?: string | null;
+  created_at?: string | null;
+};
+
+type ApiEtcBusinessBatchAuditEvent = {
+  eventId?: string;
+  event_id?: string;
+  eventType?: string;
+  event_type?: string;
+  beforeStatus?: string;
+  before_status?: string;
+  afterStatus?: string;
+  after_status?: string;
+  reason?: string | null;
+  createdAt?: string | null;
+  created_at?: string | null;
+};
+
+type ApiEtcBusinessBatch = ApiEtcBatch & {
+  businessBatchId?: string;
+  business_batch_id?: string;
+  taskId?: string;
+  task_id?: string;
+  version?: number;
+  ownerUserId?: string | null;
+  owner_user_id?: string | null;
+  ownerOrgId?: string | null;
+  owner_org_id?: string | null;
+  importBatchIds?: string[] | null;
+  import_batch_ids?: string[] | null;
+  submissionBatchId?: string | null;
+  submission_batch_id?: string | null;
+  externalEtcBatchId?: string | null;
+  external_etc_batch_id?: string | null;
+  oaDraftId?: string | null;
+  oa_draft_id?: string | null;
+  oaDraftUrl?: string | null;
+  oa_draft_url?: string | null;
+  oaRowId?: string | null;
+  oa_row_id?: string | null;
+  oaProcessStatus?: string | null;
+  oa_process_status?: string | null;
+  oaDetectionStatus?: string | null;
+  oa_detection_status?: string | null;
+  oaDetectionReason?: string | null;
+  oa_detection_reason?: string | null;
+  oaDetectionError?: string | null;
+  oa_detection_error?: string | null;
+  oaDetectionStartedAt?: string | null;
+  oa_detection_started_at?: string | null;
+  oaDetectionNextRunAt?: string | null;
+  oa_detection_next_run_at?: string | null;
+  oaDetectionDeadlineAt?: string | null;
+  oa_detection_deadline_at?: string | null;
+  oaDetectionFinalRetryUntil?: string | null;
+  oa_detection_final_retry_until?: string | null;
+  oaDetectionAttempts?: number | null;
+  oa_detection_attempts?: number | null;
+  invoiceSummary?: {
+    count?: number | null;
+    amount?: string | number | null;
+  } | null;
+  invoice_summary?: {
+    count?: number | null;
+    amount?: string | number | null;
+  } | null;
+  invoiceIds?: string[] | null;
+  invoice_ids?: string[] | null;
+  importAttempts?: ApiEtcBusinessBatchImportAttempt[] | null;
+  import_attempts?: ApiEtcBusinessBatchImportAttempt[] | null;
+  auditEvents?: ApiEtcBusinessBatchAuditEvent[] | null;
+  audit_events?: ApiEtcBusinessBatchAuditEvent[] | null;
+  createdAt?: string | null;
+  created_at?: string | null;
+  updatedAt?: string | null;
+  updated_at?: string | null;
+};
+
+type ApiEtcBusinessBatchPayload = {
+  counts?: {
+    active?: number;
+    submitted?: number;
+    unsubmitted?: number;
+  };
+  items?: ApiEtcBusinessBatch[];
+  businessBatches?: ApiEtcBusinessBatch[];
+  business_batches?: ApiEtcBusinessBatch[];
+  pagination?: {
+    page?: number;
+    page_size?: number;
+    pageSize?: number;
+    total?: number;
+  };
+};
+
+type ApiEtcBusinessBatchSinglePayload =
+  | ApiEtcBusinessBatch
+  | {
+    businessBatch?: ApiEtcBusinessBatch | null;
+    item?: ApiEtcBusinessBatch | null;
+    detail?: ApiEtcBusinessBatch | null;
+  };
 
 type ApiEtcImportSummary = {
   job?: ApiBackgroundJob;
@@ -562,6 +699,15 @@ async function requestJson<T>(url: string, init: EtcRequestInit = {}): Promise<T
         if (errorPayload.error === "stale_reconciliation_task_preview") {
           throw new Error("对账任务已更新，请重新预览 ETC zip 后再确认导入。");
         }
+        if (errorPayload.error && typeof errorPayload.error === "object" && "message" in errorPayload.error) {
+          const envelopeMessage = (errorPayload.error as { message?: unknown }).message;
+          if (typeof envelopeMessage === "string" && envelopeMessage.trim()) {
+            throw new Error(envelopeMessage);
+          }
+        }
+        if (typeof errorPayload.error === "string" && errorPayload.error.trim()) {
+          throw new Error(errorPayload.error);
+        }
         const message = typeof errorPayload.message === "string" ? errorPayload.message : "";
         throw new Error(message || trimmedText || "ETC API request failed");
       }
@@ -579,6 +725,24 @@ async function requestJson<T>(url: string, init: EtcRequestInit = {}): Promise<T
   } finally {
     requestSignal.cleanup();
   }
+}
+
+function unwrapEnvelope<T>(payload: T | ApiEnvelope<T>): T {
+  if (payload && typeof payload === "object" && "ok" in payload && "data" in payload) {
+    const envelope = payload as ApiEnvelope<T>;
+    if (envelope.ok === false) {
+      const error = envelope.error;
+      if (error && typeof error === "object" && typeof error.message === "string") {
+        throw new Error(error.message);
+      }
+      if (typeof error === "string" && error.trim()) {
+        throw new Error(error);
+      }
+      throw new Error("ETC API request failed");
+    }
+    return (envelope.data ?? {}) as T;
+  }
+  return payload as T;
 }
 
 function numberOrZero(value: unknown): number {
@@ -668,7 +832,7 @@ function mapBatchSummary(batch: ApiEtcBatch): EtcBatchSummary {
     id,
     etcBatchId,
     externalBatchId: batch.externalBatchId ?? batch.external_batch_id ?? etcBatchId,
-    status: batch.status ?? "unsubmitted",
+    status: (batch.status ?? "unsubmitted") as EtcBatchStatus,
     sourceType: batch.sourceType ?? batch.source_type ?? "",
     invoiceCount: batch.invoiceCount ?? batch.invoice_count ?? 0,
     totalAmount: normalizeMoney(batch.totalAmount ?? batch.total_amount),
@@ -706,6 +870,106 @@ function mapBatchDetail(batch: ApiEtcBatch): EtcBatchDetail {
     ...mapBatchSummary(batchWithSummary),
     invoiceItems: (batch.invoiceItems ?? batch.invoice_items ?? batch.items ?? []).map(mapInvoice),
   };
+}
+
+function stringArray(value: string[] | null | undefined): string[] {
+  return Array.isArray(value) ? value.filter((item) => typeof item === "string" && item.trim()) : [];
+}
+
+function mapBusinessBatchImportAttempt(attempt: ApiEtcBusinessBatchImportAttempt): EtcBusinessBatchImportAttempt {
+  return {
+    attemptId: attempt.attemptId ?? attempt.attempt_id ?? "",
+    importBatchId: attempt.importBatchId ?? attempt.import_batch_id ?? "",
+    status: attempt.status ?? "",
+    imported: attempt.imported ?? 0,
+    duplicatesSkipped: attempt.duplicatesSkipped ?? attempt.duplicates_skipped ?? 0,
+    attachmentsCompleted: attempt.attachmentsCompleted ?? attempt.attachments_completed ?? 0,
+    failed: attempt.failed ?? 0,
+    createdAt: attempt.createdAt ?? attempt.created_at ?? "",
+  };
+}
+
+function mapBusinessBatchAuditEvent(event: ApiEtcBusinessBatchAuditEvent): EtcBusinessBatchAuditEvent {
+  return {
+    eventId: event.eventId ?? event.event_id ?? "",
+    eventType: event.eventType ?? event.event_type ?? "",
+    beforeStatus: event.beforeStatus ?? event.before_status ?? "",
+    afterStatus: event.afterStatus ?? event.after_status ?? "",
+    reason: event.reason ?? "",
+    createdAt: event.createdAt ?? event.created_at ?? "",
+  };
+}
+
+function mapBusinessBatchSummary(batch: ApiEtcBusinessBatch): EtcBusinessBatchSummary {
+  const legacySummary = mapBatchSummary(batch);
+  const invoiceSummary = batch.invoiceSummary ?? batch.invoice_summary;
+  const businessBatchId = batch.businessBatchId ?? batch.business_batch_id ?? batch.id ?? batch.batchId ?? batch.batch_id ?? "";
+  const externalEtcBatchId =
+    batch.externalEtcBatchId
+    ?? batch.external_etc_batch_id
+    ?? batch.externalBatchId
+    ?? batch.external_batch_id
+    ?? batch.etcBatchId
+    ?? batch.etc_batch_id
+    ?? legacySummary.externalBatchId
+    ?? "";
+  return {
+    businessBatchId,
+    taskId: batch.taskId ?? batch.task_id ?? "",
+    status: (batch.status ?? "draft") as EtcBusinessBatchStatus,
+    version: batch.version ?? 0,
+    ownerUserId: batch.ownerUserId ?? batch.owner_user_id ?? "",
+    ownerOrgId: batch.ownerOrgId ?? batch.owner_org_id ?? "",
+    importBatchIds: stringArray(batch.importBatchIds ?? batch.import_batch_ids),
+    submissionBatchId: batch.submissionBatchId ?? batch.submission_batch_id ?? "",
+    externalEtcBatchId,
+    oaDraftId: batch.oaDraftId ?? batch.oa_draft_id ?? "",
+    oaDraftUrl: batch.oaDraftUrl ?? batch.oa_draft_url ?? "",
+    oaRowId: batch.oaRowId ?? batch.oa_row_id ?? batch.linkedOaRowId ?? batch.linked_oa_row_id ?? "",
+    oaProcessStatus: batch.oaProcessStatus ?? batch.oa_process_status ?? "",
+    oaDetectionStatus: batch.oaDetectionStatus ?? batch.oa_detection_status ?? "",
+    oaDetectionReason: batch.oaDetectionReason ?? batch.oa_detection_reason ?? "",
+    oaDetectionError: batch.oaDetectionError ?? batch.oa_detection_error ?? "",
+    oaDetectionStartedAt: batch.oaDetectionStartedAt ?? batch.oa_detection_started_at ?? "",
+    oaDetectionNextRunAt: batch.oaDetectionNextRunAt ?? batch.oa_detection_next_run_at ?? "",
+    oaDetectionDeadlineAt: batch.oaDetectionDeadlineAt ?? batch.oa_detection_deadline_at ?? "",
+    oaDetectionFinalRetryUntil: batch.oaDetectionFinalRetryUntil ?? batch.oa_detection_final_retry_until ?? "",
+    oaDetectionAttempts: batch.oaDetectionAttempts ?? batch.oa_detection_attempts ?? 0,
+    invoiceSummary: {
+      count: invoiceSummary?.count ?? batch.invoiceCount ?? batch.invoice_count ?? 0,
+      amount: normalizeMoney(invoiceSummary?.amount ?? batch.totalAmount ?? batch.total_amount),
+    },
+    invoiceIds: stringArray(batch.invoiceIds ?? batch.invoice_ids),
+    importAttempts: (batch.importAttempts ?? batch.import_attempts ?? []).map(mapBusinessBatchImportAttempt),
+    auditEvents: (batch.auditEvents ?? batch.audit_events ?? []).map(mapBusinessBatchAuditEvent),
+    createdAt: batch.createdAt ?? batch.created_at ?? "",
+    updatedAt: batch.updatedAt ?? batch.updated_at ?? "",
+  };
+}
+
+function mapBusinessBatchDetail(batch: ApiEtcBusinessBatch): EtcBusinessBatchDetail {
+  const summary = batch.summary && typeof batch.summary === "object" ? batch.summary : {};
+  const batchWithSummary = {
+    ...batch,
+    ...summary,
+  };
+  return {
+    ...mapBusinessBatchSummary(batchWithSummary),
+    invoiceItems: (batch.invoiceItems ?? batch.invoice_items ?? batch.items ?? []).map(mapInvoice),
+  };
+}
+
+function unwrapBusinessBatchPayload(payload: ApiEtcBusinessBatchSinglePayload | ApiEnvelope<ApiEtcBusinessBatchSinglePayload>): ApiEtcBusinessBatch {
+  const unwrapped = unwrapEnvelope<ApiEtcBusinessBatchSinglePayload>(payload);
+  if (unwrapped && typeof unwrapped === "object") {
+    const record = unwrapped as {
+      businessBatch?: ApiEtcBusinessBatch | null;
+      item?: ApiEtcBusinessBatch | null;
+      detail?: ApiEtcBusinessBatch | null;
+    };
+    return record.businessBatch ?? record.item ?? record.detail ?? (unwrapped as ApiEtcBusinessBatch);
+  }
+  return {} as ApiEtcBusinessBatch;
 }
 
 function mapEtcImportItem(item: ApiEtcImportItem): EtcImportItem {
@@ -1203,6 +1467,182 @@ export async function fetchEtcInvoices(query: EtcInvoiceQuery = {}): Promise<Etc
       total: payload.pagination?.total ?? items.length,
     },
   };
+}
+
+export async function fetchEtcBusinessBatches(query: EtcBusinessBatchQuery = {}): Promise<EtcBusinessBatchListPayload> {
+  const params = new URLSearchParams();
+  if (query.status) {
+    params.set("status", query.status);
+  }
+  if (query.month) {
+    params.set("month", query.month);
+  }
+  if (query.plate) {
+    params.set("plate", query.plate);
+  }
+  if (query.keyword) {
+    params.set("keyword", query.keyword);
+  }
+  params.set("page", String(query.page ?? 1));
+  params.set("page_size", String(query.pageSize ?? 100));
+
+  const rawPayload = await requestJson<ApiEtcBusinessBatchPayload | ApiEnvelope<ApiEtcBusinessBatchPayload>>(
+    `/api/etc/business-batches?${params.toString()}`,
+    {
+      method: "GET",
+      signal: query.signal,
+    },
+  );
+  const payload = unwrapEnvelope<ApiEtcBusinessBatchPayload>(rawPayload);
+  const items = (payload.items ?? payload.businessBatches ?? payload.business_batches ?? []).map(mapBusinessBatchSummary);
+  return {
+    counts: {
+      active: payload.counts?.active ?? payload.counts?.unsubmitted ?? 0,
+      submitted: payload.counts?.submitted ?? 0,
+    },
+    items,
+    pagination: {
+      page: payload.pagination?.page ?? query.page ?? 1,
+      pageSize: payload.pagination?.pageSize ?? payload.pagination?.page_size ?? query.pageSize ?? 100,
+      total: payload.pagination?.total ?? items.length,
+    },
+  };
+}
+
+export async function fetchEtcBusinessBatchDetail(businessBatchId: string, signal?: AbortSignal): Promise<EtcBusinessBatchDetail> {
+  const rawPayload = await requestJson<ApiEtcBusinessBatchSinglePayload | ApiEnvelope<ApiEtcBusinessBatchSinglePayload>>(
+    `/api/etc/business-batches/${encodeURIComponent(businessBatchId)}`,
+    {
+      method: "GET",
+      signal,
+    },
+  );
+  return mapBusinessBatchDetail(unwrapBusinessBatchPayload(rawPayload));
+}
+
+export async function createEtcBusinessBatch(payload: EtcCreateBusinessBatchPayload): Promise<EtcBusinessBatchDetail> {
+  const rawPayload = await requestJson<ApiEtcBusinessBatchSinglePayload | ApiEnvelope<ApiEtcBusinessBatchSinglePayload>>("/api/etc/business-batches", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      taskId: payload.taskId,
+      ...(payload.idempotencyKey ? { idempotencyKey: payload.idempotencyKey } : {}),
+    }),
+  });
+  return mapBusinessBatchDetail(unwrapBusinessBatchPayload(rawPayload));
+}
+
+export async function createEtcBusinessBatchOaDraft(
+  businessBatchId: string,
+  payload: EtcBusinessBatchVersionedPayload = {},
+): Promise<EtcBusinessBatchDetail> {
+  const rawPayload = await requestJson<ApiEtcBusinessBatchSinglePayload | ApiEnvelope<ApiEtcBusinessBatchSinglePayload>>(
+    `/api/etc/business-batches/${encodeURIComponent(businessBatchId)}/oa-draft`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        ...(payload.expectedVersion !== undefined ? { expectedVersion: payload.expectedVersion } : {}),
+        ...(payload.idempotencyKey ? { idempotencyKey: payload.idempotencyKey } : {}),
+      }),
+    },
+  );
+  return mapBusinessBatchDetail(unwrapBusinessBatchPayload(rawPayload));
+}
+
+export async function revokeEtcBusinessBatchOaDraft(
+  businessBatchId: string,
+  payload: EtcBusinessBatchReasonedPayload,
+): Promise<EtcBusinessBatchDetail> {
+  const reason = payload.reason.trim();
+  if (!reason) {
+    throw new Error("撤销原因不能为空。");
+  }
+  const rawPayload = await requestJson<ApiEtcBusinessBatchSinglePayload | ApiEnvelope<ApiEtcBusinessBatchSinglePayload>>(
+    `/api/etc/business-batches/${encodeURIComponent(businessBatchId)}/oa-draft/revoke`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        ...(payload.expectedVersion !== undefined ? { expectedVersion: payload.expectedVersion } : {}),
+        reason,
+        ...(payload.idempotencyKey ? { idempotencyKey: payload.idempotencyKey } : {}),
+      }),
+    },
+  );
+  return mapBusinessBatchDetail(unwrapBusinessBatchPayload(rawPayload));
+}
+
+export async function refreshEtcBusinessBatchOaStatus(
+  businessBatchId: string,
+  payload: Pick<EtcBusinessBatchVersionedPayload, "expectedVersion"> = {},
+): Promise<EtcBusinessBatchDetail> {
+  const rawPayload = await requestJson<ApiEtcBusinessBatchSinglePayload | ApiEnvelope<ApiEtcBusinessBatchSinglePayload>>(
+    `/api/etc/business-batches/${encodeURIComponent(businessBatchId)}/oa-status/refresh`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        ...(payload.expectedVersion !== undefined ? { expectedVersion: payload.expectedVersion } : {}),
+      }),
+    },
+  );
+  return mapBusinessBatchDetail(unwrapBusinessBatchPayload(rawPayload));
+}
+
+export async function manualEtcBusinessBatchOaStatus(
+  businessBatchId: string,
+  payload: EtcManualOaStatusPayload,
+): Promise<EtcBusinessBatchDetail> {
+  const reason = payload.reason.trim();
+  if (!reason) {
+    throw new Error("人工处理原因不能为空。");
+  }
+  const rawPayload = await requestJson<ApiEtcBusinessBatchSinglePayload | ApiEnvelope<ApiEtcBusinessBatchSinglePayload>>(
+    `/api/etc/business-batches/${encodeURIComponent(businessBatchId)}/manual-oa-status`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        decision: payload.decision,
+        ...(payload.expectedVersion !== undefined ? { expectedVersion: payload.expectedVersion } : {}),
+        reason,
+        ...(payload.candidateOaRowId ? { candidateOaRowId: payload.candidateOaRowId } : {}),
+      }),
+    },
+  );
+  return mapBusinessBatchDetail(unwrapBusinessBatchPayload(rawPayload));
+}
+
+export async function deleteEtcBusinessBatch(
+  businessBatchId: string,
+  payload: EtcBusinessBatchReasonedPayload,
+): Promise<void> {
+  const reason = payload.reason.trim();
+  if (!reason) {
+    throw new Error("删除原因不能为空。");
+  }
+  await requestJson<ApiEnvelope<unknown> | unknown>(`/api/etc/business-batches/${encodeURIComponent(businessBatchId)}`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      ...(payload.expectedVersion !== undefined ? { expectedVersion: payload.expectedVersion } : {}),
+      reason,
+      ...(payload.idempotencyKey ? { idempotencyKey: payload.idempotencyKey } : {}),
+    }),
+  });
 }
 
 export async function fetchEtcBatches(query: EtcBatchQuery = {}): Promise<EtcBatchListPayload> {

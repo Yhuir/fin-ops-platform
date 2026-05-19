@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FocusEvent, type MouseEvent } from "react";
 import ClearOutlinedIcon from "@mui/icons-material/ClearOutlined";
 import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined";
 import SearchOutlinedIcon from "@mui/icons-material/SearchOutlined";
+import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -26,6 +27,7 @@ import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
 import ToggleButton from "@mui/material/ToggleButton";
 import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
+import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 
 import PageScaffold from "../components/common/PageScaffold";
@@ -38,6 +40,7 @@ import {
 import type {
   BatchAccountingBankRow,
   BatchAccountingBucket,
+  BatchAccountingAmountCheck,
   BatchAccountingOaRow,
   BatchAccountingResponse,
 } from "../features/batchAccounting/types";
@@ -142,6 +145,58 @@ function ExpandableText({ text }: { text: string }) {
   );
 }
 
+function AmountMismatchWarning({
+  amountCheck,
+  note,
+}: {
+  amountCheck: BatchAccountingAmountCheck;
+  note: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const showTooltip = () => setOpen(true);
+  const hideTooltip = (event: MouseEvent<HTMLButtonElement> | FocusEvent<HTMLButtonElement>) => {
+    if (event.type === "mouseleave" || event.type === "blur") {
+      setOpen(false);
+    }
+  };
+
+  return (
+    <Tooltip
+      arrow
+      describeChild
+      disableFocusListener
+      disableHoverListener
+      disableTouchListener
+      onClose={() => setOpen(false)}
+      open={open}
+      placement="top"
+      title={(
+        <Stack spacing={0.5}>
+          <span>{`银行流水金额：${formatMoney(amountCheck.bankAmount)}`}</span>
+          <span>{`OA合计：${formatMoney(amountCheck.oaAmount)}`}</span>
+          <span>{`差额：${formatMoney(amountCheck.amountDelta)}`}</span>
+          <span>{`差额说明：${note || "-"}`}</span>
+        </Stack>
+      )}
+    >
+      <IconButton
+        aria-label="查看金额不一致差额说明"
+        color="warning"
+        onBlur={hideTooltip}
+        onClick={showTooltip}
+        onFocus={showTooltip}
+        onMouseEnter={showTooltip}
+        onMouseLeave={hideTooltip}
+        onTouchStart={showTooltip}
+        size="small"
+        sx={{ height: 28, ml: -0.5, width: 28 }}
+      >
+        <WarningAmberRoundedIcon fontSize="small" />
+      </IconButton>
+    </Tooltip>
+  );
+}
+
 export default function BatchAccountingPage() {
   const [bankYear, setBankYear] = useState(currentYear);
   const [oaYear, setOaYear] = useState(currentYear);
@@ -157,6 +212,7 @@ export default function BatchAccountingPage() {
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [withdrawReason, setWithdrawReason] = useState("");
   const [oaSearchQuery, setOaSearchQuery] = useState("");
+  const [differenceNote, setDifferenceNote] = useState("");
   const [snackbar, setSnackbar] = useState<{ severity: "success" | "error"; message: string } | null>(null);
 
   const selectedBankRow = useMemo(
@@ -168,6 +224,12 @@ export default function BatchAccountingPage() {
     [bankRowsById, payload.bankRows, selectedBankRowId],
   );
 
+  const selectedRelationBucket = selectedBankRow
+    ? payload.relationsByBankRowId[selectedBankRow.id]
+    : undefined;
+  const selectedRelation = selectedRelationBucket?.relation;
+  const selectedRelationAmountCheck = selectedRelation?.amountCheck;
+
   const sourceOaRows = useMemo(() => {
     if (bucket === "unsubmitted") {
       return payload.oaRows;
@@ -175,7 +237,7 @@ export default function BatchAccountingPage() {
     if (!selectedBankRow) {
       return [];
     }
-    return payload.relationsByBankRowId[selectedBankRow.id] ?? payload.oaRows;
+    return payload.relationsByBankRowId[selectedBankRow.id]?.oaRows ?? payload.oaRows;
   }, [bucket, payload.oaRows, payload.relationsByBankRowId, selectedBankRow]);
 
   const normalizedOaSearchQuery = normalizeSearchText(oaSearchQuery);
@@ -186,22 +248,29 @@ export default function BatchAccountingPage() {
     return sourceOaRows.filter((row) => oaSearchText(row).includes(normalizedOaSearchQuery));
   }, [normalizedOaSearchQuery, sourceOaRows]);
 
-  const selectedOaRows = useMemo(
-    () => Array.from(selectedOaRowIds)
+  const selectedOaRows = useMemo(() => {
+    if (bucket === "submitted") {
+      return selectedRelationBucket?.oaRows ?? [];
+    }
+    return Array.from(selectedOaRowIds)
       .map((rowId) => sourceOaRows.find((row) => row.id === rowId) ?? oaRowsById[rowId])
-      .filter((row): row is BatchAccountingOaRow => Boolean(row)),
-    [oaRowsById, selectedOaRowIds, sourceOaRows],
-  );
+      .filter((row): row is BatchAccountingOaRow => Boolean(row));
+  }, [bucket, oaRowsById, selectedOaRowIds, selectedRelationBucket, sourceOaRows]);
 
   const bankAmountCents = selectedBankRow ? parseMoneyCents(selectedBankRow.amount) : 0;
   const selectedOaTotalCents = selectedOaRows.reduce((total, row) => total + parseMoneyCents(row.amount), 0);
   const differenceCents = bankAmountCents - selectedOaTotalCents;
+  const isAmountMismatch = bucket === "unsubmitted"
+    && Boolean(selectedBankRow)
+    && selectedOaRows.length > 0
+    && differenceCents !== 0;
+  const submittedAmountMismatch = bucket === "submitted" && selectedRelationAmountCheck?.status === "mismatch";
   const canSubmit = Boolean(selectedBankRow)
     && selectedOaRows.length > 0
-    && differenceCents === 0
     && isValidYear(bankYear)
     && isValidYear(oaYear)
-    && !mutating;
+    && !mutating
+    && (differenceCents === 0 || differenceNote.trim().length > 0);
   const canWithdraw = Boolean(selectedBankRow?.relationId) && !mutating;
 
   const loadData = useCallback((signal?: AbortSignal) => {
@@ -217,7 +286,7 @@ export default function BatchAccountingPage() {
           ...current,
           ...Object.fromEntries(nextPayload.bankRows.map((row) => [row.id, row])),
         }));
-        const relationOaRows = Object.values(nextPayload.relationsByBankRowId).flat();
+        const relationOaRows = Object.values(nextPayload.relationsByBankRowId).flatMap((relation) => relation.oaRows);
         setOaRowsById((current) => ({
           ...current,
           ...Object.fromEntries([...nextPayload.oaRows, ...relationOaRows].map((row) => [row.id, row])),
@@ -251,16 +320,19 @@ export default function BatchAccountingPage() {
     setBucket(nextBucket);
     setSelectedBankRowId(null);
     setSelectedOaRowIds(new Set());
+    setDifferenceNote("");
   };
 
   const handleSelectBankRow = (row: BatchAccountingBankRow) => {
     setBankRowsById((current) => ({ ...current, [row.id]: row }));
     setSelectedBankRowId(row.id);
     setSelectedOaRowIds(new Set());
+    setDifferenceNote("");
   };
 
   const handleOaToggle = (row: BatchAccountingOaRow, checked: boolean) => {
     setOaRowsById((current) => ({ ...current, [row.id]: row }));
+    setDifferenceNote("");
     setSelectedOaRowIds((current) => {
       const next = new Set(current);
       if (checked) {
@@ -290,6 +362,7 @@ export default function BatchAccountingPage() {
         bankRowId: selectedBankRow.id,
         oaRowIds: selectedOaRows.map((row) => row.id),
         expectedVersion: selectedBankRow.version,
+        note: isAmountMismatch ? differenceNote : "",
       });
       handleMutationComplete("已关联批量账务流水与 OA。", result);
     } catch (caught) {
@@ -429,11 +502,33 @@ export default function BatchAccountingPage() {
           <Stack alignItems={{ xs: "stretch", xl: "center" }} direction={{ xs: "column", xl: "row" }} justifyContent="space-between" spacing={1.5} sx={{ px: 2, py: 1.5 }}>
             <Stack direction={{ xs: "column", lg: "row" }} spacing={1.25} sx={{ minWidth: 0 }}>
               <Stack direction="row" flexWrap="wrap" spacing={1} useFlexGap>
-                <Chip label={`银行流水金额 ${formatCents(bankAmountCents)}`} />
+                <Stack alignItems="center" direction="row" spacing={0.5}>
+                  <Chip label={`银行流水金额 ${formatCents(bankAmountCents)}`} />
+                  {submittedAmountMismatch && selectedRelationAmountCheck ? (
+                    <AmountMismatchWarning
+                      amountCheck={selectedRelationAmountCheck}
+                      note={selectedRelation?.note ?? ""}
+                    />
+                  ) : null}
+                </Stack>
                 <Chip label={`已选 OA ${selectedOaRows.length} 项`} />
                 <Chip label={`已选 OA 金额 ${formatCents(selectedOaTotalCents)}`} />
                 <Chip color={differenceCents === 0 ? "success" : "warning"} label={`差额 ${formatCents(differenceCents)}`} />
+                {submittedAmountMismatch ? (
+                  <Chip color="warning" label="金额不一致" />
+                ) : null}
               </Stack>
+              {isAmountMismatch ? (
+                <TextField
+                  helperText="金额不一致时必须填写，提交后视为人工差额闭环。"
+                  inputProps={{ "aria-required": true }}
+                  label="差额说明"
+                  onChange={(event) => setDifferenceNote(event.target.value)}
+                  size="small"
+                  sx={{ minWidth: { xs: "100%", lg: 260 } }}
+                  value={differenceNote}
+                />
+              ) : null}
               <TextField
                 InputLabelProps={{ shrink: true }}
                 inputProps={{ min: 2000, max: 2100 }}

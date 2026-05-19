@@ -7802,6 +7802,47 @@ body.column-layout-dragging {
   gap: 4px;
 }
 
+.etc-oa-status-panel,
+.etc-import-attempts {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f9fbfe;
+  min-width: 0;
+}
+
+.etc-oa-status-panel .MuiButton-root {
+  white-space: nowrap;
+}
+
+.etc-oa-manual-panel {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #dbe3ef;
+}
+
+.etc-import-attempt-list {
+  display: grid;
+  gap: 8px;
+}
+
+.etc-import-attempt-row {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.etc-import-attempt-row .MuiTypography-root {
+  overflow-wrap: anywhere;
+}
+
 .etc-upload-blocks {
   min-width: 0;
 }

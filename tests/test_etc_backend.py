@@ -14,6 +14,9 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.etc_service import (
+    EtcBusinessBatchActiveExistsError,
+    EtcBusinessBatchInvalidTransitionError,
+    EtcBusinessBatchStatus,
     EtcDraftRequestError,
     EtcOAHttpClientSettings,
     EtcInvoiceStatus,
@@ -245,6 +248,212 @@ class FakeHTTPResponse:
 
 
 class EtcServiceTests(unittest.TestCase):
+    def test_business_batch_create_list_detail_and_active_guard(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir))
+
+            batch = service.create_business_batch(task_id="ETC-TASK-001", owner_user_id="alice", owner_org_id="finance")
+
+            self.assertEqual(batch.business_batch_id, "etc_business_batch_0001")
+            self.assertEqual(batch.task_id, "ETC-TASK-001")
+            self.assertEqual(batch.status, EtcBusinessBatchStatus.DRAFT.value)
+            self.assertEqual(batch.version, 1)
+            self.assertTrue(batch.is_active)
+            self.assertEqual(batch.task_active_key, "ETC-TASK-001:active")
+            self.assertEqual(batch.owner_user_id, "alice")
+            self.assertEqual(batch.owner_org_id, "finance")
+            self.assertEqual(service.get_business_batch(batch.business_batch_id).business_batch_id, batch.business_batch_id)
+            self.assertEqual([item.business_batch_id for item in service.list_business_batches()], [batch.business_batch_id])
+            with self.assertRaises(EtcBusinessBatchActiveExistsError):
+                service.create_business_batch(task_id="ETC-TASK-001")
+
+    def test_business_batch_supplement_merge_rejects_after_draft_and_allows_after_revoke(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir), oa_client=FakeEtcOAClient())
+            batch = service.create_business_batch(task_id="ETC-TASK-001")
+
+            preview = service.preview_business_batch_import_zips(
+                batch.business_batch_id,
+                [UploadedEtcZipFile("first.zip", etc_zip(["ETC001"]))],
+                expected_version=batch.version,
+            )
+            batch, result = service.confirm_business_batch_import(
+                batch.business_batch_id,
+                str(preview["sessionId"]),
+                expected_version=preview["businessBatch"]["version"],
+            )
+            preview = service.preview_business_batch_import_zips(
+                batch.business_batch_id,
+                [UploadedEtcZipFile("supplement.zip", etc_zip(["ETC002"]))],
+                expected_version=batch.version,
+            )
+            batch, result = service.confirm_business_batch_import(
+                batch.business_batch_id,
+                str(preview["sessionId"]),
+                expected_version=preview["businessBatch"]["version"],
+            )
+
+            self.assertEqual(result.imported, 1)
+            self.assertEqual(batch.status, EtcBusinessBatchStatus.IMPORTED.value)
+            self.assertEqual(batch.import_batch_ids, ["etc_import_batch_0001", "etc_import_batch_0002"])
+            self.assertEqual(batch.invoice_ids, ["etc_invoice_0001", "etc_invoice_0002"])
+
+            drafted = service.create_business_batch_oa_draft(batch.business_batch_id, expected_version=batch.version)
+            with self.assertRaises(EtcBusinessBatchInvalidTransitionError):
+                service.preview_business_batch_import_zips(
+                    batch.business_batch_id,
+                    [UploadedEtcZipFile("late.zip", etc_zip(["ETC003"]))],
+                    expected_version=drafted.version,
+                )
+
+            revoked = service.revoke_business_batch_oa_draft(
+                batch.business_batch_id,
+                reason="补充漏导发票",
+                expected_version=drafted.version,
+            )
+            preview = service.preview_business_batch_import_zips(
+                batch.business_batch_id,
+                [UploadedEtcZipFile("late.zip", etc_zip(["ETC003"]))],
+                expected_version=revoked.version,
+            )
+            batch, result = service.confirm_business_batch_import(
+                batch.business_batch_id,
+                str(preview["sessionId"]),
+                expected_version=preview["businessBatch"]["version"],
+            )
+
+            self.assertEqual(result.imported, 1)
+            self.assertEqual(batch.status, EtcBusinessBatchStatus.IMPORTED.value)
+            self.assertEqual(batch.invoice_ids, ["etc_invoice_0001", "etc_invoice_0002", "etc_invoice_0003"])
+
+    def test_business_batch_oa_draft_is_idempotent(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            fake_oa = FakeEtcOAClient()
+            service = EtcService(data_dir=Path(temp_dir), oa_client=fake_oa)
+            batch = service.create_business_batch(task_id="ETC-TASK-001")
+            preview = service.preview_business_batch_import_zips(
+                batch.business_batch_id,
+                [UploadedEtcZipFile("invoices.zip", etc_zip(["ETC001"]))],
+                expected_version=batch.version,
+            )
+            batch, _result = service.confirm_business_batch_import(
+                batch.business_batch_id,
+                str(preview["sessionId"]),
+                expected_version=preview["businessBatch"]["version"],
+            )
+
+            first = service.create_business_batch_oa_draft(batch.business_batch_id, expected_version=batch.version)
+            second = service.create_business_batch_oa_draft(first.business_batch_id, expected_version=first.version)
+
+            self.assertEqual(first.submission_batch_id, second.submission_batch_id)
+            self.assertEqual(first.oa_draft_id, "oa-draft-001")
+            self.assertEqual(second.status, EtcBusinessBatchStatus.OA_SUBMISSION_DETECTING.value)
+            self.assertEqual(len(fake_oa.draft_payloads), 1)
+            cause = str(fake_oa.draft_payloads[0]["payload"]["data"]["cause"])
+            self.assertIn(f"business_batch_id={batch.business_batch_id}", cause)
+
+    def test_business_batch_revoke_is_idempotent_and_releases_invoices(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir), oa_client=FakeEtcOAClient())
+            batch = service.create_business_batch(task_id="ETC-TASK-001")
+            preview = service.preview_business_batch_import_zips(
+                batch.business_batch_id,
+                [UploadedEtcZipFile("invoices.zip", etc_zip(["ETC001"]))],
+                expected_version=batch.version,
+            )
+            batch, _result = service.confirm_business_batch_import(
+                batch.business_batch_id,
+                str(preview["sessionId"]),
+                expected_version=preview["businessBatch"]["version"],
+            )
+            drafted = service.create_business_batch_oa_draft(batch.business_batch_id, expected_version=batch.version)
+
+            first = service.revoke_business_batch_oa_draft(
+                batch.business_batch_id,
+                reason="撤销后补充导入",
+                expected_version=drafted.version,
+            )
+            second = service.revoke_business_batch_oa_draft(
+                batch.business_batch_id,
+                reason="重复点击撤销",
+                expected_version=first.version,
+            )
+            invoice = service.list_invoices_by_ids(["etc_invoice_0001"])[0]
+
+            self.assertEqual(first.status, EtcBusinessBatchStatus.NOT_SUBMITTED.value)
+            self.assertEqual(second.status, EtcBusinessBatchStatus.NOT_SUBMITTED.value)
+            self.assertIsNone(second.submission_batch_id)
+            self.assertIsNone(invoice.current_batch_id)
+            self.assertEqual(invoice.status, EtcInvoiceStatus.UNSUBMITTED)
+            self.assertEqual(
+                [event["event_type"] for event in second.audit_events].count("oa_draft_revoked"),
+                1,
+            )
+
+    def test_business_batch_delete_rejects_submitted_batch(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir), oa_client=FakeEtcOAClient())
+            batch = service.create_business_batch(task_id="ETC-TASK-001")
+            preview = service.preview_business_batch_import_zips(
+                batch.business_batch_id,
+                [UploadedEtcZipFile("invoices.zip", etc_zip(["ETC001"]))],
+                expected_version=batch.version,
+            )
+            batch, _result = service.confirm_business_batch_import(
+                batch.business_batch_id,
+                str(preview["sessionId"]),
+                expected_version=preview["businessBatch"]["version"],
+            )
+            drafted = service.create_business_batch_oa_draft(batch.business_batch_id, expected_version=batch.version)
+            submitted = service.manual_business_batch_oa_status(
+                batch.business_batch_id,
+                decision="submitted",
+                reason="OA 已进入流程",
+                expected_version=drafted.version,
+            )
+
+            with self.assertRaises(EtcBusinessBatchInvalidTransitionError):
+                service.delete_business_batch(batch.business_batch_id, expected_version=submitted.version)
+
+    def test_business_batch_oa_detection_marks_submitted_and_updates_invoices(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir), oa_client=FakeEtcOAClient())
+            batch = service.create_business_batch(task_id="ETC-TASK-001")
+            preview = service.preview_business_batch_import_zips(
+                batch.business_batch_id,
+                [UploadedEtcZipFile("invoices.zip", etc_zip(["ETC001"]))],
+                expected_version=batch.version,
+            )
+            batch, _result = service.confirm_business_batch_import(
+                batch.business_batch_id,
+                str(preview["sessionId"]),
+                expected_version=preview["businessBatch"]["version"],
+            )
+            drafted = service.create_business_batch_oa_draft(batch.business_batch_id, expected_version=batch.version)
+
+            detected = service.apply_business_batch_oa_detection_result(
+                drafted.business_batch_id,
+                expected_version=drafted.version,
+                detection_status="detected",
+                reason="unique_candidate_detected",
+                oa_row_id="oa-pay-ETC-001",
+                process_status="in_progress",
+                candidates=[{"oaRowId": "oa-pay-ETC-001"}],
+            )
+            invoice = service.list_invoices_by_ids(["etc_invoice_0001"])[0]
+
+            self.assertEqual(detected.status, EtcBusinessBatchStatus.OA_SUBMITTED.value)
+            self.assertEqual(detected.oa_row_id, "oa-pay-ETC-001")
+            self.assertEqual(invoice.status, EtcInvoiceStatus.SUBMITTED)
+            self.assertEqual(invoice.current_batch_id, detected.submission_batch_id)
+            self.assertIsNone(detected.task_active_key)
+            with self.assertRaises(EtcBusinessBatchInvalidTransitionError):
+                service.revoke_business_batch_oa_draft(
+                    detected.business_batch_id,
+                    reason="OA 已提交后不能释放发票",
+                    expected_version=detected.version,
+                )
+
     def test_parse_real_world_etc_xml_shape(self) -> None:
         parsed = parse_etc_xml(real_etc_xml())
 
@@ -745,6 +954,10 @@ class EtcServiceTests(unittest.TestCase):
         self.assertEqual(data["paymentProof"], "")
         self.assertEqual(data["projectName"], "6486ca70cd6cae5d4e2b0b48")
         self.assertEqual(data["cause"], f"ETC批量提交\netc_batch_id={draft.etc_batch_id}")
+        self.assertEqual(data["invoiceCount"], 2)
+        self.assertEqual(data["invoice_count"], 2)
+        self.assertEqual(data["etcInvoiceCount"], 2)
+        self.assertEqual(payload["invoiceCount"], 2)
         uploaded_invoices = data["field101"]["list"]
         self.assertEqual(
             [(item["name"], item["response"]["data"], item["response"]["extra"]["fileName"]) for item in uploaded_invoices],
@@ -1931,6 +2144,73 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(invoices["total"], 0)
         self.assertEqual(batches["items"], [])
         self.assertEqual(app._etc_service.list_import_batches(), [])
+
+    def test_delete_etc_submission_batch_route_repairs_stale_invoice_references(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._etc_service.oa_client = FakeEtcOAClient()
+            app._etc_service.import_zips([UploadedEtcZipFile("draft.zip", etc_zip(["ETC001", "ETC002"]))])
+            draft = app._etc_service.create_oa_draft(["etc_invoice_0001", "etc_invoice_0002"])
+            app._etc_service._invoices.clear()
+            app._etc_service._invoice_numbers.clear()
+            app._etc_service._import_batches.clear()
+
+            delete_response = app.handle_request("DELETE", f"/api/etc/batches/{draft.batch_id}")
+            detail_response = app.handle_request("GET", f"/api/etc/batches/{draft.batch_id}")
+
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertEqual(json.loads(delete_response.body), {"deleted": True, "batchId": draft.batch_id, "kind": "submission_batch"})
+        self.assertEqual(detail_response.status_code, 404)
+
+    def test_etc_business_batch_api_and_legacy_batches_use_unified_view(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._etc_service.oa_client = FakeEtcOAClient()
+
+            create_response = app.handle_request(
+                "POST",
+                "/api/etc/business-batches",
+                json.dumps({"taskId": "ETC-TASK-001", "ownerUserId": "alice", "ownerOrgId": "finance"}),
+            )
+            created = json.loads(create_response.body)["data"]["businessBatch"]
+            preview_body, preview_headers = multipart(
+                {"invoices.zip": etc_zip(["ETC001"])},
+                {"expectedVersion": str(created["version"])},
+            )
+            preview_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/preview",
+                preview_body,
+                preview_headers,
+            )
+            preview = json.loads(preview_response.body)["data"]
+            confirm_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/confirm",
+                json.dumps({
+                    "sessionId": preview["sessionId"],
+                    "expectedVersion": preview["businessBatch"]["version"],
+                }),
+            )
+            confirmed = json.loads(confirm_response.body)["data"]["businessBatch"]
+            draft_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{created['businessBatchId']}/oa-draft",
+                json.dumps({"expectedVersion": confirmed["version"]}),
+            )
+            detail_response = app.handle_request("GET", f"/api/etc/business-batches/{created['businessBatchId']}")
+            list_response = app.handle_request("GET", "/api/etc/business-batches")
+            legacy_response = app.handle_request("GET", "/api/etc/batches")
+
+        self.assertEqual(create_response.status_code, 201)
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(confirm_response.status_code, 200)
+        self.assertEqual(draft_response.status_code, 200)
+        self.assertEqual(json.loads(detail_response.body)["data"]["businessBatch"]["businessBatchId"], created["businessBatchId"])
+        self.assertEqual(json.loads(list_response.body)["data"]["items"][0]["businessBatchId"], created["businessBatchId"])
+        legacy_items = json.loads(legacy_response.body)["items"]
+        self.assertEqual([item["id"] for item in legacy_items], [created["businessBatchId"]])
+        self.assertEqual(legacy_items[0]["source_type"], "etc_business_batch")
 
     def test_reconciliation_item_patch_conflict_returns_task_version_conflict(self) -> None:
         with TemporaryDirectory() as temp_dir:

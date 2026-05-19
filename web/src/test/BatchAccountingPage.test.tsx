@@ -84,7 +84,7 @@ const submittedPayload = {
       applicant: "陈敏",
       apply_time: "2026-02-08",
       project_name: "办公室耗材采购",
-      amount: "900.00",
+      amount: "850.00",
       reason: "2月行政耗材日常报销",
       linked_invoice_row_ids: ["oa-att-inv-2001-01"],
     },
@@ -92,13 +92,25 @@ const submittedPayload = {
   relations_by_bank_row_id: {
     "bank-row-submitted-001": {
       relation_id: "CASE-202602-001",
+      relation: {
+        relation_id: "CASE-202602-001",
+        note: "财务确认差额闭环",
+        amount_check: {
+          status: "mismatch",
+          direction: "expense",
+          bank_amount: "900.00",
+          oa_amount: "850.00",
+          amount_delta: "50.00",
+          requires_note: true,
+        },
+      },
       oa_rows: [
         {
           id: "oa-exp-2001",
           applicant: "陈敏",
           apply_time: "2026-02-08",
           project_name: "办公室耗材采购",
-          amount: "900.00",
+          amount: "850.00",
           reason: "2月行政耗材日常报销",
           linked_invoice_row_ids: ["oa-att-inv-2001-01"],
         },
@@ -176,6 +188,15 @@ function installFetchMock() {
   return fetchMock;
 }
 
+function lastSubmitBody(fetchMock: ReturnType<typeof installFetchMock>) {
+  const submitCall = fetchMock.mock.calls.find(([input]) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+    return url.pathname === "/api/batch-accounting/submit";
+  });
+  expect(submitCall).toBeTruthy();
+  return JSON.parse(String(submitCall?.[1]?.body ?? "{}")) as Record<string, unknown>;
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -207,7 +228,7 @@ describe("BatchAccountingPage", () => {
     expect(within(oaTable).getByText("1月日常报销，包含广告素材制作和渠道投放费用")).toBeInTheDocument();
   });
 
-  test("updates selected totals, disables mismatches, and submits matching OA rows", async () => {
+  test("updates selected totals, requires notes for mismatches, and submits matching OA rows without a note", async () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock();
     const relationListener = vi.fn();
@@ -223,12 +244,15 @@ describe("BatchAccountingPage", () => {
       expect(screen.getByText("已选 OA 1 项")).toBeInTheDocument();
       expect(screen.getByText("已选 OA 金额 700.00")).toBeInTheDocument();
       expect(screen.getByText("差额 500.00")).toBeInTheDocument();
+      expect(screen.getByLabelText("差额说明")).toBeInTheDocument();
+      expect(screen.getByText("金额不一致时必须填写，提交后视为人工差额闭环。")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeDisabled();
 
       await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
       expect(screen.getByText("已选 OA 2 项")).toBeInTheDocument();
       expect(screen.getByText("已选 OA 金额 1,200.00")).toBeInTheDocument();
       expect(screen.getByText("差额 0.00")).toBeInTheDocument();
+      expect(screen.queryByLabelText("差额说明")).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeEnabled();
 
       await user.click(screen.getByRole("button", { name: "关联OA项与流水" }));
@@ -244,6 +268,7 @@ describe("BatchAccountingPage", () => {
               bank_row_id: "bank-row-001",
               oa_row_ids: ["oa-exp-1001", "oa-exp-1002"],
               expected_version: 1,
+              note: "",
             }),
           }),
         );
@@ -255,6 +280,90 @@ describe("BatchAccountingPage", () => {
     } finally {
       window.removeEventListener("workbenchRelationUpdated", relationListener);
     }
+  });
+
+  test("submits mismatched OA rows only when difference note is non-empty after trimming", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock();
+
+    renderPage();
+    await screen.findByRole("heading", { name: "日常报销批量账务管理" });
+
+    await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    const noteInput = screen.getByLabelText("差额说明");
+    expect(noteInput.tagName).toBe("INPUT");
+    expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeDisabled();
+
+    await user.type(noteInput, "   ");
+    expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeDisabled();
+
+    await user.type(noteInput, "财务确认差额闭环");
+    expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "关联OA项与流水" }));
+
+    await waitFor(() => {
+      expect(lastSubmitBody(fetchMock)).toMatchObject({
+        bank_year: "2026",
+        oa_year: "2026",
+        bank_row_id: "bank-row-001",
+        oa_row_ids: ["oa-exp-1001"],
+        expected_version: 1,
+        note: "财务确认差额闭环",
+      });
+    });
+  });
+
+  test("clears difference note when switching bank rows", async () => {
+    const user = userEvent.setup();
+    installFetchMock();
+
+    renderPage();
+    await screen.findByRole("heading", { name: "日常报销批量账务管理" });
+
+    await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.type(screen.getByLabelText("差额说明"), "财务确认差额闭环");
+    expect(screen.getByLabelText("差额说明")).toHaveValue("财务确认差额闭环");
+
+    await user.click(screen.getByRole("button", { name: /批量账务集中处理.*800.00.*2026-01-08 09:00:00.*支出.*招行 1888/ }));
+    await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+
+    expect(screen.getByLabelText("差额说明")).toHaveValue("");
+  });
+
+  test("clears difference note when switching submitted and unsubmitted buckets", async () => {
+    const user = userEvent.setup();
+    installFetchMock();
+
+    renderPage();
+    await screen.findByRole("heading", { name: "日常报销批量账务管理" });
+
+    await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.type(screen.getByLabelText("差额说明"), "财务确认差额闭环");
+    expect(screen.getByLabelText("差额说明")).toHaveValue("财务确认差额闭环");
+
+    await user.click(screen.getByRole("button", { name: "已提交 1" }));
+    await screen.findByRole("table", { name: "已关联OA项" });
+    await user.click(screen.getByRole("button", { name: /^未提交/ }));
+    await screen.findByRole("table", { name: "可关联OA项" });
+    await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+
+    expect(screen.getByLabelText("差额说明")).toHaveValue("");
+  });
+
+  test("clears difference note when OA selection changes", async () => {
+    const user = userEvent.setup();
+    installFetchMock();
+
+    renderPage();
+    await screen.findByRole("heading", { name: "日常报销批量账务管理" });
+
+    await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.type(screen.getByLabelText("差额说明"), "财务确认差额闭环");
+    await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
+    expect(screen.queryByLabelText("差额说明")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
+    expect(screen.getByLabelText("差额说明")).toHaveValue("");
   });
 
   test("keeps selected bank and OA rows when changing only the OA year", async () => {
@@ -296,6 +405,7 @@ describe("BatchAccountingPage", () => {
             bank_row_id: "bank-row-001",
             oa_row_ids: ["oa-exp-1001", "oa-exp-1981"],
             expected_version: 1,
+            note: "",
           }),
         }),
       );
@@ -343,6 +453,15 @@ describe("BatchAccountingPage", () => {
       const associatedTable = screen.getByRole("table", { name: "已关联OA项" });
       expect(within(associatedTable).queryByRole("checkbox")).not.toBeInTheDocument();
       expect(within(associatedTable).getByText("陈敏")).toBeInTheDocument();
+      expect(within(associatedTable).getByText("2月行政耗材日常报销")).toBeInTheDocument();
+      expect(within(associatedTable).queryByText(/财务确认差额闭环/)).not.toBeInTheDocument();
+      expect(screen.getByText("已选 OA 1 项")).toBeInTheDocument();
+      expect(screen.getByText("已选 OA 金额 850.00")).toBeInTheDocument();
+      expect(screen.getByText("差额 50.00")).toBeInTheDocument();
+      expect(screen.getByText("金额不一致")).toBeInTheDocument();
+      const mismatchIcon = screen.getByRole("button", { name: "查看金额不一致差额说明" });
+      await user.hover(mismatchIcon);
+      expect(await screen.findByText("差额说明：财务确认差额闭环")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "撤回关联" })).toBeEnabled();
 
       await user.click(screen.getByRole("button", { name: "撤回关联" }));

@@ -1,4 +1,8 @@
-import { memo } from "react";
+import { memo, useState, type FocusEvent, type MouseEvent, type TouchEvent } from "react";
+
+import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
+import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
 
 import { getWorkbenchColumns } from "../../features/workbench/tableConfig";
 import type { WorkbenchRecord, WorkbenchRecordType, WorkbenchSourceKind } from "../../features/workbench/types";
@@ -96,7 +100,7 @@ function WorkbenchRecordCard({
             role="cell"
           >
             <div className="record-card-cell-content">
-              {renderCellValue(column, value, row, paneId, showInlineDetail, () => onOpenDetail(row), searchQuery)}
+              {renderCellValue(column, value, row, paneId, zoneId, showInlineDetail, () => onOpenDetail(row), searchQuery)}
             </div>
           </div>
         );
@@ -196,6 +200,7 @@ function renderCellValue(
   value: string,
   row: WorkbenchRecord,
   paneId: WorkbenchRecordType,
+  zoneId: "paired" | "open",
   showInlineDetail: boolean,
   onOpenDetail: () => void,
   searchQuery = "",
@@ -229,6 +234,8 @@ function renderCellValue(
       row.tableValues.direction ?? "",
       row.tableValues.paymentAccount ?? "",
       row.categoryLabel ?? "",
+      row,
+      zoneId,
     );
   }
 
@@ -414,6 +421,8 @@ function renderBankMoneyValue(
   direction: string,
   paymentAccount: string,
   categoryLabel: string,
+  row: WorkbenchRecord,
+  zoneId: "paired" | "open",
 ) {
   const hasValue = value !== "--" && value !== "—" && value !== "";
   const normalizedDirection = resolveDirectionForMoneyCell(columnKey, direction, hasValue);
@@ -426,6 +435,7 @@ function renderBankMoneyValue(
     <span className="money-cell-stack">
       <span className="money-cell-value">
         <span>{hasValue ? value : "--"}</span>
+        {columnKey === "amount" && zoneId === "paired" ? <BankAmountMismatchWarning row={row} /> : null}
       </span>
       {shouldShowDirectionTag || shouldShowAccount || shouldShowCategory ? (
         <span className="money-cell-meta-row">
@@ -444,6 +454,88 @@ function renderBankMoneyValue(
       ) : null}
     </span>
   );
+}
+
+function BankAmountMismatchWarning({ row }: { row: WorkbenchRecord }) {
+  const [open, setOpen] = useState(false);
+  const amountCheck = row.relationAmountCheck;
+  const relationNote = (row.relationNote ?? "").trim();
+  const shouldShow =
+    row.recordType === "bank"
+    && amountCheck?.status === "mismatch"
+    && (relationNote.length > 0 || amountCheck.requiresNote === true);
+
+  if (!shouldShow || !amountCheck) {
+    return null;
+  }
+
+  const showTooltip = (
+    event: MouseEvent<HTMLButtonElement> | FocusEvent<HTMLButtonElement> | TouchEvent<HTMLButtonElement>,
+  ) => {
+    event.stopPropagation();
+    setOpen(true);
+  };
+  const hideTooltip = (event: MouseEvent<HTMLButtonElement> | FocusEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    setOpen(false);
+  };
+
+  return (
+    <Tooltip
+      arrow
+      describeChild
+      onClose={() => setOpen(false)}
+      onOpen={() => setOpen(true)}
+      open={open}
+      placement="top"
+      title={(
+        <span className="bank-amount-mismatch-tooltip" style={{ display: "grid", gap: 2 }}>
+          <strong>金额不一致</strong>
+          <span>{`银行流水金额：${formatMismatchAmount(amountCheck.bankAmount)}`}</span>
+          <span>{`OA合计：${formatMismatchAmount(amountCheck.oaAmount)}`}</span>
+          <span>{`差额：${formatMismatchAmount(amountCheck.amountDelta)}`}</span>
+          <span>{`差额说明：${relationNote || "—"}`}</span>
+        </span>
+      )}
+    >
+      <IconButton
+        aria-label="查看金额不一致差额说明"
+        color="warning"
+        size="small"
+        sx={{
+          ml: 0.25,
+          p: 0.25,
+          verticalAlign: "middle",
+          "& .MuiSvgIcon-root": { fontSize: 16 },
+        }}
+        onBlur={hideTooltip}
+        onClick={showTooltip}
+        onFocus={showTooltip}
+        onMouseEnter={showTooltip}
+        onMouseLeave={hideTooltip}
+        onTouchStart={showTooltip}
+      >
+        <WarningAmberRoundedIcon fontSize="inherit" />
+      </IconButton>
+    </Tooltip>
+  );
+}
+
+function formatMismatchAmount(value: string | undefined) {
+  const normalizedValue = (value ?? "").trim();
+  if (!normalizedValue || normalizedValue === "--" || normalizedValue === "—") {
+    return "—";
+  }
+  const numericValue = normalizedValue.replace(/,/g, "");
+  if (!/^-?\d+(\.\d+)?$/.test(numericValue)) {
+    return normalizedValue;
+  }
+
+  const sign = numericValue.startsWith("-") ? "-" : "";
+  const unsignedValue = sign ? numericValue.slice(1) : numericValue;
+  const [integerPart, decimalPart] = unsignedValue.split(".");
+  const formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return `${sign}${formattedInteger}${decimalPart === undefined ? "" : `.${decimalPart}`}`;
 }
 
 function compactBankAccountLabel(value: string) {

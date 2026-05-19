@@ -39,7 +39,7 @@ describe("ETC ticket management page", () => {
     await screen.findByTestId("etc-ticket-management-page");
 
     await waitFor(() => {
-      const batchListCalls = fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/etc/batches?"));
+      const batchListCalls = fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/etc/business-batches?"));
       expect(batchListCalls.length).toBeGreaterThanOrEqual(2);
     });
   });
@@ -54,12 +54,12 @@ describe("ETC ticket management page", () => {
     expect(within(page).getByRole("button", { name: "已提交 1" })).toBeInTheDocument();
     expect(within(page).getByRole("list", { name: "ETC批次列表" })).toBeInTheDocument();
     expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("ETC-2026-03-A");
-    expect(within(page).getByRole("button", { name: "提交OA支付申请" })).toBeEnabled();
+    await waitFor(() => expect(within(page).getByRole("button", { name: "提交OA支付申请" })).toBeEnabled());
     expect(within(page).getAllByText("ETC-2026-03-A").length).toBeGreaterThanOrEqual(1);
     expect(await within(page).findByText("ETC-2026-001")).toBeInTheDocument();
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/etc/batches?status=unsubmitted&page=1&page_size=100",
+      "/api/etc/business-batches?status=active&page=1&page_size=100",
       expect.objectContaining({ method: "GET" }),
     );
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/etc/invoices?"))).toBe(false);
@@ -80,7 +80,7 @@ describe("ETC ticket management page", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/etc/batches/etc-batch-unsubmitted-01",
+        "/api/etc/business-batches/etc-batch-unsubmitted-01",
         expect.objectContaining({ method: "DELETE" }),
       );
     });
@@ -677,7 +677,6 @@ describe("ETC ticket management page", () => {
         },
       ],
     } as never);
-
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
@@ -1320,8 +1319,9 @@ describe("ETC ticket management page", () => {
     await waitFor(() => {
       expect(etcApi.deleteEtcReconciliationTaskImportedInvoices).toHaveBeenCalledWith("etc-recon-imported-001", 8);
     });
-    expect(within(importedInvoiceSection).queryByRole("button", { name: "移除已导入的发票" })).not.toBeInTheDocument();
-    expect(within(importedInvoiceSection).getByText("确认对账后，请到 ETC 发票导入页导入 zip。")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(page).queryByRole("region", { name: "已导入ETC发票" })).not.toBeInTheDocument();
+    });
     expect(within(page).getByText("2026-03 ETC 已导入 / v9")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "移除已导入发票" })).not.toBeInTheDocument());
 
@@ -1429,19 +1429,84 @@ describe("ETC ticket management page", () => {
         },
       ],
     } as never);
-    const createDraft = vi.spyOn(etcApi, "createEtcOaDraftForBatch").mockResolvedValue({
-      batchId: "etc_batch_submission_001",
-      etcBatchId: "ETC-2026-OA-001",
+    const businessBatch = {
+      businessBatchId: "etc_business_batch_imported_submit_001",
+      taskId: "etc-recon-imported-submit-001",
+      status: "imported",
+      version: 11,
+      ownerUserId: "web_finance_user",
+      ownerOrgId: "finance",
+      importBatchIds: ["etc_import_batch_0004"],
+      submissionBatchId: "",
+      externalEtcBatchId: "ETC-2026-OA-001",
+      oaDraftId: "",
+      oaDraftUrl: "",
+      oaRowId: "",
+      oaProcessStatus: "",
+      oaDetectionStatus: "",
+      oaDetectionReason: "",
+      oaDetectionError: "",
+      oaDetectionStartedAt: "",
+      oaDetectionNextRunAt: "",
+      oaDetectionDeadlineAt: "",
+      oaDetectionFinalRetryUntil: "",
+      oaDetectionAttempts: 0,
+      invoiceSummary: { count: 36, amount: "1673.30" },
+      invoiceIds: ["etc-inv-imported-submit-001"],
+      importAttempts: [
+        {
+          attemptId: "attempt-imported-submit-001",
+          importBatchId: "etc_import_batch_0004",
+          status: "imported",
+          imported: 36,
+          duplicatesSkipped: 0,
+          attachmentsCompleted: 0,
+          failed: 0,
+          createdAt: "2026-05-19T09:00:00+08:00",
+        },
+      ],
+      auditEvents: [],
+      createdAt: "2026-05-19T09:00:00+08:00",
+      updatedAt: "2026-05-19T09:00:00+08:00",
+      invoiceItems: [
+        {
+          id: "etc-inv-imported-submit-001",
+          invoiceNumber: "ETC-IMPORTED-SUBMIT-001",
+          issueDate: "2026-04-27",
+          passageStartDate: "2026-04-27",
+          passageEndDate: "2026-04-27",
+          plateNumber: "云ADA0381",
+          sellerName: "云南高速通行费",
+          buyerName: "云南溯源科技",
+          amountWithoutTax: "1624.56",
+          taxAmount: "48.74",
+          totalAmount: "1673.30",
+          status: "unsubmitted",
+          hasPdf: true,
+          hasXml: true,
+        },
+      ],
+    } as const;
+    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
+      counts: { active: 1, submitted: 0 },
+      items: [businessBatch],
+      pagination: { page: 1, pageSize: 100, total: 1 },
+    } as never);
+    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue(businessBatch as never);
+    const createDraft = vi.spyOn(etcApi, "createEtcBusinessBatchOaDraft").mockResolvedValue({
+      ...businessBatch,
+      status: "oa_submission_detecting",
+      version: 12,
+      submissionBatchId: "etc_batch_submission_001",
       oaDraftId: "oa-draft-001",
       oaDraftUrl: "https://oa.example.test/oa/#/normal/forms/form/2?formId=2&id=oa-draft-001",
-    });
+    } as never);
 
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    const importedInvoiceSection = await within(page).findByRole("region", { name: "已导入ETC发票" });
-    expect(within(importedInvoiceSection).getByText("36 张")).toBeInTheDocument();
-    expect(within(importedInvoiceSection).getByText("合计 1673.30")).toBeInTheDocument();
+    expect(await within(page).findByRole("region", { name: "导入记录" })).toBeInTheDocument();
+    expect(within(page).getByText(/导入 36，重复 0，补齐附件 0，失败 0/)).toBeInTheDocument();
 
     const submitButton = within(page).getByRole("button", { name: "提交OA支付申请" });
     await waitFor(() => expect(submitButton).toBeEnabled());
@@ -1449,11 +1514,11 @@ describe("ETC ticket management page", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "创建OA支付申请草稿" });
     expect(dialog).toHaveTextContent("将为当前 ETC 对账任务下已导入的 36 张发票创建 OA 支付申请草稿，发票合计 1673.30。");
-    expect(dialog).toHaveTextContent("当前批次：etc_import_batch_0004");
+    expect(dialog).toHaveTextContent("当前批次：ETC-2026-OA-001");
     await user.click(within(dialog).getByRole("button", { name: "确认创建草稿" }));
 
     expect(openMock).toHaveBeenCalledWith("about:blank", "_blank");
-    await waitFor(() => expect(createDraft).toHaveBeenCalledWith("etc_import_batch_0004"));
+    await waitFor(() => expect(createDraft).toHaveBeenCalledWith("etc_business_batch_imported_submit_001", { expectedVersion: 11 }));
     await waitFor(() => expect(openedWindow.location.href).toContain("https://oa.example.test/oa/#/normal/forms/form/2"));
   });
 
@@ -1808,7 +1873,7 @@ describe("ETC ticket management page", () => {
 
     await waitFor(() => expect(within(page).getAllByText("ETC-HIST-2026-01").length).toBeGreaterThanOrEqual(1));
     expect(within(page).queryByRole("button", { name: "提交OA支付申请" })).not.toBeInTheDocument();
-    expect(within(page).getAllByText(/刘树刚 \/ 2026-02-02 \/ OA 31.80/).length).toBeGreaterThanOrEqual(1);
+    expect(within(page).getAllByText("OA已提交").length).toBeGreaterThanOrEqual(1);
     expect(within(page).getByRole("button", { name: "撤销提交状态" })).toBeEnabled();
     expect(within(page).getByRole("button", { name: "已提交批次不能删除" })).toBeDisabled();
   });
@@ -1847,7 +1912,7 @@ describe("ETC ticket management page", () => {
     expect(within(page).getAllByRole("checkbox", { name: /选择核对行/ })).toHaveLength(4);
   });
 
-  test("creates OA draft through the selected batch endpoint and refreshes after confirmation", async () => {
+  test("creates OA draft through the selected business batch and waits for OA detection", async () => {
     const user = userEvent.setup();
     const openedWindow = {
       closed: false,
@@ -1857,34 +1922,102 @@ describe("ETC ticket management page", () => {
     };
     const openMock = vi.fn(() => openedWindow);
     vi.stubGlobal("open", openMock);
-    const fetchMock = installMockApiFetch();
+    installMockApiFetch();
+    const businessBatch = {
+      businessBatchId: "etc_business_batch_0001",
+      taskId: "etc-recon-task-001",
+      status: "imported",
+      version: 7,
+      ownerUserId: "web_finance_user",
+      ownerOrgId: "finance",
+      importBatchIds: ["etc_import_batch_0004"],
+      submissionBatchId: "",
+      externalEtcBatchId: "ETC-2026-03-A",
+      oaDraftId: "",
+      oaDraftUrl: "",
+      oaRowId: "",
+      oaProcessStatus: "",
+      oaDetectionStatus: "",
+      oaDetectionReason: "",
+      oaDetectionError: "",
+      oaDetectionStartedAt: "",
+      oaDetectionNextRunAt: "",
+      oaDetectionDeadlineAt: "",
+      oaDetectionFinalRetryUntil: "",
+      oaDetectionAttempts: 0,
+      invoiceSummary: { count: 2, amount: "32.26" },
+      invoiceIds: ["etc-inv-001", "etc-inv-002"],
+      importAttempts: [
+        {
+          attemptId: "attempt-001",
+          importBatchId: "etc_import_batch_0004",
+          status: "imported",
+          imported: 2,
+          duplicatesSkipped: 0,
+          attachmentsCompleted: 0,
+          failed: 0,
+          createdAt: "2026-05-19T09:00:00+08:00",
+        },
+      ],
+      auditEvents: [],
+      createdAt: "2026-05-19T09:00:00+08:00",
+      updatedAt: "2026-05-19T09:00:00+08:00",
+      invoiceItems: [
+        {
+          id: "etc-inv-001",
+          invoiceNumber: "ETC-2026-001",
+          issueDate: "2026-02-27",
+          passageStartDate: "2026-02-27",
+          passageEndDate: "2026-02-27",
+          plateNumber: "云ADA0381",
+          sellerName: "云南高速通行费",
+          buyerName: "云南溯源科技",
+          amountWithoutTax: "12.34",
+          taxAmount: "0.73",
+          totalAmount: "13.07",
+          status: "unsubmitted",
+          hasPdf: true,
+          hasXml: true,
+        },
+      ],
+    } as const;
+    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
+      counts: { active: 1, submitted: 0 },
+      items: [businessBatch],
+      pagination: { page: 1, pageSize: 100, total: 1 },
+    } as never);
+    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue(businessBatch as never);
+    const createDraft = vi.spyOn(etcApi, "createEtcBusinessBatchOaDraft").mockResolvedValue({
+      ...businessBatch,
+      status: "oa_submission_detecting",
+      version: 8,
+      submissionBatchId: "etc_batch_0027",
+      oaDraftId: "oa_draft_001",
+      oaDraftUrl: "https://oa.example.test/oa/#/normal/forms/form/2?formId=2&id=oa_draft_001",
+    } as never);
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     await waitFor(() => expect(within(page).getAllByText("ETC-2026-03-A").length).toBeGreaterThanOrEqual(1));
-    await user.click(within(page).getByRole("button", { name: "提交OA支付申请" }));
+    const submitButton = within(page).getByRole("button", { name: "提交OA支付申请" });
+    await waitFor(() => expect(submitButton).toBeEnabled());
+    await user.click(submitButton);
 
     const dialog = await screen.findByRole("dialog", { name: "创建OA支付申请草稿" });
-    expect(dialog).toHaveTextContent("将为当前 ETC 批次创建 OA 支付申请草稿");
+    expect(dialog).toHaveTextContent("将为当前 ETC 对账任务下已导入的 2 张发票创建 OA 支付申请草稿");
     expect(dialog).toHaveTextContent("当前批次：ETC-2026-03-A");
     await user.click(within(dialog).getByRole("button", { name: "确认创建草稿" }));
 
     expect(openMock).toHaveBeenCalledWith("about:blank", "_blank");
     await waitFor(() => expect(openedWindow.location.href).toContain("https://oa.example.test/oa/#/normal/forms/form/2"));
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/etc/batches/etc-batch-unsubmitted-01/draft",
-      expect.objectContaining({ method: "POST" }),
-    );
+    await waitFor(() => expect(createDraft).toHaveBeenCalledWith("etc_business_batch_0001", { expectedVersion: 7 }));
 
-    const resultDialog = await screen.findByRole("dialog", { name: "OA提交结果确认" });
-    expect(resultDialog).toHaveTextContent("批次号：ETC-2026-03-A");
-    await user.click(within(resultDialog).getByRole("button", { name: "确认已提交OA" }));
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/etc/batches/etc-batch-unsubmitted-01/confirm-submitted",
-      expect.objectContaining({ method: "POST" }),
-    );
-    expect(await within(page).findByRole("button", { name: "未提交 1" })).toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "已提交 2" })).toBeInTheDocument();
+    const resultDialog = await screen.findByRole("dialog", { name: "OA草稿自动检测" });
+    expect(resultDialog).toHaveTextContent("OA 草稿已创建，等待 OA 系统确认提交。");
+    expect(within(resultDialog).getByRole("button", { name: "打开 OA 草稿" })).toBeEnabled();
+    expect(within(resultDialog).getByRole("button", { name: "刷新检测" })).toBeEnabled();
+    expect(within(resultDialog).getByRole("button", { name: "撤销草稿/释放发票" })).toBeEnabled();
+    expect(within(resultDialog).queryByRole("button", { name: "确认已提交OA" })).not.toBeInTheDocument();
+    expect(within(resultDialog).queryByRole("button", { name: "未提交OA" })).not.toBeInTheDocument();
   });
 });

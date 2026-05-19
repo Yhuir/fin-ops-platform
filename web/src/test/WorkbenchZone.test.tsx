@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import WorkbenchZone from "../components/workbench/WorkbenchZone";
 
@@ -97,6 +98,160 @@ function dispatchMouseEvent(target: EventTarget, type: string, clientX: number) 
 }
 
 describe("WorkbenchZone", () => {
+  test("shows batch accounting mismatch details from the paired bank amount warning", async () => {
+    const user = userEvent.setup();
+    render(
+      <WorkbenchZone
+        getRowState={() => "idle"}
+        isExpanded={false}
+        isVisible
+        title="已配对"
+        tone="success"
+        onOpenDetail={() => {}}
+        onRowAction={() => {}}
+        onSelectRow={() => {}}
+        onToggleExpand={() => {}}
+        panes={[
+          panes[0],
+          {
+            ...panes[1],
+            rows: [
+              {
+                ...panes[1].rows[0],
+                amount: "3,617.41",
+                tableValues: {
+                  ...panes[1].rows[0].tableValues,
+                  amount: "3,617.41",
+                  debitAmount: "3,617.41",
+                },
+                relationNote: "财务确认差额闭环",
+                relationAmountCheck: {
+                  status: "mismatch",
+                  direction: "expense",
+                  bankAmount: "3,617.41",
+                  oaAmount: "3,425.41",
+                  amountDelta: "192.00",
+                  requiresNote: true,
+                },
+              },
+            ],
+          },
+          panes[2],
+        ]}
+        zoneId="paired"
+      />,
+    );
+
+    const icon = await screen.findByLabelText("查看金额不一致差额说明");
+    expect(icon).toBeInTheDocument();
+
+    await user.click(icon);
+    expect(await screen.findByText("金额不一致")).toBeInTheDocument();
+    expect(screen.getByText(/银行流水金额：3,617.41/)).toBeInTheDocument();
+    expect(screen.getByText(/OA合计：3,425.41/)).toBeInTheDocument();
+    expect(screen.getByText(/差额：192.00/)).toBeInTheDocument();
+    expect(screen.getByText(/差额说明：财务确认差额闭环/)).toBeInTheDocument();
+  });
+
+  test("opens batch accounting mismatch details on keyboard focus and hover", async () => {
+    render(
+      <WorkbenchZone
+        getRowState={() => "idle"}
+        isExpanded={false}
+        isVisible
+        title="已配对"
+        tone="success"
+        onOpenDetail={() => {}}
+        onRowAction={() => {}}
+        onSelectRow={() => {}}
+        onToggleExpand={() => {}}
+        panes={[
+          panes[0],
+          {
+            ...panes[1],
+            rows: [
+              {
+                ...panes[1].rows[0],
+                relationNote: "财务确认差额闭环",
+                relationAmountCheck: {
+                  status: "mismatch",
+                  direction: "expense",
+                  bankAmount: "3,617.41",
+                  oaAmount: "3,425.41",
+                  amountDelta: "192.00",
+                  requiresNote: true,
+                },
+              },
+            ],
+          },
+          panes[2],
+        ]}
+        zoneId="paired"
+      />,
+    );
+
+    const icon = await screen.findByLabelText("查看金额不一致差额说明");
+    fireEvent.focus(icon);
+    expect(await screen.findByText("金额不一致")).toBeInTheDocument();
+
+    fireEvent.blur(icon);
+    fireEvent.mouseEnter(icon);
+    expect(await screen.findByText("金额不一致")).toBeInTheDocument();
+  });
+
+  test("does not show batch accounting mismatch warning for matched or note-free optional mismatch rows", () => {
+    const matchedBankRow = {
+      ...panes[1].rows[0],
+      relationNote: "财务确认差额闭环",
+      relationAmountCheck: {
+        status: "matched",
+        direction: "expense",
+        bankAmount: "3,617.41",
+        oaAmount: "3,617.41",
+        amountDelta: "0.00",
+        requiresNote: false,
+      },
+    };
+    const noteFreeOptionalMismatchBankRow = {
+      ...panes[1].rows[0],
+      id: "BNK-002",
+      relationNote: "",
+      relationAmountCheck: {
+        status: "mismatch",
+        direction: "expense",
+        bankAmount: "3,617.41",
+        oaAmount: "3,425.41",
+        amountDelta: "192.00",
+        requiresNote: false,
+      },
+    };
+
+    render(
+      <WorkbenchZone
+        getRowState={() => "idle"}
+        isExpanded={false}
+        isVisible
+        title="已配对"
+        tone="success"
+        onOpenDetail={() => {}}
+        onRowAction={() => {}}
+        onSelectRow={() => {}}
+        onToggleExpand={() => {}}
+        panes={[
+          panes[0],
+          {
+            ...panes[1],
+            rows: [matchedBankRow, noteFreeOptionalMismatchBankRow],
+          },
+          panes[2],
+        ]}
+        zoneId="paired"
+      />,
+    );
+
+    expect(screen.queryByLabelText("查看金额不一致差额说明")).not.toBeInTheDocument();
+  });
+
   test("collapses and restores panes per zone without affecting splitter count rules", () => {
     render(
       <WorkbenchZone

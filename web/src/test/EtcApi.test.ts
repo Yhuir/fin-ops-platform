@@ -5,20 +5,28 @@ import {
   confirmEtcImportSession,
   confirmEtcReconciliationTask,
   createEtcReconciliationTask,
+  createEtcBusinessBatch,
+  createEtcBusinessBatchOaDraft,
   createEtcOaDraft,
+  deleteEtcBusinessBatch,
   deleteEtcBatch,
   deleteEtcReconciliationTask,
   deleteEtcReconciliationTaskImportedInvoices,
+  fetchEtcBusinessBatchDetail,
+  fetchEtcBusinessBatches,
   fetchEtcBatchDetail,
   fetchEtcReconciliationTask,
   fetchEtcReconciliationTasks,
   fetchReadyEtcReconciliationTasks,
   fetchEtcInvoices,
+  manualEtcBusinessBatchOaStatus,
   markEtcBatchNotSubmitted,
   patchEtcReconciliationItem,
   previewEtcZipFiles,
+  refreshEtcBusinessBatchOaStatus,
   refreshEtcReconciliationMatches,
   reopenEtcReconciliationTask,
+  revokeEtcBusinessBatchOaDraft,
   revokeEtcSubmittedInvoices,
   uploadEtcCreditCardStatement,
   uploadEtcSupplementEvidenceForCard,
@@ -37,6 +45,166 @@ afterEach(() => {
 });
 
 describe("etc api", () => {
+  test("maps ETC business batches from envelope and legacy fields", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.startsWith("/api/etc/business-batches?")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            data: {
+              counts: { active: 1, submitted: 0 },
+              items: [
+                {
+                  id: "etc_business_batch_0001",
+                  task_id: "etc-recon-task-001",
+                  status: "oa_submission_detecting",
+                  version: 7,
+                  import_batch_ids: ["etc_import_batch_0004", "etc_import_batch_0005"],
+                  submission_batch_id: "etc_batch_0027",
+                  external_batch_id: "etc_20260519_001",
+                  oa_draft_id: "oa-draft-001",
+                  oa_draft_url: "https://oa.example.test/draft/001",
+                  invoice_count: 37,
+                  total_amount: "1673.30",
+                  import_attempts: [
+                    {
+                      attempt_id: "attempt-001",
+                      import_batch_id: "etc_import_batch_0004",
+                      imported: 35,
+                      duplicates_skipped: 1,
+                      attachments_completed: 0,
+                      failed: 0,
+                      created_at: "2026-05-19T09:00:00+08:00",
+                    },
+                  ],
+                },
+              ],
+              pagination: { page: 1, page_size: 100, total: 1 },
+            },
+            error: null,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ ok: true, data: {} }), { status: 200 });
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const result = await fetchEtcBusinessBatches({ status: "active", month: "2026-05", keyword: "001" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/etc/business-batches?status=active&month=2026-05&keyword=001&page=1&page_size=100",
+      expect.objectContaining({ method: "GET", credentials: "include" }),
+    );
+    expect(result.counts).toEqual({ active: 1, submitted: 0 });
+    expect(result.items[0]).toMatchObject({
+      businessBatchId: "etc_business_batch_0001",
+      taskId: "etc-recon-task-001",
+      status: "oa_submission_detecting",
+      version: 7,
+      importBatchIds: ["etc_import_batch_0004", "etc_import_batch_0005"],
+      submissionBatchId: "etc_batch_0027",
+      externalEtcBatchId: "etc_20260519_001",
+      oaDraftId: "oa-draft-001",
+      oaDraftUrl: "https://oa.example.test/draft/001",
+      invoiceSummary: { count: 37, amount: "1673.30" },
+      importAttempts: [
+        expect.objectContaining({
+          attemptId: "attempt-001",
+          importBatchId: "etc_import_batch_0004",
+          imported: 35,
+        }),
+      ],
+    });
+  });
+
+  test("sends business-batch OA actions with expected version and reason", async () => {
+    document.cookie = "Admin-Token=mock-cookie-token";
+    const responsePayloads = [
+      { businessBatch: { business_batch_id: "etc_business_batch_0001", status: "imported", version: 7 } },
+      { item: { business_batch_id: "etc_business_batch_0001", status: "imported", version: 7 } },
+      { detail: { business_batch_id: "etc_business_batch_0001", status: "oa_submission_detecting", version: 8 } },
+      { businessBatch: { business_batch_id: "etc_business_batch_0001", status: "oa_detection_timeout", version: 8 } },
+      { businessBatch: { business_batch_id: "etc_business_batch_0001", status: "not_submitted", version: 9 } },
+      { businessBatch: { business_batch_id: "etc_business_batch_0001", status: "manually_marked_submitted", version: 10 } },
+    ];
+    const fetchMock = vi.fn().mockImplementation(async () => {
+      const data = responsePayloads[Math.min(fetchMock.mock.calls.length - 1, responsePayloads.length - 1)];
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          data,
+          error: null,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const created = await createEtcBusinessBatch({ taskId: "etc-recon-task-001", idempotencyKey: "create-1" });
+    const detail = await fetchEtcBusinessBatchDetail("etc_business_batch_0001");
+    const draft = await createEtcBusinessBatchOaDraft("etc_business_batch_0001", { expectedVersion: 7, idempotencyKey: "draft-1" });
+    const refreshed = await refreshEtcBusinessBatchOaStatus("etc_business_batch_0001", { expectedVersion: 8 });
+    const revoked = await revokeEtcBusinessBatchOaDraft("etc_business_batch_0001", { expectedVersion: 8, reason: "导入发票不足", idempotencyKey: "revoke-1" });
+    const manual = await manualEtcBusinessBatchOaStatus("etc_business_batch_0001", {
+      decision: "submitted",
+      expectedVersion: 9,
+      reason: "OA 已进入流程，自动检测超时后人工确认。",
+      candidateOaRowId: "oa-row-001",
+    });
+    await deleteEtcBusinessBatch("etc_business_batch_0001", { expectedVersion: 10, reason: "测试删除" });
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/etc/business-batches",
+      "/api/etc/business-batches/etc_business_batch_0001",
+      "/api/etc/business-batches/etc_business_batch_0001/oa-draft",
+      "/api/etc/business-batches/etc_business_batch_0001/oa-status/refresh",
+      "/api/etc/business-batches/etc_business_batch_0001/oa-draft/revoke",
+      "/api/etc/business-batches/etc_business_batch_0001/manual-oa-status",
+      "/api/etc/business-batches/etc_business_batch_0001",
+    ]);
+    expect(created).toMatchObject({ businessBatchId: "etc_business_batch_0001", status: "imported", version: 7 });
+    expect(detail).toMatchObject({ businessBatchId: "etc_business_batch_0001", status: "imported", version: 7 });
+    expect(draft).toMatchObject({ businessBatchId: "etc_business_batch_0001", status: "oa_submission_detecting", version: 8 });
+    expect(refreshed).toMatchObject({ businessBatchId: "etc_business_batch_0001", status: "oa_detection_timeout", version: 8 });
+    expect(revoked).toMatchObject({ businessBatchId: "etc_business_batch_0001", status: "not_submitted", version: 9 });
+    expect(manual).toMatchObject({ businessBatchId: "etc_business_batch_0001", status: "manually_marked_submitted", version: 10 });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      "/api/etc/business-batches/etc_business_batch_0001/oa-draft/revoke",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ expectedVersion: 8, reason: "导入发票不足", idempotencyKey: "revoke-1" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      6,
+      "/api/etc/business-batches/etc_business_batch_0001/manual-oa-status",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          decision: "submitted",
+          expectedVersion: 9,
+          reason: "OA 已进入流程，自动检测超时后人工确认。",
+          candidateOaRowId: "oa-row-001",
+        }),
+      }),
+    );
+    fetchMock.mock.calls.forEach(([, init]) => {
+      const headers = init?.headers as Headers;
+      expect(headers.get("Authorization")).toBe("Bearer mock-cookie-token");
+    });
+  });
+
+  test("requires a reason for business-batch manual OA fallback", async () => {
+    await expect(manualEtcBusinessBatchOaStatus("etc_business_batch_0001", {
+      decision: "not_submitted",
+      expectedVersion: 9,
+      reason: "  ",
+    })).rejects.toThrow("人工处理原因不能为空");
+  });
+
   test("maps ETC invoice query payload and sends filters", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(

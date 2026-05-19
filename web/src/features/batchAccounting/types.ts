@@ -28,11 +28,32 @@ export type BatchAccountingOaRow = {
   linkedInvoiceRowIds: string[];
 };
 
+export type BatchAccountingAmountCheck = {
+  status: "matched" | "mismatch" | string;
+  direction: string;
+  bankAmount: string;
+  oaAmount: string;
+  amountDelta: string;
+  requiresNote: boolean;
+};
+
+export type BatchAccountingRelation = {
+  relationId: string;
+  note: string;
+  amountCheck?: BatchAccountingAmountCheck;
+};
+
+export type BatchAccountingRelationBucket = {
+  relationId: string;
+  relation?: BatchAccountingRelation;
+  oaRows: BatchAccountingOaRow[];
+};
+
 export type BatchAccountingResponse = {
   summary: BatchAccountingSummary;
   bankRows: BatchAccountingBankRow[];
   oaRows: BatchAccountingOaRow[];
-  relationsByBankRowId: Record<string, BatchAccountingOaRow[]>;
+  relationsByBankRowId: Record<string, BatchAccountingRelationBucket>;
 };
 
 export type FetchBatchAccountingRequest = {
@@ -48,6 +69,7 @@ export type SubmitBatchAccountingRequest = {
   bankRowId: string;
   oaRowIds: string[];
   expectedVersion?: number | null;
+  note?: string;
   signal?: AbortSignal;
 };
 

@@ -4,6 +4,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import re
+from threading import RLock
 from typing import Any, Callable, Iterable
 
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
@@ -43,6 +44,7 @@ class BatchAccountingService:
         self._grouped_workbench_loader = grouped_workbench_loader
         self._pair_relation_service = pair_relation_service
         self._case_id_provider = case_id_provider or self._default_case_id_for_bank_row
+        self._mutation_lock = RLock()
 
     def build_payload(
         self,
@@ -87,6 +89,31 @@ class BatchAccountingService:
         bank_row_id: str,
         oa_row_ids: list[str],
         actor: str,
+        note: str | None = None,
+        expected_version: int | None = None,
+    ) -> dict[str, Any]:
+        with self._mutation_lock:
+            return self._submit_unlocked(
+                year=year,
+                bank_year=bank_year,
+                oa_year=oa_year,
+                bank_row_id=bank_row_id,
+                oa_row_ids=oa_row_ids,
+                actor=actor,
+                note=note,
+                expected_version=expected_version,
+            )
+
+    def _submit_unlocked(
+        self,
+        *,
+        year: str | None = None,
+        bank_year: str | None = None,
+        oa_year: str | None = None,
+        bank_row_id: str,
+        oa_row_ids: list[str],
+        actor: str,
+        note: str | None = None,
         expected_version: int | None = None,
     ) -> dict[str, Any]:
         fallback_year = str(year or "").strip()
@@ -120,16 +147,15 @@ class BatchAccountingService:
 
         bank_amount = self._bank_expense_amount(bank_row)
         oa_amount = sum((self._money(row.get("amount")) or Decimal("0.00") for row in selected_oa_rows), Decimal("0.00"))
-        if self._quantize(bank_amount) != self._quantize(oa_amount):
+        amount_check = self._batch_amount_check(bank_amount=bank_amount, oa_amount=oa_amount)
+        submit_note = str(note or "").strip()
+        if amount_check["status"] == "mismatch" and not submit_note:
             raise BatchAccountingError(
-                "batch_accounting_amount_mismatch",
-                "银行流水金额与所选 OA 金额合计不一致。",
-                payload={
-                    "bank_amount": self._format_amount(bank_amount),
-                    "oa_amount": self._format_amount(oa_amount),
-                    "amount_delta": self._format_amount(bank_amount - oa_amount),
-                },
+                "batch_accounting_note_required",
+                "银行流水金额与所选 OA 金额合计不一致，请填写差额说明。",
+                payload={"amount_check": amount_check},
             )
+        relation_note = submit_note if amount_check["status"] == "mismatch" else "日常报销批量账务管理提交"
 
         invoice_row_ids = self._linked_invoice_row_ids(normalized_oa_row_ids, context)
         selected_oa_years = self._selected_oa_years(selected_oa_rows)
@@ -141,13 +167,6 @@ class BatchAccountingService:
             before_relations,
             self._synthetic_existing_case_relations(rows, existing_relations=before_relations, month_scope=self._month_scope(rows)),
         )
-        amount_check = {
-            "status": "matched",
-            "direction": "expense",
-            "bank_amount": self._format_amount(bank_amount),
-            "oa_amount": self._format_amount(oa_amount),
-            "amount_delta": "0.00",
-        }
         relation, _history = self._pair_relation_service.replace_with_confirmed_relation(
             case_id=self._case_id_provider(normalized_bank_row_id),
             row_ids=row_ids,
@@ -155,7 +174,7 @@ class BatchAccountingService:
             relation_mode="manual_confirmed",
             created_by=actor,
             month_scope=self._month_scope(rows),
-            note="日常报销批量账务管理提交",
+            note=relation_note,
             amount_check=amount_check,
             special_metadata={
                 "source": BATCH_ACCOUNTING_SOURCE,
@@ -294,6 +313,22 @@ class BatchAccountingService:
         }
 
     def withdraw(
+        self,
+        *,
+        relation_id: str,
+        actor: str,
+        reason: str,
+        expected_version: int | None = None,
+    ) -> dict[str, Any]:
+        with self._mutation_lock:
+            return self._withdraw_unlocked(
+                relation_id=relation_id,
+                actor=actor,
+                reason=reason,
+                expected_version=expected_version,
+            )
+
+    def _withdraw_unlocked(
         self,
         *,
         relation_id: str,
@@ -744,6 +779,18 @@ class BatchAccountingService:
     @classmethod
     def _format_amount(cls, value: Decimal) -> str:
         return f"{cls._quantize(value):.2f}"
+
+    def _batch_amount_check(self, *, bank_amount: Decimal, oa_amount: Decimal) -> dict[str, Any]:
+        amount_delta = self._quantize(bank_amount) - self._quantize(oa_amount)
+        status = "matched" if amount_delta == Decimal("0.00") else "mismatch"
+        return {
+            "status": status,
+            "direction": "expense",
+            "bank_amount": self._format_amount(bank_amount),
+            "oa_amount": self._format_amount(oa_amount),
+            "amount_delta": self._format_amount(amount_delta),
+            "requires_note": status == "mismatch",
+        }
 
     @staticmethod
     def _optional_int(value: Any) -> int | None:
