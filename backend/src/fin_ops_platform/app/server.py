@@ -2917,9 +2917,9 @@ class Application:
         self._persist_state_with_workbench_invalidation(cost_statistics_scope_keys=normalized_months)
 
     def _handle_api_etc_business_batches(self, query: dict[str, list[str]]) -> Response:
+        requested_status = str(query.get("status", [None])[0] or "").strip()
         batches = self._etc_service.list_business_batches(
             task_id=query.get("taskId", query.get("task_id", [None]))[0],
-            status=query.get("status", [None])[0],
         )
         month = str(query.get("month", [None])[0] or "").strip()
         plate = str(query.get("plate", [None])[0] or "").strip().lower()
@@ -2954,9 +2954,6 @@ class Application:
             ]
         page = max(1, self._optional_int(query.get("page", [1])[0]) or 1)
         page_size = max(1, min(500, self._optional_int(query.get("page_size", query.get("pageSize", [100]))[0]) or 100))
-        total = len(batches)
-        offset = (page - 1) * page_size
-        paged_batches = batches[offset : offset + page_size]
         active_statuses = {
             EtcBusinessBatchStatus.DRAFT.value,
             EtcBusinessBatchStatus.REVIEWING.value,
@@ -2981,15 +2978,25 @@ class Application:
             EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value,
             EtcBusinessBatchStatus.CLOSED.value,
         }
+        counts = {
+            "active": sum(1 for batch in batches if str(batch.status) in active_statuses),
+            "submitted": sum(1 for batch in batches if str(batch.status) in submitted_statuses),
+        }
+        if requested_status == "active":
+            batches = [batch for batch in batches if str(batch.status) in active_statuses]
+        elif requested_status == "submitted":
+            batches = [batch for batch in batches if str(batch.status) in submitted_statuses]
+        elif requested_status:
+            batches = [batch for batch in batches if str(batch.status) == requested_status]
+        total = len(batches)
+        offset = (page - 1) * page_size
+        paged_batches = batches[offset : offset + page_size]
         return self._etc_business_response(
             HTTPStatus.OK,
             {
                 "items": [self._etc_service.business_batch_payload(batch) for batch in paged_batches],
                 "total": total,
-                "counts": {
-                    "active": sum(1 for batch in batches if str(batch.status) in active_statuses),
-                    "submitted": sum(1 for batch in batches if str(batch.status) in submitted_statuses),
-                },
+                "counts": counts,
                 "pagination": {"page": page, "pageSize": page_size, "total": total},
             },
         )

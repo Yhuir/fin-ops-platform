@@ -2665,6 +2665,9 @@ class EtcApiTests(unittest.TestCase):
             business_batches = json.loads(
                 app.handle_request("GET", f"/api/etc/business-batches?taskId={confirmed.task_id}").body
             )
+            active_business_batches = json.loads(
+                app.handle_request("GET", "/api/etc/business-batches?status=active&page=1&page_size=100").body
+            )
 
         self.assertEqual(preview_response.status_code, 200)
         self.assertEqual(preview_payload["reconciliationFilter"]["allowedInvoiceNumbers"], ["ETC2950", "ETC4175"])
@@ -2684,6 +2687,9 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(business_batch["status"], "imported")
         self.assertEqual(business_batch["invoiceSummary"]["count"], 2)
         self.assertEqual(business_batch["importBatchIds"], ["etc_import_batch_0001"])
+        self.assertEqual(active_business_batches["data"]["counts"]["active"], 1)
+        self.assertEqual(active_business_batches["data"]["total"], 1)
+        self.assertEqual(active_business_batches["data"]["items"][0]["businessBatchId"], business_batch["businessBatchId"])
 
     def test_etc_import_preview_requires_ready_task_even_when_no_tasks_exist(self) -> None:
         with TemporaryDirectory() as temp_dir:
