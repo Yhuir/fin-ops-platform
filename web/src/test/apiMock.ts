@@ -5858,13 +5858,14 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         const batch = etcInvoiceStore.businessBatchDetail(businessBatchId);
         return batch
           ? jsonResponse({ body: { ok: true, data: { businessBatch: batch }, error: null } })
-          : jsonResponse({ status: 404, body: { ok: false, data: null, error: { message: "ETC业务批次不存在。" } } });
+          : jsonResponse({ status: 404, body: { ok: false, data: null, error: { code: "business_batch_not_found", message: "ETC业务批次不存在。" } } });
       }
       if (!segment && method === "DELETE") {
         const deleted = etcInvoiceStore.deleteBatch(businessBatchId);
-        return deleted
-          ? jsonResponse({ body: { ok: true, data: { deleted: true }, error: null } })
-          : jsonResponse({ status: 409, body: { ok: false, data: null, error: { message: "ETC业务批次不能删除。" } } });
+        if (deleted || businessBatchId.startsWith("etc_business_batch_")) {
+          return jsonResponse({ body: { ok: true, data: { deleted: true, businessBatchId, kind: "business_batch" }, error: null } });
+        }
+        return jsonResponse({ status: 409, body: { ok: false, data: null, error: { code: "invalid_status_transition", message: "ETC业务批次不能删除。" } } });
       }
       if (method === "POST" && segment === "oa-draft" && !trailing) {
         const batch = etcInvoiceStore.businessBatchDraft(businessBatchId);

@@ -2310,6 +2310,27 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(json.loads(deleted_list_response.body)["data"]["items"], [])
         self.assertEqual(json.loads(deleted_legacy_response.body)["items"], [])
 
+    def test_etc_business_batch_delete_is_idempotent_for_stale_business_ids(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            business_response = app.handle_request(
+                "DELETE",
+                "/api/etc/business-batches/etc_business_batch_0002",
+                json.dumps({"reason": "stale_row_cleanup"}),
+            )
+            legacy_response = app.handle_request("DELETE", "/api/etc/batches/etc_business_batch_0002")
+
+        expected = {
+            "deleted": True,
+            "businessBatchId": "etc_business_batch_0002",
+            "kind": "business_batch",
+        }
+        self.assertEqual(business_response.status_code, 200)
+        self.assertEqual(json.loads(business_response.body)["data"], expected)
+        self.assertEqual(legacy_response.status_code, 200)
+        self.assertEqual(json.loads(legacy_response.body)["data"], expected)
+
     def test_reconciliation_item_patch_conflict_returns_task_version_conflict(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

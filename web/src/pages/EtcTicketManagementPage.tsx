@@ -352,8 +352,21 @@ function isBusinessBatchSource(batch: EtcBatchSummary) {
   return batch.sourceType === "business_batch" || batch.sourceType === "etc_business_batch";
 }
 
-function isEtcBusinessBatchNotFoundError(error: unknown) {
-  return error instanceof Error && /ETC business batch not found:/i.test(error.message);
+function isEtcBusinessBatchNotFoundError(error: unknown, batchId?: string) {
+  const message = error instanceof Error ? error.message : "";
+  const code = typeof (error as { code?: unknown } | null)?.code === "string"
+    ? (error as { code: string }).code
+    : "";
+  const status = typeof (error as { status?: unknown } | null)?.status === "number"
+    ? (error as { status: number }).status
+    : 0;
+  if (code === "business_batch_not_found") {
+    return true;
+  }
+  if (status === 404 && batchId && message.includes(batchId)) {
+    return true;
+  }
+  return /ETC business batch not found:/i.test(message);
 }
 
 type UploadBlockProps = {
@@ -704,6 +717,18 @@ export default function EtcTicketManagementPage() {
       })
       .catch((caught) => {
         if (!(caught instanceof DOMException && caught.name === "AbortError")) {
+          if (isEtcBusinessBatchNotFoundError(caught, selectedBatchId)) {
+            setBusinessBatches((current) => current.filter((batch) => batch.businessBatchId !== selectedBatchId));
+            setBatches((current) => current.filter((batch) =>
+              batch.id !== selectedBatchId
+              && batch.etcBatchId !== selectedBatchId
+              && batch.externalBatchId !== selectedBatchId
+            ));
+            setSelectedBatchId((current) => (current === selectedBatchId ? "" : current));
+            setBatchDetail(null);
+            setBusinessBatchDetail(null);
+            return;
+          }
           setActionError(caught instanceof Error ? caught.message : "ETC业务批次明细加载失败。");
         }
       })
@@ -1563,12 +1588,18 @@ export default function EtcTicketManagementPage() {
         reason: payload.reason,
       };
     } catch (caught) {
-      if (!isEtcBusinessBatchNotFoundError(caught)) {
+      if (!isEtcBusinessBatchNotFoundError(caught, plan.batchId)) {
         throw caught;
       }
       payload = { reason: payload.reason };
     }
-    await deleteEtcBusinessBatch(plan.batchId, payload);
+    try {
+      await deleteEtcBusinessBatch(plan.batchId, payload);
+    } catch (caught) {
+      if (!isEtcBusinessBatchNotFoundError(caught, plan.batchId)) {
+        throw caught;
+      }
+    }
     removeDeletedBatchFromState(plan.batchId);
   };
 

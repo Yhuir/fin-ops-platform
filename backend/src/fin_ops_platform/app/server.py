@@ -3662,6 +3662,11 @@ class Application:
         return self._json_response(HTTPStatus.OK, detail)
 
     def _handle_api_etc_batch_delete(self, batch_id: str) -> Response:
+        if str(batch_id or "").strip().startswith("etc_business_batch_"):
+            return self._handle_api_etc_business_batch_delete(
+                batch_id,
+                json.dumps({"reason": "legacy_etc_batch_delete"}),
+            )
         task = None
         resolved_submission_batch_id = batch_id
         submission_invoice_ids: list[str] = []

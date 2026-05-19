@@ -598,6 +598,20 @@ type EtcRequestInit = RequestInit & {
   timeoutMs?: number;
 };
 
+export class EtcApiError extends Error {
+  status: number;
+  code: string;
+  details: unknown;
+
+  constructor(message: string, options: { status: number; code?: string; details?: unknown }) {
+    super(message);
+    this.name = "EtcApiError";
+    this.status = options.status;
+    this.code = options.code ?? "";
+    this.details = options.details;
+  }
+}
+
 const DEFAULT_ETC_REQUEST_TIMEOUT_MS = 60_000;
 const FAST_ETC_MUTATION_TIMEOUT_MS = 15_000;
 
@@ -630,6 +644,10 @@ function requestUrlCandidates(path: string) {
 function htmlResponseError(url: string, response: Response, body: string) {
   const snippet = body.replace(/\s+/g, " ").slice(0, 120);
   return new Error(`ETC 接口返回了 HTML 页面：${response.status} ${url}。请检查 fin-ops 后端代理路径或服务器部署配置。${snippet ? ` 响应片段：${snippet}` : ""}`);
+}
+
+function responseError(response: Response, code: string, message: string, details?: unknown) {
+  return new EtcApiError(message, { status: response.status, code, details });
 }
 
 function requestTimeoutSignal(parentSignal: AbortSignal | null | undefined, timeoutMs: number) {
@@ -695,24 +713,30 @@ async function requestJson<T>(url: string, init: EtcRequestInit = {}): Promise<T
         const errorPayload = payload as { message?: unknown; error?: unknown };
         const message = typeof errorPayload.message === "string" ? errorPayload.message : "";
         if (errorPayload.error === "preview_stale") {
-          throw new Error("预览后数据已变化，请重新预览后再确认。");
+          throw responseError(response, "preview_stale", "预览后数据已变化，请重新预览后再确认。");
         }
         if (errorPayload.error === "stale_reconciliation_task_preview") {
-          throw new Error("对账任务已更新，请重新预览 ETC zip 后再确认导入。");
+          throw responseError(response, "stale_reconciliation_task_preview", "对账任务已更新，请重新预览 ETC zip 后再确认导入。");
         }
         if (errorPayload.error && typeof errorPayload.error === "object" && "message" in errorPayload.error) {
-          const envelopeMessage = (errorPayload.error as { message?: unknown }).message;
+          const envelope = errorPayload.error as { code?: unknown; message?: unknown; details?: unknown };
+          const envelopeMessage = envelope.message;
           if (typeof envelopeMessage === "string" && envelopeMessage.trim()) {
-            throw new Error(envelopeMessage);
+            throw responseError(
+              response,
+              typeof envelope.code === "string" ? envelope.code : "",
+              envelopeMessage,
+              envelope.details,
+            );
           }
         }
         if (message) {
-          throw new Error(message);
+          throw responseError(response, "", message);
         }
         if (typeof errorPayload.error === "string" && errorPayload.error.trim()) {
-          throw new Error(errorPayload.error);
+          throw responseError(response, errorPayload.error, errorPayload.error);
         }
-        throw new Error(message || trimmedText || "ETC API request failed");
+        throw responseError(response, "", message || trimmedText || "ETC API request failed");
       }
       return payload;
     }
@@ -736,7 +760,11 @@ function unwrapEnvelope<T>(payload: T | ApiEnvelope<T>): T {
     if (envelope.ok === false) {
       const error = envelope.error;
       if (error && typeof error === "object" && typeof error.message === "string") {
-        throw new Error(error.message);
+        throw new EtcApiError(error.message, {
+          status: 0,
+          code: typeof error.code === "string" ? error.code : "",
+          details: error.details,
+        });
       }
       if (typeof error === "string" && error.trim()) {
         throw new Error(error);

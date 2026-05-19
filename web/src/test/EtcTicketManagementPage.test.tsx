@@ -228,6 +228,128 @@ describe("ETC ticket management page", () => {
     expect(within(page).queryByTestId("etc-batch-row-etc_business_batch_0001")).not.toBeInTheDocument();
   });
 
+  test("treats coded business-batch not-found responses as idempotent stale-row cleanup", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const staleListedBusinessBatch = {
+      businessBatchId: "etc_business_batch_0002",
+      taskId: "etc-recon-deleted-link-002",
+      status: "not_submitted",
+      version: 12,
+      ownerUserId: "web_finance_user",
+      ownerOrgId: "finance",
+      importBatchIds: ["etc-import-deleted-link-002"],
+      submissionBatchId: "",
+      externalEtcBatchId: "",
+      oaDraftId: "",
+      oaDraftUrl: "",
+      oaRowId: "",
+      oaProcessStatus: "",
+      oaDetectionStatus: "revoked",
+      oaDetectionReason: "user_revoked",
+      oaDetectionError: "",
+      oaDetectionStartedAt: "",
+      oaDetectionNextRunAt: "",
+      oaDetectionDeadlineAt: "",
+      oaDetectionFinalRetryUntil: "",
+      oaDetectionAttempts: 1,
+      invoiceSummary: { count: 36, amount: "1673.30" },
+      invoiceIds: ["etc-inv-001"],
+      importAttempts: [],
+      auditEvents: [],
+      createdAt: "2026-05-19T09:00:00+08:00",
+      updatedAt: "2026-05-19T09:10:00+08:00",
+    };
+    const notFound = Object.assign(new Error("ETC业务批次不存在。"), {
+      status: 404,
+      code: "business_batch_not_found",
+    });
+    vi.spyOn(etcApi, "fetchEtcBusinessBatches")
+      .mockResolvedValueOnce({
+        counts: { active: 1, submitted: 0 },
+        items: [staleListedBusinessBatch],
+        pagination: { page: 1, pageSize: 100, total: 1 },
+      } as never)
+      .mockResolvedValue({
+        counts: { active: 0, submitted: 0 },
+        items: [],
+        pagination: { page: 1, pageSize: 100, total: 0 },
+      } as never);
+    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail")
+      .mockResolvedValueOnce({
+        ...staleListedBusinessBatch,
+        invoiceItems: [],
+      } as never)
+      .mockRejectedValueOnce(notFound);
+    const deleteBusinessBatch = vi.spyOn(etcApi, "deleteEtcBusinessBatch").mockRejectedValueOnce(notFound as never);
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const row = await within(page).findByTestId("etc-batch-row-etc_business_batch_0002");
+    await user.click(within(row).getByRole("button", { name: "删除批次 etc_business_batch_0002" }));
+    const dialog = await screen.findByRole("dialog", { name: "删除批次" });
+    await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => {
+      expect(deleteBusinessBatch).toHaveBeenCalledWith("etc_business_batch_0002", {
+        reason: "用户在 ETC 页面删除未提交业务批次。",
+      });
+    });
+    expect(within(page).queryByText("ETC业务批次不存在。")).not.toBeInTheDocument();
+    expect(within(page).queryByTestId("etc-batch-row-etc_business_batch_0002")).not.toBeInTheDocument();
+  });
+
+  test("removes a selected stale business-batch row when detail loading reports not found", async () => {
+    installMockApiFetch();
+    const staleListedBusinessBatch = {
+      businessBatchId: "etc_business_batch_0003",
+      taskId: "etc-recon-deleted-link-003",
+      status: "not_submitted",
+      version: 12,
+      ownerUserId: "web_finance_user",
+      ownerOrgId: "finance",
+      importBatchIds: ["etc-import-deleted-link-003"],
+      submissionBatchId: "",
+      externalEtcBatchId: "",
+      oaDraftId: "",
+      oaDraftUrl: "",
+      oaRowId: "",
+      oaProcessStatus: "",
+      oaDetectionStatus: "revoked",
+      oaDetectionReason: "user_revoked",
+      oaDetectionError: "",
+      oaDetectionStartedAt: "",
+      oaDetectionNextRunAt: "",
+      oaDetectionDeadlineAt: "",
+      oaDetectionFinalRetryUntil: "",
+      oaDetectionAttempts: 1,
+      invoiceSummary: { count: 36, amount: "1673.30" },
+      invoiceIds: ["etc-inv-001"],
+      importAttempts: [],
+      auditEvents: [],
+      createdAt: "2026-05-19T09:00:00+08:00",
+      updatedAt: "2026-05-19T09:10:00+08:00",
+    };
+    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
+      counts: { active: 1, submitted: 0 },
+      items: [staleListedBusinessBatch],
+      pagination: { page: 1, pageSize: 100, total: 1 },
+    } as never);
+    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockRejectedValue(Object.assign(new Error("ETC业务批次不存在。"), {
+      status: 404,
+      code: "business_batch_not_found",
+    }) as never);
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    await waitFor(() => {
+      expect(within(page).queryByTestId("etc-batch-row-etc_business_batch_0003")).not.toBeInTheDocument();
+    });
+    expect(within(page).queryByText("ETC业务批次不存在。")).not.toBeInTheDocument();
+  });
+
   test("deletes a mutable reconciliation task with expected version without selecting the row", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
