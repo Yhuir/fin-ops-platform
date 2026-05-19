@@ -92,6 +92,69 @@ describe("ETC ticket management page", () => {
     expect(within(page).queryByTestId("etc-batch-row-etc-batch-unsubmitted-01")).not.toBeInTheDocument();
   });
 
+  test("blocks business batch deletion when the latest batch has an active OA draft link", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const listedBusinessBatch = {
+      businessBatchId: "etc-business-batch-stale-delete-001",
+      taskId: "etc-recon-task-001",
+      status: "imported",
+      version: 7,
+      ownerUserId: "web_finance_user",
+      ownerOrgId: "finance",
+      importBatchIds: ["etc-import-batch-stale-delete-001"],
+      submissionBatchId: "",
+      externalEtcBatchId: "ETC-2026-DRAFT-LINK",
+      oaDraftId: "",
+      oaDraftUrl: "",
+      oaRowId: "",
+      oaProcessStatus: "",
+      oaDetectionStatus: "",
+      oaDetectionReason: "",
+      oaDetectionError: "",
+      oaDetectionStartedAt: "",
+      oaDetectionNextRunAt: "",
+      oaDetectionDeadlineAt: "",
+      oaDetectionFinalRetryUntil: "",
+      oaDetectionAttempts: 0,
+      invoiceSummary: { count: 2, amount: "32.26" },
+      invoiceIds: ["etc-inv-001", "etc-inv-002"],
+      importAttempts: [],
+      auditEvents: [],
+      createdAt: "2026-05-19T09:00:00+08:00",
+      updatedAt: "2026-05-19T09:00:00+08:00",
+    };
+    const latestBusinessBatch = {
+      ...listedBusinessBatch,
+      version: 8,
+      submissionBatchId: "etc-submission-batch-active-001",
+      oaDraftId: "oa-draft-active-001",
+      oaDraftUrl: "https://oa.example.test/draft/oa-draft-active-001",
+      status: "oa_submission_detecting",
+      invoiceItems: [],
+    };
+    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
+      counts: { active: 1, submitted: 0 },
+      items: [listedBusinessBatch],
+      pagination: { page: 1, pageSize: 100, total: 1 },
+    } as never);
+    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue(latestBusinessBatch as never);
+    const deleteBusinessBatch = vi.spyOn(etcApi, "deleteEtcBusinessBatch").mockResolvedValue(undefined as never);
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const row = await within(page).findByTestId("etc-batch-row-etc-business-batch-stale-delete-001");
+    await user.click(within(row).getByRole("button", { name: "删除批次 ETC-2026-DRAFT-LINK" }));
+    const dialog = await screen.findByRole("dialog", { name: "删除批次" });
+    await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => {
+      expect(within(page).getByText("OA草稿已创建，请先撤销草稿")).toBeInTheDocument();
+    });
+    expect(deleteBusinessBatch).not.toHaveBeenCalled();
+  });
+
   test("deletes a mutable reconciliation task with expected version without selecting the row", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
@@ -1988,7 +2051,7 @@ describe("ETC ticket management page", () => {
     expect(within(page).queryByRole("button", { name: "提交OA" })).not.toBeInTheDocument();
     expect(within(page).getAllByText("OA已提交").length).toBeGreaterThanOrEqual(1);
     expect(within(page).getByRole("button", { name: "撤销提交状态" })).toBeEnabled();
-    expect(within(page).getByRole("button", { name: "已提交批次不能删除" })).toBeDisabled();
+    expect(within(page).getByRole("button", { name: "OA已提交，不能删除" })).toBeDisabled();
   });
 
   test("renders batch invoice details with a native table instead of DataGrid", async () => {

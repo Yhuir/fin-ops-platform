@@ -934,7 +934,27 @@ export default function EtcTicketManagementPage() {
     if (!businessBatch) {
       return batch.status !== "submitted";
     }
-    return ["draft", "reviewing", "ready_for_import", "imported", "import_failed", "import_partial_failed", "oa_draft_failed", "not_submitted", "manually_marked_not_submitted"].includes(businessBatch.status);
+    return canDeleteBusinessBatch(businessBatch);
+  };
+  const canDeleteBusinessBatch = (batch: EtcBusinessBatchSummary) =>
+    ["draft", "reviewing", "ready_for_import", "imported", "import_failed", "import_partial_failed", "oa_draft_failed", "not_submitted", "manually_marked_not_submitted"].includes(batch.status)
+    && !batch.submissionBatchId?.trim()
+    && !batch.oaDraftId?.trim();
+  const deleteBusinessBatchDisabledReason = (batch: EtcBusinessBatchSummary) => {
+    if (isSubmittedBusinessStatus(batch.status) || batch.oaProcessStatus === "in_progress") {
+      return "OA已提交，不能删除";
+    }
+    if (batch.submissionBatchId?.trim() || batch.oaDraftId?.trim()) {
+      return "OA草稿已创建，请先撤销草稿";
+    }
+    return "当前状态不能删除";
+  };
+  const deleteBatchDisabledReason = (batch: EtcBatchSummary) => {
+    const businessBatch = businessBatches.find((item) => item.businessBatchId === batch.id);
+    if (businessBatch) {
+      return deleteBusinessBatchDisabledReason(businessBatch);
+    }
+    return "已提交批次不能删除";
   };
   const evidenceRows = useMemo<EvidenceRow[]>(() => {
     const ticketRows = (selectedTask?.ticketRootItems ?? []).map((item: EtcTicketRootItem) => ({
@@ -1493,8 +1513,13 @@ export default function EtcTicketManagementPage() {
         const batchId = deleteTarget.item.id;
         const businessBatch = businessBatches.find((item) => item.businessBatchId === batchId);
         if (businessBatch) {
+          const latestBusinessBatch = await fetchEtcBusinessBatchDetail(batchId);
+          mergeBusinessBatch(latestBusinessBatch);
+          if (!canDeleteBusinessBatch(latestBusinessBatch)) {
+            throw new Error(deleteBusinessBatchDisabledReason(latestBusinessBatch));
+          }
           await deleteEtcBusinessBatch(batchId, {
-            expectedVersion: businessBatch.version,
+            expectedVersion: latestBusinessBatch.version,
             reason: "用户在 ETC 页面删除未提交业务批次。",
           });
         } else {
@@ -1998,13 +2023,13 @@ export default function EtcTicketManagementPage() {
                       data-testid={`etc-batch-row-${batch.id}`}
                       disablePadding
                       secondaryAction={
-                        <Tooltip title={deletable ? "删除批次" : "已提交批次不能删除"}>
+                        <Tooltip title={deletable ? "删除批次" : deleteBatchDisabledReason(batch)}>
                           <span>
                             <IconButton
                               edge="end"
                               size="small"
                               color="error"
-                              aria-label={deletable ? `删除批次 ${batchTitle}` : "已提交批次不能删除"}
+                              aria-label={deletable ? `删除批次 ${batchTitle}` : deleteBatchDisabledReason(batch)}
                               disabled={!deletable || deleteSubmitting}
                               onClick={(event) => openDeleteBatchDialog(batch, event)}
                             >
