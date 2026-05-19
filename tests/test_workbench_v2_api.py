@@ -4816,6 +4816,275 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             ],
         )
 
+    def test_confirm_link_expands_oa_attachment_context_from_all_scope_read_model_when_month_filter_hides_invoice(self) -> None:
+        app = build_application()
+        oa_row = {
+            "id": "oa-exp-202605-hidden-invoice",
+            "type": "oa",
+            "case_id": "CASE-OA-ATT-hidden-invoice",
+            "amount": "100.00",
+            "counterparty_name": "测试供应商",
+        }
+        bank_row = {
+            "id": "bk-o-202605-hidden-invoice",
+            "type": "bank",
+            "case_id": "",
+            "debit_amount": "100.00",
+            "credit_amount": "",
+            "counterparty_name": "测试供应商",
+        }
+        invoice_row = {
+            "id": "oa-att-inv-oa-exp-202605-hidden-invoice-01",
+            "type": "invoice",
+            "case_id": "CASE-OA-ATT-hidden-invoice",
+            "source_kind": "oa_attachment_invoice",
+            "derived_from_oa_id": "oa-exp-202605-hidden-invoice",
+            "amount": "100.00",
+            "total_with_tax": "100.00",
+        }
+        app._workbench_read_model_service.upsert_read_model(
+            scope_key="2026-05",
+            payload={
+                "month": "2026-05",
+                "summary": {
+                    "oa_count": 1,
+                    "bank_count": 1,
+                    "invoice_count": 0,
+                    "paired_count": 0,
+                    "open_count": 2,
+                    "exception_count": 0,
+                },
+                "paired": {"groups": []},
+                "open": {
+                    "groups": [
+                        {
+                            "group_id": "candidate:hidden-invoice",
+                            "group_type": "candidate",
+                            "match_confidence": "medium",
+                            "reason": "selected_rows",
+                            "oa_rows": [oa_row],
+                            "bank_rows": [bank_row],
+                            "invoice_rows": [],
+                        }
+                    ]
+                },
+            },
+            ignored_rows=[],
+        )
+        app._workbench_read_model_service.upsert_read_model(
+            scope_key="all",
+            payload={
+                "month": "all",
+                "summary": {
+                    "oa_count": 1,
+                    "bank_count": 0,
+                    "invoice_count": 1,
+                    "paired_count": 0,
+                    "open_count": 2,
+                    "exception_count": 0,
+                },
+                "paired": {"groups": []},
+                "open": {
+                    "groups": [
+                        {
+                            "group_id": "case:CASE-OA-ATT-hidden-invoice",
+                            "group_type": "candidate",
+                            "match_confidence": "high",
+                            "reason": "oa_attachment_source_relation",
+                            "oa_rows": [oa_row],
+                            "bank_rows": [],
+                            "invoice_rows": [invoice_row],
+                        }
+                    ]
+                },
+            },
+            ignored_rows=[],
+        )
+
+        request_body = {
+            "month": "2026-05",
+            "row_ids": ["oa-exp-202605-hidden-invoice", "bk-o-202605-hidden-invoice"],
+            "case_id": "CASE-FULL-HIDDEN-INVOICE",
+        }
+        preview_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link/preview",
+            json.dumps(request_body),
+        )
+
+        self.assertEqual(preview_response.status_code, 200)
+        preview_payload = json.loads(preview_response.body)
+        after_group = preview_payload["after"]["groups"][0]
+        self.assertEqual(
+            [row["id"] for row in after_group["invoice_rows"]],
+            ["oa-att-inv-oa-exp-202605-hidden-invoice-01"],
+        )
+
+        confirm_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link",
+            json.dumps(request_body),
+        )
+
+        self.assertEqual(confirm_response.status_code, 200)
+        confirm_payload = json.loads(confirm_response.body)
+        self.assertEqual(
+            confirm_payload["affected_row_ids"],
+            [
+                "oa-exp-202605-hidden-invoice",
+                "bk-o-202605-hidden-invoice",
+                "oa-att-inv-oa-exp-202605-hidden-invoice-01",
+            ],
+        )
+        relation = app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-FULL-HIDDEN-INVOICE")
+        assert relation is not None
+        self.assertEqual(
+            relation["row_ids"],
+            [
+                "oa-exp-202605-hidden-invoice",
+                "bk-o-202605-hidden-invoice",
+                "oa-att-inv-oa-exp-202605-hidden-invoice-01",
+            ],
+        )
+
+    def test_confirm_link_includes_active_relation_rows_for_selected_oa_context(self) -> None:
+        app = build_application()
+        oa_row = {
+            "id": "oa-exp-202605-active-context",
+            "type": "oa",
+            "case_id": "CASE-ACTIVE-OA-INVOICE",
+            "amount": "100.00",
+            "counterparty_name": "测试供应商",
+        }
+        bank_row = {
+            "id": "bk-o-202605-active-context",
+            "type": "bank",
+            "case_id": "",
+            "debit_amount": "100.00",
+            "credit_amount": "",
+            "counterparty_name": "测试供应商",
+        }
+        invoice_row = {
+            "id": "oa-att-inv-oa-exp-202605-active-context-01",
+            "type": "invoice",
+            "case_id": "CASE-ACTIVE-OA-INVOICE",
+            "source_kind": "oa_attachment_invoice",
+            "derived_from_oa_id": "oa-exp-202605-active-context",
+            "amount": "100.00",
+            "total_with_tax": "100.00",
+        }
+        app._workbench_read_model_service.upsert_read_model(
+            scope_key="2026-05",
+            payload={
+                "month": "2026-05",
+                "summary": {
+                    "oa_count": 1,
+                    "bank_count": 1,
+                    "invoice_count": 1,
+                    "paired_count": 1,
+                    "open_count": 1,
+                    "exception_count": 0,
+                },
+                "paired": {
+                    "groups": [
+                        {
+                            "group_id": "case:CASE-ACTIVE-OA-INVOICE",
+                            "group_type": "manual_confirmed",
+                            "match_confidence": "high",
+                            "reason": "relation_snapshot",
+                            "oa_rows": [oa_row],
+                            "bank_rows": [],
+                            "invoice_rows": [invoice_row],
+                        }
+                    ]
+                },
+                "open": {
+                    "groups": [
+                        {
+                            "group_id": "selected:bk-o-202605-active-context",
+                            "group_type": "selection",
+                            "match_confidence": "low",
+                            "reason": "selected_row",
+                            "oa_rows": [],
+                            "bank_rows": [bank_row],
+                            "invoice_rows": [],
+                        }
+                    ]
+                },
+            },
+            ignored_rows=[],
+        )
+        app._workbench_pair_relation_service.create_active_relation(
+            case_id="CASE-ACTIVE-OA-INVOICE",
+            row_ids=["oa-exp-202605-active-context", "oa-att-inv-oa-exp-202605-active-context-01"],
+            row_types=["oa", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="test",
+            month_scope="2026-05",
+        )
+
+        request_body = {
+            "month": "2026-05",
+            "row_ids": ["oa-exp-202605-active-context", "bk-o-202605-active-context"],
+            "case_id": "CASE-ACTIVE-CONTEXT-FULL",
+        }
+        preview_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link/preview",
+            json.dumps(request_body),
+        )
+
+        self.assertEqual(preview_response.status_code, 200)
+        preview_payload = json.loads(preview_response.body)
+        after_group = preview_payload["after"]["groups"][0]
+        self.assertEqual(
+            [row["id"] for row in after_group["invoice_rows"]],
+            ["oa-att-inv-oa-exp-202605-active-context-01"],
+        )
+        before_group = next(
+            group
+            for group in preview_payload["before"]["groups"]
+            if group["group_id"] == "case:CASE-ACTIVE-OA-INVOICE"
+        )
+        self.assertEqual(
+            [row["id"] for row in before_group["invoice_rows"]],
+            ["oa-att-inv-oa-exp-202605-active-context-01"],
+        )
+
+        confirm_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link",
+            json.dumps(request_body),
+        )
+
+        self.assertEqual(confirm_response.status_code, 200)
+        confirm_payload = json.loads(confirm_response.body)
+        self.assertEqual(
+            confirm_payload["affected_row_ids"],
+            [
+                "oa-exp-202605-active-context",
+                "bk-o-202605-active-context",
+                "oa-att-inv-oa-exp-202605-active-context-01",
+            ],
+        )
+        relation = app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-ACTIVE-CONTEXT-FULL")
+        assert relation is not None
+        self.assertEqual(
+            relation["row_ids"],
+            [
+                "oa-exp-202605-active-context",
+                "bk-o-202605-active-context",
+                "oa-att-inv-oa-exp-202605-active-context-01",
+            ],
+        )
+        history = app._workbench_pair_relation_service.list_history()
+        self.assertEqual(history[-1]["operation_type"], "confirm_link")
+        self.assertEqual(history[-1]["before_relations"][0]["case_id"], "CASE-ACTIVE-OA-INVOICE")
+        self.assertEqual(
+            history[-1]["before_relations"][0]["row_ids"],
+            ["oa-exp-202605-active-context", "oa-att-inv-oa-exp-202605-active-context-01"],
+        )
+
     def test_open_group_with_active_partial_relation_is_withdrawable(self) -> None:
         app = build_application()
         raw_payload = build_relation_amount_raw_payload(invoice_amount="100.00")

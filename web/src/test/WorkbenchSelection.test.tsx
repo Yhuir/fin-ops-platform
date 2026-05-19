@@ -373,6 +373,130 @@ describe("Workbench row selection and detail modal", () => {
     );
   });
 
+  test("open selection summary and confirm preview keep explicitly selected rows hidden by pane time filters", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderWorkbenchPage();
+
+    const openZone = await screen.findByTestId("zone-open");
+    const openBankPane = within(openZone).getByTestId("pane-bank");
+    const openOaRow = await within(openZone).findByRole("row", {
+      name: /王青.*维保续费项目/,
+    });
+    const openBankRow = within(openZone).getByRole("row", {
+      name: /2026-04-20.*杭州张三广告有限公司/,
+    });
+
+    await user.click(openOaRow);
+    await user.click(openBankRow);
+
+    expect(within(openZone).getByText("OA 1 / 6,000.00")).toBeInTheDocument();
+    expect(within(openZone).getByText("流水 1 / 6,000.00")).toBeInTheDocument();
+    expect(within(openZone).getByText("发票 1 / 6,000.00")).toBeInTheDocument();
+
+    await user.click(within(openBankPane).getByRole("button", { name: "银行流水时间筛选" }));
+    const dialog = await screen.findByRole("dialog", { name: "银行流水时间筛选面板" });
+    await user.click(within(dialog).getByRole("button", { name: "按月" }));
+    await user.click(within(dialog).getByRole("button", { name: "3月" }));
+
+    expect(within(openZone).queryByRole("row", { name: /王青.*维保续费项目/ })).not.toBeInTheDocument();
+    expect(within(openZone).queryByRole("row", { name: /2026-04-20.*杭州张三广告有限公司/ })).not.toBeInTheDocument();
+    expect(within(openZone).getByText("OA 1 / 6,000.00")).toBeInTheDocument();
+    expect(within(openZone).getByText("流水 1 / 6,000.00")).toBeInTheDocument();
+    expect(within(openZone).getByText("发票 1 / 6,000.00")).toBeInTheDocument();
+
+    await user.click(within(openZone).getByRole("button", { name: "确认关联" }));
+
+    expect(await screen.findByRole("dialog", { name: "关联预览" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/actions/confirm-link/preview",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          month: "all",
+          row_ids: ["oa-o-202604-001", "bk-o-202604-001", "iv-o-202604-001"],
+          case_id: "CASE-202604-101",
+        }),
+      }),
+    );
+  });
+
+  test("open selection summary and confirm preview include OA attachment invoice context", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderWorkbenchPage();
+
+    const openZone = await screen.findByTestId("zone-open");
+    const openOaRow = await within(openZone).findByRole("row", {
+      name: /陈涛.*智能工厂设备商/,
+    });
+    const openBankRow = within(openZone).getByRole("row", {
+      name: /2026-03-28.*智能工厂设备商/,
+    });
+
+    await user.click(openOaRow);
+    await user.click(openBankRow);
+
+    expect(within(openZone).getByText("已选 3")).toBeInTheDocument();
+    expect(within(openZone).getByText("OA 1 / 58,000.00")).toBeInTheDocument();
+    expect(within(openZone).getByText("流水 1 / 58,000.00")).toBeInTheDocument();
+    expect(within(openZone).getByText("发票 1 / 58,000.00")).toBeInTheDocument();
+
+    await user.click(within(openZone).getByRole("button", { name: "确认关联" }));
+
+    expect(await screen.findByRole("dialog", { name: "关联预览" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/actions/confirm-link/preview",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          month: "all",
+          row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
+          case_id: "CASE-202603-101",
+        }),
+      }),
+    );
+  });
+
+  test("paired selection stays withdrawable after pane filters hide the explicitly selected row", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderWorkbenchPage();
+
+    const pairedZone = await screen.findByTestId("zone-paired");
+    const pairedBankPane = within(pairedZone).getByTestId("pane-bank");
+    const pairedBankRow = await within(pairedZone).findByRole("row", {
+      name: /2026-03-25 14:22.*华东设备供应商/,
+    });
+
+    await user.click(pairedBankRow);
+    expect(within(pairedZone).getByRole("button", { name: "撤回关联" })).toBeEnabled();
+    expect(within(pairedZone).getByText("流水 1 / 128,000.00")).toBeInTheDocument();
+
+    await user.click(within(pairedBankPane).getByRole("button", { name: "银行流水时间筛选" }));
+    const dialog = await screen.findByRole("dialog", { name: "银行流水时间筛选面板" });
+    await user.click(within(dialog).getByRole("button", { name: "按月" }));
+    await user.click(within(dialog).getByRole("button", { name: "4月" }));
+
+    expect(within(pairedZone).queryByRole("row", { name: /2026-03-25 14:22.*华东设备供应商/ })).not.toBeInTheDocument();
+    expect(within(pairedZone).getByText("流水 1 / 128,000.00")).toBeInTheDocument();
+    expect(within(pairedZone).getByRole("button", { name: "撤回关联" })).toBeEnabled();
+
+    await user.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));
+
+    expect(await screen.findByRole("dialog", { name: "关联预览" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/actions/withdraw-link/preview",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          month: "all",
+          row_ids: ["oa-p-202603-001", "bk-p-202603-001", "iv-p-202603-001"],
+        }),
+      }),
+    );
+  });
+
   test("open zone exception action accepts invoice selections and uses the unified exception modal", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();

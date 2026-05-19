@@ -42,6 +42,7 @@ import {
   type WorkbenchZoneDisplayState,
 } from "../features/workbench/groupDisplayModel";
 import { reorderWorkbenchColumnLayout, type WorkbenchColumnDropPosition } from "../features/workbench/columnLayout";
+import { buildWorkbenchSelectionContext } from "../features/workbench/selectionModel";
 import type {
   IgnoredWorkbenchData,
   WorkbenchCandidateGroup,
@@ -231,8 +232,10 @@ export default function ReconciliationWorkbenchPage() {
     clearPairedSelection,
     clearOpenSelection,
     selectedPairedRowIds,
+    selectedPairedRows: explicitSelectedPairedRows,
     togglePairedRowSelection,
     selectedOpenRowIds,
+    selectedOpenRows: explicitSelectedOpenRows,
     toggleOpenRowSelection,
   } =
     useWorkbenchSelection();
@@ -825,64 +828,48 @@ export default function ReconciliationWorkbenchPage() {
     [deferredOpenDisplayState, visibleOpenGroups],
   );
 
-  const allRows = useMemo(() => {
-    if (!workbenchData) {
-      return [] as WorkbenchRecord[];
-    }
-    return [
-      ...flattenGroups(displayPairedGroups),
-      ...flattenGroups(displayOpenGroups),
-    ];
-  }, [displayOpenGroups, displayPairedGroups, workbenchData]);
-
-  const allGroups = useMemo(() => {
+  const sourceAllGroups = useMemo(() => {
     if (!workbenchData) {
       return [] as WorkbenchCandidateGroup[];
     }
-    return [...displayPairedGroups, ...displayOpenGroups];
-  }, [displayOpenGroups, displayPairedGroups, workbenchData]);
+    return [...workbenchData.paired.groups, ...visibleOpenGroups];
+  }, [visibleOpenGroups, workbenchData]);
 
-  const openRows = useMemo(() => {
-    return flattenGroups(displayOpenGroups);
-  }, [displayOpenGroups]);
+  const sourceAllRows = useMemo(() => flattenGroups(sourceAllGroups), [sourceAllGroups]);
 
-  const pairedRows = useMemo(() => {
-    return flattenGroups(displayPairedGroups);
-  }, [displayPairedGroups]);
-
-  const selectedOpenRows = useMemo(() => {
-    const rowsById = new Map(openRows.map((row) => [row.id, row]));
-    return selectedOpenRowIds
-      .map((rowId) => rowsById.get(rowId))
-      .filter((row): row is WorkbenchRecord => row !== undefined);
-  }, [openRows, selectedOpenRowIds]);
-
-  const openSelectionSummary = useMemo(
-    () => ({
-      total: selectedOpenRows.length,
-      oa: selectedOpenRows.filter((row) => row.recordType === "oa").length,
-      bank: selectedOpenRows.filter((row) => row.recordType === "bank").length,
-      invoice: selectedOpenRows.filter((row) => row.recordType === "invoice").length,
+  const openSelectionContext = useMemo(
+    () => buildWorkbenchSelectionContext({
+      explicitRows: explicitSelectedOpenRows,
+      sourceGroups: workbenchData?.open.groups ?? [],
+      zoneId: "open",
     }),
-    [selectedOpenRows],
+    [explicitSelectedOpenRows, workbenchData?.open.groups],
   );
 
-  const selectedPairedRows = useMemo(() => {
-    const rowsById = new Map(pairedRows.map((row) => [row.id, row]));
-    return selectedPairedRowIds
-      .map((rowId) => rowsById.get(rowId))
-      .filter((row): row is WorkbenchRecord => row !== undefined);
-  }, [pairedRows, selectedPairedRowIds]);
-
-  const pairedSelectionSummary = useMemo(
-    () => ({
-      total: selectedPairedRows.length,
-      oa: selectedPairedRows.filter((row) => row.recordType === "oa").length,
-      bank: selectedPairedRows.filter((row) => row.recordType === "bank").length,
-      invoice: selectedPairedRows.filter((row) => row.recordType === "invoice").length,
+  const pairedSelectionContext = useMemo(
+    () => buildWorkbenchSelectionContext({
+      explicitRows: explicitSelectedPairedRows,
+      sourceGroups: workbenchData?.paired.groups ?? [],
+      zoneId: "paired",
     }),
-    [selectedPairedRows],
+    [explicitSelectedPairedRows, workbenchData?.paired.groups],
   );
+
+  const selectedOpenRows = openSelectionContext.includedRows;
+  const selectedPairedRows = pairedSelectionContext.includedRows;
+  const explicitOpenRows = openSelectionContext.explicitRows;
+  const openSelectionSummary = openSelectionContext.summary;
+  const pairedSelectionSummary = pairedSelectionContext.summary;
+  const contextualOpenRowIds = openSelectionContext.relatedRowIdSet;
+  const contextualPairedRowIds = pairedSelectionContext.relatedRowIdSet;
+
+  const getWorkbenchRowState = useCallback((row: WorkbenchRecord, zoneId: "paired" | "open") => {
+    const explicitState = getRowState(row, zoneId);
+    if (explicitState !== "idle") {
+      return explicitState;
+    }
+    return (zoneId === "open" ? contextualOpenRowIds : contextualPairedRowIds).has(row.id) ? "related" : "idle";
+  }, [contextualOpenRowIds, contextualPairedRowIds, getRowState]);
 
   const canConfirmOpenSelection = openSelectionSummary.bank > 0 && openSelectionSummary.oa + openSelectionSummary.invoice > 0;
   const canHandleOpenSelectionException = openSelectionSummary.total > 0;
@@ -896,12 +883,12 @@ export default function ReconciliationWorkbenchPage() {
       && [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice].some((row) => selectedRowIdSet.has(row.id)),
     );
   }, [selectedOpenRowIds, workbenchData?.open.groups]);
-  const isOpenConfirmSelectionDisabled = openSelectionSummary.total < 2;
+  const isOpenConfirmSelectionDisabled = explicitOpenRows.length < 2;
   const isOpenExceptionSelectionDisabled = openSelectionSummary.total < 1;
   const isPairedCancelSelectionDisabled = pairedSelectionSummary.total < 1;
 
   const collectCaseRowIds = useCallback((row: WorkbenchRecord) => {
-    const containingGroup = allGroups.find((group) =>
+    const containingGroup = sourceAllGroups.find((group) =>
       [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice].some((candidate) => candidate.id === row.id),
     );
     if (containingGroup) {
@@ -912,9 +899,9 @@ export default function ReconciliationWorkbenchPage() {
     if (!row.caseId) {
       return [row.id];
     }
-    const relatedIds = allRows.filter((candidate) => candidate.caseId === row.caseId).map((candidate) => candidate.id);
+    const relatedIds = sourceAllRows.filter((candidate) => candidate.caseId === row.caseId).map((candidate) => candidate.id);
     return relatedIds.length > 0 ? relatedIds : [row.id];
-  }, [allGroups, allRows]);
+  }, [sourceAllGroups, sourceAllRows]);
 
   const handleOpenDetail = useCallback(async (row: WorkbenchRecord) => {
     setDetailError(null);
@@ -1066,7 +1053,7 @@ export default function ReconciliationWorkbenchPage() {
 
     if (action === "confirm-match") {
       const rowIds = collectCaseRowIds(row);
-      const rowsById = new Map(allRows.map((candidate) => [candidate.id, candidate]));
+      const rowsById = new Map(sourceAllRows.map((candidate) => [candidate.id, candidate]));
       await openConfirmPreview(rowIds.map((rowId) => rowsById.get(rowId)).filter((candidate): candidate is WorkbenchRecord => Boolean(candidate)));
       return;
     }
@@ -1144,7 +1131,7 @@ export default function ReconciliationWorkbenchPage() {
         return;
       }
       const rowIds = collectCaseRowIds(row);
-      const rowsById = new Map(allRows.map((candidate) => [candidate.id, candidate]));
+      const rowsById = new Map(sourceAllRows.map((candidate) => [candidate.id, candidate]));
       await openWithdrawPreview(rowIds.map((rowId) => rowsById.get(rowId)).filter((candidate): candidate is WorkbenchRecord => Boolean(candidate)));
       return;
     }
@@ -1171,7 +1158,7 @@ export default function ReconciliationWorkbenchPage() {
     refreshWorkbenchDataInBackground,
     runBlockingAction,
     withdrawNoOaSummaryRow,
-    allRows,
+    sourceAllRows,
   ]);
 
   const handleCloseCashTicketPurchaseDialog = useCallback(() => {
@@ -1351,7 +1338,7 @@ export default function ReconciliationWorkbenchPage() {
       openActionResultDialog("请先选择待处理记录。");
       return;
     }
-    openWorkbenchExceptionDialog(selectedOpenRows);
+    openWorkbenchExceptionDialog(explicitOpenRows);
   };
 
   const handleClearPairedSelection = () => {
@@ -1505,7 +1492,7 @@ export default function ReconciliationWorkbenchPage() {
   const pairedZoneElement = (
     <WorkbenchZone
       canMutateData={canWriteWorkbench}
-      getRowState={getRowState}
+      getRowState={getWorkbenchRowState}
       isExpanded={expandedZoneId === "paired"}
       isVisible={isPairedVisible}
       onClearSelection={handleClearPairedSelection}
@@ -1542,7 +1529,7 @@ export default function ReconciliationWorkbenchPage() {
     <WorkbenchZone
       auxiliaryHeaderActions={openAuxiliaryHeaderActions}
       canMutateData={canWriteWorkbench}
-      getRowState={getRowState}
+      getRowState={getWorkbenchRowState}
       isExpanded={expandedZoneId === "open"}
       isVisible={isOpenVisible}
       onClearSelection={handleClearOpenSelection}

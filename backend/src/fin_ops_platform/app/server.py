@@ -538,8 +538,10 @@ class Application:
         )
         self._workbench_read_model_persist_version = 0
         self._workbench_read_model_persist_version_lock = Lock()
+        self._pending_workbench_read_model_scope_keys: set[str] = set()
         self._workbench_pair_relation_persist_version = 0
         self._workbench_pair_relation_persist_version_lock = Lock()
+        self._pending_workbench_pair_relation_case_ids: set[str] = set()
         self._workbench_api_routes = WorkbenchApiRoutes(
             self._workbench_query_service,
             self._workbench_action_service,
@@ -9458,9 +9460,10 @@ class Application:
         if not normalized_case_ids:
             return
         with self._workbench_pair_relation_persist_version_lock:
+            self._pending_workbench_pair_relation_case_ids.update(normalized_case_ids)
             self._workbench_pair_relation_persist_version += 1
             version = self._workbench_pair_relation_persist_version
-        if not self._workbench_persist_async_enabled():
+        if not self._workbench_pair_relation_persist_async_enabled():
             self._persist_workbench_pair_relations_in_background(
                 version=version,
                 case_ids=normalized_case_ids,
@@ -9479,6 +9482,13 @@ class Application:
             daemon=True,
         ).start()
 
+    @staticmethod
+    def _workbench_pair_relation_persist_async_enabled() -> bool:
+        override = os.getenv("FIN_OPS_WORKBENCH_PAIR_RELATION_PERSIST_ASYNC")
+        if override is None:
+            return False
+        return override.strip().lower() not in {"0", "false", "no", "off"}
+
     def _persist_workbench_pair_relations_in_background(
         self,
         *,
@@ -9492,15 +9502,24 @@ class Application:
         with self._workbench_pair_relation_persist_version_lock:
             if version != self._workbench_pair_relation_persist_version:
                 return
+            pending_case_ids = sorted(self._pending_workbench_pair_relation_case_ids)
+            self._pending_workbench_pair_relation_case_ids.clear()
+        case_ids_to_persist = pending_case_ids or [
+            str(case_id)
+            for case_id in list(case_ids or [])
+            if str(case_id).strip()
+        ]
+        if not case_ids_to_persist:
+            return
         persist_started_at = monotonic()
-        self._persist_workbench_pair_relations(changed_case_ids=case_ids)
+        self._persist_workbench_pair_relations(changed_case_ids=case_ids_to_persist)
         if request_id is not None and action_name is not None:
             self._emit_workbench_action_timing(
                 request_id=request_id,
                 action_name=action_name,
                 phase="persist_pair_relations",
                 duration_ms=self._duration_ms(persist_started_at),
-                detail=",".join(case_ids),
+                detail=",".join(case_ids_to_persist),
             )
 
     def _schedule_workbench_read_model_persist(
@@ -9520,6 +9539,7 @@ class Application:
         if not normalized_scope_keys:
             return
         with self._workbench_read_model_persist_version_lock:
+            self._pending_workbench_read_model_scope_keys.update(normalized_scope_keys)
             self._workbench_read_model_persist_version += 1
             version = self._workbench_read_model_persist_version
         if not self._workbench_persist_async_enabled():
@@ -9561,8 +9581,17 @@ class Application:
         with self._workbench_read_model_persist_version_lock:
             if version != self._workbench_read_model_persist_version:
                 return
+            pending_scope_keys = sorted(self._pending_workbench_read_model_scope_keys)
+            self._pending_workbench_read_model_scope_keys.clear()
+        scope_keys_to_rebuild = pending_scope_keys or [
+            str(scope_key)
+            for scope_key in list(scope_keys or [])
+            if str(scope_key).strip()
+        ]
+        if not scope_keys_to_rebuild:
+            return
         rebuild_started_at = monotonic()
-        for scope_key in scope_keys:
+        for scope_key in scope_keys_to_rebuild:
             scope_started_at = monotonic()
             base_scope_key = self._workbench_read_model_base_scope_key(scope_key)
             raw_payload = self._build_raw_workbench_payload(base_scope_key)
@@ -9588,10 +9617,10 @@ class Application:
                     detail=scope_key,
                 )
         persist_started_at = monotonic()
-        snapshot = self._workbench_read_model_service.snapshot_scope_keys(scope_keys)
+        snapshot = self._workbench_read_model_service.snapshot_scope_keys(scope_keys_to_rebuild)
         self._persist_workbench_read_models_best_effort(
             snapshot=snapshot,
-            changed_scope_keys=scope_keys,
+            changed_scope_keys=scope_keys_to_rebuild,
             operation="background_rebuild_read_models",
         )
         if request_id is not None and action_name is not None:
@@ -9600,14 +9629,14 @@ class Application:
                 action_name=action_name,
                 phase="persist_read_models",
                 duration_ms=self._duration_ms(persist_started_at),
-                detail=",".join(scope_keys),
+                detail=",".join(scope_keys_to_rebuild),
             )
             self._emit_workbench_action_timing(
                 request_id=request_id,
                 action_name=action_name,
                 phase="background_total",
                 duration_ms=self._duration_ms(rebuild_started_at),
-                detail=",".join(scope_keys),
+                detail=",".join(scope_keys_to_rebuild),
             )
 
     def _save_workbench_overrides_snapshot(self, *, changed_row_ids: list[str] | None = None) -> None:
@@ -12321,10 +12350,15 @@ class Application:
             for relation_row_id in list(relation.get("row_ids") or []):
                 add(relation_row_id)
 
+        has_selected_bank_context = any(
+            self._row_type_for_row_id(row_id) == "bank"
+            for row_id in expanded_row_ids
+        )
         for group in self._cached_existing_context_groups_for_row_ids(expanded_row_ids, month_hint=month):
             for context_row_id in self._confirm_link_context_row_ids_to_preserve(
                 group,
                 selected_row_ids=seen,
+                has_selected_bank_context=has_selected_bank_context,
             ):
                 add(context_row_id)
         return expanded_row_ids
@@ -12400,6 +12434,7 @@ class Application:
         group: dict[str, object],
         *,
         selected_row_ids: set[str],
+        has_selected_bank_context: bool,
     ) -> list[str]:
         if not self._workbench_group_preserves_existing_pair_context(group):
             return []
@@ -12422,7 +12457,7 @@ class Application:
             isinstance(row, dict) and str(row.get("id") or "").strip() in selected_row_ids
             for row in list(group.get("bank_rows") or [])
         )
-        if not selected_oa_ids or not has_selected_bank:
+        if not selected_oa_ids or not (has_selected_bank or has_selected_bank_context):
             return []
 
         preserved_row_ids: list[str] = []

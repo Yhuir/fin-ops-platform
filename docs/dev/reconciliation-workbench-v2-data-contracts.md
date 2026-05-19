@@ -314,6 +314,14 @@ OA 附件发票仍展开为独立 invoice rows，row id 为 `oa-att-inv-{oa_row_
 
 关联台三栏搜索是前端 display model 行为，不改变后端 `GET /api/workbench` payload、候选 read model 或人工 pair relation。
 
+选择状态同样不能依赖 display model。前端只把三栏搜索、列筛选、时间筛选视为可见投影；确认关联、撤回关联、异常处理和选择汇总必须回到未过滤的 zone groups 解析 row id 与关系上下文。
+
+确认关联契约：
+
+- `row_ids` 可以只包含用户显式选中的行，但后端必须在 preview 和 submit 中扩展 active relation 与 read model 中需要保留的上下文行。
+- 若显式选择里存在 OA 和银行流水，且该 OA 在 active relation 或缓存 read model 中有 OA 附件发票/付款凭证上下文，后端必须把这些 invoice rows 一起纳入 `affected_row_ids` 和最终 pair relation。
+- preview 与 submit 必须共用同一扩展函数，保证金额校验、备注要求、审计历史和撤回恢复看到同一批 row id。
+
 ## 12. 进项发票与 ETC 统一身份
 
 ETC 发票也是进项发票。普通进项发票导入和 ETC zip 导入必须写入同一套 canonical `Invoice` 身份，避免关联台、税金抵扣、成本统计重复计算。

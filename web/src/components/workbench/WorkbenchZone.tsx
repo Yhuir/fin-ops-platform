@@ -47,6 +47,11 @@ type WorkbenchZoneProps = {
     oa: number;
     bank: number;
     invoice: number;
+    amounts: {
+      oa: string;
+      bank: string;
+      invoice: string;
+    };
   };
   onClearSelection?: () => void;
   primarySelectionActionLabel?: string;
@@ -153,9 +158,9 @@ function WorkbenchZone({
             <Stack className="zone-selection-toolbar" direction="row">
               <Stack className="zone-selection-summary" direction="row">
                 <Chip className="zone-selection-pill" label={`已选 ${selectionSummary?.total ?? 0}`} size="small" variant="outlined" />
-                <Chip className="zone-selection-pill" label={`OA ${selectionSummary?.oa ?? 0}`} size="small" variant="outlined" />
-                <Chip className="zone-selection-pill" label={`流水 ${selectionSummary?.bank ?? 0}`} size="small" variant="outlined" />
-                <Chip className="zone-selection-pill" label={`发票 ${selectionSummary?.invoice ?? 0}`} size="small" variant="outlined" />
+                <Chip className="zone-selection-pill" label={`OA ${selectionSummary?.oa ?? 0} / ${selectionSummary?.amounts.oa ?? "0.00"}`} size="small" variant="outlined" />
+                <Chip className="zone-selection-pill" label={`流水 ${selectionSummary?.bank ?? 0} / ${selectionSummary?.amounts.bank ?? "0.00"}`} size="small" variant="outlined" />
+                <Chip className="zone-selection-pill" label={`发票 ${selectionSummary?.invoice ?? 0} / ${selectionSummary?.amounts.invoice ?? "0.00"}`} size="small" variant="outlined" />
               </Stack>
               <Stack className="zone-selection-actions" direction="row">
                 <Button

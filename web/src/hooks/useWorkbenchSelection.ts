@@ -7,23 +7,29 @@ export type WorkbenchRowState = "idle" | "selected" | "related";
 export default function useWorkbenchSelection() {
   const [selectedRow, setSelectedRow] = useState<WorkbenchRecord | null>(null);
   const [detailRow, setDetailRow] = useState<WorkbenchRecord | null>(null);
-  const [selectedPairedRowIds, setSelectedPairedRowIds] = useState<string[]>([]);
-  const [selectedOpenRowIds, setSelectedOpenRowIds] = useState<string[]>([]);
+  const [selectedPairedRows, setSelectedPairedRows] = useState<WorkbenchRecord[]>([]);
+  const [selectedOpenRows, setSelectedOpenRows] = useState<WorkbenchRecord[]>([]);
 
   const selectedCaseId = useMemo(() => selectedRow?.caseId ?? null, [selectedRow]);
   const selectedRowId = selectedRow?.id ?? null;
+  const selectedPairedRowIds = useMemo(() => selectedPairedRows.map((row) => row.id), [selectedPairedRows]);
+  const selectedOpenRowIds = useMemo(() => selectedOpenRows.map((row) => row.id), [selectedOpenRows]);
   const selectedPairedRowIdSet = useMemo(() => new Set(selectedPairedRowIds), [selectedPairedRowIds]);
   const selectedOpenRowIdSet = useMemo(() => new Set(selectedOpenRowIds), [selectedOpenRowIds]);
 
   const togglePairedRowSelection = useCallback((row: WorkbenchRecord) => {
-    setSelectedPairedRowIds((current) =>
-      current.includes(row.id) ? current.filter((item) => item !== row.id) : [...current, row.id],
+    setSelectedPairedRows((current) =>
+      current.some((item) => item.id === row.id)
+        ? current.filter((item) => item.id !== row.id)
+        : [...current, row],
     );
   }, []);
 
   const toggleOpenRowSelection = useCallback((row: WorkbenchRecord) => {
-    setSelectedOpenRowIds((current) =>
-      current.includes(row.id) ? current.filter((item) => item !== row.id) : [...current, row.id],
+    setSelectedOpenRows((current) =>
+      current.some((item) => item.id === row.id)
+        ? current.filter((item) => item.id !== row.id)
+        : [...current, row],
     );
   }, []);
 
@@ -44,16 +50,16 @@ export default function useWorkbenchSelection() {
   const clearSelection = useCallback(() => {
     setSelectedRow(null);
     setDetailRow(null);
-    setSelectedPairedRowIds([]);
-    setSelectedOpenRowIds([]);
+    setSelectedPairedRows([]);
+    setSelectedOpenRows([]);
   }, []);
 
   const clearPairedSelection = useCallback(() => {
-    setSelectedPairedRowIds([]);
+    setSelectedPairedRows([]);
   }, []);
 
   const clearOpenSelection = useCallback(() => {
-    setSelectedOpenRowIds([]);
+    setSelectedOpenRows([]);
   }, []);
 
   const getRowState = useCallback((row: WorkbenchRecord, zoneId: "paired" | "open"): WorkbenchRowState => {
@@ -86,8 +92,10 @@ export default function useWorkbenchSelection() {
     clearPairedSelection,
     clearOpenSelection,
     selectedPairedRowIds,
+    selectedPairedRows,
     togglePairedRowSelection,
     selectedOpenRowIds,
+    selectedOpenRows,
     toggleOpenRowSelection,
   };
 }
