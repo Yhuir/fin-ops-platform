@@ -116,9 +116,9 @@ class WorkbenchAmountCheckService:
         return {
             "status": status,
             "direction": direction,
-            "oa_total": totals["oa_total"],
-            "bank_total": totals["bank_total"],
-            "invoice_total": totals["invoice_total"],
+            "oa_total": self._format_amount(totals["oa_total"]),
+            "bank_total": self._format_amount(totals["bank_total"]),
+            "invoice_total": self._format_amount(totals["invoice_total"]),
             "mismatch_fields": mismatch_fields,
             "requires_note": requires_note,
         }
@@ -291,7 +291,9 @@ class WorkbenchAmountCheckService:
         )
 
     @staticmethod
-    def _format_amount(value: Decimal) -> str:
+    def _format_amount(value: Decimal | None) -> str | None:
+        if value is None:
+            return None
         return f"{value.quantize(CENT):.2f}"
 
     @staticmethod

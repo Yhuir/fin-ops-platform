@@ -440,7 +440,7 @@ describe("Workbench row selection and detail modal", () => {
     expect(within(openZone).getByText("已选 3")).toBeInTheDocument();
     expect(within(openZone).getByText("OA 1 / 58,000.00")).toBeInTheDocument();
     expect(within(openZone).getByText("流水 1 / 58,000.00")).toBeInTheDocument();
-    expect(within(openZone).getByText("发票 1 / 58,000.00")).toBeInTheDocument();
+    expect(within(openZone).getByText("发票 1 / 65,540.00")).toBeInTheDocument();
 
     await user.click(within(openZone).getByRole("button", { name: "确认关联" }));
 

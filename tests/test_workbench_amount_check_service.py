@@ -91,6 +91,22 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "matched")
         self.assertFalse(result["requires_note"])
         self.assertEqual(result["mismatch_fields"], [])
+        self.assertEqual(result["oa_total"], "100.00")
+        self.assertEqual(result["bank_total"], "100.00")
+        self.assertEqual(result["invoice_total"], "100.00")
+
+    def test_missing_total_remains_null_when_persistable(self) -> None:
+        result = self.service.check(
+            {
+                "oa": [self._oa_row("100")],
+                "bank": [self._bank_row("100")],
+                "invoice": [],
+            }
+        )
+
+        self.assertEqual(result["oa_total"], "100.00")
+        self.assertEqual(result["bank_total"], "100.00")
+        self.assertIsNone(result["invoice_total"])
 
     @staticmethod
     def _oa_row(amount: str) -> dict[str, str]:

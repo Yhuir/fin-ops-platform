@@ -117,7 +117,17 @@ export function formatWorkbenchAmountCents(cents: number): string {
 }
 
 function sumWorkbenchAmountCents(rows: WorkbenchRecord[]) {
-  return rows.reduce((total, row) => total + parseWorkbenchAmountCents(row.amount), 0);
+  return rows.reduce((total, row) => total + parseWorkbenchAmountCents(workbenchSummaryAmount(row)), 0);
+}
+
+function workbenchSummaryAmount(row: WorkbenchRecord) {
+  if (row.recordType === "invoice") {
+    const grossAmount = row.tableValues.grossAmount?.trim();
+    if (grossAmount && grossAmount !== "--" && grossAmount !== "—") {
+      return grossAmount;
+    }
+  }
+  return row.amount;
 }
 
 function flattenWorkbenchGroups(groups: WorkbenchCandidateGroup[]) {

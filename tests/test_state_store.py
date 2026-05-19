@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import pickle
+from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -31,6 +32,7 @@ from fin_ops_platform.services.state_store import (
     NO_OA_BANK_BATCHES_COLLECTION,
     NO_OA_BANK_BATCH_AUDIT_LOG_COLLECTION,
     WORKBENCH_READ_MODELS_COLLECTION,
+    WORKBENCH_PAIR_RELATIONS_META_COLLECTION,
     WORKBENCH_PAIR_RELATIONS_COLLECTION,
     default_data_dir,
     load_mongo_state_settings,
@@ -630,6 +632,59 @@ class StateStoreTests(unittest.TestCase):
             self.assertEqual(case_b["status"], "active")
             self.assertEqual(db["workbench_pair_relations"].delete_many_calls, 0)
             self.assertEqual(db["workbench_pair_relations"].replace_one_calls, 1)
+
+    def test_save_workbench_pair_relations_serializes_decimal_history_metadata_for_mongo(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "app_mongo_config.json").write_text(
+                json.dumps({"host": "127.0.0.1", "database": "fin_ops_platform_app"}),
+                encoding="utf-8",
+            )
+            fake_client = FakeMongoClient()
+
+            with patch("fin_ops_platform.services.state_store.MongoClient", return_value=fake_client):
+                with patch(
+                    "fin_ops_platform.services.state_store.GridFSBucket",
+                    side_effect=lambda db, bucket_name: FakeGridFSBucket(db, bucket_name),
+                ):
+                    store = ApplicationStateStore(data_dir)
+                    store.save_workbench_pair_relations(
+                        {
+                            "pair_relations": {
+                                "CASE-A": {
+                                    "case_id": "CASE-A",
+                                    "row_ids": ["oa-1", "bk-1", "iv-1"],
+                                    "row_types": ["oa", "bank", "invoice"],
+                                    "status": "active",
+                                    "amount_check": {
+                                        "status": "matched",
+                                        "oa_total": Decimal("4450.00"),
+                                        "bank_total": Decimal("4450.00"),
+                                        "invoice_total": Decimal("4450.00"),
+                                    },
+                                }
+                            },
+                            "pair_relation_history": [
+                                {
+                                    "operation_id": "op-1",
+                                    "operation_type": "confirm_link",
+                                    "amount_check": {
+                                        "status": "matched",
+                                        "oa_total": Decimal("4450.00"),
+                                    },
+                                }
+                            ],
+                        },
+                        changed_case_ids=["CASE-A"],
+                    )
+
+            db = fake_client["fin_ops_platform_app"]
+            relation_document = db[WORKBENCH_PAIR_RELATIONS_COLLECTION].documents["CASE-A"]
+            meta_document = db[WORKBENCH_PAIR_RELATIONS_META_COLLECTION].documents["current_state"]
+            self.assertEqual(relation_document["amount_check"]["oa_total"], "4450.00")
+            self.assertEqual(meta_document["pair_relation_history"][0]["amount_check"]["oa_total"], "4450.00")
+            reloaded_meta_payload = pickle.loads(bytes(meta_document["payload"]))  # noqa: S301
+            self.assertEqual(reloaded_meta_payload["pair_relation_history"][0]["amount_check"]["oa_total"], Decimal("4450.00"))
 
     def test_save_workbench_pair_relations_persists_history_metadata(self) -> None:
         with TemporaryDirectory() as temp_dir:

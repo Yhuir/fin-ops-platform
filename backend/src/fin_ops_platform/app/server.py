@@ -3726,7 +3726,7 @@ class Application:
                 snapshot,
                 changed_scope_keys=changed_scope_keys,
             )
-        except Exception as exc:
+        except Exception:
             self._emit_workbench_persistence_warning(operation=operation, detail=str(exc))
 
     def _persist_cost_statistics_read_models_best_effort(
@@ -7171,6 +7171,7 @@ class Application:
                 month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
             ),
         )
+        previous_pair_snapshot = self._workbench_pair_relation_service.snapshot()
         pair_relation_started_at = monotonic()
         self._workbench_pair_relation_service.replace_with_confirmed_relation(
             case_id=resolved_case_id,
@@ -7192,6 +7193,10 @@ class Application:
                 detail=f"case_id={resolved_case_id}",
             )
         changed_scope_keys = list(self._scope_keys_for_row_ids(month=month, row_ids=row_ids))
+        changed_case_ids = [
+            *[str(relation.get("case_id", "")) for relation in before_relations if str(relation.get("case_id", "")).strip()],
+            resolved_case_id,
+        ]
         invalidate_started_at = monotonic()
         self._invalidate_workbench_read_model_scopes(changed_scope_keys)
         if request_id is not None:
@@ -7203,14 +7208,26 @@ class Application:
                 detail=",".join(changed_scope_keys),
             )
         schedule_started_at = monotonic()
-        self._schedule_workbench_pair_relation_persist(
-            changed_case_ids=[
-                *[str(relation.get("case_id", "")) for relation in before_relations if str(relation.get("case_id", "")).strip()],
-                resolved_case_id,
-            ],
-            request_id=request_id,
-            action_name=action_name,
-        )
+        try:
+            self._schedule_workbench_pair_relation_persist(
+                changed_case_ids=changed_case_ids,
+                request_id=request_id,
+                action_name=action_name,
+            )
+        except Exception as exc:
+            self._workbench_pair_relation_service = WorkbenchPairRelationService.from_snapshot(previous_pair_snapshot)
+            self._configure_workbench_exception_application_service()
+            if self._state_store is not None:
+                try:
+                    self._state_store.save_workbench_pair_relations(
+                        previous_pair_snapshot,
+                        changed_case_ids=changed_case_ids,
+                    )
+                except Exception:
+                    pass
+            return self._workbench_persistence_unavailable_response(
+                StatePersistenceError("工作台关联关系暂时无法保存，请稍后重试。")
+            )
         self._schedule_workbench_read_model_persist(
             changed_scope_keys=changed_scope_keys,
             request_id=request_id,

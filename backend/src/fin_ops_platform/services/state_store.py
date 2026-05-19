@@ -2566,6 +2566,7 @@ class ApplicationStateStore:
             for key, value in snapshot.items()
             if key not in {"pair_relations"}
         }
+        serialized_meta_payload = self._serialize_value(meta_payload)
         pair_relations = snapshot.get("pair_relations", {})
         collection = self._mongo_detailed_collections["workbench_pair_relations"]
         if changed_case_ids is not None:
@@ -2599,7 +2600,7 @@ class ApplicationStateStore:
                 {"_id": STATE_DOCUMENT_ID},
                 {
                     "$set": {
-                        **meta_payload,
+                        **serialized_meta_payload,
                         "pair_relation_count": collection.count_documents({}),
                         "payload": Binary(pickle.dumps(meta_payload)),
                         "updated_at": updated_at,
@@ -2635,7 +2636,7 @@ class ApplicationStateStore:
             {"_id": STATE_DOCUMENT_ID},
             {
                 "$set": {
-                    **meta_payload,
+                    **serialized_meta_payload,
                     "pair_relation_count": len(pair_relations) if isinstance(pair_relations, dict) else 0,
                     "payload": Binary(pickle.dumps(meta_payload)),
                     "updated_at": updated_at,

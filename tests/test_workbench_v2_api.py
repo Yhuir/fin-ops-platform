@@ -4331,6 +4331,32 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertIsNone(app._workbench_override_service.case_id_for_row(bank_row["id"]))
         self.assertIsNone(app._workbench_override_service.case_id_for_row(invoice_row["id"]))
 
+    def test_confirm_link_returns_503_and_rolls_back_when_pair_relation_persist_fails(self) -> None:
+        app = build_application()
+        app._state_store = _FailingPairRelationStateStore()
+        payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
+
+        oa_row = flatten_groups(payload["open"]["groups"], "oa")[0]
+        bank_row = flatten_groups(payload["open"]["groups"], "bank")[0]
+        invoice_row = flatten_groups(payload["open"]["groups"], "invoice")[0]
+
+        response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link",
+            json.dumps(
+                {
+                    "month": "2026-03",
+                    "row_ids": [oa_row["id"], bank_row["id"], invoice_row["id"]],
+                    "case_id": "CASE-PAIR-PERSIST-FAIL",
+                }
+            ),
+        )
+
+        self.assertEqual(response.status_code, 503)
+        response_payload = json.loads(response.body)
+        self.assertEqual(response_payload["error"], "workbench_state_persistence_unavailable")
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-PAIR-PERSIST-FAIL"))
+
     def test_confirm_personal_advance_repayment_creates_settled_case_and_pair_relation(self) -> None:
         app = build_application()
         raw_payload = build_personal_advance_repayment_raw_payload()
@@ -7552,6 +7578,24 @@ def oa_2035_attachment_evidences() -> list[dict[str, str]]:
 class _FailingOverrideStateStore:
     def save_workbench_overrides(self, snapshot: dict[str, object], *, changed_row_ids: list[str] | None = None) -> None:
         raise TimeoutError("mock override persistence timeout")
+
+    def save_workbench_read_models(
+        self,
+        snapshot: dict[str, object],
+        *,
+        changed_scope_keys: list[str] | None = None,
+    ) -> None:
+        return None
+
+
+class _FailingPairRelationStateStore:
+    def save_workbench_pair_relations(
+        self,
+        snapshot: dict[str, object],
+        *,
+        changed_case_ids: list[str] | None = None,
+    ) -> None:
+        raise TimeoutError("mock pair relation persistence timeout")
 
     def save_workbench_read_models(
         self,
