@@ -1190,7 +1190,14 @@ class WorkbenchCandidateGroupingService:
                 return True
             if any(self._is_etc_batch_oa_row(row) for row in group.oa_rows):
                 return True
+            if any(self._is_batch_accounting_relation_row(row) for row in [*group.oa_rows, *group.bank_rows]):
+                return True
         return row_type_count >= 3
+
+    @staticmethod
+    def _is_batch_accounting_relation_row(row: dict[str, Any]) -> bool:
+        metadata = row.get("special_metadata")
+        return isinstance(metadata, dict) and str(metadata.get("source") or "").strip() == "batch_accounting"
 
     def _group_counterparty(self, group: CandidateGroup) -> str | None:
         attachment_primary_row = self._attachment_group_primary_row(group)

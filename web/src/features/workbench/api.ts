@@ -27,6 +27,7 @@ import type {
   WorkbenchSummary,
   WorkbenchOaStatus,
   WorkbenchColumnLayouts,
+  WorkbenchAmountCheck,
   WorkbenchOaImportOption,
   WorkbenchOaSyncStatus,
   WorkbenchInvoiceInventory,
@@ -105,6 +106,8 @@ type ApiWorkbenchRow = {
   summary_fields?: Record<string, unknown>;
   detail_fields?: Record<string, unknown>;
   tags?: string[];
+  relation_note?: string | null;
+  relation_amount_check?: ApiWorkbenchRelationAmountCheck | null;
   cost_excluded?: boolean | null;
   special_metadata?: Record<string, unknown> | null;
 };
@@ -242,7 +245,22 @@ type ApiWorkbenchGroup = {
   bank_rows: ApiWorkbenchRow[];
   invoice_rows: ApiWorkbenchRow[];
   can_withdraw?: boolean;
+  relation_note?: string | null;
+  amount_check?: ApiWorkbenchRelationAmountCheck | null;
   special_metadata?: Record<string, unknown> | null;
+};
+
+type ApiWorkbenchRelationAmountCheck = {
+  status?: string | null;
+  direction?: string | null;
+  bank_amount?: string | number | null;
+  bankAmount?: string | number | null;
+  oa_amount?: string | number | null;
+  oaAmount?: string | number | null;
+  amount_delta?: string | number | null;
+  amountDelta?: string | number | null;
+  requires_note?: boolean | null;
+  requiresNote?: boolean | null;
 };
 
 type ApiWorkbenchAmountSummary = {
@@ -626,6 +644,21 @@ function firstNonPlaceholderDisplayValue(...values: unknown[]) {
   return undefined;
 }
 
+function mapRelationAmountCheck(value: ApiWorkbenchRelationAmountCheck | null | undefined): WorkbenchAmountCheck | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  return {
+    status: toDisplayValue(value.status, "unknown") as WorkbenchAmountCheck["status"],
+    direction: toDisplayValue(value.direction, "unknown") as WorkbenchAmountCheck["direction"],
+    bankAmount: toDisplayValue(value.bank_amount ?? value.bankAmount),
+    oaAmount: toDisplayValue(value.oa_amount ?? value.oaAmount),
+    amountDelta: toDisplayValue(value.amount_delta ?? value.amountDelta),
+    requiresNote: value.requires_note === true || value.requiresNote === true,
+  };
+}
+
 function toDetailDisplayValue(value: unknown) {
   if (typeof value === "string") {
     return toDisplayValue(value, "—");
@@ -916,6 +949,8 @@ function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
     categoryPath: Array.isArray(row.category_path) ? row.category_path.map((item) => String(item).trim()).filter(Boolean) : undefined,
     categorySource: toDisplayValue(row.category_source, "") || undefined,
     bankTextFields: row.type === "bank" ? mapBankTextFields(row) : undefined,
+    relationNote: toDisplayValue(row.relation_note, "") || undefined,
+    relationAmountCheck: mapRelationAmountCheck(row.relation_amount_check),
     specialMetadata: row.special_metadata && typeof row.special_metadata === "object" ? row.special_metadata : undefined,
   };
 }
@@ -956,6 +991,8 @@ function mapGroup(group: ApiWorkbenchGroup): WorkbenchCandidateGroup {
       invoice: group.invoice_rows.map(mapRow),
     },
     collapsedRows,
+    relationNote: toDisplayValue(group.relation_note, "") || undefined,
+    amountCheck: mapRelationAmountCheck(group.amount_check),
     specialMetadata: group.special_metadata && typeof group.special_metadata === "object" ? group.special_metadata : undefined,
     canWithdraw: Boolean(
       group.can_withdraw

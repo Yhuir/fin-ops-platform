@@ -336,6 +336,48 @@ function createEtcInvoiceStore() {
     };
   };
 
+  const hydrateBusinessBatch = (batch: (typeof batches)[number], includeInvoices = false) => {
+    const hydrated = hydrateBatch(batch, includeInvoices);
+    const batchId = "id" in batch ? batch.id : "";
+    const isSubmitted = batch.status === "submitted";
+    return {
+      business_batch_id: batchId,
+      task_id: batchId === "etc-batch-unsubmitted-01" ? "etc-recon-task-001" : "",
+      status: isSubmitted ? "oa_submitted" : "imported",
+      version: 7,
+      owner_user_id: "web_finance_user",
+      owner_org_id: "finance",
+      import_batch_ids: [`${batchId}-import-001`],
+      submission_batch_id: isSubmitted ? batchId : "",
+      external_etc_batch_id: hydrated.external_batch_id ?? hydrated.externalBatchId ?? hydrated.etc_batch_id ?? hydrated.etcBatchId,
+      oa_draft_id: "",
+      oa_draft_url: "",
+      oa_row_id: hydrated.linked_oa_row_id ?? hydrated.linkedOaRowId ?? "",
+      oa_process_status: isSubmitted ? "in_progress" : "",
+      invoice_summary: {
+        count: hydrated.invoice_count,
+        amount: hydrated.total_amount,
+      },
+      invoice_ids: getBatchInvoiceIds(batch),
+      import_attempts: [
+        {
+          attempt_id: `${batchId}-attempt-001`,
+          import_batch_id: `${batchId}-import-001`,
+          status: "imported",
+          imported: hydrated.invoice_count,
+          duplicates_skipped: 0,
+          attachments_completed: 0,
+          failed: 0,
+          created_at: "2026-05-19T09:00:00+08:00",
+        },
+      ],
+      audit_events: [],
+      created_at: "2026-05-19T09:00:00+08:00",
+      updated_at: "2026-05-19T09:00:00+08:00",
+      ...(includeInvoices ? { invoice_items: hydrated.invoice_items } : {}),
+    };
+  };
+
   const counts = () => ({
     unsubmitted: invoices.filter((invoice) => invoice.status === "unsubmitted").length,
     submitted: invoices.filter((invoice) => invoice.status === "submitted").length,
@@ -413,9 +455,72 @@ function createEtcInvoiceStore() {
         },
       };
     },
+    listBusinessBatches({ status, month, plate, keyword }: { status?: string | null; month?: string | null; plate?: string | null; keyword?: string | null }) {
+      const normalizedStatus = status === "active" ? "unsubmitted" : status === "submitted" ? "submitted" : null;
+      const normalizedKeyword = String(keyword ?? "").trim();
+      const normalizedPlate = String(plate ?? "").trim();
+      const rows = batches
+        .filter((batch) => {
+          if (normalizedStatus && batch.status !== normalizedStatus) {
+            return false;
+          }
+          const items = invoicesForBatch(batch);
+          if (month && !items.some((invoice) => invoice.issue_date.startsWith(month))) {
+            return false;
+          }
+          if (normalizedPlate && !items.some((invoice) => invoice.plate_number.includes(normalizedPlate))) {
+            return false;
+          }
+          if (normalizedKeyword) {
+            const searchable = [
+              "etc_batch_id" in batch ? batch.etc_batch_id : batch.etcBatchId,
+              "external_batch_id" in batch ? batch.external_batch_id : batch.externalBatchId,
+              ...items.map((invoice) => `${invoice.invoice_number} ${invoice.seller_name} ${invoice.plate_number}`),
+            ].join(" ");
+            return searchable.includes(normalizedKeyword);
+          }
+          return true;
+        })
+        .map((batch) => hydrateBusinessBatch(batch))
+        .filter(Boolean);
+      return {
+        ok: true,
+        data: {
+          counts: {
+            active: batches.filter((batch) => batch.status !== "submitted").length,
+            submitted: batches.filter((batch) => batch.status === "submitted").length,
+          },
+          items: cloneJson(rows),
+          pagination: {
+            page: 1,
+            page_size: 100,
+            total: rows.length,
+          },
+        },
+        error: null,
+      };
+    },
     batchDetail(batchId: string) {
       const batch = batches.find((item) => item.id === batchId);
       return batch ? cloneJson(hydrateBatch(batch, true)) : null;
+    },
+    businessBatchDetail(batchId: string) {
+      const batch = batches.find((item) => item.id === batchId);
+      return batch ? cloneJson(hydrateBusinessBatch(batch, true)) : null;
+    },
+    businessBatchDraft(batchId: string) {
+      const batch = batches.find((item) => item.id === batchId);
+      if (!batch) {
+        return null;
+      }
+      return {
+        ...hydrateBusinessBatch(batch, true),
+        status: "oa_submission_detecting",
+        version: 8,
+        submission_batch_id: "etc_batch_0027",
+        oa_draft_id: "oa_draft_001",
+        oa_draft_url: "https://oa.example.test/oa/#/normal/forms/form/2?formId=2&id=oa_draft_001",
+      };
     },
     deleteBatch(batchId: string) {
       const batch = batches.find((item) => item.id === batchId);
@@ -4466,6 +4571,14 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         keyword: url.searchParams.get("keyword"),
       }),
     }),
+    "/api/etc/business-batches": ({ url }) => ({
+      body: etcInvoiceStore.listBusinessBatches({
+        status: url.searchParams.get("status"),
+        month: url.searchParams.get("month"),
+        plate: url.searchParams.get("plate"),
+        keyword: url.searchParams.get("keyword"),
+      }),
+    }),
     "/api/etc/reconciliation-tasks/ready-for-import": () => ({
       body: etcReconciliationTaskStore.ready(),
     }),
@@ -5735,6 +5848,49 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     }
     if (url.pathname.startsWith("/imports/files/sessions/")) {
       return jsonResponse({ body: latestImportSession });
+    }
+    const etcBusinessBatchRoute = url.pathname.match(/^\/api\/etc\/business-batches\/([^/]+)(?:\/([^/]+)(?:\/([^/]+))?)?$/);
+    if (etcBusinessBatchRoute) {
+      const businessBatchId = decodeURIComponent(etcBusinessBatchRoute[1] ?? "");
+      const segment = etcBusinessBatchRoute[2] ? decodeURIComponent(etcBusinessBatchRoute[2]) : "";
+      const trailing = etcBusinessBatchRoute[3] ? decodeURIComponent(etcBusinessBatchRoute[3]) : "";
+      if (!segment && method === "GET") {
+        const batch = etcInvoiceStore.businessBatchDetail(businessBatchId);
+        return batch
+          ? jsonResponse({ body: { ok: true, data: { businessBatch: batch }, error: null } })
+          : jsonResponse({ status: 404, body: { ok: false, data: null, error: { message: "ETC业务批次不存在。" } } });
+      }
+      if (!segment && method === "DELETE") {
+        const deleted = etcInvoiceStore.deleteBatch(businessBatchId);
+        return deleted
+          ? jsonResponse({ body: { ok: true, data: { deleted: true }, error: null } })
+          : jsonResponse({ status: 409, body: { ok: false, data: null, error: { message: "ETC业务批次不能删除。" } } });
+      }
+      if (method === "POST" && segment === "oa-draft" && !trailing) {
+        const batch = etcInvoiceStore.businessBatchDraft(businessBatchId);
+        return batch
+          ? jsonResponse({ body: { ok: true, data: { businessBatch: batch }, error: null } })
+          : jsonResponse({ status: 404, body: { ok: false, data: null, error: { message: "ETC业务批次不存在。" } } });
+      }
+      if (method === "POST" && segment === "oa-status" && trailing === "refresh") {
+        const batch = etcInvoiceStore.businessBatchDraft(businessBatchId);
+        return batch
+          ? jsonResponse({ body: { ok: true, data: { businessBatch: batch }, error: null } })
+          : jsonResponse({ status: 404, body: { ok: false, data: null, error: { message: "ETC业务批次不存在。" } } });
+      }
+      if (method === "POST" && segment === "oa-draft" && trailing === "revoke") {
+        const batch = etcInvoiceStore.businessBatchDetail(businessBatchId);
+        return batch
+          ? jsonResponse({ body: { ok: true, data: { businessBatch: { ...batch, status: "not_submitted", version: 9 } }, error: null } })
+          : jsonResponse({ status: 404, body: { ok: false, data: null, error: { message: "ETC业务批次不存在。" } } });
+      }
+      if (method === "POST" && segment === "manual-oa-status") {
+        const batch = etcInvoiceStore.businessBatchDetail(businessBatchId);
+        const decision = String(jsonBody?.decision ?? "");
+        return batch
+          ? jsonResponse({ body: { ok: true, data: { businessBatch: { ...batch, status: decision === "submitted" ? "manually_marked_submitted" : "manually_marked_not_submitted", version: 9 } }, error: null } })
+          : jsonResponse({ status: 404, body: { ok: false, data: null, error: { message: "ETC业务批次不存在。" } } });
+      }
     }
     if (url.pathname === "/api/etc/reconciliation-tasks/ready-for-import") {
       return jsonResponse({ body: etcReconciliationTaskStore.ready() });

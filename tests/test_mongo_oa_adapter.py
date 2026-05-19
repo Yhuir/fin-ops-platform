@@ -2563,8 +2563,12 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual(MongoOAAdapter._form_status({"status": "APPROVED", "processStatus": "已完成"}), "已完成")
         self.assertEqual(MongoOAAdapter._form_status({"status": "APPROVED", "processStatus": 2}), "已完成")
         self.assertEqual(MongoOAAdapter._form_status({"processStatus": "2"}), "已完成")
+        self.assertEqual(MongoOAAdapter._form_status({"processStatus": "1"}), "进行中")
         self.assertEqual(MongoOAAdapter._form_status({"processStatus": "进行中"}), "进行中")
         self.assertEqual(MongoOAAdapter._form_status({"processStatus": 1}), "进行中")
+        self.assertEqual(MongoOAAdapter.canonical_process_status({"processStatus": "1"}), "in_progress")
+        self.assertEqual(MongoOAAdapter.canonical_process_status({"processStatus": "进行中"}), "in_progress")
+        self.assertEqual(MongoOAAdapter.canonical_process_status({"processStatus": 1}), "in_progress")
 
     def test_list_application_records_uses_month_cache(self) -> None:
         adapter = CountingStubMongoOAAdapter(

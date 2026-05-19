@@ -61,6 +61,82 @@ describe("workbench api bank amount mapping", () => {
     vi.restoreAllMocks();
   });
 
+  test("maps batch accounting relation note and amount check fields", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "2026-03",
+          summary: {
+            oa_count: 0,
+            bank_count: 1,
+            invoice_count: 0,
+            paired_count: 1,
+            open_count: 0,
+            exception_count: 0,
+          },
+          paired: {
+            groups: [
+              {
+                group_id: "case:CASE-BATCH-txn_imported_202601_batch_001",
+                group_type: "manual_confirmed",
+                match_confidence: "high",
+                reason: "日常报销批量账务管理",
+                relation_note: "财务确认差额闭环",
+                amount_check: {
+                  status: "mismatch",
+                  direction: "expense",
+                  bank_amount: "3617.41",
+                  oa_amount: "3425.41",
+                  amount_delta: "192.00",
+                  requires_note: true,
+                },
+                oa_rows: [],
+                bank_rows: [
+                  {
+                    id: "txn_imported_202601_batch_001",
+                    type: "bank",
+                    trade_time: "2026-03-20 16:05:40",
+                    direction: "支出",
+                    debit_amount: "3617.41",
+                    credit_amount: "",
+                    amount: "3617.41",
+                    counterparty_name: "云南溯源科技有限公司",
+                    payment_account_label: "建设银行 8106",
+                    invoice_relation: { code: "matched", label: "已匹配", tone: "success" },
+                    relation_note: "财务确认差额闭环",
+                    relation_amount_check: {
+                      status: "mismatch",
+                      direction: "expense",
+                      bank_amount: "3617.41",
+                      oa_amount: "3425.41",
+                      amount_delta: "192.00",
+                      requires_note: true,
+                    },
+                    available_actions: ["detail"],
+                  },
+                ],
+                invoice_rows: [],
+              },
+            ],
+          },
+          open: { groups: [] },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const payload = await fetchWorkbench("2026-03");
+    const group = payload.paired.groups[0];
+    const bankRow = group.rows.bank[0];
+
+    expect(group.relationNote).toBe("财务确认差额闭环");
+    expect(group.amountCheck?.status).toBe("mismatch");
+    expect(group.amountCheck?.direction).toBe("expense");
+    expect(group.amountCheck?.requiresNote).toBe(true);
+    expect(bankRow.relationNote).toBe("财务确认差额闭环");
+    expect(bankRow.relationAmountCheck?.amountDelta).toBe("192.00");
+  });
+
   test("maps invoice inventory stats from the workbench payload", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(

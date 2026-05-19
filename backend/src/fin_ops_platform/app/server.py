@@ -11,6 +11,7 @@ import json
 import os
 import re
 import sys
+import traceback
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -72,6 +73,11 @@ from fin_ops_platform.services.derived_data_lifecycle_service import DerivedData
 from fin_ops_platform.services.etc_service import (
     EtcBatchDeleteError,
     EtcBatchNotFoundError,
+    EtcBusinessBatchActiveExistsError,
+    EtcBusinessBatchInvalidTransitionError,
+    EtcBusinessBatchNotFoundError,
+    EtcBusinessBatchStatus,
+    EtcBusinessBatchVersionConflictError,
     EtcDraftRequestError,
     EtcImportPreviewStaleError,
     EtcOAClientError,
@@ -91,6 +97,7 @@ from fin_ops_platform.services.etc_document_parsers import (
     TicketRootClipboardTextParser,
     TicketRootDocumentParser,
 )
+from fin_ops_platform.services.etc_oa_detection import EtcOADetectionContext, EtcOADetectionService
 from fin_ops_platform.services.etc_reconciliation_models import FileParseResult, ParseIssue, ParseIssueSeverity, SourceFileKind
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
 from fin_ops_platform.services.etc_reconciliation_zip_filter import (
@@ -291,9 +298,12 @@ class Application:
         self._workbench_matching_dirty_worker_started = False
         self._workbench_matching_run_lock = Lock()
         self._workbench_matching_running_scope_months: set[str] = set()
+        self._etc_business_oa_detection_loop_lock = Lock()
+        self._etc_business_oa_detection_loop_batch_ids: set[str] = set()
         self._seed_payload = build_demo_seed()
         self._initialize_runtime_services(self._load_persisted_state())
         self._recover_interrupted_cost_statistics_cache_warmup_jobs()
+        self._recover_pending_etc_business_oa_detection_loops()
         if (
             os.getenv("FIN_OPS_DISABLE_STARTUP_HISTORICAL_ETC_REPAIR", "").strip() not in {"1", "true", "yes"}
             and self._historical_etc_repair_needs_startup_reconcile()
@@ -797,6 +807,13 @@ class Application:
             return self._handle_api_etc_reconciliation_task_create(body)
         if route_path.startswith("/api/etc/reconciliation-tasks/"):
             return self._route_api_etc_reconciliation_task(method, route_path, body, headers)
+        if route_path == "/api/etc/business-batches":
+            if method == "GET":
+                return self._handle_api_etc_business_batches(query)
+            if method == "POST":
+                return self._handle_api_etc_business_batch_create(body, headers)
+        if route_path.startswith("/api/etc/business-batches/"):
+            return self._route_api_etc_business_batch(method, route_path, body, headers)
         if method == "GET" and route_path == "/api/etc/invoices":
             return self._handle_api_etc_invoices(
                 status=query.get("status", [None])[0],
@@ -2044,9 +2061,9 @@ class Application:
             )
             return task, {"deleted": True, "batchId": delete_batch_id, "kind": "missing_submission_batch"}, sorted(set(changed_months))
         invoice_ids = [str(invoice_id) for invoice_id in list(getattr(batch, "invoice_ids", []) or [])]
-        changed_months = self._etc_invoice_changed_months(self._etc_service.list_invoices_by_ids(invoice_ids))
+        changed_months = self._etc_invoice_changed_months(self._existing_etc_invoices_by_ids(invoice_ids))
         delete_result = self._etc_service.delete_batch(delete_batch_id)
-        refreshed_invoices = self._etc_service.list_invoices_by_ids(invoice_ids)
+        refreshed_invoices = self._existing_etc_invoices_by_ids(invoice_ids)
         changed_months.extend(self._etc_invoice_changed_months(refreshed_invoices))
         if refreshed_invoices:
             sync_changed_months = self._sync_etc_invoices_to_canonical_invoices(refreshed_invoices)
@@ -2075,7 +2092,7 @@ class Application:
     def _delete_etc_import_batch_sources(self, import_batch_id: str) -> tuple[dict[str, object], int, list[str]]:
         import_batch = self._etc_import_batch_by_id(import_batch_id)
         if import_batch is not None:
-            etc_invoices = self._etc_service.list_invoices_by_ids(
+            etc_invoices = self._existing_etc_invoices_by_ids(
                 [str(invoice_id) for invoice_id in list(getattr(import_batch, "invoice_ids", []) or [])]
             )
         else:
@@ -2529,6 +2546,11 @@ class Application:
         if not isinstance(task_id, str) or not task_id.strip():
             return self._json_response(HTTPStatus.BAD_REQUEST, {"error": "task_id_required", "message": "task_id is required."})
         normalized_task_id = task_id.strip()
+        owner_user_id = self._resolve_background_job_owner(headers)
+        idempotency_key = f"etc_import_session:{normalized_session_id}"
+        existing_job = self._background_job_service.get_idempotent_job(owner_user_id, idempotency_key)
+        if existing_job is not None:
+            return self._json_response(HTTPStatus.ACCEPTED, {"job": existing_job.to_payload()})
         try:
             task = self._etc_reconciliation_task_service.get_task(normalized_task_id)
             reconciliation_preview = self._etc_reconciliation_import_previews.get(normalized_session_id)
@@ -2547,11 +2569,6 @@ class Application:
         except EtcServiceError as error:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "etc_import_session_not_found", "message": str(error)})
 
-        owner_user_id = self._resolve_background_job_owner(headers)
-        idempotency_key = f"etc_import_session:{normalized_session_id}"
-        existing_job = self._background_job_service.get_idempotent_job(owner_user_id, idempotency_key)
-        if existing_job is not None:
-            return self._json_response(HTTPStatus.ACCEPTED, {"job": existing_job.to_payload()})
         try:
             validate_etc_zip_confirm_for_task(task=task, preview=reconciliation_preview)
         except (StaleReconciliationPreviewError, EtcImportPreviewStaleError) as error:
@@ -2772,6 +2789,18 @@ class Application:
                     changed_months.add(date_value[:7])
         return sorted(changed_months)
 
+    def _existing_etc_invoices_by_ids(self, invoice_ids: list[str]) -> list[object]:
+        invoices: list[object] = []
+        for raw_invoice_id in list(invoice_ids or []):
+            invoice_id = str(raw_invoice_id or "").strip()
+            if not invoice_id:
+                continue
+            try:
+                invoices.extend(self._etc_service.list_invoices_by_ids([invoice_id]))
+            except EtcInvoiceNotFoundError:
+                continue
+        return invoices
+
     def _canonical_invoice_key_exists_for_etc_import(self, canonical_key: str) -> bool:
         normalized_key = str(canonical_key or "").strip()
         if not normalized_key:
@@ -2820,6 +2849,540 @@ class Application:
         self._invalidate_tax_offset_read_model_scopes(normalized_months, reason=reason)
         self._invalidate_workbench_read_model_scopes(["all", *normalized_months])
         self._persist_state_with_workbench_invalidation(cost_statistics_scope_keys=normalized_months)
+
+    def _handle_api_etc_business_batches(self, query: dict[str, list[str]]) -> Response:
+        batches = self._etc_service.list_business_batches(
+            task_id=query.get("taskId", query.get("task_id", [None]))[0],
+            status=query.get("status", [None])[0],
+        )
+        month = str(query.get("month", [None])[0] or "").strip()
+        plate = str(query.get("plate", [None])[0] or "").strip().lower()
+        keyword = str(query.get("keyword", [None])[0] or "").strip().lower()
+        if month:
+            batches = [
+                batch for batch in batches
+                if any(
+                    str(getattr(invoice, "issue_date", "") or getattr(invoice, "passage_start_date", "") or "").startswith(month)
+                    for invoice in self._etc_service.list_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or []))
+                )
+            ]
+        if plate:
+            batches = [
+                batch for batch in batches
+                if any(
+                    plate in str(getattr(invoice, "plate_number", "") or "").lower()
+                    for invoice in self._etc_service.list_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or []))
+                )
+            ]
+        if keyword:
+            batches = [
+                batch for batch in batches
+                if keyword in batch.business_batch_id.lower()
+                or keyword in str(batch.external_etc_batch_id or "").lower()
+                or keyword in str(batch.oa_row_id or "").lower()
+                or any(
+                    keyword in str(getattr(invoice, "invoice_number", "") or "").lower()
+                    or keyword in str(getattr(invoice, "plate_number", "") or "").lower()
+                    for invoice in self._etc_service.list_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or []))
+                )
+            ]
+        page = max(1, self._optional_int(query.get("page", [1])[0]) or 1)
+        page_size = max(1, min(500, self._optional_int(query.get("page_size", query.get("pageSize", [100]))[0]) or 100))
+        total = len(batches)
+        offset = (page - 1) * page_size
+        paged_batches = batches[offset : offset + page_size]
+        active_statuses = {
+            EtcBusinessBatchStatus.DRAFT.value,
+            EtcBusinessBatchStatus.REVIEWING.value,
+            EtcBusinessBatchStatus.READY_FOR_IMPORT.value,
+            EtcBusinessBatchStatus.IMPORTING.value,
+            EtcBusinessBatchStatus.IMPORTED.value,
+            EtcBusinessBatchStatus.IMPORT_FAILED.value,
+            EtcBusinessBatchStatus.IMPORT_PARTIAL_FAILED.value,
+            EtcBusinessBatchStatus.OA_DRAFT_CREATING.value,
+            EtcBusinessBatchStatus.OA_DRAFT_FAILED.value,
+            EtcBusinessBatchStatus.OA_SUBMISSION_DETECTING.value,
+            EtcBusinessBatchStatus.OA_DETECTION_TIMEOUT.value,
+            EtcBusinessBatchStatus.OA_DETECTION_CONFLICT.value,
+            EtcBusinessBatchStatus.OA_DETECTION_UNAVAILABLE.value,
+            EtcBusinessBatchStatus.NOT_SUBMITTED.value,
+            EtcBusinessBatchStatus.MANUALLY_MARKED_NOT_SUBMITTED.value,
+            EtcBusinessBatchStatus.MIGRATION_CONFLICT.value,
+            EtcBusinessBatchStatus.BUSINESS_BATCH_INVARIANT_BROKEN.value,
+        }
+        submitted_statuses = {
+            EtcBusinessBatchStatus.OA_SUBMITTED.value,
+            EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value,
+            EtcBusinessBatchStatus.CLOSED.value,
+        }
+        return self._etc_business_response(
+            HTTPStatus.OK,
+            {
+                "items": [self._etc_service.business_batch_payload(batch) for batch in paged_batches],
+                "total": total,
+                "counts": {
+                    "active": sum(1 for batch in batches if str(batch.status) in active_statuses),
+                    "submitted": sum(1 for batch in batches if str(batch.status) in submitted_statuses),
+                },
+                "pagination": {"page": page, "pageSize": page_size, "total": total},
+            },
+        )
+
+    def _handle_api_etc_business_batch_create(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
+        session = self._etc_business_mutation_session(headers)
+        if isinstance(session, Response):
+            return session
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        task_id = payload.get("taskId") or payload.get("task_id")
+        try:
+            batch = self._etc_service.create_business_batch(
+                task_id=str(task_id or ""),
+                owner_user_id=session.identity.username or session.identity.user_id,
+                owner_org_id=str(getattr(session.identity, "department_id", "") or "").strip()
+                or str(payload.get("ownerOrgId") or payload.get("owner_org_id") or "").strip()
+                or None,
+                idempotency_key=str(payload.get("idempotencyKey") or payload.get("idempotency_key") or "").strip() or None,
+            )
+        except Exception as error:
+            return self._etc_business_error_response(error)
+        return self._etc_business_response(HTTPStatus.CREATED, {"businessBatch": self._etc_service.business_batch_payload(batch)})
+
+    def _route_api_etc_business_batch(
+        self,
+        method: str,
+        route_path: str,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        relative = route_path.removeprefix("/api/etc/business-batches/").strip("/")
+        parts = [unquote(part) for part in relative.split("/") if part]
+        if not parts:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+        business_batch_id = parts[0]
+        if method in {"POST", "DELETE"}:
+            session = self._etc_business_mutation_session(headers)
+            if isinstance(session, Response):
+                return session
+        if len(parts) == 1:
+            if method == "GET":
+                try:
+                    batch = self._etc_service.get_business_batch(business_batch_id)
+                except Exception as error:
+                    return self._etc_business_error_response(error)
+                return self._etc_business_response(HTTPStatus.OK, {"businessBatch": self._etc_service.business_batch_payload(batch)})
+            if method == "DELETE":
+                return self._handle_api_etc_business_batch_delete(business_batch_id, body)
+        action = "/".join(parts[1:])
+        if method == "POST" and action == "source-files":
+            try:
+                batch = self._etc_service.get_business_batch(business_batch_id)
+            except Exception as error:
+                return self._etc_business_error_response(error)
+            return self._etc_business_response(
+                HTTPStatus.OK,
+                {"businessBatch": self._etc_service.business_batch_payload(batch), "sourceFiles": []},
+            )
+        if method == "POST" and action == "etc-import/preview":
+            return self._handle_api_etc_business_import_preview(business_batch_id, body, headers)
+        if method == "POST" and action == "etc-import/confirm":
+            return self._handle_api_etc_business_import_confirm(business_batch_id, body)
+        if method == "POST" and action == "oa-draft":
+            return self._handle_api_etc_business_oa_draft(business_batch_id, body, headers)
+        if method == "POST" and action == "oa-draft/revoke":
+            return self._handle_api_etc_business_oa_draft_revoke(business_batch_id, body)
+        if method == "POST" and action == "oa-status/refresh":
+            return self._handle_api_etc_business_oa_status_refresh(business_batch_id, body)
+        if method == "POST" and action == "manual-oa-status":
+            return self._handle_api_etc_business_manual_oa_status(business_batch_id, body)
+        return self._json_response(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+
+    def _handle_api_etc_business_import_preview(
+        self,
+        business_batch_id: str,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        fields, files, error = self._load_multipart_body(body, headers)
+        if error is not None:
+            return error
+        if not files:
+            return self._etc_business_response(
+                HTTPStatus.BAD_REQUEST,
+                None,
+                code="invalid_etc_import_request",
+                message="At least one zip file is required.",
+            )
+        invalid_files = [file.file_name for file in files if not file.file_name.lower().endswith(".zip")]
+        if invalid_files:
+            return self._etc_business_response(
+                HTTPStatus.BAD_REQUEST,
+                None,
+                code="invalid_etc_import_request",
+                message="Only .zip files can be imported.",
+            )
+        expected_version = self._optional_int((fields.get("expectedVersion") or fields.get("expected_version") or [None])[0])
+        uploads = [UploadedEtcZipFile(file_name=file.file_name, content=file.content) for file in files]
+        try:
+            payload = self._etc_service.preview_business_batch_import_zips(
+                business_batch_id,
+                uploads,
+                expected_version=expected_version,
+            )
+        except Exception as error:
+            return self._etc_business_error_response(error)
+        return self._etc_business_response(HTTPStatus.OK, payload)
+
+    def _handle_api_etc_business_import_confirm(self, business_batch_id: str, body: str | bytes | None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        session_id = str(payload.get("sessionId") or payload.get("session_id") or "").strip()
+        expected_version = self._optional_int(payload.get("expectedVersion") or payload.get("expected_version"))
+        try:
+            batch, result = self._etc_service.confirm_business_batch_import(
+                business_batch_id,
+                session_id,
+                expected_version=expected_version,
+                idempotency_key=str(payload.get("idempotencyKey") or payload.get("idempotency_key") or "").strip() or None,
+            )
+        except Exception as error:
+            return self._etc_business_error_response(error)
+        changed_months = self._sync_etc_invoices_to_canonical_invoices(
+            self._existing_etc_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or [])),
+        )
+        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_business_batch_import_confirm")
+        return self._etc_business_response(
+            HTTPStatus.OK,
+            {"businessBatch": self._etc_service.business_batch_payload(batch), "importResult": self._etc_service.import_result_payload(result)},
+        )
+
+    def _handle_api_etc_business_oa_draft(
+        self,
+        business_batch_id: str,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        expected_version = self._optional_int(payload.get("expectedVersion") or payload.get("expected_version"))
+        reconciliation_task = None
+        try:
+            current = self._etc_service.get_business_batch(business_batch_id)
+            try:
+                reconciliation_task = self._etc_reconciliation_task_service.get_task(current.task_id)
+            except KeyError:
+                reconciliation_task = None
+            batch = self._etc_service.create_business_batch_oa_draft(
+                business_batch_id,
+                expected_version=expected_version,
+                oa_client=self._build_etc_oa_client(headers),
+                reconciliation_task=reconciliation_task,
+            )
+            if reconciliation_task is not None and batch.submission_batch_id and batch.external_etc_batch_id:
+                self._etc_reconciliation_task_service.record_oa_draft_created(
+                    task_id=str(getattr(reconciliation_task, "task_id")),
+                    oa_draft_batch_id=batch.submission_batch_id,
+                    etc_batch_id=batch.external_etc_batch_id,
+                    actor="system",
+                )
+        except Exception as error:
+            return self._etc_business_error_response(error)
+        changed_months = self._sync_etc_invoices_to_canonical_invoices(
+            self._existing_etc_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or [])),
+        )
+        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_business_oa_draft_created")
+        self._schedule_etc_business_oa_detection_loop(batch.business_batch_id)
+        return self._etc_business_response(HTTPStatus.OK, {"businessBatch": self._etc_service.business_batch_payload(batch)})
+
+    def _handle_api_etc_business_oa_draft_revoke(self, business_batch_id: str, body: str | bytes | None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        expected_version = self._optional_int(payload.get("expectedVersion") or payload.get("expected_version"))
+        try:
+            checked = self._refresh_etc_business_batch_oa_detection(business_batch_id, expected_version=expected_version)
+            if str(getattr(checked, "status", "")) == EtcBusinessBatchStatus.OA_SUBMITTED.value:
+                changed_months = self._sync_etc_invoices_to_canonical_invoices(
+                    self._existing_etc_invoices_by_ids(list(getattr(checked, "invoice_ids", []) or [])),
+                )
+                self._refresh_after_etc_invoice_sync(changed_months, reason="etc_business_oa_revoke_detected_submitted")
+                return self._etc_business_response(
+                    HTTPStatus.CONFLICT,
+                    None,
+                    code="oa_already_submitted",
+                    message="OA 已进入进行中，不能撤销草稿或释放发票。",
+                    details={"businessBatch": self._etc_service.business_batch_payload(checked)},
+                )
+            batch = self._etc_service.revoke_business_batch_oa_draft(
+                business_batch_id,
+                reason=str(payload.get("reason") or "").strip(),
+                expected_version=int(getattr(checked, "version")),
+            )
+        except Exception as error:
+            return self._etc_business_error_response(error)
+        changed_months = self._sync_etc_invoices_to_canonical_invoices(
+            self._existing_etc_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or [])),
+        )
+        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_business_oa_draft_revoked")
+        return self._etc_business_response(HTTPStatus.OK, {"businessBatch": self._etc_service.business_batch_payload(batch)})
+
+    def _handle_api_etc_business_oa_status_refresh(self, business_batch_id: str, body: str | bytes | None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        expected_version = self._optional_int(payload.get("expectedVersion") or payload.get("expected_version"))
+        try:
+            batch = self._refresh_etc_business_batch_oa_detection(business_batch_id, expected_version=expected_version)
+        except Exception as error:
+            return self._etc_business_error_response(error)
+        if str(getattr(batch, "status", "")) in {
+            EtcBusinessBatchStatus.OA_SUBMITTED.value,
+            EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value,
+        }:
+            changed_months = self._sync_etc_invoices_to_canonical_invoices(
+                self._existing_etc_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or [])),
+            )
+            self._refresh_after_etc_invoice_sync(changed_months, reason="etc_business_oa_status_detected")
+        return self._etc_business_response(HTTPStatus.OK, {"businessBatch": self._etc_service.business_batch_payload(batch)})
+
+    def _refresh_etc_business_batch_oa_detection(
+        self,
+        business_batch_id: str,
+        *,
+        expected_version: int | None,
+    ):
+        batch = self._etc_service.get_business_batch(business_batch_id)
+        payload = self._etc_service.business_batch_payload(batch)
+        invoice_summary = payload.get("invoiceSummary") if isinstance(payload.get("invoiceSummary"), dict) else {}
+        context = EtcOADetectionContext(
+            business_batch_id=str(payload.get("businessBatchId") or ""),
+            external_etc_batch_id=str(payload.get("externalEtcBatchId") or ""),
+            amount=invoice_summary.get("amount", "0.00") if isinstance(invoice_summary, dict) else "0.00",
+            invoice_count=int(invoice_summary.get("count", 0) or 0) if isinstance(invoice_summary, dict) else 0,
+            owner_user_id=str(payload.get("ownerUserId") or "").strip() or None,
+            owner_org_id=str(payload.get("ownerOrgId") or "").strip() or None,
+            oa_draft_created_at=getattr(batch, "updated_at", None),
+            oa_detection_deadline_at=getattr(batch, "oa_detection_deadline_at", None),
+            oa_detection_final_retry_until=getattr(batch, "oa_detection_final_retry_until", None),
+        )
+        adapter = getattr(getattr(self, "_workbench_query_service", None), "_oa_adapter", None)
+        detector = EtcOADetectionService()
+        if not isinstance(adapter, MongoOAAdapter):
+            return self._etc_service.apply_business_batch_oa_detection_result(
+                business_batch_id,
+                expected_version=expected_version,
+                detection_status="unavailable",
+                reason="oa_detector_not_configured",
+                error="OA Mongo adapter is not configured.",
+            )
+        start, end = detector.detection_window(context)
+        if start is None or end is None:
+            now = datetime.now(UTC)
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            end = now
+        result = detector.detect_with_adapter(
+            context,
+            lambda detection_context: adapter.list_etc_oa_detection_candidates(
+                business_batch_id=detection_context.business_batch_id,
+                external_etc_batch_id=detection_context.external_etc_batch_id,
+                created_from=start,
+                created_to=end,
+            ),
+            now=datetime.now(UTC),
+        )
+        return self._etc_service.apply_business_batch_oa_detection_result(
+            business_batch_id,
+            expected_version=expected_version,
+            detection_status=result.status,
+            reason=result.reason,
+            oa_row_id=result.oa_row_id,
+            process_status=result.process_status,
+            error=result.error,
+            candidates=result.candidates,
+        )
+
+    def _recover_pending_etc_business_oa_detection_loops(self) -> None:
+        for status in (
+            EtcBusinessBatchStatus.OA_SUBMISSION_DETECTING.value,
+        ):
+            try:
+                batches = self._etc_service.list_business_batches(status=status)
+            except Exception:
+                return
+            for batch in batches:
+                self._schedule_etc_business_oa_detection_loop(batch.business_batch_id)
+
+    def _schedule_etc_business_oa_detection_loop(self, business_batch_id: str) -> bool:
+        normalized_id = str(business_batch_id or "").strip()
+        if not normalized_id:
+            return False
+        with self._etc_business_oa_detection_loop_lock:
+            if normalized_id in self._etc_business_oa_detection_loop_batch_ids:
+                return False
+            self._etc_business_oa_detection_loop_batch_ids.add(normalized_id)
+        Thread(target=self._run_etc_business_oa_detection_loop, args=(normalized_id,), daemon=True).start()
+        return True
+
+    def _run_etc_business_oa_detection_loop(self, business_batch_id: str) -> None:
+        max_attempts = max(1, int(os.getenv("FIN_OPS_ETC_OA_DETECTION_MAX_ATTEMPTS", "120") or "120"))
+        interval_seconds = max(1.0, float(os.getenv("FIN_OPS_ETC_OA_DETECTION_INTERVAL_SECONDS", "15") or "15"))
+        try:
+            for _ in range(max_attempts):
+                try:
+                    batch = self._refresh_etc_business_batch_oa_detection(business_batch_id, expected_version=None)
+                except Exception:
+                    return
+                if str(getattr(batch, "status", "")) != EtcBusinessBatchStatus.OA_SUBMISSION_DETECTING.value:
+                    if str(getattr(batch, "status", "")) == EtcBusinessBatchStatus.OA_SUBMITTED.value:
+                        changed_months = self._sync_etc_invoices_to_canonical_invoices(
+                            self._existing_etc_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or [])),
+                        )
+                        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_business_oa_status_detected_async")
+                    return
+                sleep(interval_seconds)
+        finally:
+            with self._etc_business_oa_detection_loop_lock:
+                self._etc_business_oa_detection_loop_batch_ids.discard(business_batch_id)
+
+    def _handle_api_etc_business_manual_oa_status(self, business_batch_id: str, body: str | bytes | None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        expected_version = self._optional_int(payload.get("expectedVersion") or payload.get("expected_version"))
+        decision = str(payload.get("decision") or "").strip()
+        candidate_oa_row_id = str(payload.get("candidateOaRowId") or payload.get("candidate_oa_row_id") or "").strip() or None
+        try:
+            checked = self._refresh_etc_business_batch_oa_detection(business_batch_id, expected_version=expected_version)
+            if str(getattr(checked, "status", "")) == EtcBusinessBatchStatus.OA_SUBMITTED.value:
+                changed_months = self._sync_etc_invoices_to_canonical_invoices(
+                    self._existing_etc_invoices_by_ids(list(getattr(checked, "invoice_ids", []) or [])),
+                )
+                self._refresh_after_etc_invoice_sync(changed_months, reason="etc_business_manual_oa_status_auto_detected")
+                return self._etc_business_response(HTTPStatus.OK, {"businessBatch": self._etc_service.business_batch_payload(checked)})
+            if decision == "submitted" and candidate_oa_row_id is not None:
+                latest_payload = self._etc_service.business_batch_payload(checked)
+                audit_events = list(latest_payload.get("auditEvents") or [])
+                candidate_rows = [
+                    str(candidate.get("oaRowId") or "").strip()
+                    for event in reversed(audit_events)
+                    if isinstance(event, dict)
+                    for candidate in list(event.get("candidates") or [])
+                    if isinstance(candidate, dict)
+                ]
+                if candidate_oa_row_id not in candidate_rows:
+                    return self._etc_business_response(
+                        HTTPStatus.BAD_REQUEST,
+                        None,
+                        code="invalid_manual_oa_candidate",
+                        message="人工确认的 OA 行未通过本次批次检测候选校验。",
+                    )
+            batch = self._etc_service.manual_business_batch_oa_status(
+                business_batch_id,
+                decision=decision,
+                reason=str(payload.get("reason") or "").strip(),
+                expected_version=int(getattr(checked, "version")),
+                candidate_oa_row_id=candidate_oa_row_id,
+            )
+        except Exception as error:
+            return self._etc_business_error_response(error)
+        changed_months = self._sync_etc_invoices_to_canonical_invoices(
+            self._existing_etc_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or [])),
+        )
+        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_business_manual_oa_status")
+        return self._etc_business_response(HTTPStatus.OK, {"businessBatch": self._etc_service.business_batch_payload(batch)})
+
+    def _handle_api_etc_business_batch_delete(self, business_batch_id: str, body: str | bytes | None) -> Response:
+        payload: dict[str, object] = {}
+        if body:
+            payload, error = self._load_json_body(body)
+            if error is not None:
+                return error
+        try:
+            result = self._etc_service.delete_business_batch(
+                business_batch_id,
+                expected_version=self._optional_int(payload.get("expectedVersion") or payload.get("expected_version")),
+                reason=str(payload.get("reason") or "").strip() or None,
+            )
+        except Exception as error:
+            return self._etc_business_error_response(error)
+        return self._etc_business_response(HTTPStatus.OK, result)
+
+    def _etc_business_mutation_session(self, headers: dict[str, str] | None) -> OARequestSession | Response:
+        session = resolve_oa_request_session(
+            headers,
+            identity_service=self._oa_identity_service,
+            access_control_service=self._access_control_service,
+        )
+        if not session.can_mutate_data:
+            return self._etc_business_response(
+                HTTPStatus.FORBIDDEN,
+                None,
+                code="permission_denied",
+                message="当前账户没有操作 ETC 批次的权限。",
+            )
+        return session
+
+    @staticmethod
+    def _optional_int(value: object) -> int | None:
+        if value in (None, ""):
+            return None
+        return int(value)
+
+    def _etc_business_response(
+        self,
+        status: HTTPStatus,
+        data: object,
+        *,
+        code: str | None = None,
+        message: str | None = None,
+        details: dict[str, object] | None = None,
+    ) -> Response:
+        request_id = uuid4().hex[:12]
+        error = None if code is None else {"code": code, "message": message or code, "details": details or {}}
+        return self._json_response(
+            status,
+            {
+                "ok": code is None,
+                "data": data if code is None else None,
+                "error": error,
+                "requestId": request_id,
+            },
+        )
+
+    def _etc_business_error_response(self, error: Exception) -> Response:
+        if isinstance(error, EtcBusinessBatchNotFoundError):
+            return self._etc_business_response(HTTPStatus.NOT_FOUND, None, code="business_batch_not_found", message=str(error))
+        if isinstance(error, EtcBusinessBatchActiveExistsError):
+            return self._etc_business_response(HTTPStatus.CONFLICT, None, code="active_business_batch_exists", message=str(error))
+        if isinstance(error, EtcBusinessBatchVersionConflictError):
+            return self._etc_business_response(
+                HTTPStatus.CONFLICT,
+                None,
+                code="version_conflict",
+                message="批次状态已变化，请刷新后重试。",
+                details={
+                    "businessBatchId": error.business_batch_id,
+                    "expectedVersion": error.expected_version,
+                    "actualVersion": error.actual_version,
+                },
+            )
+        if isinstance(error, EtcBusinessBatchInvalidTransitionError):
+            return self._etc_business_response(
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+                None,
+                code=getattr(error, "code", "invalid_status_transition"),
+                message=str(error),
+            )
+        if isinstance(error, EtcDraftRequestError):
+            return self._etc_business_response(HTTPStatus.BAD_REQUEST, None, code="invalid_etc_draft_request", message=str(error))
+        if isinstance(error, EtcOAClientError):
+            return self._etc_business_response(HTTPStatus.BAD_REQUEST, None, code="invalid_etc_draft_request", message=str(error))
+        if isinstance(error, EtcServiceError):
+            return self._etc_business_response(HTTPStatus.BAD_REQUEST, None, code="invalid_etc_business_batch_request", message=str(error))
+        raise error
 
     def _handle_api_etc_invoices(
         self,
@@ -2949,7 +3512,7 @@ class Application:
             existing_batch = self._etc_service.get_batch(batch_id)
             resolved_submission_batch_id = str(getattr(existing_batch, "id", "") or batch_id)
             submission_invoice_ids = [str(invoice_id) for invoice_id in list(getattr(existing_batch, "invoice_ids", []) or [])]
-            submission_invoices = self._etc_service.list_invoices_by_ids(submission_invoice_ids)
+            submission_invoices = self._existing_etc_invoices_by_ids(submission_invoice_ids)
             submission_import_batch_ids = sorted({
                 str(getattr(invoice, "import_batch_id", "") or "").strip()
                 for invoice in submission_invoices
@@ -2959,7 +3522,7 @@ class Application:
         except EtcBatchNotFoundError:
             import_batch = self._etc_import_batch_by_id(batch_id)
             if import_batch is not None:
-                import_batch_invoices = self._etc_service.list_invoices_by_ids(
+                import_batch_invoices = self._existing_etc_invoices_by_ids(
                     [str(invoice_id) for invoice_id in list(getattr(import_batch, "invoice_ids", []) or [])]
                 )
                 import_batch_changed_months = self._etc_invoice_changed_months(import_batch_invoices)
@@ -2984,10 +3547,10 @@ class Application:
                 self._refresh_after_etc_invoice_sync(changed_months, reason="etc_submission_batch_contents_deleted")
                 self._persist_state()
             if result.get("kind") == "submission_batch" and submission_invoice_ids and not submission_import_batch_ids:
-                changed_months = self._sync_etc_invoices_to_canonical_invoices(
-                    self._etc_service.list_invoices_by_ids(submission_invoice_ids),
-                )
-                self._refresh_after_etc_invoice_sync(changed_months, reason="etc_oa_draft_deleted")
+                existing_invoices = self._existing_etc_invoices_by_ids(submission_invoice_ids)
+                if existing_invoices:
+                    changed_months = self._sync_etc_invoices_to_canonical_invoices(existing_invoices)
+                    self._refresh_after_etc_invoice_sync(changed_months, reason="etc_oa_draft_deleted")
             if result.get("kind") == "import_batch":
                 canonical_deleted = self._import_service.remove_etc_invoices_by_import_batch_id(str(result.get("batchId") or batch_id))
                 task = self._clear_reconciliation_task_import_after_batch_delete(task, str(result.get("batchId") or batch_id))
@@ -3023,16 +3586,45 @@ class Application:
         return self._json_response(HTTPStatus.OK, result)
 
     def _etc_batch_counts(self) -> dict[str, int]:
+        business_batches = self._etc_service.list_business_batches()
+        business_import_batch_ids = {
+            import_batch_id
+            for batch in business_batches
+            for import_batch_id in list(getattr(batch, "import_batch_ids", []) or [])
+        }
+        business_submission_batch_ids = {
+            str(getattr(batch, "submission_batch_id", "") or "").strip()
+            for batch in business_batches
+            if str(getattr(batch, "submission_batch_id", "") or "").strip()
+        }
+        business_submitted_count = sum(
+            1
+            for batch in business_batches
+            if self._etc_business_batch_legacy_status(batch) == "submitted"
+        )
+        business_unsubmitted_count = len(business_batches) - business_submitted_count
         import_batches = [
             batch
             for batch in self._etc_service.list_import_batches()
             if not str(getattr(batch, "submission_batch_id", "") or "").strip()
+            and str(getattr(batch, "id", "") or "").strip() not in business_import_batch_ids
             and int(getattr(batch, "invoice_count", 0) or 0) > 0
             and not self._is_reconciliation_import_batch(batch)
         ]
-        unsubmitted_submission_batches = self._etc_service.list_batches(status="unsubmitted")
-        submitted_batches = self._etc_service.list_batches(status="submitted")
-        return {"unsubmitted": len(import_batches) + len(unsubmitted_submission_batches), "submitted": len(submitted_batches)}
+        unsubmitted_submission_batches = [
+            batch
+            for batch in self._etc_service.list_batches(status="unsubmitted")
+            if str(getattr(batch, "id", "") or "").strip() not in business_submission_batch_ids
+        ]
+        submitted_batches = [
+            batch
+            for batch in self._etc_service.list_batches(status="submitted")
+            if str(getattr(batch, "id", "") or "").strip() not in business_submission_batch_ids
+        ]
+        return {
+            "unsubmitted": business_unsubmitted_count + len(import_batches) + len(unsubmitted_submission_batches),
+            "submitted": business_submitted_count + len(submitted_batches),
+        }
 
     def _etc_batch_list_items(
         self,
@@ -3045,8 +3637,34 @@ class Application:
         include_submitted = status in {"", "submitted"}
         include_unsubmitted = status in {"", "unsubmitted"}
         items: list[dict[str, object]] = []
+        business_batches = self._etc_service.list_business_batches()
+        business_import_batch_ids = {
+            import_batch_id
+            for batch in business_batches
+            for import_batch_id in list(getattr(batch, "import_batch_ids", []) or [])
+        }
+        business_submission_batch_ids = {
+            str(getattr(batch, "submission_batch_id", "") or "").strip()
+            for batch in business_batches
+            if str(getattr(batch, "submission_batch_id", "") or "").strip()
+        }
+        for business_batch in business_batches:
+            legacy_status = self._etc_business_batch_legacy_status(business_batch)
+            if (legacy_status == "submitted" and not include_submitted) or (legacy_status == "unsubmitted" and not include_unsubmitted):
+                continue
+            item = self._etc_business_batch_summary_payload(business_batch)
+            if self._etc_batch_summary_matches_filters(
+                item,
+                month=month,
+                plate=plate,
+                keyword=keyword,
+                invoice_ids=list(getattr(business_batch, "invoice_ids", []) or []),
+            ):
+                items.append(item)
         if include_submitted:
             for batch in self._etc_service.list_batches(status="submitted"):
+                if str(getattr(batch, "id", "") or "").strip() in business_submission_batch_ids:
+                    continue
                 item = self._etc_submission_batch_summary_payload(batch)
                 if self._etc_batch_summary_matches_filters(
                     item,
@@ -3058,6 +3676,8 @@ class Application:
                     items.append(item)
         if include_unsubmitted:
             for batch in self._etc_service.list_batches(status="unsubmitted"):
+                if str(getattr(batch, "id", "") or "").strip() in business_submission_batch_ids:
+                    continue
                 item = self._etc_submission_batch_summary_payload(batch)
                 if self._etc_batch_summary_matches_filters(
                     item,
@@ -3068,6 +3688,8 @@ class Application:
                 ):
                     items.append(item)
             for import_batch in self._etc_service.list_import_batches():
+                if str(getattr(import_batch, "id", "") or "").strip() in business_import_batch_ids:
+                    continue
                 if self._is_reconciliation_import_batch(import_batch):
                     continue
                 if str(getattr(import_batch, "submission_batch_id", "") or "").strip():
@@ -3075,7 +3697,7 @@ class Application:
                 if int(getattr(import_batch, "invoice_count", 0) or 0) <= 0:
                     continue
                 invoice_ids = [str(invoice_id) for invoice_id in list(getattr(import_batch, "invoice_ids", []) or [])]
-                invoices = self._etc_service.list_invoices_by_ids(invoice_ids)
+                invoices = self._existing_etc_invoices_by_ids(invoice_ids)
                 item = self._etc_import_batch_summary_payload(import_batch, invoices=invoices)
                 if self._etc_batch_summary_matches_filters(
                     item,
@@ -3108,6 +3730,12 @@ class Application:
 
     def _etc_batch_detail_payload(self, batch_id: str) -> dict[str, object] | None:
         try:
+            business_batch = self._etc_service.get_business_batch(batch_id)
+        except EtcBusinessBatchNotFoundError:
+            business_batch = None
+        if business_batch is not None:
+            return self._etc_business_batch_detail_payload(business_batch)
+        try:
             batch = self._etc_service.get_batch(batch_id)
         except EtcBatchNotFoundError:
             batch = None
@@ -3117,6 +3745,68 @@ class Application:
             if str(import_batch.id) == str(batch_id):
                 return self._etc_import_batch_detail_payload(import_batch)
         return None
+
+    @staticmethod
+    def _etc_business_batch_legacy_status(batch: object) -> str:
+        return "submitted" if str(getattr(batch, "status", "") or "") in {
+            EtcBusinessBatchStatus.OA_SUBMITTED.value,
+            EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value,
+            EtcBusinessBatchStatus.CLOSED.value,
+        } else "unsubmitted"
+
+    def _etc_business_batch_detail_payload(self, batch: object) -> dict[str, object]:
+        invoice_ids = [str(invoice_id) for invoice_id in list(getattr(batch, "invoice_ids", []) or [])]
+        invoices = self._existing_etc_invoices_by_ids(invoice_ids)
+        invoice_items = [self._serialize_etc_invoice(invoice) for invoice in invoices]
+        payload = self._etc_business_batch_summary_payload(batch)
+        payload["invoiceItems"] = invoice_items
+        payload["businessBatch"] = self._etc_service.business_batch_payload(batch)
+        return payload
+
+    def _etc_business_batch_summary_payload(self, batch: object) -> dict[str, object]:
+        invoice_ids = [str(invoice_id) for invoice_id in list(getattr(batch, "invoice_ids", []) or [])]
+        invoices = self._existing_etc_invoices_by_ids(invoice_ids)
+        amount = sum((Decimal(str(getattr(invoice, "total_amount", "0"))) for invoice in invoices), Decimal("0.00")).quantize(Decimal("0.01"))
+        issue_dates = sorted(str(getattr(invoice, "issue_date", "") or "") for invoice in invoices if str(getattr(invoice, "issue_date", "") or ""))
+        passage_dates = sorted(
+            date_value
+            for invoice in invoices
+            for date_value in (
+                str(getattr(invoice, "passage_start_date", "") or ""),
+                str(getattr(invoice, "passage_end_date", "") or ""),
+            )
+            if date_value
+        )
+        plate_summary = self._etc_plate_summary_for_invoices(invoices)
+        summary = self._serialize_etc_batch_summary(
+            id_value=str(getattr(batch, "business_batch_id", "")),
+            etc_batch_id=str(getattr(batch, "external_etc_batch_id", "") or getattr(batch, "business_batch_id", "")),
+            status=self._etc_business_batch_legacy_status(batch),
+            source_type="etc_business_batch",
+            invoice_count=len(invoices),
+            total_amount=amount,
+            issue_start_date=issue_dates[0] if issue_dates else None,
+            issue_end_date=issue_dates[-1] if issue_dates else None,
+            passage_start_date=passage_dates[0] if passage_dates else None,
+            passage_end_date=passage_dates[-1] if passage_dates else None,
+            plate_summary=plate_summary,
+            linked_oa_row_id=getattr(batch, "oa_row_id", None),
+            linked_oa_case_id=None,
+            amount_delta=None,
+            note=str(getattr(batch, "status", "") or ""),
+            created_at=getattr(batch, "created_at", None),
+        )
+        summary["business_batch_id"] = str(getattr(batch, "business_batch_id", ""))
+        summary["businessBatchId"] = str(getattr(batch, "business_batch_id", ""))
+        summary["business_status"] = str(getattr(batch, "status", ""))
+        summary["submissionBatchId"] = getattr(batch, "submission_batch_id", None)
+        return {
+            "batch": self._etc_service.business_batch_payload(batch),
+            "summary": summary,
+            "plateSummary": summary["plate_summary"],
+            "invoiceItems": [],
+            "supplementItems": [],
+        }
 
     def _etc_submission_batch_detail_payload(self, batch: object) -> dict[str, object] | None:
         detail = self._etc_service.get_batch_detail(str(getattr(batch, "id", "")))
@@ -3165,7 +3855,7 @@ class Application:
 
     def _etc_import_batch_detail_payload(self, import_batch: object) -> dict[str, object] | None:
         invoice_ids = list(getattr(import_batch, "invoice_ids", []) or [])
-        invoices = self._etc_service.list_invoices_by_ids([str(invoice_id) for invoice_id in invoice_ids])
+        invoices = self._existing_etc_invoices_by_ids([str(invoice_id) for invoice_id in invoice_ids])
         invoice_items = [self._serialize_etc_invoice(invoice) for invoice in invoices]
         payload = self._etc_import_batch_summary_payload(import_batch, invoices=invoices)
         payload["invoiceItems"] = invoice_items
@@ -3356,7 +4046,7 @@ class Application:
             return True
         resolved_invoices = invoices
         if resolved_invoices is None and invoice_ids:
-            resolved_invoices = self._etc_service.list_invoices_by_ids([str(invoice_id) for invoice_id in invoice_ids])
+            resolved_invoices = self._existing_etc_invoices_by_ids([str(invoice_id) for invoice_id in invoice_ids])
         return self._etc_batch_payload_matches_filters(
             {
                 **detail,
@@ -6190,6 +6880,7 @@ class Application:
             return error
         actor = str(payload.get("actor") or session.identity.username or session.identity.user_id or "web_finance_user")
         year = str(payload.get("year") or "")
+        previous_pair_snapshot = self._workbench_pair_relation_service.snapshot()
         try:
             result = self._batch_accounting_service().submit(
                 year=year,
@@ -6198,6 +6889,7 @@ class Application:
                 bank_row_id=str(payload.get("bank_row_id") or ""),
                 oa_row_ids=list(payload.get("oa_row_ids") or []),
                 actor=actor,
+                note=str(payload.get("note") or ""),
                 expected_version=self._optional_int(payload.get("expected_version")),
             )
         except BatchAccountingError as exc:
@@ -6217,10 +6909,17 @@ class Application:
         )
         changed_case_ids = [str(case_id) for case_id in list(result.get("changed_case_ids") or []) if str(case_id).strip()]
         self._invalidate_workbench_read_model_scopes(changed_scope_keys)
-        self._schedule_workbench_pair_relation_persist(
-            changed_case_ids=changed_case_ids,
-            action_name="submit_batch_accounting",
-        )
+        try:
+            self._schedule_workbench_pair_relation_persist(
+                changed_case_ids=changed_case_ids,
+                action_name="submit_batch_accounting",
+            )
+        except Exception:
+            self._workbench_pair_relation_service = WorkbenchPairRelationService.from_snapshot(previous_pair_snapshot)
+            self._configure_workbench_exception_application_service()
+            return self._workbench_persistence_unavailable_response(
+                StatePersistenceError("工作台关联关系暂时无法保存，请稍后重试。")
+            )
         self._schedule_workbench_read_model_persist(
             changed_scope_keys=changed_scope_keys,
             action_name="submit_batch_accounting",
@@ -11413,6 +12112,17 @@ class Application:
             special_metadata=relation_payload.get("special_metadata") if isinstance(relation_payload.get("special_metadata"), dict) else None,
         )
         payload[relation_field] = self._serialize_value(linked_relation)
+        if relation_mode:
+            payload["relation_mode"] = relation_mode
+        special_metadata = relation.get("special_metadata")
+        if isinstance(special_metadata, dict) and special_metadata:
+            payload["special_metadata"] = self._serialize_value(special_metadata)
+        relation_note = str(relation.get("note") or "").strip()
+        if relation_note:
+            payload["relation_note"] = relation_note
+        relation_amount_check = relation.get("amount_check")
+        if isinstance(relation_amount_check, dict) and relation_amount_check:
+            payload["relation_amount_check"] = self._serialize_value(relation_amount_check)
         self._workbench_override_service._sync_summary_relation(payload, str(linked_relation.get("label", "")))
         if relation_mode == OA_INVOICE_OFFSET_AUTO_MATCH_MODE:
             self._apply_oa_invoice_offset_pair_metadata(payload)
@@ -13013,9 +13723,23 @@ class Application:
                 relation = self._relation_for_group(group)
                 if isinstance(relation, dict) and not self._relation_requires_dedicated_withdraw_action(relation):
                     group["can_withdraw"] = True
+                if isinstance(relation, dict):
+                    relation_note = str(relation.get("note") or "").strip()
+                    if relation_note:
+                        group["relation_note"] = relation_note
+                    amount_check = relation.get("amount_check")
+                    if isinstance(amount_check, dict) and amount_check:
+                        group["amount_check"] = self._serialize_value(amount_check)
                 for key in ("oa_rows", "bank_rows", "invoice_rows"):
                     for row in list(group.get(key, [])):
                         if isinstance(row, dict):
+                            if isinstance(relation, dict) and str(row.get("type") or "") == "bank":
+                                relation_note = str(relation.get("note") or "").strip()
+                                if relation_note:
+                                    row["relation_note"] = relation_note
+                                amount_check = relation.get("amount_check")
+                                if isinstance(amount_check, dict) and amount_check:
+                                    row["relation_amount_check"] = self._serialize_value(amount_check)
                             row["tags"] = self._derive_workbench_row_tags(row, group, relation)
         return result
 
@@ -14132,7 +14856,26 @@ def _build_handler_factory(app: Application) -> Callable[..., BaseHTTPRequestHan
             if method in {"POST", "PUT", "PATCH", "DELETE"}:
                 content_length = int(self.headers.get("Content-Length", "0"))
                 body = self.rfile.read(content_length) if content_length > 0 else None
-            response = app.handle_request(method, self.path, body, dict(self.headers.items()))
+            try:
+                response = app.handle_request(method, self.path, body, dict(self.headers.items()))
+            except Exception as error:  # pragma: no cover - exercised through deployed HTTP server
+                request_id = uuid4().hex[:12]
+                print(
+                    f"[fin-ops-api] unhandled request error request_id={request_id} method={method} path={self.path}: {error}",
+                    file=sys.stderr,
+                )
+                traceback.print_exc()
+                response = Response(
+                    status_code=int(HTTPStatus.INTERNAL_SERVER_ERROR),
+                    body=json.dumps(
+                        {
+                            "error": "internal_server_error",
+                            "message": "接口处理失败，请联系管理员查看后端日志。",
+                            "requestId": request_id,
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
             self.send_response(response.status_code)
             for key, value in response.headers.items():
                 self.send_header(key, value)

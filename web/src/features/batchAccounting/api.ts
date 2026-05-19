@@ -1,7 +1,9 @@
 import type {
+  BatchAccountingAmountCheck,
   BatchAccountingBankRow,
   BatchAccountingMutationResult,
   BatchAccountingOaRow,
+  BatchAccountingRelation,
   BatchAccountingResponse,
   FetchBatchAccountingRequest,
   SubmitBatchAccountingRequest,
@@ -47,6 +49,27 @@ type ApiSummary = {
   submittedCount?: number | null;
 };
 
+type ApiAmountCheck = {
+  status?: string | null;
+  direction?: string | null;
+  bank_amount?: string | null;
+  bankAmount?: string | null;
+  oa_amount?: string | null;
+  oaAmount?: string | null;
+  amount_delta?: string | null;
+  amountDelta?: string | null;
+  requires_note?: boolean | null;
+  requiresNote?: boolean | null;
+};
+
+type ApiRelation = {
+  relation_id?: string | null;
+  relationId?: string | null;
+  note?: string | null;
+  amount_check?: ApiAmountCheck | null;
+  amountCheck?: ApiAmountCheck | null;
+};
+
 type ApiResponse = {
   summary?: ApiSummary | null;
   bank_rows?: ApiBankRow[] | null;
@@ -58,6 +81,12 @@ type ApiResponse = {
 };
 
 type ApiRelationValue = ApiOaRow[] | {
+  relation_id?: string | null;
+  relationId?: string | null;
+  relation?: ApiRelation | null;
+  note?: string | null;
+  amount_check?: ApiAmountCheck | null;
+  amountCheck?: ApiAmountCheck | null;
   oa_rows?: ApiOaRow[] | null;
   oaRows?: ApiOaRow[] | null;
 };
@@ -160,18 +189,61 @@ function mapOaRow(row: ApiOaRow = {}): BatchAccountingOaRow {
   };
 }
 
+function mapAmountCheck(value: ApiAmountCheck | null | undefined): BatchAccountingAmountCheck | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  return {
+    status: text(value.status),
+    direction: text(value.direction),
+    bankAmount: text(value.bank_amount ?? value.bankAmount, "0.00"),
+    oaAmount: text(value.oa_amount ?? value.oaAmount, "0.00"),
+    amountDelta: text(value.amount_delta ?? value.amountDelta, "0.00"),
+    requiresNote: Boolean(value.requires_note ?? value.requiresNote),
+  };
+}
+
+function mapRelation(value: ApiRelation | null | undefined): BatchAccountingRelation | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  return {
+    relationId: text(value.relation_id ?? value.relationId),
+    note: text(value.note),
+    amountCheck: mapAmountCheck(value.amount_check ?? value.amountCheck),
+  };
+}
+
 function mapRelations(value: ApiRelationsByBankRowId | null | undefined) {
   if (!value || typeof value !== "object") {
     return {};
   }
   return Object.fromEntries(
     Object.entries(value).map(([bankRowId, relationValue]) => {
-      const rows = Array.isArray(relationValue)
-        ? relationValue
-        : relationValue.oa_rows ?? relationValue.oaRows ?? [];
+      if (Array.isArray(relationValue)) {
+        return [
+          bankRowId,
+          {
+            relationId: "",
+            oaRows: relationValue.map(mapOaRow),
+          },
+        ];
+      }
+      const rows = relationValue.oa_rows ?? relationValue.oaRows ?? [];
+      const relation = mapRelation(
+        relationValue.relation ?? {
+          relation_id: relationValue.relation_id ?? relationValue.relationId,
+          note: relationValue.note,
+          amount_check: relationValue.amount_check ?? relationValue.amountCheck,
+        },
+      );
       return [
         bankRowId,
-        Array.isArray(rows) ? rows.map(mapOaRow) : [],
+        {
+          relationId: text(relationValue.relation_id ?? relationValue.relationId ?? relation?.relationId),
+          relation,
+          oaRows: Array.isArray(rows) ? rows.map(mapOaRow) : [],
+        },
       ];
     }),
   );
@@ -215,6 +287,7 @@ export async function submitBatchAccounting({
   bankRowId,
   oaRowIds,
   expectedVersion,
+  note,
   signal,
 }: SubmitBatchAccountingRequest): Promise<BatchAccountingMutationResult> {
   const payload = await requestJson<ApiMutationResult>("/api/batch-accounting/submit", {
@@ -226,6 +299,7 @@ export async function submitBatchAccounting({
       bank_row_id: bankRowId,
       oa_row_ids: oaRowIds,
       expected_version: expectedVersion,
+      note: String(note ?? "").trim(),
     }),
     signal,
   });

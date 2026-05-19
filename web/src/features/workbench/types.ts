@@ -35,6 +35,15 @@ export type WorkbenchBankTextField = {
   value: string;
 };
 
+export type WorkbenchAmountCheck = {
+  status: "matched" | "mismatch" | "unknown" | (string & {});
+  direction: "expense" | "payment" | "receipt" | "unknown" | (string & {});
+  bankAmount: string;
+  oaAmount: string;
+  amountDelta: string;
+  requiresNote: boolean;
+};
+
 export type WorkbenchRecord = {
   id: string;
   caseId?: string;
@@ -58,6 +67,8 @@ export type WorkbenchRecord = {
   categoryPath?: string[];
   categorySource?: string;
   bankTextFields?: WorkbenchBankTextField[];
+  relationNote?: string;
+  relationAmountCheck?: WorkbenchAmountCheck;
   specialMetadata?: Record<string, unknown>;
 };
 
@@ -145,6 +156,8 @@ export type WorkbenchCandidateGroup = {
   rows: WorkbenchPaneRows;
   collapsedRows?: Partial<WorkbenchPaneRows>;
   canWithdraw?: boolean;
+  relationNote?: string;
+  amountCheck?: WorkbenchAmountCheck;
   specialMetadata?: Record<string, unknown>;
 };
 

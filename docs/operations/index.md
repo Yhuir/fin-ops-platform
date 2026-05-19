@@ -1,6 +1,7 @@
 # 运维文档索引
 
 - `deployment.md`：发布路径、环境和部署检查。
+- `etc-business-batches.md`：ETC 业务批次、OA 自动检测、迁移 dry-run、回滚和 Nginx/API smoke。
 - `data-reset.md`：数据重置规则。
 - `backup-and-recovery.md`：备份、恢复和回滚要求。
 - `monitoring.md`：健康状态、后台任务和告警。

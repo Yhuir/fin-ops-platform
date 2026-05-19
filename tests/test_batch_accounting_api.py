@@ -4,7 +4,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from fin_ops_platform.app.server import Application, build_application
+from fin_ops_platform.app.server import Application, StatePersistenceError, build_application
 from fin_ops_platform.services.batch_accounting_service import BatchAccountingService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
@@ -182,6 +182,23 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.addCleanup(payload_patcher.stop)
         return app, payload_patcher
 
+    def _submit_batch_mismatch_with_note(self, app: Application, *, note: str) -> dict[str, object]:
+        response = app.handle_request(
+            "POST",
+            "/api/batch-accounting/submit",
+            json.dumps(
+                {
+                    "year": "2026",
+                    "bank_row_id": "txn_imported_202601_batch_001",
+                    "oa_row_ids": ["oa-exp-ba-001"],
+                    "note": note,
+                    "actor": "finance-user",
+                }
+            ),
+        )
+        self.assertEqual(response.status_code, 200, response.body)
+        return json.loads(response.body)
+
     def test_unsubmitted_list_filters_bank_rows_and_daily_reimbursement_oa_rows(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
 
@@ -231,7 +248,7 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(payload["bank_rows"], [])
         self.assertEqual(payload["summary"]["unsubmitted_count"], 0)
 
-    def test_submit_rejects_amount_mismatch_without_trusting_frontend_amounts(self) -> None:
+    def test_submit_amount_mismatch_requires_difference_note(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
 
         response = app.handle_request(
@@ -250,8 +267,76 @@ class BatchAccountingApiTests(unittest.TestCase):
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 400, response.body)
-        self.assertEqual(payload["error"], "batch_accounting_amount_mismatch")
+        self.assertEqual(payload["error"], "batch_accounting_note_required")
+        self.assertEqual(payload["amount_check"]["status"], "mismatch")
+        self.assertEqual(payload["amount_check"]["direction"], "expense")
+        self.assertEqual(payload["amount_check"]["bank_amount"], "1200.00")
+        self.assertEqual(payload["amount_check"]["oa_amount"], "700.00")
+        self.assertEqual(payload["amount_check"]["amount_delta"], "500.00")
+        self.assertTrue(payload["amount_check"]["requires_note"])
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id("txn_imported_202601_batch_001"))
+
+    def test_submit_amount_mismatch_rejects_whitespace_note(self) -> None:
+        app, _payload_patcher = self._app_with_grouped_payload()
+
+        response = app.handle_request(
+            "POST",
+            "/api/batch-accounting/submit",
+            json.dumps(
+                {
+                    "year": "2026",
+                    "bank_row_id": "txn_imported_202601_batch_001",
+                    "oa_row_ids": ["oa-exp-ba-001"],
+                    "note": "   ",
+                }
+            ),
+        )
+
+        self.assertEqual(response.status_code, 400, response.body)
+        self.assertEqual(json.loads(response.body)["error"], "batch_accounting_note_required")
+
+    def test_submit_amount_mismatch_with_note_persists_relation_and_history(self) -> None:
+        app, _payload_patcher = self._app_with_grouped_payload()
+
+        payload = self._submit_batch_mismatch_with_note(app, note="OA合计不含员工餐补扣款，财务确认闭环")
+
+        relation = payload["pair_relation"]
+        self.assertEqual(relation["note"], "OA合计不含员工餐补扣款，财务确认闭环")
+        self.assertEqual(relation["amount_check"]["status"], "mismatch")
+        self.assertEqual(relation["amount_check"]["direction"], "expense")
+        self.assertEqual(relation["amount_check"]["bank_amount"], "1200.00")
+        self.assertEqual(relation["amount_check"]["oa_amount"], "700.00")
+        self.assertEqual(relation["amount_check"]["amount_delta"], "500.00")
+        self.assertTrue(relation["amount_check"]["requires_note"])
+        self.assertEqual(relation["special_metadata"]["source"], "batch_accounting")
+        history = app._workbench_pair_relation_service.list_history()[-1]
+        self.assertEqual(history["note"], "OA合计不含员工餐补扣款，财务确认闭环")
+        self.assertEqual(history["amount_check"]["status"], "mismatch")
+
+    def test_submit_rolls_back_relation_when_pair_relation_persist_scheduling_fails(self) -> None:
+        app, _payload_patcher = self._app_with_grouped_payload()
+        previous_snapshot = app._workbench_pair_relation_service.snapshot()
+
+        def fail_persist(*_args, **_kwargs):
+            raise StatePersistenceError("persist failed")
+
+        app._schedule_workbench_pair_relation_persist = fail_persist
+        response = app.handle_request(
+            "POST",
+            "/api/batch-accounting/submit",
+            json.dumps(
+                {
+                    "year": "2026",
+                    "bank_row_id": "txn_imported_202601_batch_001",
+                    "oa_row_ids": ["oa-exp-ba-001"],
+                    "note": "财务确认差额闭环",
+                }
+            ),
+        )
+
+        self.assertEqual(response.status_code, 503, response.body)
+        self.assertEqual(json.loads(response.body)["error"], "workbench_state_persistence_unavailable")
+        self.assertEqual(app._workbench_pair_relation_service.snapshot(), previous_snapshot)
 
     def test_submit_creates_batch_accounting_relation_with_current_invoice_rows(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
@@ -300,6 +385,31 @@ class BatchAccountingApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(payload["affected_months"], ["2026-01", "all"])
+
+    def test_submit_matched_amount_ignores_supplied_difference_note(self) -> None:
+        app, _payload_patcher = self._app_with_grouped_payload()
+
+        response = app.handle_request(
+            "POST",
+            "/api/batch-accounting/submit",
+            json.dumps(
+                {
+                    "year": "2026",
+                    "bank_row_id": "txn_imported_202601_batch_001",
+                    "oa_row_ids": ["oa-exp-ba-001", "oa-exp-ba-002"],
+                    "note": "上一次选择留下的差额说明",
+                    "actor": "finance-user",
+                }
+            ),
+        )
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200, response.body)
+        relation = app._workbench_pair_relation_service.get_active_relation_by_case_id(payload["relation_id"])
+        assert relation is not None
+        self.assertEqual(relation["amount_check"]["status"], "matched")
+        self.assertEqual(relation["note"], "日常报销批量账务管理提交")
+        self.assertEqual(app._workbench_pair_relation_service.list_history()[-1]["note"], "日常报销批量账务管理提交")
 
     def test_submit_uses_bank_row_scoped_relation_id_without_consuming_auto_override_ids(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
@@ -580,6 +690,19 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in relation_payload["invoice_rows"]], ["oa-att-inv-oa-exp-ba-001-01"])
         self.assertEqual(payload["summary"]["submitted_count"], 1)
 
+    def test_submitted_list_exposes_mismatch_note_and_amount_check(self) -> None:
+        app, _payload_patcher = self._app_with_grouped_payload()
+        self._submit_batch_mismatch_with_note(app, note="财务确认差额闭环")
+
+        response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=submitted")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200, response.body)
+        relation_payload = payload["relations_by_bank_row_id"]["txn_imported_202601_batch_001"]
+        self.assertEqual(relation_payload["relation"]["note"], "财务确认差额闭环")
+        self.assertEqual(relation_payload["relation"]["amount_check"]["status"], "mismatch")
+        self.assertTrue(relation_payload["relation"]["amount_check"]["requires_note"])
+
     def test_withdraw_restores_previous_oa_invoice_snapshot(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
         submit_response = app.handle_request(
@@ -612,6 +735,26 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(restored["case_id"], "CASE-OA-INVOICE")
         self.assertCountEqual(restored["row_ids"], ["oa-exp-ba-001", "oa-att-inv-oa-exp-ba-001-01"])
         self.assertEqual(app._workbench_pair_relation_service.list_history()[-1]["operation_type"], "withdraw_link")
+
+    def test_withdraw_mismatch_batch_preserves_submit_and_withdraw_notes(self) -> None:
+        app, _payload_patcher = self._app_with_grouped_payload()
+        submit_payload = self._submit_batch_mismatch_with_note(app, note="财务确认差额闭环")
+        relation_id = str(submit_payload["relation_id"])
+
+        response = app.handle_request(
+            "POST",
+            f"/api/batch-accounting/{relation_id}/withdraw",
+            json.dumps({"reason": "选错 OA", "actor": "finance-user"}),
+        )
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id(relation_id))
+        histories = app._workbench_pair_relation_service.list_history()
+        self.assertEqual(histories[-1]["operation_type"], "withdraw_link")
+        self.assertEqual(histories[-1]["note"], "选错 OA")
+        submit_history = next(history for history in histories if history["operation_type"] == "confirm_link")
+        self.assertEqual(submit_history["note"], "财务确认差额闭环")
+        self.assertEqual(submit_history["amount_check"]["status"], "mismatch")
 
     def test_withdraw_requires_reason_and_batch_accounting_relation(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()

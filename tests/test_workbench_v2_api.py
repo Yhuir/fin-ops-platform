@@ -6594,6 +6594,112 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         )
         self.assertIn("金额不一致", paired_invoice["tags"])
 
+    def _submit_batch_accounting_mismatch_with_note(
+        self,
+        app: Application,
+        *,
+        note: str,
+    ) -> dict[str, object]:
+        response = app.handle_request(
+            "POST",
+            "/api/batch-accounting/submit",
+            json.dumps(
+                {
+                    "year": "2026",
+                    "bank_row_id": "txn_imported_202601_batch_001",
+                    "oa_row_ids": ["oa-exp-ba-001"],
+                    "note": note,
+                    "actor": "finance-user",
+                }
+            ),
+        )
+        self.assertEqual(response.status_code, 200, response.body)
+        return json.loads(response.body)
+
+    @staticmethod
+    def _find_group_by_row_id(groups: list[dict[str, object]], row_id: str) -> dict[str, object]:
+        for group in groups:
+            for key in ("oa_rows", "bank_rows", "invoice_rows"):
+                for row in list(group.get(key) or []):
+                    if isinstance(row, dict) and row.get("id") == row_id:
+                        return group
+        raise AssertionError(f"group not found for row {row_id}")
+
+    def test_batch_accounting_mismatch_note_projects_to_paired_bank_row(self) -> None:
+        app = build_application()
+        raw_payload = build_batch_accounting_raw_payload()
+        with (
+            patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload),
+            patch.object(app, "_schedule_workbench_read_model_persist"),
+        ):
+            self._submit_batch_accounting_mismatch_with_note(app, note="财务确认差额闭环")
+            response = app.handle_request("GET", "/api/workbench?month=all")
+
+        self.assertEqual(response.status_code, 200, response.body)
+        payload = json.loads(response.body)
+        group = self._find_group_by_row_id(payload["paired"]["groups"], "txn_imported_202601_batch_001")
+        self.assertEqual(group["relation_note"], "财务确认差额闭环")
+        self.assertEqual(group["amount_check"]["status"], "mismatch")
+        self.assertEqual(group["amount_check"]["direction"], "expense")
+        self.assertEqual(group["amount_check"]["bank_amount"], "1200.00")
+        self.assertEqual(group["amount_check"]["oa_amount"], "700.00")
+        self.assertEqual(group["amount_check"]["amount_delta"], "500.00")
+        self.assertTrue(group["amount_check"]["requires_note"])
+        bank_row = next(row for row in group["bank_rows"] if row["id"] == "txn_imported_202601_batch_001")
+        self.assertEqual(bank_row["relation_note"], "财务确认差额闭环")
+        self.assertEqual(bank_row["relation_amount_check"]["status"], "mismatch")
+        self.assertIn("金额不一致", bank_row["tags"])
+
+    def test_batch_accounting_mismatch_with_note_has_no_exception_or_ledger_side_effects(self) -> None:
+        app = build_application()
+        raw_payload = build_batch_accounting_raw_payload()
+        before_exception_cases = app._workbench_exception_case_service.snapshot()["cases"]
+        before_turnover_relations = app._turnover_relation_service.snapshot()
+        before_ledgers = app._ledger_service.list_ledgers()
+        before_reminders = app._ledger_service.list_reminders()
+        before_tasks = app._etc_reconciliation_task_service.snapshot()
+
+        with (
+            patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload),
+            patch.object(app, "_schedule_workbench_read_model_persist"),
+        ):
+            self._submit_batch_accounting_mismatch_with_note(app, note="财务确认差额闭环")
+
+        self.assertEqual(app._workbench_exception_case_service.snapshot()["cases"], before_exception_cases)
+        self.assertEqual(app._turnover_relation_service.snapshot(), before_turnover_relations)
+        self.assertEqual(app._ledger_service.list_ledgers(), before_ledgers)
+        self.assertEqual(app._ledger_service.list_reminders(), before_reminders)
+        self.assertEqual(app._etc_reconciliation_task_service.snapshot(), before_tasks)
+
+    def test_withdraw_batch_accounting_mismatch_removes_workbench_projection_and_preserves_history_notes(self) -> None:
+        app = build_application()
+        raw_payload = build_batch_accounting_raw_payload()
+        with (
+            patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload),
+            patch.object(app, "_schedule_workbench_read_model_persist"),
+        ):
+            submit_payload = self._submit_batch_accounting_mismatch_with_note(app, note="财务确认差额闭环")
+            relation_id = str(submit_payload["relation_id"])
+            withdraw_response = app.handle_request(
+                "POST",
+                f"/api/batch-accounting/{relation_id}/withdraw",
+                json.dumps({"reason": "选错 OA", "actor": "finance-user"}),
+            )
+            workbench_response = app.handle_request("GET", "/api/workbench?month=all")
+
+        self.assertEqual(withdraw_response.status_code, 200, withdraw_response.body)
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id(relation_id))
+        workbench_payload = json.loads(workbench_response.body)
+        paired_bank_rows = flatten_groups(workbench_payload["paired"]["groups"], "bank")
+        self.assertFalse(any(row.get("id") == "txn_imported_202601_batch_001" for row in paired_bank_rows))
+
+        histories = app._workbench_pair_relation_service.list_history()
+        self.assertEqual(histories[-1]["operation_type"], "withdraw_link")
+        self.assertEqual(histories[-1]["note"], "选错 OA")
+        submit_history = next(history for history in histories if history["operation_type"] == "confirm_link")
+        self.assertEqual(submit_history["note"], "财务确认差额闭环")
+        self.assertEqual(submit_history["amount_check"]["status"], "mismatch")
+
     def test_confirm_link_preview_preserves_existing_case_group_before_submit(self) -> None:
         app = build_application()
         raw_payload = build_relation_amount_raw_payload(invoice_amount="100.00")
@@ -7183,6 +7289,52 @@ def build_relation_amount_raw_payload(*, invoice_amount: str) -> dict[str, objec
                     "available_actions": ["detail"],
                 }
             ],
+        },
+    }
+
+
+def build_batch_accounting_raw_payload() -> dict[str, object]:
+    return {
+        "month": "all",
+        "summary": {"oa_count": 1, "bank_count": 1, "invoice_count": 0, "paired_count": 0, "open_count": 2, "exception_count": 0},
+        "paired": {"oa": [], "bank": [], "invoice": []},
+        "open": {
+            "oa": [
+                {
+                    "id": "oa-exp-ba-001",
+                    "type": "oa",
+                    "case_id": "",
+                    "applicant": "刘晨",
+                    "apply_time": "2026-01-06",
+                    "project_name": "品牌广告投放",
+                    "amount": "700.00",
+                    "reason": "1月日常报销",
+                    "apply_type": "日常报销",
+                    "expense_type": "交通费",
+                    "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"},
+                    "available_actions": ["detail"],
+                    "summary_fields": {"申请日期": "2026-01-06"},
+                }
+            ],
+            "bank": [
+                {
+                    "id": "txn_imported_202601_batch_001",
+                    "type": "bank",
+                    "case_id": "",
+                    "trade_time": "2026-01-07 15:54:00",
+                    "pay_receive_time": "2026-01-07 15:54:00",
+                    "counterparty_name": "批量账务集中处理",
+                    "debit_amount": "1200.00",
+                    "credit_amount": "",
+                    "payment_account_label": "建行基本户 8106",
+                    "bank_name": "建行",
+                    "account_last4": "8106",
+                    "invoice_relation": {"code": "pending_match", "label": "待匹配", "tone": "warn"},
+                    "available_actions": ["detail"],
+                    "summary_fields": {"交易时间": "2026-01-07 15:54:00"},
+                }
+            ],
+            "invoice": [],
         },
     }
 

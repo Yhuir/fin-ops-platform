@@ -2158,6 +2158,84 @@ class MongoOAAdapter(OAAdapter):
             if self._document_external_id(form_id, document) in normalized_external_ids
         ]
 
+    def list_etc_oa_detection_candidates(
+        self,
+        *,
+        business_batch_id: str,
+        external_etc_batch_id: str,
+        created_from: datetime,
+        created_to: datetime,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        normalized_business_batch_id = clean_string(business_batch_id)
+        normalized_external_batch_id = clean_string(external_etc_batch_id)
+        if not normalized_business_batch_id and not normalized_external_batch_id:
+            return []
+
+        marker_clauses: list[dict[str, Any]] = []
+        for marker in (
+            f"business_batch_id={normalized_business_batch_id}" if normalized_business_batch_id else "",
+            f"etc_batch_id={normalized_external_batch_id}" if normalized_external_batch_id else "",
+        ):
+            if marker:
+                marker_clauses.append({"data.cause": {"$regex": re.escape(marker), "$options": "i"}})
+                marker_clauses.append({"data.remark": {"$regex": re.escape(marker), "$options": "i"}})
+
+        date_from = created_from.date().isoformat()
+        date_to = created_to.date().isoformat()
+        query: dict[str, Any] = {
+            "$and": [
+                {"form_id": self._form_id_query_value(self._settings.payment_request_form_id)},
+                {"$or": marker_clauses},
+                {
+                    "$or": [
+                        {"data.processStatus": {"$in": [1, "1", "进行中"]}},
+                        {"data.process_status": {"$in": [1, "1", "进行中"]}},
+                        {"data.流程状态": "进行中"},
+                        {"processStatus": {"$in": [1, "1", "进行中"]}},
+                    ]
+                },
+                {
+                    "$or": [
+                        {"data.applicationDate": {"$gte": date_from, "$lte": date_to}},
+                        {"data.ApplicationDate": {"$gte": date_from, "$lte": date_to}},
+                        {"modifiedTime": {"$gte": created_from.isoformat(), "$lte": created_to.isoformat()}},
+                    ]
+                },
+            ]
+        }
+        documents = self._search_form_documents(
+            self._settings.payment_request_form_id,
+            query,
+            projection=self._search_document_projection(),
+            limit=limit,
+        )
+        candidates: list[dict[str, Any]] = []
+        for document in documents:
+            data = self._document_data(document)
+            candidates.append(
+                {
+                    "oa_row_id": f"oa-pay-{self._payment_external_id(data, document)}",
+                    "form_id": self._settings.payment_request_form_id,
+                    "amount": self._first_text(data, "amount"),
+                    "invoice_count": self._first_text(data, "invoiceCount", "invoice_count", "etcInvoiceCount"),
+                    "applicant": self._first_text(data, "userName", "applicant"),
+                    "applicant_user_id": self._first_text(data, "userId", "applicantUserId", "applicant_user_id"),
+                    "owner_org_id": self._first_text(data, "orgId", "ownerOrgId", "owner_org_id", "departmentId"),
+                    "organization": self._first_text(data, "orgName", "organization", "departmentName"),
+                    "project_name": self._first_text(data, "projectName"),
+                    "created_at": self._first_text(data, "applicationDate", "ApplicationDate") or document.get("modifiedTime"),
+                    "process_status": self.canonical_process_status(data),
+                    "reason": self._first_text(data, "cause", "remark"),
+                    "detail_fields": {
+                        "OA单号": self._payment_form_no(data, document),
+                        "表单ID": self._settings.payment_request_form_id,
+                        "流程状态": self._form_status(data),
+                    },
+                }
+            )
+        return candidates
+
     def _load_project_documents(self) -> list[dict]:
         if self._mongo_temporarily_unavailable():
             return []
@@ -2203,6 +2281,7 @@ class MongoOAAdapter(OAAdapter):
                 cursor = (
                     self._collection()
                     .find(query, projection)
+                    .max_time_ms(5000)
                     .sort([(application_date_field, 1), ("_id", 1)])
                     .limit(normalized_limit)
                 )
@@ -2952,7 +3031,17 @@ class MongoOAAdapter(OAAdapter):
 
     @staticmethod
     def _canonical_status_key(data: dict[str, Any]) -> str:
-        status = MongoOAAdapter._form_status(data)
+        return MongoOAAdapter.canonical_process_status(data)
+
+    @staticmethod
+    def canonical_process_status(data: dict[str, Any] | Any) -> str:
+        payload = data if isinstance(data, dict) else {"processStatus": data}
+        direct_status = clean_string(
+            payload.get("process_status") if isinstance(payload, dict) else ""
+        )
+        if direct_status in {OA_IMPORT_STATUS_COMPLETED, OA_IMPORT_STATUS_IN_PROGRESS}:
+            return direct_status
+        status = MongoOAAdapter._form_status(payload)
         if status == "已完成":
             return OA_IMPORT_STATUS_COMPLETED
         if status == "进行中":
