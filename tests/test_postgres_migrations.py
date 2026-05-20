@@ -21,6 +21,7 @@ EXPECTED_MIGRATIONS = [
     "0006_read_models.sql",
     "0007_grants.sql",
     "0008_pending_invoice_commands.sql",
+    "0009_runtime_infrastructure.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -28,6 +29,8 @@ EXPECTED_TABLES = [
     "job.outbox_events",
     "job.background_jobs",
     "job.workbench_matching_dirty_scopes",
+    "job.read_model_dirty_scopes",
+    "job.runtime_worker_heartbeats",
     "staging.mongo_exports",
     "staging.mongo_raw_records",
     "staging.id_mappings",
@@ -95,7 +98,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 9)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 10)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -115,6 +118,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("0001 pending extensions_and_schemas", stdout.getvalue())
         self.assertIn("0007 pending grants", stdout.getvalue())
         self.assertIn("0008 pending pending_invoice_commands", stdout.getvalue())
+        self.assertIn("0009 pending runtime_infrastructure", stdout.getvalue())
         self.assertEqual(stderr.getvalue(), "")
 
     def test_status_requires_database_url(self) -> None:
@@ -168,6 +172,11 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "bank_transactions_data_fingerprint_uidx",
             "oa_applications",
             "schema_migrations",
+            "outbox_events_dedupe_uidx",
+            "read_model_dirty_scopes_active_uidx",
+            "runtime_worker_heartbeats_worker_uidx",
+            "grant select, insert, update on job.read_model_dirty_scopes to fin_ops_worker",
+            "grant select, insert, update on job.runtime_worker_heartbeats to fin_ops_worker",
         ):
             self.assertIn(required, sql)
 

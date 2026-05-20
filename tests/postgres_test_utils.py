@@ -20,6 +20,7 @@ EXPECTED_MIGRATION_FILES = [
     "0006_read_models.sql",
     "0007_grants.sql",
     "0008_pending_invoice_commands.sql",
+    "0009_runtime_infrastructure.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (
@@ -28,6 +29,8 @@ TEST_TABLES = (
     "job.outbox_events",
     "job.background_jobs",
     "job.workbench_matching_dirty_scopes",
+    "job.read_model_dirty_scopes",
+    "job.runtime_worker_heartbeats",
     "read_model.workbench_rows",
     "read_model.workbench_snapshots",
     "read_model.workbench_candidate_matches",
