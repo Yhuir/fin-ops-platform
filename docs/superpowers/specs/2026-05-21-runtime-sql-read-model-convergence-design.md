@@ -223,7 +223,7 @@ app.file_objects
   content_type
   etag
   migration_status     pending_upload|uploaded|verified|failed|tombstoned|legacy
-  source_gridfs_id
+  legacy_gridfs_id
 ```
 
 要求：
@@ -232,6 +232,7 @@ app.file_objects
 - MinIO/S3 object key 必须稳定、可重试、避免业务文件名冲突，例如 `{tenant}/{yyyy}/{mm}/{sha256[:2]}/{object_id}`。
 - 上传后校验 size、sha256、etag 或服务端 checksum。
 - 删除业务记录时先标记 tombstone，实际对象清理由 worker 做可审计任务。
+- 当前 schema 已有 `legacy_gridfs_id` 表示 GridFS 来源对象；不要再新增 `source_gridfs_id`，除非未来迁移明确给出不同语义。
 
 对象存储一致性协议：
 
