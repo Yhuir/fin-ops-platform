@@ -6,6 +6,18 @@
 - OA 系统 MongoDB 保持只读源，不修改、不写入、不作为 app 写库。
 - 迁移完成后，app 主读写接入 PostgreSQL；需要 OA 源数据时仍通过 OA Mongo 只读 adapter 读取，或读取由只读同步生成的 PostgreSQL 投影。
 
+## 当前状态
+
+截至 2026-05-21，迁移分支已合入 `main`，production `fin-ops.service` 已从 main release `/opt/fin-ops/releases/main-postgres-release-20260521013131/src` 运行，并处于 PostgreSQL primary runtime：
+
+- `FIN_OPS_APP_STORAGE_BACKEND=postgres`
+- `FIN_OPS_APP_READ_BACKEND=postgres`
+- `FIN_OPS_POSTGRES_CUTOVER_PHASE=postgres_primary`
+- `/health.storage.backend=postgres`
+- PostgreSQL schema version `0008`
+
+最新 main redeploy 前后验证见 `25-controlled-read-switch-execute.md` 的“2026-05-21 Main 合入后重新部署结果”。当前仍保留 app Mongo 作为回滚/审计读源，不进入 contract/drop Mongo；OA Mongo `form_data_db.form_data` 仍为禁止触碰边界。
+
 ## 阅读顺序
 
 1. `00-current-state-inventory.md`：当前代码、服务器、MongoDB 和 PostgreSQL 盘点结果。

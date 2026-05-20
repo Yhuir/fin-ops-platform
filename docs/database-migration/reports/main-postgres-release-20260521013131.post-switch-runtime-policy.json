@@ -1,0 +1,79 @@
+{
+  "domains": {
+    "app_health_alerts": {
+      "blocked_unknown_count": 0,
+      "classification_counts": {
+        "retention_only": 11
+      },
+      "mismatch_counts": {
+        "different": 3,
+        "missing_in_primary": 0,
+        "missing_in_shadow": 0
+      },
+      "primary_count": 11,
+      "samples": [
+        {
+          "classification": "retention_only",
+          "mismatch_kind": "different",
+          "reason": "recovered health alert is short-term diagnostic history",
+          "record_key_hash": "aa1e9b2cf2b6b659",
+          "runtime_type": "background_job_long_running",
+          "status": "recovered"
+        },
+        {
+          "classification": "retention_only",
+          "mismatch_kind": "different",
+          "reason": "recovered health alert is short-term diagnostic history",
+          "record_key_hash": "9003865a9fb59d95",
+          "runtime_type": "background_job_long_running",
+          "status": "recovered"
+        },
+        {
+          "classification": "retention_only",
+          "mismatch_kind": "different",
+          "reason": "recovered health alert is short-term diagnostic history",
+          "record_key_hash": "74c54b626c2952c2",
+          "runtime_type": "background_job_long_running",
+          "status": "recovered"
+        }
+      ],
+      "shadow_count": 11,
+      "union_count": 11
+    },
+    "background_jobs": {
+      "blocked_unknown_count": 0,
+      "classification_counts": {
+        "rebuildable": 114,
+        "retention_only": 23
+      },
+      "mismatch_counts": {
+        "different": 0,
+        "missing_in_primary": 0,
+        "missing_in_shadow": 0
+      },
+      "primary_count": 137,
+      "samples": [],
+      "shadow_count": 137,
+      "union_count": 137
+    }
+  },
+  "gate_recommendation": "PASS",
+  "generated_at": "2026-05-20T17:37:25+00:00",
+  "primary_backend": "mongo_readonly",
+  "redacted": true,
+  "run_id": "main-postgres-release-20260521013131-post-switch-runtime-policy",
+  "shadow_backend": "postgres_psql_json",
+  "summary": {
+    "blocked_unknown_count": 0,
+    "classification_counts": {
+      "rebuildable": 114,
+      "retention_only": 34
+    },
+    "domain_count": 2,
+    "mismatch_counts": {
+      "different": 3,
+      "missing_in_primary": 0,
+      "missing_in_shadow": 0
+    }
+  }
+}

@@ -1,0 +1,5 @@
+MainPID=691706
+ExecStart={ path=/usr/bin/env ; argv[]=/usr/bin/env PYTHONPATH=/opt/fin-ops/releases/stage25B-workbench-candidate-snapshot-repair-20260521004245/src/backend/src FIN_OPS_APP_STORAGE_BACKEND=postgres FIN_OPS_APP_READ_BACKEND=postgres FIN_OPS_POSTGRES_CUTOVER_PHASE=postgres_primary FIN_OPS_DATA_DIR=/opt/fin-ops/data /opt/fin-ops/releases/stage23-release-runtime-20260520233335/venv/bin/python -m fin_ops_platform.app.main --host 127.0.0.1 --port 18001 ; ignore_errors=no ; start_time=[Thu 2026-05-21 01:09:10 CST] ; stop_time=[n/a] ; pid=691706 ; code=(null) ; status=0/0 }
+WorkingDirectory=/opt/fin-ops/releases/stage25B-workbench-candidate-snapshot-repair-20260521004245/src
+ActiveState=active
+SubState=running

@@ -1,0 +1,20 @@
+{
+  "run_id": "main-postgres-release-20260521013131",
+  "full_gate": "PARTIAL",
+  "full_p0": 0,
+  "full_p1": 0,
+  "full_p2": 12,
+  "full_errors": 0,
+  "conservative_gate": "PARTIAL",
+  "conservative_p0": 0,
+  "conservative_p1": 0,
+  "conservative_p2": 12,
+  "conservative_errors": 0,
+  "runtime_gate": "PASS",
+  "blocked_unknown_count": 0,
+  "mode_status": "ready",
+  "mode_backend": "postgres",
+  "mode_postgres_status": "ready",
+  "preflight_status": "pass",
+  "preflight_schema": "0008"
+}

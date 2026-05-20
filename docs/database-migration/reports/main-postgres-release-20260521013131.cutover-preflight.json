@@ -1,0 +1,78 @@
+{
+  "app_storage": {
+    "backend": "local_pickle",
+    "database_url": "postgresql://fin_ops_app_runtime:***@127.0.0.1:5432/fin_ops",
+    "database_url_env": "FIN_OPS_POSTGRES_DATABASE_URL"
+  },
+  "backup_checklist": {
+    "items": [
+      {
+        "item": "postgres_readonly_backup_verified",
+        "status": "placeholder"
+      },
+      {
+        "item": "app_mongo_backup_verified",
+        "status": "placeholder"
+      },
+      {
+        "item": "oa_mongo_not_touched",
+        "status": "enforced"
+      }
+    ],
+    "requires_confirmation": false,
+    "status": "pending"
+  },
+  "generated_at": "2026-05-20T17:35:24+00:00",
+  "guards": {
+    "forbidden_actions": {
+      "cutover": "refused",
+      "enable_dual_write": "refused",
+      "production_write": "refused",
+      "restart_service": "refused"
+    },
+    "no_production_writes": "enforced",
+    "read_only": true
+  },
+  "postgres": {
+    "connectivity": "ready",
+    "core_counts": {
+      "bank_transactions": 431,
+      "import_batch_rows": 897,
+      "import_batches": 6,
+      "import_files": 31,
+      "invoices": 391,
+      "search_index_rows": 822
+    },
+    "database": "fin_ops",
+    "database_url": "postgresql://fin_ops_app_runtime:***@127.0.0.1:5432/fin_ops",
+    "database_url_env": "FIN_OPS_POSTGRES_DATABASE_URL",
+    "schema_migrations_exists": true,
+    "schema_migrations_table": "public.schema_migrations",
+    "schema_version": "0008",
+    "user": "fin_ops_app_runtime"
+  },
+  "readiness": {
+    "postgres_connectivity": "ready",
+    "schema_version": "0008",
+    "status": "pass",
+    "storage_backend": "local_pickle"
+  },
+  "rollback_checklist": {
+    "items": [
+      {
+        "item": "keep_current_app_storage_backend",
+        "status": "placeholder"
+      },
+      {
+        "item": "disable_shadow_or_dual_flags",
+        "status": "placeholder"
+      },
+      {
+        "item": "restore_from_verified_backup_if_directed",
+        "status": "placeholder"
+      }
+    ],
+    "status": "placeholder"
+  },
+  "status": "pass"
+}

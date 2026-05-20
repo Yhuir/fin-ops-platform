@@ -6,6 +6,8 @@
 
 2026-05-21 重新执行阶段 25 时，阶段 25A/25B 的 blocker 已修复。same-run gates 通过后，production `fin-ops.service` 已切到 PostgreSQL read/write mode；OA Mongo 仍仅作为 OA 只读来源，未读取、写入或触碰 `form_data_db.form_data`。
 
+2026-05-21 后续 main 合入复核中，迁移分支已合入 `main`，并用 `main` 生成新的 production release。执行 production service 变更前重新运行 same-run read-only gates；`P0=0`、`P1=0`、read error `0`、runtime `blocked_unknown_count=0` 后，production `fin-ops.service` 已切到 main release 的 PostgreSQL primary runtime。
+
 ## 授权范围
 
 用户已回复“同意授权”，授权进入阶段 25。该授权允许在全部 gate 通过后执行：
@@ -91,6 +93,103 @@ Post-switch validation：
 | Runtime policy classification | `PASS`，`blocked_unknown_count=0` |
 
 本阶段没有写 app Mongo，没有读取、写入或触碰 OA Mongo `form_data_db.form_data`。本阶段写入的 production 变更仅限 production service systemd drop-in/restart；业务数据写入由 live service 后续按 PostgreSQL runtime mode 执行。
+
+## 2026-05-21 Main 合入后重新部署结果
+
+Run ID：
+
+- `main-postgres-release-20260521013131`
+
+Release / runtime：
+
+- Release code：`/opt/fin-ops/releases/main-postgres-release-20260521013131/src`
+- Python venv：`/opt/fin-ops/releases/stage23-release-runtime-20260520233335/venv`
+- Runtime credential file：`/root/fin_ops_stage23_postgres_runtime.env`
+- Systemd drop-in：`/etc/systemd/system/fin-ops.service.d/20-postgres-read-switch.conf`
+
+本地 main 合入验证：
+
+| Check | 结果 |
+| --- | --- |
+| `python -m pytest -q` | `1278 passed, 21 skipped, 5 warnings, 50 subtests passed` |
+| `web npm test -- --run` | `44` files passed, `404` tests passed |
+| `web npm run build` | passed |
+
+执行前 same-run gates：
+
+| Gate | 结果 |
+| --- | --- |
+| Full native `PostgresStateStore` shadow-read | `PARTIAL`，`P0=0`、`P1=0`、read errors `0`、仅 `P2=12` |
+| Conservative `postgres_psql_json` shadow-read | `PARTIAL`，`P0=0`、`P1=0`、read errors `0`、仅 `P2=12` |
+| Runtime policy classification | `PASS`，`blocked_unknown_count=0` |
+| No-traffic PostgreSQL mode check | `ready`，`storage.backend=postgres` |
+| Cutover preflight | `pass`，schema version `0008` |
+
+执行动作：
+
+- 创建新的 main release：`/opt/fin-ops/releases/main-postgres-release-20260521013131/src`。
+- 备份旧 `20-postgres-read-switch.conf` 到 release report 目录。
+- 更新 `20-postgres-read-switch.conf`，使 `WorkingDirectory` 与 `PYTHONPATH` 指向 main release。
+- 执行 `systemctl daemon-reload` 和 `systemctl restart fin-ops.service`。
+- 首次 2 秒内 `/health` 探测过早，出现 connection refused；随后确认 service active/running，正式 health 复核通过。
+- 使用 `VITE_APP_BASE_PATH=/fin-ops/` 从 `main` 重建前端 `web/dist`，备份服务器现有静态目录后替换 `/www/wwwroot/fin-ops/dist`；该动作不修改数据库、不重启后端 service。
+- 清理 macOS tar 产生的 `._*` AppleDouble 文件后，`https://www.yn-sourcing.com/fin-ops/` 返回 HTTP `200`。
+
+最终 live service 状态：
+
+| 项 | 值 |
+| --- | --- |
+| `systemctl is-active fin-ops.service` | `active` |
+| `/health.status` | `ready` |
+| `/health.storage.backend` | `postgres` |
+| `/health.storage.mode` | `postgres` |
+| `/health.storage.postgres_database` | `fin_ops` |
+| `/health.storage.postgres_schema_version` | `8` |
+| `/health.storage.postgres_user` | `fin_ops_app_runtime` |
+| Process `FIN_OPS_APP_STORAGE_BACKEND` | `postgres` |
+| Process `FIN_OPS_APP_READ_BACKEND` | `postgres` |
+| Process `FIN_OPS_POSTGRES_CUTOVER_PHASE` | `postgres_primary` |
+| Process `PYTHONPATH` | `/opt/fin-ops/releases/main-postgres-release-20260521013131/src/backend/src` |
+| `WorkingDirectory` | `/opt/fin-ops/releases/main-postgres-release-20260521013131/src` |
+
+HTTP smoke：
+
+| Endpoint | HTTP |
+| --- | --- |
+| `/health` | `200` |
+| `/api/session/me` | `401` |
+| `/api/workbench/settings` | `401` |
+| `/api/background-jobs/active` | `401` |
+| `/api/etc/invoices` | `401` |
+
+`401` 表示未带登录凭证的接口仍被鉴权保护，不是 service 5xx。
+
+Post-switch validation：
+
+| Gate | 结果 |
+| --- | --- |
+| Full native `PostgresStateStore` shadow-read | `PARTIAL`，`P0=0`、`P1=0`、read errors `0`、仅 `P2=12` |
+| Runtime policy classification | `PASS`，`blocked_unknown_count=0` |
+
+本次 main redeploy 没有写 app Mongo，没有读取、写入或触碰 OA Mongo `form_data_db.form_data`。本次写入的 production 变更仅限 production service systemd drop-in/restart；业务数据继续由 live service 按 PostgreSQL runtime mode 写入 PostgreSQL。
+
+主要报告：
+
+- `reports/main-postgres-release-20260521013131.main-release-predeploy-gates-summary.json`
+- `reports/main-postgres-release-20260521013131.full-shadow-read-postgres.json`
+- `reports/main-postgres-release-20260521013131.conservative-shadow-read.json`
+- `reports/main-postgres-release-20260521013131.runtime-policy.json`
+- `reports/main-postgres-release-20260521013131.postgres-mode-check.stdout.json`
+- `reports/main-postgres-release-20260521013131.cutover-preflight.json`
+- `reports/main-postgres-release-20260521013131.health-r2.json`
+- `reports/main-postgres-release-20260521013131.http-smoke-codes.txt`
+- `reports/main-postgres-release-20260521013131.process-env-selected.txt`
+- `reports/main-postgres-release-20260521013131.frontend-index-cleaned.status.txt`
+- `reports/main-postgres-release-20260521013131.web-dist-files-cleaned.txt`
+- `reports/main-postgres-release-20260521013131.web-dist.tarball.sha256`
+- `reports/main-postgres-release-20260521013131.post-switch-validation-summary.json`
+- `reports/main-postgres-release-20260521013131.post-switch-full-shadow-read-postgres.json`
+- `reports/main-postgres-release-20260521013131.post-switch-runtime-policy.json`
 
 回滚 artifact：
 
