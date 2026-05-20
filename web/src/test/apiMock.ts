@@ -2425,6 +2425,40 @@ function moveWorkbenchGroup(payload: RawWorkbenchPayload, source: RawWorkbenchSe
   return true;
 }
 
+function withdrawWorkbenchGroup(payload: RawWorkbenchPayload, rowId: string) {
+  const matchedGroup = findWorkbenchGroupRows(payload, "paired", rowId);
+  if (!matchedGroup) {
+    return false;
+  }
+
+  const panes: RawWorkbenchPaneKey[] = ["oa", "bank", "invoice"];
+  const movedRowIds = new Set(
+    panes.flatMap((pane) => matchedGroup.rows[pane].map((row) => String(row.id))),
+  );
+  const shouldMove = (candidate: RawWorkbenchRow) =>
+    movedRowIds.has(String(candidate.id))
+    || (matchedGroup.caseId !== null && candidate.case_id === matchedGroup.caseId);
+
+  for (const pane of panes) {
+    payload.paired[pane] = payload.paired[pane].filter((candidate) => !shouldMove(candidate));
+  }
+
+  payload.open.oa = [
+    ...payload.open.oa,
+    ...matchedGroup.rows.oa.map((row) => ({ ...reopenWorkbenchRow(row), case_id: "CASE-RESTORED" })),
+  ];
+  payload.open.invoice = [
+    ...payload.open.invoice,
+    ...matchedGroup.rows.invoice.map((row) => ({ ...reopenWorkbenchRow(row), case_id: "CASE-RESTORED" })),
+  ];
+  payload.open.bank = [
+    ...payload.open.bank,
+    ...matchedGroup.rows.bank.map((row) => ({ ...reopenWorkbenchRow(row), case_id: "" })),
+  ];
+
+  return true;
+}
+
 function findWorkbenchRowsByIds(
   workbenchStateStore: ReturnType<typeof createWorkbenchStateStore>,
   month: string,
@@ -5355,7 +5389,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       for (const resolvedMonth of touchedMonths) {
         const payload = workbenchStateStore.get(resolvedMonth);
         for (const rowId of rowIds) {
-          moveWorkbenchGroup(payload, "paired", "open", rowId);
+          withdrawWorkbenchGroup(payload, rowId);
         }
       }
       return {
