@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 
 from fin_ops_platform.postgres import migrate
+from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from tests.postgres_test_utils import (
     apply_test_migrations,
     apply_test_migrations_through,
@@ -18,6 +20,8 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.database_url = require_postgres_test_database_url()
         apply_test_migrations(self.database_url)
         truncate_test_database(self.database_url)
+        self.connection = PostgresConnection(PostgresSettings(database_url=self.database_url))
+        self.runtime_queue = RuntimeQueueRepository(self.connection)
 
     def test_runtime_infrastructure_tables_exist(self) -> None:
         for table in ("job.read_model_dirty_scopes", "job.runtime_worker_heartbeats"):
@@ -191,6 +195,198 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
             values ('runtime_infrastructure_dedupe_test', 'done', 'tenant-a', 'same-key');
             """,
         )
+
+    def test_runtime_queue_enqueue_inserts_pending_event(self) -> None:
+        event = self.runtime_queue.enqueue(
+            tenant_id="tenant-a",
+            event_type="runtime.integration.created",
+            aggregate_type="invoice",
+            aggregate_id="invoice-1",
+            scope_type="month",
+            scope_key="2026-05",
+            dedupe_key="runtime-integration-created",
+            payload={"invoice_id": "invoice-1"},
+        )
+
+        row = self.connection.fetch_one(
+            """
+            select
+              tenant_id,
+              event_type,
+              aggregate_type,
+              aggregate_id,
+              scope_type,
+              scope_key,
+              dedupe_key,
+              payload,
+              status,
+              attempts
+            from job.outbox_events
+            where id = %s
+            """,
+            (event.event_id,),
+        )
+
+        self.assertIsNotNone(row)
+        self.assertEqual(row["tenant_id"], "tenant-a")
+        self.assertEqual(row["event_type"], "runtime.integration.created")
+        self.assertEqual(row["aggregate_type"], "invoice")
+        self.assertEqual(row["aggregate_id"], "invoice-1")
+        self.assertEqual(row["scope_type"], "month")
+        self.assertEqual(row["scope_key"], "2026-05")
+        self.assertEqual(row["dedupe_key"], "runtime-integration-created")
+        self.assertEqual(row["payload"], {"invoice_id": "invoice-1"})
+        self.assertEqual(row["status"], "pending")
+        self.assertEqual(row["attempts"], 0)
+
+    def test_runtime_queue_duplicate_active_dedupe_key_returns_same_event(self) -> None:
+        first = self.runtime_queue.enqueue(
+            tenant_id="tenant-a",
+            event_type="runtime.integration.dedupe",
+            dedupe_key="active-duplicate",
+            payload={"first": True},
+        )
+
+        duplicate = self.runtime_queue.enqueue(
+            tenant_id="tenant-a",
+            event_type="runtime.integration.dedupe",
+            dedupe_key="active-duplicate",
+            payload={"second": True},
+        )
+
+        self.assertEqual(duplicate.event_id, first.event_id)
+        count = self.connection.fetch_one(
+            """
+            select count(*) as count
+            from job.outbox_events
+            where tenant_id = %s
+              and dedupe_key = %s
+            """,
+            ("tenant-a", "active-duplicate"),
+        )
+        self.assertEqual(count["count"], 1)
+
+        self.assertTrue(self.runtime_queue.claim_next("worker-1", event_types=["runtime.integration.dedupe"]))
+        self.assertTrue(self.runtime_queue.complete(first.event_id, "worker-1"))
+        after_done = self.runtime_queue.enqueue(
+            tenant_id="tenant-a",
+            event_type="runtime.integration.dedupe",
+            dedupe_key="active-duplicate",
+            payload={"after_done": True},
+        )
+        self.assertNotEqual(after_done.event_id, first.event_id)
+
+    def test_runtime_queue_claim_next_sets_processing_lock_and_attempts(self) -> None:
+        event = self.runtime_queue.enqueue(event_type="runtime.integration.claim", payload={"claim": True})
+
+        claimed = self.runtime_queue.claim_next("worker-claim", event_types=["runtime.integration.claim"])
+
+        self.assertIsNotNone(claimed)
+        self.assertEqual(claimed.event_id, event.event_id)
+        self.assertEqual(claimed.status, "processing")
+        self.assertEqual(claimed.attempts, 1)
+        row = self.connection.fetch_one(
+            """
+            select status, locked_by, locked_at is not null as has_locked_at, attempts, attempt_count
+            from job.outbox_events
+            where id = %s
+            """,
+            (event.event_id,),
+        )
+        self.assertEqual(row["status"], "processing")
+        self.assertEqual(row["locked_by"], "worker-claim")
+        self.assertTrue(row["has_locked_at"])
+        self.assertEqual(row["attempts"], 1)
+        self.assertEqual(row["attempt_count"], 1)
+
+    def test_runtime_queue_complete_marks_done_and_sets_processed_at(self) -> None:
+        event = self.runtime_queue.enqueue(event_type="runtime.integration.complete")
+        self.assertIsNotNone(self.runtime_queue.claim_next("worker-complete", event_types=["runtime.integration.complete"]))
+
+        self.assertTrue(self.runtime_queue.complete(event.event_id, "worker-complete", result_payload={"ok": True}))
+
+        row = self.connection.fetch_one(
+            """
+            select
+              status,
+              processed_at is not null as has_processed_at,
+              locked_by,
+              locked_at,
+              raw_payload->'runtime_result' as runtime_result
+            from job.outbox_events
+            where id = %s
+            """,
+            (event.event_id,),
+        )
+        self.assertEqual(row["status"], "done")
+        self.assertTrue(row["has_processed_at"])
+        self.assertIsNone(row["locked_by"])
+        self.assertIsNone(row["locked_at"])
+        self.assertEqual(row["runtime_result"], {"ok": True})
+
+    def test_runtime_queue_fail_retry_returns_pending_with_next_available_at(self) -> None:
+        event = self.runtime_queue.enqueue(event_type="runtime.integration.retry")
+        claimed = self.runtime_queue.claim_next("worker-retry", event_types=["runtime.integration.retry"])
+        self.assertIsNotNone(claimed)
+        self.assertEqual(claimed.attempts, 1)
+
+        self.assertTrue(
+            self.runtime_queue.fail(
+                event.event_id,
+                "worker-retry",
+                "temporary failure",
+                retry=True,
+                retry_delay_seconds=30,
+            )
+        )
+
+        row = self.connection.fetch_one(
+            """
+            select
+              status,
+              last_error,
+              locked_by,
+              locked_at,
+              attempts,
+              attempt_count,
+              available_at > now() as scheduled_later
+            from job.outbox_events
+            where id = %s
+            """,
+            (event.event_id,),
+        )
+        self.assertEqual(row["status"], "pending")
+        self.assertEqual(row["last_error"], "temporary failure")
+        self.assertIsNone(row["locked_by"])
+        self.assertIsNone(row["locked_at"])
+        self.assertEqual(row["attempts"], 1)
+        self.assertEqual(row["attempt_count"], 1)
+        self.assertTrue(row["scheduled_later"])
+
+    def test_runtime_queue_fail_without_retry_marks_failed(self) -> None:
+        event = self.runtime_queue.enqueue(event_type="runtime.integration.fail")
+        self.assertIsNotNone(self.runtime_queue.claim_next("worker-fail", event_types=["runtime.integration.fail"]))
+
+        self.assertTrue(self.runtime_queue.fail(event.event_id, "worker-fail", "fatal failure", retry=False))
+
+        row = self.connection.fetch_one(
+            """
+            select
+              status,
+              last_error,
+              processed_at is not null as has_processed_at,
+              locked_by,
+              locked_at
+            from job.outbox_events
+            where id = %s
+            """,
+            (event.event_id,),
+        )
+        self.assertEqual(row["status"], "failed")
+        self.assertEqual(row["last_error"], "fatal failure")
+        self.assertTrue(row["has_processed_at"])
+        self.assertIsNone(row["locked_by"])
+        self.assertIsNone(row["locked_at"])
 
 
 if __name__ == "__main__":
