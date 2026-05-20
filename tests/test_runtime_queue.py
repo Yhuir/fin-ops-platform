@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 from datetime import datetime, timezone
 import unittest
 
@@ -12,6 +11,7 @@ class FakeTransaction:
         self.rows = list(rows or [])
         self.counts = list(counts or [])
         self.calls: list[tuple[str, str, tuple[object, ...]]] = []
+        self.outcomes: list[str] = []
 
     def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object] | None:
         self.calls.append(("fetch_one", sql, params))
@@ -31,9 +31,18 @@ class FakeConnection:
     def __init__(self, transaction: FakeTransaction) -> None:
         self.transaction_obj = transaction
 
-    @contextmanager
     def transaction(self):
-        yield self.transaction_obj
+        transaction_obj = self.transaction_obj
+
+        class TransactionContext:
+            def __enter__(self) -> FakeTransaction:
+                return transaction_obj
+
+            def __exit__(self, exc_type, exc, traceback) -> bool:
+                transaction_obj.outcomes.append("rollback" if exc_type is not None else "commit")
+                return False
+
+        return TransactionContext()
 
 
 def event_row(**overrides: object) -> dict[str, object]:
@@ -160,6 +169,40 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("event-1", message)
         self.assertIn("list", message)
         self.assertNotIn("not", message)
+        self.assertEqual(transaction.outcomes, ["rollback"])
+
+    def test_claim_next_raises_data_error_when_payload_is_empty_list(self) -> None:
+        transaction = FakeTransaction(rows=[event_row(payload=[])])
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        with self.assertRaises(RuntimeQueueDataError) as context:
+            repository.claim_next(worker_id="worker-1")
+
+        self.assertIn("event-1", str(context.exception))
+        self.assertIn("list", str(context.exception))
+        self.assertEqual(transaction.outcomes, ["rollback"])
+
+    def test_claim_next_raises_data_error_when_payload_is_null(self) -> None:
+        transaction = FakeTransaction(rows=[event_row(payload=None)])
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        with self.assertRaises(RuntimeQueueDataError) as context:
+            repository.claim_next(worker_id="worker-1")
+
+        self.assertIn("event-1", str(context.exception))
+        self.assertIn("NoneType", str(context.exception))
+        self.assertEqual(transaction.outcomes, ["rollback"])
+
+    def test_enqueue_defaults_missing_payload_key_to_empty_object(self) -> None:
+        row = event_row()
+        del row["payload"]
+        transaction = FakeTransaction(rows=[row])
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        event = repository.enqueue(event_type="invoice.imported")
+
+        self.assertEqual(event.payload, {})
+        self.assertEqual(transaction.outcomes, ["commit"])
 
     def test_claim_next_without_event_type_filter_has_no_any_clause(self) -> None:
         transaction = FakeTransaction(rows=[None])

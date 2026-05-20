@@ -85,9 +85,9 @@ class RuntimeQueueRepository:
                     available_at,
                 ),
             )
-        if row is None:
-            raise RuntimeError("Runtime queue enqueue did not return an event.")
-        return _event_from_row(row)
+            if row is None:
+                raise RuntimeError("Runtime queue enqueue did not return an event.")
+            return _event_from_row(row)
 
     def claim_next(
         self,
@@ -146,7 +146,7 @@ class RuntimeQueueRepository:
                 """,
                 params,
             )
-        return _event_from_row(row) if row is not None else None
+            return _event_from_row(row) if row is not None else None
 
     def complete(self, event_id: str, worker_id: str, result_payload: dict[str, Any] | None = None) -> bool:
         if result_payload is None:
@@ -262,7 +262,7 @@ class RuntimeQueueRepository:
 
 
 def _event_from_row(row: dict[str, Any]) -> RuntimeQueueEvent:
-    payload = row.get("payload") or {}
+    payload = row["payload"] if "payload" in row else {}
     if not isinstance(payload, dict):
         raise RuntimeQueueDataError(
             f"Runtime queue event {row.get('event_id')} has non-object payload of type {type(payload).__name__}."

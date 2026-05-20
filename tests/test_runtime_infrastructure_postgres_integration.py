@@ -402,13 +402,13 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(claimed_after_available.attempts, 3)
 
     def test_runtime_queue_claim_next_raises_data_error_for_non_object_payload(self) -> None:
-        self.connection.fetch_one(
+        inserted = self.connection.fetch_one(
             """
             insert into job.outbox_events(event_type, status, payload)
             values (
               'runtime.integration.malformed-payload',
               'pending',
-              '["not", "an", "object"]'::jsonb
+              '[]'::jsonb
             )
             returning id::text as event_id
             """
@@ -418,6 +418,18 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
             self.runtime_queue.claim_next("worker-malformed", event_types=["runtime.integration.malformed-payload"])
 
         self.assertIn("list", str(context.exception))
+        row = self.connection.fetch_one(
+            """
+            select status, locked_by, attempts, attempt_count
+            from job.outbox_events
+            where id = %s
+            """,
+            (inserted["event_id"],),
+        )
+        self.assertEqual(row["status"], "pending")
+        self.assertIsNone(row["locked_by"])
+        self.assertEqual(row["attempts"], 0)
+        self.assertEqual(row["attempt_count"], 0)
 
     def test_runtime_queue_complete_marks_done_and_sets_processed_at(self) -> None:
         event = self.runtime_queue.enqueue(event_type="runtime.integration.complete")
