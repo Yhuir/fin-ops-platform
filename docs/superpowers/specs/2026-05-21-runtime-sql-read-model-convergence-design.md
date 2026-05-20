@@ -9,7 +9,7 @@
 但现有后端仍保留兼容层：
 
 - `backend/src/fin_ops_platform/app/server.py` 的 `Application.__init__` 仍通过 `_load_persisted_state()` 调用 `state_store.load()`，再用完整快照初始化运行时服务。
-- `backend/src/fin_ops_platform/adapters/postgres_state_store.py` 的 `PostgresStateStore.load()` 会组装完整应用状态字典，并保留 `state:full_state` 与若干 `state:*` JSON fallback。
+- `backend/src/fin_ops_platform/services/postgres_state_store.py` 的 `PostgresStateStore.load()` 会组装完整应用状态字典，并保留 `state:full_state` 与若干 `state:*` JSON fallback。
 - 工作台、成本统计、税金抵扣等 read model 服务仍以进程内内存对象作为主要查询入口，命中失败时由 API 请求路径同步构建。
 - 后台刷新已经有 in-process thread 和 dirty scope 机制，但还没有收敛成独立 worker 服务，也没有把 PostgreSQL outbox/job 表作为统一 durable queue。
 
@@ -86,7 +86,7 @@ flowchart LR
 写路径原则：
 
 - 同一业务写操作在一个数据库事务内写 facts、审计、dirty scope/outbox。
-- 外部副作用，例如对象存储上传、OCR、OA 拉取、read model rebuild，由 worker 处理。
+- 外部副作用默认由 worker 处理，例如 OCR、OA 拉取、read model rebuild 和对象清理。用户上传文件是例外：API 可同步调用对象存储接收请求体，但必须遵守本文的对象存储一致性协议，不能把对象存储写入伪装成数据库事务的一部分。
 - Worker 任务必须幂等，以 `scope_key + version` 或 source record checksum 去重。
 - 对 read model 的写入要带 `source_version`、`built_at`、`scope_key`，避免旧任务覆盖新结果。
 
@@ -125,19 +125,14 @@ stale_reason          TEXT NULL
 - `file:{object_id}`
 - `oa:period:{YYYY-MM}`
 
-所有 read model 表必须有唯一键：
+read model 表按形态使用不同唯一键，不能用同一 scope 唯一键套所有表：
 
-```text
-(tenant_id, scope_type, scope_key, source_version)
-```
+- 一 scope 一行的聚合表，例如成本统计、税金抵扣月度汇总，使用 `(tenant_id, scope_type, scope_key)` 唯一键，并通过 `source_version` 防旧任务覆盖新结果。
+- 一 scope 多行的行级 read model，例如 `read_model.workbench_rows`，使用 `(tenant_id, scope_type, scope_key, row_id)` 或现有稳定 `row_id` 唯一键，并在 upsert 时比较 `source_version`。
+- 候选匹配类表，例如 `read_model.workbench_candidate_matches`，使用 `(tenant_id, scope_type, scope_key, candidate_key)` 或等价稳定候选键。
+- 搜索索引类表，例如 `read_model.search_index_rows`，使用 `(tenant_id, entity_type, entity_id)` 或 `(tenant_id, scope_type, scope_key, row_id)`，由实际 source contract 决定。
 
-或者在只保留最新版本的表上使用：
-
-```text
-(tenant_id, scope_type, scope_key)
-```
-
-并配合 `source_version` 防旧写覆盖。
+所有表都必须有可查询 scope/month 索引和 `source_version`，但只有一 scope 一行的表才允许把 `(tenant_id, scope_type, scope_key)` 当作整表唯一业务键。
 
 ### Dirty Scope
 
@@ -227,7 +222,7 @@ app.file_objects
   size_bytes
   content_type
   etag
-  migration_status     pending|uploaded|verified|failed|legacy
+  migration_status     pending_upload|uploaded|verified|failed|tombstoned|legacy
   source_gridfs_id
 ```
 
@@ -237,6 +232,17 @@ app.file_objects
 - MinIO/S3 object key 必须稳定、可重试、避免业务文件名冲突，例如 `{tenant}/{yyyy}/{mm}/{sha256[:2]}/{object_id}`。
 - 上传后校验 size、sha256、etag 或服务端 checksum。
 - 删除业务记录时先标记 tombstone，实际对象清理由 worker 做可审计任务。
+
+对象存储一致性协议：
+
+- 用户发起新上传时，API 可以同步调用 S3-compatible storage，因为请求体字节只在 API 请求期间可用；这是本文“外部副作用默认由 worker 处理”的唯一直接写例外。
+- API 先生成 `object_id`，写入 `app.file_objects` 的 `pending_upload` 记录，且该记录不可被业务读取使用。
+- API 将请求体写入临时对象 key，例如 `_tmp/{tenant}/{object_id}`，边写边计算 `sha256` 和 `size_bytes`。
+- 上传完成后校验对象大小和 checksum；校验失败则把记录标为 `failed`，返回明确错误，并由清理 worker 删除临时对象。
+- 校验通过后，将对象复制或提交到稳定 final key，例如 `{tenant}/{yyyy}/{mm}/{sha256[:2]}/{object_id}`，再把数据库记录更新为 `verified`，并在同一数据库事务内创建业务引用和 outbox 事件。
+- 如果 final 对象已写入但数据库提交失败，清理 worker 通过 `pending_upload/uploaded` 超时记录和孤儿临时 key 清理对象；业务读取只允许读取 `verified` 记录。
+- 删除或替换文件只标记 `tombstoned` 并写 outbox，实际对象删除由 worker 执行；删除失败可重试且不影响业务事实回滚。
+- GridFS 迁移 job 使用同一状态机：`legacy -> uploaded -> verified`，失败保留 `failed` 和错误原因，可重复执行。
 
 ## Redis 边界
 
@@ -274,7 +280,7 @@ Redis 不允许用于：
 
 迁移口径：
 
-- 新上传文件直接写 MinIO/S3。
+- 新上传文件按对象存储一致性协议写 MinIO/S3，并只把 `verified` 对象暴露给业务读取。
 - 旧 GridFS 文件通过 worker backfill 迁移。
 - 迁移完成且校验通过后，读取只走对象存储。
 - GridFS fallback 只允许在迁移工具和短期回滚脚本里使用，不在已 cutover 的生产模块请求路径使用。
@@ -286,15 +292,16 @@ Redis 不允许用于：
 推荐顺序：
 
 1. 基础设施收敛：schema、repository 边界、PostgreSQL durable queue、worker runtime、Redis helper、object storage interface。
-2. 文件存储：MinIO/S3 新上传、GridFS 迁移、file object read path cutover。
-3. 导入事实模型：发票、银行流水、导入批次从 snapshot 初始化退出，按 SQL 查询和分页读取。
-4. 工作台 read model：workbench rows/candidates/dirty scopes 全 SQL 化，API 不同步重构建。
-5. 成本统计 read model：month scope 聚合表 + worker refresh + Redis TTL cache。
-6. 税金抵扣 read model：month scope 聚合表 + worker refresh + Redis TTL cache。
-7. 搜索和待找发票相关 read model：结构化索引和聚合查询。
-8. OA 同步投影：OA facts/projections worker 化，API 读 SQL projection。
-9. Application runtime bootstrap：移除生产主路径 `state_store.load()` 全量快照初始化。
-10. 旧 snapshot/Mongo/GridFS 生产路径下线：保留 migration/shadow/audit 工具和运维回滚文档。
+2. 轻量启动框架：引入 production bootstrap mode、repository injection 和 snapshot 依赖 allowlist，不切具体业务模块。
+3. 文件存储：MinIO/S3 新上传、GridFS 迁移、file object read path cutover。
+4. 导入事实模型：发票、银行流水、导入批次从 snapshot 初始化退出，按 SQL 查询和分页读取。
+5. 工作台 read model：workbench rows/candidates/dirty scopes 全 SQL 化，API 不同步重构建。
+6. 成本统计 read model：month scope 聚合表 + worker refresh + Redis TTL cache。
+7. 税金抵扣 read model：month scope 聚合表 + worker refresh + Redis TTL cache。
+8. 搜索和待找发票相关 read model：结构化索引和聚合查询。
+9. OA 同步投影：OA facts/projections worker 化，API 读 SQL projection。
+10. Application runtime bootstrap 收口：移除生产主路径剩余 `state_store.load()` 全量快照初始化。
+11. 旧 snapshot/Mongo/GridFS 生产路径下线：保留 migration/shadow/audit 工具和运维回滚文档。
 
 ## 每个模块的完整完成门槛
 
@@ -307,7 +314,7 @@ Redis 不允许用于：
 - Backfill：旧数据迁移脚本或 job 完成，可重复执行，可校验。
 - Verification：单元测试、集成测试、迁移测试和关键 API smoke 通过。
 - Cutover：feature flag 或配置切换清晰，默认目标环境走新路径。
-- Rollback：只回滚到上一个模块边界，不把已迁移模块悄悄读回旧 snapshot。
+- Rollback：只通过运维操作回滚到上一个模块边界，不在生产 request handler 内写“SQL miss 后读旧 snapshot”的 fallback 分支。
 - Monitoring：日志、指标或健康检查能看见 queue backlog、失败数、stale scopes、cache 状态。
 - Docs：更新 `ARCHITECTURE.md`、`docs/architecture/`、`docs/dev/` 或 `docs/operations/` 中受影响文档。
 
@@ -323,7 +330,7 @@ Redis 不允许用于：
 上下文：
 - 仓库：/Users/yu/Desktop/fin-ops-platform
 - 设计规格：docs/superpowers/specs/2026-05-21-runtime-sql-read-model-convergence-design.md
-- 现有 PostgreSQL schema 在 backend/src/fin_ops_platform/adapters/postgres_migrations/
+- 现有 PostgreSQL schema 在 backend/src/fin_ops_platform/postgres/migrations/
 - 现有 ApplicationStateStore/PostgresStateStore 仍有全量 snapshot load/save 兼容路径。
 
 目标：
@@ -356,13 +363,45 @@ Redis 不允许用于：
 - 文档说明如何启动 worker 和如何配置 Redis/MinIO。
 ```
 
-### Module 2: 文件存储 MinIO/S3 Cutover
+### Module 2: 轻量启动框架
+
+```text
+/goal 在不切具体业务模块的前提下，引入 production lightweight bootstrap 和 repository injection 框架，防止后续模块继续扩大 ApplicationStateStore.load() 依赖。
+
+目标：
+1. 为 Application 增加轻量 production bootstrap mode，使新模块可以只注入 repositories、queue、cache、object storage 和轻量配置。
+2. 建立 snapshot 依赖 allowlist，明确哪些旧服务仍临时需要 persisted snapshot，哪些新服务禁止依赖。
+3. 把 StateStore.load() 的调用边界隔离成 legacy/bootstrap adapter，后续模块逐步从 allowlist 移除。
+4. 增加 guard test 或 static check，防止新迁移模块重新在 production path 读取 `state:*`、`StateStore.load()` 或旧 snapshot fallback。
+5. 不改变尚未迁移业务模块的行为，但为每个后续模块提供“移除构造期 snapshot 依赖”的接入点。
+
+串行任务：
+1. 读取 backend/src/fin_ops_platform/app/server.py、services 构造参数、测试 fixture 和 docs/architecture/persistence-and-read-models.md。
+2. 设计 lightweight bootstrap mode、legacy allowlist 和 repository injection 边界。
+3. 实现最小框架代码和 guard test，不切业务 API。
+4. 更新开发文档，说明后续模块如何从 allowlist 移除自己。
+5. 运行现有启动和 API smoke。
+
+可并行任务：
+- A: Application bootstrap 边界梳理。
+- B: guard test/static check。
+- C: docs/dev bootstrap 说明。
+- D: smoke fixture 调整。
+
+完成门槛：
+- 新模块可以不经 full snapshot 构造服务。
+- 尚未迁移模块仍通过明确 legacy allowlist 工作。
+- allowlist 中每个条目都有模块编号和退出条件。
+- guard test 能阻止已迁移模块新增 production snapshot fallback。
+```
+
+### Module 3: 文件存储 MinIO/S3 Cutover
 
 ```text
 /goal 将新文件上传和文件读取从 GridFS/本地兼容路径切到 S3-compatible object storage，并提供 GridFS 到 MinIO/S3 的生产级迁移闭环。
 
 目标：
-1. 新上传文件写 ObjectStorageRepository，PostgreSQL app.file_objects 保存元数据和 object pointer。
+1. 新上传文件按对象存储一致性协议写 ObjectStorageRepository，PostgreSQL app.file_objects 保存元数据、状态和 object pointer。
 2. 旧 GridFS 文件通过 worker backfill 迁移到 MinIO/S3，校验 sha256/size/etag。
 3. 已迁移文件读取只走对象存储，不在生产请求路径 fallback 到 GridFS。
 4. 保留独立迁移校验和短期回滚工具。
@@ -371,7 +410,7 @@ Redis 不允许用于：
 串行任务：
 1. 读取现有文件上传、import file、GridFS、file_objects 相关代码和 docs/operations。
 2. 补齐 file_objects migration 字段和索引。
-3. 实现 upload/download/delete/tombstone 的 object storage 路径。
+3. 实现 pending_upload、临时对象、checksum verification、final key、verified、failed、tombstoned 状态机。
 4. 实现 GridFS migration worker job 和校验脚本。
 5. 切换新上传默认路径，添加 feature flag/config。
 6. 编写测试和迁移 smoke。
@@ -386,10 +425,12 @@ Redis 不允许用于：
 - 新上传文件不写 GridFS。
 - 迁移后文件读取不依赖 Mongo/GridFS。
 - 迁移 job 可重复运行，不重复上传，不破坏已验证对象。
+- 业务读取只读取 verified 文件记录。
+- orphan temp/final object 可由 worker 清理。
 - 对象存储不可用时写操作失败 fast，并有清晰错误和审计。
 ```
 
-### Module 3: 导入事实模型 SQL Runtime
+### Module 4: 导入事实模型 SQL Runtime
 
 ```text
 /goal 将发票、银行流水、导入批次等基础事实从全量内存 snapshot 初始化改为按 SQL repository 查询和分页读取。
@@ -420,7 +461,7 @@ Redis 不允许用于：
 - 导入写入后可触发后续 workbench/cost/tax/search dirty scope。
 ```
 
-### Module 4: 工作台 Read Model SQL Cutover
+### Module 5: 工作台 Read Model SQL Cutover
 
 ```text
 /goal 将工作台运行时读取切到 read_model.workbench_rows/candidate tables 和 dirty scope worker，移除 API 请求路径同步构建。
@@ -454,7 +495,7 @@ Redis 不允许用于：
 - 有 stale/backlog 可观测指标。
 ```
 
-### Module 5: 成本统计 Read Model SQL Cutover
+### Module 6: 成本统计 Read Model SQL Cutover
 
 ```text
 /goal 将成本统计 explorer/month summary 从内存 read model 和同步计算切到 SQL 聚合 read model + worker 刷新 + Redis TTL cache。
@@ -485,7 +526,7 @@ Redis 不允许用于：
 - 统计口径与旧实现对账通过。
 ```
 
-### Module 6: 税金抵扣 Read Model SQL Cutover
+### Module 7: 税金抵扣 Read Model SQL Cutover
 
 ```text
 /goal 将税金抵扣月度 payload 从内存 read model 和同步计算切到 SQL read model + worker 刷新 + Redis TTL cache。
@@ -516,7 +557,7 @@ Redis 不允许用于：
 - 旧口径对账通过。
 ```
 
-### Module 7: 搜索与待找发票 Read Model
+### Module 8: 搜索与待找发票 Read Model
 
 ```text
 /goal 将搜索索引和待找发票聚合查询建立在结构化 SQL/read model 上，并接入 dirty scope worker。
@@ -546,7 +587,7 @@ Redis 不允许用于：
 - 大数据分页查询有索引支持。
 ```
 
-### Module 8: OA 同步投影 Worker 化
+### Module 9: OA 同步投影 Worker 化
 
 ```text
 /goal 将 OA 同步和 OA 投影读取收敛为 PostgreSQL facts/projections + worker，不让 API 请求路径访问旧同步状态或全量内存。
@@ -576,16 +617,17 @@ Redis 不允许用于：
 - OA 源不可用时不破坏已有 projection 查询。
 ```
 
-### Module 9: Application Runtime Bootstrap 去 Snapshot 化
+### Module 10: Application Runtime Bootstrap 收口
 
 ```text
-/goal 从 Application runtime 启动路径移除全量 ApplicationStateStore.load() 主依赖，使服务启动只初始化 repositories/services，而不是加载完整业务状态。
+/goal 收口 Application runtime 启动路径，移除生产主路径中剩余 ApplicationStateStore.load() 全量业务 snapshot 依赖。
 
 目标：
-1. Application.__init__ 不调用 `_load_persisted_state()` 初始化业务运行态。
-2. `_initialize_runtime_services` 改为注入 SQL repositories、queue、cache、object storage 和轻量配置。
-3. 兼容旧 StateStore 的迁移/shadow 工具从 API production bootstrap 分离。
-4. 启动时间和内存使用不随发票/银行/工作台历史数据线性增长。
+1. Application.__init__ 的 production path 不调用 `_load_persisted_state()` 初始化业务运行态。
+2. `_initialize_runtime_services` 只注入 SQL repositories、queue、cache、object storage 和轻量配置。
+3. Module 2 的 legacy allowlist 清空或只保留 migration/shadow/test 明确场景。
+4. 兼容旧 StateStore 的迁移/shadow 工具从 API production bootstrap 分离。
+5. 启动时间和内存使用不随发票/银行/工作台历史数据线性增长。
 
 串行任务：
 1. 读取 Application init、所有 service 构造参数、测试 fixture。
@@ -606,7 +648,7 @@ Redis 不允许用于：
 - 启动 smoke 和主要 API smoke 通过。
 ```
 
-### Module 10: 旧 Snapshot/Mongo/GridFS 生产路径下线
+### Module 11: 旧 Snapshot/Mongo/GridFS 生产路径下线
 
 ```text
 /goal 清理旧 snapshot/Mongo/GridFS 在生产请求路径中的使用，保留必要迁移、shadow-read、audit 和 rollback 工具。
@@ -666,14 +708,16 @@ Cutover 原则：
 - 每个模块有独立 feature/config flag，但通过模块 gate 后目标环境默认启用新路径。
 - 切换前先 backfill，再 reconciliation，再开启读路径。
 - 切换后持续观察 stale scope、queue backlog、failed jobs、API latency。
-- 旧 snapshot fallback 不在已切模块生产路径保留。
+- 已 cutover 模块的 production request handler 不允许包含“SQL/read model miss 后读取旧 Mongo/GridFS/JSON snapshot”的 fallback 分支。
 
 Rollback 原则：
 
-- 回滚到上一个模块边界，例如禁用某模块新 SQL read path 并停止相关 worker。
-- 回滚不能静默混用旧 snapshot 与新 facts，必须通过明确 config 和操作文档执行。
+- Rollback 是运维人员按文档执行的部署/config 边界回滚，不是代码里的长期运行 fallback。
+- 回滚到上一个模块边界，例如禁用某模块新 SQL read path 并停止相关 worker；回滚操作必须记录审计或变更日志。
+- 回滚不能静默混用旧 snapshot 与新 facts，必须通过明确 config、部署版本和操作文档执行。
 - 对象存储迁移回滚只针对读取指针和迁移状态，不删除已验证对象。
 - PostgreSQL facts 是权威事实源，不回滚到 Mongo 写入。
+- Guard test 或 static check 必须让 production API/worker 代码在非 allowlist 路径引用 `state:*`、`StateStore.load()`、GridFS fallback 时失败。
 
 ## 监控与运维
 
