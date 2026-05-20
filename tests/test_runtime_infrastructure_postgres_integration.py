@@ -3,13 +3,21 @@ from __future__ import annotations
 import unittest
 
 from fin_ops_platform.postgres import migrate
-from tests.postgres_test_utils import apply_test_migrations, fetch_scalar, require_postgres_test_database_url
+from tests.postgres_test_utils import (
+    apply_test_migrations,
+    apply_test_migrations_through,
+    fetch_scalar,
+    require_postgres_test_database_url,
+    reset_test_database,
+    truncate_test_database,
+)
 
 
 class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.database_url = require_postgres_test_database_url()
         apply_test_migrations(self.database_url)
+        truncate_test_database(self.database_url)
 
     def test_runtime_infrastructure_tables_exist(self) -> None:
         for table in ("job.read_model_dirty_scopes", "job.runtime_worker_heartbeats"):
@@ -142,6 +150,47 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.assertIn("dedupe_key IS NOT NULL", predicate)
         self.assertIn("pending", predicate)
         self.assertIn("processing", predicate)
+
+    def test_0009_backfills_attempts_from_preexisting_attempt_count(self) -> None:
+        reset_test_database(self.database_url)
+        apply_test_migrations_through(self.database_url, "0008")
+        event_id = fetch_scalar(
+            self.database_url,
+            """
+            insert into job.outbox_events(event_type, status, attempt_count)
+            values ('runtime_infrastructure_backfill_test', 'pending', 3)
+            returning id;
+            """,
+        )
+
+        apply_test_migrations_through(self.database_url, "0009")
+
+        attempts = fetch_scalar(
+            self.database_url,
+            f"""
+            select attempt_count::text || E'\t' || attempts::text
+            from job.outbox_events
+            where id = '{event_id}'::uuid;
+            """,
+        )
+        self.assertEqual(tuple(attempts.split("\t")), ("3", "3"))
+
+    def test_outbox_dedupe_partial_unique_index_enforces_active_events_only(self) -> None:
+        insert_sql = """
+            insert into job.outbox_events(event_type, status, tenant_id, dedupe_key)
+            values ('runtime_infrastructure_dedupe_test', 'pending', 'tenant-a', 'same-key');
+            """
+        migrate.run_psql(self.database_url, sql=insert_sql)
+        with self.assertRaises(migrate.MigrationError):
+            migrate.run_psql(self.database_url, sql=insert_sql)
+
+        migrate.run_psql(
+            self.database_url,
+            sql="""
+            insert into job.outbox_events(event_type, status, tenant_id, dedupe_key)
+            values ('runtime_infrastructure_dedupe_test', 'done', 'tenant-a', 'same-key');
+            """,
+        )
 
 
 if __name__ == "__main__":

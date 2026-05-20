@@ -123,6 +123,33 @@ def apply_test_migrations(database_url: str) -> str:
     return output.getvalue()
 
 
+def apply_test_migrations_through(database_url: str, target_version: str) -> str:
+    assert_safe_test_database_url(database_url)
+    migrations = discover_stage06_migrations()
+    selected_migrations = [item for item in migrations if item.version <= target_version]
+    if not selected_migrations or selected_migrations[-1].version != target_version:
+        raise AssertionError(f"Unknown migration target version: {target_version}")
+    output = StringIO()
+    with _test_db_env():
+        migrate.apply_migrations(database_url, selected_migrations, output)
+    return output.getvalue()
+
+
+def reset_test_database(database_url: str) -> None:
+    assert_safe_test_database_url(database_url)
+    migrate.run_psql(
+        database_url,
+        sql="""
+drop schema if exists audit cascade;
+drop schema if exists job cascade;
+drop schema if exists read_model cascade;
+drop schema if exists app cascade;
+drop schema if exists staging cascade;
+drop table if exists public.schema_migrations;
+""",
+    )
+
+
 def truncate_test_database(database_url: str) -> None:
     assert_safe_test_database_url(database_url)
     table_list = ", ".join(TEST_TABLES)
