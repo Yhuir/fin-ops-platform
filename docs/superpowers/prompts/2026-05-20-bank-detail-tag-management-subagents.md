@@ -68,15 +68,18 @@ Requirements:
    - unknown mapped tag -> `unknown_bank_transaction_tag`
    - archived mapped tag -> `archived_bank_transaction_tag`
    - tag mapped to multiple groups -> `duplicate_pending_invoice_tag_mapping`
+   - archiving a tag still referenced by pending invoice mappings must fail unless the mapping is removed
 4. Frontend must translate these error codes to Chinese actionable messages:
    - unknown -> 待找发票筛选引用了不存在的银行明细标签，请刷新后重新选择。
    - archived -> 该银行明细标签已停用，不能用于新的待找发票筛选。
    - duplicate -> 同一个银行明细标签不能同时归入多个待找发票筛选。
-5. Do not relax backend constraints and do not silently drop invalid mappings.
+   - stale/settings version conflict -> 银行明细标签已被其他页面更新，请刷新后重新保存。
+5. Frontend must map from API `error` code first, not display backend English `message` directly.
+6. Do not relax backend constraints and do not silently drop invalid mappings.
 
 TDD:
-- Add/update backend tests in tests/test_app_settings_service.py for `tags` alias + pending invoice mapping validation.
-- Add/update frontend tests in SettingsPage.test.tsx for `definitions` payload and Chinese error mapping.
+- Add/update backend tests in tests/test_app_settings_service.py for `tags` alias + pending invoice mapping validation + blocking archive of mapped tags.
+- Add/update frontend tests in SettingsPage.test.tsx for `definitions` payload, Chinese error mapping, and stale version/conflict behavior.
 - Run:
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_app_settings_service tests.test_bank_transaction_category_service -v`
   - `cd web && npm test -- --run SettingsPage.test.tsx`
@@ -101,8 +104,10 @@ Plan: docs/superpowers/plans/2026-05-20-bank-detail-tag-management.md
 Scope:
 - Prefer tests and mocks. Modify production page sync only if a concrete gap is found.
 - Candidate files:
+  - web/src/pages/SettingsPage.tsx
   - web/src/pages/BankDetailsPage.tsx
   - web/src/pages/PendingInvoicesPage.tsx
+  - web/src/test/SettingsPage.test.tsx
   - web/src/test/BankDetailsPage.test.tsx
   - web/src/test/PendingInvoicesPage.test.tsx
   - web/src/test/apiMock.ts
@@ -112,14 +117,17 @@ Requirements:
 1. Bank details page must consume the unified bank detail tag dictionary from the backend.
 2. Pending invoices page must consume the same tag dictionary and pending invoice mapping from the backend.
 3. After Settings saves bank detail tags and broadcasts `finops:bank-transaction-tags-updated`, relevant pages must refetch instead of relying on stale local state.
-4. Focus fallback must still recover from missed events.
-5. Do not add another tag store or duplicate taxonomy.
+4. Another open Settings page must react to the same event. If it has unsaved edits, it must not silently overwrite; it must show a stale/conflict prompt and require refresh/discard before saving.
+5. Focus fallback must still recover from missed events.
+6. Cross-device/server-push realtime is out of scope for this task; consistency is guaranteed by server-backed versions and save conflict protection.
+7. Do not add another tag store or duplicate taxonomy.
 
 Process:
 1. Inspect existing sync tests first.
 2. If coverage exists and is sufficient, do not modify production code; report evidence.
 3. If coverage is missing, add the smallest regression test for the missing sync path.
-4. Run:
+4. If Settings stale-save protection is missing, add the smallest production change and test for event/focus stale detection.
+5. Run:
    - `cd web && npm test -- --run BankDetailsPage.test.tsx PendingInvoicesPage.test.tsx SettingsPage.test.tsx`
 
 Return:
@@ -144,10 +152,11 @@ Review scope:
 - Confirm backend strict validation remains.
 - Confirm frontend uses definitions payload and maps relevant backend errors to Chinese messages.
 - Confirm sync behavior is tested or covered by existing tests.
+- Confirm another open Settings page cannot silently overwrite newer tag versions.
+- Confirm attempts to archive a tag still referenced by pending invoice mappings fail with an actionable message.
 - Confirm no DataGrid was introduced in this workflow.
 
 Return:
 - APPROVED if no blocking issues.
 - CHANGES_REQUESTED with numbered findings, file paths, and exact required fixes.
 ```
-

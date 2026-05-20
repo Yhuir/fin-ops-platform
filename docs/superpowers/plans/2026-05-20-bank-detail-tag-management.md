@@ -23,7 +23,7 @@
 - `web/src/components/settings/types.ts`
   - 删除待找发票筛选快速新建标签 props；保留底层 `bank_transaction_tags` 类型。
 - `web/src/pages/SettingsPage.tsx`
-  - 标签保存成功后的事件广播、错误展示中文化。
+  - 标签保存成功后的事件广播、设置页刷新/冲突保护、错误展示中文化。
 - `web/src/features/workbench/api.ts`
   - 设置保存 payload 继续发送 `bank_transaction_tags.definitions`；错误映射按结构化 code 转中文。
 - `web/src/pages/BankDetailsPage.tsx`
@@ -31,7 +31,7 @@
 - `web/src/pages/PendingInvoicesPage.tsx`
   - 验证待找发票页标签更新后刷新行为仍基于后端字典。
 - `backend/src/fin_ops_platform/services/app_settings_service.py`
-  - 保持未知、停用、重复映射校验；如需要，补充错误 code 测试。
+  - 保持未知、停用、重复映射校验；保护仍被待找发票筛选引用的标签不能停用；如需要，补充错误 code 测试。
 - `backend/src/fin_ops_platform/services/bank_transaction_category_service.py`
   - 保持 `definitions` 正式字段和 `tags` 兼容 alias。
 - Tests:
@@ -97,6 +97,7 @@ Expected: pass.
 - Modify: `web/src/pages/SettingsPage.tsx`
 - Modify: `tests/test_app_settings_service.py`
 - Modify if needed: `backend/src/fin_ops_platform/services/app_settings_service.py`
+- Modify if needed: `backend/src/fin_ops_platform/services/bank_transaction_category_service.py`
 - Test: `tests/test_app_settings_service.py`
 - Test: `web/src/test/SettingsPage.test.tsx`
 
@@ -106,11 +107,12 @@ Backend:
 
 - Keep test proving `tags` alias is accepted before mapping validation.
 - Keep tests proving unknown, archived and duplicate mapping fail.
+- Add a test proving a tag already referenced by `pending_invoice_tag_groups` cannot be archived in the same save unless the mapping is removed.
 
 Frontend:
 
 - Assert settings save sends `bank_transaction_tags.definitions`, not `tags`.
-- Add or update tests so `unknown_bank_transaction_tag`, `archived_bank_transaction_tag`, `duplicate_pending_invoice_tag_mapping` surface Chinese actionable messages.
+- Add or update tests so `unknown_bank_transaction_tag`, `archived_bank_transaction_tag`, `duplicate_pending_invoice_tag_mapping`, and stale version/conflict errors surface Chinese actionable messages.
 
 - [ ] **Step 2: Run targeted tests**
 
@@ -128,10 +130,13 @@ Expected before implementation: frontend error mapping or payload test may fail.
 Implement:
 
 - Keep `serializeBankTransactionTags()` emitting `definitions`.
+- Preserve or add a setting-save version guard based on `bankTransactionTags.version`. A stale page must not silently overwrite a newer server version.
+- Prevent archiving tags still referenced by pending invoice mappings; the save must fail with an actionable error rather than silently removing mappings.
 - Add stable frontend mapping for:
   - `unknown_bank_transaction_tag` -> `待找发票筛选引用了不存在的银行明细标签，请刷新后重新选择。`
   - `archived_bank_transaction_tag` -> `该银行明细标签已停用，不能用于新的待找发票筛选。`
   - `duplicate_pending_invoice_tag_mapping` -> `同一个银行明细标签不能同时归入多个待找发票筛选。`
+  - `category_version_conflict` or settings version conflict -> `银行明细标签已被其他页面更新，请刷新后重新保存。`
 - Do not relax backend validation.
 
 - [ ] **Step 4: Run backend/settings tests**
@@ -150,8 +155,10 @@ Expected: pass.
 **Owner:** Cross-page sync worker.
 
 **Files:**
+- Modify if needed: `web/src/pages/SettingsPage.tsx`
 - Modify if needed: `web/src/pages/BankDetailsPage.tsx`
 - Modify if needed: `web/src/pages/PendingInvoicesPage.tsx`
+- Modify: `web/src/test/SettingsPage.test.tsx`
 - Modify: `web/src/test/BankDetailsPage.test.tsx`
 - Modify: `web/src/test/PendingInvoicesPage.test.tsx`
 - Modify: `web/src/test/apiMock.ts`
@@ -162,12 +169,15 @@ Confirm tests already cover:
 
 - Bank details refetches after tag version update event/focus fallback.
 - Pending invoices refetches after tag update event/focus fallback.
+- Another open settings page reacts to tag update events. If it has unsaved edits, it must not silently overwrite; it should show a stale/conflict prompt and require refresh/discard before saving.
 
 - [ ] **Step 2: Add missing regression if needed**
 
 If no explicit pending invoice test exists for update event, add one that dispatches `finops:bank-transaction-tags-updated` and asserts rows/settings refetch.
 
 If no explicit bank details test exists for the renamed setting, add only the minimal test needed. Do not refactor page sync.
+
+If settings page does not have stale-save protection, add the smallest regression that simulates a tag version update event while local edits exist and verifies save is blocked until refresh/discard.
 
 - [ ] **Step 3: Run targeted page tests**
 
@@ -195,4 +205,3 @@ If changes are broader than expected, run:
 PYTHONPATH=backend/src python3 -m unittest discover -s tests -v
 cd web && npm test -- --run
 ```
-
