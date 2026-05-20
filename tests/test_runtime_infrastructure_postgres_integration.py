@@ -4,7 +4,7 @@ import unittest
 
 from fin_ops_platform.postgres import migrate
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
-from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
+from fin_ops_platform.services.runtime_queue import RuntimeQueueDataError, RuntimeQueueRepository
 from tests.postgres_test_utils import (
     apply_test_migrations,
     apply_test_migrations_through,
@@ -347,6 +347,77 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.assertTrue(stored["lock_refreshed"])
         self.assertEqual(stored["attempts"], 3)
         self.assertEqual(stored["attempt_count"], 3)
+
+    def test_runtime_queue_does_not_reclaim_stale_processing_event_before_available_at(self) -> None:
+        row = self.connection.fetch_one(
+            """
+            insert into job.outbox_events (
+              event_type,
+              status,
+              locked_by,
+              locked_at,
+              available_at,
+              attempts,
+              attempt_count,
+              payload
+            )
+            values (
+              'runtime.integration.future-reclaim',
+              'processing',
+              'dead-worker',
+              now() - interval '10 minutes',
+              now() + interval '10 minutes',
+              2,
+              2,
+              '{"future_reclaim": true}'::jsonb
+            )
+            returning id::text as event_id
+            """
+        )
+
+        claimed_before_available = self.runtime_queue.claim_next(
+            "new-worker",
+            event_types=["runtime.integration.future-reclaim"],
+            lock_timeout_seconds=300,
+        )
+
+        self.assertIsNone(claimed_before_available)
+        self.connection.execute(
+            """
+            update job.outbox_events
+            set available_at = now() - interval '1 minute'
+            where id = %s
+            """,
+            (row["event_id"],),
+        )
+
+        claimed_after_available = self.runtime_queue.claim_next(
+            "new-worker",
+            event_types=["runtime.integration.future-reclaim"],
+            lock_timeout_seconds=300,
+        )
+
+        self.assertIsNotNone(claimed_after_available)
+        self.assertEqual(claimed_after_available.event_id, row["event_id"])
+        self.assertEqual(claimed_after_available.attempts, 3)
+
+    def test_runtime_queue_claim_next_raises_data_error_for_non_object_payload(self) -> None:
+        self.connection.fetch_one(
+            """
+            insert into job.outbox_events(event_type, status, payload)
+            values (
+              'runtime.integration.malformed-payload',
+              'pending',
+              '["not", "an", "object"]'::jsonb
+            )
+            returning id::text as event_id
+            """
+        )
+
+        with self.assertRaises(RuntimeQueueDataError) as context:
+            self.runtime_queue.claim_next("worker-malformed", event_types=["runtime.integration.malformed-payload"])
+
+        self.assertIn("list", str(context.exception))
 
     def test_runtime_queue_complete_marks_done_and_sets_processed_at(self) -> None:
         event = self.runtime_queue.enqueue(event_type="runtime.integration.complete")

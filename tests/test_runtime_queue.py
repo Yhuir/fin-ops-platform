@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import unittest
 
-from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
+from fin_ops_platform.services.runtime_queue import RuntimeQueueDataError, RuntimeQueueRepository
 
 
 class FakeTransaction:
@@ -141,10 +141,25 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         _, sql, _ = transaction.calls[0]
         normalized_sql = " ".join(sql.lower().split())
         self.assertIn("(status = 'pending' and available_at <= now())", normalized_sql)
-        self.assertIn("(status = 'processing' and locked_at < now() - (%s * interval '1 second'))", normalized_sql)
+        self.assertRegex(
+            normalized_sql,
+            r"\(\s*status = 'processing' and available_at <= now\(\) and locked_at < now\(\) - \(%s \* interval '1 second'\)\s*\)",
+        )
         self.assertIn("status = 'processing'", normalized_sql)
         self.assertIn("attempts = attempts + 1", normalized_sql)
         self.assertIn("for update skip locked", normalized_sql)
+
+    def test_claim_next_raises_data_error_when_payload_is_not_object(self) -> None:
+        transaction = FakeTransaction(rows=[event_row(payload=["not", "an", "object"])])
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        with self.assertRaises(RuntimeQueueDataError) as context:
+            repository.claim_next(worker_id="worker-1")
+
+        message = str(context.exception)
+        self.assertIn("event-1", message)
+        self.assertIn("list", message)
+        self.assertNotIn("not", message)
 
     def test_claim_next_without_event_type_filter_has_no_any_clause(self) -> None:
         transaction = FakeTransaction(rows=[None])

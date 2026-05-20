@@ -21,6 +21,10 @@ class RuntimeQueueEvent:
     status: str
 
 
+class RuntimeQueueDataError(ValueError):
+    pass
+
+
 class RuntimeQueueRepository:
     def __init__(self, connection: PostgresConnection) -> None:
         self._connection = connection
@@ -115,7 +119,11 @@ class RuntimeQueueRepository:
                     from job.outbox_events
                     where (
                         (status = 'pending' and available_at <= now())
-                        or (status = 'processing' and locked_at < now() - (%s * interval '1 second'))
+                        or (
+                            status = 'processing'
+                            and available_at <= now()
+                            and locked_at < now() - (%s * interval '1 second')
+                        )
                     )
                       {event_type_filter}
                     order by available_at, created_at, id
@@ -256,7 +264,9 @@ class RuntimeQueueRepository:
 def _event_from_row(row: dict[str, Any]) -> RuntimeQueueEvent:
     payload = row.get("payload") or {}
     if not isinstance(payload, dict):
-        payload = {}
+        raise RuntimeQueueDataError(
+            f"Runtime queue event {row.get('event_id')} has non-object payload of type {type(payload).__name__}."
+        )
     return RuntimeQueueEvent(
         event_id=str(row["event_id"]),
         tenant_id=str(row["tenant_id"]),
