@@ -136,7 +136,12 @@ def apply_test_migrations_through(database_url: str, target_version: str) -> str
 
 
 def reset_test_database(database_url: str) -> None:
-    assert_safe_test_database_url(database_url)
+    database_name = assert_safe_test_database_url(database_url)
+    if "test" not in database_name:
+        raise AssertionError(
+            "Refusing destructive PostgreSQL integration reset against a database that is not visibly disposable: "
+            f"{redact_database_url(database_url)}"
+        )
     migrate.run_psql(
         database_url,
         sql="""
