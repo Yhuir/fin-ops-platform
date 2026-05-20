@@ -9,49 +9,66 @@ import Stack from "@mui/material/Stack";
 import Tooltip from "@mui/material/Tooltip";
 
 import BankCategoryTag from "./BankCategoryTag";
-import { CATEGORY_LABEL_BY_CODE, CATEGORY_TREE } from "./categoryOptions";
 import type { BankTransactionCategoryCode } from "./types";
+import type { BankTransactionTagDefinition } from "../pendingInvoices/types";
 
 type BankCategoryPickerProps = {
   rowId: string;
   categoryCode: BankTransactionCategoryCode | null;
   categoryLabel: string | null;
   categorySource: string;
+  categoryOptions: BankTransactionTagDefinition[];
   onChange: (categoryCode: BankTransactionCategoryCode | null) => void;
 };
 
-function getCategoryLabel(categoryCode: BankTransactionCategoryCode | null, categoryLabel: string | null) {
+function getCategoryLabel(
+  categoryCode: BankTransactionCategoryCode | null,
+  categoryLabel: string | null,
+  categoryOptions: BankTransactionTagDefinition[],
+) {
   if (!categoryCode) {
     return "未分类";
   }
-  return categoryLabel?.trim() || CATEGORY_LABEL_BY_CODE[categoryCode] || categoryCode;
+  return categoryLabel?.trim() || categoryOptions.find((option) => option.code === categoryCode)?.label || categoryCode;
 }
 
 export default function BankCategoryPicker({
   rowId,
   categoryCode,
   categoryLabel,
+  categoryOptions,
   onChange,
 }: BankCategoryPickerProps) {
   const menuId = useId();
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const selectedOptionRef = useRef<HTMLLIElement | null>(null);
   const open = Boolean(anchorEl);
-  const displayLabel = getCategoryLabel(categoryCode, categoryLabel);
+  const displayLabel = getCategoryLabel(categoryCode, categoryLabel, categoryOptions);
   const menuContainer = typeof document === "undefined" ? undefined : document.body;
 
   const menuGroups = useMemo(() => (
-    CATEGORY_TREE.map((rootNode) => ({
-      root: rootNode.root,
-      options: rootNode.groups.flatMap((group) => (
-        group.items.map((item) => ({
-          code: item.code,
-          label: item.label ?? CATEGORY_LABEL_BY_CODE[item.code] ?? item.code,
-          menuLabel: item.menuLabel ?? `${rootNode.root} / ${group.name} / ${item.status}`,
-        }))
-      )),
-    }))
-  ), []);
+    categoryOptions
+      .filter((option) => option.status === "active")
+      .reduce<Array<{ root: string; options: Array<{ code: BankTransactionCategoryCode; label: string; menuLabel: string }> }>>((groups, option) => {
+        const root = option.path[0] || (option.source === "custom" ? "自定义" : "系统标签");
+        let group = groups.find((item) => item.root === root);
+        if (!group) {
+          group = { root, options: [] };
+          groups.push(group);
+        }
+        const pathLabel = option.path.length > 0 ? option.path.join(" / ") : `${root} / ${option.label}`;
+        group.options.push({
+          code: option.code,
+          label: option.label || option.code,
+          menuLabel: pathLabel,
+        });
+        return groups;
+      }, [])
+      .map((group) => ({
+        ...group,
+        options: group.options.sort((left, right) => left.menuLabel.localeCompare(right.menuLabel, "zh-Hans-CN")),
+      }))
+  ), [categoryOptions]);
 
   const handleOpen = (event: MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);

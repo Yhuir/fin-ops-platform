@@ -17,9 +17,10 @@ describe("Finance operations shell", () => {
     expect(financeLabels).toBeDefined();
     const bankDetailsIndex = financeLabels?.indexOf("银行明细") ?? -1;
     expect(bankDetailsIndex).toBeGreaterThanOrEqual(0);
-    expect(financeLabels?.[bankDetailsIndex + 1]).toBe("免OA流水批量处理");
-    expect(financeLabels?.[bankDetailsIndex + 2]).toBe("批量账务");
-    expect(financeLabels?.[bankDetailsIndex + 3]).toBe("往来款管理");
+    expect(financeLabels?.[bankDetailsIndex + 1]).toBe("待找发票");
+    expect(financeLabels?.[bankDetailsIndex + 2]).toBe("免OA流水批量处理");
+    expect(financeLabels?.[bankDetailsIndex + 3]).toBe("批量账务");
+    expect(financeLabels?.[bankDetailsIndex + 4]).toBe("往来款管理");
   });
 
   test("loads the workbench as an all-time view and keeps the month picker scoped to tax offset", async () => {

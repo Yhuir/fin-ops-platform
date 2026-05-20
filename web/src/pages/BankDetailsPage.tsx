@@ -41,11 +41,6 @@ import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import BankCategoryTag from "../features/bankDetails/BankCategoryTag";
 import BankCategoryPicker from "../features/bankDetails/BankCategoryPicker";
 import { fetchBankDetailAccounts, fetchBankDetailTransactions, saveBankTransactionCategories } from "../features/bankDetails/api";
-import {
-  CATEGORY_LABEL_BY_CODE,
-  EMPTY_CATEGORY_COUNTS,
-  SELECTABLE_CATEGORY_OPTIONS,
-} from "../features/bankDetails/categoryOptions";
 import type {
   BankDateFilter,
   BankDetailAccount,
@@ -53,15 +48,19 @@ import type {
   BankTransactionCategoryCode,
   BankTransactionCategoryCounts,
 } from "../features/bankDetails/types";
+import type { BankTransactionTagDefinition } from "../features/pendingInvoices/types";
 
 const TODAY = new Date(2026, 4, 2);
 const DEFAULT_PAGE_SIZE = 100;
 const ALL_ACCOUNTS_KEY = "__all_bank_accounts__";
+const TAG_SYNC_EVENT = "finops:bank-transaction-tags-updated";
+const TAG_VERSION_STORAGE_KEY = "finops.bankTransactionTags.version";
 const FEATURED_CATEGORY_CODES: BankTransactionCategoryCode[] = [
   "fee",
   "salary",
   "internal_transfer",
 ];
+const EMPTY_CATEGORY_COUNTS: BankTransactionCategoryCounts = { uncategorized: 0 };
 
 const DATA_GRID_LOCALE_TEXT: Partial<GridLocaleText> = {
   ...zhCN.components.MuiDataGrid.defaultProps.localeText,
@@ -204,6 +203,34 @@ function eventAffectedMonths(event: Event) {
   return rawMonths?.map((month) => String(month).trim()).filter(Boolean) ?? null;
 }
 
+function eventTagVersion(event: Event) {
+  if (!(event instanceof CustomEvent) || !event.detail || typeof event.detail !== "object") {
+    return null;
+  }
+  const version = Number((event.detail as { version?: unknown }).version);
+  return Number.isFinite(version) ? version : null;
+}
+
+function readPersistedTagVersion() {
+  try {
+    const version = Number(window.localStorage.getItem(TAG_VERSION_STORAGE_KEY));
+    return Number.isFinite(version) && version > 0 ? version : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistTagVersion(version: number | null | undefined) {
+  if (typeof version !== "number" || !Number.isFinite(version) || version <= 0) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(TAG_VERSION_STORAGE_KEY, String(version));
+  } catch {
+    // localStorage may be unavailable in restrictive embedded shells.
+  }
+}
+
 function affectedMonthsHitDateFilter(affectedMonths: string[] | null, dateFilter: BankDateFilter) {
   if (!affectedMonths || affectedMonths.length === 0 || affectedMonths.includes("all")) {
     return true;
@@ -329,11 +356,15 @@ function applyDirtyCategoryCounts(
   return next;
 }
 
-function categoryLabelForCode(categoryCode: BankTransactionCategoryCode | null, fallback?: string | null) {
+function categoryLabelForCode(
+  categoryCode: BankTransactionCategoryCode | null,
+  categoryOptions: BankTransactionTagDefinition[],
+  fallback?: string | null,
+) {
   if (!categoryCode) {
     return null;
   }
-  return fallback?.trim() || CATEGORY_LABEL_BY_CODE[categoryCode] || categoryCode;
+  return fallback?.trim() || categoryOptions.find((option) => option.code === categoryCode)?.label || categoryCode;
 }
 
 function counterpartyNameDensity(name: string) {
@@ -497,9 +528,11 @@ export default function BankDetailsPage() {
   const [rowLoading, setRowLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [categoryCounts, setCategoryCounts] = useState<BankTransactionCategoryCounts>(EMPTY_CATEGORY_COUNTS);
+  const [categoryOptions, setCategoryOptions] = useState<BankTransactionTagDefinition[]>([]);
   const [savedCategoryByRowId, setSavedCategoryByRowId] = useState<Record<string, SavedCategoryState>>({});
   const [draftCategoryByRowId, setDraftCategoryByRowId] = useState<Partial<Record<string, BankTransactionCategoryCode | null>>>({});
   const draftCategoryByRowIdRef = useRef(draftCategoryByRowId);
+  const tagVersionRef = useRef<number | null>(readPersistedTagVersion());
   const [savingCategories, setSavingCategories] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
   const [snackbar, setSnackbar] = useState<{ severity: "success" | "error"; message: string } | null>(null);
@@ -568,6 +601,13 @@ export default function BankDetailsPage() {
         setRows(payload.rows);
         setRowCount(payload.pagination.total);
         setCategoryCounts(payload.categoryCounts);
+        if (payload.tagDictionary?.tags) {
+          setCategoryOptions(payload.tagDictionary.tags.filter((tag) => tag.status === "active"));
+        }
+        if (typeof payload.tagDictionary?.version === "number" && payload.tagDictionary.version > 0) {
+          tagVersionRef.current = payload.tagDictionary.version;
+          persistTagVersion(payload.tagDictionary.version);
+        }
         setSavedCategoryByRowId((current) => {
           const next = { ...current };
           payload.rows.forEach((row) => {
@@ -613,6 +653,41 @@ export default function BankDetailsPage() {
     return () => window.removeEventListener("workbenchRelationUpdated", handleWorkbenchRelationUpdated);
   }, [dateFilter]);
 
+  useEffect(() => {
+    const handleTagUpdate = (event: Event) => {
+      const version = eventTagVersion(event);
+      if (version !== null) {
+        tagVersionRef.current = version;
+        persistTagVersion(version);
+      }
+      setRefreshToken((current) => current + 1);
+    };
+    window.addEventListener(TAG_SYNC_EVENT, handleTagUpdate);
+
+    let channel: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== "undefined") {
+      channel = new BroadcastChannel(TAG_SYNC_EVENT);
+      channel.onmessage = (message) => {
+        const version = Number((message.data as { version?: unknown } | undefined)?.version);
+        window.dispatchEvent(new CustomEvent(TAG_SYNC_EVENT, { detail: { version: Number.isFinite(version) ? version : undefined } }));
+      };
+    }
+
+    const handleFocus = () => {
+      const persistedVersion = readPersistedTagVersion();
+      if (persistedVersion !== null && persistedVersion !== tagVersionRef.current) {
+        tagVersionRef.current = persistedVersion;
+      }
+      setRefreshToken((current) => current + 1);
+    };
+    window.addEventListener("focus", handleFocus);
+    return () => {
+      window.removeEventListener(TAG_SYNC_EVENT, handleTagUpdate);
+      window.removeEventListener("focus", handleFocus);
+      channel?.close();
+    };
+  }, []);
+
   const dirtyEntries = useMemo(
     () => Object.entries(draftCategoryByRowId).filter((entry): entry is [string, BankTransactionCategoryCode | null] => entry[1] !== undefined),
     [draftCategoryByRowId],
@@ -623,11 +698,12 @@ export default function BankDetailsPage() {
     [categoryCounts, draftCategoryByRowId, savedCategoryByRowId],
   );
   const visibleCategorySummary = useMemo<CategorySummaryItem[]>(() => {
+    const labelByCode = new Map(categoryOptions.map((option) => [option.code, option.label]));
     const featured = FEATURED_CATEGORY_CODES.map((code) => ({
       code,
-      label: CATEGORY_LABEL_BY_CODE[code] ?? code,
+      label: labelByCode.get(code) ?? code,
     }));
-    const active = SELECTABLE_CATEGORY_OPTIONS
+    const active = categoryOptions
       .filter((option) => (
         !FEATURED_CATEGORY_CODES.includes(option.code)
         && (effectiveCategoryCounts[option.code] ?? 0) > 0
@@ -637,7 +713,7 @@ export default function BankDetailsPage() {
         label: option.label,
       }));
     return [...featured, ...active];
-  }, [effectiveCategoryCounts]);
+  }, [categoryOptions, effectiveCategoryCounts]);
 
   useEffect(() => {
     if (dirtyCount === 0) {
@@ -750,7 +826,7 @@ export default function BankDetailsPage() {
       const categoryCode = draftCategoryByRowId[row.id] ?? null;
       return {
         categoryCode,
-        categoryLabel: categoryLabelForCode(categoryCode),
+        categoryLabel: categoryLabelForCode(categoryCode, categoryOptions),
         categorySource: "draft",
       };
     }
@@ -758,7 +834,7 @@ export default function BankDetailsPage() {
     if (savedCategory?.categorySource === "manual") {
       return {
         categoryCode: savedCategory.categoryCode,
-        categoryLabel: categoryLabelForCode(savedCategory.categoryCode, savedCategory.categoryLabel),
+        categoryLabel: categoryLabelForCode(savedCategory.categoryCode, categoryOptions, savedCategory.categoryLabel),
         categorySource: savedCategory.categorySource,
       };
     }
@@ -766,11 +842,12 @@ export default function BankDetailsPage() {
       categoryCode: savedCategory?.effectiveCategoryCode ?? row.effectiveCategoryCode ?? null,
       categoryLabel: categoryLabelForCode(
         savedCategory?.effectiveCategoryCode ?? row.effectiveCategoryCode ?? null,
+        categoryOptions,
         savedCategory?.effectiveCategoryLabel ?? row.effectiveCategoryLabel,
       ),
       categorySource: savedCategory?.effectiveCategorySource ?? row.effectiveCategorySource,
     };
-  }, [draftCategoryByRowId, savedCategoryByRowId]);
+  }, [categoryOptions, draftCategoryByRowId, savedCategoryByRowId]);
 
   const handleCategoryChange = useCallback((row: BankDetailTransaction, categoryCode: BankTransactionCategoryCode | null) => {
     const savedCategory = savedCategoryByRowId[row.id];
@@ -807,6 +884,7 @@ export default function BankDetailsPage() {
               categoryCode={currentCategory.categoryCode}
               categoryLabel={currentCategory.categoryLabel}
               categorySource={currentCategory.categorySource}
+              categoryOptions={categoryOptions}
               onChange={(nextCategoryCode) => handleCategoryChange(row, nextCategoryCode)}
             />
           );
@@ -814,7 +892,7 @@ export default function BankDetailsPage() {
       },
       ...remainingColumns,
     ];
-  }, [displayCategoryForRow, handleCategoryChange]);
+  }, [categoryOptions, displayCategoryForRow, handleCategoryChange]);
 
   const saveCategoryChanges = useCallback(async () => {
     if (dirtyEntries.length === 0) {

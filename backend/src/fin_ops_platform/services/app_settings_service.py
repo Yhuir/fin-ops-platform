@@ -5,6 +5,10 @@ from typing import Any, Callable
 
 from fin_ops_platform.domain.models import ProjectMaster
 from fin_ops_platform.services.access_control_service import DEFAULT_ADMIN_USERNAME
+from fin_ops_platform.services.bank_transaction_category_service import (
+    BankTransactionCategoryService,
+    default_bank_transaction_tag_dictionary_payload,
+)
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.state_store import ApplicationStateStore
@@ -26,6 +30,17 @@ DEFAULT_WORKBENCH_COLUMN_LAYOUTS = {
     "bank": ["counterparty", "amount", "loanRepaymentDate", "note"],
     "invoice": ["sellerName", "buyerName", "issueDate", "amount", "grossAmount"],
 }
+PENDING_INVOICE_TAG_GROUP_LABELS = {
+    "requires_invoice": "需要开票",
+    "bank_statement_as_invoice": "流水代替发票",
+    "no_invoice_required": "无需开票",
+}
+
+
+class AppSettingsValidationError(ValueError):
+    def __init__(self, error_code: str, message: str) -> None:
+        super().__init__(message)
+        self.error_code = error_code
 
 
 class AppSettingsService:
@@ -35,14 +50,19 @@ class AppSettingsService:
         project_costing_service: ProjectCostingService,
         oa_role_sync_service: OARoleSyncService | None = None,
         oa_import_options_provider: Callable[[], dict[str, Any]] | None = None,
+        bank_transaction_category_service: BankTransactionCategoryService | None = None,
+        audit_service: Any | None = None,
     ) -> None:
         self._state_store = state_store
         self._project_costing_service = project_costing_service
         self._oa_role_sync_service = oa_role_sync_service
         self._oa_import_options_provider = oa_import_options_provider
+        self._bank_transaction_category_service = bank_transaction_category_service
+        self._audit_service = audit_service
         self._snapshot = self._normalize_settings(
             state_store.load_app_settings() if state_store is not None else {}
         )
+        self._configure_category_service(self._snapshot)
         self._restore_manual_projects()
 
     def get_settings_payload(self) -> dict[str, Any]:
@@ -102,6 +122,11 @@ class AppSettingsService:
             "oa_invoice_offset": {
                 "applicant_names": list(self._snapshot["oa_invoice_offset"]["applicant_names"]),
             },
+            "bank_transaction_tags": self._public_bank_transaction_tags(self._snapshot["bank_transaction_tags"]),
+            "pending_invoice_tag_groups": self._public_pending_invoice_tag_groups(
+                self._snapshot["pending_invoice_tag_groups"],
+                version=int(self._snapshot["bank_transaction_tags"]["version"]),
+            ),
         }
 
     def update_settings(
@@ -117,7 +142,12 @@ class AppSettingsService:
         oa_import: dict[str, Any] | None = None,
         oa_invoice_offset: dict[str, Any] | None = None,
         manual_projects: list[dict[str, Any]] | None = None,
+        bank_transaction_tags: dict[str, Any] | None = None,
+        pending_invoice_tag_groups: dict[str, Any] | None = None,
+        actor_id: str | None = None,
+        after_bank_transaction_tag_settings_saved: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
+        previous_snapshot = dict(self._snapshot)
         normalized_snapshot = self._normalize_settings(
             {
                 "completed_project_ids": completed_project_ids,
@@ -139,9 +169,28 @@ class AppSettingsService:
                     else self._snapshot.get("manual_projects", [])
                 ),
                 "synced_projects": self._snapshot.get("synced_projects", []),
+                "bank_transaction_tags": (
+                    bank_transaction_tags
+                    if bank_transaction_tags is not None
+                    else self._snapshot.get("bank_transaction_tags", {})
+                ),
+                "pending_invoice_tag_groups": (
+                    pending_invoice_tag_groups
+                    if pending_invoice_tag_groups is not None
+                    else self._snapshot.get("pending_invoice_tag_groups", {})
+                ),
             }
         )
-        previous_snapshot = dict(self._snapshot)
+        tag_settings_event = self._prepare_tag_settings_event(
+            previous_snapshot,
+            normalized_snapshot,
+            actor_id=actor_id,
+        )
+        if tag_settings_event is not None:
+            version = int(previous_snapshot["bank_transaction_tags"]["version"]) + 1
+            normalized_snapshot["bank_transaction_tags"]["version"] = version
+            normalized_snapshot["pending_invoice_tag_groups"]["version"] = version
+            tag_settings_event["new_version"] = version
         if self._oa_role_sync_service is not None:
             self._oa_role_sync_service.sync_access_control(normalized_snapshot)
         try:
@@ -152,6 +201,11 @@ class AppSettingsService:
                 self._oa_role_sync_service.sync_access_control(previous_snapshot)
             raise
         self._snapshot = normalized_snapshot
+        self._configure_category_service(normalized_snapshot)
+        if tag_settings_event is not None:
+            self._record_tag_settings_audit(tag_settings_event)
+            if after_bank_transaction_tag_settings_saved is not None:
+                after_bank_transaction_tag_settings_saved(dict(tag_settings_event))
         self._restore_manual_projects()
         return self.get_settings_payload()
 
@@ -212,6 +266,7 @@ class AppSettingsService:
         if self._state_store is not None:
             self._state_store.save_app_settings(normalized_snapshot)
         self._snapshot = normalized_snapshot
+        self._configure_category_service(normalized_snapshot)
         self._restore_manual_projects()
 
     def _restore_manual_projects(self) -> None:
@@ -511,6 +566,13 @@ class AppSettingsService:
                     ),
                 }
             )
+        bank_transaction_tags = AppSettingsService._normalize_bank_transaction_tags(
+            raw_payload.get("bank_transaction_tags")
+        )
+        pending_invoice_tag_groups = AppSettingsService._normalize_pending_invoice_tag_groups(
+            raw_payload.get("pending_invoice_tag_groups"),
+            bank_transaction_tags=bank_transaction_tags,
+        )
         return {
             "completed_project_ids": completed_ids,
             "manual_projects": manual_projects,
@@ -527,7 +589,244 @@ class AppSettingsService:
                 "statuses": statuses,
             },
             "oa_invoice_offset": {"applicant_names": applicant_names},
+            "bank_transaction_tags": bank_transaction_tags,
+            "pending_invoice_tag_groups": pending_invoice_tag_groups,
         }
+
+    @staticmethod
+    def _normalize_bank_transaction_tags(value: Any) -> dict[str, Any]:
+        service = BankTransactionCategoryService(tag_dictionary=value if isinstance(value, dict) else None)
+        return service.tag_dictionary_payload()
+
+    @staticmethod
+    def _normalize_pending_invoice_tag_groups(
+        value: Any,
+        *,
+        bank_transaction_tags: dict[str, Any],
+    ) -> dict[str, Any]:
+        raw_payload = value if isinstance(value, dict) else {}
+        version = BankTransactionCategoryService._normalize_version(
+            raw_payload.get("version", bank_transaction_tags.get("version", 1))
+        )
+        if version <= 0:
+            version = int(bank_transaction_tags.get("version") or 1)
+        raw_groups = raw_payload.get("groups") if isinstance(raw_payload.get("groups"), dict) else raw_payload
+        if not isinstance(raw_groups, dict):
+            raw_groups = {}
+
+        definitions_by_code = {
+            str(definition["code"]): dict(definition)
+            for definition in list(bank_transaction_tags.get("definitions") or [])
+            if isinstance(definition, dict) and str(definition.get("code") or "").strip()
+        }
+        groups: dict[str, dict[str, Any]] = {}
+        claimed_codes: dict[str, str] = {}
+        for group_id, label in PENDING_INVOICE_TAG_GROUP_LABELS.items():
+            raw_group = raw_groups.get(group_id)
+            if isinstance(raw_group, dict):
+                raw_codes = raw_group.get("tag_codes")
+            elif isinstance(raw_group, list):
+                raw_codes = raw_group
+            else:
+                raw_codes = []
+            tag_codes: list[str] = []
+            seen_in_group: set[str] = set()
+            for item in list(raw_codes or []):
+                tag_code = str(item or "").strip()
+                if not tag_code or tag_code in seen_in_group:
+                    continue
+                definition = definitions_by_code.get(tag_code)
+                if not isinstance(definition, dict):
+                    raise AppSettingsValidationError(
+                        "unknown_bank_transaction_tag",
+                        f"Unknown bank transaction tag code in pending invoice group: {tag_code}",
+                    )
+                if definition.get("status") == "archived":
+                    raise AppSettingsValidationError(
+                        "archived_bank_transaction_tag",
+                        f"Archived bank transaction tag cannot be mapped: {tag_code}",
+                    )
+                if tag_code in claimed_codes:
+                    raise AppSettingsValidationError(
+                        "duplicate_pending_invoice_tag_mapping",
+                        f"Bank transaction tag {tag_code} is mapped to multiple pending invoice groups.",
+                    )
+                seen_in_group.add(tag_code)
+                claimed_codes[tag_code] = group_id
+                tag_codes.append(tag_code)
+            groups[group_id] = {
+                "label": label,
+                "tag_codes": tag_codes,
+            }
+        return {
+            "version": version,
+            "groups": groups,
+        }
+
+    @staticmethod
+    def _public_bank_transaction_tags(payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "version": int(payload.get("version") or 1),
+            "definitions": [
+                {
+                    "code": str(definition["code"]),
+                    "label": str(definition["label"]),
+                    "path": list(definition.get("path") or []),
+                    "source": str(definition["source"]),
+                    "status": str(definition["status"]),
+                }
+                for definition in list(payload.get("definitions") or [])
+                if isinstance(definition, dict)
+            ],
+        }
+
+    @staticmethod
+    def _public_pending_invoice_tag_groups(payload: dict[str, Any], *, version: int) -> dict[str, Any]:
+        groups = payload.get("groups") if isinstance(payload.get("groups"), dict) else {}
+        return {
+            "version": version,
+            "groups": {
+                group_id: {
+                    "label": str(groups.get(group_id, {}).get("label") or label)
+                    if isinstance(groups.get(group_id), dict)
+                    else label,
+                    "tag_codes": [
+                        str(tag_code)
+                        for tag_code in list(groups.get(group_id, {}).get("tag_codes") or [])
+                    ]
+                    if isinstance(groups.get(group_id), dict)
+                    else [],
+                }
+                for group_id, label in PENDING_INVOICE_TAG_GROUP_LABELS.items()
+            },
+        }
+
+    def _configure_category_service(self, snapshot: dict[str, Any]) -> None:
+        if self._bank_transaction_category_service is None:
+            return
+        self._bank_transaction_category_service.configure_tag_dictionary(
+            snapshot.get("bank_transaction_tags")
+            if isinstance(snapshot.get("bank_transaction_tags"), dict)
+            else default_bank_transaction_tag_dictionary_payload()
+        )
+
+    @staticmethod
+    def _tag_settings_comparable(snapshot: dict[str, Any]) -> dict[str, Any]:
+        tags = AppSettingsService._public_bank_transaction_tags(snapshot["bank_transaction_tags"])
+        groups = AppSettingsService._public_pending_invoice_tag_groups(
+            snapshot["pending_invoice_tag_groups"],
+            version=int(tags["version"]),
+        )
+        tags_without_version = {key: value for key, value in tags.items() if key != "version"}
+        groups_without_version = {key: value for key, value in groups.items() if key != "version"}
+        return {
+            "bank_transaction_tags": tags_without_version,
+            "pending_invoice_tag_groups": groups_without_version,
+        }
+
+    def _prepare_tag_settings_event(
+        self,
+        previous_snapshot: dict[str, Any],
+        next_snapshot: dict[str, Any],
+        *,
+        actor_id: str | None,
+    ) -> dict[str, Any] | None:
+        previous_comparable = self._tag_settings_comparable(previous_snapshot)
+        next_comparable = self._tag_settings_comparable(next_snapshot)
+        tags_changed = (
+            previous_comparable["bank_transaction_tags"]
+            != next_comparable["bank_transaction_tags"]
+        )
+        groups_changed = (
+            previous_comparable["pending_invoice_tag_groups"]
+            != next_comparable["pending_invoice_tag_groups"]
+        )
+        if not tags_changed and not groups_changed:
+            return None
+        affected_groups = self._affected_pending_invoice_groups(
+            previous_snapshot["pending_invoice_tag_groups"],
+            next_snapshot["pending_invoice_tag_groups"],
+        )
+        return {
+            "actor_id": str(actor_id or "workbench_settings").strip() or "workbench_settings",
+            "tags_changed": tags_changed,
+            "groups_changed": groups_changed,
+            "affected_groups": affected_groups,
+            "before_summary": self._tag_settings_summary(previous_snapshot),
+            "after_summary": self._tag_settings_summary(next_snapshot),
+            "new_version": int(next_snapshot["bank_transaction_tags"]["version"]),
+        }
+
+    @staticmethod
+    def _affected_pending_invoice_groups(
+        previous_groups_payload: dict[str, Any],
+        next_groups_payload: dict[str, Any],
+    ) -> list[str]:
+        previous_groups = previous_groups_payload.get("groups") if isinstance(previous_groups_payload.get("groups"), dict) else {}
+        next_groups = next_groups_payload.get("groups") if isinstance(next_groups_payload.get("groups"), dict) else {}
+        affected = []
+        for group_id in PENDING_INVOICE_TAG_GROUP_LABELS:
+            previous_codes = (
+                list(previous_groups.get(group_id, {}).get("tag_codes") or [])
+                if isinstance(previous_groups.get(group_id), dict)
+                else []
+            )
+            next_codes = (
+                list(next_groups.get(group_id, {}).get("tag_codes") or [])
+                if isinstance(next_groups.get(group_id), dict)
+                else []
+            )
+            if previous_codes != next_codes:
+                affected.append(group_id)
+        return sorted(affected)
+
+    @staticmethod
+    def _tag_settings_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
+        tags = snapshot["bank_transaction_tags"]
+        definitions = list(tags.get("definitions") or [])
+        groups = snapshot["pending_invoice_tag_groups"].get("groups")
+        groups = groups if isinstance(groups, dict) else {}
+        return {
+            "version": int(tags.get("version") or 1),
+            "definition_count": len(definitions),
+            "active_definition_count": sum(
+                1
+                for definition in definitions
+                if isinstance(definition, dict) and definition.get("status") == "active"
+            ),
+            "group_tag_counts": {
+                group_id: len(list(groups.get(group_id, {}).get("tag_codes") or []))
+                if isinstance(groups.get(group_id), dict)
+                else 0
+                for group_id in PENDING_INVOICE_TAG_GROUP_LABELS
+            },
+        }
+
+    def _record_tag_settings_audit(self, event: dict[str, Any]) -> None:
+        if self._audit_service is None:
+            return
+        metadata = {
+            "before_summary": event["before_summary"],
+            "after_summary": event["after_summary"],
+            "affected_groups": list(event["affected_groups"]),
+            "new_version": event["new_version"],
+        }
+        if event.get("tags_changed"):
+            self._audit_service.record_action(
+                actor_id=str(event["actor_id"]),
+                action="bank_transaction_tags_updated",
+                entity_type="app_settings",
+                entity_id="bank_transaction_tags",
+                metadata=metadata,
+            )
+        if event.get("groups_changed"):
+            self._audit_service.record_action(
+                actor_id=str(event["actor_id"]),
+                action="pending_invoice_tag_groups_updated",
+                entity_type="app_settings",
+                entity_id="pending_invoice_tag_groups",
+                metadata=metadata,
+            )
 
     @staticmethod
     def _normalize_option_list(

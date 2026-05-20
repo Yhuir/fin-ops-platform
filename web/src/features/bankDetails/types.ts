@@ -1,3 +1,5 @@
+import type { BankTransactionTagDictionary } from "../pendingInvoices/types";
+
 export type BankDetailAccount = {
   accountKey: string;
   bankName: string;
@@ -24,34 +26,7 @@ export type BankDetailAccountsRequest = {
 
 export type BankTransactionDirection = "income" | "expense";
 
-export type BankTransactionCategoryCode =
-  | "borrow_in_personal_pending_repayment"
-  | "borrow_in_personal_repaid"
-  | "borrow_in_company_pending_repayment"
-  | "borrow_in_company_repaid"
-  | "borrow_in_bank_pending_repayment"
-  | "borrow_in_bank_repaid"
-  | "borrow_out_personal_lent"
-  | "borrow_out_personal_pending_collection"
-  | "borrow_out_company_lent"
-  | "borrow_out_company_pending_collection"
-  | "borrow_out_goods_lent"
-  | "borrow_out_goods_pending_collection"
-  | "business_warranty_pending_collection"
-  | "business_bid_bond_pending_collection"
-  | "business_performance_bond_pending_collection"
-  | "business_invoiced_pending_collection"
-  | "external_turnover"
-  | "internal_transfer"
-  | "offset"
-  | "cash_turnover"
-  | "fee"
-  | "salary"
-  | "holiday_bonus"
-  | "bonus"
-  | "tax_payment"
-  | "treasury_tax_collection"
-  | "social_security";
+export type BankTransactionCategoryCode = string;
 
 export type BankTransactionCategoryCounts = Record<string, number> & { uncategorized: number };
 
@@ -103,6 +78,7 @@ export type BankDetailTransactionsResponse = {
     total: number;
   };
   categoryCounts: BankTransactionCategoryCounts;
+  tagDictionary?: BankTransactionTagDictionary;
 };
 
 export type BankDetailTransactionsRequest = {

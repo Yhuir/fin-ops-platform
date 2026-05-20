@@ -863,6 +863,8 @@ describe("Workbench row selection and detail modal", () => {
     expect(screen.queryByText("设置项")).not.toBeInTheDocument();
     expect(within(settingsTree).getByRole("treeitem", { name: /项目状态/ })).toBeInTheDocument();
     expect(within(settingsTree).getByRole("treeitem", { name: /银行账户/ })).toBeInTheDocument();
+    expect(within(settingsTree).getByRole("treeitem", { name: /银行流水标签/ })).toBeInTheDocument();
+    expect(within(settingsTree).getByRole("treeitem", { name: /待找发票筛选/ })).toBeInTheDocument();
     expect(within(settingsTree).getByRole("treeitem", { name: /OA导入设置/ })).toBeInTheDocument();
     expect(within(settingsTree).getByRole("treeitem", { name: /冲账规则/ })).toBeInTheDocument();
     expect(within(settingsTree).getByRole("treeitem", { name: /访问账户/ })).toBeInTheDocument();
@@ -877,10 +879,11 @@ describe("Workbench row selection and detail modal", () => {
     expect(screen.getByRole("checkbox", { name: "日常报销" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "已完成" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "进行中" })).not.toBeChecked();
-    expect(within(settingsPage).queryByText("票据类型")).not.toBeInTheDocument();
-    expect(within(settingsPage).queryByText(/^0$/)).not.toBeInTheDocument();
-    expect(within(settingsPage).queryByText(/^4$/)).not.toBeInTheDocument();
-    expect(within(settingsPage).queryByText("REJECTED")).not.toBeInTheDocument();
+    const oaImportSection = within(settingsPage).getByRole("region", { name: "OA导入设置" });
+    expect(within(oaImportSection).queryByText("票据类型")).not.toBeInTheDocument();
+    expect(within(oaImportSection).queryByText(/^0$/)).not.toBeInTheDocument();
+    expect(within(oaImportSection).queryByText(/^4$/)).not.toBeInTheDocument();
+    expect(within(oaImportSection).queryByText("REJECTED")).not.toBeInTheDocument();
     await user.clear(screen.getByLabelText("OA导入起始日期"));
     await user.type(screen.getByLabelText("OA导入起始日期"), "2026-02-01");
     await user.click(screen.getByRole("checkbox", { name: "进行中" }));

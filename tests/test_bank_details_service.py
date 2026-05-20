@@ -634,6 +634,53 @@ class BankDetailsServiceTests(unittest.TestCase):
         self.assertEqual(payload["category_counts"]["business_warranty_pending_collection"], 1)
         self.assertEqual(payload["category_counts"]["uncategorized"], 1)
 
+    def test_transactions_payload_exposes_server_owned_tag_dictionary(self) -> None:
+        category_service = BankTransactionCategoryService.from_snapshot(None)
+        category_service.configure_tag_dictionary(
+            {
+                "version": 5,
+                "definitions": [
+                    {
+                        "code": "custom_bank_statement_as_invoice",
+                        "label": "流水代替发票",
+                        "path": ["自定义", "票据"],
+                        "source": "custom",
+                        "status": "active",
+                    }
+                ],
+            }
+        )
+        service = BankDetailsService(
+            _ImportServiceStub(
+                [
+                    self._transaction(
+                        transaction_id="txn-tag-options",
+                        trade_time="2026-04-03 09:00:00",
+                    )
+                ]
+            ),
+            category_service=category_service,
+        )
+
+        payload = service.list_transactions(account_key="工商银行:6386")
+
+        definitions_by_code = {
+            definition["code"]: definition
+            for definition in payload["bank_transaction_tags"]["definitions"]
+        }
+        self.assertEqual(payload["bank_transaction_tags"]["version"], 5)
+        self.assertEqual(definitions_by_code["fee"]["source"], "system")
+        self.assertEqual(
+            definitions_by_code["custom_bank_statement_as_invoice"],
+            {
+                "code": "custom_bank_statement_as_invoice",
+                "label": "流水代替发票",
+                "path": ["自定义", "票据"],
+                "source": "custom",
+                "status": "active",
+            },
+        )
+
     def test_transactions_use_auto_category_as_effective_when_no_manual_category(self) -> None:
         transactions = [
             self._transaction(

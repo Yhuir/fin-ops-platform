@@ -70,6 +70,7 @@ OA_ATTACHMENT_INVOICE_CACHE_COLLECTION = "oa_attachment_invoice_cache"
 OA_SYNC_STATE_COLLECTION = "oa_sync_state"
 MANUAL_OA_IMPORTS_COLLECTION = "manual_oa_imports"
 APP_SETTINGS_COLLECTION = "app_settings"
+PENDING_INVOICE_COMMANDS_COLLECTION = "pending_invoice_manual_invoice_commands"
 TAX_CERTIFIED_IMPORTS_META_COLLECTION = "tax_certified_imports_meta"
 TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION = "tax_certified_import_sessions"
 TAX_CERTIFIED_IMPORT_BATCHES_COLLECTION = "tax_certified_import_batches"
@@ -270,6 +271,7 @@ class ApplicationStateStore:
                 "oa_sync_state": self._mongo_database[OA_SYNC_STATE_COLLECTION],
                 "manual_oa_imports": self._mongo_database[MANUAL_OA_IMPORTS_COLLECTION],
                 "app_settings": self._mongo_database[APP_SETTINGS_COLLECTION],
+                "pending_invoice_commands": self._mongo_database[PENDING_INVOICE_COMMANDS_COLLECTION],
                 "tax_certified_imports_meta": self._mongo_database[TAX_CERTIFIED_IMPORTS_META_COLLECTION],
                 "tax_certified_import_sessions": self._mongo_database[TAX_CERTIFIED_IMPORT_SESSIONS_COLLECTION],
                 "tax_certified_import_batches": self._mongo_database[TAX_CERTIFIED_IMPORT_BATCHES_COLLECTION],
@@ -329,6 +331,8 @@ class ApplicationStateStore:
             "oa_retention": {},
             "oa_import": {},
             "oa_invoice_offset": {},
+            "bank_transaction_tags": {},
+            "pending_invoice_tag_groups": {},
         }
         if self._mongo_database is not None:
             document = self._mongo_detailed_collections["app_settings"].find_one({"_id": APP_SETTINGS_DOCUMENT_ID})
@@ -346,6 +350,8 @@ class ApplicationStateStore:
                     "oa_retention": dict(payload.get("oa_retention") or {}),
                     "oa_import": dict(payload.get("oa_import") or {}),
                     "oa_invoice_offset": dict(payload.get("oa_invoice_offset") or {}),
+                    "bank_transaction_tags": dict(payload.get("bank_transaction_tags") or {}),
+                    "pending_invoice_tag_groups": dict(payload.get("pending_invoice_tag_groups") or {}),
                 }
             return default_payload
 
@@ -369,6 +375,8 @@ class ApplicationStateStore:
             "oa_retention": dict(loaded.get("oa_retention") or {}),
             "oa_import": dict(loaded.get("oa_import") or {}),
             "oa_invoice_offset": dict(loaded.get("oa_invoice_offset") or {}),
+            "bank_transaction_tags": dict(loaded.get("bank_transaction_tags") or {}),
+            "pending_invoice_tag_groups": dict(loaded.get("pending_invoice_tag_groups") or {}),
         }
 
     def save_app_settings(self, payload: dict[str, Any]) -> None:
@@ -384,6 +392,8 @@ class ApplicationStateStore:
             "oa_retention": dict(payload.get("oa_retention") or {}),
             "oa_import": dict(payload.get("oa_import") or {}),
             "oa_invoice_offset": dict(payload.get("oa_invoice_offset") or {}),
+            "bank_transaction_tags": dict(payload.get("bank_transaction_tags") or {}),
+            "pending_invoice_tag_groups": dict(payload.get("pending_invoice_tag_groups") or {}),
         }
         if self._mongo_database is not None:
             self._mongo_detailed_collections["app_settings"].update_one(
@@ -401,6 +411,8 @@ class ApplicationStateStore:
                         "oa_retention": normalized_payload["oa_retention"],
                         "oa_import": normalized_payload["oa_import"],
                         "oa_invoice_offset": normalized_payload["oa_invoice_offset"],
+                        "bank_transaction_tags": normalized_payload["bank_transaction_tags"],
+                        "pending_invoice_tag_groups": normalized_payload["pending_invoice_tag_groups"],
                         "payload": Binary(pickle.dumps(normalized_payload)),
                         "updated_at": datetime.now(UTC),
                     }
@@ -1600,6 +1612,8 @@ class ApplicationStateStore:
                 )
             if "tax_offset_read_models" in payload:
                 self._save_tax_offset_read_models_detailed(payload.get("tax_offset_read_models", {}), updated_at)
+            if "pending_invoice_commands" in payload:
+                self._save_pending_invoice_commands_detailed(payload.get("pending_invoice_commands", {}), updated_at)
             if "app_health_alerts" in payload:
                 self.save_app_health_alerts(payload.get("app_health_alerts", {}))
             self._save_file_import_metadata(payload.get("file_imports", {}), updated_at)
@@ -1873,6 +1887,7 @@ class ApplicationStateStore:
         turnover_ledger_extras_payload = self._load_turnover_ledger_extras_detailed_payload()
         cost_statistics_read_models_payload = self._load_cost_statistics_read_models_detailed_payload()
         tax_offset_read_models_payload = self._load_tax_offset_read_models_detailed_payload()
+        pending_invoice_commands_payload = self._load_pending_invoice_commands_detailed_payload()
         app_health_alerts_payload = self._load_app_health_alerts_detailed_payload()
         found_any = any(
             bool(section)
@@ -1892,6 +1907,7 @@ class ApplicationStateStore:
                 turnover_ledger_extras_payload,
                 cost_statistics_read_models_payload,
                 tax_offset_read_models_payload,
+                pending_invoice_commands_payload,
                 app_health_alerts_payload,
             )
         )
@@ -1926,6 +1942,8 @@ class ApplicationStateStore:
             payload["cost_statistics_read_models"] = cost_statistics_read_models_payload
         if tax_offset_read_models_payload:
             payload["tax_offset_read_models"] = tax_offset_read_models_payload
+        if pending_invoice_commands_payload:
+            payload["pending_invoice_commands"] = pending_invoice_commands_payload
         if app_health_alerts_payload:
             payload["app_health_alerts"] = app_health_alerts_payload
         if self._migrate_legacy_file_refs_to_gridfs(payload):
@@ -2433,6 +2451,10 @@ class ApplicationStateStore:
         payload = meta_payload if isinstance(meta_payload, dict) else {}
         payload["read_models"] = read_models
         return payload
+
+    def _load_pending_invoice_commands_detailed_payload(self) -> dict[str, Any]:
+        commands = self._load_entities_by_id(self._mongo_detailed_collections["pending_invoice_commands"])
+        return commands if isinstance(commands, dict) else {}
 
     def _load_app_health_alerts_detailed_payload(self) -> dict[str, Any]:
         document = self._mongo_detailed_collections["app_health_alerts"].find_one({"_id": STATE_DOCUMENT_ID})
@@ -3244,6 +3266,29 @@ class ApplicationStateStore:
                 }
             },
             upsert=True,
+        )
+
+    def _save_pending_invoice_commands_detailed(self, snapshot: dict[str, Any], updated_at: datetime) -> None:
+        command_documents: list[dict[str, Any]] = []
+        if isinstance(snapshot, dict):
+            for request_id, command in snapshot.items():
+                if not isinstance(command, dict):
+                    continue
+                serialized_command = self._serialize_value(command)
+                command_documents.append(
+                    {
+                        **serialized_command,
+                        "_id": str(serialized_command.get("request_id") or request_id),
+                        "request_id": str(serialized_command.get("request_id") or request_id),
+                        "request_key": serialized_command.get("request_key"),
+                        "status": serialized_command.get("status"),
+                        "updated_at": updated_at,
+                        "payload": Binary(pickle.dumps(command)),
+                    }
+                )
+        self._replace_collection_documents(
+            self._mongo_detailed_collections["pending_invoice_commands"],
+            command_documents,
         )
 
     def _save_tax_certified_imports_detailed(self, snapshot: dict[str, Any], updated_at: datetime) -> None:

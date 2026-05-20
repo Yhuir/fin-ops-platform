@@ -44,7 +44,7 @@ from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.access_control_service import AccessControlService
 from fin_ops_platform.services.app_health_alert_service import AppHealthAlertService
 from fin_ops_platform.services.app_health_service import AppHealthService
-from fin_ops_platform.services.app_settings_service import AppSettingsService
+from fin_ops_platform.services.app_settings_service import AppSettingsService, AppSettingsValidationError
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.batch_accounting_service import BatchAccountingError, BatchAccountingService
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
@@ -136,6 +136,11 @@ from fin_ops_platform.services.oa_identity_service import (
 )
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError, OARoleSyncService
 from fin_ops_platform.services.oa_sync_service import OASyncService
+from fin_ops_platform.services.pending_invoice_service import (
+    PendingInvoiceApplicationService,
+    PendingInvoiceError,
+    PendingInvoiceQueryService,
+)
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
 from fin_ops_platform.services.search_service import MONTH_RE as SEARCH_MONTH_RE, SUPPORTED_SCOPES as SEARCH_SUPPORTED_SCOPES, SUPPORTED_STATUSES as SEARCH_SUPPORTED_STATUSES, SearchService
@@ -420,6 +425,8 @@ class Application:
             self._project_costing_service,
             oa_role_sync_service=self._oa_role_sync_service,
             oa_import_options_provider=oa_import_options_provider,
+            bank_transaction_category_service=self._bank_transaction_category_service,
+            audit_service=self._audit_service,
         )
         if oa_adapter is not None:
             oa_adapter.set_import_settings_provider(self._app_settings_service.get_oa_import_settings)
@@ -473,6 +480,29 @@ class Application:
             auto_category_service=self._bank_transaction_auto_category_service,
             relation_tag_provider=self._bank_details_relation_tag_projection_service.relation_tag_for_transaction,
             relation_tag_batch_provider=self._bank_details_relation_tag_projection_service.relation_tags_for_transactions,
+        )
+        self._pending_invoice_commands = (
+            dict(persisted_state.get("pending_invoice_commands") or {})
+            if isinstance(persisted_state.get("pending_invoice_commands"), dict)
+            else {}
+        )
+        self._pending_invoice_query_service = PendingInvoiceQueryService(
+            import_service=self._import_service,
+            pair_relation_service=self._workbench_pair_relation_service,
+            category_service=self._bank_transaction_category_service,
+            app_settings_provider=self._app_settings_service.get_settings_payload,
+            effective_category_provider=self._bank_transaction_effective_category_provider,
+        )
+        self._pending_invoice_application_service = PendingInvoiceApplicationService(
+            import_service=self._import_service,
+            pair_relation_service=self._workbench_pair_relation_service,
+            command_store=self._pending_invoice_commands,
+            audit_recorder=self._record_pending_invoice_manual_invoice_audit,
+            finalizer=self._finalize_pending_invoice_manual_invoice,
+            row_provider=lambda transaction_id, direction: self._pending_invoice_query_service.row_for_transaction(
+                transaction_id,
+                direction=direction,
+            ),
         )
         self._turnover_ledger_extra_service = self._build_turnover_ledger_extra_service(
             persisted_state.get("turnover_ledger_extras")
@@ -721,6 +751,12 @@ class Application:
             )
         if method == "PATCH" and route_path == "/api/bank-details/transactions/categories":
             return self._handle_api_bank_transaction_categories(body, headers)
+        if method == "GET" and route_path == "/api/pending-invoices/rows":
+            return self._handle_api_pending_invoice_rows(query)
+        if method == "POST" and route_path == "/api/pending-invoices/manual-invoices/preview":
+            return self._handle_api_pending_invoice_manual_preview(body)
+        if method == "POST" and route_path == "/api/pending-invoices/manual-invoices":
+            return self._handle_api_pending_invoice_manual_confirm(body, headers)
         if method == "GET" and route_path == "/api/no-oa-bank-batches":
             return self._handle_api_no_oa_bank_batches(query)
         if method == "POST" and route_path == "/api/no-oa-bank-batches/submit":
@@ -859,7 +895,7 @@ class Application:
         if method == "GET" and route_path == "/api/workbench/settings":
             return self._handle_api_workbench_settings()
         if method == "POST" and route_path == "/api/workbench/settings":
-            return self._handle_api_workbench_settings_update(body)
+            return self._handle_api_workbench_settings_update(body, headers)
         if method == "GET" and route_path == "/api/workbench/settings/oa/manual-search":
             return self._handle_api_workbench_settings_oa_manual_search(query)
         if method == "POST" and route_path == "/api/workbench/settings/oa/manual-search/refresh-attachments":
@@ -5121,6 +5157,90 @@ class Application:
                 )
         return None
 
+    def _handle_api_pending_invoice_rows(self, query: dict[str, list[str]]) -> Response:
+        try:
+            payload = self._pending_invoice_query_service.list_rows(
+                direction=query.get("direction", [""])[0],
+                filter=query.get("filter", ["all"])[0],
+                date_from=query.get("date_from", [None])[0],
+                date_to=query.get("date_to", [None])[0],
+                keyword=query.get("keyword", [None])[0],
+                page=query.get("page", [1])[0],
+                page_size=query.get("page_size", [50])[0],
+            )
+        except PendingInvoiceError as exc:
+            return self._pending_invoice_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_pending_invoice_manual_preview(self, body: str | bytes | None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            preview = self._pending_invoice_application_service.preview_manual_invoice(payload)
+        except PendingInvoiceError as exc:
+            return self._pending_invoice_error_response(exc)
+        return self._json_response(HTTPStatus.OK, preview)
+
+    def _handle_api_pending_invoice_manual_confirm(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        session = resolve_oa_request_session(
+            headers,
+            identity_service=self._oa_identity_service,
+            access_control_service=self._access_control_service,
+        )
+        if not session.can_mutate_data:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "permission_denied", "message": "当前账户没有手工补票权限。"},
+            )
+        actor_id = str(session.identity.username or "pending_invoice").strip()
+        try:
+            result = self._pending_invoice_application_service.confirm_manual_invoice(payload, actor_id=actor_id)
+        except PendingInvoiceError as exc:
+            self._persist_state()
+            return self._pending_invoice_error_response(exc)
+        except Exception:
+            self._persist_state()
+            raise
+        self._persist_state()
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _pending_invoice_error_response(self, exc: PendingInvoiceError) -> Response:
+        payload: dict[str, object] = {"error": exc.error_code, "message": str(exc)}
+        if exc.details:
+            payload["details"] = exc.details
+        return self._json_response(exc.status_code, payload)
+
+    def _record_pending_invoice_manual_invoice_audit(self, event: dict[str, object]) -> None:
+        self._audit_service.record_action(
+            actor_id=str(event.get("actor_id") or "pending_invoice"),
+            action="pending_invoice_manual_invoice_confirmed",
+            entity_type="pending_invoice_manual_invoice",
+            entity_id=str(event.get("request_id") or event.get("invoice_id") or ""),
+            metadata=dict(event),
+        )
+
+    def _finalize_pending_invoice_manual_invoice(self, event: dict[str, object]) -> None:
+        affected_months = [str(month) for month in list(event.get("affected_months") or []) if str(month).strip()]
+        scope_keys = ["all", *affected_months]
+        self._invalidate_workbench_read_model_scopes(scope_keys)
+        projection = getattr(self, "_bank_details_relation_tag_projection_service", None)
+        if projection is not None:
+            try:
+                setattr(projection, "_index_cache_key", "")
+                setattr(projection, "_index_cache", {})
+            except Exception:
+                pass
+        self._search_service.clear_cache()
+        self._invalidate_tax_offset_read_model_scopes(affected_months, reason="pending_invoice_manual_invoice")
+
     def _handle_api_workbench_ignored(self, month: str | None) -> Response:
         current_month = month or "all"
         return self._json_response(
@@ -5134,10 +5254,29 @@ class Application:
     def _handle_api_workbench_settings(self) -> Response:
         return self._json_response(HTTPStatus.OK, self._app_settings_service.get_settings_payload())
 
-    def _handle_api_workbench_settings_update(self, body: str | bytes | None) -> Response:
+    def _handle_api_workbench_settings_update(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
+        try:
+            session = resolve_oa_request_session(
+                headers,
+                identity_service=self._oa_identity_service,
+                access_control_service=self._access_control_service,
+            )
+        except UnauthorizedOASessionError as exc:
+            return self._json_response(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized", "message": str(exc)})
+        except ForbiddenOAAccessError as exc:
+            return self._json_response(HTTPStatus.FORBIDDEN, {"error": "permission_denied", "message": str(exc)})
+        if not session.can_mutate_data:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "permission_denied", "message": "当前账户没有保存设置权限。"},
+            )
         completed_project_ids = payload.get("completed_project_ids", [])
         bank_account_mappings = payload.get("bank_account_mappings", [])
         allowed_usernames = payload.get("allowed_usernames", [])
@@ -5147,6 +5286,9 @@ class Application:
         oa_retention = payload.get("oa_retention", {})
         oa_invoice_offset = payload.get("oa_invoice_offset", {})
         oa_import = payload.get("oa_import", {})
+        bank_transaction_tags = payload.get("bank_transaction_tags")
+        pending_invoice_tag_groups = payload.get("pending_invoice_tag_groups")
+        actor_id = str(session.identity.username or "workbench_settings").strip()
         if (
             not isinstance(completed_project_ids, list)
             or not isinstance(bank_account_mappings, list)
@@ -5169,6 +5311,22 @@ class Application:
                     ),
                 },
             )
+        if bank_transaction_tags is not None and not isinstance(bank_transaction_tags, dict):
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "invalid_workbench_settings_request",
+                    "message": "bank_transaction_tags must be an object when provided.",
+                },
+            )
+        if pending_invoice_tag_groups is not None and not isinstance(pending_invoice_tag_groups, dict):
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "invalid_workbench_settings_request",
+                    "message": "pending_invoice_tag_groups must be an object when provided.",
+                },
+            )
         try:
             updated_payload = self._app_settings_service.update_settings(
                 completed_project_ids=[str(item) for item in completed_project_ids],
@@ -5182,6 +5340,18 @@ class Application:
                 oa_retention=oa_retention,
                 oa_import=oa_import,
                 oa_invoice_offset=oa_invoice_offset,
+                bank_transaction_tags=bank_transaction_tags,
+                pending_invoice_tag_groups=pending_invoice_tag_groups,
+                actor_id=actor_id or "workbench_settings",
+                after_bank_transaction_tag_settings_saved=self._finalize_bank_transaction_tag_settings_update,
+            )
+        except AppSettingsValidationError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": exc.error_code,
+                    "message": str(exc),
+                },
             )
         except OARoleSyncError as exc:
             return self._json_response(
@@ -7803,6 +7973,25 @@ class Application:
         self._persist_workbench_matching_dirty_scopes_best_effort(operation="bank_transaction_category_updated")
         return True
 
+    def _finalize_bank_transaction_tag_settings_update(self, event: dict[str, object]) -> None:
+        projection = getattr(self, "_bank_details_relation_tag_projection_service", None)
+        if projection is not None:
+            try:
+                setattr(projection, "_index_cache_key", "")
+                setattr(projection, "_index_cache", {})
+            except Exception:
+                pass
+        pending_invoice_service = getattr(self, "_pending_invoice_query_service", None)
+        for method_name in ("clear_cache", "invalidate_cache", "refresh"):
+            method = getattr(pending_invoice_service, method_name, None)
+            if callable(method):
+                try:
+                    method()
+                except TypeError:
+                    method(event)
+                break
+        self._search_service.clear_cache()
+
     def _list_tax_offset_oa_attachment_invoice_rows(self, month: str) -> list[dict[str, object]]:
         return self._workbench_query_service.list_attachment_invoice_rows_by_issue_month(month)
 
@@ -10341,6 +10530,7 @@ class Application:
                 "turnover_ledger_extras": self._turnover_ledger_api_routes.extras_snapshot(),
                 "cost_statistics_read_models": cost_statistics_snapshot,
                 "tax_offset_read_models": tax_offset_snapshot,
+                "pending_invoice_commands": dict(getattr(self, "_pending_invoice_commands", {}) or {}),
             }
         )
 

@@ -1,5 +1,7 @@
 import { vi } from "vitest";
 
+import { SELECTABLE_CATEGORY_OPTIONS } from "../features/bankDetails/categoryOptions";
+
 type MockFetchResponse = {
   status?: number;
   body: unknown;
@@ -4826,6 +4828,16 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             page,
             page_size: pageSize,
             total: keyword ? rows.length : (!accountKey || accountKey === "icbc:6386") && isCurrentYear ? 299 : rows.length,
+          },
+          bank_transaction_tags: {
+            version: 1,
+            definitions: SELECTABLE_CATEGORY_OPTIONS.map((option) => ({
+              code: option.code,
+              label: option.label,
+              path: option.menuLabel.split(" / "),
+              source: "system",
+              status: "active",
+            })),
           },
         },
       };

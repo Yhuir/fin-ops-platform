@@ -42,6 +42,8 @@ import type {
   OaManualSearchRow,
 } from "./types";
 import { countWorkbenchGroupsRows } from "./groupDisplayModel";
+import { mapBankTransactionTagDictionary } from "../pendingInvoices/api";
+import type { BankTransactionTagDictionary, PendingInvoiceTagGroups } from "../pendingInvoices/types";
 
 export type WorkbenchBootstrapProgress = {
   label: string;
@@ -217,6 +219,14 @@ type ApiWorkbenchSettings = {
   };
   oa_invoice_offset?: {
     applicant_names?: string[];
+  };
+  bank_transaction_tags?: Parameters<typeof mapBankTransactionTagDictionary>[0];
+  pending_invoice_tag_groups?: {
+    version?: number | string | null;
+    groups?: Record<string, { tag_codes?: unknown[] | null } | unknown[] | null> | null;
+    requires_invoice?: unknown[];
+    bank_statement_as_invoice?: unknown[];
+    no_invoice_required?: unknown[];
   };
 };
 
@@ -510,6 +520,8 @@ type WorkbenchSettingsUpdatePayload = {
   oaInvoiceOffset?: {
     applicantNames: string[];
   };
+  bankTransactionTags?: BankTransactionTagDictionary;
+  pendingInvoiceTagGroups?: PendingInvoiceTagGroups;
 };
 
 type ApiWorkbenchSettingsDataResetResult = {
@@ -1296,6 +1308,67 @@ function normalizeSettingsOptions(
   return mapped.length > 0 ? mapped : fallback;
 }
 
+function cleanSettingsStringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => String(item).trim()).filter(Boolean)
+    : [];
+}
+
+function mapPendingInvoiceTagGroups(value: ApiWorkbenchSettings["pending_invoice_tag_groups"]): PendingInvoiceTagGroups {
+  const groups = value?.groups;
+  if (groups && typeof groups === "object") {
+    const codesFor = (groupId: string) => {
+      const group = groups[groupId];
+      if (Array.isArray(group)) {
+        return cleanSettingsStringList(group);
+      }
+      if (group && typeof group === "object" && "tag_codes" in group) {
+        return cleanSettingsStringList(group.tag_codes);
+      }
+      return [];
+    };
+    return {
+      requiresInvoice: codesFor("requires_invoice"),
+      bankStatementAsInvoice: codesFor("bank_statement_as_invoice"),
+      noInvoiceRequired: codesFor("no_invoice_required"),
+    };
+  }
+  return {
+    requiresInvoice: cleanSettingsStringList(value?.requires_invoice),
+    bankStatementAsInvoice: cleanSettingsStringList(value?.bank_statement_as_invoice),
+    noInvoiceRequired: cleanSettingsStringList(value?.no_invoice_required),
+  };
+}
+
+function serializeBankTransactionTags(value: BankTransactionTagDictionary | undefined) {
+  if (!value) {
+    return undefined;
+  }
+  return {
+    version: value.version,
+    tags: value.tags.map((tag) => ({
+      code: tag.code,
+      label: tag.label,
+      path: tag.path,
+      status: tag.status,
+      source: tag.source,
+    })),
+  };
+}
+
+function serializePendingInvoiceTagGroups(value: PendingInvoiceTagGroups | undefined) {
+  if (!value) {
+    return undefined;
+  }
+  return {
+    groups: {
+      requires_invoice: { tag_codes: value.requiresInvoice },
+      bank_statement_as_invoice: { tag_codes: value.bankStatementAsInvoice },
+      no_invoice_required: { tag_codes: value.noInvoiceRequired },
+    },
+  };
+}
+
 function mapWorkbenchSettings(payload: ApiWorkbenchSettings): WorkbenchSettings {
   const rawLayouts = payload.workbench_column_layouts ?? {};
   const defaultFormTypes = ["payment_request", "expense_claim"];
@@ -1354,6 +1427,8 @@ function mapWorkbenchSettings(payload: ApiWorkbenchSettings): WorkbenchSettings 
         .map((item) => String(item).trim())
         .filter(Boolean),
     },
+    bankTransactionTags: mapBankTransactionTagDictionary(payload.bank_transaction_tags) ?? { version: 0, tags: [] },
+    pendingInvoiceTagGroups: mapPendingInvoiceTagGroups(payload.pending_invoice_tag_groups),
   };
 }
 
@@ -1756,6 +1831,8 @@ export async function saveWorkbenchSettings(
       oa_invoice_offset: {
         applicant_names: settings.oaInvoiceOffset?.applicantNames ?? [],
       },
+      bank_transaction_tags: serializeBankTransactionTags(settings.bankTransactionTags),
+      pending_invoice_tag_groups: serializePendingInvoiceTagGroups(settings.pendingInvoiceTagGroups),
     }),
   });
   return mapWorkbenchSettings(payload);

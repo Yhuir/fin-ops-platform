@@ -12,6 +12,7 @@ import type {
   SaveBankTransactionCategoriesRequest,
   SaveBankTransactionCategoriesResponse,
 } from "./types";
+import { mapBankTransactionTagDictionary } from "../pendingInvoices/api";
 
 type ApiBankDetailAccount = {
   account_key: string;
@@ -75,6 +76,8 @@ type ApiBankDetailTransactionsResponse = {
     total?: number;
   };
   category_counts?: Record<string, number>;
+  tag_dictionary?: Parameters<typeof mapBankTransactionTagDictionary>[0];
+  bank_transaction_tags?: Parameters<typeof mapBankTransactionTagDictionary>[0];
 };
 
 type ApiSavedBankTransactionCategory = {
@@ -265,6 +268,7 @@ export async function fetchBankDetailTransactions({
       total: payload.pagination?.total ?? payload.rows.length,
     },
     categoryCounts: mapCategoryCounts(payload.category_counts),
+    tagDictionary: mapBankTransactionTagDictionary(payload.tag_dictionary ?? payload.bank_transaction_tags),
   };
 }
 

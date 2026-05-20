@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import UTC, datetime
+import hashlib
+import json
+import re
 from threading import RLock
 from typing import Any, Callable
 
@@ -194,6 +197,39 @@ BANK_TRANSACTION_CATEGORY_COUNT_KEYS = [
     *BANK_TRANSACTION_LEGACY_CATEGORY_LABELS.keys(),
     "uncategorized",
 ]
+BANK_TRANSACTION_TAG_DICTIONARY_INITIAL_VERSION = 1
+BANK_TRANSACTION_TAG_CODE_RE = re.compile(r"^[A-Za-z0-9_:-]+$")
+
+
+def build_system_bank_transaction_tag_definitions() -> list[dict[str, Any]]:
+    definitions: list[dict[str, Any]] = []
+    for source in (
+        BANK_TRANSACTION_CATEGORY_DEFINITIONS,
+        BANK_TRANSACTION_AUTO_CATEGORY_DEFINITIONS,
+        BANK_TRANSACTION_LEGACY_CATEGORY_DEFINITIONS,
+    ):
+        for code, definition in source.items():
+            definitions.append(
+                {
+                    "code": str(code),
+                    "label": str(definition.get("category_label") or code),
+                    "path": [
+                        str(item)
+                        for item in list(definition.get("category_path") or [])
+                        if str(item).strip()
+                    ],
+                    "source": "system",
+                    "status": "active",
+                }
+            )
+    return definitions
+
+
+def default_bank_transaction_tag_dictionary_payload() -> dict[str, Any]:
+    return {
+        "version": BANK_TRANSACTION_TAG_DICTIONARY_INITIAL_VERSION,
+        "definitions": build_system_bank_transaction_tag_definitions(),
+    }
 
 
 class BankTransactionCategoryError(ValueError):
@@ -227,10 +263,13 @@ class BankTransactionCategoryService:
         *,
         categories: dict[str, dict[str, Any]] | None = None,
         audit_log: list[dict[str, Any]] | None = None,
+        tag_dictionary: dict[str, Any] | None = None,
         transaction_exists: Callable[[str], bool] | None = None,
     ) -> None:
         self._lock = RLock()
         self._transaction_exists = transaction_exists
+        self._tag_dictionary_payload = self._normalize_tag_dictionary_payload(tag_dictionary)
+        self._tag_definitions_by_code = self._build_tag_definition_index(self._tag_dictionary_payload)
         self._categories = self._normalize_categories(categories or {})
         self._audit_log = [
             deepcopy(entry)
@@ -249,9 +288,11 @@ class BankTransactionCategoryService:
             return cls(transaction_exists=transaction_exists)
         categories = snapshot.get("categories")
         audit_log = snapshot.get("audit_log")
+        tag_dictionary = snapshot.get("tag_dictionary")
         return cls(
             categories=categories if isinstance(categories, dict) else {},
             audit_log=audit_log if isinstance(audit_log, list) else [],
+            tag_dictionary=tag_dictionary if isinstance(tag_dictionary, dict) else None,
             transaction_exists=transaction_exists,
         )
 
@@ -261,7 +302,18 @@ class BankTransactionCategoryService:
                 "schema_version": BANK_TRANSACTION_CATEGORY_SCHEMA_VERSION,
                 "categories": deepcopy(self._categories),
                 "audit_log": deepcopy(self._audit_log),
+                "tag_dictionary": deepcopy(self._tag_dictionary_payload),
             }
+
+    def tag_dictionary_payload(self) -> dict[str, Any]:
+        with self._lock:
+            return deepcopy(self._tag_dictionary_payload)
+
+    def configure_tag_dictionary(self, payload: dict[str, Any] | None) -> None:
+        normalized_payload = self._normalize_tag_dictionary_payload(payload)
+        with self._lock:
+            self._tag_dictionary_payload = normalized_payload
+            self._tag_definitions_by_code = self._build_tag_definition_index(normalized_payload)
 
     def get(self, transaction_id: str) -> dict[str, Any]:
         transaction_key = self._normalize_transaction_id(transaction_id)
@@ -337,8 +389,8 @@ class BankTransactionCategoryService:
                 record = {
                     "transaction_id": transaction_id,
                     "category_code": category_code,
-                    "category_label": self.label_for(category_code),
-                    "category_path": self.path_for(category_code),
+                    "category_label": self._label_for(category_code),
+                    "category_path": self._path_for(category_code),
                     "source": "manual",
                     "updated_by": normalized_actor,
                     "updated_at": timestamp,
@@ -373,7 +425,7 @@ class BankTransactionCategoryService:
             }
 
     def category_counts(self, transaction_ids: list[str]) -> dict[str, int]:
-        counts = {key: 0 for key in BANK_TRANSACTION_CATEGORY_COUNT_KEYS}
+        counts = {key: 0 for key in self.tag_count_keys()}
         normalized_ids = [
             self._normalize_transaction_id(transaction_id)
             for transaction_id in list(transaction_ids or [])
@@ -382,7 +434,7 @@ class BankTransactionCategoryService:
         with self._lock:
             for transaction_id in normalized_ids:
                 category_code = self._categories.get(transaction_id, {}).get("category_code")
-                if category_code in BANK_TRANSACTION_CATEGORY_LABELS:
+                if self.has_tag_definition(category_code):
                     counts.setdefault(str(category_code), 0)
                     counts[str(category_code)] += 1
                 else:
@@ -409,35 +461,101 @@ class BankTransactionCategoryService:
         return list(definition["category_path"])
 
     @classmethod
-    def _normalize_categories(cls, categories: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    def _build_tag_definition_index(cls, payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        return {
+            str(definition["code"]): dict(definition)
+            for definition in list(payload.get("definitions") or [])
+            if isinstance(definition, dict) and str(definition.get("code") or "").strip()
+        }
+
+    @classmethod
+    def _normalize_tag_dictionary_payload(cls, payload: dict[str, Any] | None) -> dict[str, Any]:
+        raw_payload = payload if isinstance(payload, dict) else {}
+        version = cls._normalize_version(
+            raw_payload.get("version", BANK_TRANSACTION_TAG_DICTIONARY_INITIAL_VERSION)
+        )
+        if version <= 0:
+            version = BANK_TRANSACTION_TAG_DICTIONARY_INITIAL_VERSION
+
+        definitions_by_code: dict[str, dict[str, Any]] = {
+            definition["code"]: definition
+            for definition in build_system_bank_transaction_tag_definitions()
+        }
+        for item in list(raw_payload.get("definitions") or []):
+            if not isinstance(item, dict):
+                continue
+            definition = cls._normalize_tag_definition(item)
+            code = definition["code"]
+            if definition["source"] == "system" and code in definitions_by_code:
+                definitions_by_code[code] = {
+                    **definitions_by_code[code],
+                    "status": definition["status"],
+                }
+                continue
+            if code in definitions_by_code and definitions_by_code[code]["source"] == "system":
+                continue
+            definitions_by_code[code] = definition
+        return {
+            "version": version,
+            "definitions": sorted(definitions_by_code.values(), key=lambda item: (item["source"] != "system", item["code"])),
+        }
+
+    @classmethod
+    def _normalize_tag_definition(cls, item: dict[str, Any]) -> dict[str, Any]:
+        label = str(item.get("label") or item.get("category_label") or "").strip()
+        path = [
+            str(value).strip()
+            for value in list(item.get("path") or item.get("category_path") or [])
+            if str(value).strip()
+        ]
+        code = str(item.get("code") or item.get("category_code") or "").strip()
+        if not code:
+            seed = json.dumps({"label": label, "path": path}, ensure_ascii=False, sort_keys=True)
+            code = f"custom_{hashlib.sha1(seed.encode('utf-8')).hexdigest()[:12]}"
+        if not BANK_TRANSACTION_TAG_CODE_RE.match(code):
+            code = f"custom_{hashlib.sha1(code.encode('utf-8')).hexdigest()[:12]}"
+        source = str(item.get("source") or "custom").strip()
+        if source not in {"system", "custom"}:
+            source = "custom"
+        status = str(item.get("status") or "active").strip()
+        if status not in {"active", "archived"}:
+            status = "active"
+        return {
+            "code": code,
+            "label": label or code,
+            "path": path,
+            "source": source,
+            "status": status,
+        }
+
+    def _normalize_categories(self, categories: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
         normalized: dict[str, dict[str, Any]] = {}
         for transaction_id, record in categories.items():
             if not isinstance(record, dict):
                 continue
-            normalized_id = cls._normalize_transaction_id(transaction_id or record.get("transaction_id"))
+            normalized_id = self._normalize_transaction_id(transaction_id or record.get("transaction_id"))
             if not normalized_id:
                 continue
-            category_code = cls._normalize_category_code(record.get("category_code"))
+            category_code = self._normalize_category_code_current(record.get("category_code"))
             normalized[normalized_id] = {
                 "transaction_id": normalized_id,
                 "category_code": category_code,
-                "category_label": cls.label_for(category_code),
-                "category_path": cls.path_for(category_code),
+                "category_label": self._label_for(category_code),
+                "category_path": self._path_for(category_code),
                 "source": str(record.get("source") or "manual").strip() or "manual",
                 "updated_by": str(record.get("updated_by") or "").strip(),
                 "updated_at": str(record.get("updated_at") or "").strip(),
-                "version": cls._normalize_version(record.get("version")),
+                "version": self._normalize_version(record.get("version")),
             }
         return normalized
 
-    @classmethod
-    def _normalize_update(cls, update: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_update(self, update: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(update, dict):
             raise BankTransactionCategoryValidationError(
                 "invalid_category_update",
                 "each update must be an object.",
             )
-        transaction_id = cls._normalize_transaction_id(update.get("transaction_id"))
+        transaction_id = self._normalize_transaction_id(update.get("transaction_id"))
         if not transaction_id:
             raise BankTransactionCategoryValidationError(
                 "unknown_transaction_id",
@@ -447,15 +565,23 @@ class BankTransactionCategoryService:
         category_code = None if raw_code is None else str(raw_code).strip()
         if category_code == "":
             category_code = None
-        if category_code is not None and category_code not in BANK_TRANSACTION_CATEGORY_LABELS:
-            raise BankTransactionCategoryValidationError(
-                "invalid_category_code",
-                f"Invalid bank transaction category code: {category_code}",
-                transaction_id=transaction_id,
-            )
+        if category_code is not None:
+            definition = self._tag_definitions_by_code.get(category_code)
+            if not isinstance(definition, dict):
+                raise BankTransactionCategoryValidationError(
+                    "invalid_category_code",
+                    f"Invalid bank transaction category code: {category_code}",
+                    transaction_id=transaction_id,
+                )
+            if definition.get("status") == "archived":
+                raise BankTransactionCategoryValidationError(
+                    "archived_category_code",
+                    f"Archived bank transaction category code cannot be selected: {category_code}",
+                    transaction_id=transaction_id,
+                )
         expected_version = update.get("expected_version")
         if expected_version is not None:
-            expected_version = cls._normalize_version(expected_version)
+            expected_version = self._normalize_version(expected_version)
         return {
             "transaction_id": transaction_id,
             "category_code": category_code,
@@ -477,6 +603,16 @@ class BankTransactionCategoryService:
             return None
         return category_code
 
+    def _normalize_category_code_current(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        category_code = str(value or "").strip()
+        if not category_code:
+            return None
+        if category_code not in self._tag_definitions_by_code:
+            return category_code if category_code.startswith("custom_") else None
+        return category_code
+
     @staticmethod
     def _normalize_version(value: Any) -> int:
         try:
@@ -487,15 +623,49 @@ class BankTransactionCategoryService:
     def _current_version(self, transaction_id: str) -> int:
         return self._normalize_version(self._categories.get(transaction_id, {}).get("version"))
 
-    @classmethod
-    def _public_record(cls, transaction_id: str, record: dict[str, Any] | None) -> dict[str, Any]:
+    def _label_for(self, category_code: str | None) -> str | None:
+        if category_code is None:
+            return None
+        definition = self._tag_definitions_by_code.get(category_code)
+        if isinstance(definition, dict):
+            return str(definition.get("label") or category_code)
+        return self.label_for(category_code)
+
+    def _path_for(self, category_code: str | None) -> list[str]:
+        if category_code is None:
+            return []
+        definition = self._tag_definitions_by_code.get(category_code)
+        if isinstance(definition, dict):
+            return [
+                str(item)
+                for item in list(definition.get("path") or [])
+                if str(item).strip()
+            ]
+        return self.path_for(category_code)
+
+    def tag_count_keys(self) -> list[str]:
+        with self._lock:
+            active_codes = [
+                str(code)
+                for code, definition in self._tag_definitions_by_code.items()
+                if definition.get("status") == "active"
+            ]
+        return [*active_codes, "uncategorized"]
+
+    def has_tag_definition(self, category_code: str | None) -> bool:
+        if category_code is None:
+            return False
+        with self._lock:
+            return str(category_code) in self._tag_definitions_by_code
+
+    def _public_record(self, transaction_id: str, record: dict[str, Any] | None) -> dict[str, Any]:
         category_code = record.get("category_code") if isinstance(record, dict) else None
-        version = cls._normalize_version(record.get("version")) if isinstance(record, dict) else 0
+        version = self._normalize_version(record.get("version")) if isinstance(record, dict) else 0
         return {
             "transaction_id": transaction_id,
             "category_code": category_code,
-            "category_label": cls.label_for(category_code),
-            "category_path": cls.path_for(category_code),
+            "category_label": self._label_for(category_code),
+            "category_path": self._path_for(category_code),
             "category_version": version,
             "source": str(record.get("source") or "") if isinstance(record, dict) else "",
             "updated_by": str(record.get("updated_by") or "") if isinstance(record, dict) else "",

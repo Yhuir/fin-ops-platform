@@ -1,3 +1,8 @@
+import type {
+  BankTransactionTagDictionary,
+  PendingInvoiceTagGroups,
+} from "../pendingInvoices/types";
+
 export type WorkbenchRecordType = "oa" | "bank" | "invoice";
 
 export type WorkbenchSourceKind =
@@ -128,6 +133,8 @@ export type WorkbenchSettings = {
   oaInvoiceOffset: {
     applicantNames: string[];
   };
+  bankTransactionTags: BankTransactionTagDictionary;
+  pendingInvoiceTagGroups: PendingInvoiceTagGroups;
 };
 
 export type WorkbenchPaneRows = {

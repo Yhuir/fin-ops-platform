@@ -120,6 +120,7 @@ class BankDetailsService:
             "date_to": date_to,
             "rows": rows[start:end],
             "category_counts": self._category_counts(rows),
+            "bank_transaction_tags": self._bank_transaction_tags_payload(),
             "pagination": {
                 "page": normalized_page,
                 "page_size": normalized_page_size,
@@ -280,17 +281,31 @@ class BankDetailsService:
             payload["relation_case_id"] = str(relation.get("case_id") or "").strip()
         return payload
 
-    @staticmethod
-    def _category_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
-        counts = {key: 0 for key in BANK_TRANSACTION_CATEGORY_COUNT_KEYS}
+    def _category_counts(self, rows: list[dict[str, Any]]) -> dict[str, int]:
+        if self._category_service is not None:
+            counts = {key: 0 for key in self._category_service.tag_count_keys()}
+        else:
+            counts = {key: 0 for key in BANK_TRANSACTION_CATEGORY_COUNT_KEYS}
         for row in rows:
             category_code = row.get("effective_category_code")
-            if category_code in BANK_TRANSACTION_CATEGORY_LABELS:
+            if self._has_category_definition(category_code):
                 counts.setdefault(str(category_code), 0)
                 counts[str(category_code)] += 1
             else:
                 counts["uncategorized"] += 1
         return counts
+
+    def _has_category_definition(self, category_code: Any) -> bool:
+        if self._category_service is not None:
+            return self._category_service.has_tag_definition(
+                str(category_code) if category_code is not None else None
+            )
+        return category_code in BANK_TRANSACTION_CATEGORY_LABELS
+
+    def _bank_transaction_tags_payload(self) -> dict[str, Any]:
+        if self._category_service is None:
+            return {"version": 1, "definitions": []}
+        return self._category_service.tag_dictionary_payload()
 
     @classmethod
     def _row_matches_keyword(cls, row: dict[str, Any], keyword: str) -> bool:

@@ -29,6 +29,22 @@ import type {
 } from "../features/workbench/types";
 
 const READONLY_ACTION_MESSAGE = "当前账号仅支持查看和导出，不能保存设置。";
+const TAG_SYNC_EVENT = "finops:bank-transaction-tags-updated";
+const TAG_VERSION_STORAGE_KEY = "finops.bankTransactionTags.version";
+
+function broadcastBankTransactionTagsUpdated(version: number) {
+  try {
+    window.localStorage.setItem(TAG_VERSION_STORAGE_KEY, String(version));
+  } catch {
+    // localStorage can be unavailable in embedded shells.
+  }
+  window.dispatchEvent(new CustomEvent(TAG_SYNC_EVENT, { detail: { version } }));
+  if (typeof BroadcastChannel !== "undefined") {
+    const channel = new BroadcastChannel(TAG_SYNC_EVENT);
+    channel.postMessage({ version });
+    channel.close();
+  }
+}
 
 function settingsActorId(session: ReturnType<typeof useSession>) {
   return session.status === "authenticated" || session.status === "forbidden"
@@ -171,6 +187,8 @@ export default function SettingsPage() {
     oaRetention: WorkbenchSettings["oaRetention"];
     oaImport: WorkbenchSettings["oaImport"];
     oaInvoiceOffset: WorkbenchSettings["oaInvoiceOffset"];
+    bankTransactionTags: WorkbenchSettings["bankTransactionTags"];
+    pendingInvoiceTagGroups: WorkbenchSettings["pendingInvoiceTagGroups"];
   }) => {
     if (!canMutateData) {
       setPageFeedback({ tone: "error", message: READONLY_ACTION_MESSAGE });
@@ -185,6 +203,7 @@ export default function SettingsPage() {
     try {
       const saved = await saveWorkbenchSettings(payload);
       setSettings(saved);
+      broadcastBankTransactionTagsUpdated(saved.bankTransactionTags.version);
       setPageFeedback({ tone: "success", message: "已保存关联台设置。" });
     } catch (error) {
       setPageFeedback({ tone: "error", message: normalizeSettingsError(error, "保存设置失败，请稍后重试。") });

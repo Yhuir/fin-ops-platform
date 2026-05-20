@@ -1,5 +1,6 @@
 import type {
   BankAccountMapping,
+  WorkbenchSettings,
   WorkbenchAccessRole,
   WorkbenchOaImportSettings,
   WorkbenchProjectSetting,
@@ -16,6 +17,8 @@ export type ManagedAccessAccount = {
 export type SettingsSectionId =
   | "projects"
   | "bank_accounts"
+  | "bank_transaction_tags"
+  | "pending_invoice_tags"
   | "oa_retention"
   | "oa_invoice_offset"
   | "access_accounts"
@@ -76,6 +79,29 @@ export type SettingsBankAccountsSectionProps = {
   onAddMapping: () => void;
   onUpdateMapping: (mappingId: string, updater: (mapping: BankAccountMapping) => BankAccountMapping) => void;
   onDeleteMapping: (mappingId: string) => void;
+};
+
+export type SettingsBankTransactionTagsSectionProps = {
+  controlsDisabled: boolean;
+  tags: WorkbenchSettings["bankTransactionTags"]["tags"];
+  labelDraft: string;
+  pathDraft: string;
+  onChangeLabelDraft: (value: string) => void;
+  onChangePathDraft: (value: string) => void;
+  onAddTag: () => void;
+  onRenameTag: (code: string, label: string) => void;
+  onArchiveTag: (code: string) => void;
+};
+
+export type SettingsPendingInvoiceTagsSectionProps = {
+  controlsDisabled: boolean;
+  tags: WorkbenchSettings["bankTransactionTags"]["tags"];
+  groups: WorkbenchSettings["pendingInvoiceTagGroups"];
+  activeGroup: keyof WorkbenchSettings["pendingInvoiceTagGroups"];
+  onSelectGroup: (group: keyof WorkbenchSettings["pendingInvoiceTagGroups"]) => void;
+  onAddExistingTag: (code: string) => void;
+  onCreateAndAddTag: (label: string) => void;
+  onRemoveTag: (code: string) => void;
 };
 
 export type SettingsOaRetentionSectionProps = {

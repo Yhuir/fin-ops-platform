@@ -416,6 +416,8 @@ class ImportNormalizationService:
             "remark": self._string_or_none(raw_row.get("remark")),
             "project_id": self._string_or_none(raw_row.get("project_id")),
             "oa_form_id": self._string_or_none(raw_row.get("oa_form_id")),
+            "pending_invoice_request_key": self._string_or_none(raw_row.get("pending_invoice_request_key")),
+            "pending_invoice_bank_transaction_id": self._string_or_none(raw_row.get("pending_invoice_bank_transaction_id")),
             "tags": self._normalize_tags(raw_row.get("tags")),
         }
         errors: list[str] = []
@@ -999,12 +1001,19 @@ class ImportNormalizationService:
                 self._invoice_unique_index[invoice.source_unique_key] = invoice.id
 
     def _build_invoice_source_link(self, batch_id: str, normalized: dict[str, Any]) -> dict[str, str]:
-        return {
+        source_link = {
             "source_type": "manual_invoice_import",
             "source_id": normalized.get("source_unique_key") or normalized.get("data_fingerprint") or "",
             "batch_id": batch_id,
             "created_at": datetime.now(UTC).isoformat(),
         }
+        request_key = str(normalized.get("pending_invoice_request_key") or "").strip()
+        bank_transaction_id = str(normalized.get("pending_invoice_bank_transaction_id") or "").strip()
+        if request_key:
+            source_link["request_key"] = request_key
+        if bank_transaction_id:
+            source_link["bank_transaction_id"] = bank_transaction_id
+        return source_link
 
     @staticmethod
     def _append_invoice_source_link(invoice: Invoice, source_link: dict[str, str]) -> None:

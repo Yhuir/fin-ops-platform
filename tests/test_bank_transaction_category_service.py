@@ -79,6 +79,110 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
         self.assertEqual(result["updated_categories"][1]["category_label"], "工资")
         self.assertEqual(result["updated_categories"][1]["category_path"], ["自动识别", "工资"])
 
+    def test_system_categories_are_exposed_as_seed_tag_definitions(self) -> None:
+        service = BankTransactionCategoryService.from_snapshot(None)
+
+        payload = service.tag_dictionary_payload()
+        definitions_by_code = {
+            definition["code"]: definition
+            for definition in payload["definitions"]
+        }
+
+        self.assertEqual(payload["version"], 1)
+        self.assertEqual(
+            definitions_by_code["borrow_in_company_pending_repayment"],
+            {
+                "code": "borrow_in_company_pending_repayment",
+                "label": "公司暂借款：待还款",
+                "path": ["借入", "公司往来款", "待还款"],
+                "source": "system",
+                "status": "active",
+            },
+        )
+        self.assertEqual(definitions_by_code["fee"]["source"], "system")
+        self.assertEqual(definitions_by_code["fee"]["status"], "active")
+        self.assertEqual(definitions_by_code["fee"]["path"], ["自动识别", "手续费"])
+        self.assertIn("internal_transfer", definitions_by_code)
+
+    def test_configured_custom_tag_is_valid_manual_choice(self) -> None:
+        service = BankTransactionCategoryService.from_snapshot(
+            None,
+            transaction_exists=lambda transaction_id: transaction_id == "txn-custom",
+        )
+        service.configure_tag_dictionary(
+            {
+                "version": 3,
+                "definitions": [
+                    {
+                        "code": "custom_meal_without_invoice",
+                        "label": "餐费无需发票",
+                        "path": ["自定义", "餐费"],
+                        "source": "custom",
+                        "status": "active",
+                    }
+                ],
+            }
+        )
+
+        result = service.apply_updates(
+            [
+                {
+                    "transaction_id": "txn-custom",
+                    "category_code": "custom_meal_without_invoice",
+                    "expected_version": 0,
+                }
+            ],
+            actor="YNSYLP005",
+        )
+
+        self.assertEqual(result["updated_categories"][0]["category_label"], "餐费无需发票")
+        self.assertEqual(result["updated_categories"][0]["category_path"], ["自定义", "餐费"])
+        self.assertEqual(service.get("txn-custom")["category_code"], "custom_meal_without_invoice")
+
+    def test_archived_tag_remains_resolvable_but_cannot_be_new_manual_choice(self) -> None:
+        service = BankTransactionCategoryService.from_snapshot(
+            {
+                "categories": {
+                    "txn-archived": {
+                        "transaction_id": "txn-archived",
+                        "category_code": "custom_archived_tag",
+                        "source": "manual",
+                        "version": 2,
+                    }
+                }
+            },
+            transaction_exists=lambda transaction_id: transaction_id in {"txn-archived", "txn-new"},
+        )
+        service.configure_tag_dictionary(
+            {
+                "version": 4,
+                "definitions": [
+                    {
+                        "code": "custom_archived_tag",
+                        "label": "历史停用标签",
+                        "path": ["历史"],
+                        "source": "custom",
+                        "status": "archived",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(service.get("txn-archived")["category_label"], "历史停用标签")
+        with self.assertRaises(BankTransactionCategoryValidationError) as context:
+            service.apply_updates(
+                [
+                    {
+                        "transaction_id": "txn-new",
+                        "category_code": "custom_archived_tag",
+                        "expected_version": 0,
+                    }
+                ],
+                actor="YNSYLP005",
+            )
+
+        self.assertEqual(context.exception.error_code, "archived_category_code")
+
     def test_apply_updates_rejects_unknown_transaction(self) -> None:
         service = BankTransactionCategoryService.from_snapshot(
             None,
