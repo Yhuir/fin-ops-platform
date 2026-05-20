@@ -1,0 +1,5 @@
+MainPID=452671
+ExecMainStartTimestamp=Wed 2026-05-20 16:07:52 CST
+WorkingDirectory=/opt/fin-ops/current
+ActiveState=active
+SubState=running

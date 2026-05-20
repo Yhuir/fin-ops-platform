@@ -31,9 +31,10 @@ PYTHONPATH=backend/src python3 -m unittest discover -s tests -v
 
 ## 持久化
 
-- 启动脚本默认以 `FIN_OPS_STORAGE_MODE=mongo_only` 运行。
-- 生产模式下 app 状态快照、明细集合和原始导入文件写入 app Mongo。
-- OA 数据库保持只读，app 自身状态写入独立库 `fin_ops_platform_app`。
+- 生产主读写通过 `FIN_OPS_APP_STORAGE_BACKEND=postgres` 和 `FIN_OPS_APP_READ_BACKEND=postgres` 接入 PostgreSQL。
+- PostgreSQL 连接使用 `FIN_OPS_POSTGRES_DATABASE_URL` 或 `DATABASE_URL`，生产环境应从 root-only credential file 注入。
+- app Mongo 旧路径仍保留，用于迁移观察期回滚、shadow-read、导出和审计工具。
+- OA 数据库保持只读，只能通过 `MongoOAAdapter` 读取，不能作为 app 写库。
 
 ## 相关文档
 

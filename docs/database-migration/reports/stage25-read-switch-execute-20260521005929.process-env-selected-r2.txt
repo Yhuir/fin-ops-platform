@@ -1,0 +1,5 @@
+FIN_OPS_DATA_DIR=/opt/fin-ops/data
+FIN_OPS_APP_STORAGE_BACKEND=postgres
+FIN_OPS_APP_READ_BACKEND=postgres
+FIN_OPS_POSTGRES_CUTOVER_PHASE=postgres_primary
+PYTHONPATH=/opt/fin-ops/releases/stage25B-workbench-candidate-snapshot-repair-20260521004245/src/backend/src

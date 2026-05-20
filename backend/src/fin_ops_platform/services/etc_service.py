@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from enum import Enum
@@ -1946,11 +1946,23 @@ class EtcService:
         self._import_batch_counter = int(snapshot.get("import_batch_counter", 0) or 0)
         self._business_batch_counter = int(snapshot.get("business_batch_counter", 0) or 0)
         self._batch_day_counters = dict(snapshot.get("batch_day_counters") or {})
-        self._invoices = dict(snapshot.get("invoices") or {})
+        self._invoices = {
+            str(key): _etc_invoice_from_snapshot(value)
+            for key, value in dict(snapshot.get("invoices") or {}).items()
+        }
         self._invoice_numbers = dict(snapshot.get("invoice_numbers") or {})
-        self._batches = dict(snapshot.get("batches") or {})
-        self._import_batches = dict(snapshot.get("import_batches") or {})
-        self._business_batches = dict(snapshot.get("business_batches") or {})
+        self._batches = {
+            str(key): _etc_batch_from_snapshot(value)
+            for key, value in dict(snapshot.get("batches") or {}).items()
+        }
+        self._import_batches = {
+            str(key): _etc_import_batch_from_snapshot(value)
+            for key, value in dict(snapshot.get("import_batches") or {}).items()
+        }
+        self._business_batches = {
+            str(key): _etc_business_batch_from_snapshot(value)
+            for key, value in dict(snapshot.get("business_batches") or {}).items()
+        }
         for invoice in self._invoices.values():
             if isinstance(invoice.status, str):
                 invoice.status = _coerce_invoice_status(invoice.status)
@@ -3072,6 +3084,86 @@ def _coerce_invoice_status(status: EtcInvoiceStatus | str) -> EtcInvoiceStatus:
         return EtcInvoiceStatus(str(status))
     except ValueError as exc:
         raise EtcInvoiceRequestError("status must be unsubmitted or submitted.") from exc
+
+
+def _etc_invoice_from_snapshot(value: object) -> EtcInvoice:
+    if isinstance(value, EtcInvoice):
+        return value
+    raw = _coerce_snapshot_dict(EtcInvoice, value)
+    raw["status"] = _coerce_invoice_status(raw.get("status") or EtcInvoiceStatus.UNSUBMITTED.value)
+    for field_name in ("amount_without_tax", "tax_amount", "total_amount"):
+        raw[field_name] = _decimal_from_snapshot(raw.get(field_name), default=Decimal("0.00"))
+    for field_name in ("created_at", "updated_at"):
+        raw[field_name] = _datetime_from_snapshot(raw.get(field_name))
+    return EtcInvoice(**raw)
+
+
+def _etc_batch_from_snapshot(value: object) -> EtcBatch:
+    if isinstance(value, EtcBatch):
+        return value
+    raw = _coerce_snapshot_dict(EtcBatch, value)
+    for field_name in ("total_amount", "amount_delta", "oa_total_amount", "etc_invoice_amount", "supplement_amount"):
+        if field_name in raw:
+            raw[field_name] = _decimal_from_snapshot(raw.get(field_name), default=None)
+    for field_name in ("created_at", "confirmed_at"):
+        if field_name in raw:
+            raw[field_name] = _datetime_from_snapshot(raw.get(field_name), default=None)
+    return EtcBatch(**raw)
+
+
+def _etc_import_batch_from_snapshot(value: object) -> EtcImportBatch:
+    if isinstance(value, EtcImportBatch):
+        return value
+    raw = _coerce_snapshot_dict(EtcImportBatch, value)
+    raw["total_amount"] = _decimal_from_snapshot(raw.get("total_amount"), default=Decimal("0.00"))
+    for field_name in ("created_at", "updated_at"):
+        raw[field_name] = _datetime_from_snapshot(raw.get(field_name))
+    return EtcImportBatch(**raw)
+
+
+def _etc_business_batch_from_snapshot(value: object) -> EtcBusinessBatch:
+    if isinstance(value, EtcBusinessBatch):
+        return value
+    raw = _coerce_snapshot_dict(EtcBusinessBatch, value)
+    for field_name in (
+        "oa_detection_started_at",
+        "oa_detection_next_run_at",
+        "oa_detection_deadline_at",
+        "oa_detection_final_retry_until",
+        "created_at",
+        "updated_at",
+    ):
+        if field_name in raw:
+            raw[field_name] = _datetime_from_snapshot(raw.get(field_name), default=None)
+    return EtcBusinessBatch(**raw)
+
+
+def _coerce_snapshot_dict(cls: type[object], value: object) -> dict[str, object]:
+    raw = dict(value) if isinstance(value, dict) else {}
+    allowed = {item.name for item in fields(cls)}
+    return {key: item for key, item in raw.items() if key in allowed}
+
+
+def _datetime_from_snapshot(value: object, *, default: datetime | None = None) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if value:
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            pass
+    return datetime.now(UTC) if default is None else default
+
+
+def _decimal_from_snapshot(value: object, *, default: Decimal | None) -> Decimal | None:
+    if value in (None, ""):
+        return default
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value).replace(",", ""))
+    except (InvalidOperation, ValueError):
+        return default
 
 
 def _required_text(values: dict[str, str], field_name: str) -> str:

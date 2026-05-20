@@ -1,0 +1,24 @@
+{
+  "app_mongo_written": false,
+  "credential_file": "/root/fin_ops_stage23_postgres_runtime.env",
+  "credential_file_contains_secret": true,
+  "gate_recommendation": "BLOCKED_NO_TRAFFIC_POSTGRES_SMOKE",
+  "modified_opt_fin_ops_current": false,
+  "modified_opt_fin_ops_venv": false,
+  "modified_systemd_or_live_env": false,
+  "oa_mongo_form_data_touched": false,
+  "postgres_mode_check": {
+    "exit_code": 1,
+    "redacted": true,
+    "run_id": "stage23-release-runtime-20260520233115"
+  },
+  "production_postgresql_role_or_privilege_changed": true,
+  "production_read_switch": false,
+  "redacted_dsn": "postgresql://fin_ops_app_runtime:***@127.0.0.1:5432/fin_ops",
+  "release_base": "/opt/fin-ops/releases/stage23-release-runtime-20260520233115",
+  "release_data_dir": "/opt/fin-ops/releases/stage23-release-runtime-20260520233115/data",
+  "release_src": "/opt/fin-ops/releases/stage23-release-runtime-20260520233115/src",
+  "release_venv": "/opt/fin-ops/releases/stage23-release-runtime-20260520233115/venv",
+  "restarted_fin_ops_service": false,
+  "run_id": "stage23-release-runtime-20260520233115"
+}

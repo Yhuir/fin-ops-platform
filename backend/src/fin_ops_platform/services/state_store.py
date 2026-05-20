@@ -177,7 +177,7 @@ def load_mongo_state_settings(data_dir: Path | None = None) -> MongoStateSetting
 
 
 class ApplicationStateStore:
-    def __init__(self, data_dir: Path | None = None) -> None:
+    def __init__(self, data_dir: Path | None = None, *, read_only: bool = False) -> None:
         root = data_dir or default_data_dir()
         self._data_dir = root
         self._legacy_state_path = root / "state.pkl"
@@ -215,6 +215,7 @@ class ApplicationStateStore:
         self._mongo_meta_collection: Any | None = None
         self._mongo_detailed_collections: dict[str, Any] = {}
         self._mongo_file_bucket: GridFSBucket | None = None
+        self._read_only = read_only
         if self._mongo_settings is not None:
             self._mongo_client = MongoClient(
                 self._mongo_settings.mongo_uri,
@@ -285,7 +286,8 @@ class ApplicationStateStore:
                 "app_health_alerts": self._mongo_database[APP_HEALTH_ALERTS_COLLECTION],
             }
             self._mongo_file_bucket = GridFSBucket(self._mongo_database, bucket_name=GRIDFS_BUCKET_NAME)
-            self._ensure_mongo_metadata()
+            if not self._read_only:
+                self._ensure_mongo_metadata()
         else:
             self._import_file_root.mkdir(parents=True, exist_ok=True)
 
@@ -2455,6 +2457,12 @@ class ApplicationStateStore:
     def _load_pending_invoice_commands_detailed_payload(self) -> dict[str, Any]:
         commands = self._load_entities_by_id(self._mongo_detailed_collections["pending_invoice_commands"])
         return commands if isinstance(commands, dict) else {}
+
+    def load_pending_invoice_commands(self) -> dict[str, Any]:
+        return self._load_pending_invoice_commands_detailed_payload()
+
+    def save_pending_invoice_commands(self, snapshot: dict[str, Any]) -> None:
+        self._save_pending_invoice_commands_detailed(snapshot, datetime.now(UTC))
 
     def _load_app_health_alerts_detailed_payload(self) -> dict[str, Any]:
         document = self._mongo_detailed_collections["app_health_alerts"].find_one({"_id": STATE_DOCUMENT_ID})

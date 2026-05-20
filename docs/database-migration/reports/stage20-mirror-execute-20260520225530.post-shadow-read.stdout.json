@@ -1,0 +1,507 @@
+{
+  "completed_at": "2026-05-20T14:55:56+00:00",
+  "domain_results": [
+    {
+      "domain": "app_settings",
+      "error": null,
+      "matched": true,
+      "method_name": "load_app_settings",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "app_settings",
+        "expected_shape": "settings payload",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_app_settings",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "pending_invoice_commands",
+      "error": null,
+      "matched": true,
+      "method_name": "load_pending_invoice_commands",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "pending_invoice_commands",
+        "expected_shape": "request id -> pending invoice command",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_pending_invoice_commands",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "background_jobs",
+      "error": null,
+      "matched": true,
+      "method_name": "load_background_jobs",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "background_jobs",
+        "expected_shape": "job id -> job snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_background_jobs",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P2",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "app_health_alerts",
+      "error": null,
+      "matched": false,
+      "method_name": "load_app_health_alerts",
+      "mismatch_count": 12,
+      "mismatches": [
+        {
+          "kind": "value_mismatch",
+          "path": "records.app_health_2afc5d527e8d4f07.first_seen_at",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "c8255635225e8577bdab4393211b97a0adef002dbf7c2d7213fccc8ca62cf160",
+            "type": "str"
+          },
+          "severity": "P2",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "4ecc3a4c1d282fc6f45839bbc31616a729d1e7dc1a9f5ab35d57b324475368bb",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "records.app_health_2afc5d527e8d4f07.last_seen_at",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "f7c55b2ab477f898fe70eca7358f04346653aa4ecf4f3c0a50dd6cd9355d1516",
+            "type": "str"
+          },
+          "severity": "P2",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "3908db2cbc39291f339fcdaf68626e3cb082dbf987f100c8cc834469d29f27b1",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "records.app_health_2afc5d527e8d4f07.message",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "445409ac2c32017cafb81925c2e575344c647919276fb833902c2e87d3232b2e",
+            "type": "str"
+          },
+          "severity": "P2",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "e50ed7bde00a90f0c6a2e5a226815f9c6b5b2defd66cb651aae4a10fbe5834a2",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "records.app_health_2afc5d527e8d4f07.recovered_at",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "f7c55b2ab477f898fe70eca7358f04346653aa4ecf4f3c0a50dd6cd9355d1516",
+            "type": "str"
+          },
+          "severity": "P2",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "3908db2cbc39291f339fcdaf68626e3cb082dbf987f100c8cc834469d29f27b1",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "records.app_health_701dca35c28cd5c2.first_seen_at",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "bdbe45ced8ced55fb82e7ac90299b1790818db6ea61175b99b0dddabd96f1f69",
+            "type": "str"
+          },
+          "severity": "P2",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "02fa00f12fd622f55db94f86be525781c6ad40f509e7c05d4442466ddb17c27e",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "records.app_health_701dca35c28cd5c2.last_seen_at",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "bcf1d0b23dd839f7ed82e6b07cf72222ad89c528de24298e0dd7ceee8cb65214",
+            "type": "str"
+          },
+          "severity": "P2",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "bcb28af03a647c73e5f1a909d99649598d3818af4acbd63b7404cb9f5d7fe5b7",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "records.app_health_701dca35c28cd5c2.message",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "342b7e4692e4aa329dfa0cd7b667081638f9235eaa4b73128faf1623e1c2fcb8",
+            "type": "str"
+          },
+          "severity": "P2",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "3c464ab3494b138c1323684f9c872ed90a9a6483899ccfd7718ac0d89348d033",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "records.app_health_701dca35c28cd5c2.recovered_at",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "bcf1d0b23dd839f7ed82e6b07cf72222ad89c528de24298e0dd7ceee8cb65214",
+            "type": "str"
+          },
+          "severity": "P2",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "bcb28af03a647c73e5f1a909d99649598d3818af4acbd63b7404cb9f5d7fe5b7",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "records.app_health_7d1319b429056be7.first_seen_at",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "ad244e511a89edd4a76b54027343a39b190db85114da49cfd583fa8aacf10697",
+            "type": "str"
+          },
+          "severity": "P2",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "02fa00f12fd622f55db94f86be525781c6ad40f509e7c05d4442466ddb17c27e",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "records.app_health_7d1319b429056be7.last_seen_at",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "bcf1d0b23dd839f7ed82e6b07cf72222ad89c528de24298e0dd7ceee8cb65214",
+            "type": "str"
+          },
+          "severity": "P2",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "bcb28af03a647c73e5f1a909d99649598d3818af4acbd63b7404cb9f5d7fe5b7",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "records.app_health_7d1319b429056be7.message",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "9091b4c8c3127f633bee52fde0796dc405fb413233fbc57341fa4adb3fd65067",
+            "type": "str"
+          },
+          "severity": "P2",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "58607189e8de614d34c0ce64a1e3d581d3fe3bfd4dc4820e11fddd0180aa5e54",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "records.app_health_7d1319b429056be7.recovered_at",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "bcf1d0b23dd839f7ed82e6b07cf72222ad89c528de24298e0dd7ceee8cb65214",
+            "type": "str"
+          },
+          "severity": "P2",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "bcb28af03a647c73e5f1a909d99649598d3818af4acbd63b7404cb9f5d7fe5b7",
+            "type": "str"
+          }
+        }
+      ],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 12,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "app_health_alerts",
+        "expected_shape": "alert id -> alert snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_app_health_alerts",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P2",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "mismatched"
+    },
+    {
+      "domain": "workbench_pair_relations",
+      "error": null,
+      "matched": true,
+      "method_name": "load_workbench_pair_relations",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "workbench_pair_relations",
+        "expected_shape": "case id -> relation snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_workbench_pair_relations",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P0",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "no_oa_bank_batches",
+      "error": null,
+      "matched": true,
+      "method_name": "load_no_oa_bank_batches",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "no_oa_bank_batches",
+        "expected_shape": "batch id -> batch snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_no_oa_bank_batches",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P0",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "bank_transaction_categories",
+      "error": null,
+      "matched": true,
+      "method_name": "load_bank_transaction_categories",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "bank_transaction_categories",
+        "expected_shape": "category snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_bank_transaction_categories",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "turnover_relations",
+      "error": null,
+      "matched": true,
+      "method_name": "load_turnover_relations",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "turnover_relations",
+        "expected_shape": "relation id -> turnover relation",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_turnover_relations",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P0",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "matched"
+    }
+  ],
+  "gate_recommendation": "PARTIAL",
+  "primary_backend": "mongo",
+  "redacted": true,
+  "run_id": "stage20-mirror-execute-20260520225530-post",
+  "shadow_backend": "postgres_psql_json",
+  "started_at": "2026-05-20T14:55:55+00:00",
+  "summary": {
+    "blocked_domains": 0,
+    "compared_domains": 8,
+    "matched_domains": 7,
+    "mismatched_domains": 1,
+    "primary_errors": 0,
+    "severity_counts": {
+      "P0": 0,
+      "P1": 0,
+      "P2": 12,
+      "ignored": 0
+    },
+    "shadow_errors": 0,
+    "status_counts": {
+      "matched": 7,
+      "mismatched": 1
+    },
+    "total_domains": 8
+  }
+}

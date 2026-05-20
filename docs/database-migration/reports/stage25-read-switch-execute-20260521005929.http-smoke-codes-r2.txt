@@ -1,0 +1,5 @@
+/health 200
+/api/session/me 401
+/api/workbench/settings 401
+/api/background-jobs/active 401
+/api/etc/invoices 401

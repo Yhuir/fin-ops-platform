@@ -6,7 +6,7 @@
 
 - 前端：React + TypeScript + Vite，正式页面在 `web/`。
 - 后端：Python 服务，HTTP 入口仍是自定义 server，业务服务集中在 `backend/src/fin_ops_platform/services/`。
-- App 状态：生产模式以 MongoDB detailed collections 和 GridFS 持久化为主，保留本地 pickle/JSON 兼容路径。
+- App 状态：生产主读写使用 PostgreSQL；Mongo detailed collections/GridFS 旧路径保留为迁移观察期回滚、shadow-read 和审计工具使用。
 - OA 数据源：通过 `MongoOAAdapter` 只读读取 OA MongoDB。
 - 部署：当前已有 OA 同域部署资产，前端路径 `/fin-ops/`，后端路径 `/fin-ops-api/`。
 
@@ -34,6 +34,9 @@ OA Adapter       Import/File Services
    +------> 业务服务与状态投影 <------+
                     |                 |
                     v                 |
+              PostgreSQL app store    |
+                    |                 |
+                    v                 |
         Workbench pair relations      |
                     |                 |
                     v                 |
@@ -55,9 +58,9 @@ OA Adapter       Import/File Services
 
 当前系统已经拆出 pair relations、read models、candidate matches、dirty scopes 等性能相关模型。后续如果做高性能生产重构，建议优先处理：
 
-1. 将财务主业务事实迁入 PostgreSQL，Mongo 保留为 OA 源读取、附件缓存或非核心读模型。
-2. 将 `ApplicationStateStore` 中的整包 snapshot 语义拆成明确 repository。
-3. 将工作台、搜索、成本统计、税金抵扣全部改为数据库可索引查询和物化读模型。
+1. 完成 PostgreSQL primary 的观察期，保留 app Mongo 回滚路径直到 contract 阶段。
+2. 继续把 `ApplicationStateStore` 中的兼容 snapshot 语义收敛成明确 repository。
+3. 将工作台、搜索、成本统计、税金抵扣的高频查询进一步优化为数据库可索引查询和物化读模型。
 4. 将导入、OCR、OA 同步、统计预热迁入后台任务。
 5. 对核心接口建立压测基线和 `EXPLAIN ANALYZE` 调优闭环。
 

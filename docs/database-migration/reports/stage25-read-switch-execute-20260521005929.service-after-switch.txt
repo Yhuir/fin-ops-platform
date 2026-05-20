@@ -1,0 +1,9 @@
+MainPID=691007
+ExecMainStartTimestamp=Thu 2026-05-21 01:07:50 CST
+ExecStart={ path=/opt/fin-ops/releases/stage23-release-runtime-20260520233335/venv/bin/python ; argv[]=/opt/fin-ops/releases/stage23-release-runtime-20260520233335/venv/bin/python -m fin_ops_platform.app.main --host 127.0.0.1 --port 18001 ; ignore_errors=no ; start_time=[Thu 2026-05-21 01:07:50 CST] ; stop_time=[n/a] ; pid=691007 ; code=(null) ; status=0/0 }
+Environment=FIN_OPS_DATA_DIR=/opt/fin-ops/data FIN_OPS_OA_BASE_URL=https://www.yn-sourcing.com/oa-api FIN_OPS_ETC_OA_BASE_URL=https://www.yn-sourcing.com/oa-api FIN_OPS_ETC_OA_FILE_UPLOAD_PATH=/file/upload FIN_OPS_ETC_OA_FORM_DRAFT_PATH=/forms/form/{form_id}/records/record "FIN_OPS_ETC_OA_DRAFT_URL_TEMPLATE=https://www.yn-sourcing.com/oa/#/normal/forms/form/{form_id}?formId={form_id}&id={draft_id}" FIN_OPS_APP_STORAGE_BACKEND=postgres FIN_OPS_APP_READ_BACKEND=postgres FIN_OPS_POSTGRES_CUTOVER_PHASE=postgres_primary PYTHONPATH=/opt/fin-ops/releases/stage25B-workbench-candidate-snapshot-repair-20260521004245/src/backend/src
+WorkingDirectory=/opt/fin-ops/releases/stage25B-workbench-candidate-snapshot-repair-20260521004245/src
+ActiveState=active
+SubState=running
+FragmentPath=/etc/systemd/system/fin-ops.service
+DropInPaths=/etc/systemd/system/fin-ops.service.d/10-fin-ops-env.conf /etc/systemd/system/fin-ops.service.d/20-postgres-read-switch.conf

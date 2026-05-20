@@ -1,0 +1,728 @@
+from __future__ import annotations
+
+from dataclasses import is_dataclass
+from datetime import UTC, date, datetime
+from decimal import Decimal
+from enum import Enum
+from typing import Any
+
+from fin_ops_platform.domain.enums import BatchStatus, BatchType, ImportDecision, InvoiceStatus, InvoiceType, TransactionDirection, TransactionStatus
+from fin_ops_platform.domain.models import BankTransaction, Counterparty, ImportedBatch, ImportedBatchRowResult, Invoice
+from fin_ops_platform.services.import_file_service import FileImportPreviewItem, FileImportSession
+from fin_ops_platform.services.imports import ImportPreview
+from fin_ops_platform.services.postgres_repositories.common import jsonb as _jsonb
+
+
+class PostgresCoreRepository:
+    def __init__(self, connection: Any) -> None:
+        self._connection = connection
+
+    def load_imports(self) -> dict[str, Any]:
+        batches = self._connection.fetch_all(
+            """
+            select id::text as postgres_id, coalesce(legacy_mongo_id, id::text) as legacy_id,
+                   batch_type, source_name, imported_by, row_count, success_count,
+                   error_count, duplicate_count, suspected_duplicate_count, updated_count,
+                   status, imported_at, raw_payload
+            from app.import_batches
+            order by imported_at, legacy_id
+            """
+        )
+        invoices = self._connection.fetch_all(
+            """
+            select id::text as postgres_id, coalesce(legacy_mongo_id, id::text) as legacy_id,
+                   invoice_type, invoice_no, invoice_code, digital_invoice_no, source_unique_key,
+                   data_fingerprint, invoice_date, counterparty_id, counterparty_name, seller_name,
+                   seller_tax_no, buyer_name, buyer_tax_no, amount, signed_amount, written_off_amount,
+                   tax_rate, tax_amount, total_with_tax, currency, legacy_source_batch_id,
+                   oa_form_id, etc_invoice_id, workbench_visibility, status, tags, source_links, raw_payload
+            from app.invoices
+            order by created_at, legacy_id
+            """
+        )
+        transactions = self._connection.fetch_all(
+            """
+            select id::text as postgres_id, coalesce(legacy_mongo_id, id::text) as legacy_id,
+                   account_no, account_name, txn_direction, counterparty_name_raw,
+                   normalized_counterparty_name, amount, signed_amount, written_off_amount,
+                   txn_date, trade_time, pay_receive_time, bank_serial_no, source_unique_key,
+                   data_fingerprint, legacy_source_batch_id, counterparty_id, project_id, balance,
+                   currency, summary, remark, bank_text_fields, status, raw_payload
+            from app.bank_transactions
+            order by created_at, legacy_id
+            """
+        )
+        if not batches and not invoices and not transactions:
+            return {}
+        batch_rows = self._connection.fetch_all(
+            """
+            select rows.id::text as postgres_id, coalesce(rows.legacy_mongo_id, rows.id::text) as legacy_id,
+                   rows.legacy_batch_id, coalesce(batches.legacy_mongo_id, batches.id::text) as joined_batch_id,
+                   rows.row_no, rows.source_record_type, rows.source_unique_key, rows.data_fingerprint,
+                   rows.decision, rows.decision_reason, rows.linked_object_type, rows.linked_object_id,
+                   rows.identity_kind, rows.account_no, rows.trade_time, rows.direction, rows.amount,
+                   rows.counterparty_name, rows.raw_payload
+            from app.import_batch_rows rows
+            left join app.import_batches batches on batches.id = rows.import_batch_id
+            order by coalesce(rows.legacy_batch_id, batches.legacy_mongo_id, batches.id::text), rows.row_no
+            """
+        )
+        row_results_by_batch: dict[str, list[ImportedBatchRowResult]] = {}
+        normalized_rows_by_batch: dict[str, list[dict[str, Any]]] = {}
+        for row in batch_rows:
+            row_result = self._batch_row_from_row(row)
+            batch_id = row_result.batch_id
+            row_results_by_batch.setdefault(batch_id, []).append(row_result)
+            row_payload = self._row_payload(row)
+            normalized_row = row_payload.get("normalized_row") if isinstance(row_payload, dict) else None
+            normalized_rows_by_batch.setdefault(batch_id, []).append(dict(normalized_row if isinstance(normalized_row, dict) else {}))
+
+        preview_map: dict[str, ImportPreview] = {}
+        for row in batches:
+            batch = self._batch_from_row(row)
+            preview_map[batch.id] = ImportPreview(
+                batch=batch,
+                row_results=row_results_by_batch.get(batch.id, []),
+                normalized_rows=normalized_rows_by_batch.get(batch.id, []),
+            )
+        invoice_objects = [self._invoice_from_row(row) for row in invoices]
+        transaction_objects = [self._transaction_from_row(row) for row in transactions]
+        return {
+            "batch_counter": self._max_suffix(preview_map),
+            "row_counter": sum(len(rows) for rows in row_results_by_batch.values()),
+            "invoice_counter": len(invoice_objects),
+            "txn_counter": len(transaction_objects),
+            "counterparty_counter": len({invoice.counterparty.id for invoice in invoice_objects}),
+            "batches": preview_map,
+            "invoices": invoice_objects,
+            "transactions": transaction_objects,
+        }
+
+    def save_imports(self, snapshot: dict[str, Any]) -> None:
+        if not snapshot:
+            return
+        connection = self._connection
+        transaction_factory = getattr(connection, "transaction", None)
+        if callable(transaction_factory):
+            with transaction_factory() as tx:
+                self._save_imports_with_connection(tx, snapshot)
+        else:
+            self._save_imports_with_connection(connection, snapshot)
+
+    def load_file_imports(self) -> dict[str, Any]:
+        rows = self._connection.fetch_all(
+            """
+            select coalesce(import_files.legacy_mongo_id, import_files.id::text) as legacy_id,
+                   import_files.session_id, import_files.stored_file_path,
+                   import_files.original_filename, import_files.template_kind, import_files.status,
+                   import_files.uploaded_by, import_files.uploaded_at,
+                   coalesce(batches.legacy_mongo_id, batches.id::text) as joined_batch_id,
+                   import_files.raw_payload
+            from app.import_files import_files
+            left join app.import_batches batches on batches.id = import_files.import_batch_id
+            order by import_files.session_id, import_files.original_filename, legacy_id
+            """
+        )
+        sessions: dict[str, FileImportSession] = {}
+        for row in rows:
+            payload = self._row_payload(row)
+            if not isinstance(payload, dict):
+                payload = {}
+            session_id = self._text(payload.get("session_id") or row.get("session_id") or "default") or "default"
+            session = sessions.setdefault(
+                session_id,
+                FileImportSession(
+                    id=session_id,
+                    imported_by=self._text(payload.get("imported_by") or row.get("uploaded_by")) or "postgres",
+                    file_count=0,
+                    status=self._text(payload.get("session_status")) or "preview_ready",
+                    files=[],
+                    created_at=self._datetime(payload.get("created_at") or row.get("uploaded_at")),
+                ),
+            )
+            item = self._file_item_from_row(row, payload)
+            session.files.append(item)
+            session.file_count = len(session.files)
+            if any(file.status == "confirmed" for file in session.files):
+                session.status = "confirmed"
+        if not sessions:
+            return {}
+        return {
+            "session_counter": len(sessions),
+            "file_counter": sum(len(session.files) for session in sessions.values()),
+            "sessions": sessions,
+        }
+
+    def save_file_imports(self, snapshot: dict[str, Any]) -> None:
+        sessions = snapshot.get("sessions") if isinstance(snapshot, dict) else None
+        if not isinstance(sessions, dict):
+            return
+        for session_id, raw_session in sessions.items():
+            session_payload = self._serialize(raw_session)
+            if not isinstance(session_payload, dict):
+                continue
+            files = session_payload.get("files")
+            if not isinstance(files, list):
+                continue
+            for raw_file in files:
+                if not isinstance(raw_file, dict):
+                    continue
+                file_id = self._text(raw_file.get("id"))
+                if not file_id:
+                    continue
+                self._connection.execute(
+                    """
+                    insert into app.import_files(
+                        legacy_mongo_id, session_id, stored_file_path, original_filename,
+                        template_kind, status, raw_payload
+                    )
+                    values (%s, %s, %s, %s, %s, %s, %s)
+                    on conflict (legacy_mongo_id) do update set
+                        session_id = excluded.session_id,
+                        stored_file_path = excluded.stored_file_path,
+                        original_filename = excluded.original_filename,
+                        template_kind = excluded.template_kind,
+                        status = excluded.status,
+                        raw_payload = excluded.raw_payload
+                    """,
+                    (
+                        file_id,
+                        self._text(session_payload.get("id") or session_id),
+                        self._text(raw_file.get("stored_file_path")),
+                        self._text(raw_file.get("file_name")) or file_id,
+                        self._text(raw_file.get("template_code")),
+                        self._text(raw_file.get("status")) or "stored",
+                        _jsonb({"normalized_payload": {**raw_file, "session_id": self._text(session_payload.get("id") or session_id)}}),
+                    ),
+                )
+
+    def _save_imports_with_connection(self, connection: Any, snapshot: dict[str, Any]) -> None:
+        for preview in self._iter_previews(snapshot.get("batches")):
+            batch = preview.get("batch") if isinstance(preview.get("batch"), dict) else preview
+            if not isinstance(batch, dict):
+                continue
+            batch_id = self._text(batch.get("id"))
+            if not batch_id:
+                continue
+            connection.execute(
+                """
+                insert into app.import_batches(
+                    legacy_mongo_id, batch_type, source_name, imported_by, row_count,
+                    success_count, error_count, duplicate_count, suspected_duplicate_count,
+                    updated_count, status, imported_at, raw_payload
+                )
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s)
+                on conflict (legacy_mongo_id) do update set
+                    batch_type = excluded.batch_type,
+                    source_name = excluded.source_name,
+                    imported_by = excluded.imported_by,
+                    row_count = excluded.row_count,
+                    success_count = excluded.success_count,
+                    error_count = excluded.error_count,
+                    duplicate_count = excluded.duplicate_count,
+                    suspected_duplicate_count = excluded.suspected_duplicate_count,
+                    updated_count = excluded.updated_count,
+                    status = excluded.status,
+                    imported_at = excluded.imported_at,
+                    raw_payload = excluded.raw_payload,
+                    updated_at = now()
+                """,
+                (
+                    batch_id,
+                    self._text(batch.get("batch_type")) or BatchType.BANK_TRANSACTION.value,
+                    self._text(batch.get("source_name")) or "unknown",
+                    self._text(batch.get("imported_by")) or "unknown",
+                    self._int(batch.get("row_count"), 0),
+                    self._int(batch.get("success_count"), 0),
+                    self._int(batch.get("error_count"), 0),
+                    self._int(batch.get("duplicate_count"), 0),
+                    self._int(batch.get("suspected_duplicate_count"), 0),
+                    self._int(batch.get("updated_count"), 0),
+                    self._text(batch.get("status")) or BatchStatus.PENDING.value,
+                    self._text(batch.get("imported_at")),
+                    _jsonb({"normalized_payload": batch}),
+                ),
+            )
+            row_results = preview.get("row_results") if isinstance(preview, dict) else None
+            normalized_rows = preview.get("normalized_rows") if isinstance(preview, dict) else None
+            self._save_batch_rows(connection, batch_id, row_results, normalized_rows)
+        for invoice in self._iter_items(snapshot.get("invoices")):
+            self._save_invoice(connection, invoice)
+        for transaction in self._iter_items(snapshot.get("transactions")):
+            self._save_transaction(connection, transaction)
+
+    def _save_batch_rows(self, connection: Any, batch_id: str, row_results: Any, normalized_rows: Any) -> None:
+        if not isinstance(row_results, list):
+            return
+        normalized_list = normalized_rows if isinstance(normalized_rows, list) else []
+        for index, row_result in enumerate(row_results):
+            payload = self._serialize(row_result)
+            if not isinstance(payload, dict):
+                continue
+            row_id = self._text(payload.get("id"))
+            if not row_id:
+                continue
+            normalized = normalized_list[index] if index < len(normalized_list) and isinstance(normalized_list[index], dict) else {}
+            raw_payload = {**payload, "normalized_row": normalized}
+            connection.execute(
+                """
+                insert into app.import_batch_rows(
+                    legacy_mongo_id, import_batch_id, legacy_batch_id, row_no, source_record_type,
+                    source_unique_key, data_fingerprint, decision, decision_reason,
+                    linked_object_type, linked_object_id, identity_kind, account_no, trade_time,
+                    direction, amount, counterparty_name, raw_payload
+                )
+                values (
+                    %s,
+                    (select id from app.import_batches where legacy_mongo_id = %s or id::text = %s limit 1),
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::timestamptz, %s, %s, %s, %s
+                )
+                on conflict (legacy_mongo_id) do update set
+                    import_batch_id = excluded.import_batch_id,
+                    legacy_batch_id = excluded.legacy_batch_id,
+                    row_no = excluded.row_no,
+                    source_record_type = excluded.source_record_type,
+                    source_unique_key = excluded.source_unique_key,
+                    data_fingerprint = excluded.data_fingerprint,
+                    decision = excluded.decision,
+                    decision_reason = excluded.decision_reason,
+                    linked_object_type = excluded.linked_object_type,
+                    linked_object_id = excluded.linked_object_id,
+                    identity_kind = excluded.identity_kind,
+                    account_no = excluded.account_no,
+                    trade_time = excluded.trade_time,
+                    direction = excluded.direction,
+                    amount = excluded.amount,
+                    counterparty_name = excluded.counterparty_name,
+                    raw_payload = excluded.raw_payload
+                """,
+                (
+                    row_id,
+                    batch_id,
+                    batch_id,
+                    batch_id,
+                    self._int(payload.get("row_no"), 0),
+                    self._text(payload.get("source_record_type")) or "unknown",
+                    self._text(payload.get("source_unique_key")),
+                    self._text(payload.get("data_fingerprint")),
+                    self._text(payload.get("decision")) or ImportDecision.ERROR.value,
+                    self._text(payload.get("decision_reason")) or "",
+                    self._text(payload.get("linked_object_type")),
+                    self._text(payload.get("linked_object_id")),
+                    self._text(payload.get("identity_kind")),
+                    self._text(payload.get("account_no")),
+                    self._text(payload.get("trade_time")),
+                    self._text(payload.get("direction")),
+                    self._decimal_text(payload.get("amount")),
+                    self._text(payload.get("counterparty_name")),
+                    _jsonb({"normalized_payload": raw_payload}),
+                ),
+            )
+
+    def _save_invoice(self, connection: Any, invoice: dict[str, Any]) -> None:
+        invoice_id = self._text(invoice.get("id"))
+        if not invoice_id:
+            return
+        counterparty = invoice.get("counterparty") if isinstance(invoice.get("counterparty"), dict) else {}
+        connection.execute(
+            """
+            insert into app.invoices(
+                legacy_mongo_id, invoice_type, invoice_no, invoice_code, digital_invoice_no,
+                source_unique_key, data_fingerprint, invoice_date, invoice_month, counterparty_id,
+                counterparty_name, seller_name, seller_tax_no, buyer_name, buyer_tax_no, amount,
+                signed_amount, written_off_amount, tax_rate, tax_amount, total_with_tax, currency,
+                legacy_source_batch_id, oa_form_id, etc_invoice_id, workbench_visibility, status,
+                tags, source_links, raw_payload
+            )
+            values (
+                %s, %s, %s, %s, %s, %s, %s, %s::date, date_trunc('month', %s::date)::date,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            )
+            on conflict (legacy_mongo_id) do update set
+                invoice_type = excluded.invoice_type,
+                invoice_no = excluded.invoice_no,
+                invoice_code = excluded.invoice_code,
+                digital_invoice_no = excluded.digital_invoice_no,
+                source_unique_key = excluded.source_unique_key,
+                data_fingerprint = excluded.data_fingerprint,
+                invoice_date = excluded.invoice_date,
+                invoice_month = excluded.invoice_month,
+                counterparty_id = excluded.counterparty_id,
+                counterparty_name = excluded.counterparty_name,
+                seller_name = excluded.seller_name,
+                seller_tax_no = excluded.seller_tax_no,
+                buyer_name = excluded.buyer_name,
+                buyer_tax_no = excluded.buyer_tax_no,
+                amount = excluded.amount,
+                signed_amount = excluded.signed_amount,
+                written_off_amount = excluded.written_off_amount,
+                tax_rate = excluded.tax_rate,
+                tax_amount = excluded.tax_amount,
+                total_with_tax = excluded.total_with_tax,
+                currency = excluded.currency,
+                legacy_source_batch_id = excluded.legacy_source_batch_id,
+                oa_form_id = excluded.oa_form_id,
+                etc_invoice_id = excluded.etc_invoice_id,
+                workbench_visibility = excluded.workbench_visibility,
+                status = excluded.status,
+                tags = excluded.tags,
+                source_links = excluded.source_links,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            """,
+            (
+                invoice_id,
+                self._text(invoice.get("invoice_type")) or InvoiceType.INPUT.value,
+                self._text(invoice.get("invoice_no")) or invoice_id,
+                self._text(invoice.get("invoice_code")),
+                self._text(invoice.get("digital_invoice_no")),
+                self._text(invoice.get("source_unique_key")),
+                self._text(invoice.get("data_fingerprint")),
+                self._date_text(invoice.get("invoice_date")),
+                self._date_text(invoice.get("invoice_date")),
+                self._text(counterparty.get("id") or invoice.get("counterparty_id")),
+                self._text(counterparty.get("name") or invoice.get("counterparty_name")),
+                self._text(invoice.get("seller_name")),
+                self._text(invoice.get("seller_tax_no")),
+                self._text(invoice.get("buyer_name")),
+                self._text(invoice.get("buyer_tax_no")),
+                self._decimal_text(invoice.get("amount")) or "0",
+                self._decimal_text(invoice.get("signed_amount")) or self._decimal_text(invoice.get("amount")) or "0",
+                self._decimal_text(invoice.get("written_off_amount")) or "0",
+                self._text(invoice.get("tax_rate")),
+                self._decimal_text(invoice.get("tax_amount")),
+                self._decimal_text(invoice.get("total_with_tax")),
+                self._text(invoice.get("currency")) or "CNY",
+                self._text(invoice.get("source_batch_id") or invoice.get("legacy_source_batch_id")),
+                self._text(invoice.get("oa_form_id")),
+                self._text(invoice.get("etc_invoice_id")),
+                self._text(invoice.get("workbench_visibility")) or "visible",
+                self._text(invoice.get("status")) or InvoiceStatus.PENDING.value,
+                self._text_list(invoice.get("tags")),
+                _jsonb(invoice.get("source_links") if isinstance(invoice.get("source_links"), list) else []),
+                _jsonb({"normalized_payload": invoice}),
+            ),
+        )
+
+    def _save_transaction(self, connection: Any, transaction: dict[str, Any]) -> None:
+        transaction_id = self._text(transaction.get("id"))
+        if not transaction_id:
+            return
+        connection.execute(
+            """
+            insert into app.bank_transactions(
+                legacy_mongo_id, account_no, account_name, txn_direction, counterparty_name_raw,
+                normalized_counterparty_name, amount, signed_amount, written_off_amount, txn_date,
+                txn_month, trade_time, pay_receive_time, bank_serial_no, source_unique_key,
+                data_fingerprint, legacy_source_batch_id, counterparty_id, project_id, balance,
+                currency, summary, remark, bank_text_fields, status, raw_payload
+            )
+            values (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::date,
+                date_trunc('month', %s::date)::date, %s::timestamptz, %s::timestamptz, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            )
+            on conflict (legacy_mongo_id) do update set
+                account_no = excluded.account_no,
+                account_name = excluded.account_name,
+                txn_direction = excluded.txn_direction,
+                counterparty_name_raw = excluded.counterparty_name_raw,
+                normalized_counterparty_name = excluded.normalized_counterparty_name,
+                amount = excluded.amount,
+                signed_amount = excluded.signed_amount,
+                written_off_amount = excluded.written_off_amount,
+                txn_date = excluded.txn_date,
+                txn_month = excluded.txn_month,
+                trade_time = excluded.trade_time,
+                pay_receive_time = excluded.pay_receive_time,
+                bank_serial_no = excluded.bank_serial_no,
+                source_unique_key = excluded.source_unique_key,
+                data_fingerprint = excluded.data_fingerprint,
+                legacy_source_batch_id = excluded.legacy_source_batch_id,
+                counterparty_id = excluded.counterparty_id,
+                project_id = excluded.project_id,
+                balance = excluded.balance,
+                currency = excluded.currency,
+                summary = excluded.summary,
+                remark = excluded.remark,
+                bank_text_fields = excluded.bank_text_fields,
+                status = excluded.status,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            """,
+            (
+                transaction_id,
+                self._text(transaction.get("account_no")) or "unknown",
+                self._text(transaction.get("account_name")),
+                self._text(transaction.get("txn_direction")) or TransactionDirection.OUTFLOW.value,
+                self._text(transaction.get("counterparty_name_raw")) or "unknown",
+                self._text(transaction.get("normalized_counterparty_name") or transaction.get("counterparty_name_raw")),
+                self._decimal_text(transaction.get("amount")) or "0",
+                self._decimal_text(transaction.get("signed_amount")) or self._decimal_text(transaction.get("amount")) or "0",
+                self._decimal_text(transaction.get("written_off_amount")) or "0",
+                self._date_text(transaction.get("txn_date")),
+                self._date_text(transaction.get("txn_date")),
+                self._text(transaction.get("trade_time")),
+                self._text(transaction.get("pay_receive_time")),
+                self._text(transaction.get("bank_serial_no")),
+                self._text(transaction.get("source_unique_key")),
+                self._text(transaction.get("data_fingerprint")),
+                self._text(transaction.get("source_batch_id") or transaction.get("legacy_source_batch_id")),
+                self._text(transaction.get("counterparty_id")),
+                self._text(transaction.get("project_id")),
+                self._decimal_text(transaction.get("balance")),
+                self._text(transaction.get("currency")),
+                self._text(transaction.get("summary")),
+                self._text(transaction.get("remark")),
+                _jsonb(transaction.get("bank_text_fields") if isinstance(transaction.get("bank_text_fields"), list) else []),
+                self._text(transaction.get("status")) or TransactionStatus.PENDING.value,
+                _jsonb({"normalized_payload": transaction}),
+            ),
+        )
+
+    def _batch_from_row(self, row: dict[str, Any]) -> ImportedBatch:
+        payload = self._row_payload(row)
+        if isinstance(payload, dict) and isinstance(payload.get("batch"), dict):
+            payload = payload["batch"]
+        payload = payload if isinstance(payload, dict) else {}
+        return ImportedBatch(
+            id=self._text(payload.get("id") or row.get("legacy_id")) or str(row.get("legacy_id")),
+            batch_type=BatchType(self._text(payload.get("batch_type") or row.get("batch_type")) or BatchType.BANK_TRANSACTION.value),
+            source_name=self._text(payload.get("source_name") or row.get("source_name")) or "unknown",
+            imported_by=self._text(payload.get("imported_by") or row.get("imported_by")) or "unknown",
+            row_count=self._int(payload.get("row_count") or row.get("row_count"), 0),
+            success_count=self._int(payload.get("success_count") or row.get("success_count"), 0),
+            error_count=self._int(payload.get("error_count") or row.get("error_count"), 0),
+            status=BatchStatus(self._text(payload.get("status") or row.get("status")) or BatchStatus.PENDING.value),
+            duplicate_count=self._int(payload.get("duplicate_count") or row.get("duplicate_count"), 0),
+            suspected_duplicate_count=self._int(payload.get("suspected_duplicate_count") or row.get("suspected_duplicate_count"), 0),
+            updated_count=self._int(payload.get("updated_count") or row.get("updated_count"), 0),
+            imported_at=self._datetime(payload.get("imported_at") or row.get("imported_at")),
+        )
+
+    def _batch_row_from_row(self, row: dict[str, Any]) -> ImportedBatchRowResult:
+        payload = self._row_payload(row)
+        payload = payload if isinstance(payload, dict) else {}
+        batch_id = self._text(payload.get("batch_id") or row.get("legacy_batch_id") or row.get("joined_batch_id")) or "unknown"
+        return ImportedBatchRowResult(
+            id=self._text(payload.get("id") or row.get("legacy_id")) or str(row.get("legacy_id")),
+            batch_id=batch_id,
+            row_no=self._int(payload.get("row_no") or row.get("row_no"), 0),
+            source_record_type=self._text(payload.get("source_record_type") or row.get("source_record_type")) or "unknown",
+            source_unique_key=self._text(payload.get("source_unique_key") or row.get("source_unique_key")),
+            data_fingerprint=self._text(payload.get("data_fingerprint") or row.get("data_fingerprint")),
+            decision=ImportDecision(self._text(payload.get("decision") or row.get("decision")) or ImportDecision.ERROR.value),
+            decision_reason=self._text(payload.get("decision_reason") or row.get("decision_reason")) or "",
+            linked_object_type=self._text(payload.get("linked_object_type") or row.get("linked_object_type")),
+            linked_object_id=self._text(payload.get("linked_object_id") or row.get("linked_object_id")),
+            raw_payload=dict(payload.get("raw_payload") if isinstance(payload.get("raw_payload"), dict) else payload),
+            identity_kind=self._text(payload.get("identity_kind") or row.get("identity_kind")),
+            account_no=self._text(payload.get("account_no") or row.get("account_no")),
+            trade_time=self._text(payload.get("trade_time") or row.get("trade_time")),
+            direction=self._text(payload.get("direction") or row.get("direction")),
+            amount=self._text(payload.get("amount") or row.get("amount")),
+            counterparty_name=self._text(payload.get("counterparty_name") or row.get("counterparty_name")),
+        )
+
+    def _invoice_from_row(self, row: dict[str, Any]) -> Invoice:
+        payload = self._row_payload(row)
+        payload = payload if isinstance(payload, dict) else {}
+        counterparty_payload = payload.get("counterparty") if isinstance(payload.get("counterparty"), dict) else {}
+        counterparty_name = self._text(counterparty_payload.get("name") or row.get("counterparty_name")) or "unknown"
+        counterparty = Counterparty(
+            id=self._text(counterparty_payload.get("id") or row.get("counterparty_id")) or f"counterparty:{counterparty_name}",
+            name=counterparty_name,
+            normalized_name=self._text(counterparty_payload.get("normalized_name")) or counterparty_name,
+            counterparty_type=self._text(counterparty_payload.get("counterparty_type")) or "unknown",
+            tax_no=self._text(counterparty_payload.get("tax_no") or row.get("seller_tax_no") or row.get("buyer_tax_no")),
+        )
+        return Invoice(
+            id=self._text(payload.get("id") or row.get("legacy_id")) or str(row.get("legacy_id")),
+            invoice_type=InvoiceType(self._text(payload.get("invoice_type") or row.get("invoice_type")) or InvoiceType.INPUT.value),
+            invoice_no=self._text(payload.get("invoice_no") or row.get("invoice_no")) or str(row.get("legacy_id")),
+            counterparty=counterparty,
+            amount=Decimal(str(payload.get("amount") or row.get("amount") or "0")),
+            signed_amount=Decimal(str(payload.get("signed_amount") or row.get("signed_amount") or payload.get("amount") or row.get("amount") or "0")),
+            invoice_code=self._text(payload.get("invoice_code") or row.get("invoice_code")),
+            digital_invoice_no=self._text(payload.get("digital_invoice_no") or row.get("digital_invoice_no")),
+            source_unique_key=self._text(payload.get("source_unique_key") or row.get("source_unique_key")),
+            data_fingerprint=self._text(payload.get("data_fingerprint") or row.get("data_fingerprint")),
+            written_off_amount=Decimal(str(payload.get("written_off_amount") or row.get("written_off_amount") or "0")),
+            currency=self._text(payload.get("currency") or row.get("currency")) or "CNY",
+            invoice_date=self._date_text(payload.get("invoice_date") or row.get("invoice_date")),
+            seller_tax_no=self._text(payload.get("seller_tax_no") or row.get("seller_tax_no")),
+            seller_name=self._text(payload.get("seller_name") or row.get("seller_name")),
+            buyer_tax_no=self._text(payload.get("buyer_tax_no") or row.get("buyer_tax_no")),
+            buyer_name=self._text(payload.get("buyer_name") or row.get("buyer_name")),
+            tax_rate=self._text(payload.get("tax_rate") or row.get("tax_rate")),
+            tax_amount=self._decimal_or_none(payload.get("tax_amount") or row.get("tax_amount")),
+            total_with_tax=self._decimal_or_none(payload.get("total_with_tax") or row.get("total_with_tax")),
+            source_batch_id=self._text(payload.get("source_batch_id") or row.get("legacy_source_batch_id")),
+            oa_form_id=self._text(payload.get("oa_form_id") or row.get("oa_form_id")),
+            tags=self._text_list(payload.get("tags") or row.get("tags")),
+            source_links=list(payload.get("source_links") if isinstance(payload.get("source_links"), list) else row.get("source_links") or []),
+            etc_invoice_id=self._text(payload.get("etc_invoice_id") or row.get("etc_invoice_id")),
+            workbench_visibility=self._text(payload.get("workbench_visibility") or row.get("workbench_visibility")) or "visible",
+            status=InvoiceStatus(self._text(payload.get("status") or row.get("status")) or InvoiceStatus.PENDING.value),
+        )
+
+    def _transaction_from_row(self, row: dict[str, Any]) -> BankTransaction:
+        payload = self._row_payload(row)
+        payload = payload if isinstance(payload, dict) else {}
+        return BankTransaction(
+            id=self._text(payload.get("id") or row.get("legacy_id")) or str(row.get("legacy_id")),
+            account_no=self._text(payload.get("account_no") or row.get("account_no")) or "unknown",
+            txn_direction=TransactionDirection(self._text(payload.get("txn_direction") or row.get("txn_direction")) or TransactionDirection.OUTFLOW.value),
+            counterparty_name_raw=self._text(payload.get("counterparty_name_raw") or row.get("counterparty_name_raw")) or "unknown",
+            amount=Decimal(str(payload.get("amount") or row.get("amount") or "0")),
+            signed_amount=Decimal(str(payload.get("signed_amount") or row.get("signed_amount") or payload.get("amount") or row.get("amount") or "0")),
+            bank_serial_no=self._text(payload.get("bank_serial_no") or row.get("bank_serial_no")),
+            source_unique_key=self._text(payload.get("source_unique_key") or row.get("source_unique_key")),
+            data_fingerprint=self._text(payload.get("data_fingerprint") or row.get("data_fingerprint")),
+            written_off_amount=Decimal(str(payload.get("written_off_amount") or row.get("written_off_amount") or "0")),
+            txn_date=self._date_text(payload.get("txn_date") or row.get("txn_date")),
+            trade_time=self._text(payload.get("trade_time") or row.get("trade_time")),
+            pay_receive_time=self._text(payload.get("pay_receive_time") or row.get("pay_receive_time")),
+            counterparty_id=self._text(payload.get("counterparty_id") or row.get("counterparty_id")),
+            project_id=self._text(payload.get("project_id") or row.get("project_id")),
+            source_batch_id=self._text(payload.get("source_batch_id") or row.get("legacy_source_batch_id")),
+            account_name=self._text(payload.get("account_name") or row.get("account_name")),
+            balance=self._decimal_or_none(payload.get("balance") or row.get("balance")),
+            currency=self._text(payload.get("currency") or row.get("currency")),
+            summary=self._text(payload.get("summary") or row.get("summary")),
+            remark=self._text(payload.get("remark") or row.get("remark")),
+            bank_text_fields=list(payload.get("bank_text_fields") if isinstance(payload.get("bank_text_fields"), list) else row.get("bank_text_fields") or []),
+            status=TransactionStatus(self._text(payload.get("status") or row.get("status")) or TransactionStatus.PENDING.value),
+        )
+
+    def _file_item_from_row(self, row: dict[str, Any], payload: dict[str, Any]) -> FileImportPreviewItem:
+        batch_type = self._text(payload.get("batch_type") or payload.get("override_batch_type"))
+        return FileImportPreviewItem(
+            id=self._text(payload.get("id") or row.get("legacy_id")) or str(row.get("legacy_id")),
+            file_name=self._text(payload.get("file_name") or row.get("original_filename")) or "unknown",
+            template_code=self._text(payload.get("template_code") or row.get("template_kind")),
+            batch_type=BatchType(batch_type) if batch_type else None,
+            status=self._text(payload.get("status") or row.get("status")) or "stored",
+            message=self._text(payload.get("message")) or "",
+            row_count=self._int(payload.get("row_count"), 0),
+            success_count=self._int(payload.get("success_count"), 0),
+            error_count=self._int(payload.get("error_count"), 0),
+            duplicate_count=self._int(payload.get("duplicate_count"), 0),
+            suspected_duplicate_count=self._int(payload.get("suspected_duplicate_count"), 0),
+            updated_count=self._int(payload.get("updated_count"), 0),
+            preview_batch_id=self._text(payload.get("preview_batch_id") or row.get("joined_batch_id")),
+            batch_id=self._text(payload.get("batch_id") or row.get("joined_batch_id")),
+            stored_file_path=self._text(payload.get("stored_file_path") or row.get("stored_file_path")),
+        )
+
+    @staticmethod
+    def _row_payload(row: dict[str, Any] | None) -> Any:
+        if not row:
+            return None
+        raw_payload = row.get("raw_payload")
+        if isinstance(raw_payload, dict) and "normalized_payload" in raw_payload:
+            return raw_payload.get("normalized_payload") or {}
+        return raw_payload
+
+    def _iter_previews(self, value: Any) -> list[dict[str, Any]]:
+        if isinstance(value, dict):
+            return [item for item in (self._serialize(raw) for raw in value.values()) if isinstance(item, dict)]
+        if isinstance(value, list):
+            return [item for item in (self._serialize(raw) for raw in value) if isinstance(item, dict)]
+        return []
+
+    def _iter_items(self, value: Any) -> list[dict[str, Any]]:
+        if isinstance(value, dict):
+            return [item for item in (self._serialize(raw) for raw in value.values()) if isinstance(item, dict)]
+        if isinstance(value, list):
+            return [item for item in (self._serialize(raw) for raw in value) if isinstance(item, dict)]
+        return []
+
+    def _serialize(self, value: Any) -> Any:
+        if is_dataclass(value):
+            return {key: self._serialize(getattr(value, key, None)) for key in value.__dataclass_fields__}  # type: ignore[attr-defined]
+        if isinstance(value, dict):
+            return {str(key): self._serialize(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [self._serialize(item) for item in value]
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, date):
+            return value.isoformat()
+        if isinstance(value, Decimal):
+            return str(value)
+        if isinstance(value, Enum):
+            return value.value
+        return value
+
+    @staticmethod
+    def _text(value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, bytes):
+            value = value.decode()
+        text = str(value).strip()
+        return text or None
+
+    @staticmethod
+    def _int(value: Any, default: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _decimal_text(value: Any) -> str | None:
+        if value is None or value == "":
+            return None
+        try:
+            return str(Decimal(str(value)))
+        except Exception:
+            return None
+
+    @classmethod
+    def _decimal_or_none(cls, value: Any) -> Decimal | None:
+        text = cls._decimal_text(value)
+        return Decimal(text) if text is not None else None
+
+    @classmethod
+    def _text_list(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, (list, tuple, set)):
+            return [text for item in value if (text := cls._text(item))]
+        text = cls._text(value)
+        return [text] if text else []
+
+    @staticmethod
+    def _date_text(value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.date().isoformat()
+        if isinstance(value, date):
+            return value.isoformat()
+        text = str(value).strip()
+        return text[:10] if text else None
+
+    @classmethod
+    def _datetime(cls, value: Any) -> datetime:
+        if isinstance(value, datetime):
+            return value
+        text = cls._text(value)
+        if text:
+            try:
+                return datetime.fromisoformat(text.replace("Z", "+00:00"))
+            except ValueError:
+                pass
+        return datetime.now(UTC)
+
+    @staticmethod
+    def _max_suffix(values: dict[str, Any]) -> int:
+        maximum = 0
+        for key in values:
+            try:
+                maximum = max(maximum, int(str(key).rsplit("_", 1)[-1]))
+            except ValueError:
+                continue
+        return maximum

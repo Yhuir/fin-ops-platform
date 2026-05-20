@@ -1,0 +1,54 @@
+{
+  "domains": {
+    "app_health_alerts": {
+      "blocked_unknown_count": 0,
+      "classification_counts": {
+        "retention_only": 11
+      },
+      "mismatch_counts": {
+        "different": 0,
+        "missing_in_primary": 0,
+        "missing_in_shadow": 0
+      },
+      "primary_count": 11,
+      "samples": [],
+      "shadow_count": 11,
+      "union_count": 11
+    },
+    "background_jobs": {
+      "blocked_unknown_count": 0,
+      "classification_counts": {
+        "rebuildable": 114,
+        "retention_only": 23
+      },
+      "mismatch_counts": {
+        "different": 0,
+        "missing_in_primary": 0,
+        "missing_in_shadow": 0
+      },
+      "primary_count": 137,
+      "samples": [],
+      "shadow_count": 137,
+      "union_count": 137
+    }
+  },
+  "gate_recommendation": "PASS",
+  "generated_at": "2026-05-20T15:43:21+00:00",
+  "primary_backend": "mongo_readonly",
+  "redacted": true,
+  "run_id": "stage24-read-switch-rehearsal-20260520233932",
+  "shadow_backend": "postgres_psql_json",
+  "summary": {
+    "blocked_unknown_count": 0,
+    "classification_counts": {
+      "rebuildable": 114,
+      "retention_only": 34
+    },
+    "domain_count": 2,
+    "mismatch_counts": {
+      "different": 0,
+      "missing_in_primary": 0,
+      "missing_in_shadow": 0
+    }
+  }
+}

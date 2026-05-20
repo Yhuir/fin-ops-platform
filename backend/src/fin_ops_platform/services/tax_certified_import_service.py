@@ -161,9 +161,113 @@ class TaxCertifiedImportService:
         self._session_counter = int(snapshot.get("session_counter", 0))
         self._file_counter = int(snapshot.get("file_counter", 0))
         self._batch_counter = int(snapshot.get("batch_counter", 0))
-        self._sessions = dict(snapshot.get("sessions") or {})
-        self._batches = dict(snapshot.get("batches") or {})
-        self._records = dict(snapshot.get("records") or {})
+        self._records = {
+            str(key): self._record_from_snapshot(value)
+            for key, value in dict(snapshot.get("records") or {}).items()
+        }
+        self._sessions = {
+            str(key): self._session_from_snapshot(value)
+            for key, value in dict(snapshot.get("sessions") or {}).items()
+        }
+        self._batches = {
+            str(key): self._batch_from_snapshot(value)
+            for key, value in dict(snapshot.get("batches") or {}).items()
+        }
+
+    @classmethod
+    def _session_from_snapshot(cls, value: Any) -> TaxCertifiedImportSession:
+        if isinstance(value, TaxCertifiedImportSession):
+            return value
+        raw = dict(value) if isinstance(value, dict) else {}
+        raw["files"] = [cls._file_from_snapshot(item) for item in raw.get("files") or []]
+        raw["created_at"] = cls._datetime_from_snapshot(raw.get("created_at"))
+        return TaxCertifiedImportSession(
+            id=str(raw.get("id") or raw.get("session_id") or ""),
+            imported_by=str(raw.get("imported_by") or ""),
+            file_count=int(raw.get("file_count") or len(raw["files"])),
+            status=str(raw.get("status") or "preview_ready"),
+            files=raw["files"],
+            created_at=raw["created_at"],
+        )
+
+    @classmethod
+    def _file_from_snapshot(cls, value: Any) -> TaxCertifiedImportPreviewFile:
+        if isinstance(value, TaxCertifiedImportPreviewFile):
+            return value
+        raw = dict(value) if isinstance(value, dict) else {}
+        rows = [cls._record_from_snapshot(item) for item in raw.get("rows") or []]
+        return TaxCertifiedImportPreviewFile(
+            id=str(raw.get("id") or raw.get("file_id") or raw.get("file_name") or ""),
+            file_name=str(raw.get("file_name") or ""),
+            month=str(raw.get("month") or ""),
+            recognized_count=int(raw.get("recognized_count") or len(rows)),
+            invalid_count=int(raw.get("invalid_count") or 0),
+            rows=rows,
+        )
+
+    @classmethod
+    def _batch_from_snapshot(cls, value: Any) -> TaxCertifiedImportBatch:
+        if isinstance(value, TaxCertifiedImportBatch):
+            return value
+        raw = dict(value) if isinstance(value, dict) else {}
+        return TaxCertifiedImportBatch(
+            id=str(raw.get("id") or raw.get("batch_id") or ""),
+            session_id=str(raw.get("session_id") or ""),
+            imported_by=str(raw.get("imported_by") or ""),
+            file_count=int(raw.get("file_count") or 0),
+            months=[str(item) for item in raw.get("months") or []],
+            persisted_record_count=int(raw.get("persisted_record_count") or raw.get("record_count") or 0),
+            created_at=cls._datetime_from_snapshot(raw.get("created_at")),
+        )
+
+    @classmethod
+    def _record_from_snapshot(cls, value: Any) -> TaxCertifiedInvoiceRecord:
+        if isinstance(value, TaxCertifiedInvoiceRecord):
+            return value
+        raw = dict(value) if isinstance(value, dict) else {}
+        return TaxCertifiedInvoiceRecord(
+            id=str(raw.get("id") or raw.get("record_id") or raw.get("unique_key") or ""),
+            unique_key=str(raw.get("unique_key") or ""),
+            month=str(raw.get("month") or ""),
+            source_file_name=str(raw.get("source_file_name") or ""),
+            source_row_number=int(raw.get("source_row_number") or 0),
+            taxpayer_tax_no=cls._string_or_none(raw.get("taxpayer_tax_no")),
+            taxpayer_name=cls._string_or_none(raw.get("taxpayer_name")),
+            digital_invoice_no=cls._string_or_none(raw.get("digital_invoice_no")),
+            invoice_code=cls._string_or_none(raw.get("invoice_code")),
+            invoice_no=cls._string_or_none(raw.get("invoice_no")),
+            issue_date=cls._string_or_none(raw.get("issue_date")),
+            seller_tax_no=cls._string_or_none(raw.get("seller_tax_no")),
+            seller_name=cls._string_or_none(raw.get("seller_name")),
+            amount=cls._string_or_none(raw.get("amount")),
+            tax_amount=cls._string_or_none(raw.get("tax_amount")),
+            deductible_tax_amount=cls._string_or_none(raw.get("deductible_tax_amount")),
+            selection_status=cls._string_or_none(raw.get("selection_status")),
+            invoice_status=cls._string_or_none(raw.get("invoice_status")),
+            selection_time=cls._string_or_none(raw.get("selection_time")),
+            invoice_source=cls._string_or_none(raw.get("invoice_source")),
+            invoice_kind=cls._string_or_none(raw.get("invoice_kind")),
+            risk_level=cls._string_or_none(raw.get("risk_level")),
+            imported_at=cls._datetime_from_snapshot(raw.get("imported_at")),
+        )
+
+    @staticmethod
+    def _datetime_from_snapshot(value: Any) -> datetime:
+        if isinstance(value, datetime):
+            return value
+        if value:
+            try:
+                return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            except ValueError:
+                pass
+        return datetime.now(UTC)
+
+    @staticmethod
+    def _string_or_none(value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
 
     def _persist(self) -> None:
         if self._state_store is None:

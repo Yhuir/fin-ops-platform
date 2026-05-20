@@ -1,0 +1,1628 @@
+{
+  "completed_at": "2026-05-20T16:16:09+00:00",
+  "domain_results": [
+    {
+      "domain": "app_settings",
+      "error": null,
+      "matched": true,
+      "method_name": "load_app_settings",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "app_settings",
+        "expected_shape": "settings payload",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_app_settings",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "pending_invoice_commands",
+      "error": null,
+      "matched": true,
+      "method_name": "load_pending_invoice_commands",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "pending_invoice_commands",
+        "expected_shape": "request id -> pending invoice command",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_pending_invoice_commands",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "background_jobs",
+      "error": null,
+      "matched": true,
+      "method_name": "load_background_jobs",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "background_jobs",
+        "expected_shape": "job id -> job snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_background_jobs",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P2",
+        "severity_by_path": {},
+        "shadow_source": "postgres"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "app_health_alerts",
+      "error": null,
+      "matched": true,
+      "method_name": "load_app_health_alerts",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "app_health_alerts",
+        "expected_shape": "alert id -> alert snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_app_health_alerts",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P2",
+        "severity_by_path": {},
+        "shadow_source": "postgres"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "workbench_pair_relations",
+      "error": null,
+      "matched": true,
+      "method_name": "load_workbench_pair_relations",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "workbench_pair_relations",
+        "expected_shape": "case id -> relation snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_workbench_pair_relations",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P0",
+        "severity_by_path": {},
+        "shadow_source": "postgres"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "no_oa_bank_batches",
+      "error": null,
+      "matched": true,
+      "method_name": "load_no_oa_bank_batches",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "no_oa_bank_batches",
+        "expected_shape": "batch id -> batch snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_no_oa_bank_batches",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P0",
+        "severity_by_path": {},
+        "shadow_source": "postgres"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "bank_transaction_categories",
+      "error": null,
+      "matched": true,
+      "method_name": "load_bank_transaction_categories",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "bank_transaction_categories",
+        "expected_shape": "category snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_bank_transaction_categories",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "turnover_relations",
+      "error": null,
+      "matched": true,
+      "method_name": "load_turnover_relations",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "turnover_relations",
+        "expected_shape": "relation id -> turnover relation",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_turnover_relations",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P0",
+        "severity_by_path": {},
+        "shadow_source": "postgres"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "turnover_relation_audit_log",
+      "error": null,
+      "matched": true,
+      "method_name": "load_turnover_relation_audit_log",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "turnover_relation_audit_log",
+        "expected_shape": "audit event list",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_turnover_relation_audit_log",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P2",
+        "severity_by_path": {},
+        "shadow_source": "postgres"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "turnover_ledger_extras",
+      "error": null,
+      "matched": true,
+      "method_name": "load_turnover_ledger_extras",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "turnover_ledger_extras",
+        "expected_shape": "ledger extras snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_turnover_ledger_extras",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "workbench_read_models",
+      "error": null,
+      "matched": true,
+      "method_name": "load_workbench_read_models",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "workbench_read_models",
+        "expected_shape": "scope key -> read model rows",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_workbench_read_models",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "workbench_candidate_matches",
+      "error": null,
+      "matched": false,
+      "method_name": "load_workbench_candidate_matches",
+      "mismatch_count": 20,
+      "mismatches": [
+        {
+          "kind": "missing_in_primary",
+          "path": "candidates.candidate:001bbbfe8f09e8a0f9f4ba5d6ee7eccc922ed9cf6179c3b126df89a99f18c957",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P1",
+          "shadow": {
+            "key_count": 24,
+            "present": true,
+            "sample_keys": [
+              "amount",
+              "amount_delta",
+              "bank_row_ids",
+              "candidate_id",
+              "candidate_key"
+            ],
+            "sha256": "b36b727e2907c8226f19f28d78869a314e9802733d8d11d8e58ce8126c8e450f",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "candidates.candidate:0028885acc8ddefdd09b3c761e658686f0ede9dff01ce4bf814c97337e596c59",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P1",
+          "shadow": {
+            "key_count": 24,
+            "present": true,
+            "sample_keys": [
+              "amount",
+              "amount_delta",
+              "bank_row_ids",
+              "candidate_id",
+              "candidate_key"
+            ],
+            "sha256": "8fb76ddfa2d1bdbc431a0bf3b2892772aedcff74655aa344ece3692fd5523514",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "candidates.candidate:00e92373676d597b2dce89241eb02b05440cd8602c0c4210649604b1944423b2",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P1",
+          "shadow": {
+            "key_count": 24,
+            "present": true,
+            "sample_keys": [
+              "amount",
+              "amount_delta",
+              "bank_row_ids",
+              "candidate_id",
+              "candidate_key"
+            ],
+            "sha256": "a1e0f1f2686d0c9c4f71ff692b29e2e65107bcfa02670488c0a975e04c3d465c",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "candidates.candidate:012491795652bd7cc7da9e6f7b102059fc1f3f159b8bafe408a53dfaa0f74129",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P1",
+          "shadow": {
+            "key_count": 24,
+            "present": true,
+            "sample_keys": [
+              "amount",
+              "amount_delta",
+              "bank_row_ids",
+              "candidate_id",
+              "candidate_key"
+            ],
+            "sha256": "73578cf2f2a083ec06e71754e31ed1ca2075cb1a22904b786cc2b742cb1e0354",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "candidates.candidate:01c9026c9063636b791ed912a77f36fae00a679fb3993bf129d5c71dc526ac3f",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P1",
+          "shadow": {
+            "key_count": 24,
+            "present": true,
+            "sample_keys": [
+              "amount",
+              "amount_delta",
+              "bank_row_ids",
+              "candidate_id",
+              "candidate_key"
+            ],
+            "sha256": "595d009985e0c911588a487bca41f101d712bcbf9062789af7b2537fb2592313",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "candidates.candidate:023573de0a6db88d318ac7fe0c3414408c6025b54bb33ab7d34a56a7d882c719",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P1",
+          "shadow": {
+            "key_count": 24,
+            "present": true,
+            "sample_keys": [
+              "amount",
+              "amount_delta",
+              "bank_row_ids",
+              "candidate_id",
+              "candidate_key"
+            ],
+            "sha256": "8e3e6177eb029840a3a059a9e10dd9af3364d6b58067a163bc36f1bf9cf6d4c6",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "candidates.candidate:02428baa63e5a007680d0fd4cc8c8fe0e31c0d356df2a5c33603c23379a04a6d",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P1",
+          "shadow": {
+            "key_count": 24,
+            "present": true,
+            "sample_keys": [
+              "amount",
+              "amount_delta",
+              "bank_row_ids",
+              "candidate_id",
+              "candidate_key"
+            ],
+            "sha256": "58ce215ea9fafed190f9907ca229654d7bc05461353f8fc02dc09058fee1a3bc",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "candidates.candidate:030dc5f5820c5a408b6ea33b2400988c286c6745f60c1a7ad0c35483f30c8fcb",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P1",
+          "shadow": {
+            "key_count": 24,
+            "present": true,
+            "sample_keys": [
+              "amount",
+              "amount_delta",
+              "bank_row_ids",
+              "candidate_id",
+              "candidate_key"
+            ],
+            "sha256": "2f34c86ffcb53371b71d2f35cce1c6e2b4ab1752751205b8816c44fc284df534",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "candidates.candidate:031ac8756978907c26a771757157071158ab933ecaf0f76a3b41bcfdd36ba404",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P1",
+          "shadow": {
+            "key_count": 24,
+            "present": true,
+            "sample_keys": [
+              "amount",
+              "amount_delta",
+              "bank_row_ids",
+              "candidate_id",
+              "candidate_key"
+            ],
+            "sha256": "9b9cf55cb6bdbe1d1e65b10ac17004405dd41e641d218ba69cafc82cb254006a",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "candidates.candidate:031af2f966b18b7d4bfd94a6211a6162b0595d9f7f390e2c81d82583df7a3855",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P1",
+          "shadow": {
+            "key_count": 24,
+            "present": true,
+            "sample_keys": [
+              "amount",
+              "amount_delta",
+              "bank_row_ids",
+              "candidate_id",
+              "candidate_key"
+            ],
+            "sha256": "a74d6f75b498cec581f72d8b6b0036d18980f2afeb77fee6e4089caae2d4ac11",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "candidates.candidate:031e203f04ff568f6f388f49d48e41a085fe0cf732ba016d02d9518b8b03825e",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P1",
+          "shadow": {
+            "key_count": 24,
+            "present": true,
+            "sample_keys": [
+              "amount",
+              "amount_delta",
+              "bank_row_ids",
+              "candidate_id",
+              "candidate_key"
+            ],
+            "sha256": "99952f61fdce20cfc5045298bc74948730c3be6c37fa8dac64350fb73e91c561",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "candidates.candidate:031ed632e2efc92ec9b9ea2e5940cbae01b19b333e3565b5747b9efe33806b72",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P1",
+          "shadow": {
+            "key_count": 24,
+            "present": true,
+            "sample_keys": [
+              "amount",
+              "amount_delta",
+              "bank_row_ids",
+              "candidate_id",
+              "candidate_key"
+            ],
+            "sha256": "8881cf789eb5ff6099c7b46cc44e95eec604959e5681dd35401607421ddff8b3",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "candidates.candidate:032278c748e6e44d845cf7c347850df039d776284be35d61ac1fb280ff3d6952",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P1",
+          "shadow": {
+            "key_count": 24,
+            "present": true,
+            "sample_keys": [
+              "amount",
+              "amount_delta",
+              "bank_row_ids",
+              "candidate_id",
+              "candidate_key"
+            ],
+            "sha256": "fe229b32b76d2382133dcae4d918bb1bab79e0f8ac61686c51b9c0fb2e1caf24",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "candidates.candidate:03262bb9dee90fc758a186cd281db9faaaee7a594aa7b1989c10c0bfed4b7b62",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P1",
+          "shadow": {
+            "key_count": 24,
+            "present": true,
+            "sample_keys": [
+              "amount",
+              "amount_delta",
+              "bank_row_ids",
+              "candidate_id",
+              "candidate_key"
+            ],
+            "sha256": "b80b58886fda7fa8801b290d0f649ca5db1ecaa7e2b5f00fd36f1ae638ec5800",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "candidates.candidate:032ef4ada6b74a419b11084396827bb7982a15562cc2921fe30709d4baf3b1c2",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P1",
+          "shadow": {
+            "key_count": 24,
+            "present": true,
+            "sample_keys": [
+              "amount",
+              "amount_delta",
+              "bank_row_ids",
+              "candidate_id",
+              "candidate_key"
+            ],
+            "sha256": "e284731c3054a5a1f153bd5a16d90c781c36eb5a5c7b9153003117b490dbdca7",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "candidates.candidate:032f49412ea8e5b9b1fbf5e98935cc244a9a9b60cb573a0b67f7d0d8ca47fc59",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P1",
+          "shadow": {
+            "key_count": 24,
+            "present": true,
+            "sample_keys": [
+              "amount",
+              "amount_delta",
+              "bank_row_ids",
+              "candidate_id",
+              "candidate_key"
+            ],
+            "sha256": "09787dde1d148ced0afc0ae8975ea600a5e858ffbedf23ae0b9ba7fa9af3bb07",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "candidates.candidate:033ba9f094b1326196a5463483b11f5db97a720fc521c9f7e03fec59585d9a58",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P1",
+          "shadow": {
+            "key_count": 24,
+            "present": true,
+            "sample_keys": [
+              "amount",
+              "amount_delta",
+              "bank_row_ids",
+              "candidate_id",
+              "candidate_key"
+            ],
+            "sha256": "27fe91d78ac5a92bfac2f8ab8a291a1ef525213a6137a7779c579a216f8b61ac",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "candidates.candidate:0348d3ae852faf819ef3243ac8653ce2f993a70aad2649ef017c529c47532729",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P1",
+          "shadow": {
+            "key_count": 24,
+            "present": true,
+            "sample_keys": [
+              "amount",
+              "amount_delta",
+              "bank_row_ids",
+              "candidate_id",
+              "candidate_key"
+            ],
+            "sha256": "00ef0bb15558448a63c20bb4dfa3f5c92bcfd403381258142702fb2df8735b70",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "candidates.candidate:0353d33141044d358e7c54f0ed6e18c97da41bae10f65ed26d94b526cadcb119",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P1",
+          "shadow": {
+            "key_count": 24,
+            "present": true,
+            "sample_keys": [
+              "amount",
+              "amount_delta",
+              "bank_row_ids",
+              "candidate_id",
+              "candidate_key"
+            ],
+            "sha256": "785d171f17dd5293d5c267fe13400d5faa6decb673c8428baa255915f36b9aea",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "candidates.candidate:0354da0b88d295ff56a0f9b9cd3126fad62c26bfc23c3b34ec3cc86cfc03f107",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P1",
+          "shadow": {
+            "key_count": 24,
+            "present": true,
+            "sample_keys": [
+              "amount",
+              "amount_delta",
+              "bank_row_ids",
+              "candidate_id",
+              "candidate_key"
+            ],
+            "sha256": "3e9ece018389173d8c420f1d7df2c3247caaca20f8081ce059ba5874ef8425bb",
+            "type": "dict"
+          }
+        }
+      ],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 20,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "workbench_candidate_matches",
+        "expected_shape": "month/scope -> candidates",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_workbench_candidate_matches",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres"
+      },
+      "status": "mismatched"
+    },
+    {
+      "domain": "cost_statistics_read_models",
+      "error": null,
+      "matched": true,
+      "method_name": "load_cost_statistics_read_models",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "cost_statistics_read_models",
+        "expected_shape": "scope key -> cost read model",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_cost_statistics_read_models",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "tax_offset_read_models",
+      "error": null,
+      "matched": true,
+      "method_name": "load_tax_offset_read_models",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "tax_offset_read_models",
+        "expected_shape": "scope key -> tax offset read model",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_tax_offset_read_models",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "tax_certified_imports",
+      "error": null,
+      "matched": true,
+      "method_name": "load_tax_certified_imports",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "tax_certified_imports",
+        "expected_shape": "tax certified import snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_tax_certified_imports",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "etc_state",
+      "error": null,
+      "matched": false,
+      "method_name": "load_etc_state",
+      "mismatch_count": 9,
+      "mismatches": [
+        {
+          "kind": "missing_in_shadow",
+          "path": "batch_day_counters.20260503",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "9400f1b21cb527d7fa3d3eabba93557a18ebe7a2ca4e471cfe5e4c5b4ca7f767",
+            "type": "int"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": false,
+            "type": "null"
+          }
+        },
+        {
+          "kind": "missing_in_shadow",
+          "path": "batch_day_counters.20260506",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+            "type": "int"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": false,
+            "type": "null"
+          }
+        },
+        {
+          "kind": "missing_in_shadow",
+          "path": "batch_day_counters.20260515",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+            "type": "int"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": false,
+            "type": "null"
+          }
+        },
+        {
+          "kind": "missing_in_shadow",
+          "path": "batch_day_counters.20260518",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+            "type": "int"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": false,
+            "type": "null"
+          }
+        },
+        {
+          "kind": "missing_in_shadow",
+          "path": "batch_day_counters.20260519",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "ef2d127de37b942baad06145e54b0c619a1f22327b2ebbcfbec78f5564afe39d",
+            "type": "int"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": false,
+            "type": "null"
+          }
+        },
+        {
+          "kind": "missing_in_shadow",
+          "path": "batch_day_counters.20260520",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+            "type": "int"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": false,
+            "type": "null"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "business_batches.etc_business_batch_0002.id",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "35ded4b7e0082130038184ce3cdad0a4ed1097ca9a102b75d2f296e50f5f2ddd",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "business_batches.etc_business_batch_0003.id",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "0a3c97d9cd9c0535d342c9a24d51d9c1651a5848a2de1d6ee3eec5992e9cb438",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "business_batches.etc_business_batch_0004.id",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "4d98e5988c6fb136526ddb5d81c3fb01d35b0d4f0dc87dd2ec06d5b6b64645bf",
+            "type": "str"
+          }
+        }
+      ],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 9,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "etc_state",
+        "expected_shape": "ETC invoice/import snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_etc_state",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres"
+      },
+      "status": "mismatched"
+    },
+    {
+      "domain": "etc_reconciliation_state",
+      "error": null,
+      "matched": false,
+      "method_name": "load_etc_reconciliation_state",
+      "mismatch_count": 20,
+      "mismatches": [
+        {
+          "kind": "value_mismatch",
+          "path": "audit_counter",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "9644294ac4ffb3091eef01219b3fe4fe467f05890cc56af961dce68fddbb7704",
+            "type": "int"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+            "type": "int"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "file_counter",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "d2f483672c0239f6d7dd3c9ecee6deacbcd59185855625902a8b1c1a3bd67440",
+            "type": "int"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+            "type": "int"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "task_counter",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "5f9c4ab08cac7457e9111a30e4664920607ea2c115a1433d7be98e97e64244ca",
+            "type": "int"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+            "type": "int"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "tasks.ETC-RECON-000026.credit_card_items[0].parse_confidence",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6",
+            "type": "float"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "a51162aeeb057ca4e3df627977231de20b581f0d0d418ca3a111bc0e408ac6cc",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "tasks.ETC-RECON-000026.credit_card_items[1].parse_confidence",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6",
+            "type": "float"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "a51162aeeb057ca4e3df627977231de20b581f0d0d418ca3a111bc0e408ac6cc",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "tasks.ETC-RECON-000026.credit_card_items[2].parse_confidence",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6",
+            "type": "float"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "a51162aeeb057ca4e3df627977231de20b581f0d0d418ca3a111bc0e408ac6cc",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "tasks.ETC-RECON-000026.credit_card_items[3].parse_confidence",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6",
+            "type": "float"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "a51162aeeb057ca4e3df627977231de20b581f0d0d418ca3a111bc0e408ac6cc",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "tasks.ETC-RECON-000026.credit_card_items[4].parse_confidence",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6",
+            "type": "float"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "a51162aeeb057ca4e3df627977231de20b581f0d0d418ca3a111bc0e408ac6cc",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "tasks.ETC-RECON-000026.credit_card_items[5].parse_confidence",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6",
+            "type": "float"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "a51162aeeb057ca4e3df627977231de20b581f0d0d418ca3a111bc0e408ac6cc",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "tasks.ETC-RECON-000026.credit_card_items[6].parse_confidence",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6",
+            "type": "float"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "a51162aeeb057ca4e3df627977231de20b581f0d0d418ca3a111bc0e408ac6cc",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "tasks.ETC-RECON-000026.credit_card_items[7].parse_confidence",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6",
+            "type": "float"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "a51162aeeb057ca4e3df627977231de20b581f0d0d418ca3a111bc0e408ac6cc",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "tasks.ETC-RECON-000026.credit_card_items[8].parse_confidence",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6",
+            "type": "float"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "a51162aeeb057ca4e3df627977231de20b581f0d0d418ca3a111bc0e408ac6cc",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "tasks.ETC-RECON-000026.credit_card_items[9].parse_confidence",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6",
+            "type": "float"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "a51162aeeb057ca4e3df627977231de20b581f0d0d418ca3a111bc0e408ac6cc",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "tasks.ETC-RECON-000026.credit_card_items[10].parse_confidence",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6",
+            "type": "float"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "a51162aeeb057ca4e3df627977231de20b581f0d0d418ca3a111bc0e408ac6cc",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "tasks.ETC-RECON-000026.credit_card_items[11].parse_confidence",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6",
+            "type": "float"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "a51162aeeb057ca4e3df627977231de20b581f0d0d418ca3a111bc0e408ac6cc",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "tasks.ETC-RECON-000026.credit_card_items[12].parse_confidence",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6",
+            "type": "float"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "a51162aeeb057ca4e3df627977231de20b581f0d0d418ca3a111bc0e408ac6cc",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "tasks.ETC-RECON-000026.credit_card_items[13].parse_confidence",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6",
+            "type": "float"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "a51162aeeb057ca4e3df627977231de20b581f0d0d418ca3a111bc0e408ac6cc",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "tasks.ETC-RECON-000026.credit_card_items[14].parse_confidence",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6",
+            "type": "float"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "a51162aeeb057ca4e3df627977231de20b581f0d0d418ca3a111bc0e408ac6cc",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "tasks.ETC-RECON-000026.credit_card_items[15].parse_confidence",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6",
+            "type": "float"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "a51162aeeb057ca4e3df627977231de20b581f0d0d418ca3a111bc0e408ac6cc",
+            "type": "str"
+          }
+        },
+        {
+          "kind": "value_mismatch",
+          "path": "tasks.ETC-RECON-000026.credit_card_items[16].parse_confidence",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6",
+            "type": "float"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": true,
+            "scalar": true,
+            "sha256": "a51162aeeb057ca4e3df627977231de20b581f0d0d418ca3a111bc0e408ac6cc",
+            "type": "str"
+          }
+        }
+      ],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 20,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "etc_reconciliation_state",
+        "expected_shape": "ETC reconciliation snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_etc_reconciliation_state",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres"
+      },
+      "status": "mismatched"
+    },
+    {
+      "domain": "historical_etc_repair_bundle_metadata",
+      "error": null,
+      "matched": true,
+      "method_name": "load_historical_etc_repair_bundle_metadata",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "historical_etc_repair_bundle_metadata",
+        "expected_shape": "bundle id -> metadata only",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_historical_etc_repair_bundle_metadata",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P2",
+        "severity_by_path": {},
+        "shadow_source": "postgres"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "historical_etc_repair_parsed_seeds",
+      "error": null,
+      "matched": true,
+      "method_name": "load_historical_etc_repair_parsed_seeds",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "historical_etc_repair_parsed_seeds",
+        "expected_shape": "bundle id -> parsed seed metadata",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_historical_etc_repair_parsed_seeds",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P2",
+        "severity_by_path": {},
+        "shadow_source": "postgres"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "historical_etc_repair_states",
+      "error": null,
+      "matched": true,
+      "method_name": "load_historical_etc_repair_states",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "historical_etc_repair_states",
+        "expected_shape": "repair state snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_historical_etc_repair_states",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres"
+      },
+      "status": "matched"
+    }
+  ],
+  "gate_recommendation": "BLOCKED",
+  "primary_backend": "mongo",
+  "redacted": true,
+  "run_id": "stage25A-actual-postgres-store-shadow-20260521001446",
+  "shadow_backend": "postgres",
+  "started_at": "2026-05-20T16:15:58+00:00",
+  "summary": {
+    "blocked_domains": 0,
+    "compared_domains": 20,
+    "matched_domains": 17,
+    "mismatched_domains": 3,
+    "primary_errors": 0,
+    "severity_counts": {
+      "P0": 0,
+      "P1": 49,
+      "P2": 0,
+      "ignored": 0
+    },
+    "shadow_errors": 0,
+    "status_counts": {
+      "matched": 17,
+      "mismatched": 3
+    },
+    "total_domains": 20
+  }
+}

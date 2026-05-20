@@ -1,0 +1,27 @@
+{
+  "app_mongo_database": "fin_ops_platform_app",
+  "app_mongo_read_only": true,
+  "app_settings_presence": {
+    "bank_transaction_tags": false,
+    "pending_invoice_tag_groups": false
+  },
+  "app_settings_versions": {
+    "bank_transaction_tags": null,
+    "pending_invoice_tag_groups": null
+  },
+  "collection_counts": {
+    "app_settings": 1,
+    "pending_invoice_manual_invoice_commands": 0,
+    "workbench_pair_relations": 150,
+    "workbench_pair_relations_meta": 1
+  },
+  "created_at": "2026-05-20T09:42:17.652262+00:00",
+  "oa_mongo_accessed": false,
+  "postgres_schema_probe": {
+    "app.app_settings": true,
+    "app.pending_invoice_manual_invoice_commands": false
+  },
+  "raw_payload_included": false,
+  "redacted": true,
+  "run_id": "stage15A-post-main-revalidation-20260520174147"
+}

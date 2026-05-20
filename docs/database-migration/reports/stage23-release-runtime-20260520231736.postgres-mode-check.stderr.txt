@@ -1,0 +1,29 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/opt/fin-ops/releases/stage23-release-runtime-20260520231736/src/backend/src/fin_ops_platform/app/main.py", line 35, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/opt/fin-ops/releases/stage23-release-runtime-20260520231736/src/backend/src/fin_ops_platform/app/main.py", line 25, in main
+    app = build_application(data_dir=default_data_dir())
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/fin-ops/releases/stage23-release-runtime-20260520231736/src/backend/src/fin_ops_platform/app/server.py", line 15191, in build_application
+    return Application(data_dir=data_dir)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/fin-ops/releases/stage23-release-runtime-20260520231736/src/backend/src/fin_ops_platform/app/server.py", line 309, in __init__
+    self._initialize_runtime_services(self._load_persisted_state())
+  File "/opt/fin-ops/releases/stage23-release-runtime-20260520231736/src/backend/src/fin_ops_platform/app/server.py", line 518, in _initialize_runtime_services
+    self._etc_service = EtcService(state_store=self._state_store)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/fin-ops/releases/stage23-release-runtime-20260520231736/src/backend/src/fin_ops_platform/services/etc_service.py", line 683, in __init__
+    self._hydrate(self._load_snapshot())
+  File "/opt/fin-ops/releases/stage23-release-runtime-20260520231736/src/backend/src/fin_ops_platform/services/etc_service.py", line 1954, in _hydrate
+    self._batches = {
+                    ^
+  File "/opt/fin-ops/releases/stage23-release-runtime-20260520231736/src/backend/src/fin_ops_platform/services/etc_service.py", line 1955, in <dictcomp>
+    str(key): _etc_batch_from_snapshot(value)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/fin-ops/releases/stage23-release-runtime-20260520231736/src/backend/src/fin_ops_platform/services/etc_service.py", line 3111, in _etc_batch_from_snapshot
+    return EtcBatch(**raw)
+           ^^^^^^^^^^^^^^^
+TypeError: EtcBatch.__init__() missing 5 required positional arguments: 'id', 'etc_batch_id', 'invoice_ids', 'invoice_count', and 'total_amount'

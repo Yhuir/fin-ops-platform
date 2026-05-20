@@ -1,0 +1,545 @@
+{
+  "completed_at": "2026-05-20T13:36:00+00:00",
+  "domain_results": [
+    {
+      "domain": "app_settings",
+      "error": null,
+      "matched": true,
+      "method_name": "load_app_settings",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "app_settings",
+        "expected_shape": "settings payload",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_app_settings",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "pending_invoice_commands",
+      "error": null,
+      "matched": true,
+      "method_name": "load_pending_invoice_commands",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "pending_invoice_commands",
+        "expected_shape": "request id -> pending invoice command",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_pending_invoice_commands",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "background_jobs",
+      "error": null,
+      "matched": false,
+      "method_name": "load_background_jobs",
+      "mismatch_count": 11,
+      "mismatches": [
+        {
+          "kind": "missing_in_primary",
+          "path": "job_20260506_023302_3b78ec96",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P2",
+          "shadow": {
+            "key_count": 23,
+            "present": true,
+            "sample_keys": [
+              "acknowledged_at",
+              "affected_months",
+              "affected_scopes",
+              "created_at",
+              "current"
+            ],
+            "sha256": "3a0dc487d1d2e87945ccee1bc067e9839e84a34e7b460e48d6476f9495c947b5",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "job_20260506_023302_3e5a7b65",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P2",
+          "shadow": {
+            "key_count": 23,
+            "present": true,
+            "sample_keys": [
+              "acknowledged_at",
+              "affected_months",
+              "affected_scopes",
+              "created_at",
+              "current"
+            ],
+            "sha256": "4bb5a863fccffeebfe69dace8c53021908c21f28c8d908ce03d12ed673af5e5b",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "job_20260506_032531_04d0be8c",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P2",
+          "shadow": {
+            "key_count": 23,
+            "present": true,
+            "sample_keys": [
+              "acknowledged_at",
+              "affected_months",
+              "affected_scopes",
+              "created_at",
+              "current"
+            ],
+            "sha256": "d02ad270b46133d5927853005e41c83c4faefb4cb416644bc6a7983c6b2533d6",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "job_20260511_034115_21bc49a1",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P2",
+          "shadow": {
+            "key_count": 23,
+            "present": true,
+            "sample_keys": [
+              "acknowledged_at",
+              "affected_months",
+              "affected_scopes",
+              "created_at",
+              "current"
+            ],
+            "sha256": "a4a68d12315839f633030131e42779296c85990882dfb197763c14836eb0f02d",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "job_20260511_045813_a6634741",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P2",
+          "shadow": {
+            "key_count": 23,
+            "present": true,
+            "sample_keys": [
+              "acknowledged_at",
+              "affected_months",
+              "affected_scopes",
+              "created_at",
+              "current"
+            ],
+            "sha256": "fb804abd6bd118c81f823602dd929450c4cfebc9822362c54a7dd12242b95443",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "job_20260518_012445_2fabd29e",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P2",
+          "shadow": {
+            "key_count": 25,
+            "present": true,
+            "sample_keys": [
+              "acknowledged_at",
+              "affected_months",
+              "affected_scopes",
+              "created_at",
+              "current"
+            ],
+            "sha256": "c6f5e25161ed1f56ec892530f828b647540d30d17fd100cc04e287d7eb79834d",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "job_20260518_053013_2b5a7fe4",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P2",
+          "shadow": {
+            "key_count": 25,
+            "present": true,
+            "sample_keys": [
+              "acknowledged_at",
+              "affected_months",
+              "affected_scopes",
+              "created_at",
+              "current"
+            ],
+            "sha256": "6d4829653f9197d6c6045be1fb17519d649bf0f0352e262437ae0831ed7441fc",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "job_20260519_022049_0c97b1a0",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P2",
+          "shadow": {
+            "key_count": 25,
+            "present": true,
+            "sample_keys": [
+              "acknowledged_at",
+              "affected_months",
+              "affected_scopes",
+              "created_at",
+              "current"
+            ],
+            "sha256": "a4db70135c41c6d4bbbc8dd0d08f027ae97572799c5beec0b9c996a8e9fec707",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "job_20260519_025806_c8949c3a",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P2",
+          "shadow": {
+            "key_count": 25,
+            "present": true,
+            "sample_keys": [
+              "acknowledged_at",
+              "affected_months",
+              "affected_scopes",
+              "created_at",
+              "current"
+            ],
+            "sha256": "d7fd87b5a0da06023abe5a576d3749179b29e8a6886c8e1777965b5d60682cd1",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "job_20260519_033231_98d8bb1d",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P2",
+          "shadow": {
+            "key_count": 25,
+            "present": true,
+            "sample_keys": [
+              "acknowledged_at",
+              "affected_months",
+              "affected_scopes",
+              "created_at",
+              "current"
+            ],
+            "sha256": "6acdcb58985368f5d038f1ad8652dfee4353ef3d602860da4bd9b587a40bc398",
+            "type": "dict"
+          }
+        },
+        {
+          "kind": "missing_in_primary",
+          "path": "job_20260519_063914_ee608d76",
+          "primary": {
+            "present": false,
+            "type": "null"
+          },
+          "severity": "P2",
+          "shadow": {
+            "key_count": 25,
+            "present": true,
+            "sample_keys": [
+              "acknowledged_at",
+              "affected_months",
+              "affected_scopes",
+              "created_at",
+              "current"
+            ],
+            "sha256": "10ab11218e527ded239b02983e613c5e613bbec92df14c46e50fd1ea4f0858a1",
+            "type": "dict"
+          }
+        }
+      ],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 11,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "background_jobs",
+        "expected_shape": "job id -> job snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_background_jobs",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P2",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "mismatched"
+    },
+    {
+      "domain": "app_health_alerts",
+      "error": null,
+      "matched": true,
+      "method_name": "load_app_health_alerts",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "app_health_alerts",
+        "expected_shape": "alert id -> alert snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_app_health_alerts",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P2",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "workbench_pair_relations",
+      "error": null,
+      "matched": true,
+      "method_name": "load_workbench_pair_relations",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "workbench_pair_relations",
+        "expected_shape": "case id -> relation snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_workbench_pair_relations",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P0",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "no_oa_bank_batches",
+      "error": null,
+      "matched": true,
+      "method_name": "load_no_oa_bank_batches",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "no_oa_bank_batches",
+        "expected_shape": "batch id -> batch snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_no_oa_bank_batches",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P0",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "bank_transaction_categories",
+      "error": null,
+      "matched": true,
+      "method_name": "load_bank_transaction_categories",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "bank_transaction_categories",
+        "expected_shape": "category snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_bank_transaction_categories",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "turnover_relations",
+      "error": null,
+      "matched": true,
+      "method_name": "load_turnover_relations",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "turnover_relations",
+        "expected_shape": "relation id -> turnover relation",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_turnover_relations",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P0",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "matched"
+    }
+  ],
+  "gate_recommendation": "PARTIAL",
+  "primary_backend": "mongo",
+  "redacted": true,
+  "run_id": "stage20-mirror-dryrun-deps-20260520213534",
+  "shadow_backend": "postgres_psql_json",
+  "started_at": "2026-05-20T13:36:00+00:00",
+  "summary": {
+    "blocked_domains": 0,
+    "compared_domains": 8,
+    "matched_domains": 7,
+    "mismatched_domains": 1,
+    "primary_errors": 0,
+    "severity_counts": {
+      "P0": 0,
+      "P1": 0,
+      "P2": 11,
+      "ignored": 0
+    },
+    "shadow_errors": 0,
+    "status_counts": {
+      "matched": 7,
+      "mismatched": 1
+    },
+    "total_domains": 8
+  }
+}

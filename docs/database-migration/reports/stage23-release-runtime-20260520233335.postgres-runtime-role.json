@@ -1,0 +1,16 @@
+{
+  "credential_file": "/root/fin_ops_stage23_postgres_runtime.env",
+  "credential_file_contains_secret": true,
+  "credential_file_mode": "600",
+  "public_schema_migrations": "select",
+  "redacted_dsn": "postgresql://fin_ops_app_runtime:***@127.0.0.1:5432/fin_ops",
+  "role_name": "fin_ops_app_runtime",
+  "role_superuser": false,
+  "run_id": "stage23-release-runtime-20260520233335",
+  "schemas_granted": [
+    "app",
+    "read_model",
+    "job",
+    "audit"
+  ]
+}

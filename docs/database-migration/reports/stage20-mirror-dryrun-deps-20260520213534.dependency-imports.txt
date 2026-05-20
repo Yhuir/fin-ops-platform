@@ -1,0 +1,4 @@
+psycopg|OK|/tmp/stage20-mirror-dryrun-deps-20260520213534/venv/lib64/python3.11/site-packages/psycopg/__init__.py
+fin_ops_platform.tools.run_shadow_read_rehearsal|OK|/tmp/stage19A-production-retry-20260520202738/backend/src/fin_ops_platform/tools/run_shadow_read_rehearsal.py
+fin_ops_platform.tools.run_runtime_state_policy_preflight|OK|/tmp/stage19A-production-retry-20260520202738/backend/src/fin_ops_platform/tools/run_runtime_state_policy_preflight.py
+fin_ops_platform.tools.run_controlled_mirror_write_rehearsal|OK|/tmp/stage19A-production-retry-20260520202738/backend/src/fin_ops_platform/tools/run_controlled_mirror_write_rehearsal.py
