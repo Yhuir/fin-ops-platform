@@ -461,6 +461,24 @@ describe("Bank details page", () => {
     });
   });
 
+  test("refetches bank detail data when bank detail tag settings update", async () => {
+    const fetchMock = installMockApiFetch();
+    renderBankDetailsPage();
+
+    await screen.findByText("云南溯源科技有限公司");
+    const initialAccountRequests = requestUrls(fetchMock, "/api/bank-details/accounts").length;
+    const initialTransactionRequests = requestUrls(fetchMock, "/api/bank-details/transactions").length;
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("finops:bank-transaction-tags-updated", { detail: { version: 2 } }));
+    });
+
+    await waitFor(() => {
+      expect(requestUrls(fetchMock, "/api/bank-details/accounts").length).toBeGreaterThan(initialAccountRequests);
+      expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
+    });
+  });
+
   test("refetches bank detail data on focus when bank tag version fallback detects a missed update", async () => {
     vi.stubGlobal("BroadcastChannel", undefined);
     let tagVersion = 1;

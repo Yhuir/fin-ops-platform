@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 
@@ -139,6 +139,12 @@ function installPendingInvoiceFetch() {
   return fetchMock;
 }
 
+function pendingInvoiceRowsRequests(fetchMock: ReturnType<typeof installPendingInvoiceFetch>) {
+  return fetchMock.mock.calls
+    .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
+    .filter((url) => url.pathname === "/api/pending-invoices/rows");
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -156,6 +162,11 @@ describe("Pending invoices page", () => {
     expect(within(page).getByRole("columnheader", { name: "支出流水" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "进项发票" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "OA申请人" })).toBeInTheDocument();
+    expect(within(page).getByRole("columnheader", { name: "对方户名 / 时间" })).toBeInTheDocument();
+    expect(within(page).getByRole("columnheader", { name: "金额 / 银行账户" })).toBeInTheDocument();
+    expect(within(page).getByRole("columnheader", { name: "发票号码 / 开票日期" })).toBeInTheDocument();
+    expect(within(page).getByRole("columnheader", { name: "价税合计" })).toBeInTheDocument();
+    expect(within(page).getByRole("columnheader", { name: "销方名称" })).toBeInTheDocument();
     expect(await within(page).findByText("云南开票供应商")).toBeInTheDocument();
     expect(within(page).getByText("2026-05-02 10:00:00").closest(".MuiChip-root")).toBeInTheDocument();
     expect(within(page).getAllByText("工商银行 6386")[0].closest(".MuiChip-root")).toBeInTheDocument();
@@ -182,6 +193,7 @@ describe("Pending invoices page", () => {
     expect(within(page).queryByRole("button", { name: "全部" })).not.toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "收入流水" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "销项发票" })).toBeInTheDocument();
+    expect(within(page).getByRole("columnheader", { name: "购方名称" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: /客户有限公司 新增发票/ })).toBeInTheDocument();
     await waitFor(() => {
       const request = fetchMock.mock.calls
@@ -221,6 +233,53 @@ describe("Pending invoices page", () => {
       const paths = fetchMock.mock.calls.map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost").pathname);
       expect(paths).toContain("/api/pending-invoices/manual-invoices/preview");
       expect(paths).toContain("/api/pending-invoices/manual-invoices");
+    });
+  });
+
+  test("refetches rows when bank detail tag settings update", async () => {
+    const fetchMock = installPendingInvoiceFetch();
+    renderAppAt("/pending-invoices");
+
+    expect(await screen.findByText("云南开票供应商")).toBeInTheDocument();
+    const initialRequests = pendingInvoiceRowsRequests(fetchMock).length;
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("finops:bank-transaction-tags-updated", { detail: { version: 2 } }));
+    });
+
+    await waitFor(() => {
+      expect(pendingInvoiceRowsRequests(fetchMock).length).toBeGreaterThan(initialRequests);
+    });
+  });
+
+  test("refetches rows on focus as bank detail tag update fallback", async () => {
+    vi.stubGlobal("BroadcastChannel", undefined);
+    const localStorageStore = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: vi.fn((key: string) => localStorageStore.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => {
+        localStorageStore.set(key, value);
+      }),
+      removeItem: vi.fn((key: string) => {
+        localStorageStore.delete(key);
+      }),
+      clear: vi.fn(() => {
+        localStorageStore.clear();
+      }),
+    });
+    const fetchMock = installPendingInvoiceFetch();
+    renderAppAt("/pending-invoices");
+
+    expect(await screen.findByText("云南开票供应商")).toBeInTheDocument();
+    const initialRequests = pendingInvoiceRowsRequests(fetchMock).length;
+
+    window.localStorage.setItem("finops.bankTransactionTags.version", "2");
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+
+    await waitFor(() => {
+      expect(pendingInvoiceRowsRequests(fetchMock).length).toBeGreaterThan(initialRequests);
     });
   });
 });

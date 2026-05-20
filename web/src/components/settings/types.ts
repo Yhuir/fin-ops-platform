@@ -100,7 +100,6 @@ export type SettingsPendingInvoiceTagsSectionProps = {
   activeGroup: keyof WorkbenchSettings["pendingInvoiceTagGroups"];
   onSelectGroup: (group: keyof WorkbenchSettings["pendingInvoiceTagGroups"]) => void;
   onAddExistingTag: (code: string) => void;
-  onCreateAndAddTag: (label: string) => void;
   onRemoveTag: (code: string) => void;
 };
 

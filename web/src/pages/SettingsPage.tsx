@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
 import Stack from "@mui/material/Stack";
 
 import SettingsPageContent from "../components/settings/SettingsPageContent";
@@ -43,6 +44,23 @@ function broadcastBankTransactionTagsUpdated(version: number) {
     const channel = new BroadcastChannel(TAG_SYNC_EVENT);
     channel.postMessage({ version });
     channel.close();
+  }
+}
+
+function tagVersionFromEvent(event: Event) {
+  if (!(event instanceof CustomEvent) || !event.detail || typeof event.detail !== "object") {
+    return null;
+  }
+  const version = Number((event.detail as { version?: unknown }).version);
+  return Number.isFinite(version) && version > 0 ? version : null;
+}
+
+function readPersistedTagVersion() {
+  try {
+    const version = Number(window.localStorage.getItem(TAG_VERSION_STORAGE_KEY));
+    return Number.isFinite(version) && version > 0 ? version : null;
+  } catch {
+    return null;
   }
 }
 
@@ -87,6 +105,8 @@ export default function SettingsPage() {
   });
   const [pageFeedback, setPageFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
   const [activeDataResetJob, setActiveDataResetJob] = useState<WorkbenchSettingsDataResetJob | null>(null);
+  const [staleBankTransactionTagsVersion, setStaleBankTransactionTagsVersion] = useState<number | null>(null);
+  const localTagBroadcastVersionRef = useRef<number | null>(null);
 
   const loadSettings = useCallback(async (signal?: AbortSignal) => {
     setIsLoading(true);
@@ -99,6 +119,7 @@ export default function SettingsPage() {
         return;
       }
       setSettings(payload);
+      setStaleBankTransactionTagsVersion(null);
     } catch (error) {
       if (signal?.aborted) {
         return;
@@ -161,6 +182,57 @@ export default function SettingsPage() {
   }, [canAdminAccess, loadSettings]);
 
   useEffect(() => {
+    const currentVersion = settings?.bankTransactionTags.version ?? null;
+    const markStaleIfNewer = (version: number | null) => {
+      if (version === null || currentVersion === null || version <= currentVersion) {
+        return;
+      }
+      if (localTagBroadcastVersionRef.current === version) {
+        return;
+      }
+      setStaleBankTransactionTagsVersion(version);
+      setPageFeedback({
+        tone: "error",
+        message: "银行明细标签已在其他页面更新，请刷新后再保存。",
+      });
+    };
+
+    const handleTagUpdate = (event: Event) => {
+      markStaleIfNewer(tagVersionFromEvent(event));
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== TAG_VERSION_STORAGE_KEY) {
+        return;
+      }
+      const version = Number(event.newValue);
+      markStaleIfNewer(Number.isFinite(version) && version > 0 ? version : null);
+    };
+    const handleFocus = () => {
+      markStaleIfNewer(readPersistedTagVersion());
+    };
+
+    window.addEventListener(TAG_SYNC_EVENT, handleTagUpdate);
+    window.addEventListener("storage", handleStorage);
+    window.addEventListener("focus", handleFocus);
+
+    let channel: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== "undefined") {
+      channel = new BroadcastChannel(TAG_SYNC_EVENT);
+      channel.onmessage = (message) => {
+        const version = Number((message.data as { version?: unknown } | undefined)?.version);
+        window.dispatchEvent(new CustomEvent(TAG_SYNC_EVENT, { detail: { version: Number.isFinite(version) ? version : undefined } }));
+      };
+    }
+
+    return () => {
+      window.removeEventListener(TAG_SYNC_EVENT, handleTagUpdate);
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("focus", handleFocus);
+      channel?.close();
+    };
+  }, [settings?.bankTransactionTags.version]);
+
+  useEffect(() => {
     if (loadError) {
       setWorkbenchStatus({ level: "error", reason: loadError });
       return;
@@ -198,11 +270,23 @@ export default function SettingsPage() {
       setPageFeedback({ tone: "error", message: "登录已失效或系统不可用，不能保存设置。" });
       return;
     }
+    if (
+      staleBankTransactionTagsVersion !== null
+      && staleBankTransactionTagsVersion > payload.bankTransactionTags.version
+    ) {
+      setPageFeedback({
+        tone: "error",
+        message: "银行明细标签已在其他页面更新，请刷新后再保存。",
+      });
+      return;
+    }
     setIsSaving(true);
     setPageFeedback(null);
     try {
       const saved = await saveWorkbenchSettings(payload);
+      localTagBroadcastVersionRef.current = saved.bankTransactionTags.version;
       setSettings(saved);
+      setStaleBankTransactionTagsVersion(null);
       broadcastBankTransactionTagsUpdated(saved.bankTransactionTags.version);
       setPageFeedback({ tone: "success", message: "已保存关联台设置。" });
     } catch (error) {
@@ -286,6 +370,11 @@ export default function SettingsPage() {
     navigate("/settings");
   }, [navigate]);
 
+  const handleRefreshSettings = useCallback(() => {
+    setPageFeedback(null);
+    void loadSettings();
+  }, [loadSettings]);
+
   useLayoutEffect(() => {
     setWorkbenchHeaderActions({
       canMutateData: canMutateData && canMutateWithHealth,
@@ -301,7 +390,16 @@ export default function SettingsPage() {
     <Box data-testid="settings-page" sx={{ display: "flex", flexDirection: "column", flex: 1, height: "100%" }}>
       <Stack spacing={2} sx={{ mb: 3 }}>
         {pageFeedback ? (
-          <Alert severity={pageFeedback.tone === "error" ? "error" : "success"}>{pageFeedback.message}</Alert>
+          <Alert
+            action={staleBankTransactionTagsVersion !== null ? (
+              <Button color="inherit" size="small" onClick={handleRefreshSettings}>
+                刷新设置
+              </Button>
+            ) : null}
+            severity={pageFeedback.tone === "error" ? "error" : "success"}
+          >
+            {pageFeedback.message}
+          </Alert>
         ) : null}
         {loadError ? <Alert severity="error">{loadError}</Alert> : null}
         {isLoading && !loadError ? <Alert severity="info">正在同步关联台设置...</Alert> : null}

@@ -16,7 +16,7 @@ import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import { useState } from "react";
 
-import { settingsButtonSx, settingsTokens } from "./settingsDesign";
+import { settingsTokens } from "./settingsDesign";
 import type { SettingsPendingInvoiceTagsSectionProps } from "./types";
 
 const GROUP_LABELS: Record<SettingsPendingInvoiceTagsSectionProps["activeGroup"], string> = {
@@ -37,16 +37,36 @@ export default function SettingsPendingInvoiceTagsSection({
   groups,
   tags,
   onAddExistingTag,
-  onCreateAndAddTag,
   onRemoveTag,
   onSelectGroup,
 }: SettingsPendingInvoiceTagsSectionProps) {
   const [selectedTagCode, setSelectedTagCode] = useState("");
   const [existingTagAnchor, setExistingTagAnchor] = useState<HTMLElement | null>(null);
-  const [newTagLabel, setNewTagLabel] = useState("");
   const activeTags = groups[activeGroup];
   const activeTagSet = new Set(activeTags);
-  const activeDefinitions = activeTags.map((code) => tags.find((tag) => tag.code === code)).filter(Boolean);
+  const tagsByCode = new Map(tags.map((tag) => [tag.code, tag]));
+  const activeDefinitions = activeTags.map((code) => {
+    const tag = tagsByCode.get(code);
+    if (!tag) {
+      return {
+        code,
+        label: code,
+        path: [] as string[],
+        status: "missing",
+        issueLabel: "标签不存在",
+      };
+    }
+    if (tag.status === "archived") {
+      return {
+        ...tag,
+        issueLabel: "标签已停用",
+      };
+    }
+    return {
+      ...tag,
+      issueLabel: null,
+    };
+  });
   const availableTags = tags.filter((tag) => tag.status === "active" && !activeTagSet.has(tag.code));
 
   return (
@@ -123,34 +143,23 @@ export default function SettingsPendingInvoiceTagsSection({
                 </MenuItem>
               ))}
             </Menu>
-            <TextField label="新标签" size="small" value={newTagLabel} disabled={controlsDisabled} onChange={(event) => setNewTagLabel(event.target.value)} />
-            <Button
-              startIcon={<AddIcon />}
-              variant="contained"
-              sx={settingsButtonSx}
-              disabled={controlsDisabled || !newTagLabel.trim()}
-              onClick={() => {
-                onCreateAndAddTag(newTagLabel);
-                setNewTagLabel("");
-              }}
-            >
-              新建并加入
-            </Button>
           </Stack>
           <Stack spacing={1}>
             {activeDefinitions.length === 0 ? (
-              <Typography color="text.secondary" variant="body2">当前分组没有标签。</Typography>
-            ) : activeDefinitions.map((tag) => tag ? (
+              <Typography color="text.secondary" variant="body2">请先在银行明细标签管理中新增标签。</Typography>
+            ) : activeDefinitions.map((tag) => (
               <Stack key={tag.code} direction="row" spacing={1} alignItems="center">
-                <Chip label={tag.label} />
-                <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>{tag.path.join(" / ")}</Typography>
+                <Chip color={tag.issueLabel ? "error" : "default"} label={tag.label} variant={tag.issueLabel ? "outlined" : "filled"} />
+                <Typography variant="body2" color={tag.issueLabel ? "error" : "text.secondary"} sx={{ flex: 1 }}>
+                  {tag.issueLabel ?? tag.path.join(" / ")}
+                </Typography>
                 <Tooltip title="移除标签">
                   <IconButton aria-label={`${tag.label} 移除`} disabled={controlsDisabled} onClick={() => onRemoveTag(tag.code)}>
                     <RemoveIcon fontSize="small" />
                   </IconButton>
                 </Tooltip>
               </Stack>
-            ) : null)}
+            ))}
           </Stack>
         </Stack>
       </Box>

@@ -33,6 +33,43 @@ function formatMoney(value: string) {
   return parsed.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+const groupHeaderSx = {
+  borderBottom: "1px solid",
+  borderColor: "divider",
+  color: "text.primary",
+  fontWeight: 800,
+  textAlign: "center",
+};
+
+const subHeaderSx = {
+  borderBottom: "1px solid",
+  borderColor: "divider",
+  color: "text.secondary",
+  fontSize: "12px",
+  fontWeight: 700,
+  whiteSpace: "nowrap",
+};
+
+const bankGroupSx = {
+  bgcolor: "#eaf3ff",
+};
+
+const bankSubSx = {
+  bgcolor: "#f5f9ff",
+};
+
+const invoiceGroupSx = {
+  bgcolor: "#edf8f2",
+};
+
+const invoiceSubSx = {
+  bgcolor: "#f6fbf8",
+};
+
+const oaGroupSx = {
+  bgcolor: "#f3f4f6",
+};
+
 export default function PendingInvoicesTable({
   direction,
   rows,
@@ -45,74 +82,79 @@ export default function PendingInvoicesTable({
 }: PendingInvoicesTableProps) {
   const bankHeader = direction === "expense" ? "支出流水" : "收入流水";
   const invoiceHeader = direction === "expense" ? "进项发票" : "销项发票";
+  const invoicePartyHeader = direction === "expense" ? "销方名称" : "购方名称";
 
   return (
-    <Box sx={{ border: "1px solid", borderColor: "divider", bgcolor: "background.paper" }}>
-      <Table aria-label="待找发票流水表" size="small">
+    <Box sx={{ border: "1px solid", borderColor: "divider", bgcolor: "background.paper", overflowX: "auto" }}>
+      <Table aria-label="待找发票流水表" size="small" sx={{ minWidth: 1080, tableLayout: "fixed" }}>
         <TableHead>
           <TableRow>
-            <TableCell sx={{ width: "42%", fontWeight: 700 }}>{bankHeader}</TableCell>
-            <TableCell sx={{ width: "43%", fontWeight: 700 }}>{invoiceHeader}</TableCell>
-            <TableCell sx={{ width: "15%", fontWeight: 700 }}>OA申请人</TableCell>
+            <TableCell colSpan={2} scope="colgroup" sx={[groupHeaderSx, bankGroupSx]}>
+              {bankHeader}
+            </TableCell>
+            <TableCell colSpan={3} scope="colgroup" sx={[groupHeaderSx, invoiceGroupSx, { borderLeft: "1px solid", borderLeftColor: "divider" }]}>
+              {invoiceHeader}
+            </TableCell>
+            <TableCell rowSpan={2} scope="col" sx={[groupHeaderSx, oaGroupSx, { width: "12%", borderLeft: "1px solid", borderLeftColor: "divider" }]}>
+              OA申请人
+            </TableCell>
+          </TableRow>
+          <TableRow>
+            <TableCell scope="col" sx={[subHeaderSx, bankSubSx, { width: "22%" }]}>
+              对方户名 / 时间
+            </TableCell>
+            <TableCell scope="col" align="right" sx={[subHeaderSx, bankSubSx, { width: "16%" }]}>
+              金额 / 银行账户
+            </TableCell>
+            <TableCell scope="col" sx={[subHeaderSx, invoiceSubSx, { width: "18%", borderLeft: "1px solid", borderLeftColor: "divider" }]}>
+              发票号码 / 开票日期
+            </TableCell>
+            <TableCell scope="col" align="right" sx={[subHeaderSx, invoiceSubSx, { width: "12%" }]}>
+              价税合计
+            </TableCell>
+            <TableCell scope="col" sx={[subHeaderSx, invoiceSubSx, { width: "20%" }]}>
+              {invoicePartyHeader}
+            </TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
           {rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={3} align="center" sx={{ py: 6, color: "text.secondary" }}>
+              <TableCell colSpan={6} align="center" sx={{ py: 6, color: "text.secondary" }}>
                 当前条件下没有待找发票流水。
               </TableCell>
             </TableRow>
           ) : rows.map((row) => (
             <TableRow key={row.id} hover>
-              <TableCell>
-                <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between" sx={{ minWidth: 0 }}>
-                  <Box sx={{ minWidth: 0 }}>
-                    <Typography component="div" variant="body2" fontWeight={700} noWrap title={row.bankTransaction.counterpartyName}>
-                      {row.bankTransaction.counterpartyName}
-                    </Typography>
-                    <Chip label={row.bankTransaction.tradeTime || "时间为空"} size="small" variant="outlined" sx={{ mt: 0.75 }} />
-                  </Box>
-                  <Box sx={{ minWidth: 140, textAlign: "right" }}>
-                    <Typography component="div" variant="body2" fontWeight={800} sx={{ fontVariantNumeric: "tabular-nums" }}>
-                      {formatMoney(row.bankTransaction.amount)}
-                    </Typography>
-                    <Chip
-                      label={`${row.bankTransaction.bankName || "银行"} ${row.bankTransaction.accountLast4 || "----"}`}
-                      size="small"
-                      variant="outlined"
-                      sx={{ mt: 0.75 }}
-                    />
-                  </Box>
-                </Stack>
+              <TableCell sx={{ verticalAlign: "top" }}>
+                <Typography component="div" variant="body2" fontWeight={700} noWrap title={row.bankTransaction.counterpartyName}>
+                  {row.bankTransaction.counterpartyName}
+                </Typography>
+                <Chip label={row.bankTransaction.tradeTime || "时间为空"} size="small" variant="outlined" sx={{ mt: 0.75 }} />
               </TableCell>
-              <TableCell>
+              <TableCell align="right" sx={{ verticalAlign: "top" }}>
+                <Typography component="div" variant="body2" fontWeight={800} sx={{ fontVariantNumeric: "tabular-nums" }}>
+                  {formatMoney(row.bankTransaction.amount)}
+                </Typography>
+                <Chip
+                  label={`${row.bankTransaction.bankName || "银行"} ${row.bankTransaction.accountLast4 || "----"}`}
+                  size="small"
+                  variant="outlined"
+                  sx={{ mt: 0.75 }}
+                />
+              </TableCell>
+              <TableCell sx={{ borderLeft: "1px solid", borderLeftColor: "divider", verticalAlign: "top" }}>
                 {row.invoices.length > 0 ? (
                   <Stack spacing={1.25}>
                     {row.invoices.map((invoice) => {
                       const invoiceNumber = invoice.invoiceNo || invoice.digitalInvoiceNo || "号码为空";
                       return (
-                        <Stack
-                          key={invoice.id || invoiceNumber}
-                          direction="row"
-                          spacing={2}
-                          alignItems="center"
-                          justifyContent="space-between"
-                          sx={{ minWidth: 0 }}
-                        >
-                          <Box sx={{ minWidth: 0, flex: 1 }}>
-                            <Typography component="div" variant="body2" fontWeight={700} noWrap title={invoiceNumber}>
-                              {invoiceNumber}
-                            </Typography>
-                            <Chip label={invoice.issueDate || "开票日期为空"} size="small" variant="outlined" sx={{ mt: 0.75 }} />
-                          </Box>
-                          <Typography component="div" variant="body2" fontWeight={800} sx={{ minWidth: 104, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                            {formatMoney(invoice.totalWithTax)}
+                        <Box key={invoice.id || invoiceNumber} sx={{ minWidth: 0 }}>
+                          <Typography component="div" variant="body2" fontWeight={700} noWrap title={invoiceNumber}>
+                            {invoiceNumber}
                           </Typography>
-                          <Typography component="div" variant="body2" color="text.secondary" sx={{ minWidth: 140 }} noWrap title={direction === "expense" ? invoice.sellerName : invoice.buyerName}>
-                            {direction === "expense" ? invoice.sellerName || "销方为空" : invoice.buyerName || "购方为空"}
-                          </Typography>
-                        </Stack>
+                          <Chip label={invoice.issueDate || "开票日期为空"} size="small" variant="outlined" sx={{ mt: 0.75 }} />
+                        </Box>
                       );
                     })}
                   </Stack>
@@ -131,7 +173,36 @@ export default function PendingInvoicesTable({
                   <Typography color="text.secondary">—</Typography>
                 )}
               </TableCell>
-              <TableCell>{row.oaApplicant || "—"}</TableCell>
+              <TableCell align="right" sx={{ verticalAlign: "top" }}>
+                {row.invoices.length > 0 ? (
+                  <Stack spacing={1.25}>
+                    {row.invoices.map((invoice) => (
+                      <Typography key={invoice.id || invoice.invoiceNo || invoice.digitalInvoiceNo} component="div" variant="body2" fontWeight={800} sx={{ fontVariantNumeric: "tabular-nums" }}>
+                        {formatMoney(invoice.totalWithTax)}
+                      </Typography>
+                    ))}
+                  </Stack>
+                ) : (
+                  <Typography color="text.secondary">—</Typography>
+                )}
+              </TableCell>
+              <TableCell sx={{ verticalAlign: "top" }}>
+                {row.invoices.length > 0 ? (
+                  <Stack spacing={1.25}>
+                    {row.invoices.map((invoice) => {
+                      const partyName = direction === "expense" ? invoice.sellerName || "销方为空" : invoice.buyerName || "购方为空";
+                      return (
+                        <Typography key={invoice.id || invoice.invoiceNo || invoice.digitalInvoiceNo} component="div" variant="body2" color="text.secondary" noWrap title={partyName}>
+                          {partyName}
+                        </Typography>
+                      );
+                    })}
+                  </Stack>
+                ) : (
+                  <Typography color="text.secondary">—</Typography>
+                )}
+              </TableCell>
+              <TableCell sx={{ borderLeft: "1px solid", borderLeftColor: "divider", verticalAlign: "top" }}>{row.oaApplicant || "—"}</TableCell>
             </TableRow>
           ))}
         </TableBody>
