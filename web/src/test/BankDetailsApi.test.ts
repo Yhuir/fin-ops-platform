@@ -183,4 +183,33 @@ describe("bank details API", () => {
       }),
     ).rejects.toThrow("接口返回了 HTML 页面");
   });
+
+  test.each([
+    ["invalid_category_code", "该银行明细标签不存在，请刷新后重新选择。"],
+    ["archived_category_code", "该银行明细标签已停用，不能再用于新的银行明细。"],
+    ["category_version_conflict", "银行明细标签已更新，请刷新后重新保存。"],
+  ])("maps category save error code %s before backend message", async (errorCode, expectedMessage) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({
+        error: errorCode,
+        message: "Backend internal message",
+      }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      })),
+    );
+
+    await expect(
+      saveBankTransactionCategories({
+        updates: [
+          {
+            transactionId: "bank-detail-001",
+            categoryCode: "borrow_in_company_pending_repayment",
+            expectedVersion: 1,
+          },
+        ],
+      }),
+    ).rejects.toThrow(expectedMessage);
+  });
 });

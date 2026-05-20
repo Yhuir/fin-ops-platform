@@ -246,6 +246,141 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(finalize_calls, [])
         self.assertEqual(app._audit_service.as_dicts(), [])
 
+    def test_archiving_pending_invoice_mapped_tag_fails_with_in_use_code(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            finalize_calls: list[dict[str, object]] = []
+            configured = app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[],
+                allowed_usernames=[],
+                readonly_export_usernames=[],
+                admin_usernames=[],
+                bank_transaction_tags={
+                    "version": 1,
+                    "definitions": [
+                        {
+                            "code": "custom_mapped_pending_invoice",
+                            "label": "待找发票映射标签",
+                            "path": ["自定义"],
+                            "source": "custom",
+                            "status": "active",
+                        }
+                    ],
+                },
+                pending_invoice_tag_groups={
+                    "groups": {
+                        "requires_invoice": {"tag_codes": ["custom_mapped_pending_invoice"]},
+                        "bank_statement_as_invoice": {"tag_codes": []},
+                        "no_invoice_required": {"tag_codes": []},
+                    }
+                },
+                actor_id="settings-owner",
+            )
+
+            with self.assertRaises(AppSettingsValidationError) as context:
+                app._app_settings_service.update_settings(
+                    completed_project_ids=[],
+                    bank_account_mappings=[],
+                    allowed_usernames=[],
+                    readonly_export_usernames=[],
+                    admin_usernames=[],
+                    bank_transaction_tags={
+                        "version": configured["bank_transaction_tags"]["version"],
+                        "definitions": [
+                            {
+                                "code": "custom_mapped_pending_invoice",
+                                "label": "待找发票映射标签",
+                                "path": ["自定义"],
+                                "source": "custom",
+                                "status": "archived",
+                            }
+                        ],
+                    },
+                    pending_invoice_tag_groups=configured["pending_invoice_tag_groups"],
+                    actor_id="settings-owner",
+                    after_bank_transaction_tag_settings_saved=finalize_calls.append,
+                )
+
+            current = app._app_settings_service.get_settings_payload()
+
+        self.assertEqual(
+            context.exception.error_code,
+            "bank_transaction_tag_in_use_by_pending_invoice_filter",
+        )
+        self.assertEqual(finalize_calls, [])
+        self.assertEqual(current["bank_transaction_tags"]["version"], configured["bank_transaction_tags"]["version"])
+        definitions_by_code = {
+            definition["code"]: definition
+            for definition in current["bank_transaction_tags"]["definitions"]
+        }
+        self.assertEqual(definitions_by_code["custom_mapped_pending_invoice"]["status"], "active")
+
+    def test_stale_bank_transaction_tags_save_fails_with_version_conflict_code(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            current = app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[],
+                allowed_usernames=[],
+                readonly_export_usernames=[],
+                admin_usernames=[],
+                bank_transaction_tags={
+                    "version": 1,
+                    "definitions": [
+                        {
+                            "code": "custom_current_tag",
+                            "label": "当前标签",
+                            "path": ["自定义"],
+                            "source": "custom",
+                            "status": "active",
+                        }
+                    ],
+                },
+                pending_invoice_tag_groups={
+                    "groups": {
+                        "requires_invoice": {"tag_codes": []},
+                        "bank_statement_as_invoice": {"tag_codes": []},
+                        "no_invoice_required": {"tag_codes": []},
+                    }
+                },
+                actor_id="settings-owner",
+            )
+
+            with self.assertRaises(AppSettingsValidationError) as context:
+                app._app_settings_service.update_settings(
+                    completed_project_ids=[],
+                    bank_account_mappings=[],
+                    allowed_usernames=[],
+                    readonly_export_usernames=[],
+                    admin_usernames=[],
+                    bank_transaction_tags={
+                        "version": 1,
+                        "definitions": [
+                            {
+                                "code": "custom_stale_tag",
+                                "label": "旧页面标签",
+                                "path": ["自定义"],
+                                "source": "custom",
+                                "status": "active",
+                            }
+                        ],
+                    },
+                    pending_invoice_tag_groups=current["pending_invoice_tag_groups"],
+                    actor_id="settings-owner",
+                )
+
+            after_conflict = app._app_settings_service.get_settings_payload()
+
+        self.assertEqual(context.exception.error_code, "bank_transaction_tags_version_conflict")
+        definitions_by_code = {
+            definition["code"]: definition
+            for definition in after_conflict["bank_transaction_tags"]["definitions"]
+        }
+        self.assertIn("custom_current_tag", definitions_by_code)
+        self.assertNotIn("custom_stale_tag", definitions_by_code)
+        self.assertEqual(after_conflict["bank_transaction_tags"]["version"], current["bank_transaction_tags"]["version"])
+
     def test_tag_and_mapping_saves_audit_and_finalize_with_actor_and_version(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -346,6 +481,110 @@ class AppSettingsServiceTests(unittest.TestCase):
             reloaded_payload["pending_invoice_tag_groups"]["groups"]["no_invoice_required"]["tag_codes"],
             ["custom_no_invoice_parking"],
         )
+
+    def test_historical_invalid_pending_invoice_mappings_survive_reload_for_resolution(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            store = ApplicationStateStore(data_dir)
+            store.save_app_settings(
+                {
+                    "bank_transaction_tags": {
+                        "version": 7,
+                        "definitions": [
+                            {
+                                "code": "custom_archived_history",
+                                "label": "历史停用标签",
+                                "path": ["自定义"],
+                                "source": "custom",
+                                "status": "archived",
+                            }
+                        ],
+                    },
+                    "pending_invoice_tag_groups": {
+                        "version": 7,
+                        "groups": {
+                            "requires_invoice": {"tag_codes": ["missing_history_tag", "custom_archived_history"]},
+                            "bank_statement_as_invoice": {"tag_codes": []},
+                            "no_invoice_required": {"tag_codes": []},
+                        },
+                    },
+                }
+            )
+
+            app = build_application(data_dir=data_dir)
+            payload = app._app_settings_service.get_settings_payload()
+
+            with self.assertRaises(AppSettingsValidationError) as context:
+                app._app_settings_service.update_settings(
+                    completed_project_ids=[],
+                    bank_account_mappings=[],
+                    allowed_usernames=[],
+                    readonly_export_usernames=[],
+                    admin_usernames=[],
+                    bank_transaction_tags=payload["bank_transaction_tags"],
+                    pending_invoice_tag_groups=payload["pending_invoice_tag_groups"],
+                    actor_id="settings-owner",
+                )
+
+        self.assertEqual(
+            payload["pending_invoice_tag_groups"]["groups"]["requires_invoice"]["tag_codes"],
+            ["missing_history_tag", "custom_archived_history"],
+        )
+        self.assertEqual(context.exception.error_code, "unknown_bank_transaction_tag")
+
+    def test_historical_duplicate_pending_invoice_mappings_survive_reload_for_resolution(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            store = ApplicationStateStore(data_dir)
+            store.save_app_settings(
+                {
+                    "bank_transaction_tags": {
+                        "version": 7,
+                        "definitions": [
+                            {
+                                "code": "fee",
+                                "label": "手续费",
+                                "path": ["自动识别", "手续费"],
+                                "source": "system",
+                                "status": "active",
+                            }
+                        ],
+                    },
+                    "pending_invoice_tag_groups": {
+                        "version": 7,
+                        "groups": {
+                            "requires_invoice": {"tag_codes": ["fee"]},
+                            "bank_statement_as_invoice": {"tag_codes": ["fee"]},
+                            "no_invoice_required": {"tag_codes": []},
+                        },
+                    },
+                }
+            )
+
+            app = build_application(data_dir=data_dir)
+            payload = app._app_settings_service.get_settings_payload()
+
+            with self.assertRaises(AppSettingsValidationError) as context:
+                app._app_settings_service.update_settings(
+                    completed_project_ids=[],
+                    bank_account_mappings=[],
+                    allowed_usernames=[],
+                    readonly_export_usernames=[],
+                    admin_usernames=[],
+                    bank_transaction_tags=payload["bank_transaction_tags"],
+                    pending_invoice_tag_groups=payload["pending_invoice_tag_groups"],
+                    actor_id="settings-owner",
+                )
+
+        self.assertEqual(
+            payload["pending_invoice_tag_groups"]["groups"]["requires_invoice"]["tag_codes"],
+            ["fee"],
+        )
+        self.assertEqual(
+            payload["pending_invoice_tag_groups"]["groups"]["bank_statement_as_invoice"]["tag_codes"],
+            ["fee"],
+        )
+        self.assertEqual(context.exception.error_code, "duplicate_pending_invoice_tag_mapping")
 
     def test_state_store_mongo_app_settings_round_trips_bank_tags_and_pending_invoice_groups(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

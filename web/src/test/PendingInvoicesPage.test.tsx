@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 
@@ -139,6 +139,12 @@ function installPendingInvoiceFetch() {
   return fetchMock;
 }
 
+function pendingInvoiceRowsRequests(fetchMock: ReturnType<typeof installPendingInvoiceFetch>) {
+  return fetchMock.mock.calls
+    .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
+    .filter((url) => url.pathname === "/api/pending-invoices/rows");
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -221,6 +227,53 @@ describe("Pending invoices page", () => {
       const paths = fetchMock.mock.calls.map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost").pathname);
       expect(paths).toContain("/api/pending-invoices/manual-invoices/preview");
       expect(paths).toContain("/api/pending-invoices/manual-invoices");
+    });
+  });
+
+  test("refetches rows when bank detail tag settings update", async () => {
+    const fetchMock = installPendingInvoiceFetch();
+    renderAppAt("/pending-invoices");
+
+    expect(await screen.findByText("云南开票供应商")).toBeInTheDocument();
+    const initialRequests = pendingInvoiceRowsRequests(fetchMock).length;
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("finops:bank-transaction-tags-updated", { detail: { version: 2 } }));
+    });
+
+    await waitFor(() => {
+      expect(pendingInvoiceRowsRequests(fetchMock).length).toBeGreaterThan(initialRequests);
+    });
+  });
+
+  test("refetches rows on focus as bank detail tag update fallback", async () => {
+    vi.stubGlobal("BroadcastChannel", undefined);
+    const localStorageStore = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: vi.fn((key: string) => localStorageStore.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => {
+        localStorageStore.set(key, value);
+      }),
+      removeItem: vi.fn((key: string) => {
+        localStorageStore.delete(key);
+      }),
+      clear: vi.fn(() => {
+        localStorageStore.clear();
+      }),
+    });
+    const fetchMock = installPendingInvoiceFetch();
+    renderAppAt("/pending-invoices");
+
+    expect(await screen.findByText("云南开票供应商")).toBeInTheDocument();
+    const initialRequests = pendingInvoiceRowsRequests(fetchMock).length;
+
+    window.localStorage.setItem("finops.bankTransactionTags.version", "2");
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+
+    await waitFor(() => {
+      expect(pendingInvoiceRowsRequests(fetchMock).length).toBeGreaterThan(initialRequests);
     });
   });
 });

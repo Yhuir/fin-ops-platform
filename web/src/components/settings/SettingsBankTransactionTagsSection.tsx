@@ -35,7 +35,7 @@ export default function SettingsBankTransactionTagsSection({
     >
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 3 }}>
         <Typography id="settings-section-bank-transaction-tags-title" component="h3" variant="h6" sx={{ color: settingsTokens.textPrimary, fontWeight: 400, fontSize: "16px" }}>
-          银行流水标签
+          银行明细标签管理
         </Typography>
       </Stack>
       <Stack spacing={2}>

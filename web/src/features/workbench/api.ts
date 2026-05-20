@@ -1504,6 +1504,31 @@ function buildManualSearchQuery(filters: OaManualSearchFilters) {
   return params.toString();
 }
 
+const WORKBENCH_API_ERROR_MESSAGES: Record<string, string> = {
+  unknown_bank_transaction_tag: "待找发票筛选引用了不存在的银行明细标签，请刷新后重新选择。",
+  archived_bank_transaction_tag: "该银行明细标签已停用，不能用于新的待找发票筛选。",
+  duplicate_pending_invoice_tag_mapping: "同一个银行明细标签不能同时归入多个待找发票筛选。",
+  bank_transaction_tag_in_use_by_pending_invoice_filter: "该银行明细标签仍被待找发票筛选使用，请先从待找发票筛选中移除。",
+  bank_transaction_tags_version_conflict: "银行明细标签已被其他页面更新，请刷新后重新保存。",
+};
+
+function resolveWorkbenchApiErrorMessage(payload: unknown, rawText: string) {
+  if (payload && typeof payload === "object") {
+    const errorCode = String((payload as { error?: unknown }).error ?? "").trim();
+    if (errorCode && WORKBENCH_API_ERROR_MESSAGES[errorCode]) {
+      return WORKBENCH_API_ERROR_MESSAGES[errorCode];
+    }
+    const message = String((payload as { message?: unknown }).message ?? "").trim();
+    if (message) {
+      return message;
+    }
+    if (errorCode) {
+      return errorCode;
+    }
+  }
+  return rawText.trim() || "request failed";
+}
+
 async function requestJson<T>(url: string, init: RequestInit = {}) {
   const response = await fetch(url, init);
   const rawText = await response.text();
@@ -1519,7 +1544,7 @@ async function requestJson<T>(url: string, init: RequestInit = {}) {
     }
   }
   if (!response.ok) {
-    throw new Error(typeof payload === "object" && payload ? JSON.stringify(payload) : rawText.trim() || "request failed");
+    throw new Error(resolveWorkbenchApiErrorMessage(payload, rawText));
   }
   return ((payload ?? {}) as T);
 }

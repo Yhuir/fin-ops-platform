@@ -210,6 +210,25 @@ function parseApplicantNames(value: string) {
   return names;
 }
 
+function pendingInvoiceTagGroupIssue(
+  bankTransactionTags: WorkbenchSettings["bankTransactionTags"],
+  pendingInvoiceTagGroups: WorkbenchSettings["pendingInvoiceTagGroups"],
+) {
+  const tagsByCode = new Map(bankTransactionTags.tags.map((tag) => [tag.code, tag]));
+  for (const codes of Object.values(pendingInvoiceTagGroups)) {
+    for (const code of codes) {
+      const tag = tagsByCode.get(code);
+      if (!tag) {
+        return "待找发票筛选引用了不存在的银行明细标签，请移除后再保存。";
+      }
+      if (tag.status === "archived") {
+        return "待找发票筛选引用了已停用的银行明细标签，请先从待找发票筛选中移除。";
+      }
+    }
+  }
+  return null;
+}
+
 function parseResetErrorMessage(message: string) {
   try {
     const payload = JSON.parse(message) as { message?: unknown };
@@ -299,6 +318,7 @@ export default function SettingsPageContent({
   const setActiveSectionId = (value: SettingsSectionId) => setDraftField("activeSectionId", value);
   const [dataResetDialog, setDataResetDialog] = useState<DataResetDialogState>(null);
   const [dataResetPassword, setDataResetPassword] = useState("");
+  const [settingsActionStatus, setSettingsActionStatus] = useState<DataResetStatus | null>(null);
   const [dataResetStatus, setDataResetStatus] = useState<DataResetStatus | null>(null);
   const [dataResetProgress, setDataResetProgress] = useState<WorkbenchSettingsDataResetJob | null>(null);
   const [isDataResetting, setIsDataResetting] = useState(false);
@@ -361,8 +381,8 @@ export default function SettingsPageContent({
       },
       {
         id: "bank_transaction_tags" as const,
-        label: "银行流水标签",
-        description: "系统与自定义标签",
+        label: "银行明细标签管理",
+        description: "全 app 银行明细标签字典",
         count: bankTransactionTags.tags.filter((tag) => tag.status === "active").length,
         visible: true,
       },
@@ -606,11 +626,6 @@ export default function SettingsPageContent({
       ...current,
       tags: current.tags.map((tag) => (tag.code === code ? { ...tag, status: "archived" } : tag)),
     }));
-    setPendingInvoiceTagGroups((current) => ({
-      requiresInvoice: current.requiresInvoice.filter((item) => item !== code),
-      bankStatementAsInvoice: current.bankStatementAsInvoice.filter((item) => item !== code),
-      noInvoiceRequired: current.noInvoiceRequired.filter((item) => item !== code),
-    }));
   }
 
   function addTagToPendingInvoiceGroup(code: string) {
@@ -627,14 +642,13 @@ export default function SettingsPageContent({
     });
   }
 
-  function createAndAddPendingInvoiceTag(label: string) {
-    const tag = createCustomTag(label);
-    if (tag) {
-      addTagToPendingInvoiceGroup(tag.code);
-    }
-  }
-
   function handleSave() {
+    setSettingsActionStatus(null);
+    const pendingInvoiceIssue = pendingInvoiceTagGroupIssue(bankTransactionTags, pendingInvoiceTagGroups);
+    if (pendingInvoiceIssue) {
+      setSettingsActionStatus({ tone: "error", message: pendingInvoiceIssue });
+      return;
+    }
     const normalizedAccounts = normalizeManagedAccounts(managedAccessAccounts);
     onSave({
       completedProjectIds,
@@ -750,6 +764,11 @@ export default function SettingsPageContent({
                   当前账号仅支持查看和导出，不能保存设置。
                 </Alert>
               ) : null}
+              {settingsActionStatus ? (
+                <Alert severity={settingsActionStatus.tone} sx={{ mt: 1.5, py: 0.5 }}>
+                  {settingsActionStatus.message}
+                </Alert>
+              ) : null}
             </Box>
             <Stack
               direction="row"
@@ -837,7 +856,6 @@ export default function SettingsPageContent({
                   activeGroup={activePendingInvoiceGroup}
                   onSelectGroup={setActivePendingInvoiceGroup}
                   onAddExistingTag={addTagToPendingInvoiceGroup}
-                  onCreateAndAddTag={createAndAddPendingInvoiceTag}
                   onRemoveTag={(code) =>
                     setPendingInvoiceTagGroups((current) => ({
                       ...current,

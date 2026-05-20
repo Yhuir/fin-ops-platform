@@ -95,6 +95,29 @@ type ApiSaveBankTransactionCategoriesResponse = {
   workbench_rebuild_queued?: boolean;
 };
 
+const BANK_DETAIL_API_ERROR_MESSAGES: Record<string, string> = {
+  invalid_category_code: "该银行明细标签不存在，请刷新后重新选择。",
+  archived_category_code: "该银行明细标签已停用，不能再用于新的银行明细。",
+  category_version_conflict: "银行明细标签已更新，请刷新后重新保存。",
+};
+
+function resolveBankDetailApiErrorMessage(payload: unknown, rawText: string) {
+  if (payload && typeof payload === "object") {
+    const errorCode = String((payload as { error?: unknown }).error ?? "").trim();
+    if (errorCode && BANK_DETAIL_API_ERROR_MESSAGES[errorCode]) {
+      return BANK_DETAIL_API_ERROR_MESSAGES[errorCode];
+    }
+    const message = String((payload as { message?: unknown }).message ?? "").trim();
+    if (message) {
+      return message;
+    }
+    if (errorCode) {
+      return errorCode;
+    }
+  }
+  return rawText.trim() || "request failed";
+}
+
 async function requestJson<T>(url: string, init: RequestInit = {}) {
   const response = await fetch(url, init);
   const rawText = await response.text();
@@ -119,7 +142,7 @@ async function requestJson<T>(url: string, init: RequestInit = {}) {
     }
   }
   if (!response.ok) {
-    throw new Error(trimmedText || "request failed");
+    throw new Error(resolveBankDetailApiErrorMessage(payload, trimmedText));
   }
   return payload;
 }

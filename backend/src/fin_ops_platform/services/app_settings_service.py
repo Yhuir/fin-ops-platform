@@ -60,7 +60,8 @@ class AppSettingsService:
         self._bank_transaction_category_service = bank_transaction_category_service
         self._audit_service = audit_service
         self._snapshot = self._normalize_settings(
-            state_store.load_app_settings() if state_store is not None else {}
+            state_store.load_app_settings() if state_store is not None else {},
+            validate_pending_invoice_tag_groups=False,
         )
         self._configure_category_service(self._snapshot)
         self._restore_manual_projects()
@@ -148,6 +149,11 @@ class AppSettingsService:
         after_bank_transaction_tag_settings_saved: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         previous_snapshot = dict(self._snapshot)
+        self._validate_bank_transaction_tag_settings_update(
+            previous_snapshot,
+            bank_transaction_tags=bank_transaction_tags,
+            pending_invoice_tag_groups=pending_invoice_tag_groups,
+        )
         normalized_snapshot = self._normalize_settings(
             {
                 "completed_project_ids": completed_project_ids,
@@ -179,7 +185,8 @@ class AppSettingsService:
                     if pending_invoice_tag_groups is not None
                     else self._snapshot.get("pending_invoice_tag_groups", {})
                 ),
-            }
+            },
+            validate_pending_invoice_tag_groups=True,
         )
         tag_settings_event = self._prepare_tag_settings_event(
             previous_snapshot,
@@ -262,7 +269,10 @@ class AppSettingsService:
         return self.get_settings_payload()
 
     def _save_snapshot(self, snapshot: dict[str, Any]) -> None:
-        normalized_snapshot = self._normalize_settings(snapshot)
+        normalized_snapshot = self._normalize_settings(
+            snapshot,
+            validate_pending_invoice_tag_groups=False,
+        )
         if self._state_store is not None:
             self._state_store.save_app_settings(normalized_snapshot)
         self._snapshot = normalized_snapshot
@@ -409,7 +419,11 @@ class AppSettingsService:
         )
 
     @staticmethod
-    def _normalize_settings(payload: dict[str, Any] | None) -> dict[str, Any]:
+    def _normalize_settings(
+        payload: dict[str, Any] | None,
+        *,
+        validate_pending_invoice_tag_groups: bool,
+    ) -> dict[str, Any]:
         raw_payload = payload if isinstance(payload, dict) else {}
         completed_ids = sorted(
             {
@@ -572,6 +586,7 @@ class AppSettingsService:
         pending_invoice_tag_groups = AppSettingsService._normalize_pending_invoice_tag_groups(
             raw_payload.get("pending_invoice_tag_groups"),
             bank_transaction_tags=bank_transaction_tags,
+            validate=validate_pending_invoice_tag_groups,
         )
         return {
             "completed_project_ids": completed_ids,
@@ -603,6 +618,7 @@ class AppSettingsService:
         value: Any,
         *,
         bank_transaction_tags: dict[str, Any],
+        validate: bool,
     ) -> dict[str, Any]:
         raw_payload = value if isinstance(value, dict) else {}
         version = BankTransactionCategoryService._normalize_version(
@@ -637,20 +653,22 @@ class AppSettingsService:
                     continue
                 definition = definitions_by_code.get(tag_code)
                 if not isinstance(definition, dict):
-                    raise AppSettingsValidationError(
-                        "unknown_bank_transaction_tag",
-                        f"Unknown bank transaction tag code in pending invoice group: {tag_code}",
-                    )
-                if definition.get("status") == "archived":
+                    if validate:
+                        raise AppSettingsValidationError(
+                            "unknown_bank_transaction_tag",
+                            f"Unknown bank transaction tag code in pending invoice group: {tag_code}",
+                        )
+                elif definition.get("status") == "archived" and validate:
                     raise AppSettingsValidationError(
                         "archived_bank_transaction_tag",
                         f"Archived bank transaction tag cannot be mapped: {tag_code}",
                     )
                 if tag_code in claimed_codes:
-                    raise AppSettingsValidationError(
-                        "duplicate_pending_invoice_tag_mapping",
-                        f"Bank transaction tag {tag_code} is mapped to multiple pending invoice groups.",
-                    )
+                    if validate:
+                        raise AppSettingsValidationError(
+                            "duplicate_pending_invoice_tag_mapping",
+                            f"Bank transaction tag {tag_code} is mapped to multiple pending invoice groups.",
+                        )
                 seen_in_group.add(tag_code)
                 claimed_codes[tag_code] = group_id
                 tag_codes.append(tag_code)
@@ -827,6 +845,87 @@ class AppSettingsService:
                 entity_id="pending_invoice_tag_groups",
                 metadata=metadata,
             )
+
+    @staticmethod
+    def _validate_bank_transaction_tag_settings_update(
+        previous_snapshot: dict[str, Any],
+        *,
+        bank_transaction_tags: dict[str, Any] | None,
+        pending_invoice_tag_groups: dict[str, Any] | None,
+    ) -> None:
+        previous_tags = previous_snapshot["bank_transaction_tags"]
+        previous_version = int(previous_tags.get("version") or 1)
+        if isinstance(bank_transaction_tags, dict):
+            requested_version = BankTransactionCategoryService._normalize_version(
+                bank_transaction_tags.get("version", 1)
+            )
+            if requested_version <= 0:
+                requested_version = 1
+            if requested_version != previous_version:
+                raise AppSettingsValidationError(
+                    "bank_transaction_tags_version_conflict",
+                    "Bank transaction tag settings version conflict.",
+                )
+
+        if not isinstance(bank_transaction_tags, dict):
+            return
+
+        next_tags = AppSettingsService._normalize_bank_transaction_tags(bank_transaction_tags)
+        previous_definitions = {
+            str(definition["code"]): dict(definition)
+            for definition in list(previous_tags.get("definitions") or [])
+            if isinstance(definition, dict) and str(definition.get("code") or "").strip()
+        }
+        next_definitions = {
+            str(definition["code"]): dict(definition)
+            for definition in list(next_tags.get("definitions") or [])
+            if isinstance(definition, dict) and str(definition.get("code") or "").strip()
+        }
+        newly_archived_codes = {
+            code
+            for code, previous_definition in previous_definitions.items()
+            if previous_definition.get("status") != "archived"
+            and next_definitions.get(code, {}).get("status") == "archived"
+        }
+        if not newly_archived_codes:
+            return
+
+        mapped_codes = AppSettingsService._pending_invoice_tag_codes_for_archive_guard(
+            pending_invoice_tag_groups,
+            fallback_groups=previous_snapshot["pending_invoice_tag_groups"],
+        )
+        blocked_codes = sorted(newly_archived_codes.intersection(mapped_codes))
+        if blocked_codes:
+            raise AppSettingsValidationError(
+                "bank_transaction_tag_in_use_by_pending_invoice_filter",
+                f"Bank transaction tag is still mapped to pending invoice filters: {blocked_codes[0]}",
+            )
+
+    @staticmethod
+    def _pending_invoice_tag_codes_for_archive_guard(
+        value: Any,
+        *,
+        fallback_groups: dict[str, Any],
+    ) -> set[str]:
+        raw_payload = value if isinstance(value, dict) else fallback_groups
+        raw_groups = raw_payload.get("groups") if isinstance(raw_payload.get("groups"), dict) else raw_payload
+        if not isinstance(raw_groups, dict):
+            raw_groups = {}
+        mapped_codes: set[str] = set()
+        for group_id in PENDING_INVOICE_TAG_GROUP_LABELS:
+            raw_group = raw_groups.get(group_id)
+            if isinstance(raw_group, dict):
+                raw_codes = raw_group.get("tag_codes")
+            elif isinstance(raw_group, list):
+                raw_codes = raw_group
+            else:
+                raw_codes = []
+            mapped_codes.update(
+                str(item or "").strip()
+                for item in list(raw_codes or [])
+                if str(item or "").strip()
+            )
+        return mapped_codes
 
     @staticmethod
     def _normalize_option_list(

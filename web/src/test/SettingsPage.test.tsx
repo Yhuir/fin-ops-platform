@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 
@@ -44,7 +44,7 @@ function installSettingsTagFetch() {
         expect(body.bank_transaction_tags).not.toHaveProperty("tags");
         expect(body.pending_invoice_tag_groups).toMatchObject({
           groups: {
-            requires_invoice: { tag_codes: expect.arrayContaining(["fee", "internal_transfer"]) },
+            bank_statement_as_invoice: { tag_codes: expect.arrayContaining(["internal_transfer"]) },
           },
         });
       }
@@ -54,6 +54,47 @@ function installSettingsTagFetch() {
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
+}
+
+function installInvalidPendingInvoiceTagFetch() {
+  const baseFetch = installMockApiFetch();
+  let postCount = 0;
+  const settingsPayload = () => ({
+    projects: { active: [], completed: [], completed_project_ids: [] },
+    bank_account_mappings: [],
+    access_control: { allowed_usernames: [], readonly_export_usernames: [], admin_usernames: [], full_access_usernames: [] },
+    workbench_column_layouts: { oa: [], bank: [], invoice: [] },
+    oa_retention: { cutoff_date: "2026-01-01" },
+    oa_import: { form_types: ["payment_request"], statuses: ["completed"] },
+    oa_invoice_offset: { applicant_names: [] },
+    bank_transaction_tags: {
+      version: 4,
+      tags: [
+        { code: "fee", label: "手续费", path: ["自动识别", "手续费"], status: "active", source: "system" },
+        { code: "salary", label: "工资", path: ["自动识别", "工资"], status: "archived", source: "system" },
+      ],
+    },
+    pending_invoice_tag_groups: {
+      requires_invoice: ["missing_tag", "salary"],
+      bank_statement_as_invoice: [],
+      no_invoice_required: [],
+    },
+  });
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+    if (url.pathname === "/api/workbench/settings") {
+      if ((init?.method ?? "GET").toUpperCase() === "POST") {
+        postCount += 1;
+      }
+      return new Response(JSON.stringify(settingsPayload()), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    return baseFetch(input, init);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return {
+    fetchMock,
+    getPostCount: () => postCount,
+  };
 }
 
 describe("Settings page", () => {
@@ -148,13 +189,19 @@ describe("Settings page", () => {
 
     const settingsPage = await screen.findByTestId("settings-page");
     const tree = within(settingsPage).getByRole("tree", { name: "设置分类" });
-    expect(within(tree).getByRole("treeitem", { name: /银行流水标签/ })).toBeInTheDocument();
+    expect(within(tree).getByRole("treeitem", { name: /银行明细标签管理/ })).toBeInTheDocument();
+    expect(within(tree).getByText("全 app 银行明细标签字典")).toBeInTheDocument();
+    expect(within(tree).queryByRole("treeitem", { name: /银行流水标签/ })).not.toBeInTheDocument();
     await user.click(within(tree).getByRole("treeitem", { name: /待找发票筛选/ }));
 
     const region = within(settingsPage).getByRole("region", { name: "待找发票筛选" });
     expect(within(region).getByText("需要开票")).toBeInTheDocument();
     expect(within(region).getByText("流水代替发票")).toBeInTheDocument();
     expect(within(region).getByText("无需开票")).toBeInTheDocument();
+    expect(within(region).queryByRole("textbox", { name: "新标签" })).not.toBeInTheDocument();
+    expect(within(region).queryByRole("button", { name: /新建并加入/ })).not.toBeInTheDocument();
+    await user.click(within(region).getByText("流水代替发票"));
+    expect(within(region).getByText(/请先在银行明细标签管理中新增标签/)).toBeInTheDocument();
     await user.click(within(region).getByRole("button", { name: "选择现有标签" }));
     await user.click(await screen.findByRole("menuitem", { name: "内部往来款" }));
     await user.click(within(settingsPage).getByRole("button", { name: "保存设置" }));
@@ -168,5 +215,56 @@ describe("Settings page", () => {
     });
 
     window.removeEventListener("finops:bank-transaction-tags-updated", listener);
+  });
+
+  test("keeps invalid historical pending invoice mappings visible and blocks save until removed", async () => {
+    const user = userEvent.setup();
+    const { getPostCount } = installInvalidPendingInvoiceTagFetch();
+    renderAppAt("/settings");
+
+    const settingsPage = await screen.findByTestId("settings-page");
+    const tree = within(settingsPage).getByRole("tree", { name: "设置分类" });
+    await user.click(within(tree).getByRole("treeitem", { name: /待找发票筛选/ }));
+
+    const region = within(settingsPage).getByRole("region", { name: "待找发票筛选" });
+    expect(within(region).getByText("missing_tag")).toBeInTheDocument();
+    expect(within(region).getByText("标签不存在")).toBeInTheDocument();
+    expect(within(region).getByText("工资")).toBeInTheDocument();
+    expect(within(region).getByText("标签已停用")).toBeInTheDocument();
+
+    await user.click(within(settingsPage).getByRole("button", { name: "保存设置" }));
+    expect(await within(settingsPage).findByText("待找发票筛选引用了不存在的银行明细标签，请移除后再保存。")).toBeInTheDocument();
+    expect(getPostCount()).toBe(0);
+
+    await user.click(within(region).getByRole("button", { name: "missing_tag 移除" }));
+    await user.click(within(settingsPage).getByRole("button", { name: "保存设置" }));
+    expect(await within(settingsPage).findByText("待找发票筛选引用了已停用的银行明细标签，请先从待找发票筛选中移除。")).toBeInTheDocument();
+    expect(getPostCount()).toBe(0);
+
+    await user.click(within(region).getByRole("button", { name: "工资 移除" }));
+    await user.click(within(settingsPage).getByRole("button", { name: "保存设置" }));
+    await waitFor(() => expect(getPostCount()).toBe(1));
+  });
+
+  test("blocks stale settings saves after another page updates bank detail tags", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installSettingsTagFetch();
+    renderAppAt("/settings");
+
+    const settingsPage = await screen.findByTestId("settings-page");
+    act(() => {
+      window.dispatchEvent(new CustomEvent("finops:bank-transaction-tags-updated", { detail: { version: 5 } }));
+    });
+    expect(await within(settingsPage).findByText("银行明细标签已在其他页面更新，请刷新后再保存。")).toBeInTheDocument();
+    expect(within(settingsPage).getByRole("button", { name: "刷新设置" })).toBeInTheDocument();
+
+    await user.click(within(settingsPage).getByRole("button", { name: "保存设置" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([input, init]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/workbench/settings" && (init?.method ?? "GET").toUpperCase() === "POST";
+      })).toBe(false);
+    });
   });
 });
