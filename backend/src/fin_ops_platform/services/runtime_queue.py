@@ -113,9 +113,10 @@ class RuntimeQueueRepository:
                 from (
                     select id
                     from job.outbox_events
-                    where status = 'pending'
-                      and available_at <= now()
-                      and (locked_at is null or locked_at < now() - (%s * interval '1 second'))
+                    where (
+                        (status = 'pending' and available_at <= now())
+                        or (status = 'processing' and locked_at < now() - (%s * interval '1 second'))
+                    )
                       {event_type_filter}
                     order by available_at, created_at, id
                     limit 1

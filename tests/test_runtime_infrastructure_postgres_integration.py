@@ -299,6 +299,55 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(row["attempts"], 1)
         self.assertEqual(row["attempt_count"], 1)
 
+    def test_runtime_queue_claim_next_reclaims_stale_processing_event(self) -> None:
+        row = self.connection.fetch_one(
+            """
+            insert into job.outbox_events (
+              event_type,
+              status,
+              locked_by,
+              locked_at,
+              attempts,
+              attempt_count,
+              payload
+            )
+            values (
+              'runtime.integration.reclaim',
+              'processing',
+              'dead-worker',
+              now() - interval '10 minutes',
+              2,
+              2,
+              '{"reclaim": true}'::jsonb
+            )
+            returning id::text as event_id
+            """
+        )
+
+        claimed = self.runtime_queue.claim_next(
+            "new-worker",
+            event_types=["runtime.integration.reclaim"],
+            lock_timeout_seconds=300,
+        )
+
+        self.assertIsNotNone(claimed)
+        self.assertEqual(claimed.event_id, row["event_id"])
+        self.assertEqual(claimed.status, "processing")
+        self.assertEqual(claimed.attempts, 3)
+        stored = self.connection.fetch_one(
+            """
+            select status, locked_by, locked_at > now() - interval '1 minute' as lock_refreshed, attempts, attempt_count
+            from job.outbox_events
+            where id = %s
+            """,
+            (row["event_id"],),
+        )
+        self.assertEqual(stored["status"], "processing")
+        self.assertEqual(stored["locked_by"], "new-worker")
+        self.assertTrue(stored["lock_refreshed"])
+        self.assertEqual(stored["attempts"], 3)
+        self.assertEqual(stored["attempt_count"], 3)
+
     def test_runtime_queue_complete_marks_done_and_sets_processed_at(self) -> None:
         event = self.runtime_queue.enqueue(event_type="runtime.integration.complete")
         self.assertIsNotNone(self.runtime_queue.claim_next("worker-complete", event_types=["runtime.integration.complete"]))

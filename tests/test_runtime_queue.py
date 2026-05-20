@@ -129,6 +129,23 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("locked_by = %s", normalized_sql)
         self.assertEqual(params, ("worker-1", 120, ["invoice.imported", "invoice.updated"]))
 
+    def test_claim_next_candidate_includes_stale_processing_events(self) -> None:
+        transaction = FakeTransaction(rows=[event_row(status="processing", attempts=3)])
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        event = repository.claim_next(worker_id="new-worker", lock_timeout_seconds=300)
+
+        self.assertIsNotNone(event)
+        self.assertEqual(event.status, "processing")
+        self.assertEqual(event.attempts, 3)
+        _, sql, _ = transaction.calls[0]
+        normalized_sql = " ".join(sql.lower().split())
+        self.assertIn("(status = 'pending' and available_at <= now())", normalized_sql)
+        self.assertIn("(status = 'processing' and locked_at < now() - (%s * interval '1 second'))", normalized_sql)
+        self.assertIn("status = 'processing'", normalized_sql)
+        self.assertIn("attempts = attempts + 1", normalized_sql)
+        self.assertIn("for update skip locked", normalized_sql)
+
     def test_claim_next_without_event_type_filter_has_no_any_clause(self) -> None:
         transaction = FakeTransaction(rows=[None])
         repository = RuntimeQueueRepository(FakeConnection(transaction))
