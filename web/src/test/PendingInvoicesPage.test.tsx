@@ -162,6 +162,11 @@ describe("Pending invoices page", () => {
     expect(within(page).getByRole("columnheader", { name: "支出流水" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "进项发票" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "OA申请人" })).toBeInTheDocument();
+    expect(within(page).getByRole("columnheader", { name: "对方户名 / 时间" })).toBeInTheDocument();
+    expect(within(page).getByRole("columnheader", { name: "金额 / 银行账户" })).toBeInTheDocument();
+    expect(within(page).getByRole("columnheader", { name: "发票号码 / 开票日期" })).toBeInTheDocument();
+    expect(within(page).getByRole("columnheader", { name: "价税合计" })).toBeInTheDocument();
+    expect(within(page).getByRole("columnheader", { name: "销方名称" })).toBeInTheDocument();
     expect(await within(page).findByText("云南开票供应商")).toBeInTheDocument();
     expect(within(page).getByText("2026-05-02 10:00:00").closest(".MuiChip-root")).toBeInTheDocument();
     expect(within(page).getAllByText("工商银行 6386")[0].closest(".MuiChip-root")).toBeInTheDocument();
@@ -188,6 +193,7 @@ describe("Pending invoices page", () => {
     expect(within(page).queryByRole("button", { name: "全部" })).not.toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "收入流水" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "销项发票" })).toBeInTheDocument();
+    expect(within(page).getByRole("columnheader", { name: "购方名称" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: /客户有限公司 新增发票/ })).toBeInTheDocument();
     await waitFor(() => {
       const request = fetchMock.mock.calls
