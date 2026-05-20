@@ -6,7 +6,7 @@
 
 **Architecture:** 保持后端和持久化字段 `bank_transaction_tags` / `pending_invoice_tag_groups` 不迁移，前端产品文案统一为“银行明细标签”。设置页分离两个职责：标签字典管理与待找发票筛选映射。同步继续使用后端版本、窗口事件、BroadcastChannel 和页面聚焦兜底。
 
-**Tech Stack:** Python unittest backend, React + TypeScript frontend, MUI native components, Vitest frontend tests.
+**Tech Stack:** Python unittest backend, React + TypeScript frontend, MUI native components, MUI Table/native table components for pending invoice tabular UI, Vitest frontend tests. Do not introduce MUI X DataGrid.
 
 ---
 
@@ -31,7 +31,7 @@
 - `web/src/pages/PendingInvoicesPage.tsx`
   - 验证待找发票页标签更新后刷新行为仍基于后端字典。
 - `backend/src/fin_ops_platform/services/app_settings_service.py`
-  - 保持未知、停用、重复映射校验；保护仍被待找发票筛选引用的标签不能停用；如需要，补充错误 code 测试。
+  - 保持未知、停用、重复映射校验；保护仍被待找发票筛选引用的标签不能停用；返回稳定错误码 `bank_transaction_tag_in_use_by_pending_invoice_filter` 和 `bank_transaction_tags_version_conflict`。
 - `backend/src/fin_ops_platform/services/bank_transaction_category_service.py`
   - 保持 `definitions` 正式字段和 `tags` 兼容 alias。
 - Tests:
@@ -107,12 +107,14 @@ Backend:
 
 - Keep test proving `tags` alias is accepted before mapping validation.
 - Keep tests proving unknown, archived and duplicate mapping fail.
-- Add a test proving a tag already referenced by `pending_invoice_tag_groups` cannot be archived in the same save unless the mapping is removed.
+- Add a test proving a tag already referenced by `pending_invoice_tag_groups` cannot be archived in the same save unless the mapping is removed, and that the response `error` code is `bank_transaction_tag_in_use_by_pending_invoice_filter`.
+- Add or preserve a stale settings save test asserting the response `error` code is `bank_transaction_tags_version_conflict`.
 
 Frontend:
 
 - Assert settings save sends `bank_transaction_tags.definitions`, not `tags`.
-- Add or update tests so `unknown_bank_transaction_tag`, `archived_bank_transaction_tag`, `duplicate_pending_invoice_tag_mapping`, and stale version/conflict errors surface Chinese actionable messages.
+- Add or update tests so `unknown_bank_transaction_tag`, `archived_bank_transaction_tag`, `duplicate_pending_invoice_tag_mapping`, `bank_transaction_tag_in_use_by_pending_invoice_filter`, and `bank_transaction_tags_version_conflict` surface Chinese actionable messages.
+- Add or update tests that seed `pending_invoice_tag_groups` with unknown and archived `tag_codes`, verify the UI keeps them visible as disabled/error chips with `标签不存在` / `标签已停用`, and verify save is blocked until the user removes the invalid mapping or refreshes.
 
 - [ ] **Step 2: Run targeted tests**
 
@@ -136,7 +138,8 @@ Implement:
   - `unknown_bank_transaction_tag` -> `待找发票筛选引用了不存在的银行明细标签，请刷新后重新选择。`
   - `archived_bank_transaction_tag` -> `该银行明细标签已停用，不能用于新的待找发票筛选。`
   - `duplicate_pending_invoice_tag_mapping` -> `同一个银行明细标签不能同时归入多个待找发票筛选。`
-  - `category_version_conflict` or settings version conflict -> `银行明细标签已被其他页面更新，请刷新后重新保存。`
+  - `bank_transaction_tag_in_use_by_pending_invoice_filter` -> `该银行明细标签仍被待找发票筛选使用，请先从待找发票筛选中移除。`
+  - `bank_transaction_tags_version_conflict` -> `银行明细标签已被其他页面更新，请刷新后重新保存。`
 - Do not relax backend validation.
 
 - [ ] **Step 4: Run backend/settings tests**
@@ -170,6 +173,8 @@ Confirm tests already cover:
 - Bank details refetches after tag version update event/focus fallback.
 - Pending invoices refetches after tag update event/focus fallback.
 - Another open settings page reacts to tag update events. If it has unsaved edits, it must not silently overwrite; it should show a stale/conflict prompt and require refresh/discard before saving.
+- Pending invoice filter mapping renders unknown or archived historical `tag_codes` as visible disabled/error chips and blocks save until resolved.
+- Pending invoice tabular UI remains implemented with MUI Table/native table components and does not import MUI X DataGrid.
 
 - [ ] **Step 2: Add missing regression if needed**
 

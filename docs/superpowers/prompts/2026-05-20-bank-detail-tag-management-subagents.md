@@ -26,8 +26,9 @@ Requirements:
 5. Remove the 新标签 input and 新建并加入 button from 待找发票筛选.
 6. 待找发票筛选 must only allow selecting existing active tags.
 7. Empty state copy must tell users to create tags in 银行明细标签管理.
-8. Keep MUI native components. Do not introduce DataGrid.
-9. Keep internal IDs and API fields as bank_transaction_tags unless a test forces otherwise.
+8. Keep MUI native components. Pending invoice tabular UI must continue using MUI Table/native table components where a table is required.
+9. Do not introduce `@mui/x-data-grid` or MUI X DataGrid.
+10. Keep internal IDs and API fields as bank_transaction_tags unless a test forces otherwise.
 
 TDD:
 - First update/add SettingsPage.test.tsx assertions for the renamed entry and removed quick-create controls.
@@ -68,18 +69,21 @@ Requirements:
    - unknown mapped tag -> `unknown_bank_transaction_tag`
    - archived mapped tag -> `archived_bank_transaction_tag`
    - tag mapped to multiple groups -> `duplicate_pending_invoice_tag_mapping`
-   - archiving a tag still referenced by pending invoice mappings must fail unless the mapping is removed
+   - archiving a tag still referenced by pending invoice mappings must fail with `bank_transaction_tag_in_use_by_pending_invoice_filter` unless the mapping is removed
+   - stale settings saves must fail with `bank_transaction_tags_version_conflict`
 4. Frontend must translate these error codes to Chinese actionable messages:
    - unknown -> 待找发票筛选引用了不存在的银行明细标签，请刷新后重新选择。
    - archived -> 该银行明细标签已停用，不能用于新的待找发票筛选。
    - duplicate -> 同一个银行明细标签不能同时归入多个待找发票筛选。
-   - stale/settings version conflict -> 银行明细标签已被其他页面更新，请刷新后重新保存。
+   - in-use archive -> 该银行明细标签仍被待找发票筛选使用，请先从待找发票筛选中移除。
+   - `bank_transaction_tags_version_conflict` -> 银行明细标签已被其他页面更新，请刷新后重新保存。
 5. Frontend must map from API `error` code first, not display backend English `message` directly.
 6. Do not relax backend constraints and do not silently drop invalid mappings.
 
 TDD:
-- Add/update backend tests in tests/test_app_settings_service.py for `tags` alias + pending invoice mapping validation + blocking archive of mapped tags.
-- Add/update frontend tests in SettingsPage.test.tsx for `definitions` payload, Chinese error mapping, and stale version/conflict behavior.
+- Add/update backend tests in tests/test_app_settings_service.py for `tags` alias + pending invoice mapping validation + blocking archive of mapped tags with the exact code `bank_transaction_tag_in_use_by_pending_invoice_filter`.
+- Add/update frontend tests in SettingsPage.test.tsx for `definitions` payload, Chinese error mapping, exact `bank_transaction_tags_version_conflict` handling, and stale version/conflict behavior.
+- Add/update SettingsPage tests that seed `pending_invoice_tag_groups` with unknown and archived `tag_codes`, verify they remain visible as disabled/error chips with `标签不存在` / `标签已停用`, and verify save is blocked until the mapping is removed or refreshed.
 - Run:
   - `PYTHONPATH=backend/src python3 -m unittest tests.test_app_settings_service tests.test_bank_transaction_category_service -v`
   - `cd web && npm test -- --run SettingsPage.test.tsx`
@@ -121,6 +125,7 @@ Requirements:
 5. Focus fallback must still recover from missed events.
 6. Cross-device/server-push realtime is out of scope for this task; consistency is guaranteed by server-backed versions and save conflict protection.
 7. Do not add another tag store or duplicate taxonomy.
+8. Pending invoice tabular UI must remain MUI Table/native table based. Do not introduce MUI X DataGrid.
 
 Process:
 1. Inspect existing sync tests first.
@@ -154,6 +159,9 @@ Review scope:
 - Confirm sync behavior is tested or covered by existing tests.
 - Confirm another open Settings page cannot silently overwrite newer tag versions.
 - Confirm attempts to archive a tag still referenced by pending invoice mappings fail with an actionable message.
+- Confirm the exact error codes `bank_transaction_tag_in_use_by_pending_invoice_filter` and `bank_transaction_tags_version_conflict` are used for those cases.
+- Confirm invalid historical pending invoice mappings remain visible as disabled/error chips and are not silently dropped.
+- Confirm pending invoice tabular UI still uses MUI Table/native table components where tabular display is required.
 - Confirm no DataGrid was introduced in this workflow.
 
 Return:

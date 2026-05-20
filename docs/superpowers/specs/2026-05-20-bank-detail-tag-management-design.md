@@ -23,6 +23,7 @@
 - 不引入第二套标签体系。
 - 不做物理删除标签。历史银行明细和历史映射需要保留可解释性。
 - 不重做整个设置页布局。
+- 不把待找发票页面的表格实现切换到 MUI X DataGrid。涉及流水/发票/申请人的表格展示继续使用 MUI Table 或原生 table 语义组件。
 
 ## 产品边界
 
@@ -143,6 +144,12 @@
 - 已停用或不存在的历史引用不应静默消失。如果页面拿到的映射中包含异常标签，应显示禁用/错误 chip，标注 `标签不存在` 或 `标签已停用`，并阻止保存，直到用户移除该映射或刷新到服务端最新状态。
 - 当用户尝试停用一个已被待找发票筛选引用的标签时，保存必须失败并给出中文提示，要求先从 `待找发票筛选` 中移除该标签。不能自动从筛选映射中删除。
 
+### 待找发票主页面表格
+
+- 待找发票页面中流水、发票、OA 申请人等表格化信息继续使用 MUI Table 或原生 table 语义组件实现。
+- 不引入 `@mui/x-data-grid` 或 MUI X DataGrid。
+- 本任务只调整标签字典和筛选映射来源，不重做待找发票页面的信息架构。
+
 ## 错误处理
 
 后端保留结构化错误码：
@@ -150,6 +157,8 @@
 - `unknown_bank_transaction_tag`
 - `archived_bank_transaction_tag`
 - `duplicate_pending_invoice_tag_mapping`
+- `bank_transaction_tag_in_use_by_pending_invoice_filter`
+- `bank_transaction_tags_version_conflict`
 - `category_version_conflict`
 - `invalid_category_code`
 - `archived_category_code`
@@ -158,10 +167,11 @@
 
 设置保存错误映射：
 
-- `待找发票筛选引用了不存在的银行明细标签，请刷新后重新选择。`
-- `该银行明细标签已停用，不能用于新的待找发票筛选。`
-- `同一个银行明细标签不能同时归入多个待找发票筛选。`
-- `银行明细标签已被其他页面更新，请刷新后重新保存。`
+- `unknown_bank_transaction_tag` -> `待找发票筛选引用了不存在的银行明细标签，请刷新后重新选择。`
+- `archived_bank_transaction_tag` -> `该银行明细标签已停用，不能用于新的待找发票筛选。`
+- `duplicate_pending_invoice_tag_mapping` -> `同一个银行明细标签不能同时归入多个待找发票筛选。`
+- `bank_transaction_tag_in_use_by_pending_invoice_filter` -> `该银行明细标签仍被待找发票筛选使用，请先从待找发票筛选中移除。`
+- `bank_transaction_tags_version_conflict` -> `银行明细标签已被其他页面更新，请刷新后重新保存。`
 
 银行明细页标签选择错误映射：
 
@@ -191,6 +201,7 @@
 - 基于旧标签版本保存时被阻止，不能覆盖新版本。
 - 后端继续拒绝未知标签、停用标签和重复归类。
 - 前端错误提示为中文可操作提示，不暴露英文内部错误。
+- 待找发票主页面仍使用 MUI Table/native table 语义组件展示表格信息，未引入 DataGrid。
 - 相关测试覆盖设置页、保存 payload、后端校验、待找发票筛选 UI 和同步入口。
 
 ## 实施分解
