@@ -488,6 +488,7 @@ class WorkbenchExceptionProjectionService:
             "amount_summary": deepcopy(summary.get("amount_summary") or {}),
             "display_tags": deepcopy(summary.get("display_tags") or []),
             "audit_summary": deepcopy(summary.get("audit_summary") or {}),
+            "detail_note": summary.get("detail_note", ""),
             "available_actions": ["detail", "cancel_link", "reopen_exception"],
         }
 

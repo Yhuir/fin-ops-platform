@@ -1033,6 +1033,10 @@ export default function ReconciliationWorkbenchPage() {
     }
   }, [handleCloseDetail]);
 
+  const openRelationPreviewErrorDialog = useCallback((error: unknown) => {
+    openActionResultDialog(actionErrorMessage(error), "操作失败");
+  }, [openActionResultDialog]);
+
   const handleWorkbenchExceptionApplied = useCallback((result: WorkbenchExceptionApplyResult) => {
     clearOpenSelection();
     if (result.workbenchRefreshRequired) {
@@ -1054,7 +1058,11 @@ export default function ReconciliationWorkbenchPage() {
     if (action === "confirm-match") {
       const rowIds = collectCaseRowIds(row);
       const rowsById = new Map(sourceAllRows.map((candidate) => [candidate.id, candidate]));
-      await openConfirmPreview(rowIds.map((rowId) => rowsById.get(rowId)).filter((candidate): candidate is WorkbenchRecord => Boolean(candidate)));
+      try {
+        await openConfirmPreview(rowIds.map((rowId) => rowsById.get(rowId)).filter((candidate): candidate is WorkbenchRecord => Boolean(candidate)));
+      } catch (error) {
+        openRelationPreviewErrorDialog(error);
+      }
       return;
     }
 
@@ -1132,7 +1140,11 @@ export default function ReconciliationWorkbenchPage() {
       }
       const rowIds = collectCaseRowIds(row);
       const rowsById = new Map(sourceAllRows.map((candidate) => [candidate.id, candidate]));
-      await openWithdrawPreview(rowIds.map((rowId) => rowsById.get(rowId)).filter((candidate): candidate is WorkbenchRecord => Boolean(candidate)));
+      try {
+        await openWithdrawPreview(rowIds.map((rowId) => rowsById.get(rowId)).filter((candidate): candidate is WorkbenchRecord => Boolean(candidate)));
+      } catch (error) {
+        openRelationPreviewErrorDialog(error);
+      }
       return;
     }
 
@@ -1159,6 +1171,7 @@ export default function ReconciliationWorkbenchPage() {
     runBlockingAction,
     withdrawNoOaSummaryRow,
     sourceAllRows,
+    openRelationPreviewErrorDialog,
   ]);
 
   const handleCloseCashTicketPurchaseDialog = useCallback(() => {
@@ -1300,7 +1313,11 @@ export default function ReconciliationWorkbenchPage() {
       openActionResultDialog("确认关联至少需要选择 1 条银行流水，并同时选择 OA 或发票。");
       return;
     }
-    await openConfirmPreview(selectedOpenRows);
+    try {
+      await openConfirmPreview(selectedOpenRows);
+    } catch (error) {
+      openRelationPreviewErrorDialog(error);
+    }
   };
 
   const handleWithdrawOpenSelection = async () => {
@@ -1316,9 +1333,13 @@ export default function ReconciliationWorkbenchPage() {
       group.canWithdraw
       && [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice].some((row) => selectedRowIdSet.has(row.id)),
     );
-    await openWithdrawPreview(
-      selectedGroups.flatMap((group) => [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice]),
-    );
+    try {
+      await openWithdrawPreview(
+        selectedGroups.flatMap((group) => [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice]),
+      );
+    } catch (error) {
+      openRelationPreviewErrorDialog(error);
+    }
   };
 
   const handleClearOpenSelection = () => {
@@ -1383,9 +1404,13 @@ export default function ReconciliationWorkbenchPage() {
       });
       return;
     }
-    await openWithdrawPreview(
-      selectedGroups.flatMap((group) => [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice]),
-    );
+    try {
+      await openWithdrawPreview(
+        selectedGroups.flatMap((group) => [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice]),
+      );
+    } catch (error) {
+      openRelationPreviewErrorDialog(error);
+    }
   };
 
   const handleUnignoreRow = async (row: WorkbenchRecord) => {

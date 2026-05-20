@@ -144,6 +144,13 @@ export type WorkbenchRelationMode = "no_oa_bank_batch" | (string & {});
 
 export type WorkbenchDisplayMode = "collapsed_summary" | "normal" | (string & {});
 
+export type WorkbenchProcessedExceptionSummary = {
+  scenario?: Record<string, unknown>;
+  resolution?: Record<string, unknown>;
+  detailNote?: string;
+  displayTags?: string[];
+};
+
 export type WorkbenchCandidateGroup = {
   id: string;
   groupType: WorkbenchGroupType;
@@ -159,6 +166,7 @@ export type WorkbenchCandidateGroup = {
   relationNote?: string;
   amountCheck?: WorkbenchAmountCheck;
   specialMetadata?: Record<string, unknown>;
+  processedExceptionSummary?: WorkbenchProcessedExceptionSummary;
 };
 
 export type WorkbenchAmountSummaryTotals = {

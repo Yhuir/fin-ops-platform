@@ -1915,6 +1915,7 @@ function buildGroups(
       oa_rows: Array<Record<string, unknown>>;
       bank_rows: Array<Record<string, unknown>>;
       invoice_rows: Array<Record<string, unknown>>;
+      can_withdraw?: boolean;
     }
   >();
 
@@ -1943,7 +1944,16 @@ function buildGroups(
     }
   }
 
-  return Array.from(groups.values());
+  return Array.from(groups.values()).map((group) => {
+    const groupRows = [...group.oa_rows, ...group.bank_rows, ...group.invoice_rows];
+    const hasWithdrawHistory = groupRows.some((row) =>
+      Array.isArray(row.available_actions) && row.available_actions.includes("withdraw_link"),
+    );
+    return {
+      ...group,
+      can_withdraw: section === "paired" || hasWithdrawHistory ? true : undefined,
+    };
+  });
 }
 
 function groupHasDanger(group: {

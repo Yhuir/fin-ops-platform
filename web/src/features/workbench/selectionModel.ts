@@ -42,6 +42,12 @@ export function buildWorkbenchSelectionContext({
       .filter((row) => row.recordType === "oa")
       .map((row) => row.id),
   );
+  const selectedSourceOaIds = new Set(
+    explicitRows
+      .map((row) => sourceRowsById.get(row.id) ?? row)
+      .map(readOaSourceId)
+      .filter((sourceOaId): sourceOaId is string => Boolean(sourceOaId)),
+  );
   sourceGroups.forEach((group) => {
     const groupRows = flattenWorkbenchGroup(group);
     if (!groupRows.some((row) => explicitRowIdSet.has(row.id))) {
@@ -53,9 +59,22 @@ export function buildWorkbenchSelectionContext({
       return;
     }
 
+    const explicitGroupRecordTypes = new Set(
+      groupRows
+        .filter((row) => explicitRowIdSet.has(row.id))
+        .map((row) => row.recordType),
+    );
+    if (explicitGroupRecordTypes.size >= 2) {
+      groupRows.forEach((row) => includedRowsById.set(row.id, row));
+      return;
+    }
+
     groupRows.forEach((row) => {
       const sourceOaId = readOaSourceId(row);
       if (sourceOaId && selectedOaIds.has(sourceOaId)) {
+        includedRowsById.set(row.id, row);
+      }
+      if (row.recordType === "oa" && selectedSourceOaIds.has(row.id)) {
         includedRowsById.set(row.id, row);
       }
     });

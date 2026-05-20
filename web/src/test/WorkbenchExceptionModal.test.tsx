@@ -1,6 +1,6 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import MuiProviders from "../app/MuiProviders";
 import WorkbenchExceptionModal from "../components/workbench/WorkbenchExceptionModal";
@@ -33,6 +33,11 @@ const sessionValue: SessionContextValue = {
 };
 
 describe("WorkbenchExceptionModal", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
   test("loads preview on open and renders amount summary, evidence, warnings, actions, and required fields", async () => {
     const user = userEvent.setup();
     let resolvePreview: (response: Response) => void = () => undefined;
@@ -212,6 +217,52 @@ describe("WorkbenchExceptionModal", () => {
       affectedRowIds: ["oa-1", "bank-1", "invoice-1"],
     }));
     expect(onClose).toHaveBeenCalled();
+  });
+
+  test("releases submit state and shows a recoverable error when apply takes too long", async () => {
+    const user = userEvent.setup();
+    const onApplied = vi.fn();
+    const onClose = vi.fn();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (url.pathname === "/api/workbench/exception/preview") {
+        return jsonResponse(manualOaExemptionPreview);
+      }
+      if (url.pathname === "/api/workbench/exception/apply") {
+        return new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+        });
+      }
+      throw new Error(`Unexpected request: ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderModal({
+      rows: defaultRows.filter((row) => row.id !== "oa-1"),
+      onApplied,
+      onClose,
+    });
+
+    const dialog = await screen.findByRole("dialog", { name: "统一异常处理" });
+    await user.click(within(dialog).getByRole("radio", { name: /人工确认免 OA/ }));
+    await user.type(within(dialog).getByLabelText("原因代码"), "manual_business_exemption");
+    await user.type(within(dialog).getByLabelText("到期日期"), "2026-05-31");
+    await user.type(within(dialog).getByLabelText("备注"), "业务确认无需 OA");
+
+    vi.useFakeTimers();
+    act(() => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "提交处理" }));
+    });
+    expect(within(dialog).getByRole("button", { name: "提交中..." })).toBeDisabled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(12_000);
+    });
+
+    expect(within(dialog).getByText("异常处理提交超时")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "提交处理" })).toBeEnabled();
+    expect(onApplied).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   test("renders income-side OA data anomaly without a misleading closed action button", async () => {

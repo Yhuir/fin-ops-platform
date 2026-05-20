@@ -11,6 +11,9 @@ type ProcessedExceptionsModalProps = {
   onCancelException: (row: WorkbenchRecord) => void;
 };
 
+const PROCESSED_EXCEPTIONS_ROW_TEMPLATE_COLUMNS =
+  "minmax(360px, 1fr) 1px minmax(360px, 1fr) 1px minmax(360px, 1fr) 1px minmax(220px, 0.5fr) minmax(260px, 0.6fr)";
+
 export default function ProcessedExceptionsModal({
   groups,
   panes,
@@ -37,7 +40,7 @@ export default function ProcessedExceptionsModal({
           </button>
         </header>
 
-        <div className="ignored-items-body">
+        <div className="ignored-items-body processed-exceptions-body">
           {groups.length === 0 ? (
             <div className="detail-state-panel">当前没有已处理异常项。</div>
           ) : (
@@ -54,7 +57,21 @@ export default function ProcessedExceptionsModal({
               }}
               onSelectRow={() => undefined}
               panes={panes}
-              rowTemplateColumns="minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)"
+              rowTemplateColumns={PROCESSED_EXCEPTIONS_ROW_TEMPLATE_COLUMNS}
+              trailingColumns={[
+                {
+                  key: "exceptionReason",
+                  label: "异常原因",
+                  className: "processed-exception-summary-cell",
+                  renderGroup: (group) => <ProcessedExceptionSummaryText value={resolveProcessedExceptionReason(group)} />,
+                },
+                {
+                  key: "exceptionNote",
+                  label: "异常备注",
+                  className: "processed-exception-summary-cell",
+                  renderGroup: (group) => <ProcessedExceptionSummaryText value={resolveProcessedExceptionNote(group)} />,
+                },
+              ]}
               canMutateData={canMutateData}
               zoneId="paired"
             />
@@ -63,4 +80,48 @@ export default function ProcessedExceptionsModal({
       </div>
     </div>
   );
+}
+
+function ProcessedExceptionSummaryText({ value }: { value: string }) {
+  return <span className="processed-exception-summary-text" title={value}>{value}</span>;
+}
+
+function resolveProcessedExceptionReason(group: WorkbenchCandidateGroup) {
+  const summary = group.processedExceptionSummary;
+  return firstText(
+    summary?.scenario?.label,
+    summary?.scenario?.scenario_label,
+    summary?.scenario?.code,
+    summary?.resolution?.action_label,
+    summary?.resolution?.label,
+    firstProcessedRow(group)?.status,
+    group.reason,
+  );
+}
+
+function resolveProcessedExceptionNote(group: WorkbenchCandidateGroup) {
+  const row = firstProcessedRow(group);
+  return firstText(
+    group.processedExceptionSummary?.detailNote,
+    group.processedExceptionSummary?.resolution?.note,
+    group.processedExceptionSummary?.resolution?.comment,
+    row?.relationNote,
+    row?.detailFields.find((field) => field.label === "备注")?.value,
+    group.relationNote,
+    "—",
+  );
+}
+
+function firstProcessedRow(group: WorkbenchCandidateGroup) {
+  return [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice][0];
+}
+
+function firstText(...values: unknown[]) {
+  for (const value of values) {
+    const text = typeof value === "string" ? value.trim() : "";
+    if (text && text !== "--" && text !== "—") {
+      return text;
+    }
+  }
+  return "—";
 }

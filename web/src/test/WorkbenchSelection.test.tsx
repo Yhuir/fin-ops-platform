@@ -821,10 +821,12 @@ describe("Workbench row selection and detail modal", () => {
     const clearButton = within(openZone).getByRole("button", { name: "清空选择" });
     const confirmButton = within(openZone).getByRole("button", { name: "确认关联" });
     const exceptionButton = within(openZone).getByRole("button", { name: "异常处理" });
+    const withdrawButton = within(openZone).getByRole("button", { name: "撤回关联" });
 
     expect(clearButton).toBeEnabled();
     expect(confirmButton).toBeDisabled();
     expect(exceptionButton).toBeDisabled();
+    expect(withdrawButton).toBeDisabled();
 
     const openOaRow = within(openZone).getByRole("row", {
       name: /陈涛.*智能工厂设备商/,
@@ -843,6 +845,7 @@ describe("Workbench row selection and detail modal", () => {
 
     expect(confirmButton).toBeEnabled();
     expect(exceptionButton).toBeEnabled();
+    expect(withdrawButton).toBeDisabled();
   });
 
   test("workbench settings can manage allowed app accounts", async () => {

@@ -32,6 +32,7 @@ import type {
   WorkbenchOaSyncStatus,
   WorkbenchInvoiceInventory,
   WorkbenchSourceKind,
+  WorkbenchGroupType,
   OaManualAttachmentRefreshResult,
   OaManualImportList,
   OaManualImportResult,
@@ -233,7 +234,7 @@ type ApiWorkbenchSettingsOption =
 
 type ApiWorkbenchGroup = {
   group_id: string;
-  group_type: "auto_closed" | "manual_confirmed" | "candidate" | "source_linked";
+  group_type: "auto_closed" | "manual_confirmed" | "candidate" | "source_linked" | "processed_exception" | "open_exception" | (string & {});
   match_confidence: "high" | "medium" | "low";
   reason: string;
   relation_mode?: string | null;
@@ -248,6 +249,7 @@ type ApiWorkbenchGroup = {
   relation_note?: string | null;
   amount_check?: ApiWorkbenchRelationAmountCheck | null;
   special_metadata?: Record<string, unknown> | null;
+  processed_exception_summary?: Record<string, unknown> | null;
 };
 
 type ApiWorkbenchRelationAmountCheck = {
@@ -262,6 +264,8 @@ type ApiWorkbenchRelationAmountCheck = {
   requires_note?: boolean | null;
   requiresNote?: boolean | null;
 };
+
+const WORKBENCH_EXCEPTION_APPLY_TIMEOUT_MS = 12_000;
 
 type ApiWorkbenchAmountSummary = {
   before?: {
@@ -634,6 +638,17 @@ function toDisplayValue(value: unknown, fallback = "--") {
   return String(value);
 }
 
+function toBankAmountDisplayValue(value: unknown, fallback = "--") {
+  const displayValue = toDisplayValue(value, fallback);
+  if (displayValue === fallback || displayValue === "--" || displayValue === "—") {
+    return displayValue;
+  }
+  if (!/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(displayValue)) {
+    return displayValue;
+  }
+  return displayValue.replace(/,/g, "");
+}
+
 function firstNonPlaceholderDisplayValue(...values: unknown[]) {
   for (const value of values) {
     const displayValue = toDisplayValue(value, "");
@@ -656,6 +671,28 @@ function mapRelationAmountCheck(value: ApiWorkbenchRelationAmountCheck | null | 
     oaAmount: toDisplayValue(value.oa_amount ?? value.oaAmount),
     amountDelta: toDisplayValue(value.amount_delta ?? value.amountDelta),
     requiresNote: value.requires_note === true || value.requiresNote === true,
+  };
+}
+
+function mapProcessedExceptionSummary(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const payload = value as Record<string, unknown>;
+  const scenario = payload.scenario && typeof payload.scenario === "object"
+    ? payload.scenario as Record<string, unknown>
+    : undefined;
+  const resolution = payload.resolution && typeof payload.resolution === "object"
+    ? payload.resolution as Record<string, unknown>
+    : undefined;
+  const displayTags = Array.isArray(payload.display_tags)
+    ? payload.display_tags.map((item) => String(item).trim()).filter(Boolean)
+    : undefined;
+  return {
+    scenario,
+    resolution,
+    detailNote: toDisplayValue(payload.detail_note ?? payload.detailNote, "") || undefined,
+    displayTags,
   };
 }
 
@@ -712,6 +749,22 @@ function normalizeRowAvailableActions(row: ApiWorkbenchRow) {
   return actions.includes("withdraw_no_oa_batch")
     ? actions
     : [...actions, "withdraw_no_oa_batch"];
+}
+
+function groupHasNoOaWithdrawAction(group: ApiWorkbenchGroup) {
+  return group.summary_row ? normalizeRowAvailableActions(group.summary_row).includes("withdraw_no_oa_batch") : false;
+}
+
+function mapGroupType(groupType: ApiWorkbenchGroup["group_type"]): WorkbenchGroupType {
+  const normalizedGroupType = String(groupType);
+  if (
+    normalizedGroupType === "auto_closed"
+    || normalizedGroupType === "manual_confirmed"
+    || normalizedGroupType === "candidate"
+  ) {
+    return normalizedGroupType as WorkbenchGroupType;
+  }
+  return "candidate";
 }
 
 function rowActionVariant(row: ApiWorkbenchRow, availableActions: string[]): WorkbenchActionVariant {
@@ -828,8 +881,8 @@ function mapTableValues(row: ApiWorkbenchRow): Record<string, string> {
       transactionTime: toDisplayValue(row.trade_time),
       direction,
       amount: resolveBankAmount(row),
-      debitAmount: toDisplayValue(row.debit_amount),
-      creditAmount: toDisplayValue(row.credit_amount),
+      debitAmount: toBankAmountDisplayValue(row.debit_amount),
+      creditAmount: toBankAmountDisplayValue(row.credit_amount),
       counterparty: toDisplayValue(row.counterparty_name),
       paymentAccount: toDisplayValue(row.payment_account_label),
       invoiceRelationStatus: relationLabel,
@@ -913,11 +966,11 @@ function resolveBankDirection(row: ApiWorkbenchRow) {
 }
 
 function resolveBankAmount(row: ApiWorkbenchRow) {
-  const debitAmount = toDisplayValue(row.debit_amount, "");
+  const debitAmount = toBankAmountDisplayValue(row.debit_amount, "");
   if (debitAmount !== "") {
     return debitAmount;
   }
-  const creditAmount = toDisplayValue(row.credit_amount, "");
+  const creditAmount = toBankAmountDisplayValue(row.credit_amount, "");
   if (creditAmount !== "") {
     return creditAmount;
   }
@@ -974,7 +1027,7 @@ function mapGroup(group: ApiWorkbenchGroup): WorkbenchCandidateGroup {
     : undefined;
   return {
     id: group.group_id,
-    groupType: group.group_type === "source_linked" ? "candidate" : group.group_type,
+    groupType: mapGroupType(group.group_type),
     matchConfidence: group.match_confidence,
     reason: group.reason,
     relationMode: typeof group.relation_mode === "string" && group.relation_mode.trim()
@@ -994,12 +1047,10 @@ function mapGroup(group: ApiWorkbenchGroup): WorkbenchCandidateGroup {
     relationNote: toDisplayValue(group.relation_note, "") || undefined,
     amountCheck: mapRelationAmountCheck(group.amount_check),
     specialMetadata: group.special_metadata && typeof group.special_metadata === "object" ? group.special_metadata : undefined,
+    processedExceptionSummary: mapProcessedExceptionSummary(group.processed_exception_summary),
     canWithdraw: Boolean(
       group.can_withdraw
-      || [...group.oa_rows, ...group.bank_rows, ...group.invoice_rows].some((row) => {
-        const actions = normalizeRowAvailableActions(row);
-        return actions.includes("withdraw_link") || actions.includes("cancel_link") || actions.includes("withdraw_no_oa_batch");
-      }),
+      || groupHasNoOaWithdrawAction(group),
     ),
   };
 }
@@ -1396,6 +1447,24 @@ async function requestJson<T>(url: string, init: RequestInit = {}) {
     throw new Error(typeof payload === "object" && payload ? JSON.stringify(payload) : rawText.trim() || "request failed");
   }
   return ((payload ?? {}) as T);
+}
+
+async function requestJsonWithTimeout<T>(url: string, init: RequestInit = {}, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await requestJson<T>(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (
+      (error instanceof DOMException && error.name === "AbortError")
+      || (error instanceof Error && error.name === "AbortError")
+    ) {
+      throw new Error("异常处理提交超时");
+    }
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
 }
 
 function createAbortError() {
@@ -1994,17 +2063,21 @@ export async function previewWorkbenchException(
 export async function applyWorkbenchException(
   payload: WorkbenchExceptionApplyPayload,
 ): Promise<WorkbenchExceptionApplyResult> {
-  const result = await requestJson<ApiWorkbenchExceptionApplyResult>("/api/workbench/exception/apply", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      month: payload.month,
-      row_ids: payload.rowIds,
-      scenario_code: payload.scenarioCode,
-      action_code: payload.actionCode,
-      payload: payload.payload,
-    }),
-  });
+  const result = await requestJsonWithTimeout<ApiWorkbenchExceptionApplyResult>(
+    "/api/workbench/exception/apply",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        month: payload.month,
+        row_ids: payload.rowIds,
+        scenario_code: payload.scenarioCode,
+        action_code: payload.actionCode,
+        payload: payload.payload,
+      }),
+    },
+    WORKBENCH_EXCEPTION_APPLY_TIMEOUT_MS,
+  );
   return mapWorkbenchExceptionApplyResult(result);
 }
 

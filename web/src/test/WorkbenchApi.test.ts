@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { applyWorkbenchException, fetchWorkbench, previewWorkbenchException } from "../features/workbench/api";
-import { buildWorkbenchDisplayGroups, createEmptyWorkbenchZoneDisplayState } from "../features/workbench/groupDisplayModel";
+import {
+  buildWorkbenchDisplayGroups,
+  createEmptyWorkbenchZoneDisplayState,
+  workbenchRowMatchesUnifiedSearch,
+} from "../features/workbench/groupDisplayModel";
 import type { WorkbenchCandidateGroup, WorkbenchRecord, WorkbenchRecordType } from "../features/workbench/types";
 
 const workbenchPanes: WorkbenchRecordType[] = ["oa", "bank", "invoice"];
@@ -59,6 +63,125 @@ function createContextSearchGroups(activePaneId: WorkbenchRecordType) {
 describe("workbench api bank amount mapping", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  test("does not mark ordinary open candidates withdrawable from row cancel actions", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "all",
+          summary: {
+            oa_count: 1,
+            bank_count: 1,
+            invoice_count: 0,
+            paired_count: 0,
+            open_count: 2,
+            exception_count: 0,
+          },
+          paired: { groups: [] },
+          open: {
+            groups: [
+              {
+                group_id: "case:ORDINARY-CANDIDATE",
+                group_type: "candidate",
+                match_confidence: "medium",
+                reason: "candidate_match",
+                oa_rows: [
+                  {
+                    id: "oa-open-ordinary",
+                    type: "oa",
+                    applicant: "刘际涛",
+                    project_name: "云南溯源科技",
+                    apply_type: "支付申请",
+                    amount: "6868.55",
+                    counterparty_name: "刘树刚",
+                    reason: "代购公车款",
+                    oa_bank_relation: { code: "candidate_unclosed", label: "候选未闭环", tone: "warn" },
+                    available_actions: ["detail", "confirm_link", "mark_exception"],
+                  },
+                ],
+                bank_rows: [
+                  {
+                    id: "bank-open-ordinary",
+                    type: "bank",
+                    trade_time: "2026-04-03 09:00:07",
+                    debit_amount: "6868.55",
+                    credit_amount: "",
+                    counterparty_name: "刘树刚",
+                    payment_account_label: "建行 8106",
+                    invoice_relation: { code: "candidate_unclosed", label: "候选未闭环", tone: "warn" },
+                    remark: "摘要：电子转账 备注：代购公车款",
+                    available_actions: ["detail", "view_relation", "cancel_link", "handle_exception"],
+                  },
+                ],
+                invoice_rows: [],
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const payload = await fetchWorkbench("all");
+
+    expect(payload.open.groups[0].canWithdraw).toBe(false);
+  });
+
+  test("normalizes bank row amounts without grouping separators for display search", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "2026-03",
+          summary: {
+            oa_count: 0,
+            bank_count: 1,
+            invoice_count: 0,
+            paired_count: 0,
+            open_count: 1,
+            exception_count: 0,
+          },
+          paired: { groups: [] },
+          open: {
+            groups: [
+              {
+                group_id: "case:CASE-BANK-AMOUNT-001",
+                group_type: "candidate",
+                match_confidence: "medium",
+                reason: "银行金额搜索口径",
+                oa_rows: [],
+                bank_rows: [
+                  {
+                    id: "bank-amount-search-001",
+                    type: "bank",
+                    trade_time: "2026-03-20 16:05:40",
+                    direction: "支出",
+                    debit_amount: "19,370.00",
+                    credit_amount: "",
+                    amount: "19,370.00",
+                    counterparty_name: "云南溯源科技有限公司",
+                    payment_account_label: "建设银行 8106",
+                    invoice_relation: { code: "pending", label: "待处理", tone: "warn" },
+                    available_actions: ["detail"],
+                  },
+                ],
+                invoice_rows: [],
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const payload = await fetchWorkbench("2026-03");
+    const group = payload.open.groups[0];
+    const bankRow = group.rows.bank[0];
+
+    expect(bankRow.amount).toBe("19370.00");
+    expect(bankRow.tableValues.amount).toBe("19370.00");
+    expect(bankRow.tableValues.debitAmount).toBe("19370.00");
+    expect(workbenchRowMatchesUnifiedSearch(bankRow, "19370.00")).toBe(true);
   });
 
   test("maps batch accounting relation note and amount check fields", async () => {
@@ -597,8 +720,8 @@ describe("workbench api bank amount mapping", () => {
     const payload = await fetchWorkbench("2026-03");
     const bankRow = payload.open.groups[0].rows.bank[0];
 
-    expect(bankRow.tableValues.amount).toBe("6,000.00");
-    expect(bankRow.amount).toBe("6,000.00");
+    expect(bankRow.tableValues.amount).toBe("6000.00");
+    expect(bankRow.amount).toBe("6000.00");
     expect(bankRow.tableValues.direction).toBe("收入");
     expect((bankRow as any).categoryCode).toBe("borrow_in_company_pending_repayment");
     expect((bankRow as any).categoryLabel).toBe("公司暂借款：待还款");

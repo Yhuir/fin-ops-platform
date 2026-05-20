@@ -351,14 +351,14 @@ describe("Workbench columns and inline actions", () => {
     const moneyValueRow = directionTag.closest(".money-cell-value");
     const moneyMetaRow = directionTag.closest(".money-cell-meta-row");
     const bankAmountHeader = within(bankPane).getByRole("columnheader", { name: "金额" });
-    const bankAmountCell = within(bankRow as HTMLElement).getByText("128,000.00").closest(".record-card-cell");
+    const bankAmountCell = within(bankRow as HTMLElement).getByText("128000.00").closest(".record-card-cell");
 
     expect(directionTag).toHaveClass("direction-tag");
     expect(directionTag).toHaveClass("direction-tag-outflow");
     expect(within(pairedGroup).queryByText("资金方向")).not.toBeInTheDocument();
     expect(moneyValueRow).toBeNull();
     expect(moneyMetaRow).not.toBeNull();
-    expect(within(bankAmountCell as HTMLElement).getByText("128,000.00")).toBeInTheDocument();
+    expect(within(bankAmountCell as HTMLElement).getByText("128000.00")).toBeInTheDocument();
     expect(bankAmountHeader).toHaveClass("column-money-centered");
     expect(bankAmountCell).toHaveClass("column-money-centered");
   });

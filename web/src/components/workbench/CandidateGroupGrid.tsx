@@ -1,4 +1,14 @@
-import { Fragment, memo, useEffect, useMemo, useState, useCallback, useRef, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  Fragment,
+  memo,
+  useEffect,
+  useMemo,
+  useState,
+  useCallback,
+  useRef,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
 
 import {
   collectWorkbenchFilterOptions,
@@ -33,6 +43,12 @@ type CandidateGroupGridProps = {
   displayState?: WorkbenchZoneDisplayState;
   columnLayouts?: WorkbenchColumnLayouts;
   rowTemplateColumns: string;
+  trailingColumns?: Array<{
+    key: string;
+    label: string;
+    className?: string;
+    renderGroup: (group: WorkbenchCandidateGroup) => ReactNode;
+  }>;
   actionMode?: "default" | "cancel-exception-only";
   highlightedRowId?: string | null;
   getRowState: (row: WorkbenchRecord, zoneId: "paired" | "open") => WorkbenchRowState;
@@ -73,6 +89,7 @@ function CandidateGroupGrid({
   displayState = createEmptyWorkbenchZoneDisplayState(),
   columnLayouts,
   rowTemplateColumns,
+  trailingColumns = [],
   actionMode = "default",
   highlightedRowId,
   getRowState,
@@ -150,6 +167,7 @@ function CandidateGroupGrid({
   const paneHasActionColumn = (paneId: WorkbenchRecordType) => actionMode === "cancel-exception-only" || paneId === "invoice";
   const paneLayoutClass = (paneId: WorkbenchRecordType) =>
     paneHasActionColumn(paneId) ? "pane-layout-with-action" : "pane-layout-no-action";
+  const hasTrailingColumns = trailingColumns.length > 0;
 
   const columnsByPane = useMemo(
     () => ({
@@ -359,6 +377,16 @@ function CandidateGroupGrid({
                 </Fragment>
               );
             })}
+            {hasTrailingColumns ? <div className="candidate-pane-grid-divider" aria-hidden="true" /> : null}
+            {trailingColumns.map((column) => (
+              <div
+                key={`${group.id}-trailing-${column.key}`}
+                className={`candidate-group-trailing-cell${column.className ? ` ${column.className}` : ""}`}
+                role="cell"
+              >
+                {column.renderGroup(group)}
+              </div>
+            ))}
           </div>
         );
       })}
@@ -369,6 +397,10 @@ function CandidateGroupGrid({
               <div className="candidate-group-pane-slot candidate-group-pane-slot-filler" />
               {paneIndex < panes.length - 1 ? <div className="candidate-pane-grid-divider candidate-pane-grid-divider-filler" /> : null}
             </Fragment>
+          ))}
+          {hasTrailingColumns ? <div className="candidate-pane-grid-divider candidate-pane-grid-divider-filler" /> : null}
+          {trailingColumns.map((column) => (
+            <div key={`body-filler-trailing-${column.key}`} className="candidate-group-trailing-cell candidate-group-trailing-cell-filler" />
           ))}
         </div>
       ) : null}
@@ -387,6 +419,7 @@ function CandidateGroupGrid({
     paneGridStyleByPane,
     panes,
     rowTemplateColumns,
+    trailingColumns,
     toggleCollapsedGroup,
     zoneId,
   ]);
@@ -513,6 +546,17 @@ function CandidateGroupGrid({
             {paneIndex < panes.length - 1 ? <div className="candidate-pane-grid-divider candidate-pane-grid-divider-head" aria-hidden="true" /> : null}
           </Fragment>
         ))}
+        {hasTrailingColumns ? <div className="candidate-pane-grid-divider candidate-pane-grid-divider-head" aria-hidden="true" /> : null}
+        {trailingColumns.map((column) => (
+          <div
+            aria-label={column.label}
+            key={`head-trailing-${column.key}`}
+            className={`candidate-columnheader candidate-trailing-columnheader${column.className ? ` ${column.className}` : ""}`}
+            role="columnheader"
+          >
+            <span className="candidate-columnheader-label">{column.label}</span>
+          </div>
+        ))}
       </div>
 
       {gridBody}
@@ -541,6 +585,10 @@ function CandidateGroupGrid({
             </div>
             {paneIndex < panes.length - 1 ? <div className="candidate-pane-grid-divider candidate-pane-grid-divider-footer" aria-hidden="true" /> : null}
           </Fragment>
+        ))}
+        {hasTrailingColumns ? <div className="candidate-pane-grid-divider candidate-pane-grid-divider-footer" aria-hidden="true" /> : null}
+        {trailingColumns.map((column) => (
+          <div key={`footer-trailing-${column.key}`} className="candidate-pane-footer-slot candidate-trailing-footer-slot" />
         ))}
       </div>
     </div>
