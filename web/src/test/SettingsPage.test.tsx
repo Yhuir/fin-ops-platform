@@ -36,7 +36,12 @@ function installSettingsTagFetch() {
       if ((init?.method ?? "GET").toUpperCase() === "POST") {
         settingsVersion = 5;
         const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
-        expect(body.bank_transaction_tags).toBeDefined();
+        expect(body.bank_transaction_tags).toMatchObject({
+          definitions: expect.arrayContaining([
+            expect.objectContaining({ code: "fee" }),
+          ]),
+        });
+        expect(body.bank_transaction_tags).not.toHaveProperty("tags");
         expect(body.pending_invoice_tag_groups).toMatchObject({
           groups: {
             requires_invoice: { tag_codes: expect.arrayContaining(["fee", "internal_transfer"]) },

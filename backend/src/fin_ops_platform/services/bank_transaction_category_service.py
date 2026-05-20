@@ -481,7 +481,10 @@ class BankTransactionCategoryService:
             definition["code"]: definition
             for definition in build_system_bank_transaction_tag_definitions()
         }
-        for item in list(raw_payload.get("definitions") or []):
+        raw_definitions = raw_payload.get("definitions")
+        if raw_definitions is None:
+            raw_definitions = raw_payload.get("tags")
+        for item in list(raw_definitions or []):
             if not isinstance(item, dict):
                 continue
             definition = cls._normalize_tag_definition(item)

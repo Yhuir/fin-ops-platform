@@ -128,6 +128,48 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(mapping_changed["bank_transaction_tags"]["version"], 3)
         self.assertEqual(mapping_changed["pending_invoice_tag_groups"]["version"], 3)
 
+    def test_settings_accepts_frontend_tags_alias_before_pending_invoice_mapping_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            payload = app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[],
+                allowed_usernames=[],
+                readonly_export_usernames=[],
+                admin_usernames=[],
+                bank_transaction_tags={
+                    "version": 1,
+                    "tags": [
+                        {
+                            "code": "custom_1779265822964",
+                            "label": "利息",
+                            "path": ["自定义", "利息"],
+                            "source": "custom",
+                            "status": "active",
+                        }
+                    ],
+                },
+                pending_invoice_tag_groups={
+                    "groups": {
+                        "requires_invoice": {"tag_codes": []},
+                        "bank_statement_as_invoice": {"tag_codes": ["custom_1779265822964"]},
+                        "no_invoice_required": {"tag_codes": []},
+                    }
+                },
+                actor_id="settings-owner",
+            )
+
+        definitions_by_code = {
+            definition["code"]: definition
+            for definition in payload["bank_transaction_tags"]["definitions"]
+        }
+        self.assertIn("custom_1779265822964", definitions_by_code)
+        self.assertEqual(
+            payload["pending_invoice_tag_groups"]["groups"]["bank_statement_as_invoice"]["tag_codes"],
+            ["custom_1779265822964"],
+        )
+
     def test_invalid_pending_invoice_group_mappings_do_not_audit_or_finalize(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

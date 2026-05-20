@@ -1346,7 +1346,7 @@ function serializeBankTransactionTags(value: BankTransactionTagDictionary | unde
   }
   return {
     version: value.version,
-    tags: value.tags.map((tag) => ({
+    definitions: value.tags.map((tag) => ({
       code: tag.code,
       label: tag.label,
       path: tag.path,
