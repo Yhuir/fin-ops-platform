@@ -175,6 +175,9 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "outbox_events_dedupe_uidx",
             "read_model_dirty_scopes_active_uidx",
             "runtime_worker_heartbeats_worker_uidx",
+            "job.sync_outbox_event_attempts()",
+            "outbox_events_sync_attempts_trg",
+            "outbox_events_status_chk",
             "grant select, insert, update on job.read_model_dirty_scopes to fin_ops_worker",
             "grant select, insert, update on job.runtime_worker_heartbeats to fin_ops_worker",
         ):
