@@ -1,0 +1,45 @@
+{
+  "run_id": "stage20-mirror-dryrun-20260520211501",
+  "stage": "20-production-controlled-runtime-mirror-write-rehearsal",
+  "gate": "BLOCKED_DEPENDENCY_PSYCOPG",
+  "production_mirror_write_dry_run_executed": false,
+  "production_mirror_write_execute_executed": false,
+  "production_postgresql_written": false,
+  "app_mongo_written": false,
+  "oa_mongo_form_data_touched": false,
+  "production_service_modified_or_restarted": false,
+  "local_verification": {
+    "command": "PYTHONPATH=backend/src pytest -q tests/test_runtime_state_policy.py tests/test_stage15_runtime_tools.py tests/test_shadow_read_rehearsal.py",
+    "result": "35 passed, 20 subtests passed"
+  },
+  "production_dependency_check": {
+    "service": {
+      "active_state": "active",
+      "sub_state": "running",
+      "main_pid": 452671,
+      "exec_main_start_timestamp": "Wed 2026-05-20 16:07:52 CST",
+      "working_directory": "/opt/fin-ops/current"
+    },
+    "python_imports": {
+      "fin_ops_platform.tools.run_shadow_read_rehearsal": "OK",
+      "fin_ops_platform.tools.run_runtime_state_policy_preflight": "OK",
+      "fin_ops_platform.tools.run_controlled_mirror_write_rehearsal": "OK",
+      "psycopg": "FAIL: ModuleNotFoundError"
+    },
+    "tools": {
+      "psql": "/usr/bin/psql",
+      "pg_dump": "/usr/bin/pg_dump"
+    }
+  },
+  "latest_readonly_gate_artifacts": {
+    "shadow_read": "docs/database-migration/reports/stage20-preflight-20260520210456.shadow-read.json",
+    "runtime_policy": "docs/database-migration/reports/stage20-preflight-20260520210456.runtime-policy.json"
+  },
+  "blocking_reason": "Production /opt/fin-ops/venv cannot import psycopg, while run_controlled_mirror_write_rehearsal uses PostgresStateStore for the postgres mirror backend even in dry-run.",
+  "user_action_required": [
+    "Authorize a temporary dependency strategy, preferably creating a server-local /tmp virtualenv with psycopg/psycopg-binary for the one-off runner without modifying /opt/fin-ops/current or restarting fin-ops.service.",
+    "Alternatively authorize installing psycopg into the production venv, which is broader and should be treated as a production environment change.",
+    "Or authorize implementing a psql-json dry-run-only runner that does not validate the formal PostgresStateStore mirror-write path."
+  ],
+  "redacted": true
+}

@@ -1,0 +1,6 @@
+psycopg|OK|/opt/fin-ops/releases/stage23-release-runtime-20260520233115/venv/lib64/python3.11/site-packages/psycopg/__init__.py
+fin_ops_platform.app.main|OK|/opt/fin-ops/releases/stage23-release-runtime-20260520233115/src/backend/src/fin_ops_platform/app/main.py
+fin_ops_platform.services.postgres_connection|OK|/opt/fin-ops/releases/stage23-release-runtime-20260520233115/src/backend/src/fin_ops_platform/services/postgres_connection.py
+fin_ops_platform.services.postgres_state_store|OK|/opt/fin-ops/releases/stage23-release-runtime-20260520233115/src/backend/src/fin_ops_platform/services/postgres_state_store.py
+fin_ops_platform.tools.run_shadow_read_rehearsal|OK|/opt/fin-ops/releases/stage23-release-runtime-20260520233115/src/backend/src/fin_ops_platform/tools/run_shadow_read_rehearsal.py
+fin_ops_platform.tools.run_runtime_state_policy_preflight|OK|/opt/fin-ops/releases/stage23-release-runtime-20260520233115/src/backend/src/fin_ops_platform/tools/run_runtime_state_policy_preflight.py

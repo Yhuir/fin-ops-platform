@@ -1,0 +1,10 @@
+{
+  "blocked_unknown_count": 0,
+  "p0": 0,
+  "p1": 0,
+  "policy_exit": 0,
+  "policy_gate": "PASS",
+  "primary_errors": 0,
+  "shadow_errors": 0,
+  "shadow_exit": 1
+}

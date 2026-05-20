@@ -1,0 +1,67 @@
+{
+  "counts_after": {
+    "app.app_settings.runtime_state": 2,
+    "audit.app_health_alerts": 12,
+    "job.background_jobs": 148
+  },
+  "counts_before": {
+    "app.app_settings.runtime_state": 0,
+    "audit.app_health_alerts": 1,
+    "job.background_jobs": 148
+  },
+  "executed": true,
+  "gate_recommendation": "PASS",
+  "generated_at": "2026-05-20T14:55:54+00:00",
+  "mirror_backend": "postgres",
+  "mode": "execute",
+  "plan": {
+    "bound_status": "pass",
+    "bounds": {
+      "app_health_alerts": {
+        "max_count": 200,
+        "planned_count": 11,
+        "status": "pass"
+      },
+      "app_settings_runtime_rows": {
+        "max_count": 2,
+        "planned_count": 2,
+        "status": "pass"
+      },
+      "background_jobs": {
+        "max_count": 5000,
+        "planned_count": 137,
+        "status": "pass"
+      }
+    },
+    "snapshot_hashes": {
+      "app_health_alerts": "ccd4eca081afe971dadb68de61a9812ca60696f2b424d8c9c2ae0f332d23c98f",
+      "background_jobs": "c6143cc80a0c720507ce203e18f1b978361d28e1f0e64466d17887d33e932ac0"
+    }
+  },
+  "policy_summary": {
+    "blocked_unknown_count": 0,
+    "classification_counts": {
+      "cleanup_candidate": 11,
+      "rebuildable": 114,
+      "retention_only": 34
+    },
+    "domain_count": 2,
+    "mismatch_counts": {
+      "different": 3,
+      "missing_in_primary": 11,
+      "missing_in_shadow": 0
+    }
+  },
+  "primary_backend": "mongo_readonly",
+  "redacted": true,
+  "run_id": "stage20-mirror-execute-20260520225530",
+  "target_tables": [
+    "job.background_jobs",
+    "audit.app_health_alerts",
+    "app.app_settings[state:background_jobs,state:app_health_alerts]"
+  ],
+  "write_methods_called": [
+    "save_background_jobs",
+    "save_app_health_alerts"
+  ]
+}

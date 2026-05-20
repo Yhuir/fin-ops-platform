@@ -1,0 +1,22 @@
+{
+  "app_mongo_written": false,
+  "code_path": "/tmp/stage19A-production-retry-20260520202738/backend/src",
+  "dry_run_exit": 0,
+  "dry_run_gate": "DRY_RUN_PASS",
+  "executed": false,
+  "gate_recommendation": "DRY_RUN_PASS_REQUIRES_EXECUTE_AUTHORIZATION",
+  "oa_mongo_form_data_touched": false,
+  "plan_bound_status": "pass",
+  "policy_blocked_unknown_count": 0,
+  "production_postgresql_written": false,
+  "production_service_modified_or_restarted": false,
+  "run_id": "stage20-mirror-dryrun-deps-20260520213647",
+  "stage": "controlled-mirror-write-dry-run",
+  "target_tables": [
+    "job.background_jobs",
+    "audit.app_health_alerts",
+    "app.app_settings[state:background_jobs,state:app_health_alerts]"
+  ],
+  "temp_base": "/tmp/stage20-mirror-dryrun-deps-20260520213647",
+  "temp_venv": "/tmp/stage20-mirror-dryrun-deps-20260520213647/venv"
+}

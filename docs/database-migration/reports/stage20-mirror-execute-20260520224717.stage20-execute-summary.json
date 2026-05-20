@@ -1,0 +1,18 @@
+{
+  "app_mongo_written": false,
+  "backup_dir": "/data/backups/postgres/stage20-mirror-execute-20260520224717",
+  "code_path": "/tmp/stage19A-production-retry-20260520202738/backend/src",
+  "detail": "target table pg_dump failed",
+  "gate_recommendation": "BLOCKED_BACKUP_FAILED",
+  "oa_mongo_form_data_touched": false,
+  "production_postgresql_write_scope": [
+    "job.background_jobs",
+    "audit.app_health_alerts",
+    "app.app_settings[state:background_jobs,state:app_health_alerts]"
+  ],
+  "production_service_modified_or_restarted": false,
+  "run_id": "stage20-mirror-execute-20260520224717",
+  "stage": "backup",
+  "temp_base": "/tmp/stage20-mirror-execute-20260520224717",
+  "temp_venv": "/tmp/stage20-mirror-execute-20260520224717/venv"
+}

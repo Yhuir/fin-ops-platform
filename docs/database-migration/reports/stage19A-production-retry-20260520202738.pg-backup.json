@@ -1,0 +1,13 @@
+{
+  "run_id": "stage19A-production-retry-20260520202738",
+  "database": "fin_ops",
+  "backup_directory": "/data/backups/postgres/stage19A-production-retry-20260520202738",
+  "dump_file": "/data/backups/postgres/stage19A-production-retry-20260520202738/fin_ops_pre_19A.dump",
+  "dump_bytes": 13354787,
+  "dump_sha256": "8c6218facb42f9f8bfc2cc88d70a6f5995aefe10b83313a4817045322cbf49b5",
+  "created_before": "stage19A production PostgreSQL transform retry",
+  "notes": [
+    "The dump remains on the production server and was not copied into the repository.",
+    "This metadata records the pre-retry backup artifact used for rollback reference."
+  ]
+}

@@ -1,0 +1,104 @@
+{
+  "api_smoke": {
+    "checks": [
+      {
+        "method": "GET",
+        "path": "/health",
+        "status_code": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/session/me",
+        "status_code": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/workbench/settings",
+        "status_code": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/search?q=<redacted-query>&scope=all&month=all",
+        "status_code": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/etc/invoices",
+        "status_code": 200
+      }
+    ],
+    "status": "pass"
+  },
+  "empty_db_app_check": {
+    "postgres_schema_version": 7,
+    "status": "ready",
+    "storage_backend": "postgres"
+  },
+  "gate": "BLOCKED_PENDING_INVOICE_COVERAGE",
+  "gate_rationale": "Disposable PostgreSQL migrations, integration tests, production export import, reconciliation, real-data app check, and API smoke passed after fixing ETC submission batch transform. The remaining blocker for migration readiness is post-main pending invoice command formal PostgreSQL coverage and targeted settings tests.",
+  "integration_tests": {
+    "command": "python -m pytest tests/test_postgres_test_utils.py tests/test_postgres_state_store_integration.py tests/test_app_postgres_mode_integration.py -q",
+    "result": "15 passed, 5 warnings, 20 subtests passed"
+  },
+  "local_fix": {
+    "fixed": true,
+    "summary": "etc_state:etc_submission_batches now expands payload.batches instead of treating the whole state payload as one submission batch.",
+    "tests": "tests/test_postgres_transform.py::test_transform_expands_etc_submission_batches_from_batches_snapshot"
+  },
+  "pending_invoice_coverage": {
+    "bank_transaction_tags": "covered by app.app_settings JSONB but missing PostgreSQL-specific round-trip test",
+    "pending_invoice_manual_invoice_commands": "missing formal PostgreSQL schema/repository/export/transform/shadow-read coverage; current PostgreSQL fallback is state:full_state only",
+    "pending_invoice_tag_groups": "covered by app.app_settings JSONB but missing PostgreSQL-specific round-trip test"
+  },
+  "postgres_tools": {
+    "initdb": "/opt/homebrew/bin/initdb",
+    "pg_ctl": "/opt/homebrew/bin/pg_ctl",
+    "psql": "/opt/homebrew/bin/psql",
+    "version": "PostgreSQL 17.10"
+  },
+  "production_export_import": {
+    "export_id": "fin_ops_app_export_20260519235526_5a233544",
+    "manifest_sha256": "54d14c2ee2c2f09e7fb7c62bd5a6729fbb7dad075c76180f2be3cf2dbc414152",
+    "mismatches": [],
+    "reconciliation_status": "pass",
+    "source_database": "fin_ops_platform_app",
+    "staging_records": 15494,
+    "transform_status": "transformed"
+  },
+  "real_data_app_check": {
+    "postgres_schema_version": 7,
+    "status": "ready",
+    "storage_backend": "postgres"
+  },
+  "redacted": true,
+  "run_id": "stage16-worktree-postgres-test-20260520182420",
+  "schema_migrations": [
+    "0001",
+    "0002",
+    "0003",
+    "0004",
+    "0005",
+    "0006",
+    "0007"
+  ],
+  "scope": "local disposable PostgreSQL worktree test onboarding",
+  "target_counts": {
+    "app.bank_transactions": 431,
+    "app.file_objects": 445,
+    "app.import_batch_rows": 897,
+    "app.import_batches": 6,
+    "app.import_files": 31,
+    "app.invoices": 391,
+    "app.no_oa_bank_batches": 79,
+    "app.workbench_exception_cases": 2,
+    "app.workbench_pair_relations": 142,
+    "job.background_jobs": 114,
+    "read_model.search_index_rows": 822,
+    "read_model.workbench_candidate_matches": 5274
+  },
+  "test_database": {
+    "database": "fin_ops_worktree_test",
+    "host": "127.0.0.1",
+    "url_redacted": "<local-disposable-postgres-url>"
+  }
+}

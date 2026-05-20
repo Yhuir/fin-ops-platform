@@ -1,0 +1,710 @@
+{
+  "completed_at": "2026-05-20T15:58:04+00:00",
+  "domain_results": [
+    {
+      "domain": "app_settings",
+      "error": null,
+      "matched": true,
+      "method_name": "load_app_settings",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "app_settings",
+        "expected_shape": "settings payload",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_app_settings",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "pending_invoice_commands",
+      "error": null,
+      "matched": true,
+      "method_name": "load_pending_invoice_commands",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "pending_invoice_commands",
+        "expected_shape": "request id -> pending invoice command",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_pending_invoice_commands",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "background_jobs",
+      "error": null,
+      "matched": true,
+      "method_name": "load_background_jobs",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "background_jobs",
+        "expected_shape": "job id -> job snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_background_jobs",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P2",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "app_health_alerts",
+      "error": null,
+      "matched": true,
+      "method_name": "load_app_health_alerts",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "app_health_alerts",
+        "expected_shape": "alert id -> alert snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_app_health_alerts",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P2",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "workbench_pair_relations",
+      "error": null,
+      "matched": true,
+      "method_name": "load_workbench_pair_relations",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "workbench_pair_relations",
+        "expected_shape": "case id -> relation snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_workbench_pair_relations",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P0",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "no_oa_bank_batches",
+      "error": null,
+      "matched": true,
+      "method_name": "load_no_oa_bank_batches",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "no_oa_bank_batches",
+        "expected_shape": "batch id -> batch snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_no_oa_bank_batches",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P0",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "bank_transaction_categories",
+      "error": null,
+      "matched": true,
+      "method_name": "load_bank_transaction_categories",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "bank_transaction_categories",
+        "expected_shape": "category snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_bank_transaction_categories",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "turnover_relations",
+      "error": null,
+      "matched": true,
+      "method_name": "load_turnover_relations",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "turnover_relations",
+        "expected_shape": "relation id -> turnover relation",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_turnover_relations",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P0",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "matched"
+    },
+    {
+      "domain": "turnover_relation_audit_log",
+      "error": "AttributeError: 'PsqlShadowReadStore' object has no attribute 'load_turnover_relation_audit_log'",
+      "matched": false,
+      "method_name": "load_turnover_relation_audit_log",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "turnover_relation_audit_log",
+        "expected_shape": "audit event list",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_turnover_relation_audit_log",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P2",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "shadow_error"
+    },
+    {
+      "domain": "turnover_ledger_extras",
+      "error": "AttributeError: 'PsqlShadowReadStore' object has no attribute 'load_turnover_ledger_extras'",
+      "matched": false,
+      "method_name": "load_turnover_ledger_extras",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "turnover_ledger_extras",
+        "expected_shape": "ledger extras snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_turnover_ledger_extras",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "shadow_error"
+    },
+    {
+      "domain": "workbench_read_models",
+      "error": "AttributeError: 'PsqlShadowReadStore' object has no attribute 'load_workbench_read_models'",
+      "matched": false,
+      "method_name": "load_workbench_read_models",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "workbench_read_models",
+        "expected_shape": "scope key -> read model rows",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_workbench_read_models",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "shadow_error"
+    },
+    {
+      "domain": "workbench_candidate_matches",
+      "error": "AttributeError: 'PsqlShadowReadStore' object has no attribute 'load_workbench_candidate_matches'",
+      "matched": false,
+      "method_name": "load_workbench_candidate_matches",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "workbench_candidate_matches",
+        "expected_shape": "month/scope -> candidates",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_workbench_candidate_matches",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "shadow_error"
+    },
+    {
+      "domain": "cost_statistics_read_models",
+      "error": "AttributeError: 'PsqlShadowReadStore' object has no attribute 'load_cost_statistics_read_models'",
+      "matched": false,
+      "method_name": "load_cost_statistics_read_models",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "cost_statistics_read_models",
+        "expected_shape": "scope key -> cost read model",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_cost_statistics_read_models",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "shadow_error"
+    },
+    {
+      "domain": "tax_offset_read_models",
+      "error": "AttributeError: 'PsqlShadowReadStore' object has no attribute 'load_tax_offset_read_models'",
+      "matched": false,
+      "method_name": "load_tax_offset_read_models",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "tax_offset_read_models",
+        "expected_shape": "scope key -> tax offset read model",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_tax_offset_read_models",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "shadow_error"
+    },
+    {
+      "domain": "tax_certified_imports",
+      "error": "AttributeError: 'PsqlShadowReadStore' object has no attribute 'load_tax_certified_imports'",
+      "matched": false,
+      "method_name": "load_tax_certified_imports",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "tax_certified_imports",
+        "expected_shape": "tax certified import snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_tax_certified_imports",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "shadow_error"
+    },
+    {
+      "domain": "etc_state",
+      "error": "AttributeError: 'PsqlShadowReadStore' object has no attribute 'load_etc_state'",
+      "matched": false,
+      "method_name": "load_etc_state",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "etc_state",
+        "expected_shape": "ETC invoice/import snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_etc_state",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "shadow_error"
+    },
+    {
+      "domain": "etc_reconciliation_state",
+      "error": "AttributeError: 'PsqlShadowReadStore' object has no attribute 'load_etc_reconciliation_state'",
+      "matched": false,
+      "method_name": "load_etc_reconciliation_state",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "etc_reconciliation_state",
+        "expected_shape": "ETC reconciliation snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_etc_reconciliation_state",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "shadow_error"
+    },
+    {
+      "domain": "historical_etc_repair_bundle_metadata",
+      "error": "AttributeError: 'PsqlShadowReadStore' object has no attribute 'load_historical_etc_repair_bundle_metadata'",
+      "matched": false,
+      "method_name": "load_historical_etc_repair_bundle_metadata",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "historical_etc_repair_bundle_metadata",
+        "expected_shape": "bundle id -> metadata only",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_historical_etc_repair_bundle_metadata",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P2",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "shadow_error"
+    },
+    {
+      "domain": "historical_etc_repair_parsed_seeds",
+      "error": "AttributeError: 'PsqlShadowReadStore' object has no attribute 'load_historical_etc_repair_parsed_seeds'",
+      "matched": false,
+      "method_name": "load_historical_etc_repair_parsed_seeds",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "historical_etc_repair_parsed_seeds",
+        "expected_shape": "bundle id -> parsed seed metadata",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_historical_etc_repair_parsed_seeds",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P2",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "shadow_error"
+    },
+    {
+      "domain": "historical_etc_repair_states",
+      "error": "AttributeError: 'PsqlShadowReadStore' object has no attribute 'load_historical_etc_repair_states'",
+      "matched": false,
+      "method_name": "load_historical_etc_repair_states",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "historical_etc_repair_states",
+        "expected_shape": "repair state snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_historical_etc_repair_states",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres_psql_json"
+      },
+      "status": "shadow_error"
+    }
+  ],
+  "gate_recommendation": "BLOCKED",
+  "primary_backend": "mongo",
+  "redacted": true,
+  "run_id": "stage25-full-shadow-precheck-20260520235801",
+  "shadow_backend": "postgres_psql_json",
+  "started_at": "2026-05-20T15:58:03+00:00",
+  "summary": {
+    "blocked_domains": 0,
+    "compared_domains": 8,
+    "matched_domains": 8,
+    "mismatched_domains": 0,
+    "primary_errors": 0,
+    "severity_counts": {
+      "P0": 0,
+      "P1": 0,
+      "P2": 0,
+      "ignored": 0
+    },
+    "shadow_errors": 12,
+    "status_counts": {
+      "matched": 8,
+      "shadow_error": 12
+    },
+    "total_domains": 20
+  }
+}

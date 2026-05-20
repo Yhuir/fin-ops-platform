@@ -150,7 +150,7 @@ from fin_ops_platform.services.settings_data_reset_service import (
     RESET_OA_AND_REBUILD_ACTION,
     SettingsDataResetService,
 )
-from fin_ops_platform.services.state_store import ApplicationStateStore
+from fin_ops_platform.services.state_store_factory import build_state_store
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService, UploadedCertifiedImportFile
 from fin_ops_platform.services.tax_offset_read_model_service import TaxOffsetReadModelService
 from fin_ops_platform.services.tax_offset_service import TaxOffsetService
@@ -284,7 +284,7 @@ ROW_ID_MONTH_RE = re.compile(r"(20\d{2})(\d{2})")
 
 class Application:
     def __init__(self, *, data_dir: Path | None = None) -> None:
-        self._state_store = ApplicationStateStore(data_dir) if data_dir is not None else None
+        self._state_store = build_state_store(data_dir)
         self._data_reset_jobs: dict[str, DataResetJob] = {}
         self._data_reset_jobs_lock = Lock()
         persisted_oa_sync_state = self._state_store.load_oa_sync_state() if self._state_store is not None else {}
@@ -1164,6 +1164,17 @@ class Application:
         )
 
     def readiness_summary(self) -> dict[str, object]:
+        storage_summary = {
+            "mode": self._state_store.storage_mode if self._state_store is not None else "memory",
+            "backend": self._state_store.storage_backend if self._state_store is not None else "memory",
+            "database": self._state_store.mongo_database_name if self._state_store is not None else None,
+        }
+        if self._state_store is not None and hasattr(self._state_store, "health_summary"):
+            try:
+                storage_summary.update(getattr(self._state_store, "health_summary")())
+            except Exception as exc:  # pragma: no cover - readiness should report degraded dependency state.
+                storage_summary.update({"postgres_status": "error", "postgres_error": str(exc)})
+
         return {
             "service": "fin-ops-platform-api",
             "version": __version__,
@@ -1277,11 +1288,7 @@ class Application:
                 "no_oa_bank_batch_processing",
                 "background_job_foundation",
             ],
-            "storage": {
-                "mode": self._state_store.storage_mode if self._state_store is not None else "memory",
-                "backend": self._state_store.storage_backend if self._state_store is not None else "memory",
-                "database": self._state_store.mongo_database_name if self._state_store is not None else None,
-            },
+            "storage": storage_summary,
             "future_modules": [],
         }
 

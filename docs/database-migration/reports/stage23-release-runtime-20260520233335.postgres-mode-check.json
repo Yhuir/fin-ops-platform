@@ -1,0 +1,9 @@
+{
+  "exit_code": 0,
+  "postgres_status": "ready",
+  "redacted": true,
+  "run_id": "stage23-release-runtime-20260520233335",
+  "status": "ready",
+  "storage_backend": "postgres",
+  "storage_mode": "postgres"
+}

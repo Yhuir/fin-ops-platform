@@ -1,0 +1,32 @@
+{
+  "allowed_tables": [
+    "app.app_settings",
+    "app.workbench_pair_relations",
+    "app.workbench_pair_relation_history"
+  ],
+  "allowed_usernames_count": 6,
+  "app_settings_keys": [
+    "admin_usernames",
+    "allowed_usernames",
+    "bank_account_mappings",
+    "completed_project_ids",
+    "manual_projects",
+    "oa_import",
+    "oa_invoice_offset",
+    "oa_retention",
+    "readonly_export_usernames",
+    "synced_projects",
+    "workbench_column_layouts"
+  ],
+  "dry_run": true,
+  "pair_relation_history_count": 17,
+  "pair_relations_count": 142,
+  "row_count_bounds": {
+    "pair_relation_history_max": 20000,
+    "pair_relations_max": 5000
+  },
+  "run_id": "stage13",
+  "snapshot_sha256": "b15ca4dfd16f430428e760e2a212d518dca7a036f3b03e89864c24d5d6e18673",
+  "source": "app_mongo_readonly",
+  "target": "production_postgresql_app_owned_tables"
+}

@@ -1,0 +1,38 @@
+# /etc/systemd/system/fin-ops.service
+[Unit]
+Description=fin-ops platform backend
+After=network.target mongod.service
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/fin-ops/current
+EnvironmentFile=/opt/fin-ops/fin-ops.env
+ExecStart=/opt/fin-ops/venv/bin/python -m fin_ops_platform.app.main --host 127.0.0.1 --port 18001
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/fin-ops.service.d/10-fin-ops-env.conf
+[Service]
+Environment=FIN_OPS_DATA_DIR=/opt/fin-ops/data
+Environment=FIN_OPS_OA_BASE_URL=https://www.yn-sourcing.com/oa-api
+Environment=FIN_OPS_ETC_OA_BASE_URL=https://www.yn-sourcing.com/oa-api
+Environment=FIN_OPS_ETC_OA_FILE_UPLOAD_PATH=/file/upload
+Environment=FIN_OPS_ETC_OA_FORM_DRAFT_PATH=/forms/form/{form_id}/records/record
+Environment=FIN_OPS_ETC_OA_DRAFT_URL_TEMPLATE=https://www.yn-sourcing.com/oa/#/normal/forms/form/{form_id}?formId={form_id}&id={draft_id}
+
+# /etc/systemd/system/fin-ops.service.d/20-postgres-read-switch.conf
+[Service]
+EnvironmentFile=/root/fin_ops_stage23_postgres_runtime.env
+Environment=FIN_OPS_APP_STORAGE_BACKEND=postgres
+Environment=FIN_OPS_APP_READ_BACKEND=postgres
+Environment=FIN_OPS_POSTGRES_CUTOVER_PHASE=postgres_primary
+Environment=FIN_OPS_DATA_DIR=/opt/fin-ops/data
+Environment=PYTHONPATH=/opt/fin-ops/releases/stage25B-workbench-candidate-snapshot-repair-20260521004245/src/backend/src
+WorkingDirectory=/opt/fin-ops/releases/stage25B-workbench-candidate-snapshot-repair-20260521004245/src
+ExecStart=
+ExecStart=/opt/fin-ops/releases/stage23-release-runtime-20260520233335/venv/bin/python -m fin_ops_platform.app.main --host 127.0.0.1 --port 18001

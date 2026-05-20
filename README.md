@@ -6,7 +6,7 @@
 
 - 后端：Python，业务服务在 `backend/src/fin_ops_platform/`。
 - 前端：React + TypeScript + Vite，正式工程在 `web/`。
-- 持久化：生产模式使用 app MongoDB detailed collections 和 GridFS；OA MongoDB 只读接入。
+- 持久化：生产主读写使用 PostgreSQL；OA MongoDB 继续只读接入。app Mongo 旧路径保留为迁移观察期回滚、shadow-read 和审计工具使用。
 - 部署：支持 OA 同域 iframe 集成，前端 `/fin-ops/`，后端 `/fin-ops-api/`。
 
 ## 快速启动

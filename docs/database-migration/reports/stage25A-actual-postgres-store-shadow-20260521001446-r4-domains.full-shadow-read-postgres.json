@@ -1,0 +1,158 @@
+{
+  "completed_at": "2026-05-20T16:28:51+00:00",
+  "domain_results": [
+    {
+      "domain": "workbench_candidate_matches",
+      "error": null,
+      "matched": false,
+      "method_name": "load_workbench_candidate_matches",
+      "mismatch_count": 3,
+      "mismatches": [
+        {
+          "kind": "missing_in_shadow",
+          "path": "candidates",
+          "primary": {
+            "key_count": 1883,
+            "present": true,
+            "sample_keys": [
+              "candidate:000431cc9a711c0d0dbf09738d081839b710e56fc6eb8393843c207d17d90473",
+              "candidate:000636b342b69b4a7ab4c44f16110869b9460c32e61f7b9f21c52a92f0b5ef56",
+              "candidate:000847710a46c350338ab188450f4737e161bfb64a59e5722e04b64a612dc1c8",
+              "candidate:00122a8f60bf1b5b6a016bcf43d3e3dd0812757c6af1f73429a772e7083e474a",
+              "candidate:0015e0d1d7847c4354b71500897f310f7ac368b7183bc8c85cb11bd5c0dcdd0a"
+            ],
+            "sha256": "690747152039b8da6c8b09c8dc620f8d69dc571d2e4474bbc7336d72d8a20f6f",
+            "type": "dict"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": false,
+            "type": "null"
+          }
+        },
+        {
+          "kind": "missing_in_shadow",
+          "path": "schema_version",
+          "primary": {
+            "present": true,
+            "scalar": true,
+            "sha256": "38178919d73f3cd8027be0146a5deae5c31c9f85d675b7dbc6a863d36e2d616b",
+            "type": "str"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": false,
+            "type": "null"
+          }
+        },
+        {
+          "kind": "missing_in_shadow",
+          "path": "scope_runs",
+          "primary": {
+            "key_count": 26,
+            "present": true,
+            "sample_keys": [
+              "2023-07",
+              "2023-08",
+              "2023-09",
+              "2023-10",
+              "2023-11"
+            ],
+            "sha256": "acda70e631d7d3307e5aaa3d3535b6126189638c995318cc1d5888811a29d162",
+            "type": "dict"
+          },
+          "severity": "P1",
+          "shadow": {
+            "present": false,
+            "type": "null"
+          }
+        }
+      ],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 3,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "workbench_candidate_matches",
+        "expected_shape": "month/scope -> candidates",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_workbench_candidate_matches",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres"
+      },
+      "status": "mismatched"
+    },
+    {
+      "domain": "etc_reconciliation_state",
+      "error": null,
+      "matched": true,
+      "method_name": "load_etc_reconciliation_state",
+      "mismatch_count": 0,
+      "mismatches": [],
+      "severity_counts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "ignored": 0
+      },
+      "spec": {
+        "args": [],
+        "domain": "etc_reconciliation_state",
+        "expected_shape": "ETC reconciliation snapshot",
+        "ignored_paths": [
+          "created_at",
+          "generated_at",
+          "raw_payload.migration_metadata",
+          "updated_at"
+        ],
+        "kwargs": {},
+        "max_mismatches": 20,
+        "method_name": "load_etc_reconciliation_state",
+        "parameters_source": "parameterless",
+        "primary_source": "mongo_readonly",
+        "severity": "P1",
+        "severity_by_path": {},
+        "shadow_source": "postgres"
+      },
+      "status": "matched"
+    }
+  ],
+  "gate_recommendation": "BLOCKED",
+  "primary_backend": "mongo",
+  "redacted": true,
+  "run_id": "stage25A-actual-postgres-store-shadow-20260521001446-r4-domains",
+  "shadow_backend": "postgres",
+  "started_at": "2026-05-20T16:28:49+00:00",
+  "summary": {
+    "blocked_domains": 0,
+    "compared_domains": 2,
+    "matched_domains": 1,
+    "mismatched_domains": 1,
+    "primary_errors": 0,
+    "severity_counts": {
+      "P0": 0,
+      "P1": 3,
+      "P2": 0,
+      "ignored": 0
+    },
+    "shadow_errors": 0,
+    "status_counts": {
+      "matched": 1,
+      "mismatched": 1
+    },
+    "total_domains": 2
+  }
+}
