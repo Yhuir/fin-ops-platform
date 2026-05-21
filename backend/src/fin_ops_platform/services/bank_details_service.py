@@ -26,12 +26,14 @@ class BankDetailsService:
         auto_category_service: BankTransactionAutoCategoryService | None = None,
         relation_tag_provider: Callable[[str], dict[str, Any] | None] | None = None,
         relation_tag_batch_provider: Callable[[list[str]], dict[str, dict[str, Any]]] | None = None,
+        fact_repository: Any | None = None,
     ) -> None:
         self._import_service = import_service
         self._category_service = category_service
         self._auto_category_service = auto_category_service
         self._relation_tag_provider = relation_tag_provider
         self._relation_tag_batch_provider = relation_tag_batch_provider
+        self._fact_repository = fact_repository
 
     def list_accounts(self, *, date_from: str | None = None, date_to: str | None = None) -> dict[str, Any]:
         transactions = self._transactions()
@@ -86,6 +88,42 @@ class BankDetailsService:
         normalized_page = max(int(page or 1), 1)
         normalized_page_size = min(max(int(page_size or 100), 1), 500)
         normalized_keyword = self._normalize_keyword(keyword)
+        sql_page_loader = getattr(self._fact_repository, "list_bank_transactions_page", None)
+        if callable(sql_page_loader):
+            transactions, total = sql_page_loader(
+                account_key=account_key,
+                date_from=date_from,
+                date_to=date_to,
+                keyword=normalized_keyword,
+                page=normalized_page,
+                page_size=normalized_page_size,
+            )
+            display_payloads = [self._transaction_payload(transaction) for transaction in transactions]
+            auto_categories = self._auto_category_payloads(display_payloads)
+            relation_tags_by_id = self._relation_tag_relations(
+                [str(payload.get("id") or "") for payload in display_payloads]
+            )
+            rows = [
+                self._row_payload(
+                    payload,
+                    auto_category=auto_categories.get(str(payload.get("id") or "")),
+                    relation=relation_tags_by_id.get(str(payload.get("id") or "")),
+                )
+                for payload in display_payloads
+            ]
+            return {
+                "account_key": account_key,
+                "date_from": date_from,
+                "date_to": date_to,
+                "rows": rows,
+                "category_counts": self._category_counts(rows),
+                "bank_transaction_tags": self._bank_transaction_tags_payload(),
+                "pagination": {
+                    "page": normalized_page,
+                    "page_size": normalized_page_size,
+                    "total": total,
+                },
+            }
         context_payloads: list[dict[str, Any]] = []
         display_payloads: list[dict[str, Any]] = []
         for transaction in self._transactions():

@@ -17,6 +17,203 @@ class PostgresCoreRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
 
+    def list_invoices_page(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 100,
+        month: str | None = None,
+        invoice_type: str | None = None,
+        status: str | None = None,
+        keyword: str | None = None,
+    ) -> tuple[list[Invoice], int]:
+        limit, offset = self._page_bounds(page, page_size)
+        where_sql, params = self._invoice_filter_sql(
+            month=month,
+            invoice_type=invoice_type,
+            status=status,
+            keyword=keyword,
+        )
+        total_row = self._connection.fetch_one(
+            f"select count(*)::bigint as total from app.invoices {where_sql}",
+            params,
+        )
+        rows = self._connection.fetch_all(
+            f"""
+            select id::text as postgres_id, coalesce(legacy_mongo_id, id::text) as legacy_id,
+                   invoice_type, invoice_no, invoice_code, digital_invoice_no, source_unique_key,
+                   data_fingerprint, invoice_date, counterparty_id, counterparty_name, seller_name,
+                   seller_tax_no, buyer_name, buyer_tax_no, amount, signed_amount, written_off_amount,
+                   tax_rate, tax_amount, total_with_tax, currency, legacy_source_batch_id,
+                   oa_form_id, etc_invoice_id, workbench_visibility, status, tags, source_links, raw_payload
+            from app.invoices
+            {where_sql}
+            order by created_at desc, legacy_id desc
+            limit %s offset %s
+            """,
+            (*params, limit, offset),
+        )
+        return [self._invoice_from_row(row) for row in rows], self._int((total_row or {}).get("total"), 0)
+
+    def list_bank_transactions_page(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 100,
+        account_key: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        keyword: str | None = None,
+    ) -> tuple[list[BankTransaction], int]:
+        limit, offset = self._page_bounds(page, page_size)
+        where_sql, params = self._bank_transaction_filter_sql(
+            account_key=account_key,
+            date_from=date_from,
+            date_to=date_to,
+            keyword=keyword,
+        )
+        total_row = self._connection.fetch_one(
+            f"select count(*)::bigint as total from app.bank_transactions {where_sql}",
+            params,
+        )
+        rows = self._connection.fetch_all(
+            f"""
+            select id::text as postgres_id, coalesce(legacy_mongo_id, id::text) as legacy_id,
+                   account_no, account_name, txn_direction, counterparty_name_raw,
+                   normalized_counterparty_name, amount, signed_amount, written_off_amount,
+                   txn_date, trade_time, pay_receive_time, bank_serial_no, source_unique_key,
+                   data_fingerprint, legacy_source_batch_id, counterparty_id, project_id, balance,
+                   currency, summary, remark, bank_text_fields, status, raw_payload
+            from app.bank_transactions
+            {where_sql}
+            order by coalesce(trade_time, txn_date::timestamptz) desc, legacy_id desc
+            limit %s offset %s
+            """,
+            (*params, limit, offset),
+        )
+        return [self._transaction_from_row(row) for row in rows], self._int((total_row or {}).get("total"), 0)
+
+    def list_import_batches_page(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 100,
+        batch_type: str | None = None,
+        status: str | None = None,
+    ) -> tuple[list[ImportedBatch], int]:
+        limit, offset = self._page_bounds(page, page_size)
+        clauses: list[str] = []
+        params: list[Any] = []
+        if text := self._text(batch_type):
+            clauses.append("batch_type = %s")
+            params.append(text)
+        if text := self._text(status):
+            clauses.append("status = %s")
+            params.append(text)
+        where_sql = "where " + " and ".join(clauses) if clauses else ""
+        total_row = self._connection.fetch_one(
+            f"select count(*)::bigint as total from app.import_batches {where_sql}",
+            tuple(params),
+        )
+        rows = self._connection.fetch_all(
+            f"""
+            select id::text as postgres_id, coalesce(legacy_mongo_id, id::text) as legacy_id,
+                   batch_type, source_name, imported_by, row_count, success_count,
+                   error_count, duplicate_count, suspected_duplicate_count, updated_count,
+                   status, imported_at, raw_payload
+            from app.import_batches
+            {where_sql}
+            order by imported_at desc, legacy_id desc
+            limit %s offset %s
+            """,
+            (*params, limit, offset),
+        )
+        return [self._batch_from_row(row) for row in rows], self._int((total_row or {}).get("total"), 0)
+
+    def list_import_files_page(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 100,
+        session_id: str | None = None,
+        status: str | None = None,
+    ) -> tuple[list[FileImportPreviewItem], int]:
+        limit, offset = self._page_bounds(page, page_size)
+        clauses: list[str] = []
+        params: list[Any] = []
+        if text := self._text(session_id):
+            clauses.append("import_files.session_id = %s")
+            params.append(text)
+        if text := self._text(status):
+            clauses.append("import_files.status = %s")
+            params.append(text)
+        where_sql = "where " + " and ".join(clauses) if clauses else ""
+        total_row = self._connection.fetch_one(
+            f"select count(*)::bigint as total from app.import_files import_files {where_sql}",
+            tuple(params),
+        )
+        rows = self._connection.fetch_all(
+            f"""
+            select coalesce(import_files.legacy_mongo_id, import_files.id::text) as legacy_id,
+                   import_files.session_id, import_files.stored_file_path,
+                   import_files.original_filename, import_files.template_kind, import_files.status,
+                   import_files.uploaded_by, import_files.uploaded_at,
+                   coalesce(batches.legacy_mongo_id, batches.id::text) as joined_batch_id,
+                   import_files.raw_payload
+            from app.import_files import_files
+            left join app.import_batches batches on batches.id = import_files.import_batch_id
+            {where_sql}
+            order by import_files.uploaded_at desc, legacy_id desc
+            limit %s offset %s
+            """,
+            (*params, limit, offset),
+        )
+        files: list[FileImportPreviewItem] = []
+        for row in rows:
+            payload = self._row_payload(row)
+            files.append(self._file_item_from_row(row, payload if isinstance(payload, dict) else {}))
+        return files, self._int((total_row or {}).get("total"), 0)
+
+    def find_invoice_identity(
+        self,
+        *,
+        source_unique_key: str | None = None,
+        data_fingerprint: str | None = None,
+    ) -> Invoice | None:
+        if source_unique_key:
+            return self._fetch_invoice_by_clause("source_unique_key = %s", (source_unique_key,))
+        if data_fingerprint:
+            return self._fetch_invoice_by_clause("data_fingerprint = %s", (data_fingerprint,))
+        return None
+
+    def find_transaction_identity(self, *, source_unique_key: str) -> BankTransaction | None:
+        if not source_unique_key:
+            return None
+        row = self._connection.fetch_one(
+            f"""
+            select id::text as postgres_id, coalesce(legacy_mongo_id, id::text) as legacy_id,
+                   account_no, account_name, txn_direction, counterparty_name_raw,
+                   normalized_counterparty_name, amount, signed_amount, written_off_amount,
+                   txn_date, trade_time, pay_receive_time, bank_serial_no, source_unique_key,
+                   data_fingerprint, legacy_source_batch_id, counterparty_id, project_id, balance,
+                   currency, summary, remark, bank_text_fields, status, raw_payload
+            from app.bank_transactions
+            where source_unique_key = %s
+            limit 1
+            """,
+            (source_unique_key,),
+        )
+        return self._transaction_from_row(row) if row else None
+
+    def get_invoice(self, invoice_id: str) -> Invoice | None:
+        normalized_invoice_id = self._text(invoice_id)
+        if not normalized_invoice_id:
+            return None
+        return self._fetch_invoice_by_clause(
+            "legacy_mongo_id = %s or id::text = %s",
+            (normalized_invoice_id, normalized_invoice_id),
+        )
+
     def load_imports(self) -> dict[str, Any]:
         batches = self._connection.fetch_all(
             """
@@ -106,8 +303,10 @@ class PostgresCoreRepository:
         if callable(transaction_factory):
             with transaction_factory() as tx:
                 self._save_imports_with_connection(tx, snapshot)
+                self._mark_import_fact_read_models_dirty(tx, snapshot)
         else:
             self._save_imports_with_connection(connection, snapshot)
+            self._mark_import_fact_read_models_dirty(connection, snapshot)
 
     def load_file_imports(self) -> dict[str, Any]:
         rows = self._connection.fetch_all(
@@ -250,6 +449,69 @@ class PostgresCoreRepository:
             self._save_invoice(connection, invoice)
         for transaction in self._iter_items(snapshot.get("transactions")):
             self._save_transaction(connection, transaction)
+
+    def _mark_import_fact_read_models_dirty(self, connection: Any, snapshot: dict[str, Any]) -> None:
+        scope_keys = self._changed_import_scope_keys(snapshot)
+        if not scope_keys:
+            return
+        for scope_key in scope_keys:
+            for scope_type in ("workbench", "cost", "tax", "search"):
+                payload = {"source": "import_facts", "scope_type": scope_type, "scope_key": scope_key}
+                connection.execute(
+                    """
+                    insert into job.read_model_dirty_scopes(
+                        tenant_id, scope_type, scope_key, reason, payload, raw_payload, next_run_at
+                    )
+                    values ('default', %s, %s, 'import_facts_changed', %s, %s, now())
+                    on conflict (tenant_id, scope_type, scope_key)
+                    where status in ('pending', 'processing')
+                    do update set
+                        reason = excluded.reason,
+                        payload = job.read_model_dirty_scopes.payload || excluded.payload,
+                        raw_payload = excluded.raw_payload,
+                        status = 'pending',
+                        next_run_at = now(),
+                        updated_at = now()
+                    """,
+                    (scope_type, scope_key, _jsonb(payload), _jsonb(payload)),
+                )
+                connection.execute(
+                    """
+                    insert into job.outbox_events(
+                        tenant_id, event_type, aggregate_type, aggregate_id,
+                        scope_type, scope_key, dedupe_key, payload
+                    )
+                    values ('default', 'import.fact.changed', 'import_fact', %s, %s, %s, %s, %s)
+                    on conflict (tenant_id, dedupe_key)
+                    where dedupe_key is not null and status in ('pending', 'processing')
+                    do update set updated_at = job.outbox_events.updated_at
+                    """,
+                    (
+                        scope_key,
+                        scope_type,
+                        scope_key,
+                        f"import.fact.changed:{scope_type}:{scope_key}",
+                        _jsonb(payload),
+                    ),
+                )
+
+    def _changed_import_scope_keys(self, snapshot: dict[str, Any]) -> list[str]:
+        scope_keys: set[str] = set()
+        for invoice in self._iter_items(snapshot.get("invoices")):
+            month = self._month_key(invoice.get("invoice_date"))
+            if month:
+                scope_keys.add(month)
+        for transaction in self._iter_items(snapshot.get("transactions")):
+            month = self._month_key(transaction.get("txn_date") or transaction.get("trade_time"))
+            if month:
+                scope_keys.add(month)
+        if not scope_keys and (
+            self._iter_items(snapshot.get("invoices"))
+            or self._iter_items(snapshot.get("transactions"))
+            or self._iter_previews(snapshot.get("batches"))
+        ):
+            scope_keys.add("global")
+        return sorted(scope_keys)
 
     def _save_batch_rows(self, connection: Any, batch_id: str, row_results: Any, normalized_rows: Any) -> None:
         if not isinstance(row_results, list):
@@ -547,6 +809,9 @@ class PostgresCoreRepository:
             digital_invoice_no=self._text(payload.get("digital_invoice_no") or row.get("digital_invoice_no")),
             source_unique_key=self._text(payload.get("source_unique_key") or row.get("source_unique_key")),
             data_fingerprint=self._text(payload.get("data_fingerprint") or row.get("data_fingerprint")),
+            invoice_status_from_source=self._text(
+                payload.get("invoice_status_from_source") or row.get("invoice_status_from_source")
+            ),
             written_off_amount=Decimal(str(payload.get("written_off_amount") or row.get("written_off_amount") or "0")),
             currency=self._text(payload.get("currency") or row.get("currency")) or "CNY",
             invoice_date=self._date_text(payload.get("invoice_date") or row.get("invoice_date")),
@@ -614,6 +879,91 @@ class PostgresCoreRepository:
             batch_id=self._text(payload.get("batch_id") or row.get("joined_batch_id")),
             stored_file_path=self._text(payload.get("stored_file_path") or row.get("stored_file_path")),
         )
+
+    def _fetch_invoice_by_clause(self, where_clause: str, params: tuple[Any, ...]) -> Invoice | None:
+        row = self._connection.fetch_one(
+            f"""
+            select id::text as postgres_id, coalesce(legacy_mongo_id, id::text) as legacy_id,
+                   invoice_type, invoice_no, invoice_code, digital_invoice_no, source_unique_key,
+                   data_fingerprint, invoice_date, counterparty_id, counterparty_name, seller_name,
+                   seller_tax_no, buyer_name, buyer_tax_no, amount, signed_amount, written_off_amount,
+                   tax_rate, tax_amount, total_with_tax, currency, legacy_source_batch_id,
+                   oa_form_id, etc_invoice_id, workbench_visibility, status, tags, source_links, raw_payload
+            from app.invoices
+            where {where_clause}
+            limit 1
+            """,
+            params,
+        )
+        return self._invoice_from_row(row) if row else None
+
+    @staticmethod
+    def _page_bounds(page: int, page_size: int) -> tuple[int, int]:
+        normalized_page = max(int(page or 1), 1)
+        normalized_page_size = min(max(int(page_size or 100), 1), 500)
+        return normalized_page_size, (normalized_page - 1) * normalized_page_size
+
+    def _invoice_filter_sql(
+        self,
+        *,
+        month: str | None,
+        invoice_type: str | None,
+        status: str | None,
+        keyword: str | None,
+    ) -> tuple[str, tuple[Any, ...]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if text := self._text(month):
+            clauses.append("invoice_month = (%s || '-01')::date")
+            params.append(text[:7])
+        if text := self._text(invoice_type):
+            clauses.append("invoice_type = %s")
+            params.append(text)
+        if text := self._text(status):
+            clauses.append("status = %s")
+            params.append(text)
+        if text := self._text(keyword):
+            like = f"%{text}%"
+            clauses.append("(invoice_no ilike %s or counterparty_name ilike %s or seller_name ilike %s or buyer_name ilike %s)")
+            params.extend([like, like, like, like])
+        return ("where " + " and ".join(clauses) if clauses else ""), tuple(params)
+
+    def _bank_transaction_filter_sql(
+        self,
+        *,
+        account_key: str | None,
+        date_from: str | None,
+        date_to: str | None,
+        keyword: str | None,
+    ) -> tuple[str, tuple[Any, ...]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if text := self._text(account_key):
+            try:
+                bank_name, account_last4 = text.rsplit(":", 1)
+            except ValueError:
+                bank_name, account_last4 = "", text
+            bank_name = bank_name.replace("-", " ")
+            clauses.append(
+                "(lower(coalesce(raw_payload->'normalized_payload'->>'imported_bank_name', '')) = %s "
+                "or right(account_no, 4) = %s)"
+            )
+            params.extend([bank_name.lower(), account_last4])
+        if text := self._text(date_from):
+            clauses.append("txn_date >= %s::date")
+            params.append(text[:10])
+        if text := self._text(date_to):
+            clauses.append("txn_date <= %s::date")
+            params.append(text[:10])
+        if text := self._text(keyword):
+            like = f"%{text}%"
+            clauses.append("(counterparty_name_raw ilike %s or summary ilike %s or remark ilike %s or bank_serial_no ilike %s)")
+            params.extend([like, like, like, like])
+        return ("where " + " and ".join(clauses) if clauses else ""), tuple(params)
+
+    def _month_key(self, value: Any) -> str | None:
+        text = self._date_text(value)
+        return text[:7] if text and len(text) >= 7 else None
 
     @staticmethod
     def _row_payload(row: dict[str, Any] | None) -> Any:

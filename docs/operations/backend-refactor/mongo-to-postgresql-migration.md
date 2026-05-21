@@ -76,21 +76,25 @@ GridFS 文件迁移到 MinIO/S3：
 
 1. 从 app Mongo GridFS 读取文件。
 2. 计算 SHA-256。
-3. 上传到 MinIO/S3。
-4. 写入 `app.file_objects`。
-5. 写入旧 GridFS id 到新 file object 的映射。
-6. 抽样下载并验证 checksum。
+3. `app.file_objects` 写入 `pending_upload`，记录临时对象 key、sha256、size。
+4. 上传临时对象并下载校验 sha256/size。
+5. 上传最终对象并下载校验 sha256/size。
+6. 更新 `app.file_objects` 为 `verified`，保存旧 GridFS id、bucket、object key、etag。
+7. 抽样或全量运行独立校验脚本。
 
 对象 key 建议：
 
 ```text
 fin-ops/
-  imports/{yyyy}/{mm}/{file_object_id}/{original_filename}
-  attachments/{yyyy}/{mm}/{file_object_id}/{original_filename}
-  exports/{yyyy}/{mm}/{file_object_id}/{filename}
+  objects/imports/{file_id}/{sha256}/{original_filename}
+  objects/etc_invoice/{file_id}/{sha256}/{original_filename}
+  objects/gridfs/{legacy_gridfs_id}/{sha256}/{original_filename}
+  tmp/{namespace}/{file_id}/{sha256}/{original_filename}
 ```
 
 不要把原始文件名直接作为唯一 key，避免重名覆盖。
+
+生产工具入口见 `docs/operations/object-storage-minio.md`。迁移 worker 可重复运行，已 `verified` 的对象不会重复上传；生产请求路径只读取 `verified` 对象，不再 fallback 到 GridFS。
 
 ## 导入 PostgreSQL
 
@@ -239,4 +243,3 @@ MinIO/S3 迁移后发现文件异常：
 | read model 口径变化 | 事实表对账和页面样本对比同时做。 |
 | PostgreSQL 大表锁 | expand/contract migration，避免生产长事务 DDL。 |
 | OA Mongo 同步中断 | 保留水位、retry、人工指定范围重放。 |
-

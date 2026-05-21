@@ -22,6 +22,22 @@ class _ImportServiceStub:
         return list(self._transactions)
 
 
+class _ExplodingImportService:
+    def list_transactions(self) -> list[BankTransaction]:
+        raise AssertionError("SQL-paged bank details must not load all transactions from the import service")
+
+
+class _PagedBankTransactionRepository:
+    def __init__(self, rows: list[BankTransaction], total: int) -> None:
+        self.rows = rows
+        self.total = total
+        self.calls: list[dict[str, object]] = []
+
+    def list_bank_transactions_page(self, **kwargs: object) -> tuple[list[BankTransaction], int]:
+        self.calls.append(dict(kwargs))
+        return list(self.rows), self.total
+
+
 class BankDetailsServiceTests(unittest.TestCase):
     def _transaction(
         self,
@@ -160,6 +176,23 @@ class BankDetailsServiceTests(unittest.TestCase):
         self.assertEqual(payload["total_balance"], "950.00")
         self.assertEqual(payload["balance_account_count"], 1)
         self.assertEqual(payload["missing_balance_account_count"], 1)
+
+    def test_transactions_use_sql_paged_repository_when_available(self) -> None:
+        transaction = self._transaction(
+            transaction_id="txn-sql-1",
+            trade_time="2026-05-02 09:00:00",
+            counterparty_name="供应商SQL",
+        )
+        repository = _PagedBankTransactionRepository([transaction], total=10001)
+        service = BankDetailsService(_ExplodingImportService(), fact_repository=repository)
+
+        payload = service.list_transactions(keyword="供应商", page=4, page_size=25)
+
+        self.assertEqual(payload["pagination"]["total"], 10001)
+        self.assertEqual(payload["rows"][0]["id"], "txn-sql-1")
+        self.assertEqual(repository.calls[0]["page"], 4)
+        self.assertEqual(repository.calls[0]["page_size"], 25)
+        self.assertEqual(repository.calls[0]["keyword"], "供应商")
 
     def test_accounts_transaction_count_respects_date_range(self) -> None:
         service = BankDetailsService(

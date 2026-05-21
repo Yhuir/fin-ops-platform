@@ -764,7 +764,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            app = build_application(data_dir=data_dir)
+            app = build_application(data_dir=data_dir, bootstrap_mode="legacy")
             app._app_settings_service._oa_import_options_provider = None
             app._app_settings_service.update_settings(
                 completed_project_ids=[],
@@ -912,7 +912,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            app = build_application(data_dir=data_dir)
+            app = build_application(data_dir=data_dir, bootstrap_mode="legacy")
             app._app_settings_service._oa_import_options_provider = None
             app._app_settings_service.update_settings(
                 completed_project_ids=[],

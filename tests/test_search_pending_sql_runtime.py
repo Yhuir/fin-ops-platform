@@ -1,0 +1,348 @@
+from __future__ import annotations
+
+import json
+from http import HTTPStatus
+import unittest
+
+from fin_ops_platform.app.server import Application
+from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
+from fin_ops_platform.services.search_pending_read_model_refresh import SearchPendingReadModelRefreshService
+
+
+class QueueRecorder:
+    def __init__(self) -> None:
+        self.refreshes: list[tuple[str, str, str]] = []
+        self.completed: list[tuple[str, str, str]] = []
+
+    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+        self.refreshes.append((scope_type, scope_key, reason))
+
+    def complete_read_model_refresh(self, *, tenant_id: str, scope_type: str, scope_key: str) -> None:
+        self.completed.append((tenant_id, scope_type, scope_key))
+
+
+class SearchPendingConnection:
+    def __init__(self, *, search_rows: list[dict] | None = None, pending_rows: list[dict] | None = None, dirty: bool = False) -> None:
+        self.search_rows = list(search_rows or [])
+        self.pending_rows = list(pending_rows or [])
+        self.dirty = dirty
+        self.fetch_all_calls: list[tuple[str, tuple]] = []
+        self.fetch_one_calls: list[tuple[str, tuple]] = []
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        if "from read_model.search_index_rows" in normalized:
+            return self.search_rows
+        if "from read_model.pending_invoice_rows" in normalized:
+            return self.pending_rows
+        return []
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_one_calls.append((normalized, params))
+        if "from job.read_model_dirty_scopes" in normalized:
+            return {"status": "pending", "updated_at": "2026-05-21T09:00:00+00:00"} if self.dirty else None
+        if "count(*)" in normalized and "from read_model.pending_invoice_rows" in normalized:
+            return {"count": len(self.pending_rows)}
+        return None
+
+
+class SearchPendingSqlRuntimeTests(unittest.TestCase):
+    def test_search_repository_reads_index_rows_without_state_fallback(self) -> None:
+        connection = SearchPendingConnection(
+            search_rows=[
+                {
+                    "source_kind": "bank",
+                    "payload": {
+                        "row_id": "txn-1",
+                        "record_type": "bank",
+                        "month": "2026-05",
+                        "zone_hint": "open",
+                        "matched_field": "对方户名",
+                        "title": "昆明供应商",
+                        "primary_meta": "2026-05-02 / 10.00 / 支出",
+                        "secondary_meta": "工行 / 项目A",
+                        "status_label": "未配对",
+                        "jump_target": {"month": "2026-05", "row_id": "txn-1", "record_type": "bank", "zone_hint": "open"},
+                    },
+                }
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.search_index(q="昆明", scope="all", month="2026-05", project_name=None, status=None, limit=20)
+
+        self.assertEqual(payload["summary"], {"total": 1, "oa": 0, "bank": 1, "invoice": 0})
+        self.assertEqual(payload["bank_results"][0]["row_id"], "txn-1")
+        self.assertTrue(all("app_settings" not in sql for sql, _params in connection.fetch_all_calls))
+
+    def test_search_api_miss_enqueues_refresh_without_sync_scan(self) -> None:
+        queue = QueueRecorder()
+        app = object.__new__(Application)
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._search_sql_read_repository = type("SearchRepo", (), {"search_index": lambda *_args, **_kwargs: None})()
+        app._search_service = type(
+            "SearchService",
+            (),
+            {"search": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("search API miss must not scan in-memory state"))},
+        )()
+
+        response = app._handle_api_search(q="昆明", scope="all", month="2026-05", project_name=None, status=None, limit="20")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(queue.refreshes, [("search", "2026-05", "api_miss")])
+
+    def test_search_api_reads_sql_index(self) -> None:
+        app = object.__new__(Application)
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder()})()
+        app._search_sql_read_repository = type(
+            "SearchRepo",
+            (),
+            {
+                "search_index": lambda *_args, **_kwargs: {
+                    "query": "昆明",
+                    "filters": {"scope": "all", "month": "2026-05", "project_name": None, "status": None, "limit": 20},
+                    "summary": {"total": 1, "oa": 0, "bank": 1, "invoice": 0},
+                    "oa_results": [],
+                    "bank_results": [{"row_id": "txn-1"}],
+                    "invoice_results": [],
+                    "refresh_status": "fresh",
+                }
+            },
+        )()
+        app._search_service = type(
+            "SearchService",
+            (),
+            {"search": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("search SQL hit must not scan in-memory state"))},
+        )()
+
+        response = app._handle_api_search(q="昆明", scope="all", month="2026-05", project_name=None, status=None, limit="20")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["bank_results"], [{"row_id": "txn-1"}])
+        self.assertEqual(payload["read_model_status"], "fresh")
+
+    def test_pending_invoice_repository_reads_rows_page_and_summary(self) -> None:
+        connection = SearchPendingConnection(
+            pending_rows=[
+                {
+                    "payload": {
+                        "id": "txn-1",
+                        "bank_transaction": {"id": "txn-1", "counterparty_name": "昆明供应商"},
+                        "invoices": [],
+                        "can_create_invoice": True,
+                    },
+                    "missing_invoice": True,
+                    "can_create_invoice": True,
+                }
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_pending_invoice_rows(direction="expense", filter="all", date_from=None, date_to=None, keyword=None, page=1, page_size=50)
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        self.assertEqual(payload["summary"]["missing_invoice_rows"], 1)
+        self.assertEqual(payload["rows"][0]["id"], "txn-1")
+
+    def test_pending_invoice_api_miss_enqueues_refresh_without_sync_scan(self) -> None:
+        queue = QueueRecorder()
+        app = object.__new__(Application)
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._pending_invoice_sql_read_repository = type(
+            "PendingRepo",
+            (),
+            {"list_pending_invoice_rows": lambda *_args, **_kwargs: None},
+        )()
+        app._pending_invoice_query_service = type(
+            "PendingService",
+            (),
+            {"list_rows": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("pending invoice API miss must not scan in-memory state"))},
+        )()
+
+        response = app._handle_api_pending_invoice_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(queue.refreshes, [("pending_invoice", "expense:all", "api_miss")])
+
+    def test_pending_invoice_api_reads_sql_page(self) -> None:
+        app = object.__new__(Application)
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder()})()
+        app._pending_invoice_sql_read_repository = type(
+            "PendingRepo",
+            (),
+            {
+                "list_pending_invoice_rows": lambda *_args, **_kwargs: {
+                    "direction": "expense",
+                    "filter": "all",
+                    "rows": [{"id": "txn-1"}],
+                    "pagination": {"page": 1, "page_size": 50, "total": 1},
+                    "summary": {"total_rows": 1, "missing_invoice_rows": 1, "create_invoice_available_rows": 1},
+                    "bank_transaction_tags": {},
+                    "bank_transaction_tags_version": 1,
+                    "refresh_status": "fresh",
+                }
+            },
+        )()
+        app._pending_invoice_query_service = type(
+            "PendingService",
+            (),
+            {"list_rows": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("pending invoice SQL hit must not scan in-memory state"))},
+        )()
+
+        response = app._handle_api_pending_invoice_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["rows"], [{"id": "txn-1"}])
+        self.assertEqual(payload["read_model_status"], "fresh")
+
+    def test_pending_invoice_sql_page_preserves_bank_tag_settings(self) -> None:
+        app = object.__new__(Application)
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder()})()
+        app._app_settings_service = type(
+            "SettingsService",
+            (),
+            {"get_settings_payload": lambda *_args: {"bank_transaction_tags": {"version": 7, "items": [{"code": "A1"}]}}},
+        )()
+        app._pending_invoice_sql_read_repository = type(
+            "PendingRepo",
+            (),
+            {
+                "list_pending_invoice_rows": lambda *_args, **_kwargs: {
+                    "direction": "expense",
+                    "filter": "all",
+                    "rows": [{"id": "txn-1"}],
+                    "pagination": {"page": 1, "page_size": 50, "total": 1},
+                    "summary": {"total_rows": 1, "missing_invoice_rows": 1, "create_invoice_available_rows": 1},
+                    "bank_transaction_tags": {},
+                    "bank_transaction_tags_version": 1,
+                    "refresh_status": "fresh",
+                }
+            },
+        )()
+
+        response = app._handle_api_pending_invoice_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["bank_transaction_tags"], {"version": 7, "items": [{"code": "A1"}]})
+        self.assertEqual(payload["bank_transaction_tags_version"], 7)
+
+    def test_pending_invoice_worker_rebuild_paginates_all_rows(self) -> None:
+        saved: list[dict[str, object]] = []
+
+        class PendingService:
+            def list_rows(self, **kwargs: object) -> dict[str, object]:
+                page = int(kwargs["page"])
+                rows = [
+                    {
+                        "id": f"txn-{index}",
+                        "bank_transaction": {
+                            "id": f"txn-{index}",
+                            "trade_time": "2026-05-01",
+                            "amount": "1.00",
+                            "counterparty_name": f"供应商{index}",
+                        },
+                        "invoices": [],
+                        "can_create_invoice": True,
+                    }
+                    for index in range(1, 201)
+                ]
+                if page == 2:
+                    rows = [
+                        {
+                            "id": "txn-201",
+                            "bank_transaction": {
+                                "id": "txn-201",
+                                "trade_time": "2026-05-02",
+                                "amount": "2.00",
+                                "counterparty_name": "供应商201",
+                            },
+                            "invoices": [],
+                            "can_create_invoice": True,
+                        }
+                    ]
+                return {
+                    "rows": rows,
+                    "pagination": {"page": page, "page_size": 200, "total": 201},
+                }
+
+        app = object.__new__(Application)
+        app._pending_invoice_query_service = PendingService()
+        app._pending_invoice_sql_read_repository = type(
+            "PendingRepo",
+            (),
+            {"save_pending_invoice_rows": lambda *_args, **kwargs: saved.extend(kwargs["rows"])},
+        )()
+
+        result = app.rebuild_pending_invoice_read_model_scope("expense:all")
+
+        self.assertEqual(result["row_count"], 201)
+        self.assertEqual(len(saved), 201)
+        self.assertEqual(saved[-1]["payload"]["id"], "txn-201")
+
+    def test_refresh_handler_rebuilds_search_and_pending_scopes(self) -> None:
+        class FakeApplication:
+            def __init__(self) -> None:
+                self.search_rebuilt: list[str] = []
+                self.pending_rebuilt: list[str] = []
+
+            def rebuild_search_index_scope(self, scope_key: str) -> dict[str, object]:
+                self.search_rebuilt.append(scope_key)
+                return {"scope_key": scope_key, "row_count": 1}
+
+            def rebuild_pending_invoice_read_model_scope(self, scope_key: str) -> dict[str, object]:
+                self.pending_rebuilt.append(scope_key)
+                return {"scope_key": scope_key, "row_count": 2}
+
+        queue = QueueRecorder()
+        application = FakeApplication()
+        service = SearchPendingReadModelRefreshService(application=application, queue_repository=queue)
+        search_event = RuntimeQueueEvent(
+            event_id="event-1",
+            tenant_id="tenant-a",
+            event_type="search.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="2026-05",
+            scope_type="search",
+            scope_key="2026-05",
+            dedupe_key=None,
+            payload={"scope_key": "2026-05"},
+            attempts=1,
+            status="processing",
+        )
+        pending_event = RuntimeQueueEvent(
+            event_id="event-2",
+            tenant_id="tenant-a",
+            event_type="pending_invoice.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="expense:all",
+            scope_type="pending_invoice",
+            scope_key="expense:all",
+            dedupe_key=None,
+            payload={"scope_key": "expense:all"},
+            attempts=1,
+            status="processing",
+        )
+
+        self.assertEqual(service.handle_runtime_event(search_event)["row_count"], 1)
+        self.assertEqual(service.handle_runtime_event(pending_event)["row_count"], 2)
+
+        self.assertEqual(application.search_rebuilt, ["2026-05"])
+        self.assertEqual(application.pending_rebuilt, ["expense:all"])
+        self.assertEqual(
+            queue.completed,
+            [("tenant-a", "search", "2026-05"), ("tenant-a", "pending_invoice", "expense:all")],
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

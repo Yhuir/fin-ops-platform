@@ -15,9 +15,12 @@ https://oa.company.com/fin-ops-api/  -> Python 后端
 
 - Nginx：路径转发、静态资源、API 反代。
 - 后端进程：Python app server。
+- Worker 进程：PostgreSQL durable queue consumer，负责 OA sync、read model refresh 和迁移 backfill。
 - 前端构建产物：Vite build 输出。
-- App MongoDB：app 状态和 GridFS 文件。
-- OA MongoDB：只读源数据。
+- PostgreSQL：app 事实、设置、read model、队列、审计和健康状态。
+- MinIO/S3：文件对象。
+- Redis：短 TTL cache、wakeup 和辅助锁；不可用时 PostgreSQL polling 仍可运行。
+- OA MongoDB：worker 只读源数据，不在 API 请求路径访问。
 - OA 系统：登录、菜单、权限和 iframe 容器。
 
 ## 环境变量

@@ -137,10 +137,13 @@ from fin_ops_platform.services.oa_identity_service import (
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError, OARoleSyncService
 from fin_ops_platform.services.oa_sync_service import OASyncService
 from fin_ops_platform.services.pending_invoice_service import (
+    EXPENSE_FILTERS as PENDING_INVOICE_EXPENSE_FILTERS,
     PendingInvoiceApplicationService,
     PendingInvoiceError,
     PendingInvoiceQueryService,
+    VALID_FILTERS as PENDING_INVOICE_VALID_FILTERS,
 )
+from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionAdapter
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
 from fin_ops_platform.services.search_service import MONTH_RE as SEARCH_MONTH_RE, SUPPORTED_SCOPES as SEARCH_SUPPORTED_SCOPES, SUPPORTED_STATUSES as SEARCH_SUPPORTED_STATUSES, SearchService
@@ -150,6 +153,7 @@ from fin_ops_platform.services.settings_data_reset_service import (
     RESET_OA_AND_REBUILD_ACTION,
     SettingsDataResetService,
 )
+from fin_ops_platform.services.runtime_bootstrap import LegacySnapshotBootstrap, RuntimeRepositoryContext
 from fin_ops_platform.services.state_store_factory import build_state_store
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService, UploadedCertifiedImportFile
 from fin_ops_platform.services.tax_offset_read_model_service import TaxOffsetReadModelService
@@ -283,8 +287,11 @@ ROW_ID_MONTH_RE = re.compile(r"(20\d{2})(\d{2})")
 
 
 class Application:
-    def __init__(self, *, data_dir: Path | None = None) -> None:
+    def __init__(self, *, data_dir: Path | None = None, bootstrap_mode: str | None = None) -> None:
+        self._bootstrap_mode = self._normalize_bootstrap_mode(bootstrap_mode)
         self._state_store = build_state_store(data_dir)
+        self._legacy_bootstrap = LegacySnapshotBootstrap(self._state_store)
+        self._runtime_repositories = RuntimeRepositoryContext.from_state_store(self._state_store)
         self._data_reset_jobs: dict[str, DataResetJob] = {}
         self._data_reset_jobs_lock = Lock()
         persisted_oa_sync_state = self._state_store.load_oa_sync_state() if self._state_store is not None else {}
@@ -306,7 +313,9 @@ class Application:
         self._etc_business_oa_detection_loop_lock = Lock()
         self._etc_business_oa_detection_loop_batch_ids: set[str] = set()
         self._seed_payload = build_demo_seed()
-        self._initialize_runtime_services(self._load_persisted_state())
+        if self._bootstrap_mode == "lightweight":
+            return
+        self._initialize_runtime_services(self._runtime_bootstrap_state())
         self._recover_interrupted_cost_statistics_cache_warmup_jobs()
         self._recover_pending_etc_business_oa_detection_loops()
         if (
@@ -315,8 +324,37 @@ class Application:
         ):
             self._maybe_reconcile_historical_etc_repair(reason="application_startup")
 
-    def _load_persisted_state(self) -> dict[str, object]:
-        return self._state_store.load() if self._state_store is not None else {}
+    @property
+    def runtime_repositories(self) -> RuntimeRepositoryContext:
+        return self._runtime_repositories
+
+    @staticmethod
+    def _normalize_bootstrap_mode(value: str | None) -> str:
+        raw_value = (value or os.getenv("FIN_OPS_BOOTSTRAP_MODE") or "production").strip().lower()
+        if raw_value not in {"production", "legacy", "lightweight"}:
+            raise ValueError("bootstrap_mode must be production, legacy, or lightweight.")
+        return raw_value
+
+    def _runtime_bootstrap_state(self) -> dict[str, object]:
+        if self._bootstrap_mode == "legacy":
+            return self._load_persisted_state("legacy_application_startup")
+        return {}
+
+    def _load_persisted_state(self, reason: str) -> dict[str, object]:
+        return self._legacy_bootstrap.load_full_snapshot(reason=reason)
+
+    def _requires_sql_read_model_runtime(self) -> bool:
+        if self._bootstrap_mode not in {"production", "lightweight"}:
+            return False
+        return str(getattr(self._state_store, "storage_backend", "") or "").strip() == "postgres"
+
+    def _build_legacy_direct_oa_mongo_adapter(self) -> MongoOAAdapter | None:
+        if self._bootstrap_mode != "legacy":
+            return None
+        mongo_oa_settings = load_mongo_oa_settings(self._state_store.data_dir if self._state_store is not None else None)
+        if mongo_oa_settings is None:
+            return None
+        return MongoOAAdapter(settings=mongo_oa_settings, attachment_invoice_cache=self._state_store)
 
     @staticmethod
     def _build_turnover_ledger_extra_service(snapshot: object) -> object:
@@ -327,9 +365,16 @@ class Application:
         return TurnoverLedgerExtraService.from_snapshot(snapshot if isinstance(snapshot, dict) else None)
 
     def _initialize_runtime_services(self, persisted_state: dict[str, object]) -> None:
+        import_fact_repository = getattr(self._state_store, "import_fact_repository", None)
+        self._workbench_sql_read_repository = getattr(self._state_store, "workbench_sql_read_repository", None)
+        self._cost_statistics_sql_read_repository = getattr(self._state_store, "cost_statistics_sql_read_repository", None)
+        self._tax_offset_sql_read_repository = getattr(self._state_store, "tax_offset_sql_read_repository", None)
+        self._search_sql_read_repository = getattr(self._state_store, "search_sql_read_repository", None)
+        self._pending_invoice_sql_read_repository = getattr(self._state_store, "pending_invoice_sql_read_repository", None)
         self._import_service = ImportNormalizationService.from_snapshot(
             persisted_state.get("imports"),
             id_registry=self._state_store,
+            fact_repository=import_fact_repository,
         )
         self._bank_transaction_category_service = BankTransactionCategoryService.from_snapshot(
             persisted_state.get("bank_transaction_categories"),
@@ -386,11 +431,12 @@ class Application:
         self._tax_offset_read_model_service = TaxOffsetReadModelService.from_snapshot(
             persisted_state.get("tax_offset_read_models"),
         )
-        mongo_oa_settings = load_mongo_oa_settings(self._state_store.data_dir if self._state_store is not None else None)
+        source_oa_adapter = self._build_legacy_direct_oa_mongo_adapter()
+        oa_projection_repository = getattr(self._state_store, "oa_projection_repository", None)
         oa_adapter = (
-            MongoOAAdapter(settings=mongo_oa_settings, attachment_invoice_cache=self._state_store)
-            if mongo_oa_settings is not None
-            else None
+            PostgresOAProjectionAdapter(oa_projection_repository)
+            if oa_projection_repository is not None
+            else source_oa_adapter
         )
         self._audit_service = AuditTrailService()
         self._reconciliation_service = ManualReconciliationService(
@@ -405,7 +451,7 @@ class Application:
         self._integration_service = IntegrationHubService(
             self._import_service,
             self._audit_service,
-            adapter=oa_adapter,
+            adapter=source_oa_adapter,
         )
         self._project_costing_service = ProjectCostingService(
             self._import_service,
@@ -416,8 +462,8 @@ class Application:
         )
         self._oa_role_sync_service = OARoleSyncService.from_environment()
         oa_import_options_provider = (
-            oa_adapter.list_oa_import_filter_options
-            if isinstance(oa_adapter, MongoOAAdapter)
+            source_oa_adapter.list_oa_import_filter_options
+            if isinstance(source_oa_adapter, MongoOAAdapter)
             else None
         )
         self._app_settings_service = AppSettingsService(
@@ -428,8 +474,8 @@ class Application:
             bank_transaction_category_service=self._bank_transaction_category_service,
             audit_service=self._audit_service,
         )
-        if oa_adapter is not None:
-            oa_adapter.set_import_settings_provider(self._app_settings_service.get_oa_import_settings)
+        if source_oa_adapter is not None:
+            source_oa_adapter.set_import_settings_provider(self._app_settings_service.get_oa_import_settings)
         self._oa_identity_service = OAIdentityService()
         self._access_control_service = AccessControlService.from_environment(
             dynamic_allowed_usernames_provider=self._app_settings_service.get_allowed_usernames,
@@ -480,6 +526,7 @@ class Application:
             auto_category_service=self._bank_transaction_auto_category_service,
             relation_tag_provider=self._bank_details_relation_tag_projection_service.relation_tag_for_transaction,
             relation_tag_batch_provider=self._bank_details_relation_tag_projection_service.relation_tags_for_transactions,
+            fact_repository=import_fact_repository,
         )
         self._pending_invoice_commands = (
             dict(persisted_state.get("pending_invoice_commands") or {})
@@ -554,6 +601,7 @@ class Application:
                 workbench_override_service=self._workbench_override_service,
                 workbench_pair_relation_service=self._workbench_pair_relation_service,
                 workbench_read_model_service=self._workbench_read_model_service,
+                workbench_matching_dirty_scope_service=self._workbench_matching_dirty_scope_service,
                 tax_certified_import_service=self._tax_certified_import_service,
             )
             if self._state_store is not None
@@ -586,8 +634,8 @@ class Application:
             self._workbench_query_service,
             self._workbench_action_service,
         )
-        if isinstance(oa_adapter, MongoOAAdapter):
-            oa_adapter.set_attachment_invoice_cache_updated_callback(self._handle_oa_attachment_invoice_cache_updated)
+        if isinstance(source_oa_adapter, MongoOAAdapter):
+            source_oa_adapter.set_attachment_invoice_cache_updated_callback(self._handle_oa_attachment_invoice_cache_updated)
         self._tax_api_routes = TaxApiRoutes(self._tax_offset_service)
         self._turnover_ledger_api_routes = TurnoverLedgerApiRoutes(
             ledger_service=self._turnover_ledger_service,
@@ -605,7 +653,7 @@ class Application:
         )
 
     def _reload_runtime_services(self) -> None:
-        self._initialize_runtime_services(self._load_persisted_state())
+        self._initialize_runtime_services(self._runtime_bootstrap_state())
 
     def _bank_transaction_exists(self, transaction_id: str) -> bool:
         normalized_transaction_id = str(transaction_id or "").strip()
@@ -734,7 +782,14 @@ class Application:
             return auth_error
         if method == "GET" and route_path == "/api/workbench":
             month = query.get("month", [None])[0]
-            return self._handle_api_workbench(month)
+            return self._handle_api_workbench(
+                month,
+                page=query.get("page", [None])[0],
+                page_size=query.get("page_size", [None])[0],
+                status=query.get("status", [None])[0],
+                source_kind=query.get("source_kind", [None])[0],
+                search=query.get("search", [None])[0],
+            )
         if method == "GET" and route_path == "/api/bank-details/accounts":
             return self._handle_api_bank_details_accounts(
                 date_from=query.get("date_from", [None])[0],
@@ -749,6 +804,12 @@ class Application:
                 page=query.get("page", [None])[0],
                 page_size=query.get("page_size", [None])[0],
             )
+        if method == "GET" and route_path == "/api/import-facts/invoices":
+            return self._handle_api_import_fact_invoices(query)
+        if method == "GET" and route_path == "/api/import-facts/batches":
+            return self._handle_api_import_fact_batches(query)
+        if method == "GET" and route_path == "/api/import-facts/files":
+            return self._handle_api_import_fact_files(query)
         if method == "PATCH" and route_path == "/api/bank-details/transactions/categories":
             return self._handle_api_bank_transaction_categories(body, headers)
         if method == "GET" and route_path == "/api/pending-invoices/rows":
@@ -1179,6 +1240,12 @@ class Application:
             "service": "fin-ops-platform-api",
             "version": __version__,
             "status": "ready",
+            "bootstrap": {
+                "mode": self._bootstrap_mode,
+                "legacy_snapshot_disabled": self._bootstrap_mode != "legacy",
+                "legacy_snapshot": self._legacy_bootstrap.summary(),
+                "repositories": self._runtime_repositories.summary(),
+            },
             "entrypoints": [
                 "/health",
                 "/foundation/seed",
@@ -1323,9 +1390,92 @@ class Application:
             headers={"Content-Type": "text/html; charset=utf-8"},
         )
 
-    def _handle_api_workbench(self, month: str | None) -> Response:
+    def _handle_api_workbench(
+        self,
+        month: str | None,
+        *,
+        page: str | None = None,
+        page_size: str | None = None,
+        status: str | None = None,
+        source_kind: str | None = None,
+        search: str | None = None,
+    ) -> Response:
         current_month = month or "all"
+        sql_response = self._handle_api_workbench_from_sql_read_model(
+            current_month,
+            page=page,
+            page_size=page_size,
+            status=status,
+            source_kind=source_kind,
+            search=search,
+        )
+        if sql_response is not None:
+            return sql_response
+        if self._requires_sql_read_model_runtime():
+            scope_key = self._workbench_read_model_scope_key(current_month)
+            self._enqueue_workbench_read_model_refresh(scope_key, reason="api_sql_repository_unavailable")
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "read_model_unavailable",
+                    "read_model_status": "unavailable",
+                    "scope_key": scope_key,
+                    "message": "Workbench SQL read model repository is not configured for production runtime.",
+                },
+            )
         return self._json_response(HTTPStatus.OK, self._build_api_workbench_payload(current_month))
+
+    def _handle_api_workbench_from_sql_read_model(
+        self,
+        month: str,
+        *,
+        page: str | None = None,
+        page_size: str | None = None,
+        status: str | None = None,
+        source_kind: str | None = None,
+        search: str | None = None,
+    ) -> Response | None:
+        repository = getattr(self, "_workbench_sql_read_repository", None)
+        get_view = getattr(repository, "get_workbench_view", None)
+        if not callable(get_view):
+            return None
+        scope_key = self._workbench_read_model_scope_key(month)
+        view = get_view(
+            scope_key=scope_key,
+            page=page,
+            page_size=page_size,
+            status=status,
+            source_kind=source_kind,
+            search=search,
+        )
+        if not isinstance(view, dict):
+            self._enqueue_workbench_read_model_refresh(scope_key, reason="api_miss")
+            return self._json_response(
+                HTTPStatus.ACCEPTED,
+                {
+                    "read_model_status": "refreshing",
+                    "scope_key": scope_key,
+                    "message": "Workbench read model is missing; refresh has been enqueued.",
+                },
+            )
+        payload = dict(view.get("payload") if isinstance(view.get("payload"), dict) else {})
+        refresh_status = str(view.get("refresh_status") or view.get("cache_status") or "fresh")
+        if refresh_status != "fresh":
+            self._enqueue_workbench_read_model_refresh(scope_key, reason="api_stale")
+        payload["read_model_status"] = refresh_status
+        payload["read_model_scope_key"] = scope_key
+        if view.get("generated_at"):
+            payload["read_model_generated_at"] = view.get("generated_at")
+        if isinstance(view.get("rows_page"), dict):
+            payload["rows_page"] = view.get("rows_page")
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _enqueue_workbench_read_model_refresh(self, scope_key: str, *, reason: str) -> None:
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
+        if not callable(enqueue):
+            return
+        enqueue(scope_type="workbench", scope_key=scope_key, reason=reason)
 
     def _handle_api_oa_sync_status(self) -> Response:
         return self._json_response(HTTPStatus.OK, self._oa_sync_service.status_payload())
@@ -1571,6 +1721,17 @@ class Application:
                     "message": "status must be paired, open, ignored, or processed_exception.",
                 },
             )
+        sql_payload = self._get_search_payload_from_sql_read_model(
+            q=q,
+            scope=resolved_scope,
+            month=resolved_month,
+            project_name=project_name,
+            status=resolved_status,
+            limit=resolved_limit,
+        )
+        if sql_payload is not None:
+            status_code = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" and not sql_payload.get("summary", {}).get("total") else HTTPStatus.OK
+            return self._json_response(status_code, sql_payload)
         payload = self._search_service.search(
             q=q,
             scope=resolved_scope,
@@ -1580,6 +1741,51 @@ class Application:
             limit=resolved_limit,
         )
         return self._json_response(HTTPStatus.OK, payload)
+
+    def _get_search_payload_from_sql_read_model(
+        self,
+        *,
+        q: str,
+        scope: str,
+        month: str,
+        project_name: str | None,
+        status: str | None,
+        limit: int,
+    ) -> dict[str, object] | None:
+        repository = getattr(self, "_search_sql_read_repository", None)
+        search_index = getattr(repository, "search_index", None)
+        if not callable(search_index):
+            return None
+        payload = search_index(q=q, scope=scope, month=month, project_name=project_name, status=status, limit=limit)
+        scope_key = month if month != "all" else "all"
+        if not isinstance(payload, dict):
+            self._enqueue_search_read_model_refresh(scope_key, reason="api_miss")
+            return {
+                "query": q,
+                "filters": {"scope": scope, "month": month, "project_name": project_name or None, "status": status, "limit": limit},
+                "summary": {"total": 0, "oa": 0, "bank": 0, "invoice": 0},
+                "oa_results": [],
+                "bank_results": [],
+                "invoice_results": [],
+                "read_model_status": "refreshing",
+                "read_model_scope_key": scope_key,
+            }
+        refresh_status = str(payload.get("refresh_status") or "fresh")
+        if refresh_status != "fresh":
+            self._enqueue_search_read_model_refresh(scope_key, reason="api_stale")
+        result = dict(payload)
+        result["read_model_status"] = refresh_status
+        result["read_model_scope_key"] = scope_key
+        result.pop("refresh_status", None)
+        return result
+
+    def _enqueue_search_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
+        if not callable(enqueue):
+            return False
+        enqueue(scope_type="search", scope_key=scope_key, reason=reason)
+        return True
 
     def _handle_api_etc_import(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
         return self._json_response(
@@ -4679,8 +4885,11 @@ class Application:
     ) -> None:
         if self._state_store is None:
             return
+        save_read_models = getattr(self._state_store, "save_tax_offset_read_models", None)
+        if not callable(save_read_models):
+            return
         try:
-            self._state_store.save_tax_offset_read_models(
+            save_read_models(
                 snapshot,
                 changed_scope_keys=changed_scope_keys,
             )
@@ -5166,6 +5375,10 @@ class Application:
 
     def _handle_api_pending_invoice_rows(self, query: dict[str, list[str]]) -> Response:
         try:
+            sql_payload = self._get_pending_invoice_rows_from_sql_read_model(query)
+            if sql_payload is not None:
+                status_code = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" and not sql_payload.get("rows") else HTTPStatus.OK
+                return self._json_response(status_code, sql_payload)
             payload = self._pending_invoice_query_service.list_rows(
                 direction=query.get("direction", [""])[0],
                 filter=query.get("filter", ["all"])[0],
@@ -5178,6 +5391,85 @@ class Application:
         except PendingInvoiceError as exc:
             return self._pending_invoice_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
+
+    def _get_pending_invoice_rows_from_sql_read_model(self, query: dict[str, list[str]]) -> dict[str, object] | None:
+        repository = getattr(self, "_pending_invoice_sql_read_repository", None)
+        list_rows = getattr(repository, "list_pending_invoice_rows", None)
+        if not callable(list_rows):
+            return None
+        direction = query.get("direction", [""])[0]
+        filter_name = query.get("filter", ["all"])[0]
+        normalized_direction = str(direction or "").strip()
+        normalized_filter = str(filter_name or "all").strip() or "all"
+        if normalized_direction not in {"expense", "income"}:
+            raise PendingInvoiceError("invalid_direction", "direction must be expense or income.")
+        if normalized_filter not in PENDING_INVOICE_VALID_FILTERS:
+            raise PendingInvoiceError("invalid_filter", "filter must be all or a supported pending invoice group.")
+        if normalized_direction == "income" and normalized_filter in PENDING_INVOICE_EXPENSE_FILTERS:
+            raise PendingInvoiceError(
+                "invalid_filter_for_income",
+                "Income pending invoice rows do not support expense invoice tag filters.",
+                status_code=HTTPStatus.BAD_REQUEST,
+            )
+        payload = list_rows(
+            direction=normalized_direction,
+            filter=normalized_filter,
+            date_from=query.get("date_from", [None])[0],
+            date_to=query.get("date_to", [None])[0],
+            keyword=query.get("keyword", [None])[0],
+            page=query.get("page", [1])[0],
+            page_size=query.get("page_size", [50])[0],
+        )
+        scope_key = self._pending_invoice_scope_key(direction=normalized_direction, filter_name=normalized_filter)
+        if not isinstance(payload, dict):
+            self._enqueue_pending_invoice_read_model_refresh(scope_key, reason="api_miss")
+            return {
+                "direction": normalized_direction,
+                "filter": normalized_filter,
+                "rows": [],
+                "pagination": {"page": 1, "page_size": 50, "total": 0},
+                "summary": {"total_rows": 0, "missing_invoice_rows": 0, "create_invoice_available_rows": 0},
+                "bank_transaction_tags": {},
+                "bank_transaction_tags_version": 1,
+                "read_model_status": "refreshing",
+                "read_model_scope_key": scope_key,
+            }
+        refresh_status = str(payload.get("refresh_status") or "fresh")
+        if refresh_status != "fresh":
+            self._enqueue_pending_invoice_read_model_refresh(scope_key, reason="api_stale")
+        result = dict(payload)
+        settings_service = getattr(self, "_app_settings_service", None)
+        get_settings_payload = getattr(settings_service, "get_settings_payload", None)
+        if callable(get_settings_payload):
+            settings_payload = get_settings_payload()
+            bank_transaction_tags = (
+                settings_payload.get("bank_transaction_tags")
+                if isinstance(settings_payload, dict)
+                else None
+            )
+            if isinstance(bank_transaction_tags, dict):
+                result["bank_transaction_tags"] = bank_transaction_tags
+                result["bank_transaction_tags_version"] = int(
+                    bank_transaction_tags.get("version") or result.get("bank_transaction_tags_version") or 1
+                )
+        result["read_model_status"] = refresh_status
+        result["read_model_scope_key"] = scope_key
+        result.pop("refresh_status", None)
+        return result
+
+    @staticmethod
+    def _pending_invoice_scope_key(*, direction: str, filter_name: str | None = None) -> str:
+        normalized_direction = str(direction or "").strip()
+        normalized_filter = str(filter_name or "all").strip() or "all"
+        return f"{normalized_direction}:{normalized_filter}"
+
+    def _enqueue_pending_invoice_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
+        if not callable(enqueue):
+            return False
+        enqueue(scope_type="pending_invoice", scope_key=scope_key, reason=reason)
+        return True
 
     def _handle_api_pending_invoice_manual_preview(self, body: str | bytes | None) -> Response:
         payload, error = self._load_json_body(body)
@@ -5383,6 +5675,9 @@ class Application:
                 operation="invalidate_read_models_after_settings_update",
             )
         self._search_service.clear_cache()
+        self._invalidate_search_read_model_scopes(["all"], reason="settings_update")
+        if bank_transaction_tags is not None or pending_invoice_tag_groups is not None:
+            self._invalidate_pending_invoice_read_model_scopes(reason="settings_update")
         return self._json_response(HTTPStatus.OK, updated_payload)
 
     def _handle_api_workbench_settings_oa_manual_search(self, query: dict[str, list[str]]) -> Response:
@@ -6198,10 +6493,25 @@ class Application:
 
     def _handle_api_cost_statistics(self, month: str | None, project_scope: str | None) -> Response:
         current_month = month or datetime.now().strftime("%Y-%m")
+        normalized_project_scope = str(project_scope or "active").strip().lower()
         try:
+            if normalized_project_scope not in {"active", "all"}:
+                raise ValueError("project_scope must be active or all")
+            sql_result = self._get_cost_statistics_month_from_sql_read_model(
+                current_month,
+                normalized_project_scope,
+            )
+            if sql_result is not None:
+                payload, _cache_hit = sql_result
+                status = (
+                    HTTPStatus.ACCEPTED
+                    if payload.get("read_model_status") == "refreshing" and not payload.get("rows")
+                    else HTTPStatus.OK
+                )
+                return self._json_response(status, payload)
             payload = self._cost_statistics_service.get_month_statistics(
                 current_month,
-                project_scope=project_scope or "active",
+                project_scope=normalized_project_scope,
             )
         except ValueError as error:
             return self._cost_statistics_project_scope_error_response(error)
@@ -6228,13 +6538,26 @@ class Application:
             duration_ms=self._duration_ms(started_at),
             entry_count=self._cost_statistics_explorer_entry_count(payload),
         )
-        return self._json_response(HTTPStatus.OK, payload)
+        status = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" and not payload.get("time_rows") else HTTPStatus.OK
+        return self._json_response(status, payload)
 
     def _get_or_build_cost_statistics_explorer(
         self,
         month: str,
         project_scope: str,
     ) -> tuple[dict[str, object], bool]:
+        sql_result = self._get_cost_statistics_explorer_from_sql_read_model(month, project_scope)
+        if sql_result is not None:
+            return sql_result
+        if self._requires_sql_read_model_runtime():
+            scope_key = self._cost_statistics_request_scope_key(month, project_scope)
+            self._enqueue_cost_statistics_read_model_refresh(scope_key, reason="api_sql_repository_unavailable")
+            payload = self._empty_cost_statistics_explorer_payload(month)
+            payload["error"] = "read_model_unavailable"
+            payload["read_model_status"] = "refreshing"
+            payload["read_model_scope_key"] = scope_key
+            return payload, False
+
         read_model_service = self._cost_statistics_read_model_service
         if read_model_service is not None:
             cached_read_model = read_model_service.get_read_model(month, project_scope)
@@ -6268,6 +6591,184 @@ class Application:
             )
         return payload, False
 
+    def _get_cost_statistics_explorer_from_sql_read_model(
+        self,
+        month: str,
+        project_scope: str,
+    ) -> tuple[dict[str, object], bool] | None:
+        repository = getattr(self, "_cost_statistics_sql_read_repository", None)
+        get_view = getattr(repository, "get_cost_statistics_view", None)
+        if not callable(get_view):
+            return None
+        scope_key = self._cost_statistics_request_scope_key(month, project_scope)
+        cache_key = self._cost_statistics_redis_cache_key(scope_key)
+        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
+        get_cached = getattr(redis_helper, "get_json", None)
+        if callable(get_cached):
+            cached = get_cached(cache_key)
+            if isinstance(cached, dict):
+                cached_payload = cached.get("payload") if isinstance(cached.get("payload"), dict) else cached
+                payload = dict(cached_payload)
+                payload["read_model_status"] = "fresh"
+                payload["read_model_scope_key"] = scope_key
+                return payload, True
+
+        view = get_view(scope_key=scope_key)
+        if not isinstance(view, dict):
+            self._enqueue_cost_statistics_read_model_refresh(scope_key, reason="api_miss")
+            payload = self._empty_cost_statistics_explorer_payload(month)
+            payload["read_model_status"] = "refreshing"
+            payload["read_model_scope_key"] = scope_key
+            return payload, False
+
+        payload = dict(view.get("payload") if isinstance(view.get("payload"), dict) else {})
+        refresh_status = str(view.get("refresh_status") or "fresh")
+        if refresh_status != "fresh":
+            self._enqueue_cost_statistics_read_model_refresh(scope_key, reason="api_stale")
+        payload["read_model_status"] = refresh_status
+        payload["read_model_scope_key"] = scope_key
+        if view.get("generated_at"):
+            payload["read_model_generated_at"] = view.get("generated_at")
+        set_cached = getattr(redis_helper, "set_json", None)
+        if callable(set_cached) and refresh_status == "fresh":
+            set_cached(cache_key, {"payload": payload}, ttl_seconds=self._cost_statistics_redis_ttl_seconds())
+        return payload, False
+
+    def _get_cost_statistics_month_from_sql_read_model(
+        self,
+        month: str,
+        project_scope: str,
+    ) -> tuple[dict[str, object], bool] | None:
+        repository = getattr(self, "_cost_statistics_sql_read_repository", None)
+        get_view = getattr(repository, "get_cost_statistics_view", None)
+        if not callable(get_view):
+            return None
+        scope_key = self._cost_statistics_request_scope_key(month, project_scope)
+        cache_key = self._cost_statistics_month_redis_cache_key(scope_key)
+        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
+        get_cached = getattr(redis_helper, "get_json", None)
+        if callable(get_cached):
+            cached = get_cached(cache_key)
+            if isinstance(cached, dict):
+                cached_payload = cached.get("payload") if isinstance(cached.get("payload"), dict) else cached
+                payload = dict(cached_payload)
+                payload["read_model_status"] = "fresh"
+                payload["read_model_scope_key"] = scope_key
+                return payload, True
+
+        view = get_view(scope_key=scope_key)
+        if not isinstance(view, dict):
+            self._enqueue_cost_statistics_read_model_refresh(scope_key, reason="api_month_miss")
+            payload = self._empty_cost_statistics_month_payload(month)
+            payload["read_model_status"] = "refreshing"
+            payload["read_model_scope_key"] = scope_key
+            return payload, False
+
+        explorer_payload = view.get("payload") if isinstance(view.get("payload"), dict) else {}
+        payload = self._cost_statistics_month_payload_from_explorer_payload(month, explorer_payload)
+        refresh_status = str(view.get("refresh_status") or "fresh")
+        if refresh_status != "fresh":
+            self._enqueue_cost_statistics_read_model_refresh(scope_key, reason="api_month_stale")
+        payload["read_model_status"] = refresh_status
+        payload["read_model_scope_key"] = scope_key
+        if view.get("generated_at"):
+            payload["read_model_generated_at"] = view.get("generated_at")
+        set_cached = getattr(redis_helper, "set_json", None)
+        if callable(set_cached) and refresh_status == "fresh":
+            set_cached(cache_key, {"payload": payload}, ttl_seconds=self._cost_statistics_redis_ttl_seconds())
+        return payload, False
+
+    def _cost_statistics_month_payload_from_explorer_payload(
+        self,
+        month: str,
+        explorer_payload: dict[str, object],
+    ) -> dict[str, object]:
+        time_rows = explorer_payload.get("time_rows")
+        if not isinstance(time_rows, list):
+            time_rows = []
+        grouped: dict[tuple[str, str, str], dict[str, object]] = {}
+        transaction_ids: set[str] = set()
+        total_amount = Decimal("0.00")
+        for raw_row in time_rows:
+            if not isinstance(raw_row, dict):
+                continue
+            amount = self._decimal_from_value(raw_row.get("amount")) or Decimal("0.00")
+            transaction_id = str(raw_row.get("transaction_id") or "").strip()
+            if transaction_id:
+                transaction_ids.add(transaction_id)
+            total_amount += amount
+            key = (
+                str(raw_row.get("project_name") or "").strip(),
+                str(raw_row.get("expense_type") or "").strip(),
+                str(raw_row.get("expense_content") or "").strip(),
+            )
+            bucket = grouped.setdefault(
+                key,
+                {
+                    "project_name": key[0],
+                    "expense_type": key[1],
+                    "expense_content": key[2],
+                    "amount_decimal": Decimal("0.00"),
+                    "transaction_count": 0,
+                    "sample_transaction_ids": [],
+                },
+            )
+            bucket["amount_decimal"] = bucket["amount_decimal"] + amount
+            bucket["transaction_count"] = int(bucket["transaction_count"]) + 1
+            samples = bucket["sample_transaction_ids"]
+            if transaction_id and isinstance(samples, list) and transaction_id not in samples:
+                samples.append(transaction_id)
+
+        rows = []
+        for bucket in sorted(grouped.values(), key=lambda item: (item["project_name"], item["expense_type"], item["expense_content"])):
+            rows.append(
+                {
+                    "project_name": bucket["project_name"],
+                    "expense_type": bucket["expense_type"],
+                    "expense_content": bucket["expense_content"],
+                    "amount": self._plain_money(bucket["amount_decimal"]),
+                    "transaction_count": bucket["transaction_count"],
+                    "sample_transaction_ids": list(bucket["sample_transaction_ids"]),
+                }
+            )
+        return {
+            "month": month,
+            "summary": {
+                "row_count": len(rows),
+                "transaction_count": len(transaction_ids) if transaction_ids else len(time_rows),
+                "total_amount": self._plain_money(total_amount),
+            },
+            "rows": rows,
+        }
+
+    @staticmethod
+    def _cost_statistics_request_scope_key(month: str, project_scope: str) -> str:
+        return f"{str(project_scope or 'active').strip().lower()}:{str(month or 'all').strip() or 'all'}"
+
+    @staticmethod
+    def _cost_statistics_redis_cache_key(scope_key: str) -> str:
+        return f"cost_statistics:explorer:{scope_key}"
+
+    @staticmethod
+    def _cost_statistics_month_redis_cache_key(scope_key: str) -> str:
+        return f"cost_statistics:month:{scope_key}"
+
+    @staticmethod
+    def _cost_statistics_redis_ttl_seconds() -> int:
+        raw_value = os.getenv("FIN_OPS_COST_STATISTICS_REDIS_TTL_SECONDS", "60").strip()
+        try:
+            return min(120, max(1, int(raw_value)))
+        except ValueError:
+            return 60
+
+    def _enqueue_cost_statistics_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
+        if not callable(enqueue):
+            return False
+        enqueue(scope_type="cost_statistics", scope_key=scope_key, reason=reason)
+        return True
+
     @staticmethod
     def _empty_cost_statistics_explorer_payload(month: str) -> dict[str, object]:
         return {
@@ -6280,6 +6781,18 @@ class Application:
             "time_rows": [],
             "project_rows": [],
             "expense_type_rows": [],
+        }
+
+    @staticmethod
+    def _empty_cost_statistics_month_payload(month: str) -> dict[str, object]:
+        return {
+            "month": month,
+            "summary": {
+                "row_count": 0,
+                "transaction_count": 0,
+                "total_amount": "0.00",
+            },
+            "rows": [],
         }
 
     @staticmethod
@@ -6906,9 +7419,22 @@ class Application:
             duration_ms=self._duration_ms(started_at),
             payload=payload,
         )
-        return self._json_response(HTTPStatus.OK, payload)
+        status = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" and not payload.get("input_plan_items") and not payload.get("output_items") and not payload.get("certified_items") else HTTPStatus.OK
+        return self._json_response(status, payload)
 
     def _get_or_build_tax_offset_month_payload(self, month: str) -> tuple[dict[str, object], bool]:
+        sql_result = self._get_tax_offset_month_from_sql_read_model(month)
+        if sql_result is not None:
+            return sql_result
+        if self._requires_sql_read_model_runtime():
+            scope_key = self._tax_offset_request_scope_key(month)
+            self._enqueue_tax_offset_read_model_refresh(scope_key, reason="api_sql_repository_unavailable")
+            payload = self._empty_tax_offset_month_payload(month)
+            payload["error"] = "read_model_unavailable"
+            payload["read_model_status"] = "refreshing"
+            payload["read_model_scope_key"] = scope_key
+            return payload, False
+
         read_model_service = self._tax_offset_read_model_service
         if read_model_service is not None:
             cached_read_model = read_model_service.get_read_model(month)
@@ -6933,6 +7459,104 @@ class Application:
                 operation="upsert_tax_offset_read_model",
             )
         return payload, False
+
+    def _get_tax_offset_month_from_sql_read_model(self, month: str) -> tuple[dict[str, object], bool] | None:
+        repository = getattr(self, "_tax_offset_sql_read_repository", None)
+        get_view = getattr(repository, "get_tax_offset_view", None)
+        if not callable(get_view):
+            return None
+        scope_key = self._tax_offset_request_scope_key(month)
+        cache_key = self._tax_offset_redis_cache_key(scope_key)
+        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
+        get_cached = getattr(redis_helper, "get_json", None)
+        if callable(get_cached):
+            cached = get_cached(cache_key)
+            if isinstance(cached, dict):
+                cached_payload = cached.get("payload") if isinstance(cached.get("payload"), dict) else cached
+                payload = dict(cached_payload)
+                payload["read_model_status"] = "fresh"
+                payload["read_model_scope_key"] = scope_key
+                return payload, True
+
+        view = get_view(scope_key=scope_key)
+        if not isinstance(view, dict):
+            self._enqueue_tax_offset_read_model_refresh(scope_key, reason="api_miss")
+            payload = self._empty_tax_offset_month_payload(month)
+            payload["read_model_status"] = "refreshing"
+            payload["read_model_scope_key"] = scope_key
+            return payload, False
+
+        payload = dict(view.get("payload") if isinstance(view.get("payload"), dict) else {})
+        refresh_status = str(view.get("refresh_status") or "fresh")
+        if refresh_status != "fresh":
+            self._enqueue_tax_offset_read_model_refresh(scope_key, reason="api_stale")
+        payload["read_model_status"] = refresh_status
+        payload["read_model_scope_key"] = scope_key
+        if view.get("generated_at"):
+            payload["read_model_generated_at"] = view.get("generated_at")
+        if view.get("schema_version"):
+            payload["read_model_schema_version"] = view.get("schema_version")
+        set_cached = getattr(redis_helper, "set_json", None)
+        if callable(set_cached) and refresh_status == "fresh":
+            set_cached(cache_key, {"payload": payload}, ttl_seconds=self._tax_offset_redis_ttl_seconds())
+        return payload, False
+
+    @staticmethod
+    def _tax_offset_request_scope_key(month: str) -> str:
+        normalized_month = str(month or "").strip()
+        if not SEARCH_MONTH_RE.match(normalized_month):
+            raise ValueError("month must be YYYY-MM for tax offset read model.")
+        return normalized_month
+
+    @staticmethod
+    def _tax_offset_redis_cache_key(scope_key: str) -> str:
+        return f"tax_offset:month:{scope_key}"
+
+    @staticmethod
+    def _tax_offset_redis_ttl_seconds() -> int:
+        raw_value = os.getenv("FIN_OPS_TAX_OFFSET_REDIS_TTL_SECONDS", "60").strip()
+        try:
+            return min(120, max(1, int(raw_value)))
+        except ValueError:
+            return 60
+
+    def _enqueue_tax_offset_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
+        if not callable(enqueue):
+            return False
+        enqueue(scope_type="tax_offset", scope_key=scope_key, reason=reason)
+        return True
+
+    @staticmethod
+    def _empty_tax_offset_month_payload(month: str) -> dict[str, object]:
+        return {
+            "month": month,
+            "summary": {
+                "output_tax": "0.00",
+                "input_tax": "0.00",
+                "planned_input_tax": "0.00",
+                "certified_input_tax": "0.00",
+                "deductible_tax": "0.00",
+                "result_label": "本月留抵税额",
+                "result_amount": "0.00",
+            },
+            "output_items": [],
+            "input_plan_items": [],
+            "certified_items": [],
+            "certified_matched_rows": [],
+            "certified_outside_plan_rows": [],
+            "locked_certified_input_ids": [],
+            "default_selected_output_ids": [],
+            "default_selected_input_ids": [],
+        }
+
+    def _tax_offset_month_entry_count(self, payload: dict[str, object]) -> int:
+        return (
+            self._safe_list_count(payload.get("output_items"))
+            + self._safe_list_count(payload.get("input_plan_items"))
+            + self._safe_list_count(payload.get("certified_items"))
+        )
 
     def _handle_api_bank_details_accounts(self, *, date_from: str | None, date_to: str | None) -> Response:
         return self._json_response(
@@ -6965,6 +7589,92 @@ class Application:
                 {"error": "invalid_bank_details_request", "message": str(exc)},
             )
         return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_import_fact_invoices(self, query: dict[str, list[str]]) -> Response:
+        repository = getattr(self._state_store, "import_fact_repository", None)
+        page_loader = getattr(repository, "list_invoices_page", None)
+        if not callable(page_loader):
+            return self._json_response(
+                HTTPStatus.NOT_IMPLEMENTED,
+                {"error": "sql_import_facts_unavailable", "message": "SQL import fact repository is not configured."},
+            )
+        try:
+            page, page_size = self._pagination_from_query(query)
+            rows, total = page_loader(
+                page=page,
+                page_size=page_size,
+                month=query.get("month", [None])[0],
+                invoice_type=query.get("invoice_type", [None])[0],
+                status=query.get("status", [None])[0],
+                keyword=query.get("keyword", [None])[0],
+            )
+        except ValueError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_import_fact_query", "message": str(exc)},
+            )
+        return self._json_response(
+            HTTPStatus.OK,
+            {"items": self._serialize_value(rows), "pagination": {"page": page, "page_size": page_size, "total": total}},
+        )
+
+    def _handle_api_import_fact_batches(self, query: dict[str, list[str]]) -> Response:
+        repository = getattr(self._state_store, "import_fact_repository", None)
+        page_loader = getattr(repository, "list_import_batches_page", None)
+        if not callable(page_loader):
+            return self._json_response(
+                HTTPStatus.NOT_IMPLEMENTED,
+                {"error": "sql_import_facts_unavailable", "message": "SQL import fact repository is not configured."},
+            )
+        try:
+            page, page_size = self._pagination_from_query(query)
+            rows, total = page_loader(
+                page=page,
+                page_size=page_size,
+                batch_type=query.get("batch_type", [None])[0],
+                status=query.get("status", [None])[0],
+            )
+        except ValueError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_import_fact_query", "message": str(exc)},
+            )
+        return self._json_response(
+            HTTPStatus.OK,
+            {"items": self._serialize_value(rows), "pagination": {"page": page, "page_size": page_size, "total": total}},
+        )
+
+    def _handle_api_import_fact_files(self, query: dict[str, list[str]]) -> Response:
+        repository = getattr(self._state_store, "import_fact_repository", None)
+        page_loader = getattr(repository, "list_import_files_page", None)
+        if not callable(page_loader):
+            return self._json_response(
+                HTTPStatus.NOT_IMPLEMENTED,
+                {"error": "sql_import_facts_unavailable", "message": "SQL import fact repository is not configured."},
+            )
+        try:
+            page, page_size = self._pagination_from_query(query)
+            rows, total = page_loader(
+                page=page,
+                page_size=page_size,
+                session_id=query.get("session_id", [None])[0],
+                status=query.get("status", [None])[0],
+            )
+        except ValueError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_import_fact_query", "message": str(exc)},
+            )
+        return self._json_response(
+            HTTPStatus.OK,
+            {"items": self._serialize_value(rows), "pagination": {"page": page, "page_size": page_size, "total": total}},
+        )
+
+    @staticmethod
+    def _pagination_from_query(query: dict[str, list[str]]) -> tuple[int, int]:
+        page = max(int((query.get("page") or ["1"])[0] or 1), 1)
+        page_size = min(max(int((query.get("page_size") or ["100"])[0] or 100), 1), 500)
+        return page, page_size
 
     def _handle_api_bank_transaction_categories(
         self,
@@ -9304,6 +10014,31 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_oa_sync_request", "message": "actor_id is required."},
             )
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        enqueue = getattr(queue_repository, "enqueue", None)
+        if callable(enqueue):
+            scope_key = str(payload.get("scope", "all") or "all").strip() or "all"
+            event = enqueue(
+                event_type="oa.sync",
+                aggregate_type="oa",
+                aggregate_id=scope_key,
+                scope_type="oa",
+                scope_key=scope_key,
+                dedupe_key=f"oa.sync:{scope_key}",
+                payload={
+                    "scope_key": scope_key,
+                    "triggered_by": str(actor_id),
+                    "retry_run_id": payload.get("retry_run_id"),
+                },
+            )
+            return self._json_response(
+                HTTPStatus.ACCEPTED,
+                {
+                    "status": "queued",
+                    "event_id": getattr(event, "event_id", None),
+                    "scope_key": scope_key,
+                },
+            )
         try:
             run = self._integration_service.sync(
                 scope=str(payload.get("scope", "all")),
@@ -10500,7 +11235,7 @@ class Application:
             if callable(save_extras):
                 save_extras(snapshot)
                 return
-            current_payload = self._state_store.load()
+            current_payload = self._legacy_bootstrap.load_full_snapshot(reason="legacy_turnover_ledger_extras_fallback_persist")
             current_payload["turnover_ledger_extras"] = snapshot
             self._state_store.save(current_payload)
         except Exception as exc:
@@ -10549,6 +11284,8 @@ class Application:
     ) -> None:
         self._search_service.clear_cache()
         self._invalidate_workbench_read_models(invalidate_cost_statistics=False)
+        self._invalidate_search_read_model_scopes(cost_statistics_scope_keys or ["all"], reason="import_state_changed")
+        self._invalidate_pending_invoice_read_model_scopes(reason="import_state_changed")
         if invalidate_cost_statistics:
             if cost_statistics_scope_keys is None:
                 self._invalidate_cost_statistics_read_models()
@@ -10727,21 +11464,7 @@ class Application:
         rebuild_started_at = monotonic()
         for scope_key in scope_keys_to_rebuild:
             scope_started_at = monotonic()
-            base_scope_key = self._workbench_read_model_base_scope_key(scope_key)
-            raw_payload = self._build_raw_workbench_payload(base_scope_key)
-            candidate_payload = self._apply_candidate_matches_to_payload(raw_payload, base_scope_key)
-            grouped_payload = self._group_row_payload(
-                candidate_payload,
-                turnover_relations=self._active_turnover_relations_for_workbench(),
-            )
-            self._apply_workbench_runtime_metadata(grouped_payload, base_scope_key)
-            ignored_rows = self._extract_ignored_rows(candidate_payload)
-            self._workbench_read_model_service.upsert_read_model(
-                scope_key=scope_key,
-                payload=grouped_payload,
-                ignored_rows=ignored_rows,
-                source_versions=self._workbench_read_model_source_versions(),
-            )
+            self.rebuild_workbench_read_model_scope(scope_key, persist=False)
             if request_id is not None and action_name is not None:
                 self._emit_workbench_action_timing(
                     request_id=request_id,
@@ -10772,6 +11495,239 @@ class Application:
                 duration_ms=self._duration_ms(rebuild_started_at),
                 detail=",".join(scope_keys_to_rebuild),
             )
+
+    def rebuild_workbench_read_model_scope(self, scope_key: str, *, persist: bool = True) -> dict[str, object]:
+        normalized_scope_key = str(scope_key or "").strip() or "all"
+        base_scope_key = self._workbench_read_model_base_scope_key(normalized_scope_key)
+        raw_payload = self._build_raw_workbench_payload(base_scope_key)
+        candidate_payload = self._apply_candidate_matches_to_payload(raw_payload, base_scope_key)
+        grouped_payload = self._group_row_payload(
+            candidate_payload,
+            turnover_relations=self._active_turnover_relations_for_workbench(),
+        )
+        self._apply_workbench_runtime_metadata(grouped_payload, base_scope_key)
+        ignored_rows = self._extract_ignored_rows(candidate_payload)
+        read_model = self._workbench_read_model_service.upsert_read_model(
+            scope_key=normalized_scope_key,
+            payload=grouped_payload,
+            ignored_rows=ignored_rows,
+            source_versions=self._workbench_read_model_source_versions(),
+        )
+        if persist:
+            self._persist_workbench_read_models_best_effort(
+                snapshot=self._workbench_read_model_service.snapshot_scope_keys([normalized_scope_key]),
+                changed_scope_keys=[normalized_scope_key],
+                operation="worker_rebuild_read_model_scope",
+            )
+        payload = read_model.get("payload") if isinstance(read_model, dict) else grouped_payload
+        row_count = sum(self._workbench_grouped_summary(payload if isinstance(payload, dict) else {}).values())
+        return {
+            "scope_key": normalized_scope_key,
+            "base_scope_key": base_scope_key,
+            "row_count": row_count,
+            "ignored_row_count": len(ignored_rows),
+        }
+
+    def rebuild_cost_statistics_read_model_scope(self, scope_key: str) -> dict[str, object]:
+        parsed = self._parse_cost_statistics_scope_key(scope_key)
+        if parsed is None:
+            raise ValueError("cost statistics read model scope_key must be project_scope:month.")
+        project_scope, month = parsed
+        payload = self._cost_statistics_service.get_explorer(month, project_scope=project_scope)
+        read_model = self._cost_statistics_read_model_service.upsert_read_model(
+            month,
+            project_scope,
+            payload,
+            generated_at=datetime.now().isoformat(),
+            source_scope_keys=[month],
+            cache_status="ready",
+        )
+        warmed_scope_key = self._cost_statistics_read_model_scope_key(
+            month,
+            project_scope,
+            read_model=read_model,
+        )
+        self._persist_cost_statistics_read_models_best_effort(
+            snapshot=self._cost_statistics_read_model_service.snapshot_scope_keys([warmed_scope_key]),
+            changed_scope_keys=[warmed_scope_key],
+            operation="worker_cost_statistics_read_model_refresh",
+        )
+        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
+        set_cached = getattr(redis_helper, "set_json", None)
+        if callable(set_cached):
+            cached_payload = dict(payload)
+            cached_payload["read_model_status"] = "fresh"
+            cached_payload["read_model_scope_key"] = warmed_scope_key
+            set_cached(
+                self._cost_statistics_redis_cache_key(warmed_scope_key),
+                {"payload": cached_payload},
+                ttl_seconds=self._cost_statistics_redis_ttl_seconds(),
+            )
+        return {
+            "scope_key": warmed_scope_key,
+            "month": month,
+            "project_scope": project_scope,
+            "entry_count": self._cost_statistics_explorer_entry_count(payload),
+        }
+
+    def rebuild_tax_offset_read_model_scope(self, scope_key: str) -> dict[str, object]:
+        month = self._tax_offset_request_scope_key(scope_key)
+        payload = self._tax_api_routes.get_tax_offset(month)
+        read_model = self._tax_offset_read_model_service.upsert_read_model(
+            month,
+            payload,
+            generated_at=datetime.now().isoformat(),
+            source_scope_keys=[month],
+            cache_status="ready",
+        )
+        warmed_scope_key = self._tax_offset_read_model_scope_key(month, read_model=read_model)
+        self._persist_tax_offset_read_models_best_effort(
+            snapshot=self._tax_offset_read_model_service.snapshot_scope_keys([warmed_scope_key]),
+            changed_scope_keys=[warmed_scope_key],
+            operation="worker_tax_offset_read_model_refresh",
+        )
+        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
+        set_cached = getattr(redis_helper, "set_json", None)
+        if callable(set_cached):
+            cached_payload = dict(payload)
+            cached_payload["read_model_status"] = "fresh"
+            cached_payload["read_model_scope_key"] = warmed_scope_key
+            set_cached(
+                self._tax_offset_redis_cache_key(warmed_scope_key),
+                {"payload": cached_payload},
+                ttl_seconds=self._tax_offset_redis_ttl_seconds(),
+            )
+        return {
+            "scope_key": warmed_scope_key,
+            "month": month,
+            "entry_count": self._tax_offset_month_entry_count(payload),
+        }
+
+    def rebuild_search_index_scope(self, scope_key: str) -> dict[str, object]:
+        month = str(scope_key or "").strip()
+        if month != "all" and not SEARCH_MONTH_RE.match(month):
+            raise ValueError("search read model scope_key must be all or YYYY-MM.")
+        months = self._list_search_months() if month == "all" else [month]
+        repository = getattr(self, "_search_sql_read_repository", None)
+        save_rows = getattr(repository, "save_search_index_rows", None)
+        if not callable(save_rows):
+            raise RuntimeError("Search SQL read repository is not configured.")
+        total_rows = 0
+        for current_month in months:
+            rows = self._build_search_index_rows_for_month(current_month)
+            save_rows(scope_key=current_month, rows=rows)
+            total_rows += len(rows)
+        return {"scope_key": month, "row_count": total_rows}
+
+    def _build_search_index_rows_for_month(self, month: str) -> list[dict[str, object]]:
+        month_index = self._search_service._load_month_index(month)
+        rows: list[dict[str, object]] = []
+        for source_kind in ("oa", "bank", "invoice"):
+            for indexed_row in list(month_index.get(source_kind, []) or []):
+                if not isinstance(indexed_row, dict):
+                    continue
+                row_payload = indexed_row.get("row") if isinstance(indexed_row.get("row"), dict) else {}
+                fields = indexed_row.get("fields") if isinstance(indexed_row.get("fields"), list) else []
+                matched_field = str(fields[0][0]) if fields and isinstance(fields[0], tuple) else "全文"
+                result_payload = self._search_service._build_result(
+                    row=row_payload,
+                    month=str(indexed_row.get("month") or month),
+                    zone_hint=str(indexed_row.get("zone_hint") or "open"),
+                    matched_field=matched_field,
+                    project_names=list(indexed_row.get("project_names") or []),
+                    group_id=str(indexed_row.get("group_id") or ""),
+                )
+                searchable_parts = [str(value) for _name, value in fields if value]
+                searchable_parts.extend(
+                    [
+                        str(result_payload.get("title") or ""),
+                        str(result_payload.get("primary_meta") or ""),
+                        str(result_payload.get("secondary_meta") or ""),
+                    ]
+                )
+                rows.append(
+                    {
+                        "row_id": result_payload.get("row_id"),
+                        "source_kind": source_kind,
+                        "status": result_payload.get("zone_hint"),
+                        "title": result_payload.get("title"),
+                        "subtitle": result_payload.get("secondary_meta"),
+                        "searchable_text": " ".join(part for part in searchable_parts if part.strip()),
+                        "project_name": " / ".join(list(indexed_row.get("project_names") or [])),
+                        "counterparty_name": row_payload.get("counterparty_name") or row_payload.get("seller_name"),
+                        "amount": row_payload.get("amount") or row_payload.get("debit_amount") or row_payload.get("credit_amount"),
+                        "payload": result_payload,
+                    }
+                )
+        return rows
+
+    def rebuild_pending_invoice_read_model_scope(self, scope_key: str) -> dict[str, object]:
+        direction, _, filter_name = str(scope_key or "").partition(":")
+        normalized_direction = direction or "expense"
+        normalized_filter = filter_name or "all"
+        repository = getattr(self, "_pending_invoice_sql_read_repository", None)
+        save_rows = getattr(repository, "save_pending_invoice_rows", None)
+        if not callable(save_rows):
+            raise RuntimeError("Pending invoice SQL read repository is not configured.")
+        page_size = 200
+        page = 1
+        source_rows: list[object] = []
+        total_rows: int | None = None
+        while True:
+            payload = self._pending_invoice_query_service.list_rows(
+                direction=normalized_direction,
+                filter=normalized_filter,
+                page=page,
+                page_size=page_size,
+            )
+            page_rows = list(payload.get("rows") or []) if isinstance(payload, dict) else []
+            source_rows.extend(page_rows)
+            pagination = payload.get("pagination") if isinstance(payload, dict) else {}
+            if isinstance(pagination, dict):
+                total_rows = self._optional_int(pagination.get("total")) or len(source_rows)
+            if not page_rows or len(page_rows) < page_size or (total_rows is not None and len(source_rows) >= total_rows):
+                break
+            page += 1
+        rows = self._pending_invoice_rows_for_read_model(source_rows)
+        save_rows(scope_key=f"{normalized_direction}:{normalized_filter}", rows=rows)
+        return {"scope_key": f"{normalized_direction}:{normalized_filter}", "row_count": len(rows)}
+
+    def _pending_invoice_rows_for_read_model(self, rows: object) -> list[dict[str, object]]:
+        result: list[dict[str, object]] = []
+        for row in list(rows or []):
+            if not isinstance(row, dict):
+                continue
+            bank_transaction = row.get("bank_transaction") if isinstance(row.get("bank_transaction"), dict) else {}
+            tag_code = str(bank_transaction.get("effective_tag_code") or "").strip()
+            filter_group = self._pending_invoice_filter_group_for_tag(tag_code) or "all"
+            searchable_text = " ".join(
+                str(part)
+                for part in (
+                    row.get("id"),
+                    bank_transaction.get("counterparty_name"),
+                    bank_transaction.get("trade_time"),
+                    bank_transaction.get("amount"),
+                    bank_transaction.get("effective_tag_label"),
+                    row.get("oa_applicant"),
+                )
+                if str(part or "").strip()
+            )
+            payload = dict(row)
+            payload["filter_group"] = filter_group
+            result.append({"filter_group": filter_group, "searchable_text": searchable_text, "payload": payload})
+        return result
+
+    def _pending_invoice_filter_group_for_tag(self, tag_code: str) -> str | None:
+        if not tag_code:
+            return None
+        settings = self._app_settings_service.get_settings_payload()
+        groups = ((settings.get("pending_invoice_tag_groups") or {}).get("groups") or {})
+        for group_name in ("requires_invoice", "bank_statement_as_invoice", "no_invoice_required"):
+            group = groups.get(group_name) if isinstance(groups, dict) else None
+            tag_codes = list((group or {}).get("tag_codes") or []) if isinstance(group, dict) else []
+            if tag_code in {str(code).strip() for code in tag_codes}:
+                return group_name
+        return None
 
     def _save_workbench_overrides_snapshot(self, *, changed_row_ids: list[str] | None = None) -> None:
         self._search_service.clear_cache()
@@ -12738,13 +13694,44 @@ class Application:
         expanded_scope_keys = self._expand_workbench_read_model_scope_keys_for_base_scopes(list(normalized_scope_keys))
         for scope_key in expanded_scope_keys:
             self._workbench_read_model_service.delete_read_model(scope_key)
+            self._enqueue_workbench_read_model_refresh(scope_key, reason="workbench_scope_invalidated")
         if invalidate_cost_statistics:
             self._invalidate_cost_statistics_read_model_scopes(
                 list(normalized_scope_keys),
                 reason="workbench_scope_invalidated",
                 schedule_warmup=schedule_cost_statistics_warmup,
             )
+            self._invalidate_tax_offset_read_model_scopes(
+                list(normalized_scope_keys),
+                reason="workbench_scope_invalidated",
+            )
+            self._invalidate_search_read_model_scopes(
+                list(normalized_scope_keys),
+                reason="workbench_scope_invalidated",
+            )
+            self._invalidate_pending_invoice_read_model_scopes(reason="workbench_scope_invalidated")
         return expanded_scope_keys
+
+    def _invalidate_search_read_model_scopes(self, scope_keys: list[str], *, reason: str) -> None:
+        months = {
+            str(scope_key).strip()
+            for scope_key in list(scope_keys or [])
+            if SEARCH_MONTH_RE.match(str(scope_key).strip())
+        }
+        if not months and any(str(scope_key).strip() == "all" for scope_key in list(scope_keys or [])):
+            months.add("all")
+        for scope_key in sorted(months or {"all"}):
+            self._enqueue_search_read_model_refresh(scope_key, reason=reason)
+
+    def _invalidate_pending_invoice_read_model_scopes(self, *, reason: str) -> None:
+        for scope_key in (
+            "expense:all",
+            "expense:requires_invoice",
+            "expense:bank_statement_as_invoice",
+            "expense:no_invoice_required",
+            "income:all",
+        ):
+            self._enqueue_pending_invoice_read_model_refresh(scope_key, reason=reason)
 
     def _invalidate_cost_statistics_read_models(self, *, schedule_warmup: bool = True) -> list[str]:
         read_model_service = self._cost_statistics_read_model_service
@@ -12761,7 +13748,8 @@ class Application:
         warmup_months = self._cost_statistics_warmup_months_from_read_model_scope_keys(deleted_scope_keys)
         if not warmup_months:
             warmup_months = ["all"]
-        self._schedule_cost_statistics_cache_warmup(warmup_months, reason="cost_statistics_read_model_invalidated")
+        if not self._enqueue_cost_statistics_refresh_for_months(warmup_months, reason="cost_statistics_read_model_invalidated"):
+            self._schedule_cost_statistics_cache_warmup(warmup_months, reason="cost_statistics_read_model_invalidated")
         return deleted_scope_keys
 
     def _invalidate_cost_statistics_read_model_scopes(
@@ -12797,12 +13785,32 @@ class Application:
             changed_scope_keys=deleted_scope_keys,
             operation=reason or "invalidate_cost_statistics_read_model_scopes",
         )
-        if schedule_warmup and deleted_scope_keys:
-            self._schedule_cost_statistics_cache_warmup(
+        if schedule_warmup:
+            enqueued = self._enqueue_cost_statistics_refresh_for_months(
                 warmup_months,
                 reason=reason or "cost_statistics_scope_invalidated",
             )
+            if deleted_scope_keys and not enqueued:
+                self._schedule_cost_statistics_cache_warmup(
+                    warmup_months,
+                    reason=reason or "cost_statistics_scope_invalidated",
+                )
         return deleted_scope_keys
+
+    def _enqueue_cost_statistics_refresh_for_months(self, months: list[str], *, reason: str) -> bool:
+        enqueued = False
+        for target in self._cost_statistics_warmup_targets(months=months, project_scopes=["active", "all"]):
+            scope_key = target["scope_key"]
+            self._delete_cost_statistics_redis_cache(scope_key)
+            enqueued = self._enqueue_cost_statistics_read_model_refresh(scope_key, reason=reason) or enqueued
+        return enqueued
+
+    def _delete_cost_statistics_redis_cache(self, scope_key: str) -> None:
+        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
+        delete = getattr(redis_helper, "delete", None)
+        if callable(delete):
+            delete(self._cost_statistics_redis_cache_key(scope_key))
+            delete(self._cost_statistics_month_redis_cache_key(scope_key))
 
     @staticmethod
     def _cost_statistics_months_from_workbench_scope_keys(scope_keys: list[str]) -> set[str]:
@@ -13179,7 +14187,11 @@ class Application:
         warmup_months = self._tax_offset_warmup_months_from_scope_keys(deleted_scope_keys)
         if not warmup_months:
             warmup_months = self._default_tax_offset_warmup_months()
-        self._schedule_tax_offset_cache_warmup(warmup_months, reason="tax_offset_read_model_invalidated")
+        if not self._enqueue_tax_offset_refresh_for_months(
+            warmup_months,
+            reason="tax_offset_read_model_invalidated",
+        ):
+            self._schedule_tax_offset_cache_warmup(warmup_months, reason="tax_offset_read_model_invalidated")
         return deleted_scope_keys
 
     def _invalidate_tax_offset_read_model_scopes(
@@ -13202,11 +14214,29 @@ class Application:
                 changed_scope_keys=deleted_scope_keys,
                 operation=reason or "invalidate_tax_offset_read_model_scopes",
             )
-        self._schedule_tax_offset_cache_warmup(
+        refresh_enqueued = self._enqueue_tax_offset_refresh_for_months(
             ordered_months,
             reason=reason or "tax_offset_scope_invalidated",
         )
+        if not refresh_enqueued and deleted_scope_keys:
+            self._schedule_tax_offset_cache_warmup(
+                ordered_months,
+                reason=reason or "tax_offset_scope_invalidated",
+            )
         return deleted_scope_keys
+
+    def _enqueue_tax_offset_refresh_for_months(self, months: list[str], *, reason: str) -> bool:
+        enqueued = False
+        for month in sorted(self._tax_offset_months_from_scope_keys(months)):
+            self._delete_tax_offset_redis_cache(month)
+            enqueued = self._enqueue_tax_offset_read_model_refresh(month, reason=reason) or enqueued
+        return enqueued
+
+    def _delete_tax_offset_redis_cache(self, scope_key: str) -> None:
+        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
+        delete = getattr(redis_helper, "delete", None)
+        if callable(delete):
+            delete(self._tax_offset_redis_cache_key(scope_key))
 
     @staticmethod
     def _tax_offset_months_from_scope_keys(scope_keys: list[str]) -> set[str]:
@@ -15187,13 +16217,13 @@ def _etc_zip_filter_status_message(filter_status: str) -> str:
     return labels.get(filter_status, "")
 
 
-def build_application(*, data_dir: Path | None = None) -> Application:
-    return Application(data_dir=data_dir)
+def build_application(*, data_dir: Path | None = None, bootstrap_mode: str | None = None) -> Application:
+    return Application(data_dir=data_dir, bootstrap_mode=bootstrap_mode)
 
 
 def run_http_server(host: str, port: int, app: Application | None = None) -> None:
     application = app or build_application()
-    if os.getenv("FIN_OPS_OA_POLLING_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}:
+    if os.getenv("FIN_OPS_OA_POLLING_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}:
         application.start_oa_sync_polling_worker()
     if os.getenv("FIN_OPS_WORKBENCH_MATCHING_DIRTY_WORKER_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}:
         application.start_workbench_matching_dirty_scope_worker()

@@ -1,0 +1,122 @@
+{
+  "checks": [
+    {
+      "detail": "All remaining _load_snapshot reads are classified; migrated read model fallbacks are absent.",
+      "metadata": {
+        "classified": {
+          "app_health_alerts": "legacy-runtime-temporary: active health alert compatibility; exit after audit/app health table is sole source.",
+          "background_jobs": "legacy-runtime-temporary: background job mirror/read compatibility; exit after runtime queue fully replaces old jobs.",
+          "bank_transaction_categories": "legacy-runtime-temporary: category settings compatibility; exit after formal category rows/settings cover all data.",
+          "etc_reconciliation_state": "legacy-runtime-temporary: ETC reconciliation counters; exit after reconciliation counter tables are complete.",
+          "etc_state": "legacy-runtime-temporary: ETC counters and compatibility state; exit after ETC counter tables are complete.",
+          "file_imports": "migration-shadow-test-only: only used by explicit legacy full snapshot file imports path.",
+          "full_state": "migration-shadow-test-only: disabled by default; only read when FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT=1.",
+          "historical_etc_repair_bundles": "migration-shadow-test-only: historical repair metadata fallback.",
+          "historical_etc_repair_parsed_seeds": "migration-shadow-test-only: historical repair parsed seed fallback.",
+          "historical_etc_repair_states": "migration-shadow-test-only: historical repair state fallback.",
+          "imports": "migration-shadow-test-only: only used by explicit legacy full snapshot imports path.",
+          "manual_oa_imports": "legacy-runtime-temporary: manual OA import state; exit after app/manual OA repository coverage.",
+          "matching": "legacy-runtime-temporary: matching run compatibility; exit after formal matching tables are sole source.",
+          "no_oa_bank_batches": "legacy-runtime-temporary: no-OA batch relation compatibility; exit after formal rows cover all historical batches.",
+          "oa_sync_state": "worker-source-state: OA sync checkpoint; exit after OA sync state is formalized.",
+          "turnover_ledger_extras": "legacy-runtime-temporary: ledger extra compatibility; exit after formal rows cover all extras.",
+          "turnover_relations": "legacy-runtime-temporary: turnover relation compatibility; exit after formal rows cover all relations.",
+          "workbench_exception_cases": "legacy-runtime-temporary: exception case compatibility; exit after formal rows cover all cases.",
+          "workbench_pair_relations": "legacy-runtime-temporary: relation migration compatibility; exit after repository shadow mismatch is zero."
+        }
+      },
+      "name": "static.postgres_snapshot_fallbacks",
+      "status": "pass"
+    },
+    {
+      "detail": "Production PostgreSQL runtime has explicit read_model_unavailable boundaries before legacy builders.",
+      "name": "static.production_builder_boundaries",
+      "status": "pass"
+    },
+    {
+      "detail": "Docker daemon reachable: 28.5.1",
+      "name": "infra.docker",
+      "status": "pass"
+    },
+    {
+      "detail": "PostgreSQL reachable; migration status and runtime queue integration tests passed.",
+      "metadata": {
+        "database": "postgresql://finops:***@127.0.0.1:51868/fin_ops_test"
+      },
+      "name": "infra.postgres",
+      "status": "pass"
+    },
+    {
+      "detail": "Redis set/get/delete TTL smoke passed.",
+      "name": "infra.redis",
+      "status": "pass"
+    },
+    {
+      "detail": "MinIO/S3 put/get/delete checksum smoke passed.",
+      "name": "infra.object_storage",
+      "status": "pass"
+    },
+    {
+      "detail": "GridFS backfill, checksum verify, and orphan cleanup worker smoke passed.",
+      "metadata": {
+        "cleanup_worker_stdout": "{\"attempts\": 1, \"event\": \"runtime_worker.event_processed\", \"event_type\": \"file_object.gridfs_migration\", \"queue_event_id\": \"87866970-93b6-4856-bdc5-3c323738f630\", \"worker_id\": \"closure-file-worker-20ec6596\"}\n",
+        "legacy_gridfs_id": "closure-gridfs-ec38bf7e81bd4ea1b070633e8a92b1ab",
+        "migrate_worker_stdout": "{\"attempts\": 1, \"event\": \"runtime_worker.event_processed\", \"event_type\": \"file_object.gridfs_migration\", \"queue_event_id\": \"46163e51-230a-43e0-81ad-a32ec52e6dbe\", \"worker_id\": \"closure-file-worker-d9d160c6\"}\n",
+        "migrated_object_key": "objects/gridfs/closure-gridfs-ec38bf7e81bd4ea1b070633e8a92b1ab/c5d0cd3ae290490601b239758538e7000ae05452234e1d672436d3518c47917a/closure-gridfs.txt",
+        "verify_stdout": "{\"checked\": 1, \"failed\": 0}"
+      },
+      "name": "infra.file_object_migration",
+      "status": "pass"
+    },
+    {
+      "detail": "Real OA Mongo source read and oa.sync worker projection smoke passed.",
+      "metadata": {
+        "source": {
+          "month_count": 1,
+          "months": [
+            "2026-05"
+          ],
+          "sample_month": "2026-05",
+          "sample_record_count": 1,
+          "status": "ready"
+        },
+        "verification": {
+          "dirty_scope_count": 6,
+          "oa_projection_rows": 1,
+          "oa_sync_done_count": 1,
+          "oa_sync_runs": 1
+        },
+        "worker_stdout": "{\"attempts\": 1, \"event\": \"runtime_worker.event_processed\", \"event_type\": \"oa.sync\", \"queue_event_id\": \"e6cfe1fa-624b-4a9e-801a-74bb8db4f8b8\", \"worker_id\": \"closure-oa-worker-7cfa715d\"}\n"
+      },
+      "name": "infra.oa_source",
+      "status": "pass"
+    },
+    {
+      "detail": "Worker --check passed.",
+      "metadata": {
+        "stdout": "{\n  \"event_types\": [\n    \"workbench.read_model.refresh\",\n    \"cost_statistics.read_model.refresh\",\n    \"tax_offset.read_model.refresh\",\n    \"search.read_model.refresh\",\n    \"pending_invoice.read_model.refresh\"\n  ],\n  \"handlers\": [\n    \"cost_statistics.read_model.refresh\",\n    \"pending_invoice.read_model.refresh\",\n    \"search.read_model.refresh\",\n    \"tax_offset.read_model.refresh\",\n    \"workbench.read_model.refresh\"\n  ],\n  \"lock_timeout_seconds\": 300,\n  \"poll_interval_seconds\": 5.0,\n  \"postgres\": \"postgresql://finops:***@127.0.0.1:51868/fin_ops_test\",\n  \"redis_enabled\": true,\n  \"service\": \"fin-ops-platform-worker\"\n}\n"
+      },
+      "name": "worker.check",
+      "status": "pass"
+    },
+    {
+      "detail": "Read model EXPLAIN ANALYZE probes completed.",
+      "metadata": {
+        "output_sample": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Aggregate\",\n      \"Strategy\": \"Plain\",\n      \"Partial Mode\": \"Simple\",\n      \"Parallel Aware\": false,\n      \"Async Capable\": false,\n      \"Startup Cost\": 12.25,\n      \"Total Cost\": 12.26,\n      \"Plan Rows\": 1,\n      \"Plan Width\": 8,\n      \"Actual Startup Time\": 0.008,\n      \"Actual Total Time\": 0.008,\n      \"Actual Rows\": 1,\n      \"Actual Loops\": 1,\n      \"Shared Hit Blocks\": 0,\n      \"Shared Read Blocks\": 0,\n      \"Shared Dirtied Blocks\": 0,\n      \"Shared Written Blocks\": 0,\n      \"Local Hit Blocks\": 0,\n      \"Local Read Blocks\": 0,\n      \"Local Dirtied Blocks\": 0,\n      \"Local Written Blocks\": 0,\n      \"Temp Read Blocks\": 0,\n      \"Temp Written Blocks\": 0,\n      \"Plans\": [\n        {\n          \"Node Type\": \"Seq Scan\",\n          \"Parent Relationship\": \"Outer\",\n          \"Parallel Aware\": false,\n          \"Async Capable\": false,\n          \"Relation Name\": \"workbench_rows\",\n          \"Alias\": \"workbench_rows\",\n          \"Startup Cost\": 0.00,\n          \"Total Cost\": 11.80,\n          \"Plan Rows\": 180,\n          \"Plan Width\": 0,\n          \"Actual Startup Time\": 0.004,\n          \"Actual Total Time\": 0.004,\n          \"Actual Rows\": 0,\n          \"Actual Loops\": 1,\n          \"Shared Hit Blocks\": 0,\n          \"Shared Read Blocks\": 0,\n          \"Shared Dirtied Blocks\": 0,\n          \"Shared Written Blocks\": 0,\n          \"Local Hit Blocks\": 0,\n          \"Local Read Blocks\": 0,\n          \"Local Dirtied Blocks\": 0,\n          \"Local Written Blocks\": 0,\n          \"Temp Read Blocks\": 0,\n          \"Temp Written Blocks\": 0\n        }\n      ]\n    },\n    \"Planning\": {\n      \"Shared Hit Blocks\": 215,\n      \"Shared Read Blocks\": 4,\n      \"Shared Dirtied Blocks\": 0,\n      \"Shared Written Blocks\": 0,\n      \"Local Hit Blocks\": 0,\n      \"Local Read Blocks\": 0,\n      \"Local Dirtied Blocks\": 0,\n      \"Local Written Blocks\": 0,\n      \"Temp Read Blocks\": 0,\n      \"Temp Written Blocks\": 0\n    },\n    \"Planning Time\": 2.556,\n    \"Triggers\": [\n    ],\n    \"Executi"
+      },
+      "name": "performance.read_models",
+      "status": "pass"
+    },
+    {
+      "detail": "Targeted runtime convergence tests passed.",
+      "metadata": {
+        "stderr": "pe_without_sync_rebuild (tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_workbench_invalidation_marks_dirty_scope_without_sync_rebuild) ... ok\ntest_workbench_refresh_handler_rebuilds_scope_and_marks_dirty_scope_done (tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_workbench_refresh_handler_rebuilds_scope_and_marks_dirty_scope_done) ... ok\ntest_cost_statistics_api_miss_enqueues_refresh_and_returns_refreshing (tests.test_cost_statistics_sql_runtime.CostStatisticsSqlRuntimeTests.test_cost_statistics_api_miss_enqueues_refresh_and_returns_refreshing) ... ok\ntest_cost_statistics_api_reads_redis_hot_cache_without_sql_or_sync_build (tests.test_cost_statistics_sql_runtime.CostStatisticsSqlRuntimeTests.test_cost_statistics_api_reads_redis_hot_cache_without_sql_or_sync_build) ... ok\ntest_cost_statistics_api_reads_sql_and_populates_short_redis_cache (tests.test_cost_statistics_sql_runtime.CostStatisticsSqlRuntimeTests.test_cost_statistics_api_reads_sql_and_populates_short_redis_cache) ... ok\ntest_cost_statistics_invalidation_marks_dirty_even_when_no_cached_model_exists (tests.test_cost_statistics_sql_runtime.CostStatisticsSqlRuntimeTests.test_cost_statistics_invalidation_marks_dirty_even_when_no_cached_model_exists) ... ok\ntest_cost_statistics_month_summary_miss_enqueues_refresh_without_sync_build (tests.test_cost_statistics_sql_runtime.CostStatisticsSqlRuntimeTests.test_cost_statistics_month_summary_miss_enqueues_refresh_without_sync_build) ... ok\ntest_cost_statistics_month_summary_reads_sql_aggregate_and_populates_redis (tests.test_cost_statistics_sql_runtime.CostStatisticsSqlRuntimeTests.test_cost_statistics_month_summary_reads_sql_aggregate_and_populates_redis) ... ok\ntest_cost_statistics_refresh_handler_rebuilds_scope_and_marks_dirty_scope_done (tests.test_cost_statistics_sql_runtime.CostStatisticsSqlRuntimeTests.test_cost_statistics_refresh_handler_rebuilds_scope_and_marks_dirty_scope_done) ... ok\ntest_production_postgres_cost_statistics_requires_sql_read_model_without_sync_build (tests.test_cost_statistics_sql_runtime.CostStatisticsSqlRuntimeTests.test_production_postgres_cost_statistics_requires_sql_read_model_without_sync_build) ... ok\ntest_repository_reads_cost_statistics_view_and_dirty_status_from_sql (tests.test_cost_statistics_sql_runtime.CostStatisticsSqlRuntimeTests.test_repository_reads_cost_statistics_view_and_dirty_status_from_sql) ... ok\ntest_production_postgres_tax_offset_requires_sql_read_model_without_sync_build (tests.test_tax_offset_sql_runtime.TaxOffsetSqlRuntimeTests.test_production_postgres_tax_offset_requires_sql_read_model_without_sync_build) ... ok\ntest_repository_reads_tax_offset_view_and_dirty_status_from_sql (tests.test_tax_offset_sql_runtime.TaxOffsetSqlRuntimeTests.test_repository_reads_tax_offset_view_and_dirty_status_from_sql) ... ok\ntest_tax_offset_api_miss_enqueues_refresh_and_returns_refreshing (tests.test_tax_offset_sql_runtime.TaxOffsetSqlRuntimeTests.test_tax_offset_api_miss_enqueues_refresh_and_returns_refreshing) ... ok\ntest_tax_offset_api_reads_redis_hot_cache_without_sql_or_sync_build (tests.test_tax_offset_sql_runtime.TaxOffsetSqlRuntimeTests.test_tax_offset_api_reads_redis_hot_cache_without_sql_or_sync_build) ... ok\ntest_tax_offset_api_reads_sql_and_populates_short_redis_cache (tests.test_tax_offset_sql_runtime.TaxOffsetSqlRuntimeTests.test_tax_offset_api_reads_sql_and_populates_short_redis_cache) ... ok\ntest_tax_offset_invalidation_marks_dirty_and_deletes_redis_even_when_no_cached_model_exists (tests.test_tax_offset_sql_runtime.TaxOffsetSqlRuntimeTests.test_tax_offset_invalidation_marks_dirty_and_deletes_redis_even_when_no_cached_model_exists) ... ok\ntest_tax_offset_refresh_handler_rebuilds_scope_and_marks_dirty_scope_done (tests.test_tax_offset_sql_runtime.TaxOffsetSqlRuntimeTests.test_tax_offset_refresh_handler_rebuilds_scope_and_marks_dirty_scope_done) ... ok\n\n----------------------------------------------------------------------\nRan 56 tests in 0.114s\n\nOK\n"
+      },
+      "name": "tests.targeted",
+      "status": "pass"
+    }
+  ],
+  "generated_at": "2026-05-21T06:15:40.204854+00:00",
+  "require_real_infra": false,
+  "status": "pass"
+}

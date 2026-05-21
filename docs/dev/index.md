@@ -4,6 +4,8 @@
 
 - `local-development.md`：本地依赖、启动和检查。
 - `backend.md`：后端结构、服务边界和常用入口。
+- `runtime-infrastructure.md`：PostgreSQL durable queue、独立 worker、Redis 边界和对象存储配置骨架。
+- `runtime-bootstrap.md`：production lightweight bootstrap、repository injection 和 legacy snapshot allowlist。
 - `frontend.md`：前端结构、页面和测试入口。
 - `testing.md`：测试和验证命令。
 

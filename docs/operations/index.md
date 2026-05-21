@@ -4,6 +4,7 @@
 - `etc-business-batches.md`：ETC 业务批次、OA 自动检测、迁移 dry-run、回滚和 Nginx/API smoke。
 - `data-reset.md`：数据重置规则。
 - `backup-and-recovery.md`：备份、恢复和回滚要求。
+- `object-storage-minio.md`：MinIO/S3 文件对象存储、GridFS backfill、校验和短期回滚。
 - `monitoring.md`：健康状态、后台任务和告警。
 - `backend-refactor/mongo-backup.md`：后端重构前的 app Mongo、OA Mongo 备份和恢复演练。
 - `backend-refactor/postgresql-provisioning.md`：服务器上新建 PostgreSQL、账号、备份、PITR 和 migration 配置。

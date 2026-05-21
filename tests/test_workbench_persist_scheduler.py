@@ -51,7 +51,7 @@ class WorkbenchPersistSchedulerTests(unittest.TestCase):
             app._persist_workbench_pair_relations_in_background(**CapturedThread.started_kwargs[0])
             app._persist_workbench_pair_relations_in_background(**CapturedThread.started_kwargs[1])
 
-            reloaded = build_application(data_dir=Path(temp_dir))
+            reloaded = build_application(data_dir=Path(temp_dir), bootstrap_mode="legacy")
             self.assertIsNotNone(
                 reloaded._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-BATCH-42931")
             )
@@ -71,7 +71,7 @@ class WorkbenchPersistSchedulerTests(unittest.TestCase):
                 )
 
             self.assertEqual(CapturedThread.started_kwargs, [])
-            reloaded = build_application(data_dir=Path(temp_dir))
+            reloaded = build_application(data_dir=Path(temp_dir), bootstrap_mode="legacy")
             self.assertIsNotNone(
                 reloaded._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-BATCH-DURABLE")
             )

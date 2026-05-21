@@ -47,6 +47,7 @@ class SettingsDataResetService:
         workbench_override_service: Any,
         workbench_pair_relation_service: Any,
         workbench_read_model_service: Any,
+        workbench_matching_dirty_scope_service: Any,
         tax_certified_import_service: Any,
     ) -> None:
         self._state_store = state_store
@@ -56,6 +57,7 @@ class SettingsDataResetService:
         self._workbench_override_service = workbench_override_service
         self._workbench_pair_relation_service = workbench_pair_relation_service
         self._workbench_read_model_service = workbench_read_model_service
+        self._workbench_matching_dirty_scope_service = workbench_matching_dirty_scope_service
         self._tax_certified_import_service = tax_certified_import_service
 
     @staticmethod
@@ -407,7 +409,7 @@ class SettingsDataResetService:
         return candidates if isinstance(candidates, dict) else {}
 
     def _matching_dirty_scopes(self) -> dict[str, Any]:
-        snapshot = self._state_store.load().get("workbench_matching_dirty_scopes", {})
+        snapshot = self._workbench_matching_dirty_scope_service.snapshot()
         dirty_scopes = snapshot.get("dirty_scopes") if isinstance(snapshot, dict) else {}
         return dirty_scopes if isinstance(dirty_scopes, dict) else {}
 

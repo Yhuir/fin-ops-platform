@@ -262,7 +262,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
             with (data_dir / "state.pkl").open("wb") as handle:
                 pickle.dump({"workbench_candidate_matches": {"candidates": {candidate_key: candidate}}}, handle)
 
-            app = Application(data_dir=data_dir)
+            app = Application(data_dir=data_dir, bootstrap_mode="legacy")
 
         self.assertEqual(
             app._workbench_candidate_match_service.list_candidates_by_month("2026-05"),

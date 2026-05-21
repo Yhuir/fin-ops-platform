@@ -379,7 +379,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             put_payload = json.loads(put_response.body)
             restored_response = app.handle_request("GET", f"/api/turnover-ledger/relations/{relation_id}/extra")
             restored_payload = json.loads(restored_response.body)
-            reloaded_app = build_application(data_dir=Path(temp_dir))
+            reloaded_app = build_application(data_dir=Path(temp_dir), bootstrap_mode="legacy")
             reloaded_response = reloaded_app.handle_request("GET", f"/api/turnover-ledger/relations/{relation_id}/extra")
             reloaded_payload = json.loads(reloaded_response.body)
 

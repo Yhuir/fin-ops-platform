@@ -254,7 +254,7 @@ class PendingInvoiceApiTests(unittest.TestCase):
                     body=json.dumps({**payload, "preview_id": preview["preview_id"], "request_id": "api-recoverable"}),
                 )
 
-            reloaded = build_application(data_dir=data_dir)
+            reloaded = build_application(data_dir=data_dir, bootstrap_mode="legacy")
 
         command = reloaded._pending_invoice_commands["api-recoverable"]
         self.assertEqual(command["status"], "failed_recoverable")

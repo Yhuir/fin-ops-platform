@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 
-from fin_ops_platform.domain.enums import BatchStatus, BatchType, ImportDecision, InvoiceStatus, InvoiceType
+from fin_ops_platform.domain.enums import BatchStatus, BatchType, ImportDecision, InvoiceStatus, InvoiceType, TransactionDirection
+from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
 from fin_ops_platform.services.import_file_service import FileImportService
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
@@ -159,3 +161,195 @@ def test_core_repository_loads_domain_snapshots_accepted_by_services() -> None:
     sessions = file_service.snapshot()["sessions"]
     assert sessions["session_1"].files[0].id == "file_1"
     assert sessions["session_1"].files[0].batch_id == "batch_1"
+
+
+class PagedFactConnection:
+    def __init__(self) -> None:
+        self.fetch_all_calls: list[tuple[str, tuple]] = []
+        self.fetch_one_calls: list[tuple[str, tuple]] = []
+        self.execute_calls: list[tuple[str, tuple]] = []
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        if "from app.invoices" in normalized:
+            assert "limit %s offset %s" in normalized
+            return [
+                {
+                    "legacy_id": "invoice_page_1",
+                    "invoice_type": InvoiceType.INPUT.value,
+                    "invoice_no": "INV-PAGE-1",
+                    "invoice_date": "2026-05-01",
+                    "counterparty_id": "cp_1",
+                    "counterparty_name": "供应商A",
+                    "amount": "128.00",
+                    "signed_amount": "128.00",
+                    "written_off_amount": "0.00",
+                    "currency": "CNY",
+                    "legacy_source_batch_id": "batch_import_0007",
+                    "workbench_visibility": "visible",
+                    "status": InvoiceStatus.PENDING.value,
+                    "tags": [],
+                    "source_links": [],
+                    "raw_payload": {"normalized_payload": {"id": "invoice_page_1"}},
+                }
+            ]
+        if "from app.bank_transactions" in normalized:
+            assert "limit %s offset %s" in normalized
+            return [
+                {
+                    "legacy_id": "txn_page_1",
+                    "account_no": "62220000",
+                    "txn_direction": TransactionDirection.OUTFLOW.value,
+                    "counterparty_name_raw": "供应商A",
+                    "amount": "99.00",
+                    "signed_amount": "-99.00",
+                    "written_off_amount": "0.00",
+                    "txn_date": "2026-05-02",
+                    "trade_time": "2026-05-02 09:00:00",
+                    "legacy_source_batch_id": "batch_import_0008",
+                    "status": "pending",
+                    "raw_payload": {"normalized_payload": {"id": "txn_page_1"}},
+                }
+            ]
+        return []
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_one_calls.append((normalized, params))
+        if "count(*)" in normalized:
+            return {"total": 123}
+        return None
+
+    def execute(self, sql: str, params: tuple = ()) -> int:
+        self.execute_calls.append((" ".join(sql.lower().split()), params))
+        return 1
+
+
+def test_core_repository_lists_invoice_and_bank_facts_with_sql_pagination() -> None:
+    connection = PagedFactConnection()
+    repository = PostgresCoreRepository(connection)
+
+    invoices, invoice_total = repository.list_invoices_page(page=3, page_size=50, month="2026-05")
+    transactions, transaction_total = repository.list_bank_transactions_page(page=2, page_size=25, keyword="供应商")
+
+    assert invoice_total == 123
+    assert invoices[0].id == "invoice_page_1"
+    assert transaction_total == 123
+    assert transactions[0].id == "txn_page_1"
+    assert all("from app.invoices order by" not in sql for sql, _params in connection.fetch_all_calls)
+    assert all("from app.bank_transactions order by" not in sql for sql, _params in connection.fetch_all_calls)
+
+
+class IdentityConnection:
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        if "from app.invoices" in normalized:
+            return {
+                "legacy_id": "invoice_existing_sql",
+                "invoice_type": InvoiceType.OUTPUT.value,
+                "invoice_no": "9001",
+                "invoice_date": "2026-03-21",
+                "counterparty_id": "cp_sql",
+                "counterparty_name": "Acme Supplies",
+                "amount": "100.00",
+                "signed_amount": "100.00",
+                "written_off_amount": "0.00",
+                "currency": "CNY",
+                "source_unique_key": params[0],
+                "invoice_status_from_source": "valid",
+                "workbench_visibility": "visible",
+                "status": InvoiceStatus.PENDING.value,
+                "tags": [],
+                "source_links": [],
+                "raw_payload": {"normalized_payload": {"id": "invoice_existing_sql", "invoice_status_from_source": "valid"}},
+            }
+        if "from app.bank_transactions" in normalized:
+            return {
+                "legacy_id": "txn_existing_sql",
+                "account_no": "62220000",
+                "txn_direction": TransactionDirection.OUTFLOW.value,
+                "counterparty_name_raw": "Acme Supplies",
+                "amount": "88.00",
+                "signed_amount": "-88.00",
+                "written_off_amount": "0.00",
+                "txn_date": "2026-03-23",
+                "source_unique_key": params[0],
+                "status": "pending",
+                "raw_payload": {"normalized_payload": {"id": "txn_existing_sql"}},
+            }
+        return None
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        raise AssertionError(f"identity lookup must not full-scan facts: {sql}")
+
+
+def test_import_service_uses_sql_identity_repository_without_snapshot_facts() -> None:
+    repository = PostgresCoreRepository(IdentityConnection())
+    service = ImportNormalizationService(fact_repository=repository)
+
+    preview = service.preview_import(
+        batch_type=BatchType.OUTPUT_INVOICE,
+        source_name="output.json",
+        imported_by="tester",
+        rows=[
+            {
+                "invoice_code": "033001",
+                "invoice_no": "9001",
+                "counterparty_name": "Acme Supplies",
+                "amount": "100.00",
+                "invoice_date": "2026-03-21",
+                "invoice_status_from_source": "valid",
+            }
+        ],
+    )
+
+    assert preview.row_results[0].decision == ImportDecision.DUPLICATE_SKIPPED
+    assert preview.row_results[0].linked_object_id == "invoice_existing_sql"
+
+
+class NotificationConnection:
+    def __init__(self) -> None:
+        self.executed_sql: list[str] = []
+        self.executed_params: list[tuple] = []
+
+    def execute(self, sql: str, params: tuple = ()) -> int:
+        self.executed_sql.append(" ".join(sql.lower().split()))
+        self.executed_params.append(params)
+        return 1
+
+
+def test_save_imports_marks_read_models_dirty_and_outbox_event() -> None:
+    connection = NotificationConnection()
+    repository = PostgresCoreRepository(connection)
+    counterparty = Counterparty(id="cp_1", name="供应商A", normalized_name="供应商A", counterparty_type="vendor")
+    invoice = Invoice(
+        id="invoice_1",
+        invoice_type=InvoiceType.INPUT,
+        invoice_no="INV-001",
+        counterparty=counterparty,
+        amount=Decimal("100.00"),
+        signed_amount=Decimal("100.00"),
+        invoice_date="2026-05-01",
+        source_batch_id="batch_import_0001",
+    )
+    transaction = BankTransaction(
+        id="txn_1",
+        account_no="62220000",
+        txn_direction=TransactionDirection.OUTFLOW,
+        counterparty_name_raw="供应商A",
+        amount=Decimal("100.00"),
+        signed_amount=Decimal("-100.00"),
+        txn_date="2026-05-02",
+        source_batch_id="batch_import_0001",
+    )
+
+    repository.save_imports({"invoices": [invoice], "transactions": [transaction]})
+
+    joined_sql = "\n".join(connection.executed_sql) + "\n" + repr(connection.executed_params).lower()
+    assert "insert into job.read_model_dirty_scopes" in joined_sql
+    assert "insert into job.outbox_events" in joined_sql
+    assert "workbench" in joined_sql
+    assert "cost" in joined_sql
+    assert "tax" in joined_sql
+    assert "search" in joined_sql

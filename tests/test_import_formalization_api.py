@@ -106,7 +106,7 @@ class ImportFormalizationApiTests(unittest.TestCase):
             self.assertIn("2026-01", matching_job_payload["result_summary"]["affected_months"])
             self.assertNotIn("matching_results", matching_job_payload["result_summary"])
 
-            restarted = build_application(data_dir=Path(temp_dir))
+            restarted = build_application(data_dir=Path(temp_dir), bootstrap_mode="legacy")
             session_response = restarted.handle_request(
                 "GET",
                 f"/imports/files/sessions/{preview_payload['session']['id']}",
