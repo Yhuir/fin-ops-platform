@@ -141,10 +141,19 @@ def _build_preflight_backend_store(data_dir: Path, env_name: str, backend: str) 
 
 
 def _build_postgres_store(data_dir: Path) -> Any:
+    from fin_ops_platform.services.object_storage import ObjectStorageSettings, S3ObjectStorageRepository
     from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
     from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 
-    return PostgresStateStore(data_dir=data_dir, connection=PostgresConnection(PostgresSettings.from_env()))
+    object_storage_settings = ObjectStorageSettings.from_env()
+    object_storage_repository = S3ObjectStorageRepository(object_storage_settings) if object_storage_settings.enabled else None
+    kwargs: dict[str, Any] = {
+        "data_dir": data_dir,
+        "connection": PostgresConnection(PostgresSettings.from_env()),
+    }
+    if object_storage_repository is not None:
+        kwargs["object_storage_repository"] = object_storage_repository
+    return PostgresStateStore(**kwargs)
 
 
 def _required_preflight_backend(env_name: str) -> str:

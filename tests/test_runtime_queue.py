@@ -263,6 +263,20 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("processed_at = now()", normalized_permanent_sql)
         self.assertEqual(permanent_params, ("fatal", "event-1", "worker-1"))
 
+    def test_retry_is_explicit_alias_for_retryable_failure(self) -> None:
+        transaction = FakeTransaction(rows=[event_row(status="pending")])
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        self.assertTrue(repository.retry("event-1", "worker-1", "temporary", retry_delay_seconds=45))
+
+        _, sql, params = transaction.calls[0]
+        normalized_sql = " ".join(sql.lower().split())
+        self.assertIn("status = 'pending'", normalized_sql)
+        self.assertIn("available_at = now() + (%s * interval '1 second')", normalized_sql)
+        self.assertIn("status = 'processing'", normalized_sql)
+        self.assertIn("locked_by = %s", normalized_sql)
+        self.assertEqual(params, ("temporary", 45, "event-1", "worker-1"))
+
     def test_backlog_summary_returns_counts_and_pending_age(self) -> None:
         transaction = FakeTransaction(
             rows=[

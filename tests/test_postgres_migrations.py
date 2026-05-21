@@ -22,6 +22,8 @@ EXPECTED_MIGRATIONS = [
     "0007_grants.sql",
     "0008_pending_invoice_commands.sql",
     "0009_runtime_infrastructure.sql",
+    "0010_runtime_phase2_cutover.sql",
+    "0011_runtime_phase2_query_indexes.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -80,6 +82,7 @@ EXPECTED_TABLES = [
     "read_model.workbench_snapshots",
     "read_model.workbench_candidate_matches",
     "read_model.search_index_rows",
+    "read_model.pending_invoice_rows",
     "read_model.cost_statistics_read_models",
     "read_model.tax_offset_read_models",
 ]
@@ -98,7 +101,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 10)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 12)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -119,6 +122,8 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("0007 pending grants", stdout.getvalue())
         self.assertIn("0008 pending pending_invoice_commands", stdout.getvalue())
         self.assertIn("0009 pending runtime_infrastructure", stdout.getvalue())
+        self.assertIn("0010 pending runtime_phase2_cutover", stdout.getvalue())
+        self.assertIn("0011 pending runtime_phase2_query_indexes", stdout.getvalue())
         self.assertEqual(stderr.getvalue(), "")
 
     def test_status_requires_database_url(self) -> None:
@@ -178,6 +183,20 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "job.sync_outbox_event_attempts()",
             "outbox_events_sync_attempts_trg",
             "outbox_events_status_chk",
+            "file_objects_migration_status_chk",
+            "file_objects_storage_backend_chk",
+            "file_objects_migration_status_idx",
+            "file_objects_verified_storage_idx",
+            "file_objects_legacy_gridfs_idx",
+            "invoices_legacy_source_batch_idx",
+            "invoices_created_id_idx",
+            "bank_transactions_legacy_source_batch_idx",
+            "bank_transactions_created_id_idx",
+            "import_files_status_uploaded_idx",
+            "temporary_object_key",
+            "source_storage_uri",
+            "verified_at",
+            "tombstoned_at",
             "grant select, insert, update on job.read_model_dirty_scopes to fin_ops_worker",
             "grant select, insert, update on job.runtime_worker_heartbeats to fin_ops_worker",
         ):
@@ -226,6 +245,9 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         oa_body = re.search(r"create table if not exists app\.oa_applications\s*\((.*?)\);", sql, flags=re.S).group(1)
         for column in ("oa_source_id", "form_id", "row_id"):
             self.assertIn(column, oa_body)
+        self.assertIn("alter table app.oa_applications", sql)
+        self.assertIn("add column if not exists scope_month date", sql)
+        self.assertIn("oa_applications_scope_month_row_idx", sql)
 
 
 if __name__ == "__main__":

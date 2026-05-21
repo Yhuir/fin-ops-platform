@@ -117,7 +117,8 @@ create unique index if not exists runtime_worker_heartbeats_worker_uidx
 
 alter table app.file_objects
     add column if not exists etag text,
-    add column if not exists migration_status text;
+    add column if not exists migration_status text,
+    add column if not exists updated_at timestamptz not null default now();
 
 do $$
 begin

@@ -89,6 +89,88 @@ class RuntimeQueueRepository:
                 raise RuntimeError("Runtime queue enqueue did not return an event.")
             return _event_from_row(row)
 
+    def enqueue_read_model_refresh(
+        self,
+        *,
+        scope_type: str,
+        scope_key: str,
+        reason: str,
+        tenant_id: str = "default",
+    ) -> RuntimeQueueEvent:
+        normalized_scope_type = str(scope_type or "").strip()
+        normalized_scope_key = str(scope_key or "").strip()
+        normalized_reason = str(reason or "").strip() or "read_model_refresh"
+        if not normalized_scope_type or not normalized_scope_key:
+            raise RuntimeQueueDataError("scope_type and scope_key are required for read model refresh.")
+        payload = {
+            "scope_type": normalized_scope_type,
+            "scope_key": normalized_scope_key,
+            "reason": normalized_reason,
+        }
+        event_type = f"{normalized_scope_type}.read_model.refresh"
+        with self._connection.transaction() as transaction:
+            transaction.execute(
+                """
+                insert into job.read_model_dirty_scopes(
+                    tenant_id, scope_type, scope_key, reason, payload, raw_payload, status, next_run_at
+                )
+                values (%s, %s, %s, %s, %s, %s, 'pending', now())
+                on conflict (tenant_id, scope_type, scope_key)
+                where status in ('pending', 'processing')
+                do update set
+                    reason = excluded.reason,
+                    payload = job.read_model_dirty_scopes.payload || excluded.payload,
+                    raw_payload = excluded.raw_payload,
+                    status = 'pending',
+                    next_run_at = now(),
+                    updated_at = now()
+                """,
+                (
+                    tenant_id,
+                    normalized_scope_type,
+                    normalized_scope_key,
+                    normalized_reason,
+                    self._json_param(payload),
+                    self._json_param(payload),
+                ),
+            )
+            row = transaction.fetch_one(
+                """
+                insert into job.outbox_events (
+                    tenant_id, event_type, aggregate_type, aggregate_id,
+                    scope_type, scope_key, dedupe_key, payload
+                )
+                values (%s, %s, 'read_model', %s, %s, %s, %s, %s)
+                on conflict (tenant_id, dedupe_key)
+                where dedupe_key is not null and status in ('pending', 'processing')
+                do update set updated_at = job.outbox_events.updated_at
+                returning
+                    id::text as event_id,
+                    tenant_id,
+                    event_type,
+                    aggregate_type,
+                    aggregate_id,
+                    scope_type,
+                    scope_key,
+                    dedupe_key,
+                    payload,
+                    attempts,
+                    status
+                """,
+                (
+                    tenant_id,
+                    event_type,
+                    normalized_scope_key,
+                    normalized_scope_type,
+                    normalized_scope_key,
+                    f"{event_type}:{normalized_scope_type}:{normalized_scope_key}",
+                    self._json_param(payload),
+                ),
+            )
+            if row is None:
+                raise RuntimeError("Runtime queue enqueue did not return a read model refresh event.")
+            return _event_from_row(row)
+
     def claim_next(
         self,
         worker_id: str,
@@ -229,6 +311,73 @@ class RuntimeQueueRepository:
         with self._connection.transaction() as transaction:
             row = transaction.fetch_one(sql, params)
         return row is not None
+
+    def retry(self, event_id: str, worker_id: str, error: str, retry_delay_seconds: int = 60) -> bool:
+        return self.fail(
+            event_id,
+            worker_id,
+            error,
+            retry=True,
+            retry_delay_seconds=retry_delay_seconds,
+        )
+
+    def complete_read_model_refresh(self, *, tenant_id: str, scope_type: str, scope_key: str) -> bool:
+        with self._connection.transaction() as transaction:
+            row = transaction.fetch_one(
+                """
+                update job.read_model_dirty_scopes
+                set
+                    status = 'done',
+                    locked_by = null,
+                    locked_at = null,
+                    last_error = null,
+                    updated_at = now()
+                where tenant_id = %s
+                  and scope_type = %s
+                  and scope_key = %s
+                  and status in ('pending', 'processing')
+                returning id
+                """,
+                (tenant_id, scope_type, scope_key),
+            )
+        return row is not None
+
+    def record_worker_heartbeat(
+        self,
+        worker_id: str,
+        worker_kind: str,
+        status: str,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        with self._connection.transaction() as transaction:
+            transaction.fetch_one(
+                """
+                insert into job.runtime_worker_heartbeats (
+                    worker_id,
+                    worker_kind,
+                    status,
+                    payload,
+                    raw_payload
+                )
+                values (%s, %s, %s, %s, %s)
+                on conflict (worker_id)
+                do update set
+                    worker_kind = excluded.worker_kind,
+                    status = excluded.status,
+                    payload = excluded.payload,
+                    raw_payload = excluded.raw_payload,
+                    last_seen_at = now(),
+                    updated_at = now()
+                returning id
+                """,
+                (
+                    worker_id,
+                    worker_kind,
+                    status,
+                    self._json_param(payload or {}),
+                    self._json_param(payload or {}),
+                ),
+            )
 
     def backlog_summary(self) -> dict[str, object]:
         with self._connection.transaction() as transaction:

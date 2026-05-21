@@ -6,12 +6,16 @@ from decimal import Decimal
 from enum import Enum
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
+from fin_ops_platform.services.file_object_migration import verified_object_key_from_uri, write_verified_object
+from fin_ops_platform.services.object_storage import ObjectStorageReadError, ObjectStorageRepository, ObjectStorageWriteError
 from fin_ops_platform.services.postgres_repositories import (
     PostgresCoreRepository,
+    PostgresOAProjectionRepository,
     PostgresOpsTaxEtcRepository,
     PostgresReadModelRepository,
     PostgresWorkbenchRepository,
@@ -22,11 +26,13 @@ from fin_ops_platform.services.postgres_snapshot_contracts import (
     normalize_turnover_relations,
     normalize_workbench_pair_relations,
 )
+from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
 from fin_ops_platform.services.state_store import ApplicationStateStore, GRIDFS_BUCKET_NAME, GRIDFS_REF_PREFIX, load_mongo_state_settings
 
 
 APP_SETTINGS_KEY = "app_settings"
 STATE_KEY_PREFIX = "state:"
+LEGACY_GRIDFS_READS_ENV = "FIN_OPS_ENABLE_LEGACY_GRIDFS_READS"
 
 
 def _default_app_settings_payload() -> dict[str, Any]:
@@ -94,16 +100,34 @@ class LegacyGridFSFileReader:
 
 
 class PostgresStateStore:
-    def __init__(self, *, data_dir: Path, connection: Any, legacy_file_reader: Any | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        data_dir: Path,
+        connection: Any,
+        legacy_file_reader: Any | None = None,
+        object_storage_repository: ObjectStorageRepository | None = None,
+    ) -> None:
         self._data_dir = Path(data_dir)
         self._connection = connection
-        self._legacy_file_reader = legacy_file_reader or LegacyGridFSFileReader.from_data_dir(self._data_dir)
+        self._object_storage_repository = object_storage_repository
+        self._object_storage_backend = str(getattr(object_storage_repository, "backend", "minio")) if object_storage_repository is not None else None
+        self._object_storage_bucket = str(getattr(object_storage_repository, "bucket", "")) if object_storage_repository is not None else None
+        self._legacy_file_reader = legacy_file_reader
+        if (
+            self._legacy_file_reader is None
+            and self._object_storage_repository is None
+            and self._legacy_gridfs_reads_enabled()
+        ):
+            self._legacy_file_reader = LegacyGridFSFileReader.from_data_dir(self._data_dir)
         self._core_repository = PostgresCoreRepository(connection)
+        self._oa_projection_repository = PostgresOAProjectionRepository(connection)
         self._ops_tax_etc_repository = PostgresOpsTaxEtcRepository(connection)
         self._read_model_repository = PostgresReadModelRepository(connection)
         self._workbench_repository = PostgresWorkbenchRepository(connection)
         self._file_root = self._data_dir / "postgres_files"
-        self._file_root.mkdir(parents=True, exist_ok=True)
+        if self._object_storage_repository is None:
+            self._file_root.mkdir(parents=True, exist_ok=True)
 
     @property
     def data_dir(self) -> Path:
@@ -121,10 +145,25 @@ class PostgresStateStore:
     def mongo_database_name(self) -> str | None:
         return None
 
+    @staticmethod
+    def _legacy_gridfs_reads_enabled() -> bool:
+        return (os.environ.get(LEGACY_GRIDFS_READS_ENV) or "").strip().lower() in {"1", "true", "yes", "on"}
+
     def health_summary(self) -> dict[str, object]:
+        summary: dict[str, object]
         if hasattr(self._connection, "health_summary"):
-            return dict(self._connection.health_summary())
-        return {"postgres_status": "unknown"}
+            summary = dict(self._connection.health_summary())
+        else:
+            summary = {"postgres_status": "unknown"}
+        try:
+            summary["runtime_infrastructure"] = RuntimeMonitoringRepository(self._connection).health_summary()
+        except Exception as exc:  # pragma: no cover - health should degrade instead of blocking readiness.
+            summary["runtime_infrastructure"] = {"status": "error", "error": str(exc)}
+        return summary
+
+    @property
+    def oa_projection_repository(self) -> PostgresOAProjectionRepository:
+        return self._oa_projection_repository
 
     def load_app_settings(self) -> dict[str, Any]:
         payload = self._load_settings(APP_SETTINGS_KEY)
@@ -268,6 +307,8 @@ class PostgresStateStore:
         self._save_snapshot("etc_reconciliation_state", snapshot)
 
     def store_etc_reconciliation_file(self, *, task_id: str, file_id: str, file_name: str, content: bytes) -> str:
+        if self._object_storage_repository is not None:
+            return self._store_object_file(namespace="etc_reconciliation", file_id=file_id, file_name=file_name, content=content)
         stored_file_path = self._store_local_file("etc_reconciliation", file_id, file_name, content)
         self._save_file_object(file_id=file_id, file_name=file_name, stored_file_path=stored_file_path, content=content)
         return stored_file_path
@@ -278,6 +319,8 @@ class PostgresStateStore:
     def store_etc_invoice_file(self, *, invoice_number: str, file_name: str, content: bytes) -> str:
         normalized_invoice_number = ApplicationStateStore._sanitize_name(invoice_number)  # noqa: SLF001
         file_id = f"etc_invoice:{normalized_invoice_number}:{ApplicationStateStore._sanitize_name(file_name)}"  # noqa: SLF001
+        if self._object_storage_repository is not None:
+            return self._store_object_file(namespace="etc_invoice", file_id=file_id, file_name=file_name, content=content)
         stored_file_path = self._store_local_file("etc_invoice", file_id, file_name, content)
         self._save_file_object(file_id=file_id, file_name=file_name, stored_file_path=stored_file_path, content=content)
         return stored_file_path
@@ -286,11 +329,22 @@ class PostgresStateStore:
         return self._read_file(stored_file_path)
 
     def etc_invoice_file_exists(self, stored_file_path: str) -> bool:
+        if self._is_object_storage_ref(stored_file_path):
+            try:
+                self._read_object_file(stored_file_path)
+            except Exception:
+                return False
+            return True
         if self._is_gridfs_ref(stored_file_path):
+            if self._object_storage_repository is not None:
+                return False
             return self._legacy_file_reader is not None
         return Path(stored_file_path).exists()
 
     def delete_etc_invoice_file(self, stored_file_path: str) -> None:
+        if self._is_object_storage_ref(stored_file_path):
+            self._delete_object_file(stored_file_path)
+            return
         Path(stored_file_path).unlink(missing_ok=True)
 
     def save_historical_etc_repair_bundle(
@@ -306,7 +360,22 @@ class PostgresStateStore:
             raise ValueError("bundle_id is required.")
         if not content:
             raise ValueError("bundle content is required.")
-        stored_file_path = self._store_local_file("historical_etc_repair", normalized_bundle_id, file_name, content)
+        if self._object_storage_repository is not None:
+            stored_file_path = self._store_object_file(
+                namespace="historical_etc_repair",
+                file_id=f"historical_etc_repair:{normalized_bundle_id}",
+                file_name=file_name,
+                content=content,
+            )
+            file_object_id = self._file_object_id_for_storage_uri(stored_file_path)
+        else:
+            stored_file_path = self._store_local_file("historical_etc_repair", normalized_bundle_id, file_name, content)
+            file_object_id = self._save_file_object(
+                file_id=f"historical_etc_repair:{normalized_bundle_id}",
+                file_name=file_name,
+                stored_file_path=stored_file_path,
+                content=content,
+            )
         payload = {
             "_id": normalized_bundle_id,
             "bundle_id": normalized_bundle_id,
@@ -317,12 +386,6 @@ class PostgresStateStore:
             "size": len(content),
             "sha256": hashlib.sha256(content).hexdigest(),
         }
-        file_object_id = self._save_file_object(
-            file_id=f"historical_etc_repair:{normalized_bundle_id}",
-            file_name=file_name,
-            stored_file_path=stored_file_path,
-            content=content,
-        )
         self._ops_tax_etc_repository.save_historical_etc_repair_bundle_metadata(payload, file_object_id=file_object_id)
         bundles = self.load_historical_etc_repair_bundle_metadata()
         bundles[normalized_bundle_id] = payload
@@ -341,6 +404,13 @@ class PostgresStateStore:
         if not bundle:
             return None
         path = str(bundle.get("stored_file_path") or "")
+        if self._is_object_storage_ref(path):
+            return {
+                "bundle_id": str(bundle.get("bundle_id") or bundle_id),
+                "file_name": str(bundle.get("file_name") or f"{bundle_id}.zip"),
+                "content": self._read_file(path),
+                "metadata": dict(bundle),
+            }
         if path and Path(path).exists():
             return {
                 "bundle_id": str(bundle.get("bundle_id") or bundle_id),
@@ -445,16 +515,13 @@ class PostgresStateStore:
         snapshot = self._read_model_repository.load_workbench_read_models()
         if snapshot:
             return snapshot
-        return self._load_snapshot("workbench_read_models") or {}
+        return {}
 
     def save_workbench_read_models(self, snapshot: dict[str, Any], *, changed_scope_keys: set[str] | None = None) -> None:
         self._read_model_repository.save_workbench_read_models(snapshot, changed_scope_keys=changed_scope_keys)
         self._save_snapshot("workbench_read_models", snapshot)
 
     def load_workbench_candidate_matches(self) -> dict[str, Any]:
-        fallback = self._load_snapshot("workbench_candidate_matches")
-        if fallback:
-            return fallback
         snapshot = self._read_model_repository.load_workbench_candidate_matches()
         if snapshot:
             return snapshot
@@ -530,7 +597,7 @@ class PostgresStateStore:
         snapshot = self._read_model_repository.load_cost_statistics_read_models()
         if snapshot:
             return snapshot
-        return self._load_snapshot("cost_statistics_read_models") or {}
+        return {}
 
     def save_cost_statistics_read_models(self, snapshot: dict[str, Any], *, changed_scope_keys: set[str] | None = None) -> None:
         self._read_model_repository.save_cost_statistics_read_models(snapshot, changed_scope_keys=changed_scope_keys)
@@ -540,16 +607,58 @@ class PostgresStateStore:
         snapshot = self._read_model_repository.load_tax_offset_read_models()
         if snapshot:
             return snapshot
-        return self._load_snapshot("tax_offset_read_models") or {}
+        return {}
 
     def save_tax_offset_read_models(self, snapshot: dict[str, Any], *, changed_scope_keys: set[str] | None = None) -> None:
         self._read_model_repository.save_tax_offset_read_models(snapshot, changed_scope_keys=changed_scope_keys)
         self._save_snapshot("tax_offset_read_models", snapshot)
 
+    @property
+    def import_fact_repository(self) -> PostgresCoreRepository:
+        return self._core_repository
+
+    @property
+    def workbench_sql_read_repository(self) -> PostgresReadModelRepository:
+        return self._read_model_repository
+
+    @property
+    def cost_statistics_sql_read_repository(self) -> PostgresReadModelRepository:
+        return self._read_model_repository
+
+    @property
+    def tax_offset_sql_read_repository(self) -> PostgresReadModelRepository:
+        return self._read_model_repository
+
+    @property
+    def search_sql_read_repository(self) -> PostgresReadModelRepository:
+        return self._read_model_repository
+
+    @property
+    def pending_invoice_sql_read_repository(self) -> PostgresReadModelRepository:
+        return self._read_model_repository
+
+    def list_invoices_page(self, **kwargs: Any) -> tuple[list[Any], int]:
+        return self._core_repository.list_invoices_page(**kwargs)
+
+    def list_bank_transactions_page(self, **kwargs: Any) -> tuple[list[Any], int]:
+        return self._core_repository.list_bank_transactions_page(**kwargs)
+
+    def list_import_batches_page(self, **kwargs: Any) -> tuple[list[Any], int]:
+        return self._core_repository.list_import_batches_page(**kwargs)
+
+    def list_import_files_page(self, **kwargs: Any) -> tuple[list[Any], int]:
+        return self._core_repository.list_import_files_page(**kwargs)
+
     def load(self) -> dict[str, Any]:
+        return self._load_snapshot_payload(include_import_facts=True)
+
+    def load_bootstrap_snapshot(self) -> dict[str, Any]:
+        return self._load_snapshot_payload(include_import_facts=False)
+
+    def _load_snapshot_payload(self, *, include_import_facts: bool) -> dict[str, Any]:
         snapshot = {
-            "imports": self._load_imports(),
-            "file_imports": self._load_file_imports(),
+            "imports": self._load_imports() if include_import_facts else {},
+            "file_imports": self._load_file_imports() if include_import_facts else {},
             "matching": self._load_matching(),
             "bank_transaction_categories": self.load_bank_transaction_categories(),
             "workbench_overrides": self._load_snapshot_or_empty("workbench_overrides"),
@@ -566,9 +675,11 @@ class PostgresStateStore:
             "app_health_alerts": self.load_app_health_alerts(),
             "pending_invoice_commands": self.load_pending_invoice_commands(),
         }
-        saved_whole = self._load_snapshot("full_state")
+        saved_whole = self._load_snapshot("full_state") if include_import_facts and self._legacy_full_state_snapshot_enabled() else {}
         if saved_whole:
             for key, value in saved_whole.items():
+                if not include_import_facts and key in {"imports", "file_imports"}:
+                    continue
                 if key not in snapshot or snapshot.get(key) in ({}, [], None):
                     snapshot[key] = value
         return snapshot
@@ -611,7 +722,17 @@ class PostgresStateStore:
             self.save_app_health_alerts(normalized.get("app_health_alerts") or {})
         if "pending_invoice_commands" in normalized:
             self.save_pending_invoice_commands(normalized.get("pending_invoice_commands") or {})
-        self._save_snapshot("full_state", normalized)
+        if self._legacy_full_state_snapshot_enabled():
+            self._save_snapshot("full_state", normalized)
+
+    @staticmethod
+    def _legacy_full_state_snapshot_enabled() -> bool:
+        return os.getenv("FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
 
     def save_workbench_overrides(self, workbench_overrides_snapshot: dict[str, Any], *, changed_row_ids: set[str] | None = None) -> None:
         self._workbench_repository.save_workbench_overrides(workbench_overrides_snapshot, changed_row_ids=changed_row_ids)
@@ -628,8 +749,12 @@ class PostgresStateStore:
         self._save_snapshot("workbench_exception_cases", snapshot)
 
     def store_import_file(self, *, session_id: str, file_id: str, file_name: str, content: bytes) -> str:
-        stored_file_path = self._store_local_file("imports", file_id, file_name, content)
-        file_object_id = self._save_file_object(file_id=file_id, file_name=file_name, stored_file_path=stored_file_path, content=content)
+        if self._object_storage_repository is not None:
+            stored_file_path = self._store_object_file(namespace="imports", file_id=file_id, file_name=file_name, content=content)
+            file_object_id = self._file_object_id_for_storage_uri(stored_file_path)
+        else:
+            stored_file_path = self._store_local_file("imports", file_id, file_name, content)
+            file_object_id = self._save_file_object(file_id=file_id, file_name=file_name, stored_file_path=stored_file_path, content=content)
         self._connection.execute(
             """
             insert into app.import_files(legacy_mongo_id, session_id, stored_file_path, original_filename, status, file_object_id, raw_payload)
@@ -665,11 +790,21 @@ class PostgresStateStore:
                 continue
             seen.add(normalized)
             if self._is_gridfs_ref(normalized):
+                if self._object_storage_repository is not None:
+                    raise RuntimeError("Legacy GridFS delete is disabled when object storage is enabled.")
                 row_count = self._connection.execute(
                     "update app.import_files set status = 'deleted' where stored_file_path = %s",
                     (normalized,),
                 )
                 deleted += max(row_count, 1)
+                continue
+            if self._is_object_storage_ref(normalized):
+                self._delete_object_file(normalized)
+                self._connection.execute(
+                    "update app.import_files set status = 'deleted' where stored_file_path = %s",
+                    (normalized,),
+                )
+                deleted += 1
                 continue
             file_path = Path(normalized)
             if file_path.exists():
@@ -820,6 +955,228 @@ class PostgresStateStore:
             file_object_id = file_object_id.decode()
         return str(file_object_id) if file_object_id else None
 
+    def _store_object_file(
+        self,
+        *,
+        namespace: str,
+        file_id: str,
+        file_name: str,
+        content: bytes,
+        content_type: str | None = None,
+        legacy_gridfs_id: str | None = None,
+    ) -> str:
+        if self._object_storage_repository is None or not self._object_storage_backend or not self._object_storage_bucket:
+            raise ObjectStorageWriteError("Object storage repository is not configured for PostgreSQL file writes.")
+        content_bytes = bytes(content or b"")
+        sha256 = hashlib.sha256(content_bytes).hexdigest()
+        temporary_object_key = (
+            f"tmp/{ApplicationStateStore._sanitize_name(namespace)}/"
+            f"{ApplicationStateStore._sanitize_name(file_id)}/{sha256}/"
+            f"{ApplicationStateStore._sanitize_name(file_name)}"
+        )
+        pending_uri = f"{self._object_storage_backend}://{self._object_storage_bucket}/{temporary_object_key}"
+        row = self._upsert_file_object(
+            file_id=file_id,
+            legacy_gridfs_id=legacy_gridfs_id,
+            storage_backend=self._object_storage_backend,
+            storage_uri=pending_uri,
+            bucket_name=self._object_storage_bucket,
+            object_key=temporary_object_key,
+            file_name=file_name,
+            sha256=sha256,
+            size_bytes=len(content_bytes),
+            content_type=content_type,
+            etag=None,
+            migration_status="pending_upload",
+            temporary_object_key=temporary_object_key,
+            source_storage_backend=None,
+            source_storage_uri=None,
+            last_error=None,
+            raw_payload={
+                "normalized_payload": {
+                    "id": file_id,
+                    "file_name": file_name,
+                    "stored_file_path": pending_uri,
+                    "sha256": sha256,
+                    "size_bytes": len(content_bytes),
+                    "migration_status": "pending_upload",
+                }
+            },
+        )
+        file_object_id = str(row.get("id") or "") if row else ""
+        try:
+            result = write_verified_object(
+                object_storage_repository=self._object_storage_repository,
+                storage_backend=self._object_storage_backend,
+                bucket_name=self._object_storage_bucket,
+                namespace=namespace,
+                file_id=file_id,
+                file_name=file_name,
+                content=content_bytes,
+                content_type=content_type,
+            )
+        except ObjectStorageWriteError as exc:
+            self._mark_file_object_failed(file_object_id, str(exc))
+            raise
+        except Exception as exc:
+            self._mark_file_object_failed(file_object_id, str(exc) or exc.__class__.__name__)
+            raise ObjectStorageWriteError(str(exc) or exc.__class__.__name__) from exc
+
+        self._mark_file_object_verified(
+            file_object_id,
+            storage_backend=result.storage_backend,
+            storage_uri=result.storage_uri,
+            bucket_name=result.bucket_name,
+            object_key=result.object_key,
+            etag=result.etag,
+            raw_payload={
+                "normalized_payload": {
+                    "id": file_id,
+                    "file_name": file_name,
+                    "stored_file_path": result.storage_uri,
+                    "sha256": result.sha256,
+                    "size_bytes": result.size_bytes,
+                    "migration_status": "verified",
+                }
+            },
+        )
+        return result.storage_uri
+
+    def _upsert_file_object(
+        self,
+        *,
+        file_id: str,
+        legacy_gridfs_id: str | None,
+        storage_backend: str,
+        storage_uri: str,
+        bucket_name: str | None,
+        object_key: str | None,
+        file_name: str,
+        sha256: str,
+        size_bytes: int,
+        content_type: str | None,
+        etag: str | None,
+        migration_status: str,
+        temporary_object_key: str | None,
+        source_storage_backend: str | None,
+        source_storage_uri: str | None,
+        last_error: str | None,
+        raw_payload: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        return self._connection.fetch_one(
+            """
+            insert into app.file_objects(
+                legacy_mongo_id, legacy_gridfs_id, storage_backend, storage_uri,
+                bucket_name, object_key, filename, sha256, size_bytes, content_type,
+                etag, migration_status, temporary_object_key, source_storage_backend,
+                source_storage_uri, last_error, uploaded_at, raw_payload
+            )
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now(), %s)
+            on conflict (legacy_mongo_id) do update set
+                legacy_gridfs_id = excluded.legacy_gridfs_id,
+                storage_backend = excluded.storage_backend,
+                storage_uri = excluded.storage_uri,
+                bucket_name = excluded.bucket_name,
+                object_key = excluded.object_key,
+                filename = excluded.filename,
+                sha256 = excluded.sha256,
+                size_bytes = excluded.size_bytes,
+                content_type = excluded.content_type,
+                etag = excluded.etag,
+                migration_status = excluded.migration_status,
+                temporary_object_key = excluded.temporary_object_key,
+                source_storage_backend = excluded.source_storage_backend,
+                source_storage_uri = excluded.source_storage_uri,
+                last_error = excluded.last_error,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            returning id::text as id
+            """,
+            (
+                file_id,
+                legacy_gridfs_id,
+                storage_backend,
+                storage_uri,
+                bucket_name,
+                object_key,
+                file_name,
+                sha256,
+                size_bytes,
+                content_type,
+                etag,
+                migration_status,
+                temporary_object_key,
+                source_storage_backend,
+                source_storage_uri,
+                last_error,
+                _jsonb(raw_payload),
+            ),
+        )
+
+    def _mark_file_object_verified(
+        self,
+        file_object_id: str,
+        *,
+        storage_backend: str,
+        storage_uri: str,
+        bucket_name: str,
+        object_key: str,
+        etag: str | None,
+        raw_payload: dict[str, Any],
+    ) -> None:
+        if not file_object_id:
+            return
+        self._connection.execute(
+            """
+            update app.file_objects
+            set storage_backend = %s,
+                storage_uri = %s,
+                bucket_name = %s,
+                object_key = %s,
+                etag = %s,
+                migration_status = 'verified',
+                temporary_object_key = null,
+                verified_at = now(),
+                last_error = null,
+                raw_payload = %s,
+                updated_at = now()
+            where id = %s::uuid
+            """,
+            (storage_backend, storage_uri, bucket_name, object_key, etag, _jsonb(raw_payload), file_object_id),
+        )
+
+    def _mark_file_object_failed(self, file_object_id: str, error: str) -> None:
+        if not file_object_id:
+            return
+        self._connection.execute(
+            """
+            update app.file_objects
+            set migration_status = 'failed',
+                last_error = %s,
+                failed_at = now(),
+                updated_at = now()
+            where id = %s::uuid
+            """,
+            (error[:1000], file_object_id),
+        )
+
+    def _file_object_id_for_storage_uri(self, stored_file_path: str) -> str | None:
+        row = self._file_object_for_storage_uri(stored_file_path)
+        value = row.get("id") if row else None
+        return str(value) if value else None
+
+    def _file_object_for_storage_uri(self, stored_file_path: str) -> dict[str, Any] | None:
+        return self._connection.fetch_one(
+            """
+            select id::text as id, storage_backend, storage_uri, bucket_name, object_key,
+                   sha256, size_bytes, migration_status
+            from app.file_objects
+            where storage_uri = %s
+            limit 1
+            """,
+            (stored_file_path,),
+        )
+
     def _store_local_file(self, namespace: str, file_id: str, file_name: str, content: bytes) -> str:
         safe_name = ApplicationStateStore._sanitize_name(file_name)  # noqa: SLF001
         target_dir = self._file_root / ApplicationStateStore._sanitize_name(namespace) / ApplicationStateStore._sanitize_name(file_id)  # noqa: SLF001
@@ -829,7 +1186,11 @@ class PostgresStateStore:
         return str(target_path)
 
     def _read_file(self, stored_file_path: str) -> bytes:
+        if self._is_object_storage_ref(stored_file_path):
+            return self._read_object_file(stored_file_path)
         if self._is_gridfs_ref(stored_file_path):
+            if self._object_storage_repository is not None:
+                raise RuntimeError("Legacy GridFS fallback is disabled when object storage is enabled.")
             if self._legacy_file_reader is None:
                 raise RuntimeError("Legacy GridFS file access is not configured for PostgreSQL state store.")
             return bytes(self._legacy_file_reader.read(stored_file_path))
@@ -838,9 +1199,49 @@ class PostgresStateStore:
             raise FileNotFoundError(stored_file_path)
         return path.read_bytes()
 
+    def _read_object_file(self, stored_file_path: str) -> bytes:
+        if self._object_storage_repository is None or not self._object_storage_bucket:
+            raise RuntimeError("Object storage is not configured for PostgreSQL file access.")
+        row = self._file_object_for_storage_uri(stored_file_path)
+        if not row or str(row.get("migration_status") or "") != "verified":
+            raise RuntimeError("Only verified object storage file records can be read from production paths.")
+        object_key = str(row.get("object_key") or "") or verified_object_key_from_uri(stored_file_path, expected_bucket=self._object_storage_bucket)
+        try:
+            content = self._object_storage_repository.get_object(object_key)
+        except Exception as exc:
+            raise ObjectStorageReadError(str(exc) or exc.__class__.__name__) from exc
+        expected_size = row.get("size_bytes")
+        if expected_size not in (None, "") and int(expected_size) != len(content):
+            raise ObjectStorageReadError("Object storage file size mismatch.")
+        expected_sha256 = str(row.get("sha256") or "").strip()
+        if expected_sha256 and hashlib.sha256(content).hexdigest() != expected_sha256:
+            raise ObjectStorageReadError("Object storage file checksum mismatch.")
+        return bytes(content)
+
+    def _delete_object_file(self, stored_file_path: str) -> None:
+        if self._object_storage_repository is None:
+            raise RuntimeError("Object storage is not configured for PostgreSQL file delete.")
+        row = self._file_object_for_storage_uri(stored_file_path)
+        object_key = str(row.get("object_key") or "") if row else verified_object_key_from_uri(stored_file_path, expected_bucket=self._object_storage_bucket)
+        self._object_storage_repository.delete_object(object_key)
+        self._connection.execute(
+            """
+            update app.file_objects
+            set migration_status = 'tombstoned',
+                tombstoned_at = now(),
+                updated_at = now()
+            where storage_uri = %s
+            """,
+            (stored_file_path,),
+        )
+
     @staticmethod
     def _is_gridfs_ref(value: str) -> bool:
         return str(value or "").startswith(GRIDFS_REF_PREFIX)
+
+    @staticmethod
+    def _is_object_storage_ref(value: str) -> bool:
+        return str(value or "").startswith(("s3://", "minio://"))
 
     def _serialize_value(self, value: Any) -> Any:
         if is_dataclass(value):
