@@ -847,6 +847,22 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   height: auto;
 }
 
+.zone-page-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 8px 14px;
+  border-top: 1px solid #d9e2ec;
+  background: #fbfdff;
+  color: #52606d;
+  font-size: 12px;
+}
+
+.zone-load-more-btn {
+  min-width: 88px;
+}
+
 .embedded-shell .workbench-zone-slot .zone {
   height: calc(100vh - 214px);
   min-height: 702px;

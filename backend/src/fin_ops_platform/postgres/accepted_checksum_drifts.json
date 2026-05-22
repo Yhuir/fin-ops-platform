@@ -1,0 +1,50 @@
+[
+  {
+    "version": "0004",
+    "name": "oa_projection_sync",
+    "applied_checksum_sha256": "3f358b0a830f6de933c4b15f27987c83d1e2be076833585c574685b5121d65f3",
+    "current_checksum_sha256": "4388a900905768f32354236d9fdc3f013395b1f3b23df62f7d7e23ec8493480d",
+    "accepted_at": "2026-05-22",
+    "reason": "Production fin_ops applied this checksum before runtime SQL read model convergence. The current file is the repository baseline; future schema changes must use a new migration."
+  },
+  {
+    "version": "0005",
+    "name": "tax_etc_turnover_settings_jobs",
+    "applied_checksum_sha256": "46d92cb88233997fa1a04bfb941c79e24cfb3da50779e7edfd9915ba86e6befa",
+    "current_checksum_sha256": "ce324e83b63850bffceaebc450315b88ab6cdcc1c5ae42a81e5cfd6e73f361c4",
+    "accepted_at": "2026-05-22",
+    "reason": "Production fin_ops applied this checksum before runtime SQL read model convergence. The current file is the repository baseline; future schema changes must use a new migration."
+  },
+  {
+    "version": "0006",
+    "name": "read_models",
+    "applied_checksum_sha256": "c9707b4f2a32b834fb4703e6dbd15ae1e9e536fe19cdf1a247292ee5742d9ef5",
+    "current_checksum_sha256": "2580ee0c9a8b4779dc6d9470ca66b26424c44bd51bdcddcb1869e4281b0f4d75",
+    "accepted_at": "2026-05-22",
+    "reason": "Production fin_ops applied this checksum before runtime SQL read model convergence. The current file is the repository baseline; future schema changes must use a new migration."
+  },
+  {
+    "version": "0007",
+    "name": "grants",
+    "applied_checksum_sha256": "2a10c903e5daa5d8a30c8d3e9d3aa357306f7f24e058b826fee64419e8f8c2ac",
+    "current_checksum_sha256": "632d8218095740df99568eaa390a27be13085019c0b0dd7df3b2901318b51639",
+    "accepted_at": "2026-05-22",
+    "reason": "Production fin_ops applied this checksum before runtime SQL read model convergence. The current file is the repository baseline; future schema changes must use a new migration."
+  },
+  {
+    "version": "0014",
+    "name": "workbench_groups_read_model",
+    "applied_checksum_sha256": "1683616b14db503c8b4be9bf33016fe0f2cfdc2323de03f2a1086ef278fdb673",
+    "current_checksum_sha256": "5aec2a9948f5ab32f92de84ccceb87cef800daa8ef1df852efeb5795e81c67c0",
+    "accepted_at": "2026-05-22",
+    "reason": "Local and production databases applied the first workbench_groups migration before sort columns were added to the repository file. Migration 0015 carries the forward-only schema fix; do not edit 0014 again."
+  },
+  {
+    "version": "0018",
+    "name": "api_performance_read_model",
+    "applied_checksum_sha256": "35437872bf268b9d11d5e84ffcde4cf0540b61068647f2d7322ceefb0c0f791d",
+    "current_checksum_sha256": "4ae11018160c184cb3592fad19834bd8a8faf4ed8b00ce9a4844db78cf07872d",
+    "accepted_at": "2026-05-22",
+    "reason": "Production fin_ops applied the initial 0018 migration after pg_stat_statements had been created by the database owner. The repository baseline now makes extension creation privilege-tolerant so non-superuser staging migrators can apply the table/index migration; future schema changes must use a new migration."
+  }
+]

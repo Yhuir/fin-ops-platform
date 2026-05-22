@@ -37,9 +37,24 @@
 - `all`：跨月和全局工作台。
 - `YYYY-MM`：月度视图，服务税金、成本、搜索跳转等场景。
 
+首屏读取不得依赖全量页面快照：
+
+- `GET /api/workbench/summary?month=all` 返回汇总、`read_model_status`、`generated_at`，以及轻量 `oa_status`/`invoice_inventory` 状态诊断；不得返回候选组或行级快照。
+- `GET /api/workbench/groups?month=all&zone=open|paired&page=1&page_size=50&detail_level=summary` 返回当前页候选组摘要；支持服务端 `status`、`source_kind`、`search` 和 `sort=oa|bank|invoice:asc|desc`。前端首屏和分页必须使用 `summary`，避免把重 `detail_fields` 带入列表页。
+- `GET /api/workbench/groups/detail?month=all&zone=open|paired&group_id=...` 返回单个 group 完整详情，用于详情抽屉、审计和需要重字段的交互。
+- `GET /api/workbench/refresh-status` 返回 dirty scope、worker heartbeat/lag、failed backlog 和最近错误。
+- 旧 `GET /api/workbench?month=all` 只作为兼容期接口，不再作为前端首屏依赖。
+
+热路径基于结构化 SQL read model：
+
+- `read_model.workbench_rows` 保存行级投影，用于详情定位、搜索和行级统计。
+- `read_model.workbench_groups` 保存组级投影，用于首屏分页、区域分页、服务端筛选、搜索、排序和短 TTL page cache。
+- `read_model.workbench_snapshots` 保留审计、导出、对账和兼容期用途，不作为首屏查询的数据源。
+
 ## 搜索、筛选和排序
 
 - 三栏局部搜索按当前栏驱动，整组联动。
+- 三栏局部搜索和时间排序触发 `/api/workbench/groups` 重新读取首屏页；前端只保留当前分页窗口和后续显式加载的页，不再为了筛选/排序预取全量快照。
 - 银行流水栏金额按不带千分位分隔符的固定小数文本展示，例如 `19370.00`，以便财务人员按连续数字直接搜索。
 - 多选筛选按列生效，不破坏候选组上下文。
 - 排序按组排序，不按单行排序。

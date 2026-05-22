@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fin_ops_platform.services.object_storage import ObjectStorageSettings
-from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
+from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository, RuntimeQueueSettings
 from fin_ops_platform.services.runtime_redis import RuntimeRedisHelper, RuntimeRedisSettings
 
 
@@ -66,6 +66,7 @@ class LegacySnapshotBootstrap:
 class RuntimeRepositoryContext:
     state_store: Any | None
     queue_repository: RuntimeQueueRepository | None
+    queue_settings: RuntimeQueueSettings
     redis_helper: RuntimeRedisHelper
     object_storage_settings: ObjectStorageSettings
 
@@ -75,6 +76,7 @@ class RuntimeRepositoryContext:
         return cls(
             state_store=state_store,
             queue_repository=RuntimeQueueRepository(connection) if connection is not None else None,
+            queue_settings=RuntimeQueueSettings.from_env(),
             redis_helper=RuntimeRedisHelper.from_settings(RuntimeRedisSettings.from_env()),
             object_storage_settings=ObjectStorageSettings.from_env(),
         )
@@ -84,6 +86,7 @@ class RuntimeRepositoryContext:
         return {
             "state_store_backend": getattr(self.state_store, "storage_backend", None),
             "queue_repository": self.queue_repository is not None,
+            **self.queue_settings.summary(),
             "redis_enabled": self.redis_helper.enabled,
             **redis_summary,
             "object_storage_backend": self.object_storage_settings.backend,

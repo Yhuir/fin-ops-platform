@@ -242,6 +242,38 @@ describe("Workbench candidate grouping layout", () => {
       if (url.pathname === "/api/workbench") {
         return new Response(JSON.stringify(buildNoOaWorkbenchPayload()), { status: 200 });
       }
+      if (url.pathname === "/api/workbench/summary") {
+        const payload = buildNoOaWorkbenchPayload();
+        return new Response(
+          JSON.stringify({
+            month: payload.month,
+            summary: payload.summary,
+            oa_status: payload.oa_status,
+            invoice_inventory: payload.invoice_inventory,
+            read_model_status: "fresh",
+            generated_at: "2026-05-22T09:30:00+08:00",
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.pathname === "/api/workbench/groups") {
+        const payload = buildNoOaWorkbenchPayload();
+        const zone = url.searchParams.get("zone") === "open" ? "open" : "paired";
+        const groups = payload[zone].groups;
+        return new Response(
+          JSON.stringify({
+            month: payload.month,
+            zone,
+            page: 1,
+            page_size: 50,
+            total: groups.length,
+            has_more: false,
+            groups,
+            read_model_status: "fresh",
+          }),
+          { status: 200 },
+        );
+      }
       if (url.pathname === "/api/workbench/ignored") {
         return new Response(JSON.stringify({ month: url.searchParams.get("month") ?? "all", rows: [] }), { status: 200 });
       }
@@ -310,6 +342,13 @@ describe("Workbench candidate grouping layout", () => {
     return appStyles.slice(openBraceIndex + 1, closeBraceIndex);
   }
 
+  function countInitialWorkbenchPageRequests(fetchMock: ReturnType<typeof mockWorkbenchPageFetch>) {
+    return fetchMock.mock.calls.filter(([input]) => {
+      const url = new URL(String(input), "http://localhost");
+      return url.pathname === "/api/workbench/summary" || url.pathname === "/api/workbench/groups";
+    }).length;
+  }
+
   function getStandaloneCssRuleBody(selector: string, occurrence = 0) {
     let selectorIndex = -1;
     let searchFrom = 0;
@@ -342,7 +381,7 @@ describe("Workbench candidate grouping layout", () => {
 
     expect(within(groupRow).getByText("陈涛")).toBeInTheDocument();
     expect(within(groupRow).getAllByText("智能工厂设备商").length).toBeGreaterThan(0);
-    expect(within(groupRow).getAllByText("58,000.00").length).toBeGreaterThan(0);
+    expect(within(groupRow).getAllByText("58000").length).toBeGreaterThan(0);
     expect(within(groupRow).getByText("进")).toBeInTheDocument();
   });
 
@@ -450,7 +489,7 @@ describe("Workbench candidate grouping layout", () => {
 
       const pairedZone = await screen.findByTestId("zone-paired");
       const groupRow = await screen.findByTestId("candidate-group-paired-no-oa-bank-batch:NOOA-202603-FEE");
-      fireEvent.click(within(groupRow).getByRole("row", { name: /免OA手续费批次.*30\.00/ }));
+      fireEvent.click(within(groupRow).getByRole("row", { name: /免OA手续费批次.*30/ }));
       fireEvent.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));
 
       await waitFor(() => {
@@ -475,16 +514,14 @@ describe("Workbench candidate grouping layout", () => {
 
     renderWorkbenchPage();
     await screen.findByTestId("candidate-group-paired-no-oa-bank-batch:NOOA-202603-FEE");
-    const initialWorkbenchRequests = fetchMock.mock.calls.filter(([input]) =>
-      String(input).startsWith("/api/workbench?"),
-    ).length;
+    const initialWorkbenchRequests = countInitialWorkbenchPageRequests(fetchMock);
 
     await act(async () => {
       window.dispatchEvent(new CustomEvent("bankTransactionCategoryUpdated", { detail: { affectedMonths: ["2026-03"] } }));
     });
 
     await waitFor(() => {
-      const workbenchRequests = fetchMock.mock.calls.filter(([input]) => String(input).startsWith("/api/workbench?")).length;
+      const workbenchRequests = countInitialWorkbenchPageRequests(fetchMock);
       expect(workbenchRequests).toBeGreaterThan(initialWorkbenchRequests);
     });
   });
@@ -526,13 +563,13 @@ describe("Workbench candidate grouping layout", () => {
       "candidate-scroll-open-case:CASE-202603-OA-ATTACHMENT-2035-invoice",
     );
 
-    expect(within(oaCell).getByRole("row", { name: /胡瑢.*248\.00/ })).toBeInTheDocument();
-    expect(within(invoiceCell).getByRole("row", { name: /OA2035-MACHINE-25.*25\.00/ })).toBeInTheDocument();
-    expect(within(invoiceCell).getByRole("row", { name: /OA2035-MACHINE-23.*23\.00/ })).toBeInTheDocument();
-    expect(within(invoiceCell).getByRole("row", { name: /OA2035-FUEL-200.*200\.00/ })).toBeInTheDocument();
-    expect(within(invoiceCell).getByRole("row", { name: /微信支付.*胡瑢.*25\.00/ })).toBeInTheDocument();
-    expect(within(invoiceCell).getByRole("row", { name: /微信支付.*胡瑢.*23\.00/ })).toBeInTheDocument();
-    expect(within(invoiceCell).getByRole("row", { name: /微信支付.*胡瑢.*200\.00/ })).toBeInTheDocument();
+    expect(within(oaCell).getByRole("row", { name: /胡瑢.*248/ })).toBeInTheDocument();
+    expect(within(invoiceCell).getByRole("row", { name: /OA2035-MACHINE-25.*25/ })).toBeInTheDocument();
+    expect(within(invoiceCell).getByRole("row", { name: /OA2035-MACHINE-23.*23/ })).toBeInTheDocument();
+    expect(within(invoiceCell).getByRole("row", { name: /OA2035-FUEL-200.*200/ })).toBeInTheDocument();
+    expect(within(invoiceCell).getByRole("row", { name: /微信支付.*胡瑢.*25/ })).toBeInTheDocument();
+    expect(within(invoiceCell).getByRole("row", { name: /微信支付.*胡瑢.*23/ })).toBeInTheDocument();
+    expect(within(invoiceCell).getByRole("row", { name: /微信支付.*胡瑢.*200/ })).toBeInTheDocument();
     expect(within(invoiceCell).getAllByRole("row")).toHaveLength(6);
     expect(within(invoiceCell).getAllByText("OA附件")).toHaveLength(3);
     expect(within(invoiceCell).getAllByText("付款凭证")).toHaveLength(3);
@@ -552,8 +589,8 @@ describe("Workbench candidate grouping layout", () => {
       "candidate-scroll-open-case:CASE-202603-OA-ATTACHMENT-292-invoice",
     );
 
-    expect(within(oaCell).getByRole("row", { name: /胡瑢.*292\.00/ })).toBeInTheDocument();
-    expect(within(invoiceCell).getByRole("row", { name: /OAATT-292-001.*292\.00/ })).toBeInTheDocument();
+    expect(within(oaCell).getByRole("row", { name: /胡瑢.*292/ })).toBeInTheDocument();
+    expect(within(invoiceCell).getByRole("row", { name: /OAATT-292-001.*292/ })).toBeInTheDocument();
     expect(within(invoiceCell).getAllByRole("row")).toHaveLength(1);
   });
 

@@ -6,6 +6,7 @@ import re
 from types import SimpleNamespace
 from typing import Any
 
+from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
 from fin_ops_platform.services.no_oa_bank_batch_service import NO_OA_BANK_BATCH_RELATION_MODE
 from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
@@ -38,9 +39,12 @@ class WorkbenchSqlProjectionBuilder:
         connection: Any,
         read_model_repository: PostgresReadModelRepository | None = None,
         oa_query_service: WorkbenchQueryService | None = None,
+        bank_account_resolver: BankAccountResolver | None = None,
     ) -> None:
         self._connection = connection
         self._read_model_repository = read_model_repository or PostgresReadModelRepository(connection)
+        self._bank_account_mapping_cache: dict[str, str] | None = None
+        self._bank_account_resolver = bank_account_resolver or BankAccountResolver(self._bank_account_mapping_dict)
         if oa_query_service is not None:
             self._oa_query_service = oa_query_service
         else:
@@ -76,6 +80,26 @@ class WorkbenchSqlProjectionBuilder:
         )
         return [str(row.get("scope_key")) for row in rows if MONTH_RE.match(str(row.get("scope_key") or ""))]
 
+    def _bank_account_mapping_dict(self) -> dict[str, str]:
+        if self._bank_account_mapping_cache is not None:
+            return dict(self._bank_account_mapping_cache)
+        row = self._connection.fetch_one(
+            "select settings_payload from app.app_settings where settings_key = %s",
+            ("app_settings",),
+        )
+        payload = row_payload(row, "settings_payload")
+        settings = payload if isinstance(payload, dict) else {}
+        mappings: dict[str, str] = {}
+        for item in list(settings.get("bank_account_mappings") or []):
+            if not isinstance(item, dict):
+                continue
+            last4 = str(item.get("last4") or "").strip()
+            bank_name = str(item.get("bank_name") or "").strip()
+            if len(last4) == 4 and last4.isdigit() and bank_name:
+                mappings[last4] = bank_name
+        self._bank_account_mapping_cache = mappings
+        return dict(mappings)
+
     def rebuild_workbench_read_model_scope(
         self,
         scope_key: str,
@@ -85,6 +109,7 @@ class WorkbenchSqlProjectionBuilder:
         normalized_scope = str(scope_key or "").strip()
         if not MONTH_RE.match(normalized_scope):
             raise ValueError("workbench SQL projection scope_key must be a month shard YYYY-MM.")
+        self._bank_account_mapping_cache = None
         resolved_source_version = _int_value(source_version, self._current_dirty_scope_source_version(normalized_scope))
         rows_by_id = self._workbench_rows_for_month(normalized_scope)
         relations = self._active_pair_relations_for_month(normalized_scope, set(rows_by_id))
@@ -523,6 +548,7 @@ class WorkbenchSqlProjectionBuilder:
         credit_amount = amount if not _is_outflow(direction, signed_amount) else None
         account_no = str(row.get("account_no") or "")
         account_name = str(row.get("account_name") or "")
+        payment_account_label = self._bank_account_resolver.resolve_label(account_no, account_name)
         detail_fields = row_payload(row, "raw_payload")
         detail_fields = detail_fields if isinstance(detail_fields, dict) else {}
         return {
@@ -537,7 +563,7 @@ class WorkbenchSqlProjectionBuilder:
             "debit_amount": str(debit_amount or "") or None,
             "credit_amount": str(credit_amount or "") or None,
             "counterparty_name": row.get("counterparty_name_raw"),
-            "payment_account_label": account_name or account_no[-4:],
+            "payment_account_label": payment_account_label,
             "invoice_relation": {"code": "pending_invoice_match", "label": "待关联发票", "tone": "warn"},
             "pay_receive_time": _date_text(row.get("pay_receive_time") or row.get("trade_time") or row.get("txn_date")),
             "summary": row.get("summary"),
@@ -549,7 +575,7 @@ class WorkbenchSqlProjectionBuilder:
                 "借方发生额": str(debit_amount or "") or "—",
                 "贷方发生额": str(credit_amount or "") or "—",
                 "对方户名": row.get("counterparty_name_raw") or "—",
-                "支付账户": account_name or account_no[-4:] or "—",
+                "支付账户": payment_account_label or "—",
                 "和发票关联情况": "待关联发票",
                 "支付/收款时间": _date_text(row.get("pay_receive_time") or row.get("trade_time") or row.get("txn_date")),
                 "备注": row.get("remark") or "—",

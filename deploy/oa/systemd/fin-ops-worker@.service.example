@@ -1,0 +1,37 @@
+[Unit]
+Description=fin-ops runtime worker %i
+After=network-online.target postgresql.service redis.service rabbitmq-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fin-ops
+Group=fin-ops
+WorkingDirectory=/opt/fin-ops/current/backend
+Environment=PYTHONPATH=/opt/fin-ops/current/backend/src
+Environment=FIN_OPS_DATA_DIR=/opt/fin-ops/data
+Environment=FIN_OPS_WORKER_ID=%H-%i
+Environment=FIN_OPS_WORKER_KIND=%i
+Environment=FIN_OPS_WORKER_ARGS=
+Environment=FIN_OPS_WORKER_LOCK_TIMEOUT_SECONDS=300
+Environment=FIN_OPS_WORKER_TASK_TIMEOUT_SECONDS=60
+Environment=FIN_OPS_WORKER_STATEMENT_TIMEOUT_SECONDS=30
+Environment=FIN_OPS_WORKER_MAX_ATTEMPTS=5
+EnvironmentFile=/etc/fin-ops/fin-ops.common.env
+EnvironmentFile=/etc/fin-ops/fin-ops.secrets.env
+EnvironmentFile=-/etc/fin-ops/fin-ops.worker.%i.env
+ExecStart=/opt/fin-ops/venv/bin/python -m fin_ops_platform.app.worker --worker-id ${FIN_OPS_WORKER_ID} --worker-kind ${FIN_OPS_WORKER_KIND} $FIN_OPS_WORKER_ARGS --lock-timeout-seconds ${FIN_OPS_WORKER_LOCK_TIMEOUT_SECONDS} --task-timeout-seconds ${FIN_OPS_WORKER_TASK_TIMEOUT_SECONDS} --statement-timeout-seconds ${FIN_OPS_WORKER_STATEMENT_TIMEOUT_SECONDS} --max-attempts ${FIN_OPS_WORKER_MAX_ATTEMPTS}
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=30
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/fin-ops/data
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

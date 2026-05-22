@@ -28,7 +28,9 @@ class FakeQueue:
         self.claimed = claimed
         self.claim_calls: list[tuple[str, list[str] | None, int]] = []
         self.completed: list[tuple[str, str, dict[str, object] | None]] = []
+        self.acked: list[tuple[str, str, dict[str, object] | None]] = []
         self.failed: list[tuple[str, str, str, bool, int]] = []
+        self.failed_events: list[tuple[str, str, str, bool, int, int]] = []
         self.heartbeats: list[tuple[str, str, str, object]] = []
         self.statement_timeouts: list[int | None] = []
 
@@ -40,8 +42,25 @@ class FakeQueue:
         self.completed.append((event_id, worker_id, result_payload))
         return True
 
+    def ack_event(self, event_id: str, worker_id: str, result_payload=None) -> bool:
+        self.acked.append((event_id, worker_id, result_payload))
+        return True
+
     def fail(self, event_id: str, worker_id: str, error: str, retry: bool = True, retry_delay_seconds: int = 60) -> bool:
         self.failed.append((event_id, worker_id, error, retry, retry_delay_seconds))
+        return True
+
+    def fail_event(
+        self,
+        event_id: str,
+        worker_id: str,
+        error: str,
+        *,
+        retryable: bool = True,
+        retry_delay_seconds: int = 60,
+        max_attempts: int = 5,
+    ) -> bool:
+        self.failed_events.append((event_id, worker_id, error, retryable, retry_delay_seconds, max_attempts))
         return True
 
     def record_worker_heartbeat(self, worker_id: str, worker_kind: str, status: str, payload=None) -> None:
@@ -64,7 +83,10 @@ class RuntimeWorkerTests(unittest.TestCase):
 
         self.assertEqual(result, RuntimeWorkerResult.PROCESSED)
         self.assertEqual(queue.claim_calls, [("worker-1", ["runtime.test"], 120)])
-        self.assertEqual(queue.completed, [("event-1", "worker-1", {"handled": "event-1"})])
+        self.assertEqual(queue.acked[0][0:2], ("event-1", "worker-1"))
+        self.assertEqual(queue.acked[0][2]["handled"], "event-1")
+        self.assertIn("duration_ms", queue.acked[0][2])
+        self.assertEqual(queue.completed, [])
         self.assertEqual(queue.failed, [])
         self.assertTrue(any(status == "idle" for _worker_id, _kind, status, _payload in queue.heartbeats))
 
@@ -84,7 +106,31 @@ class RuntimeWorkerTests(unittest.TestCase):
 
         self.assertEqual(result, RuntimeWorkerResult.FAILED_RETRYABLE)
         self.assertEqual(queue.completed, [])
-        self.assertEqual(queue.failed, [("event-1", "worker-1", "transient failure", True, 75)])
+        self.assertEqual(queue.failed_events, [("event-1", "worker-1", "transient failure", True, 75, 5)])
+
+    def test_run_once_uses_exponential_retry_delay_and_max_attempts(self) -> None:
+        claimed = event()
+        claimed = RuntimeQueueEvent(**{**claimed.__dict__, "attempts": 3})
+        queue = FakeQueue(claimed)
+
+        def fail(_event: RuntimeQueueEvent) -> None:
+            raise RuntimeError("transient failure")
+
+        worker = RuntimeWorker(
+            queue_repository=queue,
+            config=RuntimeWorkerConfig(
+                worker_id="worker-1",
+                event_types=["runtime.test"],
+                retry_delay_seconds=10,
+                max_attempts=4,
+            ),
+            handlers={"runtime.test": fail},
+        )
+
+        result = worker.run_once()
+
+        self.assertEqual(result, RuntimeWorkerResult.FAILED_RETRYABLE)
+        self.assertEqual(queue.failed_events, [("event-1", "worker-1", "transient failure", True, 40, 4)])
 
     def test_run_once_sets_statement_timeout_and_processing_heartbeat_for_claimed_event(self) -> None:
         queue = FakeQueue(event())
@@ -127,10 +173,10 @@ class RuntimeWorkerTests(unittest.TestCase):
 
         self.assertEqual(result, RuntimeWorkerResult.FAILED_RETRYABLE)
         self.assertEqual(queue.completed, [])
-        self.assertEqual(len(queue.failed), 1)
-        self.assertEqual(queue.failed[0][0], "event-1")
-        self.assertIn("runtime worker task exceeded 1s timeout", queue.failed[0][2])
-        self.assertEqual(queue.failed[0][3:], (True, 7))
+        self.assertEqual(len(queue.failed_events), 1)
+        self.assertEqual(queue.failed_events[0][0], "event-1")
+        self.assertIn("runtime worker task exceeded 1s timeout", queue.failed_events[0][2])
+        self.assertEqual(queue.failed_events[0][3:], (True, 7, 5))
 
     def test_run_once_does_not_claim_when_no_event_types_or_handlers_are_registered(self) -> None:
         queue = FakeQueue(event())

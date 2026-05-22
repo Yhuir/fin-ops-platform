@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+from fin_ops_platform.services.runtime_queue import DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
 
 
@@ -12,9 +13,15 @@ class FakeConnection:
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
         self.calls.append((sql, params))
         normalized = " ".join(sql.lower().split())
+        if "like '%." in normalized:
+            raise AssertionError("literal percent signs must be escaped for psycopg SQL")
+        if "publish_status" in normalized:
+            return [{"publish_status": "unpublished", "count": 4}, {"publish_status": "failed", "count": 2}]
         if "from job.outbox_events" in normalized:
             return [{"status": "pending", "count": 3}, {"status": "failed", "count": 1}]
-        if "from job.read_model_dirty_scopes" in normalized:
+        if "from job.read_model_dirty_scopes" in normalized and "group by status" in normalized:
+            return [{"status": "pending", "count": 2}, {"status": "processing", "count": 1}]
+        if "from job.read_model_dirty_scopes" in normalized and "updated_at <" in normalized:
             return [
                 {
                     "tenant_id": "default",
@@ -30,18 +37,58 @@ class FakeConnection:
 
     def fetch_one(self, sql: str, params: tuple[object, ...] = ()):
         self.calls.append((sql, params))
+        normalized = " ".join(sql.lower().split())
+        if "like '%." in normalized:
+            raise AssertionError("literal percent signs must be escaped for psycopg SQL")
+        if "from job.runtime_worker_heartbeats" in normalized:
+            return {"max_worker_heartbeat_lag_seconds": 8.0}
+        if "rabbitmq_publish" in normalized:
+            return {"p50_ms": 10.0, "p95_ms": 20.0, "p99_ms": 30.0}
+        if "percentile_cont" in normalized:
+            return {"p50_ms": 120.0, "p95_ms": 300.0, "p99_ms": 450.0}
+        if "read_model_refresh_total" in normalized:
+            return {"failed_count": 1, "read_model_refresh_total": 10}
+        if "publish_status in" in normalized:
+            return {"max_unpublished_age_seconds": 11.0}
         return {"max_pending_age_seconds": 42.0}
+
+
+class FakeRabbitMqMetrics:
+    def summary(self) -> dict[str, object]:
+        return {
+            "rabbitmq_management_configured": True,
+            "rabbitmq_queue_depth": 5,
+            "rabbitmq_unacked_messages": 1,
+            "rabbitmq_consumer_count": 2,
+            "rabbitmq_dlq_count": 0,
+            "rabbitmq_oldest_message_age_seconds": None,
+        }
 
 
 class RuntimeMonitoringRepositoryTests(unittest.TestCase):
     def test_health_summary_reports_backlog_failed_jobs_and_stale_dirty_scopes(self) -> None:
-        repository = RuntimeMonitoringRepository(FakeConnection())
+        repository = RuntimeMonitoringRepository(FakeConnection(), rabbitmq_metrics_provider=FakeRabbitMqMetrics())
 
         summary = repository.health_summary(stale_after_seconds=300)
 
         self.assertEqual(summary["queue_backlog"], {"pending": 3, "failed": 1})
+        self.assertEqual(summary["dirty_scopes"], {"pending": 2, "processing": 1})
         self.assertEqual(summary["failed_jobs"], 1)
         self.assertEqual(summary["max_pending_age_seconds"], 42.0)
+        self.assertEqual(summary["oldest_pending_event_age_seconds"], 42.0)
+        self.assertEqual(summary["worker_heartbeat_lag_seconds"], 8.0)
+        self.assertEqual(summary["read_model_refresh_duration_ms"], {"p50": 120.0, "p95": 300.0, "p99": 450.0})
+        self.assertEqual(summary["read_model_refresh_failure_rate"], 0.1)
+        self.assertEqual(summary["rabbitmq_publish_status"], {"unpublished": 4, "failed": 2})
+        self.assertEqual(summary["rabbitmq_unpublished_backlog"], 4)
+        self.assertEqual(summary["rabbitmq_publish_failed_backlog"], 2)
+        self.assertEqual(summary["rabbitmq_dispatcher_lag_seconds"], 11.0)
+        self.assertEqual(summary["rabbitmq_dispatch_event_types"], list(DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES))
+        self.assertEqual(summary["rabbitmq_publish_confirm_latency_ms"], {"p50": 10.0, "p95": 20.0, "p99": 30.0})
+        self.assertEqual(summary["rabbitmq_queue_depth"], 5)
+        self.assertEqual(summary["rabbitmq_unacked_messages"], 1)
+        self.assertEqual(summary["rabbitmq_consumer_count"], 2)
+        self.assertEqual(summary["rabbitmq_dlq_count"], 0)
         self.assertEqual(summary["stale_dirty_scope_count"], 1)
         self.assertEqual(summary["stale_dirty_scopes"][0]["scope_key"], "workbench:month:2026-05")
 

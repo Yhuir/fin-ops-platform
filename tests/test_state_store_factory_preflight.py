@@ -10,13 +10,23 @@ from fin_ops_platform.services.state_store import ApplicationStateStore
 
 
 class FakePostgresStateStore:
-    def __init__(self, *, data_dir: Path, connection: object) -> None:
+    def __init__(self, *, data_dir: Path, connection: object, sql_read_connection: object | None = None, **_kwargs: object) -> None:
         self.data_dir = data_dir
         self.connection = connection
+        self.sql_read_connection = sql_read_connection
 
     @property
     def storage_backend(self) -> str:
         return "postgres"
+
+
+class WarmableConnection:
+    def __init__(self, settings: object) -> None:
+        self.settings = settings
+        self.warmed = False
+
+    def warm_up(self) -> None:
+        self.warmed = True
 
 
 class StateStoreFactoryPreflightTests(unittest.TestCase):
@@ -53,6 +63,41 @@ class StateStoreFactoryPreflightTests(unittest.TestCase):
         self.assertIs(store.connection, connection)
         from_env.assert_called_once_with()
         connection_class.assert_called_once_with(settings)
+
+    def test_postgres_backend_warms_primary_and_optional_read_connections(self) -> None:
+        write_settings = object()
+        read_settings = object()
+        created_connections: list[WarmableConnection] = []
+
+        def create_connection(settings: object) -> WarmableConnection:
+            connection = WarmableConnection(settings)
+            created_connections.append(connection)
+            return connection
+
+        with TemporaryDirectory() as temp_dir, patch.dict(
+            "os.environ",
+            {
+                state_store_factory.APP_STORAGE_BACKEND_ENV: "postgres",
+                "FIN_OPS_POSTGRES_DATABASE_URL": "postgresql://user:secret@db/fin_ops",
+                "FIN_OPS_POSTGRES_READ_DATABASE_URL": "postgresql://readonly:secret@db/fin_ops",
+            },
+            clear=True,
+        ), patch(
+            "fin_ops_platform.services.postgres_connection.PostgresSettings.from_env", return_value=write_settings
+        ), patch(
+            "fin_ops_platform.services.postgres_connection.PostgresSettings.from_read_env", return_value=read_settings
+        ), patch(
+            "fin_ops_platform.services.postgres_connection.PostgresConnection", side_effect=create_connection
+        ), patch(
+            "fin_ops_platform.services.postgres_state_store.PostgresStateStore", FakePostgresStateStore
+        ):
+            store = state_store_factory.build_state_store(Path(temp_dir))
+
+        self.assertIsInstance(store, FakePostgresStateStore)
+        self.assertEqual([connection.settings for connection in created_connections], [write_settings, read_settings])
+        self.assertTrue(all(connection.warmed for connection in created_connections))
+        self.assertIs(store.connection, created_connections[0])
+        self.assertIs(store.sql_read_connection, created_connections[1])
 
     def test_shadow_requires_explicit_primary_and_shadow_backends(self) -> None:
         with TemporaryDirectory() as temp_dir, patch.dict(

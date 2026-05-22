@@ -33,6 +33,12 @@ import type {
   WorkbenchInvoiceInventory,
   WorkbenchSourceKind,
   WorkbenchGroupType,
+  WorkbenchGroupsPageQuery,
+  WorkbenchGroupsPageResult,
+  WorkbenchInitialPageResult,
+  WorkbenchReadModelStatus,
+  WorkbenchZoneId,
+  WorkbenchZonePageInfo,
   OaManualAttachmentRefreshResult,
   OaManualImportList,
   OaManualImportResult,
@@ -136,6 +142,28 @@ type ApiWorkbenchPayload = {
   open: {
     groups: ApiWorkbenchGroup[];
   };
+};
+
+type ApiWorkbenchSummaryPayload = {
+  month: string;
+  scope_key?: string;
+  generated_at?: string | null;
+  read_model_status?: WorkbenchReadModelStatus;
+  oa_status?: ApiWorkbenchPayload["oa_status"];
+  invoice_inventory?: ApiWorkbenchInvoiceInventory;
+  summary: ApiWorkbenchPayload["summary"];
+};
+
+type ApiWorkbenchGroupsPayload = {
+  month: string;
+  scope_key?: string;
+  zone: WorkbenchZoneId;
+  page: number;
+  page_size: number;
+  total: number;
+  has_more: boolean;
+  read_model_status?: WorkbenchReadModelStatus;
+  groups: ApiWorkbenchGroup[];
 };
 
 type ApiWorkbenchInvoiceInventory = {
@@ -251,7 +279,9 @@ type ApiWorkbenchGroup = {
   display_mode?: string | null;
   default_collapsed?: boolean | null;
   summary_row?: ApiWorkbenchRow | null;
+  row_counts?: Partial<Record<WorkbenchRecordType, number | string | null>> | null;
   collapsed_rows?: Partial<Record<WorkbenchRecordType, ApiWorkbenchRow[]>> | null;
+  collapsed_row_counts?: Partial<Record<WorkbenchRecordType, number | string | null>> | null;
   oa_rows: ApiWorkbenchRow[];
   bank_rows: ApiWorkbenchRow[];
   invoice_rows: ApiWorkbenchRow[];
@@ -650,15 +680,40 @@ function toDisplayValue(value: unknown, fallback = "--") {
   return String(value);
 }
 
-function toBankAmountDisplayValue(value: unknown, fallback = "--") {
+function toWorkbenchAmountDisplayValue(value: unknown, fallback = "--") {
   const displayValue = toDisplayValue(value, fallback);
   if (displayValue === fallback || displayValue === "--" || displayValue === "—") {
     return displayValue;
   }
-  if (!/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(displayValue)) {
+  const normalizedGrouping = displayValue.replace(/,/g, "");
+  if (!/^-?\d+(\.\d+)?$/.test(normalizedGrouping)) {
     return displayValue;
   }
-  return displayValue.replace(/,/g, "");
+  const [integerPart, decimalPart] = normalizedGrouping.split(".");
+  if (decimalPart === undefined) {
+    return integerPart;
+  }
+  const trimmedDecimal = decimalPart.replace(/0+$/, "");
+  return trimmedDecimal ? `${integerPart}.${trimmedDecimal}` : integerPart;
+}
+
+function toBankAmountDisplayValue(value: unknown, fallback = "--") {
+  return toWorkbenchAmountDisplayValue(value, fallback);
+}
+
+function toWorkbenchDateTimeDisplayValue(value: unknown, fallback = "--") {
+  const displayValue = toDisplayValue(value, fallback);
+  if (displayValue === fallback || displayValue === "--" || displayValue === "—") {
+    return displayValue;
+  }
+  const normalizedValue = displayValue.trim();
+  const isoDateTimeMatch = normalizedValue.match(
+    /^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2}(?::\d{2})?)(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/,
+  );
+  if (isoDateTimeMatch) {
+    return `${isoDateTimeMatch[1]} ${isoDateTimeMatch[2]}`;
+  }
+  return normalizedValue;
 }
 
 function firstNonPlaceholderDisplayValue(...values: unknown[]) {
@@ -824,7 +879,7 @@ function rowAmount(row: ApiWorkbenchRow) {
   if (row.type === "bank") {
     return resolveBankAmount(row);
   }
-  return toDisplayValue(row.amount);
+  return toWorkbenchAmountDisplayValue(row.amount);
 }
 
 function rowCounterparty(row: ApiWorkbenchRow) {
@@ -872,14 +927,20 @@ function mapTableValues(row: ApiWorkbenchRow): Record<string, string> {
 
   if (row.type === "oa") {
     const detailFields = row.detail_fields ?? {};
+    const summaryFields = row.summary_fields ?? {};
     return {
       applicant: toDisplayValue(row.applicant),
-      applicationTime: toDisplayValue(
-        detailFields["审批完成时间"] ?? detailFields["申请日期"] ?? detailFields["创建时间"],
+      applicationTime: toWorkbenchDateTimeDisplayValue(
+        detailFields["审批完成时间"]
+          ?? detailFields["申请日期"]
+          ?? detailFields["创建时间"]
+          ?? summaryFields["审批完成时间"]
+          ?? summaryFields["申请日期"]
+          ?? summaryFields["创建时间"],
       ),
       projectName: toDisplayValue(row.project_name_display ?? row.project_name),
       applicationType: toDisplayValue(row.apply_type),
-      amount: toDisplayValue(row.amount),
+      amount: toWorkbenchAmountDisplayValue(row.amount),
       counterparty: toDisplayValue(row.counterparty_name),
       reason: toDisplayValue(row.reason),
       reconciliationStatus: relationLabel,
@@ -890,7 +951,7 @@ function mapTableValues(row: ApiWorkbenchRow): Record<string, string> {
   if (row.type === "bank") {
     const direction = resolveBankDirection(row);
     return {
-      transactionTime: toDisplayValue(row.trade_time),
+      transactionTime: toWorkbenchDateTimeDisplayValue(row.trade_time),
       direction,
       amount: resolveBankAmount(row),
       debitAmount: toBankAmountDisplayValue(row.debit_amount),
@@ -898,31 +959,38 @@ function mapTableValues(row: ApiWorkbenchRow): Record<string, string> {
       counterparty: toDisplayValue(row.counterparty_name),
       paymentAccount: toDisplayValue(row.payment_account_label),
       invoiceRelationStatus: relationLabel,
-      paymentOrReceiptTime: toDisplayValue(row.pay_receive_time),
+      paymentOrReceiptTime: toWorkbenchDateTimeDisplayValue(row.pay_receive_time),
       note: formatBankTextFieldsForNote(row),
       loanRepaymentDate: toDisplayValue(row.repayment_date),
     };
   }
 
   const detailFields = row.detail_fields ?? {};
+  const summaryFields = row.summary_fields ?? {};
   return {
     sellerTaxId: toDisplayValue(row.seller_tax_no),
     sellerName: toDisplayValue(row.seller_name),
     buyerTaxId: toDisplayValue(row.buyer_tax_no),
     buyerName: toDisplayValue(row.buyer_name),
-    invoiceCode: toDisplayValue(firstNonPlaceholderDisplayValue(detailFields["发票代码"], row.invoice_code)),
+    invoiceCode: toDisplayValue(firstNonPlaceholderDisplayValue(detailFields["发票代码"], row.invoice_code, summaryFields["发票代码"])),
     invoiceNo: toDisplayValue(firstNonPlaceholderDisplayValue(
       detailFields["发票号码"],
       row.invoice_no,
       detailFields["数电发票号码"],
       row.digital_invoice_no,
+      summaryFields["发票号码"],
+      summaryFields["数电发票号码"],
     )),
-    digitalInvoiceNo: toDisplayValue(firstNonPlaceholderDisplayValue(detailFields["数电发票号码"], row.digital_invoice_no)),
-    issueDate: toDisplayValue(row.issue_date),
-    amount: toDisplayValue(row.amount),
+    digitalInvoiceNo: toDisplayValue(firstNonPlaceholderDisplayValue(
+      detailFields["数电发票号码"],
+      row.digital_invoice_no,
+      summaryFields["数电发票号码"],
+    )),
+    issueDate: toWorkbenchDateTimeDisplayValue(row.issue_date),
+    amount: toWorkbenchAmountDisplayValue(row.amount),
     taxRate: toDisplayValue(row.tax_rate),
-    taxAmount: toDisplayValue(row.tax_amount),
-    grossAmount: toDisplayValue(row.total_with_tax),
+    taxAmount: toWorkbenchAmountDisplayValue(row.tax_amount),
+    grossAmount: toWorkbenchAmountDisplayValue(row.total_with_tax),
     invoiceType: toDisplayValue(row.invoice_type),
   };
 }
@@ -1030,6 +1098,8 @@ function mapPaneRows(panes: Record<WorkbenchRecordType, ApiWorkbenchRow[]>): Wor
 
 function mapGroup(group: ApiWorkbenchGroup): WorkbenchCandidateGroup {
   const summaryRow = group.summary_row ? mapRow(group.summary_row) : undefined;
+  const rowCounts = mapPaneRowCounts(group.row_counts);
+  const collapsedRowCounts = mapPaneRowCounts(group.collapsed_row_counts);
   const collapsedRows = group.collapsed_rows && typeof group.collapsed_rows === "object"
     ? {
       oa: (group.collapsed_rows.oa ?? []).map(mapRow),
@@ -1055,7 +1125,9 @@ function mapGroup(group: ApiWorkbenchGroup): WorkbenchCandidateGroup {
       bank: group.bank_rows.map(mapRow),
       invoice: group.invoice_rows.map(mapRow),
     },
+    rowCounts,
     collapsedRows,
+    collapsedRowCounts,
     relationNote: toDisplayValue(group.relation_note, "") || undefined,
     amountCheck: mapRelationAmountCheck(group.amount_check),
     specialMetadata: group.special_metadata && typeof group.special_metadata === "object" ? group.special_metadata : undefined,
@@ -1065,6 +1137,20 @@ function mapGroup(group: ApiWorkbenchGroup): WorkbenchCandidateGroup {
       || groupHasNoOaWithdrawAction(group),
     ),
   };
+}
+
+function mapPaneRowCounts(counts: ApiWorkbenchGroup["row_counts"]): WorkbenchCandidateGroup["rowCounts"] | undefined {
+  if (!counts || typeof counts !== "object") {
+    return undefined;
+  }
+  const mapped: WorkbenchCandidateGroup["rowCounts"] = {};
+  (["oa", "bank", "invoice"] as WorkbenchRecordType[]).forEach((paneId) => {
+    const count = Number(counts[paneId]);
+    if (Number.isFinite(count) && count >= 0) {
+      mapped[paneId] = count;
+    }
+  });
+  return Object.keys(mapped).length > 0 ? mapped : undefined;
 }
 
 function mapAmountTotals(totals: ApiWorkbenchAmountSummary["before"] | undefined) {
@@ -1235,6 +1321,36 @@ function mapSummary(
     openCount: summary.open_count,
     exceptionCount: summary.exception_count,
     totalCount: summary.oa_count + summary.bank_count + summary.invoice_count,
+  };
+}
+
+function mapSummaryCounts(summary: ApiWorkbenchPayload["summary"]): WorkbenchSummary {
+  const oaCount = toCount(summary.oa_count);
+  const bankCount = toCount(summary.bank_count);
+  const invoiceCount = toCount(summary.invoice_count);
+  return {
+    oaCount,
+    bankCount,
+    invoiceCount,
+    pairedCount: toCount(summary.paired_count),
+    openCount: toCount(summary.open_count),
+    exceptionCount: toCount(summary.exception_count),
+    totalCount: oaCount + bankCount + invoiceCount,
+  };
+}
+
+function mapReadModelStatus(value: unknown): WorkbenchReadModelStatus {
+  return String(value ?? "fresh").trim() as WorkbenchReadModelStatus || "fresh";
+}
+
+function mapWorkbenchZonePage(payload: ApiWorkbenchGroupsPayload): WorkbenchZonePageInfo {
+  return {
+    zone: payload.zone,
+    page: toCount(payload.page) || 1,
+    pageSize: toCount(payload.page_size) || 50,
+    total: toCount(payload.total),
+    hasMore: payload.has_more === true,
+    readModelStatus: mapReadModelStatus(payload.read_model_status),
   };
 }
 
@@ -1680,10 +1796,6 @@ async function requestJsonWithByteProgress<T>(
   });
 }
 
-export async function fetchWorkbench(month: string, signal?: AbortSignal): Promise<WorkbenchData> {
-  return fetchWorkbenchWithProgress(month, signal);
-}
-
 function cleanOaSyncScopeList(value: unknown[] | undefined) {
   return Array.isArray(value)
     ? value.map((item) => String(item).trim()).filter(Boolean)
@@ -1712,6 +1824,121 @@ export async function fetchWorkbenchOaSyncStatus(signal?: AbortSignal): Promise<
         : 0,
     version: typeof payload.version === "number" ? payload.version : null,
   };
+}
+
+function workbenchGroupsUrl(
+  month: string,
+  zone: WorkbenchZoneId,
+  page: number,
+  pageSize: number,
+  query: WorkbenchGroupsPageQuery = {},
+) {
+  const params = new URLSearchParams({
+    month,
+    zone,
+    page: String(page),
+    page_size: String(pageSize),
+  });
+  const search = String(query.search ?? "").trim();
+  const status = String(query.status ?? "").trim();
+  const sourceKind = String(query.sourceKind ?? "").trim();
+  const sort = String(query.sort ?? "").trim();
+  const detailLevel = query.detailLevel === "full" ? "full" : query.detailLevel === "summary" ? "summary" : "";
+  if (search) {
+    params.set("search", search);
+  }
+  if (status) {
+    params.set("status", status);
+  }
+  if (sourceKind) {
+    params.set("source_kind", sourceKind);
+  }
+  if (sort) {
+    params.set("sort", sort);
+  }
+  if (detailLevel) {
+    params.set("detail_level", detailLevel);
+  }
+  return `/api/workbench/groups?${params.toString()}`;
+}
+
+export async function fetchWorkbenchGroupsPage(
+  month: string,
+  zone: WorkbenchZoneId,
+  page: number,
+  pageSize = 50,
+  signal?: AbortSignal,
+  query: WorkbenchGroupsPageQuery = {},
+): Promise<WorkbenchGroupsPageResult> {
+  const payload = await requestJson<ApiWorkbenchGroupsPayload>(workbenchGroupsUrl(month, zone, page, pageSize, query), {
+    method: "GET",
+    signal,
+  });
+  return {
+    zone: payload.zone,
+    groups: payload.groups.map(mapGroup),
+    page: mapWorkbenchZonePage(payload),
+  };
+}
+
+export async function fetchWorkbenchInitialPage(
+  month: string,
+  signal?: AbortSignal,
+  onProgress?: (progress: WorkbenchBootstrapProgress) => void,
+  zoneQueries: Partial<Record<WorkbenchZoneId, WorkbenchGroupsPageQuery>> = {},
+): Promise<WorkbenchInitialPageResult> {
+  onProgress?.({
+    label: "加载工作台汇总",
+    loadedBytes: 0,
+    totalBytes: 0,
+    percent: 20,
+    indeterminate: false,
+  });
+  const summary = await requestJson<ApiWorkbenchSummaryPayload>(`/api/workbench/summary?month=${month}`, {
+    method: "GET",
+    signal,
+  });
+  onProgress?.({
+    label: "加载首屏候选组",
+    loadedBytes: 0,
+    totalBytes: 0,
+    percent: 55,
+    indeterminate: false,
+  });
+  const [pairedPage, openPage] = await Promise.all([
+    fetchWorkbenchGroupsPage(month, "paired", 1, 50, signal, { ...zoneQueries.paired, detailLevel: "summary" }),
+    fetchWorkbenchGroupsPage(month, "open", 1, 50, signal, { ...zoneQueries.open, detailLevel: "summary" }),
+  ]);
+  onProgress?.({
+    label: "关联台数据已加载完成",
+    loadedBytes: 0,
+    totalBytes: 0,
+    percent: 100,
+    indeterminate: false,
+  });
+
+  return {
+    data: {
+      month: summary.month,
+      oaStatus: mapOaStatus(summary.oa_status),
+      summary: mapSummaryCounts(summary.summary),
+      invoiceInventory: mapInvoiceInventory(summary.invoice_inventory),
+      paired: {
+        groups: pairedPage.groups,
+      },
+      open: {
+        groups: openPage.groups,
+      },
+    },
+    pages: {
+      paired: pairedPage.page,
+      open: openPage.page,
+    },
+  };
+}
+
+export async function fetchWorkbench(month: string, signal?: AbortSignal): Promise<WorkbenchData> {
+  return fetchWorkbenchWithProgress(month, signal);
 }
 
 export async function fetchWorkbenchWithProgress(

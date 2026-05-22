@@ -322,16 +322,17 @@ function CandidateGroupGrid({
           }
           const collapseKey = `${group.id}:${paneId}`;
           const isExpanded = expandedCollapsedGroups.has(collapseKey);
+          const collapsedRowCount = group.collapsedRowCounts?.[paneId] ?? collapsedRows.length;
           return [
             <button
               aria-expanded={isExpanded}
-              aria-label={isExpanded ? "收起免OA批次明细" : `展开免OA批次明细，${collapsedRows.length} 条`}
+              aria-label={isExpanded ? "收起免OA批次明细" : `展开免OA批次明细，${collapsedRowCount} 条`}
               className="row-action-btn candidate-group-collapse-control"
               key={collapseKey}
               type="button"
               onClick={() => toggleCollapsedGroup(group.id, paneId)}
             >
-              {isExpanded ? "收起明细" : `展开 ${collapsedRows.length} 条明细`}
+              {isExpanded ? "收起明细" : `展开 ${collapsedRowCount} 条明细`}
             </button>,
           ];
         });

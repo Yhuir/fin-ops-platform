@@ -39,6 +39,23 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
             "dedupe_key",
             "attempts",
             "processed_at",
+            "schema_version",
+            "source_version",
+            "priority",
+            "trace_id",
+            "max_attempts",
+            "dead_lettered_at",
+            "publish_status",
+            "published_at",
+            "publish_attempt_count",
+            "publish_last_error",
+            "next_publish_at",
+            "publish_locked_by",
+            "publish_locked_at",
+            "rabbitmq_exchange",
+            "rabbitmq_routing_key",
+            "rabbitmq_message_id",
+            "publish_confirmed_at",
         )
         column_list = ", ".join(f"'{column}'" for column in columns)
         count = fetch_scalar(
@@ -111,6 +128,13 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
             """,
         )
         self.assertEqual(constraint_name, "outbox_events_status_chk")
+        migrate.run_psql(
+            self.database_url,
+            sql="""
+            insert into job.outbox_events(event_type, status)
+            values ('runtime_infrastructure_test', 'dead_lettered');
+            """,
+        )
 
         with self.assertRaises(migrate.MigrationError):
             migrate.run_psql(
@@ -153,7 +177,47 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         )
         self.assertIn("dedupe_key IS NOT NULL", predicate)
         self.assertIn("pending", predicate)
-        self.assertIn("processing", predicate)
+        self.assertNotIn("processing", predicate)
+
+    def test_outbox_envelope_view_exposes_rabbitmq_safe_fields(self) -> None:
+        event = self.runtime_queue.enqueue_read_model_refresh(
+            scope_type="workbench",
+            scope_key="all",
+            reason="integration-test",
+            priority="high",
+            trace_id="trace-integration",
+        )
+        row = self.connection.fetch_one(
+            """
+            select
+              event_id,
+              event_type,
+              scope_type,
+              scope_key,
+              source_version,
+              priority,
+              trace_id,
+              schema_version,
+              publish_status,
+              publish_attempt_count,
+              payload
+            from job.runtime_outbox_envelope_v1
+            where event_id = %s
+            """,
+            (event.event_id,),
+        )
+
+        self.assertEqual(row["event_id"], event.event_id)
+        self.assertEqual(row["event_type"], "workbench.read_model.refresh")
+        self.assertEqual(row["scope_type"], "workbench")
+        self.assertEqual(row["scope_key"], "all")
+        self.assertEqual(row["source_version"], event.source_version)
+        self.assertEqual(row["priority"], "high")
+        self.assertEqual(row["trace_id"], "trace-integration")
+        self.assertEqual(row["schema_version"], 1)
+        self.assertEqual(row["publish_status"], "unpublished")
+        self.assertEqual(row["publish_attempt_count"], 0)
+        self.assertEqual(row["payload"]["source_version"], event.source_version)
 
     def test_0009_backfills_attempts_from_preexisting_attempt_count(self) -> None:
         reset_test_database(self.database_url)
@@ -239,7 +303,7 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(row["status"], "pending")
         self.assertEqual(row["attempts"], 0)
 
-    def test_runtime_queue_duplicate_active_dedupe_key_returns_same_event(self) -> None:
+    def test_runtime_queue_duplicate_pending_dedupe_key_returns_same_event_but_processing_allows_new_version(self) -> None:
         first = self.runtime_queue.enqueue(
             tenant_id="tenant-a",
             event_type="runtime.integration.dedupe",
@@ -267,6 +331,13 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(count["count"], 1)
 
         self.assertTrue(self.runtime_queue.claim_next("worker-1", event_types=["runtime.integration.dedupe"]))
+        while_processing = self.runtime_queue.enqueue(
+            tenant_id="tenant-a",
+            event_type="runtime.integration.dedupe",
+            dedupe_key="active-duplicate",
+            payload={"while_processing": True},
+        )
+        self.assertNotEqual(while_processing.event_id, first.event_id)
         self.assertTrue(self.runtime_queue.complete(first.event_id, "worker-1"))
         after_done = self.runtime_queue.enqueue(
             tenant_id="tenant-a",

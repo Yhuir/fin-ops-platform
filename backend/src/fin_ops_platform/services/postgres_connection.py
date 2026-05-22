@@ -3,8 +3,12 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 import os
+from threading import Lock
+from time import monotonic
 from typing import Any, Iterator
 from urllib.parse import ParseResult, urlparse, urlunparse
+
+from fin_ops_platform.services.api_performance_metrics import record_database_connection_acquire, record_database_query
 
 
 class PostgresConfigurationError(RuntimeError):
@@ -16,6 +20,9 @@ class PostgresSettings:
     database_url: str
     connect_timeout_seconds: int = 5
     statement_timeout_ms: int = 10_000
+    pool_min_size: int = 1
+    pool_max_size: int = 10
+    pool_enabled: bool = True
 
     @classmethod
     def from_env(cls) -> PostgresSettings:
@@ -28,6 +35,37 @@ class PostgresSettings:
             database_url=database_url,
             connect_timeout_seconds=_positive_int_from_env("FIN_OPS_POSTGRES_CONNECT_TIMEOUT_SECONDS", 5),
             statement_timeout_ms=_positive_int_from_env("FIN_OPS_POSTGRES_STATEMENT_TIMEOUT_MS", 10_000),
+            pool_min_size=_positive_int_from_env("FIN_OPS_POSTGRES_POOL_MIN_SIZE", 1),
+            pool_max_size=_positive_int_from_env("FIN_OPS_POSTGRES_POOL_MAX_SIZE", 10),
+            pool_enabled=(os.environ.get("FIN_OPS_POSTGRES_POOL_ENABLED") or "1").strip().lower()
+            not in {"0", "false", "no", "off"},
+        )
+
+    @classmethod
+    def from_read_env(cls) -> PostgresSettings | None:
+        database_url = (os.environ.get("FIN_OPS_POSTGRES_READ_DATABASE_URL") or "").strip()
+        if not database_url:
+            return None
+        default_connect_timeout_seconds = _positive_int_from_env("FIN_OPS_POSTGRES_CONNECT_TIMEOUT_SECONDS", 5)
+        default_statement_timeout_ms = _positive_int_from_env("FIN_OPS_POSTGRES_STATEMENT_TIMEOUT_MS", 10_000)
+        default_pool_min_size = _positive_int_from_env("FIN_OPS_POSTGRES_POOL_MIN_SIZE", 1)
+        default_pool_max_size = _positive_int_from_env("FIN_OPS_POSTGRES_POOL_MAX_SIZE", 10)
+        return cls(
+            database_url=database_url,
+            connect_timeout_seconds=_positive_int_from_env(
+                "FIN_OPS_POSTGRES_READ_CONNECT_TIMEOUT_SECONDS",
+                default_connect_timeout_seconds,
+            ),
+            statement_timeout_ms=_positive_int_from_env(
+                "FIN_OPS_POSTGRES_READ_STATEMENT_TIMEOUT_MS",
+                default_statement_timeout_ms,
+            ),
+            pool_min_size=_positive_int_from_env("FIN_OPS_POSTGRES_READ_POOL_MIN_SIZE", default_pool_min_size),
+            pool_max_size=_positive_int_from_env("FIN_OPS_POSTGRES_READ_POOL_MAX_SIZE", default_pool_max_size),
+            pool_enabled=(os.environ.get("FIN_OPS_POSTGRES_READ_POOL_ENABLED") or os.environ.get("FIN_OPS_POSTGRES_POOL_ENABLED") or "1")
+            .strip()
+            .lower()
+            not in {"0", "false", "no", "off"},
         )
 
     @property
@@ -71,49 +109,120 @@ class PostgresConnection:
     def __init__(self, settings: PostgresSettings) -> None:
         self.settings = settings
         self._statement_timeout_ms_override: int | None = None
+        self._pool: Any | None = None
+        self._pool_lock = Lock()
 
     def set_statement_timeout_ms(self, value: int | None) -> None:
         if value is not None and value <= 0:
             raise ValueError("statement timeout must be positive when provided.")
         self._statement_timeout_ms_override = value
 
+    def warm_up(self) -> None:
+        if not self.settings.pool_enabled:
+            with self.connection():
+                return
+        pool = self._connection_pool()
+        wait = getattr(pool, "wait", None)
+        if callable(wait):
+            wait(timeout=self.settings.connect_timeout_seconds)
+            return
+        with self.connection():
+            return
+
     @contextmanager
     def connection(self) -> Iterator[Any]:
+        started_at = monotonic()
+        with self._pooled_or_direct_connection() as connection:
+            record_database_connection_acquire((monotonic() - started_at) * 1000)
+            self._prepare_connection(connection)
+            yield connection
+
+    def _connection_pool(self) -> Any:
+        with self._pool_lock:
+            if self._pool is None:
+                try:
+                    from psycopg.rows import dict_row
+                    from psycopg_pool import ConnectionPool
+                except ImportError as exc:  # pragma: no cover - exercised when dependency is missing in deployment.
+                    raise PostgresConfigurationError("PostgreSQL pooling requires psycopg_pool.") from exc
+                self._pool = ConnectionPool(
+                    conninfo=self.settings.database_url,
+                    min_size=self.settings.pool_min_size,
+                    max_size=max(self.settings.pool_max_size, self.settings.pool_min_size),
+                    kwargs={
+                        "connect_timeout": self.settings.connect_timeout_seconds,
+                        "row_factory": dict_row,
+                    },
+                    open=True,
+                )
+            return self._pool
+
+    @contextmanager
+    def _direct_connection(self) -> Iterator[Any]:
         try:
             import psycopg
             from psycopg.rows import dict_row
         except ImportError as exc:  # pragma: no cover - exercised when dependency is missing in deployment.
             raise PostgresConfigurationError("PostgreSQL mode requires the psycopg package.") from exc
-
         with psycopg.connect(
             self.settings.database_url,
             connect_timeout=self.settings.connect_timeout_seconds,
             row_factory=dict_row,
         ) as connection:
-            connection.autocommit = True
-            with connection.cursor() as cursor:
-                timeout_ms = self._statement_timeout_ms_override or self.settings.statement_timeout_ms
-                cursor.execute("select set_config('statement_timeout', %s, false)", (str(timeout_ms),))
-            connection.autocommit = False
             yield connection
+
+    @contextmanager
+    def _pooled_or_direct_connection(self) -> Iterator[Any]:
+        if not self.settings.pool_enabled:
+            with self._direct_connection() as connection:
+                yield connection
+            return
+        try:
+            pool = self._connection_pool()
+        except PostgresConfigurationError:
+            with self._direct_connection() as connection:
+                yield connection
+            return
+        with pool.connection() as connection:
+            yield connection
+
+    def _prepare_connection(self, connection: Any) -> None:
+        connection.autocommit = True
+        with connection.cursor() as cursor:
+            timeout_ms = self._statement_timeout_ms_override or self.settings.statement_timeout_ms
+            cursor.execute("select set_config('statement_timeout', %s, false)", (str(timeout_ms),))
+        connection.autocommit = False
 
     def fetch_one(self, sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
         with self.connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute(sql, params)
-                row = cursor.fetchone()
+                started_at = monotonic()
+                try:
+                    cursor.execute(sql, params)
+                    row = cursor.fetchone()
+                finally:
+                    record_database_query((monotonic() - started_at) * 1000)
                 return dict(row) if row is not None else None
 
     def fetch_all(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         with self.connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute(sql, params)
-                return [dict(row) for row in cursor.fetchall()]
+                started_at = monotonic()
+                try:
+                    cursor.execute(sql, params)
+                    rows = cursor.fetchall()
+                finally:
+                    record_database_query((monotonic() - started_at) * 1000)
+                return [dict(row) for row in rows]
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> int:
         with self.connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute(sql, params)
+                started_at = monotonic()
+                try:
+                    cursor.execute(sql, params)
+                finally:
+                    record_database_query((monotonic() - started_at) * 1000)
                 return int(cursor.rowcount or 0)
 
     @contextmanager
@@ -153,21 +262,38 @@ class PostgresTransaction:
 
     def fetch_one(self, sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
         with self._connection.cursor() as cursor:
-            cursor.execute(sql, params)
-            row = cursor.fetchone()
+            started_at = monotonic()
+            try:
+                cursor.execute(sql, params)
+                row = cursor.fetchone()
+            finally:
+                record_database_query((monotonic() - started_at) * 1000)
             return dict(row) if row is not None else None
 
     def fetch_all(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         with self._connection.cursor() as cursor:
-            cursor.execute(sql, params)
-            return [dict(row) for row in cursor.fetchall()]
+            started_at = monotonic()
+            try:
+                cursor.execute(sql, params)
+                rows = cursor.fetchall()
+            finally:
+                record_database_query((monotonic() - started_at) * 1000)
+            return [dict(row) for row in rows]
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> int:
         with self._connection.cursor() as cursor:
-            cursor.execute(sql, params)
+            started_at = monotonic()
+            try:
+                cursor.execute(sql, params)
+            finally:
+                record_database_query((monotonic() - started_at) * 1000)
             return int(cursor.rowcount or 0)
 
     def execute_many(self, sql: str, params_seq: list[tuple[Any, ...]]) -> int:
         with self._connection.cursor() as cursor:
-            cursor.executemany(sql, params_seq)
+            started_at = monotonic()
+            try:
+                cursor.executemany(sql, params_seq)
+            finally:
+                record_database_query((monotonic() - started_at) * 1000)
             return int(cursor.rowcount or 0)

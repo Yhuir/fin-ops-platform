@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -17,6 +18,7 @@ from urllib.parse import parse_qsl, quote, unquote, urlsplit, urlunsplit
 
 MIGRATION_FILENAME_RE = re.compile(r"^(?P<version>\d{4})_(?P<name>[a-z0-9_]+)\.sql$")
 MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
+ACCEPTED_CHECKSUM_DRIFTS_PATH = Path(__file__).resolve().parent / "accepted_checksum_drifts.json"
 SCHEMA_MIGRATIONS_TABLE = "public.schema_migrations"
 
 
@@ -37,6 +39,16 @@ class AppliedMigration:
     version: str
     name: str
     checksum_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptedChecksumDrift:
+    version: str
+    name: str
+    applied_checksum_sha256: str
+    current_checksum_sha256: str
+    accepted_at: str
+    reason: str
 
 
 def redact_database_url(database_url: str) -> str:
@@ -85,10 +97,54 @@ def discover_migrations(migrations_dir: Path = MIGRATIONS_DIR) -> list[Migration
 
 
 def database_url_from_env_or_arg(database_url: str | None) -> str:
-    resolved = database_url or os.getenv("DATABASE_URL")
+    resolved = database_url or os.getenv("DATABASE_URL") or os.getenv("FIN_OPS_POSTGRES_DATABASE_URL")
     if not resolved:
         raise MigrationError("PostgreSQL connection is required. Set DATABASE_URL or pass --database-url.")
     return resolved
+
+
+def load_accepted_checksum_drifts(path: Path = ACCEPTED_CHECKSUM_DRIFTS_PATH) -> dict[str, AcceptedChecksumDrift]:
+    if not path.exists():
+        return {}
+    try:
+        raw_entries = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise MigrationError(f"Invalid accepted checksum drift registry: {path}") from exc
+    if not isinstance(raw_entries, list):
+        raise MigrationError(f"Accepted checksum drift registry must be a list: {path}")
+    entries: dict[str, AcceptedChecksumDrift] = {}
+    for raw in raw_entries:
+        if not isinstance(raw, dict):
+            raise MigrationError(f"Accepted checksum drift entry must be an object: {path}")
+        entry = AcceptedChecksumDrift(
+            version=str(raw.get("version") or ""),
+            name=str(raw.get("name") or ""),
+            applied_checksum_sha256=str(raw.get("applied_checksum_sha256") or ""),
+            current_checksum_sha256=str(raw.get("current_checksum_sha256") or ""),
+            accepted_at=str(raw.get("accepted_at") or ""),
+            reason=str(raw.get("reason") or ""),
+        )
+        if not MIGRATION_FILENAME_RE.match(f"{entry.version}_{entry.name}.sql"):
+            raise MigrationError(f"Invalid accepted checksum drift entry: {entry.version} {entry.name}")
+        for value in (entry.applied_checksum_sha256, entry.current_checksum_sha256):
+            if not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise MigrationError(f"Invalid checksum in accepted drift entry: {entry.version}")
+        if not entry.accepted_at or not entry.reason:
+            raise MigrationError(f"Accepted checksum drift entry requires accepted_at and reason: {entry.version}")
+        if entry.version in entries:
+            raise MigrationError(f"Duplicate accepted checksum drift entry: {entry.version}")
+        entries[entry.version] = entry
+    return entries
+
+
+def is_accepted_checksum_drift(migration: Migration, applied: AppliedMigration, accepted: dict[str, AcceptedChecksumDrift]) -> bool:
+    entry = accepted.get(migration.version)
+    return (
+        entry is not None
+        and entry.name == migration.name
+        and entry.applied_checksum_sha256 == applied.checksum_sha256
+        and entry.current_checksum_sha256 == migration.checksum_sha256
+    )
 
 
 def _psql_path() -> str:
@@ -184,10 +240,17 @@ order by version;
 def format_plan(migrations: Sequence[Migration], applied: dict[str, AppliedMigration] | None = None) -> list[str]:
     lines: list[str] = []
     applied = applied or {}
+    accepted = load_accepted_checksum_drifts()
     for migration in migrations:
         state = "pending"
         if migration.version in applied:
-            state = "applied" if applied[migration.version].checksum_sha256 == migration.checksum_sha256 else "checksum-mismatch"
+            applied_migration = applied[migration.version]
+            if applied_migration.checksum_sha256 == migration.checksum_sha256:
+                state = "applied"
+            elif is_accepted_checksum_drift(migration, applied_migration, accepted):
+                state = "accepted-checksum-drift"
+            else:
+                state = "checksum-mismatch"
         lines.append(f"{migration.version} {state} {migration.name} {migration.checksum_sha256}")
     return lines
 
@@ -207,6 +270,9 @@ commit;
 
 
 def ensure_metadata_table(database_url: str) -> None:
+    exists_sql = "select case when to_regclass('public.schema_migrations') is null then '' else 'exists' end;"
+    if run_psql(database_url, sql=exists_sql) == "exists":
+        return
     run_psql(
         database_url,
         sql="""
@@ -226,10 +292,14 @@ def apply_migrations(database_url: str, migrations: Sequence[Migration], stdout:
     assert_safe_target(database_url)
     ensure_metadata_table(database_url)
     applied = fetch_applied_migrations(database_url)
+    accepted = load_accepted_checksum_drifts()
     for migration in migrations:
         existing = applied.get(migration.version)
         if existing is not None:
             if existing.checksum_sha256 != migration.checksum_sha256:
+                if is_accepted_checksum_drift(migration, existing, accepted):
+                    print(f"{migration.version} skipped-accepted-checksum-drift {migration.name}", file=stdout)
+                    continue
                 raise MigrationError(f"Applied migration checksum mismatch: {migration.version}")
             print(f"{migration.version} skipped {migration.name}", file=stdout)
             continue

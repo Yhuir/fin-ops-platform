@@ -44,6 +44,8 @@ class RuntimeRedisHelper:
         self._client = client
         self._key_prefix = key_prefix.strip(":")
         self._wakeup_channel = wakeup_channel
+        self._hit_count = 0
+        self._miss_count = 0
 
     @property
     def enabled(self) -> bool:
@@ -78,15 +80,26 @@ class RuntimeRedisHelper:
         try:
             self._client.ping()
         except Exception as exc:  # pragma: no cover - concrete exception type comes from optional redis package.
-            return {"redis_status": "error", "redis_error": str(exc)}
-        return {"redis_status": "ready"}
+            return {
+                "redis_status": "error",
+                "redis_error": str(exc),
+                "redis_hit_count": self._hit_count,
+                "redis_miss_count": self._miss_count,
+            }
+        return {
+            "redis_status": "ready",
+            "redis_hit_count": self._hit_count,
+            "redis_miss_count": self._miss_count,
+        }
 
     def get_json(self, key: str) -> dict[str, Any] | None:
         if self._client is None:
             return None
         raw = self._client.get(self._key(key))
         if raw is None:
+            self._miss_count += 1
             return None
+        self._hit_count += 1
         if isinstance(raw, bytes):
             raw = raw.decode("utf-8")
         payload = json.loads(str(raw))
@@ -101,6 +114,25 @@ class RuntimeRedisHelper:
             return False
         encoded = json.dumps(value, ensure_ascii=False, sort_keys=True)
         return bool(self._client.set(self._key(key), encoded, ex=ttl_seconds))
+
+    def get_text(self, key: str) -> str | None:
+        if self._client is None:
+            return None
+        raw = self._client.get(self._key(key))
+        if raw is None:
+            self._miss_count += 1
+            return None
+        self._hit_count += 1
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+        return str(raw)
+
+    def set_text(self, key: str, value: str, *, ttl_seconds: int) -> bool:
+        if ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be positive.")
+        if self._client is None:
+            return False
+        return bool(self._client.set(self._key(key), str(value), ex=ttl_seconds))
 
     def delete(self, key: str) -> bool:
         if self._client is None:

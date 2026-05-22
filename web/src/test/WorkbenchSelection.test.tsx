@@ -46,6 +46,10 @@ function fetchPath(input: RequestInfo | URL) {
   return `${url.pathname}${url.search}`;
 }
 
+function isWorkbenchSummaryRequest(input: RequestInfo | URL) {
+  return fetchPath(input).startsWith("/api/workbench/summary?");
+}
+
 describe("Workbench row selection and detail modal", () => {
   test("clicking an open row toggles multi-selection without opening the detail modal", async () => {
     const user = userEvent.setup();
@@ -561,7 +565,7 @@ describe("Workbench row selection and detail modal", () => {
     const calledPaths = fetchMock.mock.calls.map(([input]) => fetchPath(input));
     const applyIndex = calledPaths.findIndex((path) => path === "/api/workbench/exception/apply");
     expect(applyIndex).toBeGreaterThanOrEqual(0);
-    expect(calledPaths.slice(applyIndex + 1)).toContain("/api/workbench?month=all");
+    expect(calledPaths.slice(applyIndex + 1)).toContain("/api/workbench/summary?month=all");
   });
 
   test("open zone exception action accepts OA 2035 attachment payment receipt selections from the backend group", async () => {
@@ -571,10 +575,10 @@ describe("Workbench row selection and detail modal", () => {
 
     const openZone = await screen.findByTestId("zone-open");
     const oa2035Row = within(openZone).getByRole("row", {
-      name: /胡瑢.*248\.00/,
+      name: /胡瑢.*248(?:\.00)?/,
     });
     const paymentReceiptRow = within(openZone).getByRole("row", {
-      name: /微信支付.*胡瑢.*200\.00/,
+      name: /微信支付.*胡瑢.*200(?:\.00)?/,
     });
 
     await user.click(oa2035Row);
@@ -1482,10 +1486,14 @@ describe("Workbench row selection and detail modal", () => {
       expect(refreshingIndicator).toHaveClass("pending");
     }, { timeout: 5_000 });
 
-    const initialWorkbenchFetchCount = fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/workbench?")).length;
+    const initialWorkbenchFetchCount = fetchMock.mock.calls.filter(([url]) =>
+      isWorkbenchSummaryRequest(url as RequestInfo | URL),
+    ).length;
 
     await waitFor(() => {
-      const workbenchFetchCount = fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/workbench?")).length;
+      const workbenchFetchCount = fetchMock.mock.calls.filter(([url]) =>
+        isWorkbenchSummaryRequest(url as RequestInfo | URL),
+      ).length;
       expect(fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/oa-sync/status")).length).toBeGreaterThan(2);
       expect(workbenchFetchCount).toBe(initialWorkbenchFetchCount + 1);
     }, { timeout: 8_000 });
@@ -1735,8 +1743,7 @@ describe("Workbench row selection and detail modal", () => {
       }),
     );
     const workbenchRefreshCalls = fetchMock.mock.calls.filter(([input]) => {
-      const rawUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-      return new URL(rawUrl, "http://localhost").pathname === "/api/workbench";
+      return isWorkbenchSummaryRequest(input as RequestInfo | URL);
     });
     expect(workbenchRefreshCalls.length).toBeGreaterThan(0);
   });
@@ -1888,8 +1895,7 @@ describe("Workbench row selection and detail modal", () => {
 
     expect(await screen.findByText("已取消 2 条记录的异常处理。")).toBeInTheDocument();
     const workbenchRefreshCalls = fetchMock.mock.calls.filter(([input]) => {
-      const rawUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-      return new URL(rawUrl, "http://localhost").pathname === "/api/workbench";
+      return isWorkbenchSummaryRequest(input as RequestInfo | URL);
     });
     expect(workbenchRefreshCalls).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "确定" }));

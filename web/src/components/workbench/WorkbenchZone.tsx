@@ -17,6 +17,7 @@ import type {
   WorkbenchColumnLayouts,
   WorkbenchInvoiceInventory,
   WorkbenchRecord,
+  WorkbenchZonePageInfo,
 } from "../../features/workbench/types";
 import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import type { WorkbenchInlineAction } from "./RowActions";
@@ -63,6 +64,9 @@ type WorkbenchZoneProps = {
   primarySelectionActionDisabled?: boolean;
   secondarySelectionActionDisabled?: boolean;
   tertiarySelectionActionDisabled?: boolean;
+  pageInfo?: WorkbenchZonePageInfo;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
   auxiliaryHeaderActions?: Array<{
     label: string;
     onClick: () => void;
@@ -123,6 +127,9 @@ function WorkbenchZone({
   primarySelectionActionDisabled,
   secondarySelectionActionDisabled,
   tertiarySelectionActionDisabled,
+  pageInfo,
+  loadingMore = false,
+  onLoadMore,
   auxiliaryHeaderActions,
   onTogglePaneSearch,
   onClosePaneSearch,
@@ -319,6 +326,24 @@ function WorkbenchZone({
         onStartDrag={startDrag}
         zoneId={zoneId}
       />
+      {pageInfo ? (
+        <div className="zone-page-footer">
+          <span>
+            已加载 {groups?.length ?? 0} / {pageInfo.total}
+          </span>
+          {pageInfo.hasMore ? (
+            <Button
+              className="zone-load-more-btn"
+              disabled={loadingMore}
+              size="small"
+              variant="outlined"
+              onClick={onLoadMore}
+            >
+              {loadingMore ? "加载中" : "加载更多"}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }

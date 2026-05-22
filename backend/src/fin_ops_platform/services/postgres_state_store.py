@@ -105,11 +105,13 @@ class PostgresStateStore:
         *,
         data_dir: Path,
         connection: Any,
+        sql_read_connection: Any | None = None,
         legacy_file_reader: Any | None = None,
         object_storage_repository: ObjectStorageRepository | None = None,
     ) -> None:
         self._data_dir = Path(data_dir)
         self._connection = connection
+        self._sql_read_connection = sql_read_connection or connection
         self._object_storage_repository = object_storage_repository
         self._object_storage_backend = str(getattr(object_storage_repository, "backend", "minio")) if object_storage_repository is not None else None
         self._object_storage_bucket = str(getattr(object_storage_repository, "bucket", "")) if object_storage_repository is not None else None
@@ -124,6 +126,7 @@ class PostgresStateStore:
         self._oa_projection_repository = PostgresOAProjectionRepository(connection)
         self._ops_tax_etc_repository = PostgresOpsTaxEtcRepository(connection)
         self._read_model_repository = PostgresReadModelRepository(connection)
+        self._sql_read_model_repository = PostgresReadModelRepository(self._sql_read_connection)
         self._workbench_repository = PostgresWorkbenchRepository(connection)
         self._file_root = self._data_dir / "postgres_files"
         if self._object_storage_repository is None:
@@ -619,23 +622,23 @@ class PostgresStateStore:
 
     @property
     def workbench_sql_read_repository(self) -> PostgresReadModelRepository:
-        return self._read_model_repository
+        return self._sql_read_model_repository
 
     @property
     def cost_statistics_sql_read_repository(self) -> PostgresReadModelRepository:
-        return self._read_model_repository
+        return self._sql_read_model_repository
 
     @property
     def tax_offset_sql_read_repository(self) -> PostgresReadModelRepository:
-        return self._read_model_repository
+        return self._sql_read_model_repository
 
     @property
     def search_sql_read_repository(self) -> PostgresReadModelRepository:
-        return self._read_model_repository
+        return self._sql_read_model_repository
 
     @property
     def pending_invoice_sql_read_repository(self) -> PostgresReadModelRepository:
-        return self._read_model_repository
+        return self._sql_read_model_repository
 
     def list_invoices_page(self, **kwargs: Any) -> tuple[list[Any], int]:
         return self._core_repository.list_invoices_page(**kwargs)

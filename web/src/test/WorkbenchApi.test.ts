@@ -1,8 +1,15 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { applyWorkbenchException, fetchWorkbench, previewWorkbenchException } from "../features/workbench/api";
+import {
+  applyWorkbenchException,
+  fetchWorkbench,
+  fetchWorkbenchGroupsPage,
+  fetchWorkbenchInitialPage,
+  previewWorkbenchException,
+} from "../features/workbench/api";
 import {
   buildWorkbenchDisplayGroups,
+  countWorkbenchGroupRows,
   createEmptyWorkbenchZoneDisplayState,
   workbenchRowMatchesUnifiedSearch,
 } from "../features/workbench/groupDisplayModel";
@@ -128,6 +135,212 @@ describe("workbench api bank amount mapping", () => {
     expect(payload.open.groups[0].canWithdraw).toBe(false);
   });
 
+  test("loads initial workbench page from summary and zone group endpoints", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.startsWith("/api/workbench/summary")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              month: "all",
+              summary: {
+                oa_count: 1,
+                bank_count: 1,
+                invoice_count: 0,
+                paired_count: 1,
+                open_count: 1,
+                exception_count: 0,
+              },
+              oa_status: { code: "ready", message: "OA 已同步" },
+              invoice_inventory: {
+                system_total: 9,
+                manual_import_total: 7,
+                workbench_visible_total: 4,
+                hidden_submitted_etc_total: 2,
+                extra_etc_total: 1,
+                etc_summary_batch_count: 3,
+                oa_attachment_total: 5,
+              },
+              read_model_status: "fresh",
+              generated_at: "2026-05-22T09:30:00+00:00",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      }
+      if (url.includes("zone=paired")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              month: "all",
+              zone: "paired",
+              page: 1,
+              page_size: 50,
+              total: 1,
+              has_more: false,
+              groups: [
+                {
+                  group_id: "case:paired",
+                  group_type: "manual_confirmed",
+                  match_confidence: "high",
+                  reason: "已确认",
+                  oa_rows: [],
+                  bank_rows: [{ id: "bank-paired", type: "bank", available_actions: ["detail"] }],
+                  invoice_rows: [],
+                },
+              ],
+              read_model_status: "fresh",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      }
+      if (url.includes("zone=open")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              month: "all",
+              zone: "open",
+              page: 1,
+              page_size: 50,
+              total: 1,
+              has_more: false,
+              groups: [
+                {
+                  group_id: "case:open",
+                  group_type: "candidate",
+                  match_confidence: "medium",
+                  reason: "候选",
+                  oa_rows: [{ id: "oa-open", type: "oa", available_actions: ["detail"] }],
+                  bank_rows: [],
+                  invoice_rows: [],
+                },
+              ],
+              read_model_status: "fresh",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      }
+      return Promise.reject(new Error(`unexpected url ${url}`));
+    });
+
+    const result = await fetchWorkbenchInitialPage("all");
+
+    expect(result.data.summary.pairedCount).toBe(1);
+    expect(result.data.paired.groups[0].id).toBe("case:paired");
+    expect(result.data.open.groups[0].id).toBe("case:open");
+    expect(result.data.invoiceInventory.systemTotal).toBe(9);
+    expect(result.data.invoiceInventory.oaAttachmentTotal).toBe(5);
+    expect(result.data.oaStatus.message).toBe("OA 已同步");
+    expect(result.pages.open.hasMore).toBe(false);
+    expect(fetchSpy.mock.calls.some(([input]) => String(input).startsWith("/api/workbench?"))).toBe(false);
+    expect(fetchSpy.mock.calls.filter(([input]) => String(input).includes("detail_level=summary"))).toHaveLength(2);
+  });
+
+  test("serializes workbench group page SQL query controls", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "all",
+          zone: "open",
+          page: 2,
+          page_size: 25,
+          total: 0,
+          has_more: false,
+          groups: [],
+          read_model_status: "fresh",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await fetchWorkbenchGroupsPage("all", "open", 2, 25, undefined, {
+      search: "供应商A",
+      status: "open",
+      sourceKind: "bank_transaction",
+      sort: "bank:desc",
+      detailLevel: "summary",
+    });
+
+    const url = new URL(String(fetchSpy.mock.calls[0][0]), "http://localhost");
+    expect(url.pathname).toBe("/api/workbench/groups");
+    expect(url.searchParams.get("month")).toBe("all");
+    expect(url.searchParams.get("zone")).toBe("open");
+    expect(url.searchParams.get("page")).toBe("2");
+    expect(url.searchParams.get("page_size")).toBe("25");
+    expect(url.searchParams.get("search")).toBe("供应商A");
+    expect(url.searchParams.get("status")).toBe("open");
+    expect(url.searchParams.get("source_kind")).toBe("bank_transaction");
+    expect(url.searchParams.get("sort")).toBe("bank:desc");
+    expect(url.searchParams.get("detail_level")).toBe("summary");
+  });
+
+  test("maps summary workbench rows without requiring heavy detail fields", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "2026-03",
+          summary: {
+            oa_count: 1,
+            bank_count: 0,
+            invoice_count: 1,
+            paired_count: 0,
+            open_count: 2,
+            exception_count: 0,
+          },
+          paired: { groups: [] },
+          open: {
+            groups: [
+              {
+                group_id: "case:summary-rows",
+                group_type: "candidate",
+                match_confidence: "medium",
+                reason: "summary rows",
+                oa_rows: [
+                  {
+                    id: "oa-summary",
+                    type: "oa",
+                    applicant: "张三",
+                    project_name: "摘要项目",
+                    apply_type: "费用报销",
+                    amount: "100.00",
+                    counterparty_name: "供应商A",
+                    reason: "差旅费",
+                    summary_fields: { "申请日期": "2026-03-01T08:30:00+08:00" },
+                    available_actions: ["detail"],
+                  },
+                ],
+                bank_rows: [],
+                invoice_rows: [
+                  {
+                    id: "invoice-summary",
+                    type: "invoice",
+                    seller_name: "供应商A",
+                    buyer_name: "杭州溯源科技有限公司",
+                    issue_date: "2026-03-02",
+                    amount: "100.00",
+                    total_with_tax: "106.00",
+                    summary_fields: { "发票代码": "044001", "发票号码": "12345678" },
+                    available_actions: ["detail"],
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const payload = await fetchWorkbench("2026-03");
+    const group = payload.open.groups[0];
+
+    expect(group.rows.oa[0].tableValues.applicationTime).toBe("2026-03-01 08:30:00");
+    expect(group.rows.invoice[0].tableValues.invoiceCode).toBe("044001");
+    expect(group.rows.invoice[0].tableValues.invoiceNo).toBe("12345678");
+  });
+
   test("normalizes bank row amounts without grouping separators for display search", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
@@ -178,10 +391,81 @@ describe("workbench api bank amount mapping", () => {
     const group = payload.open.groups[0];
     const bankRow = group.rows.bank[0];
 
-    expect(bankRow.amount).toBe("19370.00");
-    expect(bankRow.tableValues.amount).toBe("19370.00");
-    expect(bankRow.tableValues.debitAmount).toBe("19370.00");
-    expect(workbenchRowMatchesUnifiedSearch(bankRow, "19370.00")).toBe(true);
+    expect(bankRow.amount).toBe("19370");
+    expect(bankRow.tableValues.amount).toBe("19370");
+    expect(bankRow.tableValues.debitAmount).toBe("19370");
+    expect(workbenchRowMatchesUnifiedSearch(bankRow, "19370")).toBe(true);
+  });
+
+  test("normalizes workbench bank timestamps and numeric-scale amounts for display", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "2026-04",
+          summary: {
+            oa_count: 0,
+            bank_count: 2,
+            invoice_count: 0,
+            paired_count: 0,
+            open_count: 2,
+            exception_count: 0,
+          },
+          paired: { groups: [] },
+          open: {
+            groups: [
+              {
+                group_id: "case:scaled-bank-amounts",
+                group_type: "candidate",
+                match_confidence: "medium",
+                reason: "numeric scale display",
+                oa_rows: [],
+                bank_rows: [
+                  {
+                    id: "bank-scale-1",
+                    type: "bank",
+                    trade_time: "2026-04-23T17:33:56+08:00",
+                    pay_receive_time: "2026-04-23T17:33:56+08:00",
+                    direction: "支出",
+                    debit_amount: "1.000000",
+                    credit_amount: "",
+                    counterparty_name: "云南溯源科技有限公司",
+                    payment_account_label: "建行 8106",
+                    invoice_relation: { code: "no_oa_bank_batch", label: "免OA批量处理", tone: "success" },
+                    available_actions: ["detail"],
+                  },
+                  {
+                    id: "bank-scale-2",
+                    type: "bank",
+                    trade_time: "2026-04-23T17:22:27+08:00",
+                    pay_receive_time: "2026-04-23T17:22:27+08:00",
+                    direction: "支出",
+                    debit_amount: "4.500000",
+                    credit_amount: "",
+                    counterparty_name: "云南溯源科技有限公司",
+                    payment_account_label: "建行 8106",
+                    invoice_relation: { code: "no_oa_bank_batch", label: "免OA批量处理", tone: "success" },
+                    available_actions: ["detail"],
+                  },
+                ],
+                invoice_rows: [],
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const payload = await fetchWorkbench("2026-04");
+    const bankRows = payload.open.groups[0].rows.bank;
+
+    expect(bankRows[0].amount).toBe("1");
+    expect(bankRows[0].tableValues.amount).toBe("1");
+    expect(bankRows[0].tableValues.transactionTime).toBe("2026-04-23 17:33:56");
+    expect(bankRows[0].tableValues.paymentOrReceiptTime).toBe("2026-04-23 17:33:56");
+    expect(bankRows[1].amount).toBe("4.5");
+    expect(bankRows[1].tableValues.amount).toBe("4.5");
+    expect(bankRows[1].tableValues.transactionTime).toBe("2026-04-23 17:22:27");
   });
 
   test("maps batch accounting relation note and amount check fields", async () => {
@@ -720,8 +1004,8 @@ describe("workbench api bank amount mapping", () => {
     const payload = await fetchWorkbench("2026-03");
     const bankRow = payload.open.groups[0].rows.bank[0];
 
-    expect(bankRow.tableValues.amount).toBe("6000.00");
-    expect(bankRow.amount).toBe("6000.00");
+    expect(bankRow.tableValues.amount).toBe("6000");
+    expect(bankRow.amount).toBe("6000");
     expect(bankRow.tableValues.direction).toBe("收入");
     expect((bankRow as any).categoryCode).toBe("borrow_in_company_pending_repayment");
     expect((bankRow as any).categoryLabel).toBe("公司暂借款：待还款");
@@ -1511,6 +1795,52 @@ describe("workbench api bank amount mapping", () => {
     const state = createEmptyWorkbenchZoneDisplayState();
 
     expect(buildWorkbenchDisplayGroups(groups, state)).toBe(groups);
+  });
+});
+
+describe("workbench groups summary contract", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test("uses server row counts when summary pages only include preview rows", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "all",
+          zone: "paired",
+          page: 1,
+          page_size: 50,
+          total: 1,
+          has_more: false,
+          groups: [
+            {
+              group_id: "case-summary",
+              group_type: "candidate",
+              match_confidence: "medium",
+              reason: "summary preview",
+              row_counts: { oa: 5, bank: 0, invoice: 2 },
+              collapsed_row_counts: { bank: 8 },
+              oa_rows: [{ id: "oa-preview", type: "oa", available_actions: ["detail"] }],
+              bank_rows: [],
+              invoice_rows: [{ id: "invoice-preview", type: "invoice", available_actions: ["detail"] }],
+              collapsed_rows: {
+                bank: [{ id: "bank-preview", type: "bank", available_actions: ["detail"] }],
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await fetchWorkbenchGroupsPage("all", "paired", 1, 50, undefined, { detailLevel: "summary" });
+    const group = result.groups[0];
+
+    expect(group.rowCounts).toEqual({ oa: 5, bank: 0, invoice: 2 });
+    expect(group.collapsedRowCounts).toEqual({ bank: 8 });
+    expect(group.rows.oa).toHaveLength(1);
+    expect(countWorkbenchGroupRows(group)).toBe(15);
   });
 });
 

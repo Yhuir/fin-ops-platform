@@ -155,10 +155,12 @@ if mode in {"--all", "--require-backend"}:
         fail(f"Backend health check failed: {exc}")
 
     try:
-        workbench = http_json(f"{base_url}/api/workbench?month=all", timeout=15)
-        summary = workbench.get("summary") or {}
-        open_groups = ((workbench.get("open") or {}).get("groups") or [])
-        paired_groups = ((workbench.get("paired") or {}).get("groups") or [])
+        workbench_summary = http_json(f"{base_url}/api/workbench/summary?month=all", timeout=15)
+        summary = workbench_summary.get("summary") or {}
+        paired_page = http_json(f"{base_url}/api/workbench/groups?month=all&zone=paired&page=1&page_size=5", timeout=15)
+        open_page = http_json(f"{base_url}/api/workbench/groups?month=all&zone=open&page=1&page_size=5", timeout=15)
+        open_groups = open_page.get("groups") or []
+        paired_groups = paired_page.get("groups") or []
         total_count = int(
             summary.get("totalCount")
             or summary.get("total_count")
@@ -171,11 +173,19 @@ if mode in {"--all", "--require-backend"}:
         )
         visible_groups = len(open_groups) + len(paired_groups)
         if total_count <= 0 and visible_groups <= 0:
-            fail("Workbench API returned an empty read model for month=all.")
+            fail("Workbench summary/groups API returned an empty read model for month=all.")
         else:
-            ok(f"Workbench API ready (total={total_count}, groups={visible_groups})")
+            ok(
+                "Workbench summary/groups API ready "
+                f"(total={total_count}, first_page_groups={visible_groups}, "
+                f"open_total={open_page.get('total')}, paired_total={paired_page.get('total')})"
+            )
     except Exception as exc:  # noqa: BLE001
-        fail(f"Workbench API check failed: {exc}")
+        fail(
+            "Workbench summary/groups API check failed. "
+            "Verify that scripts/start-backend.sh is running fin_ops_platform.app.main on FIN_OPS_BACKEND_PORT, "
+            f"not a legacy ASGI stub: {exc}"
+        )
 
 
 if errors:

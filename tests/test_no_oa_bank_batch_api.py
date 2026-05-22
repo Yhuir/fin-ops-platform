@@ -80,6 +80,34 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertFalse(payload["batches"][0]["can_withdraw"])
         self.assertEqual(payload["batches"][0]["blocked_reason"], "")
 
+    def test_list_uses_fact_repository_when_runtime_starts_without_transaction_snapshot(self) -> None:
+        class FactRepository:
+            def list_bank_transactions_page(self, *, page: int, page_size: int, **_filters):
+                rows = [bank_transaction("bank-202603-fee-1", amount="3.00")]
+                return (rows, len(rows)) if page == 1 else ([], len(rows))
+
+        class CategoryProvider:
+            def bulk_get_for_rows(self, rows):
+                return {
+                    str(row.get("id")): {
+                        "transaction_id": str(row.get("id")),
+                        "category_code": "fee",
+                        "category_label": "手续费",
+                        "category_source": "manual",
+                    }
+                    for row in rows
+                }
+
+        app = build_application()
+        app._import_service = ImportNormalizationService(fact_repository=FactRepository())
+        app._bank_transaction_effective_category_provider = CategoryProvider()
+
+        payload = self._list_batches(app)
+
+        self.assertEqual(payload["summary"]["total"], 1)
+        self.assertEqual(payload["batches"][0]["row_ids"], ["bank-202603-fee-1"])
+        self.assertEqual(payload["batches"][0]["total_amount"], "3.00")
+
     def test_list_summary_always_returns_managed_no_oa_categories(self) -> None:
         app = self._app_with_transactions(
             [

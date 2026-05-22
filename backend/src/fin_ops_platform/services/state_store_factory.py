@@ -147,13 +147,27 @@ def _build_postgres_store(data_dir: Path) -> Any:
 
     object_storage_settings = ObjectStorageSettings.from_env()
     object_storage_repository = S3ObjectStorageRepository(object_storage_settings) if object_storage_settings.enabled else None
+    connection = PostgresConnection(PostgresSettings.from_env())
+    _warm_up_postgres_connection(connection)
+    read_settings = PostgresSettings.from_read_env()
+    sql_read_connection = PostgresConnection(read_settings) if read_settings is not None else None
+    if sql_read_connection is not None:
+        _warm_up_postgres_connection(sql_read_connection)
     kwargs: dict[str, Any] = {
         "data_dir": data_dir,
-        "connection": PostgresConnection(PostgresSettings.from_env()),
+        "connection": connection,
     }
+    if sql_read_connection is not None:
+        kwargs["sql_read_connection"] = sql_read_connection
     if object_storage_repository is not None:
         kwargs["object_storage_repository"] = object_storage_repository
     return PostgresStateStore(**kwargs)
+
+
+def _warm_up_postgres_connection(connection: Any) -> None:
+    warm_up = getattr(connection, "warm_up", None)
+    if callable(warm_up):
+        warm_up()
 
 
 def _required_preflight_backend(env_name: str) -> str:

@@ -48,7 +48,7 @@ backend/src/fin_ops_platform/
 - 导入事实读取必须优先走 PostgreSQL `import_fact_repository`；发票、银行流水、批次和导入文件列表不得在生产 API path 通过 `imports` snapshot 全量加载后分页。
 - 工作台读取必须优先走 PostgreSQL `read_model.workbench_snapshots` / `read_model.workbench_rows` / `read_model.workbench_candidate_matches`；`/api/workbench` 不得在生产请求路径调用 `_build_raw_workbench_payload()` 同步 rebuild。
 - 新服务需要 snapshot/persistence 时，优先明确状态边界，不继续扩大整包状态。
-- 新后台任务优先写入 `job.outbox_events`，由独立 worker claim；不要把新生产机制挂在 API 进程内 thread 上。
+- 新后台任务优先写入 `job.outbox_events`，由独立 worker claim；不要把新生产机制挂在 API 进程内 thread 上。RabbitMQ 未来只能投递 `RuntimeQueueEvent.to_envelope()`，不能成为事实源。
 - `LEGACY_SNAPSHOT_ALLOWLIST` 在 production 模块层面必须保持为空；legacy full snapshot 只允许 migration、shadow、test 或显式 `bootstrap_mode=legacy` 场景使用，并保持 `app/server.py` 不直接调用 `state_store.load()`。
 - 生产 API/worker 主路径不得新增 App Mongo snapshot、`state:*` JSON、GridFS 或 direct OA Mongo fallback。迁移、shadow-read、audit、rollback 代码必须放在 `tools/`、显式 worker handler 或 legacy bootstrap 边界内，并在测试中标注 `bootstrap_mode="legacy"`。
 
@@ -59,10 +59,12 @@ FIN_OPS_POSTGRES_DATABASE_URL=postgresql://... \
 PYTHONPATH=backend/src \
 python3 -m fin_ops_platform.app.worker \
   --enable-workbench-read-model-refresh \
+  --worker-kind workbench-read-model \
   --event-type workbench.read_model.refresh \
   --lock-timeout-seconds 300 \
   --task-timeout-seconds 60 \
-  --statement-timeout-seconds 30
+  --statement-timeout-seconds 30 \
+  --max-attempts 5
 ```
 
 本地 smoke 可用 `--check` 查看 handler、queue、Redis 配置，不会开始 claim：
@@ -70,10 +72,47 @@ python3 -m fin_ops_platform.app.worker \
 ```bash
 FIN_OPS_POSTGRES_DATABASE_URL=postgresql://... \
 PYTHONPATH=backend/src \
-python3 -m fin_ops_platform.app.worker --enable-workbench-read-model-refresh --check
+python3 -m fin_ops_platform.app.worker --enable-workbench-read-model-refresh --worker-kind workbench-read-model --check
 ```
 
-`/api/workbench` 支持 `month`、`page`、`page_size`、`status`、`source_kind`、`search`。当 SQL snapshot miss 时返回 `202 Accepted` 和 `read_model_status=refreshing`；当 dirty scope pending/processing 时返回已有 payload，并带 `read_model_status=refreshing`。
+Queue 配置边界：
+
+```text
+FIN_OPS_QUEUE_BACKEND=postgres
+RABBITMQ_URL=amqp://rabbitmq.internal
+RABBITMQ_VHOST=/finops
+RABBITMQ_EXCHANGE=finops.events
+RABBITMQ_WORKBENCH_QUEUE=finops.workbench.read_model.refresh
+RABBITMQ_WORKBENCH_ROUTING_KEY=workbench.read_model.refresh
+RABBITMQ_DEAD_LETTER_EXCHANGE=finops.events.dlx
+RABBITMQ_WORKBENCH_DEAD_LETTER_QUEUE=finops.workbench.read_model.refresh.dlq
+RABBITMQ_PREFETCH=10
+RABBITMQ_PUBLISH_CONFIRM=true
+RABBITMQ_HEARTBEAT_SECONDS=60
+RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS=300
+RABBITMQ_MANAGEMENT_URL=http://rabbitmq.internal:15672
+RABBITMQ_MANAGEMENT_USERNAME=finops_monitor
+RABBITMQ_MANAGEMENT_PASSWORD=***
+RABBITMQ_SHADOW_PUBLISH=false
+```
+
+默认仍是 PostgreSQL queue。启用 RabbitMQ 时必须同时运行：
+
+- `python3 -m fin_ops_platform.app.rabbitmq_topology --apply`：显式创建 durable exchange/queue/DLX/DLQ。
+- `python3 -m fin_ops_platform.app.rabbitmq_dispatcher`：从 PostgreSQL outbox 发布 envelope，publisher confirm 后才标记 `publish_status=published`。
+- `python3 -m fin_ops_platform.app.worker`：`FIN_OPS_QUEUE_BACKEND=rabbitmq` 时进入 RabbitMQ consumer 模式，收到消息后仍回 PostgreSQL claim `event_id` 对应任务。
+
+RabbitMQ 消息体不得携带 read model payload 或页面 snapshot。回滚时停止 dispatcher/consumer，把 worker 改回 `FIN_OPS_QUEUE_BACKEND=postgres` 即可继续 polling PostgreSQL outbox。
+
+工作台首屏读取使用拆分后的 SQL-native 契约：
+
+- `/api/workbench/summary?month=all`：返回 summary、`read_model_status`、`generated_at`，以及轻量 `oa_status`/`invoice_inventory` 状态诊断；不得返回候选组或行级快照。
+- `/api/workbench/groups?month=all&zone=open|paired&page=1&page_size=50&detail_level=summary`：从 `read_model.workbench_groups` 返回当前页 group 摘要，支持 `status`、`source_kind`、`search` 和受控排序 `sort=oa|bank|invoice:asc|desc`，排序字段来自组级 SQL sort key。`detail_level` 默认为 `full` 以兼容旧调用；前端首屏和 load-more 必须显式传 `summary`。
+- `/api/workbench/groups/detail?month=all&zone=open|paired&group_id=...`：从同一 SQL read model 返回单个 group 的完整 payload。列表页不得通过扩大 page size 或读取旧 snapshot 获取详情。
+- `/api/workbench/refresh-status`：返回 workbench dirty scopes、worker heartbeat/lag、outbox backlog、最近错误和 source version。
+- `/api/workbench` 继续支持 `month`、`page`、`page_size`、`status`、`source_kind`、`search` 作为兼容接口；前端首屏不得依赖它。
+
+`read_model.workbench_rows` 和 `read_model.workbench_groups` 是页面热路径。`read_model.workbench_snapshots.payload/raw_payload` 只用于审计、导出、对账和兼容期。Groups 接口可使用 Redis 短 TTL page cache；Redis key 必须包含 read model source version、分页、筛选、搜索、排序和 `detail_level` 参数，Redis miss 必须回 PostgreSQL read model，Redis 清空不影响正确性。`/api/workbench/summary` 和 `/api/workbench/groups` 输出 `workbench_api_metric` 结构化日志，生产指标系统按 endpoint 聚合 p95。
 
 成本统计 SQL read model worker：
 

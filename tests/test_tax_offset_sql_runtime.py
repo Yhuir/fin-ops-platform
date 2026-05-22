@@ -65,6 +65,20 @@ class RedisRecorder:
         return True
 
 
+class FailingRedisRecorder(RedisRecorder):
+    def get_json(self, key: str) -> dict | None:
+        self.gets.append(key)
+        raise TimeoutError("redis timeout")
+
+    def set_json(self, key: str, value: dict, *, ttl_seconds: int) -> bool:
+        self.sets.append((key, value, ttl_seconds))
+        raise TimeoutError("redis timeout")
+
+    def delete(self, key: str) -> bool:
+        self.deletes.append(key)
+        raise TimeoutError("redis timeout")
+
+
 class TaxOffsetReadConnection:
     def __init__(self, *, read_model_row: dict | None = None, dirty: bool = False) -> None:
         self.read_model_row = read_model_row
@@ -217,6 +231,90 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(redis.sets[0][0], "tax_offset:month:2026-05")
         self.assertLessEqual(redis.sets[0][2], 120)
 
+    def test_tax_offset_api_falls_back_to_sql_when_redis_times_out(self) -> None:
+        app = object.__new__(Application)
+        app._runtime_repositories = type(
+            "RuntimeRepos",
+            (),
+            {"queue_repository": QueueRecorder(), "redis_helper": FailingRedisRecorder()},
+        )()
+        app._tax_offset_sql_read_repository = type(
+            "SqlTaxOffset",
+            (),
+            {
+                "get_tax_offset_view": lambda *_args, **_kwargs: {
+                    "payload": tax_payload("2026-05"),
+                    "refresh_status": "fresh",
+                    "generated_at": "2026-05-21T09:00:00+00:00",
+                    "schema_version": "2026-05-tax-offset-month-v1",
+                }
+            },
+        )()
+
+        response = app._handle_api_tax_offset("2026-05")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["month"], "2026-05")
+        self.assertEqual(payload["read_model_status"], "fresh")
+
+    def test_tax_offset_summary_api_uses_small_redis_key_and_omits_items(self) -> None:
+        redis = RedisRecorder()
+        app = object.__new__(Application)
+        app._runtime_repositories = type(
+            "RuntimeRepos",
+            (),
+            {"queue_repository": QueueRecorder(), "redis_helper": redis},
+        )()
+        app._tax_offset_sql_read_repository = type(
+            "SqlTaxOffset",
+            (),
+            {
+                "get_tax_offset_view": lambda *_args, **_kwargs: {
+                    "payload": tax_payload("2026-05"),
+                    "refresh_status": "fresh",
+                    "generated_at": "2026-05-21T09:00:00+00:00",
+                    "schema_version": "2026-05-tax-offset-month-v1",
+                }
+            },
+        )()
+
+        response = app._handle_api_tax_offset_summary("2026-05")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["month"], "2026-05")
+        self.assertEqual(payload["item_counts"]["output_items"], 1)
+        self.assertEqual(payload["item_counts"]["input_plan_items"], 1)
+        self.assertNotIn("output_items", payload)
+        self.assertNotIn("input_plan_items", payload)
+        self.assertEqual(redis.sets[0][0], "tax_offset:summary:2026-05")
+
+    def test_tax_offset_summary_api_reads_small_redis_cache_without_sql(self) -> None:
+        cached_summary = {
+            "month": "2026-05",
+            "summary": {"output_tax": "0.00"},
+            "item_counts": {"output_items": 8},
+        }
+        app = object.__new__(Application)
+        app._runtime_repositories = type(
+            "RuntimeRepos",
+            (),
+            {"queue_repository": QueueRecorder(), "redis_helper": RedisRecorder({"payload": cached_summary})},
+        )()
+        app._tax_offset_sql_read_repository = type(
+            "SqlTaxOffset",
+            (),
+            {"get_tax_offset_view": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("SQL should not be hit on summary Redis cache"))},
+        )()
+
+        response = app._handle_api_tax_offset_summary("2026-05")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["item_counts"]["output_items"], 8)
+        self.assertEqual(payload["read_model_status"], "fresh")
+
     def test_tax_offset_refresh_handler_rebuilds_scope_and_marks_dirty_scope_done(self) -> None:
         class FakeBuilder:
             def __init__(self) -> None:
@@ -315,7 +413,21 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(deleted, [])
         self.assertEqual(queue.refreshes, [("tax_offset", "2026-05", "unit_test")])
-        self.assertEqual(redis.deletes, ["tax_offset:month:2026-05"])
+        self.assertEqual(redis.deletes, ["tax_offset:month:2026-05", "tax_offset:summary:2026-05"])
+
+    def test_tax_offset_invalidation_ignores_redis_delete_timeout(self) -> None:
+        queue = QueueRecorder()
+        redis = FailingRedisRecorder()
+        app = object.__new__(Application)
+        app._runtime_repositories = type(
+            "RuntimeRepos",
+            (),
+            {"queue_repository": queue, "redis_helper": redis},
+        )()
+
+        app._delete_tax_offset_redis_cache("2026-05")
+
+        self.assertEqual(redis.deletes, ["tax_offset:month:2026-05", "tax_offset:summary:2026-05"])
 
 
 if __name__ == "__main__":

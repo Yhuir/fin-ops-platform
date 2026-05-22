@@ -20,10 +20,11 @@ import {
   confirmWorkbenchCashTicketPurchase,
   confirmWorkbenchLink,
   fetchIgnoredWorkbenchRows,
+  fetchWorkbenchGroupsPage,
+  fetchWorkbenchInitialPage,
   fetchWorkbenchOaSyncStatus,
   fetchWorkbenchRowDetail,
   fetchWorkbenchSettings,
-  fetchWorkbenchWithProgress,
   ignoreWorkbenchRow,
   previewWorkbenchConfirmLink,
   previewWorkbenchWithdrawLink,
@@ -33,10 +34,12 @@ import {
 } from "../features/workbench/api";
 import { fetchNoOaBankBatchDetail, withdrawNoOaBankBatch } from "../features/noOaBankBatches/api";
 import {
+  buildWorkbenchServerPageQuery,
   buildWorkbenchDisplayGroups,
   buildWorkbenchPaneRows,
   countWorkbenchGroupsRows,
   createEmptyWorkbenchZoneDisplayState,
+  mergeWorkbenchGroupsById,
   resolveWorkbenchActivePane,
   type WorkbenchPaneTimeFilter,
   type WorkbenchZoneDisplayState,
@@ -48,10 +51,12 @@ import type {
   WorkbenchCandidateGroup,
   WorkbenchData,
   WorkbenchExceptionApplyResult,
+  WorkbenchGroupsPageQuery,
   WorkbenchOaSyncStatus,
   WorkbenchRecord,
   WorkbenchRelationPreview,
   WorkbenchSettings,
+  WorkbenchZonePageInfo,
 } from "../features/workbench/types";
 import { useMonth } from "../contexts/MonthContext";
 import useWorkbenchSelection from "../hooks/useWorkbenchSelection";
@@ -89,6 +94,24 @@ type WorkbenchLoadProgressState = {
   percent: number | null;
   indeterminate: boolean;
 };
+
+function createInitialZonePageInfo(zone: "paired" | "open"): WorkbenchZonePageInfo {
+  return {
+    zone,
+    page: 0,
+    pageSize: 50,
+    total: 0,
+    hasMore: false,
+    readModelStatus: "fresh",
+  };
+}
+
+function createInitialZonePages(): Record<"paired" | "open", WorkbenchZonePageInfo> {
+  return {
+    paired: createInitialZonePageInfo("paired"),
+    open: createInitialZonePageInfo("open"),
+  };
+}
 
 function isWorkbenchZoneDisplayState(value: unknown): value is WorkbenchZoneDisplayState {
   if (!value || typeof value !== "object") {
@@ -240,6 +263,8 @@ export default function ReconciliationWorkbenchPage() {
   } =
     useWorkbenchSelection();
   const [workbenchData, setWorkbenchData] = useState<WorkbenchData | null>(null);
+  const [zonePages, setZonePages] = useState<Record<"paired" | "open", WorkbenchZonePageInfo>>(() => createInitialZonePages());
+  const [loadingMoreZone, setLoadingMoreZone] = useState<"paired" | "open" | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [loadProgress, setLoadProgress] = useState<WorkbenchLoadProgressState>({
@@ -292,6 +317,26 @@ export default function ReconciliationWorkbenchPage() {
   const previousOaSyncStatusRef = useRef<WorkbenchOaSyncStatus | null>(null);
   const deferredPairedDisplayState = useDeferredValue(pairedDisplayState);
   const deferredOpenDisplayState = useDeferredValue(openDisplayState);
+  const pairedServerPageQuery = useMemo(
+    () => buildWorkbenchServerPageQuery(deferredPairedDisplayState),
+    [deferredPairedDisplayState],
+  );
+  const openServerPageQuery = useMemo(
+    () => buildWorkbenchServerPageQuery(deferredOpenDisplayState),
+    [deferredOpenDisplayState],
+  );
+  const zoneServerPageQueries = useMemo<Record<"paired" | "open", WorkbenchGroupsPageQuery>>(
+    () => ({
+      paired: pairedServerPageQuery,
+      open: openServerPageQuery,
+    }),
+    [openServerPageQuery, pairedServerPageQuery],
+  );
+  const zoneServerPageQueryKey = useMemo(
+    () => JSON.stringify(zoneServerPageQueries),
+    [zoneServerPageQueries],
+  );
+  const lastZoneServerPageQueryKeyRef = useRef(zoneServerPageQueryKey);
   const [oaSyncShellStatus, setOaSyncShellStatus] = useState<{ level: "ok" | "pending" | "error"; reason: string } | null>(null);
 
   const updateZoneDisplayState = useCallback((
@@ -628,10 +673,15 @@ export default function ReconciliationWorkbenchPage() {
   async function loadWorkbenchData(
     month: string,
     signal?: AbortSignal,
-    options?: { background?: boolean; includeAuxiliary?: boolean },
+    options?: {
+      background?: boolean;
+      includeAuxiliary?: boolean;
+      zoneQueries?: Record<"paired" | "open", WorkbenchGroupsPageQuery>;
+    },
   ) {
     const background = options?.background ?? false;
     const includeAuxiliary = options?.includeAuxiliary ?? false;
+    const resolvedZoneQueries = options?.zoneQueries ?? zoneServerPageQueries;
 
     if (background) {
       setIsRefreshing(true);
@@ -648,13 +698,19 @@ export default function ReconciliationWorkbenchPage() {
     }
 
     try {
-      const workbenchPayload = await fetchWorkbenchWithProgress(month, signal, (progress) => {
-        setLoadProgress(progress);
-      });
+      const workbenchPayload = await fetchWorkbenchInitialPage(
+        month,
+        signal,
+        (progress) => {
+          setLoadProgress(progress);
+        },
+        resolvedZoneQueries,
+      );
       if (signal?.aborted) {
         return;
       }
-      setWorkbenchData(workbenchPayload);
+      setWorkbenchData(workbenchPayload.data);
+      setZonePages(workbenchPayload.pages);
       if (!background) {
         setIsLoading(false);
       } else {
@@ -670,6 +726,7 @@ export default function ReconciliationWorkbenchPage() {
       }
       if (!background) {
         setWorkbenchData(null);
+        setZonePages(createInitialZonePages());
         setIgnoredData({ month, rows: [] });
         setLoadError("工作台数据加载失败，请稍后重试。");
         setIsLoading(false);
@@ -679,6 +736,61 @@ export default function ReconciliationWorkbenchPage() {
       }
     }
   }
+
+  const handleLoadMoreZone = useCallback(async (zone: "paired" | "open") => {
+    const pageInfo = zonePages[zone];
+    if (!workbenchData || !pageInfo.hasMore || loadingMoreZone) {
+      return;
+    }
+    setLoadingMoreZone(zone);
+    try {
+      const result = await fetchWorkbenchGroupsPage(
+        WORKBENCH_VIEW_MONTH,
+        zone,
+        pageInfo.page + 1,
+        pageInfo.pageSize,
+        undefined,
+        { ...zoneServerPageQueries[zone], detailLevel: "summary" },
+      );
+      setWorkbenchData((current) => {
+        if (!current) {
+          return current;
+        }
+        return {
+          ...current,
+          [zone]: {
+            groups: mergeWorkbenchGroupsById(current[zone].groups, result.groups),
+          },
+        };
+      });
+      setZonePages((current) => ({
+        ...current,
+        [zone]: result.page,
+      }));
+    } catch {
+      setLastActionMessage("加载更多候选组失败，请稍后重试。");
+    } finally {
+      setLoadingMoreZone(null);
+    }
+  }, [loadingMoreZone, workbenchData, zonePages, zoneServerPageQueries]);
+
+  useEffect(() => {
+    if (!workbenchData || isLoading) {
+      lastZoneServerPageQueryKeyRef.current = zoneServerPageQueryKey;
+      return;
+    }
+    if (lastZoneServerPageQueryKeyRef.current === zoneServerPageQueryKey) {
+      return;
+    }
+    lastZoneServerPageQueryKeyRef.current = zoneServerPageQueryKey;
+    const controller = new AbortController();
+    clearSelection();
+    void loadWorkbenchData(WORKBENCH_VIEW_MONTH, controller.signal, {
+      background: true,
+      zoneQueries: zoneServerPageQueries,
+    });
+    return () => controller.abort();
+  }, [clearSelection, isLoading, workbenchData, zoneServerPageQueries, zoneServerPageQueryKey]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1522,6 +1634,7 @@ export default function ReconciliationWorkbenchPage() {
       isVisible={isPairedVisible}
       onClearSelection={handleClearPairedSelection}
       onOpenDetail={handleOpenDetail}
+      onLoadMore={() => handleLoadMoreZone("paired")}
       onPrimarySelectionAction={handleCancelPairedSelection}
       primarySelectionActionDisabled={isPairedCancelSelectionDisabled || !canWriteWorkbench}
       onRowAction={handleRowAction}
@@ -1540,6 +1653,8 @@ export default function ReconciliationWorkbenchPage() {
       groups={displayPairedGroups}
       sourceGroups={workbenchData?.paired.groups ?? []}
       invoiceInventory={workbenchData?.invoiceInventory}
+      loadingMore={loadingMoreZone === "paired"}
+      pageInfo={zonePages.paired}
       highlightedRowId={null}
       panes={pairedPanes}
       primarySelectionActionLabel="撤回关联"
@@ -1559,6 +1674,7 @@ export default function ReconciliationWorkbenchPage() {
       isVisible={isOpenVisible}
       onClearSelection={handleClearOpenSelection}
       onOpenDetail={handleOpenDetail}
+      onLoadMore={() => handleLoadMoreZone("open")}
       onPrimarySelectionAction={handleConfirmOpenSelection}
       primarySelectionActionDisabled={isOpenConfirmSelectionDisabled || !canWriteWorkbench}
       onRowAction={handleRowAction}
@@ -1581,6 +1697,8 @@ export default function ReconciliationWorkbenchPage() {
       groups={displayOpenGroups}
       sourceGroups={visibleOpenGroups}
       invoiceInventory={workbenchData?.invoiceInventory}
+      loadingMore={loadingMoreZone === "open"}
+      pageInfo={zonePages.open}
       highlightedRowId={null}
       panes={openPanes}
       primarySelectionActionLabel="确认关联"

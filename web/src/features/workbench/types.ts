@@ -143,6 +143,8 @@ export type WorkbenchPaneRows = {
   invoice: WorkbenchRecord[];
 };
 
+export type WorkbenchPaneRowCounts = Partial<Record<WorkbenchRecordType, number>>;
+
 export type WorkbenchMatchConfidence = "high" | "medium" | "low";
 
 export type WorkbenchGroupType = "auto_closed" | "manual_confirmed" | "candidate";
@@ -168,7 +170,9 @@ export type WorkbenchCandidateGroup = {
   defaultCollapsed?: boolean;
   summaryRow?: WorkbenchRecord;
   rows: WorkbenchPaneRows;
+  rowCounts?: WorkbenchPaneRowCounts;
   collapsedRows?: Partial<WorkbenchPaneRows>;
+  collapsedRowCounts?: WorkbenchPaneRowCounts;
   canWithdraw?: boolean;
   relationNote?: string;
   amountCheck?: WorkbenchAmountCheck;
@@ -216,6 +220,29 @@ export type WorkbenchSummary = {
   totalCount: number;
 };
 
+export type WorkbenchReadModelStatus = "fresh" | "refreshing" | "stale" | "unavailable" | (string & {});
+
+export type WorkbenchZoneId = "paired" | "open";
+
+export type WorkbenchGroupsSort = `${WorkbenchRecordType}:asc` | `${WorkbenchRecordType}:desc`;
+
+export type WorkbenchGroupsPageQuery = {
+  search?: string;
+  status?: string;
+  sourceKind?: string;
+  sort?: WorkbenchGroupsSort;
+  detailLevel?: "summary" | "full";
+};
+
+export type WorkbenchZonePageInfo = {
+  zone: WorkbenchZoneId;
+  page: number;
+  pageSize: number;
+  total: number;
+  hasMore: boolean;
+  readModelStatus: WorkbenchReadModelStatus;
+};
+
 export type WorkbenchInvoiceInventory = {
   systemTotal: number;
   manualImportTotal: number;
@@ -254,6 +281,17 @@ export type WorkbenchData = {
   open: {
     groups: WorkbenchCandidateGroup[];
   };
+};
+
+export type WorkbenchInitialPageResult = {
+  data: WorkbenchData;
+  pages: Record<WorkbenchZoneId, WorkbenchZonePageInfo>;
+};
+
+export type WorkbenchGroupsPageResult = {
+  zone: WorkbenchZoneId;
+  groups: WorkbenchCandidateGroup[];
+  page: WorkbenchZonePageInfo;
 };
 
 export type IgnoredWorkbenchData = {

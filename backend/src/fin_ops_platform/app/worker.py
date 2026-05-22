@@ -22,7 +22,8 @@ from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, load_mong
 from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService
 from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
 from fin_ops_platform.services.postgres_state_store import LegacyGridFSFileReader
-from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
+from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository, RuntimeQueueSettings
+from fin_ops_platform.services.rabbitmq_runtime import RabbitMqConsumer, rabbitmq_event_routes
 from fin_ops_platform.services.runtime_redis import RuntimeRedisHelper, RuntimeRedisSettings
 from fin_ops_platform.services.runtime_worker import RuntimeWorker, RuntimeWorkerConfig
 from fin_ops_platform.services.search_pending_read_model_refresh import SearchPendingReadModelRefreshService
@@ -41,10 +42,12 @@ OA_IMPORT_STATUSES = {"completed", "in_progress"}
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="fin-ops-platform standalone runtime worker")
     parser.add_argument("--worker-id", default=None, help="Stable worker id for PostgreSQL locks and heartbeats.")
+    parser.add_argument("--worker-kind", default=None, help="Worker heartbeat kind. Defaults to the enabled handler family.")
     parser.add_argument("--event-type", action="append", default=[], help="Outbox event type to claim. Repeatable.")
     parser.add_argument("--poll-interval-seconds", type=float, default=5.0)
     parser.add_argument("--lock-timeout-seconds", type=int, default=300)
     parser.add_argument("--retry-delay-seconds", type=int, default=60)
+    parser.add_argument("--max-attempts", type=int, default=5)
     parser.add_argument("--task-timeout-seconds", type=int, default=None)
     parser.add_argument("--statement-timeout-seconds", type=int, default=None)
     parser.add_argument("--max-iterations", type=int, default=None, help="Testing/smoke limit. Omit to run continuously.")
@@ -62,6 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     settings = PostgresSettings.from_env()
+    queue_settings = RuntimeQueueSettings.from_env()
     connection = PostgresConnection(settings)
     queue = RuntimeQueueRepository(connection)
     redis_helper = RuntimeRedisHelper.from_settings(RuntimeRedisSettings.from_env())
@@ -74,6 +78,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         task_timeout_seconds=args.task_timeout_seconds,
         statement_timeout_seconds=args.statement_timeout_seconds,
         max_iterations=args.max_iterations,
+        max_attempts=args.max_attempts,
+        worker_kind=args.worker_kind or _infer_worker_kind(args),
     )
     handlers = {}
     if args.enable_file_object_migration:
@@ -151,13 +157,28 @@ def main(argv: Sequence[str] | None = None) -> int:
                 {
                     "service": "fin-ops-platform-worker",
                     "postgres": settings.redacted_database_url,
+                    "queue_backend": queue_settings.backend,
+                    "rabbitmq_configured": bool(queue_settings.rabbitmq_url),
+                    "rabbitmq_exchange": queue_settings.rabbitmq_exchange,
+                    "rabbitmq_event_routes": {
+                        event_type: {
+                            "queue": route.queue,
+                            "routing_key": route.routing_key,
+                            "dead_letter_queue": route.dead_letter_queue,
+                        }
+                        for event_type, route in rabbitmq_event_routes(queue_settings).items()
+                        if event_type in config.event_types
+                    },
                     "redis_enabled": redis_helper.enabled,
+                    "runtime_transport": "rabbitmq" if queue_settings.backend == "rabbitmq" else "postgres",
+                    "worker_kind": config.worker_kind,
                     "event_types": config.event_types,
                     "handlers": sorted(handlers),
                     "poll_interval_seconds": config.poll_interval_seconds,
                     "lock_timeout_seconds": config.lock_timeout_seconds,
                     "task_timeout_seconds": config.task_timeout_seconds,
                     "statement_timeout_seconds": config.statement_timeout_seconds,
+                    "max_attempts": config.max_attempts,
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -167,8 +188,37 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     worker = RuntimeWorker(queue_repository=queue, config=config, redis_helper=redis_helper, handlers=handlers)
+    if queue_settings.backend == "rabbitmq":
+        event_types = list(config.event_types or sorted(handlers))
+        consumer = RabbitMqConsumer(
+            settings=queue_settings,
+            queue_repository=queue,
+            worker=worker,
+            worker_id=config.worker_id,
+            event_types=event_types,
+            lock_timeout_seconds=config.lock_timeout_seconds,
+        )
+        consumer.consume_forever()
+        return 0
     worker.run_forever()
     return 0
+
+
+def _infer_worker_kind(args: argparse.Namespace) -> str:
+    enabled = [
+        name
+        for name, enabled_flag in (
+            ("file-object-migration", args.enable_file_object_migration),
+            ("workbench-read-model", args.enable_workbench_read_model_refresh),
+            ("cost-statistics-read-model", args.enable_cost_statistics_read_model_refresh),
+            ("tax-offset-read-model", args.enable_tax_offset_read_model_refresh),
+            ("search-read-model", args.enable_search_read_model_refresh),
+            ("pending-invoice-read-model", args.enable_pending_invoice_read_model_refresh),
+            ("oa-sync", args.enable_oa_sync),
+        )
+        if enabled_flag
+    ]
+    return enabled[0] if len(enabled) == 1 else "runtime"
 
 
 def _load_oa_runtime_settings(connection: PostgresConnection) -> dict[str, Any]:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from http import HTTPStatus
 import unittest
+from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
@@ -93,12 +94,201 @@ class WorkbenchAllRowsPageConnection(WorkbenchSqlReadConnection):
         return []
 
 
+class WorkbenchSummaryGroupsConnection(WorkbenchSqlReadConnection):
+    def __init__(self, *, dirty_status: str | None = None) -> None:
+        super().__init__()
+        self.dirty_status = dirty_status
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_one_calls.append((normalized, params))
+        if "from read_model.workbench_groups" in normalized and "count(*) as total_count" in normalized:
+            return {"total_count": 2}
+        if "from read_model.workbench_groups" in normalized and "max(generated_at)" in normalized:
+            return {"generated_at": "2026-05-22T09:30:00+00:00"}
+        if "from read_model.workbench_groups" in normalized and "group_id = %s" in normalized:
+            return {
+                "group_id": "case:1",
+                "zone": "open",
+                "payload": {
+                    "group_id": "case:1",
+                    "group_type": "candidate",
+                    "match_confidence": "medium",
+                    "reason": "detail",
+                    "oa_rows": [{"id": "oa-1", "type": "oa", "detail_fields": {"OA单号": "2151"}}],
+                    "bank_rows": [],
+                    "invoice_rows": [],
+                },
+            }
+        if "from app.invoices" in normalized:
+            return {
+                "system_total": 9,
+                "manual_import_total": 7,
+                "workbench_visible_total": 4,
+                "hidden_submitted_etc_total": 2,
+                "extra_etc_total": 1,
+            }
+        if "from app.etc_business_batches" in normalized:
+            return {"etc_summary_batch_count": 3}
+        if "from read_model.workbench_rows" in normalized and "source_kind = 'oa_attachment_invoice'" in normalized:
+            return {"oa_attachment_total": 5}
+        return super().fetch_one(sql, params)
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        if "%workbench%" in normalized:
+            raise AssertionError("psycopg SQL uses % placeholders; ilike patterns must be query parameters")
+        if "from read_model.workbench_snapshots" in normalized and "payload, raw_payload" in normalized:
+            raise AssertionError("summary/groups hot path must not load full workbench snapshots")
+        if "from read_model.workbench_groups" in normalized and "group by zone" in normalized:
+            return [
+                {"zone": "paired", "count": 1},
+                {"zone": "open", "count": 2},
+            ]
+        if "from read_model.workbench_rows" in normalized and "group by row_type" in normalized:
+            return [
+                {"row_type": "oa", "count": 3},
+                {"row_type": "bank", "count": 4},
+                {"row_type": "invoice", "count": 5},
+            ]
+        if "from job.read_model_dirty_scopes" in normalized:
+            if self.dirty_status is None:
+                return []
+            return [
+                {
+                    "scope_key": "2026-05",
+                    "status": self.dirty_status,
+                    "updated_at": "2026-05-22T09:31:00+00:00",
+                    "last_error": "worker timeout" if self.dirty_status == "failed" else None,
+                    "source_version": 7,
+                }
+            ]
+        if "from job.runtime_worker_heartbeats" in normalized:
+            return [
+                {
+                    "worker_id": "worker-workbench-1",
+                    "worker_kind": "workbench",
+                    "status": "processing",
+                    "last_seen_at": "2026-05-22T09:31:05+00:00",
+                    "lag_seconds": 12.0,
+                    "payload": {"event_id": "event-1"},
+                }
+            ]
+        if "from job.outbox_events" in normalized and "group by status" in normalized:
+            return [{"status": "pending", "count": 2}, {"status": "failed", "count": 1}]
+        if "from read_model.workbench_groups" in normalized:
+            return [
+                {
+                    "group_id": "case:1",
+                    "zone": "open",
+                    "payload": {
+                        "group_id": "case:1",
+                        "group_type": "candidate",
+                        "match_confidence": "medium",
+                        "reason": "sql page",
+                        "oa_rows": [
+                            {"id": f"oa-{index}", "type": "oa", "detail_fields": {"OA单号": f"215{index}"}}
+                            for index in range(1, 6)
+                        ],
+                        "bank_rows": [],
+                        "invoice_rows": [],
+                        "collapsed_rows": {
+                            "oa": [
+                                {"id": f"collapsed-oa-{index}", "type": "oa", "detail_fields": {"OA单号": f"C{index}"}}
+                                for index in range(1, 5)
+                            ]
+                        },
+                        "raw_payload": {"large": True},
+                    },
+                },
+                {
+                    "group_id": "case:2",
+                    "zone": "open",
+                    "payload": {
+                        "group_id": "case:2",
+                        "group_type": "candidate",
+                        "match_confidence": "medium",
+                        "reason": "sql page",
+                        "oa_rows": [],
+                        "bank_rows": [{"id": "bank-2", "type": "bank"}],
+                        "invoice_rows": [],
+                    },
+                },
+            ]
+        return []
+
+
+class MaterializedWorkbenchSummaryConnection(WorkbenchSummaryGroupsConnection):
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_one_calls.append((normalized, params))
+        if "from read_model.workbench_summary" in normalized:
+            return {
+                "scope_key": "all",
+                "payload": {
+                    "month": "all",
+                    "scope_key": "all",
+                    "summary": {
+                        "oa_count": 10,
+                        "bank_count": 11,
+                        "invoice_count": 12,
+                        "paired_count": 13,
+                        "open_count": 14,
+                        "exception_count": 0,
+                    },
+                    "invoice_inventory": {"system_total": 99},
+                    "generated_at": "2026-05-22T10:00:00+00:00",
+                },
+                "generated_at": "2026-05-22T10:00:00+00:00",
+                "source_versions": {"source_version": 9},
+            }
+        return super().fetch_one(sql, params)
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        if "from job.read_model_dirty_scopes" in normalized:
+            return []
+        if "from read_model.workbench_groups" in normalized or "from read_model.workbench_rows" in normalized:
+            raise AssertionError("materialized summary fast path must not recalculate summary from groups or rows")
+        return []
+
+
 class QueueRecorder:
     def __init__(self) -> None:
         self.refreshes: list[tuple[str, str]] = []
 
     def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
         self.refreshes.append((scope_type, scope_key, reason))
+
+
+class RedisRecorder:
+    def __init__(self, json_values: dict[str, dict] | None = None, text_values: dict[str, str] | None = None) -> None:
+        self.json_values = dict(json_values or {})
+        self.text_values = dict(text_values or {})
+        self.get_json_calls: list[str] = []
+        self.set_json_calls: list[tuple[str, dict, int]] = []
+        self.get_text_calls: list[str] = []
+        self.set_text_calls: list[tuple[str, str, int]] = []
+
+    def get_json(self, key: str) -> dict | None:
+        self.get_json_calls.append(key)
+        return self.json_values.get(key)
+
+    def set_json(self, key: str, value: dict, *, ttl_seconds: int) -> bool:
+        self.set_json_calls.append((key, value, ttl_seconds))
+        self.json_values[key] = value
+        return True
+
+    def get_text(self, key: str) -> str | None:
+        self.get_text_calls.append(key)
+        return self.text_values.get(key)
+
+    def set_text(self, key: str, value: str, *, ttl_seconds: int) -> bool:
+        self.set_text_calls.append((key, value, ttl_seconds))
+        self.text_values[key] = value
+        return True
 
 
 class WorkbenchWriteConnection:
@@ -131,14 +321,21 @@ class WorkbenchProjectionSettingsConnection:
         *,
         overrides: list[dict[str, object]] | None = None,
         exception_cases: list[dict[str, object]] | None = None,
+        bank_account_mappings: list[dict[str, object]] | None = None,
     ) -> None:
         self.overrides = list(overrides or [])
         self.exception_cases = list(exception_cases or [])
+        self.bank_account_mappings = list(bank_account_mappings or [])
 
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         normalized = " ".join(sql.lower().split())
         if "from app.app_settings" in normalized:
-            return {"settings_payload": {"oa_invoice_offset": {"applicant_names": []}}}
+            return {
+                "settings_payload": {
+                    "oa_invoice_offset": {"applicant_names": []},
+                    "bank_account_mappings": self.bank_account_mappings,
+                }
+            }
         if "from job.read_model_dirty_scopes" in normalized:
             return {"source_version": 1}
         return None
@@ -260,6 +457,54 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(len(view["payload"]["open"]["groups"]), 1)
         self.assertEqual(len(view["payload"]["paired"]["groups"]), 1)
 
+    def test_repository_dedupes_all_scope_groups_by_row_identity(self) -> None:
+        duplicate_paired_group = {
+            "group_id": "case:CASE-DUPLICATE-1",
+            "group_type": "manual_confirmed",
+            "match_confidence": "high",
+            "reason": "existing_case_group",
+            "oa_rows": [{"id": "oa-duplicate", "type": "oa"}],
+            "bank_rows": [{"id": "bank-duplicate", "type": "bank"}],
+            "invoice_rows": [{"id": "invoice-duplicate", "type": "invoice"}],
+        }
+        connection = WorkbenchSqlReadConnection(
+            snapshot_rows=[
+                {
+                    "scope_key": "2026-02",
+                    "row_count": 3,
+                    "generated_at": "2026-05-22T09:00:00+00:00",
+                    "payload": {
+                        "payload": {
+                            "summary": {"oa_count": 1, "bank_count": 1, "invoice_count": 1, "paired_count": 1, "open_count": 0},
+                            "paired": {"groups": [duplicate_paired_group]},
+                            "open": {"groups": []},
+                        }
+                    },
+                },
+                {
+                    "scope_key": "2026-01",
+                    "row_count": 3,
+                    "generated_at": "2026-05-22T08:00:00+00:00",
+                    "payload": {
+                        "payload": {
+                            "summary": {"oa_count": 1, "bank_count": 1, "invoice_count": 1, "paired_count": 1, "open_count": 0},
+                            "paired": {"groups": [{**duplicate_paired_group, "group_id": "case:DIFFERENT-GROUP-ID"}]},
+                            "open": {"groups": []},
+                        }
+                    },
+                },
+            ],
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        view = repository.get_workbench_view(scope_key="all")
+
+        self.assertEqual(len(view["payload"]["paired"]["groups"]), 1)
+        self.assertEqual(view["payload"]["summary"]["paired_count"], 1)
+        self.assertEqual(view["payload"]["summary"]["oa_count"], 1)
+        self.assertEqual(view["payload"]["summary"]["bank_count"], 1)
+        self.assertEqual(view["payload"]["summary"]["invoice_count"], 1)
+
     def test_repository_ignores_stale_all_workbench_snapshot_and_synthesizes_from_months(self) -> None:
         connection = WorkbenchSqlReadConnection(
             snapshot_row={
@@ -327,6 +572,177 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             )
         )
 
+    def test_repository_reads_workbench_summary_without_full_snapshot_payloads(self) -> None:
+        connection = WorkbenchSummaryGroupsConnection(dirty_status="processing")
+        repository = PostgresReadModelRepository(connection)
+
+        summary = repository.get_workbench_summary(scope_key="all")
+
+        self.assertEqual(summary["summary"]["oa_count"], 3)
+        self.assertEqual(summary["summary"]["bank_count"], 4)
+        self.assertEqual(summary["summary"]["invoice_count"], 5)
+        self.assertEqual(summary["summary"]["paired_count"], 1)
+        self.assertEqual(summary["summary"]["open_count"], 2)
+        self.assertEqual(summary["invoice_inventory"]["system_total"], 9)
+        self.assertEqual(summary["invoice_inventory"]["oa_attachment_total"], 5)
+        self.assertEqual(summary["read_model_status"], "refreshing")
+        self.assertEqual(summary["generated_at"], "2026-05-22T09:30:00+00:00")
+        self.assertFalse(
+            any(
+                "from read_model.workbench_snapshots" in sql and "payload, raw_payload" in sql
+                for sql, _params in connection.fetch_all_calls
+            )
+        )
+
+    def test_repository_reads_materialized_workbench_summary_when_available(self) -> None:
+        connection = MaterializedWorkbenchSummaryConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        summary = repository.get_workbench_summary(scope_key="all")
+
+        self.assertEqual(summary["summary"]["oa_count"], 10)
+        self.assertEqual(summary["summary"]["open_count"], 14)
+        self.assertEqual(summary["invoice_inventory"]["system_total"], 99)
+        self.assertEqual(summary["read_model_status"], "fresh")
+        self.assertTrue(any("from read_model.workbench_summary" in sql for sql, _params in connection.fetch_one_calls))
+        self.assertFalse(
+            any("from read_model.workbench_groups" in sql or "from read_model.workbench_rows" in sql for sql, _params in connection.fetch_all_calls)
+        )
+
+    def test_repository_reads_workbench_groups_page_from_structured_groups(self) -> None:
+        connection = WorkbenchSummaryGroupsConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        page = repository.get_workbench_groups_page(
+            scope_key="all",
+            zone="open",
+            page=1,
+            page_size=1,
+            source_kind="bank_transaction",
+            search="供应商",
+            sort="bank:desc",
+        )
+
+        self.assertEqual(page["zone"], "open")
+        self.assertEqual(page["page"], 1)
+        self.assertEqual(page["page_size"], 1)
+        self.assertEqual(page["total"], 2)
+        self.assertEqual(page["has_more"], True)
+        self.assertEqual(page["groups"][0]["group_id"], "case:1")
+        self.assertTrue(any("from read_model.workbench_groups" in sql for sql, _params in connection.fetch_all_calls))
+        self.assertTrue(any("bank_sort_max desc nulls last" in sql for sql, _params in connection.fetch_all_calls))
+        self.assertFalse(
+            any(
+                "from read_model.workbench_snapshots" in sql and "payload, raw_payload" in sql
+                for sql, _params in connection.fetch_all_calls
+            )
+        )
+
+    def test_repository_reads_all_scope_groups_from_materialized_all_groups(self) -> None:
+        connection = WorkbenchSummaryGroupsConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.get_workbench_groups_page(scope_key="all", zone="open", page=1, page_size=1)
+
+        group_queries = [
+            (sql, params)
+            for sql, params in [*connection.fetch_one_calls, *connection.fetch_all_calls]
+            if "from read_model.workbench_groups" in sql
+        ]
+        self.assertTrue(group_queries)
+        self.assertTrue(any("scope_key = %s" in sql and params[:1] == ("all",) for sql, params in group_queries))
+        self.assertFalse(any("scope_key <> 'all'" in sql for sql, _params in group_queries))
+
+    def test_repository_reads_workbench_groups_summary_page_without_heavy_details(self) -> None:
+        connection = WorkbenchSummaryGroupsConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        page = repository.get_workbench_groups_page(
+            scope_key="all",
+            zone="open",
+            page=1,
+            page_size=1,
+            detail_level="summary",
+        )
+
+        group = page["groups"][0]
+        self.assertEqual(page["detail_level"], "summary")
+        self.assertEqual(group["group_id"], "case:1")
+        self.assertEqual(group["row_counts"], {"oa": 5, "bank": 0, "invoice": 0})
+        self.assertEqual(group["collapsed_row_counts"], {"oa": 4})
+        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-1", "oa-2", "oa-3"])
+        self.assertEqual([row["id"] for row in group["collapsed_rows"]["oa"]], ["collapsed-oa-1", "collapsed-oa-2", "collapsed-oa-3"])
+        self.assertEqual(group["oa_rows"][0]["id"], "oa-1")
+        self.assertNotIn("detail_fields", group["oa_rows"][0])
+        self.assertNotIn("raw_payload", group)
+
+    def test_repository_reads_single_workbench_group_detail(self) -> None:
+        connection = WorkbenchSummaryGroupsConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        group = repository.get_workbench_group_detail(scope_key="all", zone="open", group_id="case:1")
+
+        self.assertIsNotNone(group)
+        self.assertEqual(group["group_id"], "case:1")
+        self.assertEqual(group["oa_rows"][0]["id"], "oa-1")
+        self.assertTrue(any("group_id = %s" in sql for sql, _params in connection.fetch_one_calls))
+
+    def test_repository_reports_workbench_refresh_status(self) -> None:
+        connection = WorkbenchSummaryGroupsConnection(dirty_status="failed")
+        repository = PostgresReadModelRepository(connection)
+
+        status = repository.get_workbench_refresh_status(scope_key="all")
+
+        self.assertEqual(status["read_model_status"], "stale")
+        self.assertEqual(status["dirty_scopes"][0]["scope_key"], "2026-05")
+        self.assertEqual(status["last_error"], "worker timeout")
+        self.assertEqual(status["worker_lag_seconds"], 12.0)
+        self.assertEqual(status["outbox_backlog"]["failed"], 1)
+
+    def test_repository_persists_workbench_groups_alongside_rows_and_snapshot(self) -> None:
+        connection = WorkbenchWriteConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models(
+            {
+                "read_models": {
+                    "2026-05": {
+                        "scope_key": "2026-05",
+                        "payload": {
+                            "open": {
+                                "groups": [
+                                    {
+                                        "group_id": "case:CASE-1",
+                                        "group_type": "candidate",
+                                        "match_confidence": "medium",
+                                        "reason": "候选",
+                                        "oa_rows": [
+                                            {
+                                                "id": "oa-row-1",
+                                                "type": "oa",
+                                                "source_kind": "oa",
+                                                "status": "open",
+                                                "project_name": "项目A",
+                                            }
+                                        ],
+                                        "bank_rows": [],
+                                        "invoice_rows": [],
+                                    }
+                                ]
+                            }
+                        },
+                        "source_versions": {"source_version": 6},
+                    }
+                }
+            },
+            changed_scope_keys={"2026-05"},
+        )
+
+        sql = "\n".join(statement for statement, _params in connection.executed)
+        self.assertIn("delete from read_model.workbench_groups", sql)
+        self.assertIn("insert into read_model.workbench_groups", sql)
+        self.assertIn("insert into read_model.workbench_summary", sql)
+
     def test_workbench_api_returns_sql_read_model_without_sync_build(self) -> None:
         app = object.__new__(Application)
         queue = QueueRecorder()
@@ -349,6 +765,281 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["open"], {"groups": []})
         self.assertEqual(payload["read_model_status"], "fresh")
         self.assertEqual(queue.refreshes, [])
+
+    def test_workbench_summary_api_uses_sql_summary_contract(self) -> None:
+        app = object.__new__(Application)
+        queue = QueueRecorder()
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue, "redis_helper": None})()
+        app._workbench_sql_read_repository = type(
+            "SqlWorkbench",
+            (),
+            {
+                "get_workbench_summary": lambda _self, **_kwargs: {
+                    "month": "all",
+                    "summary": {"oa_count": 1, "bank_count": 2, "invoice_count": 3, "paired_count": 4, "open_count": 5, "exception_count": 0},
+                    "read_model_status": "fresh",
+                    "generated_at": "2026-05-22T09:30:00+00:00",
+                }
+            },
+        )()
+        app._build_raw_workbench_payload = lambda _month: (_ for _ in ()).throw(
+            AssertionError("summary API must not build full workbench payload")
+        )
+
+        response = app._handle_api_workbench_summary("all")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["summary"]["bank_count"], 2)
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(queue.refreshes, [])
+
+    def test_workbench_summary_api_reports_missing_groups_table_as_unavailable(self) -> None:
+        app = object.__new__(Application)
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder(), "redis_helper": None})()
+        app._workbench_sql_read_repository = type(
+            "SqlWorkbench",
+            (),
+            {
+                "get_workbench_summary": lambda _self, **_kwargs: (_ for _ in ()).throw(
+                    RuntimeError('relation "read_model.workbench_groups" does not exist')
+                )
+            },
+        )()
+
+        response = app._handle_api_workbench_summary("all")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.SERVICE_UNAVAILABLE))
+        self.assertEqual(payload["error"], "read_model_unavailable")
+        self.assertEqual(payload["read_model_status"], "unavailable")
+
+    def test_workbench_summary_api_logs_stale_unavailable_status_metric(self) -> None:
+        app = object.__new__(Application)
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder(), "redis_helper": None})()
+        app._workbench_sql_read_repository = None
+
+        with patch("builtins.print") as print_mock:
+            response = app._handle_api_workbench_summary("all")
+
+        self.assertEqual(response.status_code, int(HTTPStatus.SERVICE_UNAVAILABLE))
+        metric_payloads = [
+            json.loads(call.args[0])
+            for call in print_mock.call_args_list
+            if call.args and json.loads(call.args[0]).get("kind") == "workbench_read_model_status_metric"
+        ]
+        self.assertEqual(metric_payloads[0]["metric"], "workbench.read_model.status.count")
+        self.assertEqual(metric_payloads[0]["endpoint"], "/api/workbench/summary")
+        self.assertEqual(metric_payloads[0]["read_model_status"], "unavailable")
+
+    def test_workbench_groups_api_uses_sql_groups_contract(self) -> None:
+        app = object.__new__(Application)
+        queue = QueueRecorder()
+        calls: list[dict[str, object]] = []
+
+        class SqlWorkbench:
+            def get_workbench_groups_page(self, **kwargs):
+                calls.append(kwargs)
+                return {
+                    "month": "all",
+                    "zone": "open",
+                    "page": 1,
+                    "page_size": 50,
+                    "total": 1,
+                    "has_more": False,
+                    "groups": [{"group_id": "case:1", "oa_rows": [], "bank_rows": [], "invoice_rows": []}],
+                    "read_model_status": "fresh",
+                }
+
+            def workbench_groups_cache_version(self, **_kwargs):
+                return "v7"
+
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue, "redis_helper": None})()
+        app._workbench_sql_read_repository = SqlWorkbench()
+        app._build_raw_workbench_payload = lambda _month: (_ for _ in ()).throw(
+            AssertionError("groups API must not build full workbench payload")
+        )
+
+        response = app._handle_api_workbench_groups(
+            "all",
+            zone="open",
+            page="1",
+            page_size="50",
+            status="open",
+            source_kind="bank_transaction",
+            search="供应商",
+            sort="bank:desc",
+            detail_level="summary",
+        )
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["groups"][0]["group_id"], "case:1")
+        self.assertEqual(
+            calls,
+            [
+                {
+                    "scope_key": "all",
+                    "zone": "open",
+                    "page": "1",
+                    "page_size": "50",
+                    "status": "open",
+                    "source_kind": "bank_transaction",
+                    "search": "供应商",
+                    "sort": "bank:desc",
+                    "detail_level": "summary",
+                }
+            ],
+        )
+
+    def test_workbench_group_detail_api_returns_full_group(self) -> None:
+        app = object.__new__(Application)
+
+        class SqlWorkbench:
+            def get_workbench_group_detail(self, **kwargs):
+                self.kwargs = kwargs
+                return {
+                    "group_id": "case:1",
+                    "group_type": "candidate",
+                    "match_confidence": "medium",
+                    "reason": "detail",
+                    "oa_rows": [{"id": "oa-1", "type": "oa", "detail_fields": {"OA单号": "2151"}}],
+                    "bank_rows": [],
+                    "invoice_rows": [],
+                }
+
+        repository = SqlWorkbench()
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder(), "redis_helper": None})()
+        app._workbench_sql_read_repository = repository
+
+        response = app._handle_api_workbench_group_detail("all", zone="open", group_id="case:1")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["group"]["oa_rows"][0]["detail_fields"], {"OA单号": "2151"})
+        self.assertEqual(repository.kwargs, {"scope_key": "all", "zone": "open", "group_id": "case:1"})
+
+    def test_workbench_groups_api_redis_hit_does_not_query_database_cache_version(self) -> None:
+        app = object.__new__(Application)
+        cache_key = app._workbench_groups_redis_cache_key_from_version(
+            cache_version="v7",
+            scope_key="all",
+            zone="open",
+            page="1",
+            page_size="50",
+            status=None,
+            source_kind=None,
+            search=None,
+            sort=None,
+            detail_level="full",
+        )
+        self.assertIsNotNone(cache_key)
+        redis = RedisRecorder(
+            text_values={"workbench:groups:version:all": "v7"},
+            json_values={
+                cache_key: {
+                    "payload": {
+                        "month": "all",
+                        "zone": "open",
+                        "page": 1,
+                        "page_size": 50,
+                        "total": 1,
+                        "has_more": False,
+                        "groups": [{"group_id": "cached"}],
+                    }
+                }
+            },
+        )
+
+        class SqlWorkbench:
+            def get_workbench_groups_page(self, **_kwargs):
+                raise AssertionError("Redis hit must not query SQL page")
+
+            def workbench_groups_cache_version(self, **_kwargs):
+                raise AssertionError("Redis hit must not query SQL cache version")
+
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder(), "redis_helper": redis})()
+        app._workbench_sql_read_repository = SqlWorkbench()
+
+        response = app._handle_api_workbench_groups("all", zone="open", page="1", page_size="50")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["groups"][0]["group_id"], "cached")
+        self.assertEqual(redis.get_text_calls, ["workbench:groups:version:all"])
+
+    def test_workbench_groups_api_redis_cache_is_separated_by_detail_level(self) -> None:
+        app = object.__new__(Application)
+        redis = RedisRecorder(text_values={"workbench:groups:version:all": "v7"})
+
+        class SqlWorkbench:
+            def get_workbench_groups_page(self, **_kwargs):
+                return {
+                    "month": "all",
+                    "zone": "open",
+                    "page": 1,
+                    "page_size": 50,
+                    "total": 1,
+                    "has_more": False,
+                    "groups": [{"group_id": "fresh", "oa_rows": [], "bank_rows": [], "invoice_rows": []}],
+                    "read_model_status": "fresh",
+                    "detail_level": "summary",
+                }
+
+            def workbench_groups_cache_version(self, **_kwargs):
+                raise AssertionError("Redis version key should avoid SQL cache version lookup")
+
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder(), "redis_helper": redis})()
+        app._workbench_sql_read_repository = SqlWorkbench()
+
+        app._handle_api_workbench_groups("all", zone="open", page="1", page_size="50", detail_level="summary")
+        app._handle_api_workbench_groups("all", zone="open", page="1", page_size="50", detail_level="full")
+
+        self.assertEqual(len(redis.set_json_calls), 2)
+        self.assertNotEqual(redis.set_json_calls[0][0], redis.set_json_calls[1][0])
+
+    def test_workbench_groups_api_reports_missing_groups_table_as_unavailable(self) -> None:
+        app = object.__new__(Application)
+
+        class SqlWorkbench:
+            def get_workbench_groups_page(self, **_kwargs):
+                raise RuntimeError('relation "read_model.workbench_groups" does not exist')
+
+            def workbench_groups_cache_version(self, **_kwargs):
+                return "v0"
+
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder(), "redis_helper": None})()
+        app._workbench_sql_read_repository = SqlWorkbench()
+
+        response = app._handle_api_workbench_groups("all", zone="open")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.SERVICE_UNAVAILABLE))
+        self.assertEqual(payload["error"], "read_model_unavailable")
+        self.assertEqual(payload["read_model_status"], "unavailable")
+
+    def test_workbench_refresh_status_api_exposes_dirty_scopes_and_worker_lag(self) -> None:
+        app = object.__new__(Application)
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder(), "redis_helper": None})()
+        app._workbench_sql_read_repository = type(
+            "SqlWorkbench",
+            (),
+            {
+                "get_workbench_refresh_status": lambda _self, **_kwargs: {
+                    "read_model_status": "refreshing",
+                    "dirty_scopes": [{"scope_key": "2026-05", "status": "processing"}],
+                    "worker_lag_seconds": 8.0,
+                    "last_error": None,
+                }
+            },
+        )()
+
+        response = app._handle_api_workbench_refresh_status("all")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["dirty_scopes"][0]["scope_key"], "2026-05")
 
     def test_workbench_api_miss_enqueues_refresh_and_returns_refreshing(self) -> None:
         app = object.__new__(Application)
@@ -537,8 +1228,15 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.completed: list[tuple[str, str, str]] = []
 
-            def complete_read_model_refresh(self, *, tenant_id: str, scope_type: str, scope_key: str) -> None:
-                self.completed.append((tenant_id, scope_type, scope_key))
+            def complete_read_model_refresh(
+                self,
+                *,
+                tenant_id: str,
+                scope_type: str,
+                scope_key: str,
+                source_version: object = None,
+            ) -> None:
+                self.completed.append((tenant_id, scope_type, scope_key, source_version))
 
         builder = FakeBuilder()
         queue = FakeQueue()
@@ -560,7 +1258,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         result = service.handle_runtime_event(event)
 
         self.assertEqual(builder.rebuilt, [("2026-05", 7)])
-        self.assertEqual(queue.completed, [("tenant-a", "workbench", "2026-05")])
+        self.assertEqual(queue.completed, [("tenant-a", "workbench", "2026-05", 7)])
         self.assertEqual(result["scope_key"], "2026-05")
         self.assertEqual(result["row_count"], 1)
 
@@ -579,13 +1277,20 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         class FakeQueue:
             def __init__(self) -> None:
                 self.refreshes: list[tuple[str, str, str]] = []
-                self.completed: list[tuple[str, str, str]] = []
+                self.completed: list[tuple[str, str, str, object]] = []
 
             def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
                 self.refreshes.append((scope_type, scope_key, reason))
 
-            def complete_read_model_refresh(self, *, tenant_id: str, scope_type: str, scope_key: str) -> None:
-                self.completed.append((tenant_id, scope_type, scope_key))
+            def complete_read_model_refresh(
+                self,
+                *,
+                tenant_id: str,
+                scope_type: str,
+                scope_key: str,
+                source_version: object = None,
+            ) -> None:
+                self.completed.append((tenant_id, scope_type, scope_key, source_version))
 
         builder = FakeBuilder()
         queue = FakeQueue()
@@ -612,7 +1317,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             queue.refreshes,
             [("workbench", "2026-05", "workbench_all_shard"), ("workbench", "2026-04", "workbench_all_shard")],
         )
-        self.assertEqual(queue.completed, [("tenant-a", "workbench", "all")])
+        self.assertEqual(queue.completed, [("tenant-a", "workbench", "all", None)])
 
     def test_sql_projection_pairs_materialized_attachment_rows_by_source_oa_relation(self) -> None:
         relation = {
@@ -741,6 +1446,41 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(rows[0]["source_expense_item_id"], "oa-exp-structured:item:1")
         self.assertEqual(rows[0]["source_attachment_key"], "oa-exp-structured:invoice:1")
         self.assertIn("INV-STRUCT-001", rows[0]["detail_fields"]["发票号码"])
+
+    def test_sql_projection_bank_account_label_uses_settings_mapping_not_account_name(self) -> None:
+        connection = WorkbenchProjectionSettingsConnection(
+            bank_account_mappings=[
+                {"last4": "6386", "bank_name": "工商银行", "short_name": "工行"},
+            ]
+        )
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=CandidateSnapshotRecorder(),
+        )
+
+        row = builder._bank_row_from_sql(
+            {
+                "row_id": "bank-company-account-name",
+                "account_no": "bank_mapping_6386",
+                "account_name": "云南溯源科技有限公司",
+                "txn_direction": "outflow",
+                "counterparty_name_raw": "云南溯源科技有限公司",
+                "amount": "4.500000",
+                "signed_amount": "-4.500000",
+                "txn_date": "2026-04-23",
+                "trade_time": "2026-04-23T17:22:27+08:00",
+                "pay_receive_time": "2026-04-23T17:22:27+08:00",
+                "summary": "单位国内汇款手续费收入",
+                "remark": "企业网银同城他行",
+                "raw_payload": {},
+            }
+        )
+
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(row["counterparty_name"], "云南溯源科技有限公司")
+        self.assertEqual(row["payment_account_label"], "工商银行 账户 6386")
+        self.assertEqual(row["summary_fields"]["支付账户"], "工商银行 账户 6386")
 
     def test_sql_projection_matches_legacy_attachment_cache_by_nested_source_key(self) -> None:
         class StructuredOAConnection(WorkbenchProjectionSettingsConnection):

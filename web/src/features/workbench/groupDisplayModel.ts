@@ -1,4 +1,10 @@
-import type { WorkbenchCandidateGroup, WorkbenchPaneRows, WorkbenchRecord, WorkbenchRecordType } from "./types";
+import type {
+  WorkbenchCandidateGroup,
+  WorkbenchGroupsPageQuery,
+  WorkbenchPaneRows,
+  WorkbenchRecord,
+  WorkbenchRecordType,
+} from "./types";
 
 const workbenchPaneIds: WorkbenchRecordType[] = ["oa", "bank", "invoice"];
 
@@ -102,11 +108,53 @@ export function buildWorkbenchPaneRows(groups: WorkbenchCandidateGroup[]): Workb
   };
 }
 
+export function mergeWorkbenchGroupsById(
+  currentGroups: WorkbenchCandidateGroup[],
+  incomingGroups: WorkbenchCandidateGroup[],
+): WorkbenchCandidateGroup[] {
+  const seenGroupIds = new Set(currentGroups.map((group) => group.id));
+  const mergedGroups = [...currentGroups];
+  incomingGroups.forEach((group) => {
+    if (seenGroupIds.has(group.id)) {
+      return;
+    }
+    seenGroupIds.add(group.id);
+    mergedGroups.push(group);
+  });
+  return mergedGroups;
+}
+
+export function buildWorkbenchServerPageQuery(state: WorkbenchZoneDisplayState): WorkbenchGroupsPageQuery {
+  const query: WorkbenchGroupsPageQuery = {};
+  const searchContext = resolveWorkbenchSearchContext(state);
+  if (searchContext?.rawQuery) {
+    query.search = searchContext.rawQuery;
+  }
+  const sortPaneId = workbenchPaneIds.find((paneId) => state.sortByPane[paneId]);
+  if (sortPaneId) {
+    const direction = state.sortByPane[sortPaneId];
+    if (direction) {
+      query.sort = `${sortPaneId}:${direction}`;
+    }
+  }
+  return query;
+}
+
 export function countWorkbenchGroupRows(group: WorkbenchCandidateGroup): number {
   return workbenchPaneIds.reduce((total, paneId) => {
+    const collapsedPaneCount = group.collapsedRowCounts?.[paneId];
+    if (typeof collapsedPaneCount === "number") {
+      return total + collapsedPaneCount;
+    }
     const collapsedPaneRows = group.collapsedRows?.[paneId] ?? [];
-    const paneRows = collapsedPaneRows.length > 0 ? collapsedPaneRows : group.rows[paneId];
-    return total + paneRows.length;
+    if (collapsedPaneRows.length > 0) {
+      return total + collapsedPaneRows.length;
+    }
+    const paneCount = group.rowCounts?.[paneId];
+    if (typeof paneCount === "number") {
+      return total + paneCount;
+    }
+    return total + group.rows[paneId].length;
   }, 0);
 }
 
@@ -170,10 +218,12 @@ export function resolveWorkbenchActivePane(
 
 function resolveWorkbenchSearchContext(state: WorkbenchZoneDisplayState) {
   if (state.activePaneId) {
-    const activePaneQuery = normalizeWorkbenchSearchText(state.searchQueryByPane[state.activePaneId] || "");
+    const activePaneRawQuery = (state.searchQueryByPane[state.activePaneId] || "").trim();
+    const activePaneQuery = normalizeWorkbenchSearchText(activePaneRawQuery);
     if (activePaneQuery) {
       return {
         paneId: state.activePaneId,
+        rawQuery: activePaneRawQuery,
         normalizedQuery: activePaneQuery,
       };
     }
@@ -188,6 +238,7 @@ function resolveWorkbenchSearchContext(state: WorkbenchZoneDisplayState) {
 
   return {
     paneId,
+    rawQuery: (state.searchQueryByPane[paneId] || "").trim(),
     normalizedQuery: normalizeWorkbenchSearchText(state.searchQueryByPane[paneId] || ""),
   };
 }

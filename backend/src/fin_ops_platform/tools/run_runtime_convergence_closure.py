@@ -36,6 +36,7 @@ ALLOWED_POSTGRES_SNAPSHOT_READS = {
     "background_jobs": "legacy-runtime-temporary: background job mirror/read compatibility; exit after runtime queue fully replaces old jobs.",
     "app_health_alerts": "legacy-runtime-temporary: active health alert compatibility; exit after audit/app health table is sole source.",
     "workbench_pair_relations": "legacy-runtime-temporary: relation migration compatibility; exit after repository shadow mismatch is zero.",
+    "workbench_overrides": "legacy-runtime-temporary: workbench override compatibility; exit after formal override rows cover all reads.",
     "no_oa_bank_batches": "legacy-runtime-temporary: no-OA batch relation compatibility; exit after formal rows cover all historical batches.",
     "bank_transaction_categories": "legacy-runtime-temporary: category settings compatibility; exit after formal category rows/settings cover all data.",
     "turnover_relations": "legacy-runtime-temporary: turnover relation compatibility; exit after formal rows cover all relations.",

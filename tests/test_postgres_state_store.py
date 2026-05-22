@@ -42,7 +42,7 @@ class FakePostgresConnection:
         if "insert into app.app_settings" in sql:
             self.settings[params[0]] = unwrap_jsonb(params[1])
             return 1
-        if "insert into app.oa_attachment_invoice_cache" in sql:
+        if "insert into app.oa_attachment_invoice_cache(" in sql:
             self.attachment_cache[params[0]] = unwrap_jsonb(params[7])
             return 1
         return 1
@@ -166,6 +166,21 @@ class PostgresStateStoreTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir, patch.dict("os.environ", {"FIN_OPS_APP_STORAGE_BACKEND": "postgres"}, clear=True):
             with self.assertRaisesRegex(PostgresConfigurationError, "requires FIN_OPS_POSTGRES_DATABASE_URL or DATABASE_URL"):
                 build_state_store(Path(temp_dir))
+
+    def test_read_model_repositories_use_optional_read_connection(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            write_connection = FakePostgresConnection()
+            read_connection = FakePostgresConnection()
+            store = PostgresStateStore(
+                data_dir=Path(temp_dir),
+                connection=write_connection,
+                sql_read_connection=read_connection,
+            )
+
+        self.assertIs(store.workbench_sql_read_repository._connection, read_connection)
+        self.assertIs(store.search_sql_read_repository._connection, read_connection)
+        self.assertIs(store.tax_offset_sql_read_repository._connection, read_connection)
+        self.assertIs(store._read_model_repository._connection, write_connection)
 
     def test_postgres_store_settings_and_cache_round_trip_through_parameterized_sql(self) -> None:
         with TemporaryDirectory() as temp_dir:

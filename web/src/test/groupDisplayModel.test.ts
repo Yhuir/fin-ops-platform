@@ -1,6 +1,8 @@
 import {
+  buildWorkbenchServerPageQuery,
   buildWorkbenchDisplayGroups,
   createEmptyWorkbenchZoneDisplayState,
+  mergeWorkbenchGroupsById,
 } from "../features/workbench/groupDisplayModel";
 import type { WorkbenchCandidateGroup, WorkbenchRecord } from "../features/workbench/types";
 
@@ -40,6 +42,45 @@ function buildGroup(id: string, transactionTime: string): WorkbenchCandidateGrou
 }
 
 describe("groupDisplayModel time filter", () => {
+  test("dedupes repeated paginated groups for paired and open zones", () => {
+    const firstPageGroups = [
+      buildGroup("case:paired-1", "2026-03-28 10:18"),
+      buildGroup("case:paired-2", "2026-03-29 10:18"),
+    ];
+    const repeatedSecondPage = [
+      buildGroup("case:paired-2", "2026-03-29 10:18"),
+      buildGroup("case:paired-3", "2026-03-30 10:18"),
+    ];
+
+    expect(mergeWorkbenchGroupsById(firstPageGroups, repeatedSecondPage).map((group) => group.id)).toEqual([
+      "case:paired-1",
+      "case:paired-2",
+      "case:paired-3",
+    ]);
+  });
+
+  test("derives SQL page query controls from applied search and sort state", () => {
+    const state = {
+      ...createEmptyWorkbenchZoneDisplayState(),
+      activePaneId: "bank",
+      searchQueryByPane: {
+        oa: "",
+        bank: "供应商A",
+        invoice: "",
+      },
+      sortByPane: {
+        oa: null,
+        bank: "desc",
+        invoice: null,
+      },
+    } as ReturnType<typeof createEmptyWorkbenchZoneDisplayState>;
+
+    expect(buildWorkbenchServerPageQuery(state)).toEqual({
+      search: "供应商A",
+      sort: "bank:desc",
+    });
+  });
+
   test("filters bank groups by year and month when bank pane is active", () => {
     const groups = [
       buildGroup("group-2025-12", "2025-12-18 10:00"),

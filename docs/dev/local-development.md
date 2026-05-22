@@ -30,6 +30,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
 - `FIN_OPS_APP_READ_BACKEND=postgres`
 - `FIN_OPS_POSTGRES_CUTOVER_PHASE=postgres_primary`
 - `FIN_OPS_STORAGE_MODE=postgres`
+- `FIN_OPS_QUEUE_BACKEND=postgres`
 
 如果配置了 `FIN_OPS_SSH_TUNNEL_HOST`，启动脚本会先建立本地端口转发，再启动 API：
 
@@ -47,6 +48,8 @@ FIN_OPS_BACKEND_ENV_FILE=/path/to/local.env ./scripts/start-backend.sh
 
 需要让本地和服务器都启用 Redis runtime helper 时，服务器 systemd env 和本地私有 env 都应配置 `FIN_OPS_REDIS_URL`。本地通常使用 SSH tunnel，例如 `redis://:password@127.0.0.1:16379/0`。
 
+RabbitMQ 相关变量当前只作为未来投递通道边界预留；本地同构验收仍应保持 `FIN_OPS_QUEUE_BACKEND=postgres`。未来测试 RabbitMQ 时也必须同时配置 PostgreSQL，因为 worker 只从 PostgreSQL outbox 读取真实任务。
+
 生产级本地验收应先跑 runtime check：
 
 ```bash
@@ -61,7 +64,8 @@ FIN_OPS_BACKEND_ENV_FILE=/path/to/local.env ./scripts/start-backend.sh
 ./scripts/check-local-runtime.sh --require-backend
 ```
 
-完整检查会验证 `/health` 使用 PostgreSQL runtime、Redis 和对象存储可用，并确认 `/api/workbench?month=all` 能从 SQL read model 返回非空数据。
+完整检查会验证 `/health` 使用 PostgreSQL runtime、Redis 和对象存储可用，并确认 `/api/workbench/summary` 与 `/api/workbench/groups` 能从 SQL read model 返回非空数据。
+工作台首屏使用 split summary/groups endpoint。不要用机器上残留的 `127.0.0.1:8000` 旧 `backend.api.main:app` 进程判断本项目状态；本仓库默认后端端口是 `8001`，前端 Vite proxy 也默认指向 `http://127.0.0.1:8001`。
 
 没有 PostgreSQL 连接配置时，脚本仍保留本地 legacy mode 兼容路径；本地和服务器同构验收必须使用 PostgreSQL runtime。
 

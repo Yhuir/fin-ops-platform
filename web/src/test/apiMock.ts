@@ -4171,6 +4171,47 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       }
       return { body: toGroupedWorkbenchPayload(cloneJson(workbenchStateStore.get(month)), options.workbenchOaStatus) };
     },
+    "/api/workbench/summary": ({ url }) => {
+      const month = url.searchParams.get("month") ?? "";
+      if (options.workbenchErrorMonths?.includes(month)) {
+        return { status: 500, body: { message: "workbench summary failed" } };
+      }
+      const payload = toGroupedWorkbenchPayload(cloneJson(workbenchStateStore.get(month)), options.workbenchOaStatus);
+      return {
+          body: {
+            month: payload.month,
+            summary: payload.summary,
+            oa_status: payload.oa_status,
+            invoice_inventory: payload.invoice_inventory,
+            read_model_status: "fresh",
+            generated_at: "2026-05-22T09:30:00+08:00",
+          },
+      };
+    },
+    "/api/workbench/groups": ({ url }) => {
+      const month = url.searchParams.get("month") ?? "";
+      if (options.workbenchErrorMonths?.includes(month)) {
+        return { status: 500, body: { message: "workbench groups failed" } };
+      }
+      const zone = url.searchParams.get("zone") === "paired" ? "paired" : "open";
+      const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
+      const pageSize = Math.max(1, Number(url.searchParams.get("page_size") ?? "50") || 50);
+      const payload = toGroupedWorkbenchPayload(cloneJson(workbenchStateStore.get(month)), options.workbenchOaStatus);
+      const groups = payload[zone].groups;
+      const offset = (page - 1) * pageSize;
+      return {
+        body: {
+          month: payload.month,
+          zone,
+          page,
+          page_size: pageSize,
+          total: groups.length,
+          has_more: offset + pageSize < groups.length,
+          groups: groups.slice(offset, offset + pageSize),
+          read_model_status: "fresh",
+        },
+      };
+    },
     "/api/oa-sync/status": () => {
       const statuses = options.workbenchOaSyncStatuses;
       if (statuses && statuses.length > 0) {
@@ -6224,7 +6265,9 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
 
     const response = await handler({ url, init, jsonBody, formData });
     const workbenchSpecificDelay =
-      (url.pathname === "/api/workbench" ? options.workbenchPrimaryDelayMs : undefined)
+      (url.pathname === "/api/workbench" || url.pathname === "/api/workbench/summary"
+        ? options.workbenchPrimaryDelayMs
+        : undefined)
       ?? (url.pathname === "/api/workbench/ignored" ? options.workbenchIgnoredDelayMs : undefined)
       ?? (url.pathname === "/api/workbench/settings" ? options.workbenchSettingsDelayMs : undefined);
 
@@ -6234,6 +6277,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       options.workbenchLoadDelayMs
       && (
         url.pathname === "/api/workbench"
+        || url.pathname === "/api/workbench/summary"
+        || url.pathname === "/api/workbench/groups"
         || url.pathname === "/api/workbench/ignored"
         || url.pathname === "/api/workbench/settings"
       )

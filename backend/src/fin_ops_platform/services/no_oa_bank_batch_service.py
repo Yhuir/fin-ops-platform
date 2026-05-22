@@ -121,6 +121,12 @@ class NoOaBankBatchService:
         effective_active_relations = self._effective_active_relations_after_migration(active_relations, current_active_relations)
         occupied_row_ids = self._active_relation_row_ids(effective_active_relations)
         no_oa_occupied_row_ids = self._active_no_oa_relation_row_ids(effective_active_relations)
+        relation_backed_submitted_batches = self._relation_backed_submitted_batches(
+            effective_active_relations,
+            rows,
+            categories,
+            source_version_payload,
+        )
 
         generated: dict[str, dict[str, Any]] = {}
         generated.update(self._build_single_side_batches(rows, categories, occupied_row_ids, source_version_payload))
@@ -153,6 +159,35 @@ class NoOaBankBatchService:
                 generated[batch_id] = stale
             else:
                 generated[batch_id] = batch
+
+        repaired_relation_backed_batches: list[dict[str, Any]] = []
+        for batch_id, relation_backed_batch in relation_backed_submitted_batches.items():
+            existing_batch = self._batches.get(batch_id)
+            current_generated = generated.get(batch_id)
+            if isinstance(current_generated, dict) and str(current_generated.get("status") or "") == "submitted":
+                continue
+            if (
+                not isinstance(existing_batch, dict)
+                or str(existing_batch.get("status") or "") != "submitted"
+            ):
+                repaired_relation_backed_batches.append(relation_backed_batch)
+            generated[batch_id] = relation_backed_batch
+        if repaired_relation_backed_batches:
+            self._merge_legacy_migration_result(
+                changed_case_ids=[
+                    str(batch.get("relation_case_id") or batch.get("batch_id") or "")
+                    for batch in repaired_relation_backed_batches
+                ],
+                affected_months=[
+                    month
+                    for batch in repaired_relation_backed_batches
+                    for month in self._batch_affected_months(batch)
+                ],
+                migrated_batch_ids=[
+                    str(batch.get("batch_id") or "")
+                    for batch in repaired_relation_backed_batches
+                ],
+            )
 
         self._batches = {batch_id: self._normalize_batch(batch) for batch_id, batch in generated.items()}
         return self.list_batches()
@@ -192,7 +227,7 @@ class NoOaBankBatchService:
     def list_batches(self, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         resolved_filters = filters if isinstance(filters, dict) else {}
         batches = [
-            batch
+            self._enrich_batch(batch)
             for batch in self._batches.values()
             if str(batch.get("status") or "").strip() != "superseded"
         ]
@@ -207,19 +242,16 @@ class NoOaBankBatchService:
                 batches = [batch for batch in batches if str(batch.get(field_name) or "") == value]
         bucket = str(resolved_filters.get("bucket") or "").strip()
         if bucket and bucket != "all":
-            batches = [batch for batch in batches if self._status_bucket(str(batch.get("status") or "")) == bucket]
-        return [
-            self._enrich_batch(batch)
-            for batch in sorted(
-                batches,
-                key=lambda item: (
-                    str(item.get("scope_month") or ""),
-                    str(item.get("batch_type") or ""),
-                    str(item.get("account_key") or ""),
-                    str(item.get("batch_id") or ""),
-                ),
-            )
-        ]
+            batches = [batch for batch in batches if str(batch.get("status_bucket") or "") == bucket]
+        return sorted(
+            batches,
+            key=lambda item: (
+                str(item.get("scope_month") or ""),
+                str(item.get("batch_type") or ""),
+                str(item.get("account_key") or ""),
+                str(item.get("batch_id") or ""),
+            ),
+        )
 
     def get_batch(self, batch_id: str) -> dict[str, Any]:
         resolved_batch_id = str(batch_id or "").strip()
@@ -950,6 +982,100 @@ class NoOaBankBatchService:
         if not isinstance(special_metadata, dict):
             return ""
         return str(special_metadata.get("source_batch_id") or "").strip()
+
+    def _relation_backed_submitted_batches(
+        self,
+        active_relations: list[dict[str, Any]],
+        rows: list[dict[str, Any]],
+        categories: dict[str, dict[str, Any]],
+        source_versions: dict[str, Any],
+    ) -> dict[str, dict[str, Any]]:
+        rows_by_id = {self._row_id(row): row for row in list(rows or []) if self._row_id(row)}
+        batches: dict[str, dict[str, Any]] = {}
+        for relation in list(active_relations or []):
+            if not isinstance(relation, dict) or not self._is_no_oa_relation(relation):
+                continue
+            case_id = str(relation.get("case_id") or "").strip()
+            batch_id = self._relation_source_batch_id(relation) or case_id
+            if not batch_id:
+                continue
+            row_ids = [
+                str(row_id).strip()
+                for row_id in list(relation.get("row_ids") or [])
+                if str(row_id).strip()
+            ]
+            if not row_ids:
+                continue
+            relation_metadata = relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else {}
+            resolved_rows = [rows_by_id[row_id] for row_id in row_ids if row_id in rows_by_id]
+            batch_type = str(relation_metadata.get("batch_type") or "").strip()
+            if not batch_type and resolved_rows:
+                batch_type = self._category_code(resolved_rows[0], categories)
+            if batch_type not in SUPPORTED_BATCH_TYPES:
+                continue
+            scope_month = self._relation_scope_month(relation, resolved_rows)
+            total_amount = self._decimal(relation_metadata.get("total_amount"))
+            if total_amount is None:
+                total_amount = self._legacy_relation_total_amount(batch_type, resolved_rows)
+            first_row = resolved_rows[0] if resolved_rows else {}
+            evidence = deepcopy(relation.get("evidence") if isinstance(relation.get("evidence"), dict) else {})
+            batch = {
+                "batch_id": batch_id,
+                "batch_key": str(evidence.get("batch_key") or f"relation:{case_id}"),
+                "batch_type": batch_type,
+                "batch_label": str(relation_metadata.get("batch_label") or NO_OA_BANK_BATCH_LABELS.get(batch_type, batch_type)),
+                "scope_month": scope_month,
+                "account_key": self._account_key(first_row) if batch_type != "internal_transfer" else "",
+                "bank_name": self._bank_name(first_row),
+                "account_last4": self._account_last4(first_row),
+                "status": "submitted",
+                "row_ids": row_ids,
+                "row_count": int(relation_metadata.get("row_count") or len(row_ids)),
+                "total_amount": self._format_amount(total_amount),
+                "tag_counts": {batch_type: len(row_ids)},
+                "direction_counts": self._direction_counts(resolved_rows),
+                "relation_case_id": case_id or batch_id,
+                "source_versions": deepcopy(source_versions),
+                "evidence": {
+                    **evidence,
+                    "source": "active_no_oa_relation",
+                    "relation_backed_projection": True,
+                    "relation_case_id": case_id,
+                },
+                "category_source": "active_no_oa_relation",
+                "created_by": str(relation.get("created_by") or NO_OA_LEGACY_RELATION_MIGRATION_SOURCE),
+                "created_at": str(relation.get("created_at") or self._timestamp()),
+                "submitted_by": str(relation.get("created_by") or NO_OA_LEGACY_RELATION_MIGRATION_SOURCE),
+                "submitted_at": str(relation.get("created_at") or self._timestamp()),
+                "withdrawn_by": "",
+                "withdrawn_at": "",
+                "withdraw_reason": "",
+                "version": int(relation_metadata.get("batch_version") or 1),
+                "updated_at": str(relation.get("updated_at") or self._timestamp()),
+            }
+            if batch_type == "internal_transfer":
+                batch["income_row_ids"] = [
+                    self._row_id(row)
+                    for row in resolved_rows
+                    if self._direction(row) == "inflow"
+                ]
+                batch["expense_row_ids"] = [
+                    self._row_id(row)
+                    for row in resolved_rows
+                    if self._direction(row) == "outflow"
+                ]
+                batch["account_pairs"] = [self._account_payload(row) for row in resolved_rows]
+            batches[batch_id] = self._normalize_batch(batch)
+        return batches
+
+    def _relation_scope_month(self, relation: dict[str, Any], rows: list[dict[str, Any]]) -> str:
+        raw_month = str(relation.get("month_scope") or "").strip()
+        if len(raw_month) >= 7 and raw_month[:7] != "all":
+            return raw_month[:7]
+        months = {self._scope_month(row) for row in rows if self._scope_month(row)}
+        if len(months) == 1:
+            return next(iter(months))
+        return raw_month or "all"
 
     def _submitted_batch_stale_relation_case_ids(self, batch: dict[str, Any]) -> set[str]:
         evidence = batch.get("evidence")
@@ -1729,8 +1855,13 @@ class NoOaBankBatchService:
 
     def _enrich_batch(self, batch: dict[str, Any]) -> dict[str, Any]:
         enriched = self._normalize_batch(batch)
+        has_active_relation = self._has_active_no_oa_relation(enriched)
+        if enriched["status"] == "stale" and has_active_relation:
+            enriched["status"] = "submitted"
+            enriched["status_bucket"] = "submitted"
+            enriched["relation_backed_status"] = "stale"
         enriched["can_withdraw"] = enriched["status"] == "submitted" or (
-            enriched["status"] == "stale" and self._has_active_no_oa_relation(enriched)
+            enriched["status"] == "stale" and has_active_relation
         )
         enriched["blocked_reason"] = self._blocked_reason(enriched)
         return deepcopy(enriched)

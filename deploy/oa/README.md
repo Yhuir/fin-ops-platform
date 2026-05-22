@@ -151,6 +151,20 @@ VITE_APP_BASE_PATH=/fin-ops/
 仓库里已补充一份环境变量模板：
 
 - `deploy/oa/fin_ops.env.example`
+- `deploy/oa/env/fin-ops.common.env.example`
+- `deploy/oa/env/fin-ops.secrets.env.example`
+- `deploy/oa/env/fin-ops.rabbitmq-*.env.example`
+
+systemd 模板位于：
+
+- `deploy/oa/systemd/fin-ops.service.example`
+- `deploy/oa/systemd/fin-ops-worker@.service.example`
+- `deploy/oa/systemd/fin-ops-rabbitmq-topology.service.example`
+- `deploy/oa/systemd/fin-ops-rabbitmq-dispatcher.service.example`
+
+生产部署时，API、worker、RabbitMQ dispatcher 和 RabbitMQ topology bootstrap 应使用不同的 `EnvironmentFile`。`FIN_OPS_POSTGRES_DATABASE_URL`、`RABBITMQ_URL`、Redis、MinIO/S3 和 OA role sync 密码只能放在服务器 root-only secret 文件中，不要写入仓库模板或 systemd inline `Environment=`。
+
+RabbitMQ 切换不是发布脚本的默认副作用。先保持 `FIN_OPS_QUEUE_BACKEND=postgres`，完成 topology apply 和 dispatcher shadow publish 观察，再按 worker 族灰度到 `FIN_OPS_QUEUE_BACKEND=rabbitmq`。完整 topology 已覆盖 workbench、search/pending、cost/tax、oa-sync 和 file migration；生产发布范围由 `RABBITMQ_DISPATCH_EVENT_TYPES` 控制。完整步骤见 `docs/operations/runtime-read-model-hardening.md`。
 
 ## 一键发布脚本
 

@@ -42,7 +42,12 @@ class WorkbenchReadModelRefreshService:
 
         complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)
         if callable(complete_dirty_scope):
-            complete_dirty_scope(tenant_id=event.tenant_id, scope_type=scope_type, scope_key=scope_key)
+            complete_dirty_scope(
+                tenant_id=event.tenant_id,
+                scope_type=scope_type,
+                scope_key=scope_key,
+                source_version=source_version,
+            )
         return payload
 
     def _enqueue_all_scope_shards(self, event: RuntimeQueueEvent, scope_key: str) -> dict[str, Any] | None:
@@ -55,5 +60,10 @@ class WorkbenchReadModelRefreshService:
             enqueue(scope_type="workbench", scope_key=shard_key, reason="workbench_all_shard")
         complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)
         if callable(complete_dirty_scope):
-            complete_dirty_scope(tenant_id=event.tenant_id, scope_type="workbench", scope_key=scope_key)
+            complete_dirty_scope(
+                tenant_id=event.tenant_id,
+                scope_type="workbench",
+                scope_key=scope_key,
+                source_version=event.source_version or event.payload.get("source_version"),
+            )
         return {"scope_key": scope_key, "enqueued_scope_keys": shard_keys, "row_count": 0}

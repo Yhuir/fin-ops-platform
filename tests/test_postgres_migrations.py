@@ -26,6 +26,11 @@ EXPECTED_MIGRATIONS = [
     "0011_runtime_phase2_query_indexes.sql",
     "0012_workbench_rows_scope_unique.sql",
     "0013_oa_attachment_cache_sources.sql",
+    "0014_workbench_groups_read_model.sql",
+    "0015_workbench_groups_sort_columns.sql",
+    "0016_runtime_outbox_envelope_fields.sql",
+    "0017_rabbitmq_outbox_publish_state.sql",
+    "0018_api_performance_read_model.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -81,6 +86,8 @@ EXPECTED_TABLES = [
     "app.app_settings",
     "app.pending_invoice_manual_invoice_commands",
     "read_model.workbench_rows",
+    "read_model.workbench_groups",
+    "read_model.workbench_summary",
     "read_model.workbench_snapshots",
     "read_model.workbench_candidate_matches",
     "read_model.search_index_rows",
@@ -103,7 +110,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 14)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 19)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -131,11 +138,72 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_status_requires_database_url(self) -> None:
         stdout = StringIO()
         stderr = StringIO()
-        with patch.dict(os.environ, {"DATABASE_URL": ""}):
+        with patch.dict(os.environ, {"DATABASE_URL": "", "FIN_OPS_POSTGRES_DATABASE_URL": ""}):
             exit_code = migrate.main(["status", "--migrations-dir", str(MIGRATIONS_DIR)], stdout=stdout, stderr=stderr)
         self.assertEqual(exit_code, 1)
         self.assertEqual(stdout.getvalue(), "")
         self.assertIn("PostgreSQL connection is required", stderr.getvalue())
+
+    def test_database_url_can_use_fin_ops_postgres_env(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"DATABASE_URL": "", "FIN_OPS_POSTGRES_DATABASE_URL": "postgresql://user:pw@127.0.0.1:5432/fin_ops"},
+        ):
+            self.assertEqual(
+                migrate.database_url_from_env_or_arg(None),
+                "postgresql://user:pw@127.0.0.1:5432/fin_ops",
+            )
+
+    def test_format_plan_reports_accepted_checksum_drift(self) -> None:
+        migration = migrate.Migration(
+            version="0004",
+            name="oa_projection_sync",
+            path=MIGRATIONS_DIR / "0004_oa_projection_sync.sql",
+            checksum_sha256="4388a900905768f32354236d9fdc3f013395b1f3b23df62f7d7e23ec8493480d",
+        )
+        applied = {
+            "0004": migrate.AppliedMigration(
+                version="0004",
+                name="oa_projection_sync",
+                checksum_sha256="3f358b0a830f6de933c4b15f27987c83d1e2be076833585c574685b5121d65f3",
+            )
+        }
+
+        self.assertEqual(
+            migrate.format_plan([migration], applied),
+            [
+                "0004 accepted-checksum-drift oa_projection_sync "
+                "4388a900905768f32354236d9fdc3f013395b1f3b23df62f7d7e23ec8493480d"
+            ],
+        )
+
+    def test_apply_skips_exact_accepted_checksum_drift(self) -> None:
+        migration = migrate.Migration(
+            version="0004",
+            name="oa_projection_sync",
+            path=MIGRATIONS_DIR / "0004_oa_projection_sync.sql",
+            checksum_sha256="4388a900905768f32354236d9fdc3f013395b1f3b23df62f7d7e23ec8493480d",
+        )
+        applied = {
+            "0004": migrate.AppliedMigration(
+                version="0004",
+                name="oa_projection_sync",
+                checksum_sha256="3f358b0a830f6de933c4b15f27987c83d1e2be076833585c574685b5121d65f3",
+            )
+        }
+        stdout = StringIO()
+        with patch("fin_ops_platform.postgres.migrate.assert_safe_target"), patch(
+            "fin_ops_platform.postgres.migrate.ensure_metadata_table"
+        ), patch("fin_ops_platform.postgres.migrate.fetch_applied_migrations", return_value=applied):
+            migrate.apply_migrations("postgresql://user:pw@127.0.0.1:5432/fin_ops", [migration], stdout)
+
+        self.assertIn("0004 skipped-accepted-checksum-drift oa_projection_sync", stdout.getvalue())
+
+    def test_ensure_metadata_table_does_not_require_create_when_table_exists(self) -> None:
+        with patch("fin_ops_platform.postgres.migrate.run_psql", return_value="exists") as run_psql:
+            migrate.ensure_metadata_table("postgresql://user:pw@127.0.0.1:5432/fin_ops")
+
+        self.assertEqual(run_psql.call_count, 1)
 
     def test_redacts_database_url_password(self) -> None:
         password_value = "pw"
@@ -185,6 +253,27 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "job.sync_outbox_event_attempts()",
             "outbox_events_sync_attempts_trg",
             "outbox_events_status_chk",
+            "outbox_events_priority_chk",
+            "outbox_events_schema_version_chk",
+            "outbox_events_max_attempts_chk",
+            "read_model_dirty_scopes_priority_chk",
+            "outbox_events_claim_priority_idx",
+            "outbox_events_trace_idx",
+            "runtime_outbox_envelope_v1",
+            "publish_status text not null default 'unpublished'",
+            "publish_attempt_count integer not null default 0",
+            "next_publish_at timestamptz not null default now()",
+            "outbox_events_publish_status_chk",
+            "outbox_events_publish_claim_idx",
+            "outbox_events_publish_lock_idx",
+            "outbox_events_rabbitmq_message_idx",
+            "drop view if exists job.runtime_outbox_envelope_v1",
+            "schema_version integer not null default 1",
+            "source_version bigint",
+            "priority text not null default 'normal'",
+            "trace_id text",
+            "dead_lettered_at timestamptz",
+            "where dedupe_key is not null and status = 'pending'",
             "file_objects_migration_status_chk",
             "file_objects_storage_backend_chk",
             "file_objects_migration_status_idx",
@@ -201,6 +290,18 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "tombstoned_at",
             "grant select, insert, update on job.read_model_dirty_scopes to fin_ops_worker",
             "grant select, insert, update on job.runtime_worker_heartbeats to fin_ops_worker",
+            "grant select, insert, update, delete on read_model.workbench_groups to fin_ops_worker",
+            "grant select, insert, update, delete on read_model.workbench_groups to fin_ops_migrator",
+            "create extension if not exists pg_stat_statements",
+            "create table if not exists read_model.workbench_summary",
+            "workbench_summary_scope_key_uidx",
+            "workbench_summary_scope_month_idx",
+            "workbench_summary_source_version_idx",
+            "on read_model.workbench_summary (((source_versions->>'source_version')::bigint))",
+            "grant select on read_model.workbench_summary to fin_ops_api",
+            "grant select, insert, update, delete on read_model.workbench_summary to fin_ops_worker",
+            "grant select on read_model.workbench_summary to fin_ops_readonly",
+            "grant select, insert, update, delete on read_model.workbench_summary to fin_ops_migrator",
         ):
             self.assertIn(required, sql)
 

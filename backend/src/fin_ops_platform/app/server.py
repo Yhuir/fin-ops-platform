@@ -42,6 +42,7 @@ from fin_ops_platform.app.routes_turnover_ledger import (
 from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.access_control_service import AccessControlService
+from fin_ops_platform.services.api_performance_metrics import ApiPerformanceRecorder, request_database_timing
 from fin_ops_platform.services.app_health_alert_service import AppHealthAlertService
 from fin_ops_platform.services.app_health_service import AppHealthService
 from fin_ops_platform.services.app_settings_service import AppSettingsService, AppSettingsValidationError
@@ -289,6 +290,7 @@ ROW_ID_MONTH_RE = re.compile(r"(20\d{2})(\d{2})")
 class Application:
     def __init__(self, *, data_dir: Path | None = None, bootstrap_mode: str | None = None) -> None:
         self._bootstrap_mode = self._normalize_bootstrap_mode(bootstrap_mode)
+        self._api_performance_recorder = ApiPerformanceRecorder()
         self._state_store = build_state_store(data_dir)
         self._legacy_bootstrap = LegacySnapshotBootstrap(self._state_store)
         self._runtime_repositories = RuntimeRepositoryContext.from_state_store(self._state_store)
@@ -709,7 +711,7 @@ class Application:
     def _turnover_bank_transaction_rows(self) -> list[dict[str, object]]:
         rows: list[dict[str, object]] = []
         transaction_payloads: list[dict[str, object]] = []
-        for transaction in list(self._import_service.list_transactions()):
+        for transaction in list(self._import_service.list_transactions(month="all")):
             payload = self._serialize_value(transaction)
             if not isinstance(payload, dict):
                 continue
@@ -793,6 +795,33 @@ class Application:
         headers: dict[str, str] | None = None,
     ) -> Response:
         request_started_at = monotonic()
+        route_path = self._normalize_route_path(urlparse(path).path)
+        status_code = int(HTTPStatus.INTERNAL_SERVER_ERROR)
+        with request_database_timing() as database_timing:
+            try:
+                response = self._handle_request_untracked(method, path, body=body, headers=headers)
+                status_code = int(response.status_code)
+                return response
+            finally:
+                self._api_performance_recorder.record_request(
+                    method=method,
+                    route_path=route_path,
+                    status_code=status_code,
+                    duration_ms=self._duration_ms(request_started_at),
+                    connection_acquire_duration_ms=database_timing.connection_acquire_duration_ms,
+                    sql_execute_fetch_duration_ms=database_timing.sql_execute_fetch_duration_ms,
+                    database_duration_ms=database_timing.total_duration_ms,
+                    database_query_count=database_timing.query_count,
+                )
+
+    def _handle_request_untracked(
+        self,
+        method: str,
+        path: str,
+        body: str | bytes | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> Response:
+        request_started_at = monotonic()
         parsed = urlparse(path)
         route_path = self._normalize_route_path(parsed.path)
         query = parse_qs(parsed.query)
@@ -831,6 +860,44 @@ class Application:
                 source_kind=query.get("source_kind", [None])[0],
                 search=query.get("search", [None])[0],
             )
+        if method == "GET" and route_path == "/api/workbench/summary":
+            month = query.get("month", [None])[0]
+            response = self._handle_api_workbench_summary(month)
+            self._emit_workbench_api_metric(
+                endpoint="/api/workbench/summary",
+                scope_key=self._workbench_read_model_scope_key(month or "all"),
+                status_code=response.status_code,
+                duration_ms=self._duration_ms(request_started_at),
+            )
+            return response
+        if method == "GET" and route_path == "/api/workbench/groups/detail":
+            return self._handle_api_workbench_group_detail(
+                query.get("month", [None])[0],
+                zone=query.get("zone", [None])[0],
+                group_id=query.get("group_id", [None])[0],
+            )
+        if method == "GET" and route_path == "/api/workbench/groups":
+            month = query.get("month", [None])[0]
+            response = self._handle_api_workbench_groups(
+                month,
+                zone=query.get("zone", [None])[0],
+                page=query.get("page", [None])[0],
+                page_size=query.get("page_size", [None])[0],
+                status=query.get("status", [None])[0],
+                source_kind=query.get("source_kind", [None])[0],
+                search=query.get("search", [None])[0],
+                sort=query.get("sort", [None])[0],
+                detail_level=query.get("detail_level", [None])[0],
+            )
+            self._emit_workbench_api_metric(
+                endpoint="/api/workbench/groups",
+                scope_key=self._workbench_read_model_scope_key(month or "all"),
+                status_code=response.status_code,
+                duration_ms=self._duration_ms(request_started_at),
+            )
+            return response
+        if method == "GET" and route_path == "/api/workbench/refresh-status":
+            return self._handle_api_workbench_refresh_status(query.get("month", [None])[0])
         if method == "GET" and route_path == "/api/bank-details/accounts":
             return self._handle_api_bank_details_accounts(
                 date_from=query.get("date_from", [None])[0],
@@ -1081,6 +1148,9 @@ class Application:
         if method == "GET" and route_path == "/api/tax-offset":
             month = query.get("month", [None])[0]
             return self._handle_api_tax_offset(month)
+        if method == "GET" and route_path == "/api/tax-offset/summary":
+            month = query.get("month", [None])[0]
+            return self._handle_api_tax_offset_summary(month)
         if method == "POST" and route_path == "/api/tax-offset/certified-import/preview":
             return self._handle_api_tax_certified_import_preview(body, headers)
         if method == "POST" and route_path == "/api/tax-offset/certified-import/confirm":
@@ -1302,6 +1372,7 @@ class Application:
                 "/matching/run",
                 "/matching/results",
                 "/api/workbench",
+                "/api/workbench/groups/detail",
                 "/api/search",
                 "/api/background-jobs/active",
                 "/api/background-jobs/{job_id}",
@@ -1348,6 +1419,7 @@ class Application:
                 "/api/workbench/actions/ignore-row",
                 "/api/workbench/actions/unignore-row",
                 "/api/tax-offset",
+                "/api/tax-offset/summary",
                 "/api/tax-offset/certified-import/preview",
                 "/api/tax-offset/certified-import/confirm",
                 "/api/tax-offset/certified-imports",
@@ -1421,6 +1493,7 @@ class Application:
             ],
             "planned": ["costing"],
         }
+        payload["api_performance"] = self._api_performance_recorder.summary()
         return payload
 
     def _handle_workbench_prototype(self) -> Response:
@@ -1510,6 +1583,436 @@ class Application:
         if isinstance(view.get("rows_page"), dict):
             payload["rows_page"] = view.get("rows_page")
         return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_workbench_summary(self, month: str | None) -> Response:
+        current_month = month or "all"
+        repository = getattr(self, "_workbench_sql_read_repository", None)
+        get_summary = getattr(repository, "get_workbench_summary", None)
+        scope_key = self._workbench_read_model_scope_key(current_month)
+        if not callable(get_summary):
+            self._emit_workbench_read_model_status_metric(
+                endpoint="/api/workbench/summary",
+                scope_key=scope_key,
+                read_model_status="unavailable",
+                reason="repository_unavailable",
+            )
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "read_model_unavailable",
+                    "read_model_status": "unavailable",
+                    "scope_key": scope_key,
+                    "message": "Workbench SQL summary repository is not configured.",
+                },
+            )
+        try:
+            payload = get_summary(scope_key=scope_key)
+        except Exception as error:
+            if self._is_missing_workbench_groups_read_model_error(error):
+                self._emit_workbench_read_model_status_metric(
+                    endpoint="/api/workbench/summary",
+                    scope_key=scope_key,
+                    read_model_status="unavailable",
+                    reason="migration_missing",
+                )
+                return self._json_response(
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    {
+                        "error": "read_model_unavailable",
+                        "read_model_status": "unavailable",
+                        "scope_key": scope_key,
+                        "message": "Workbench SQL groups read model table is not migrated.",
+                    },
+                )
+            raise
+        if not isinstance(payload, dict):
+            self._enqueue_workbench_read_model_refresh(scope_key, reason="api_summary_miss")
+            self._emit_workbench_read_model_status_metric(
+                endpoint="/api/workbench/summary",
+                scope_key=scope_key,
+                read_model_status="refreshing",
+                reason="api_summary_miss",
+            )
+            return self._json_response(
+                HTTPStatus.ACCEPTED,
+                {
+                    "month": current_month,
+                    "scope_key": scope_key,
+                    "summary": {
+                        "oa_count": 0,
+                        "bank_count": 0,
+                        "invoice_count": 0,
+                        "paired_count": 0,
+                        "open_count": 0,
+                        "exception_count": 0,
+                    },
+                    "read_model_status": "refreshing",
+                    "generated_at": None,
+                },
+            )
+        payload = dict(payload)
+        if "oa_status" not in payload:
+            oa_status_payload = getattr(getattr(self, "_workbench_query_service", None), "oa_status_payload", None)
+            if callable(oa_status_payload):
+                payload["oa_status"] = Application._serialize_value(oa_status_payload())
+        summary_status = str(payload.get("read_model_status") or "fresh")
+        if summary_status != "fresh":
+            self._emit_workbench_read_model_status_metric(
+                endpoint="/api/workbench/summary",
+                scope_key=scope_key,
+                read_model_status=summary_status,
+                reason="sql_status",
+            )
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_workbench_groups(
+        self,
+        month: str | None,
+        *,
+        zone: str | None,
+        page: str | None = None,
+        page_size: str | None = None,
+        status: str | None = None,
+        source_kind: str | None = None,
+        search: str | None = None,
+        sort: str | None = None,
+        detail_level: str | None = None,
+    ) -> Response:
+        current_month = month or "all"
+        normalized_zone = str(zone or "").strip()
+        if normalized_zone not in {"open", "paired"}:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_workbench_zone", "message": "zone must be open or paired."},
+            )
+        normalized_detail_level = self._normalize_workbench_group_detail_level(detail_level)
+        repository = getattr(self, "_workbench_sql_read_repository", None)
+        get_groups_page = getattr(repository, "get_workbench_groups_page", None)
+        scope_key = self._workbench_read_model_scope_key(current_month)
+        if not callable(get_groups_page):
+            self._emit_workbench_read_model_status_metric(
+                endpoint="/api/workbench/groups",
+                scope_key=scope_key,
+                read_model_status="unavailable",
+                reason="repository_unavailable",
+            )
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "read_model_unavailable",
+                    "read_model_status": "unavailable",
+                    "scope_key": scope_key,
+                    "message": "Workbench SQL groups repository is not configured.",
+                },
+            )
+        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
+        get_cached = getattr(redis_helper, "get_json", None)
+        get_text = getattr(redis_helper, "get_text", None)
+        set_text = getattr(redis_helper, "set_text", None)
+        version_key = self._workbench_groups_redis_version_key(scope_key)
+        redis_cache_version = get_text(version_key) if callable(get_text) else None
+        cache_key = self._workbench_groups_redis_cache_key_from_version(
+            cache_version=redis_cache_version,
+            scope_key=scope_key,
+            zone=normalized_zone,
+            page=page,
+            page_size=page_size,
+            status=status,
+            source_kind=source_kind,
+            search=search,
+            sort=sort,
+            detail_level=normalized_detail_level,
+        )
+        if cache_key and callable(get_cached):
+            cached = get_cached(cache_key)
+            if isinstance(cached, dict):
+                payload = dict(cached.get("payload") if isinstance(cached.get("payload"), dict) else cached)
+                payload["read_model_status"] = "fresh"
+                payload["read_model_scope_key"] = scope_key
+                return self._json_response(HTTPStatus.OK, payload)
+        if cache_key is None:
+            cache_key = self._workbench_groups_redis_cache_key(
+                repository=repository,
+                scope_key=scope_key,
+                zone=normalized_zone,
+                page=page,
+                page_size=page_size,
+                status=status,
+                source_kind=source_kind,
+                search=search,
+                sort=sort,
+                detail_level=normalized_detail_level,
+            )
+        if cache_key and callable(get_cached):
+            if callable(set_text):
+                parsed_version = self._workbench_groups_redis_cache_version_from_key(cache_key)
+                if parsed_version:
+                    set_text(version_key, parsed_version, ttl_seconds=self._workbench_groups_redis_ttl_seconds())
+            cached = get_cached(cache_key)
+            if isinstance(cached, dict):
+                payload = dict(cached.get("payload") if isinstance(cached.get("payload"), dict) else cached)
+                payload["read_model_status"] = "fresh"
+                payload["read_model_scope_key"] = scope_key
+                return self._json_response(HTTPStatus.OK, payload)
+        try:
+            payload = get_groups_page(
+                scope_key=scope_key,
+                zone=normalized_zone,
+                page=page,
+                page_size=page_size,
+                status=status,
+                source_kind=source_kind,
+                search=search,
+                sort=sort,
+                detail_level=normalized_detail_level,
+            )
+        except Exception as error:
+            if self._is_missing_workbench_groups_read_model_error(error):
+                self._emit_workbench_read_model_status_metric(
+                    endpoint="/api/workbench/groups",
+                    scope_key=scope_key,
+                    read_model_status="unavailable",
+                    reason="migration_missing",
+                )
+                return self._json_response(
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    {
+                        "error": "read_model_unavailable",
+                        "read_model_status": "unavailable",
+                        "scope_key": scope_key,
+                        "message": "Workbench SQL groups read model table is not migrated.",
+                    },
+                )
+            raise
+        if not isinstance(payload, dict):
+            self._enqueue_workbench_read_model_refresh(scope_key, reason="api_groups_miss")
+            self._emit_workbench_read_model_status_metric(
+                endpoint="/api/workbench/groups",
+                scope_key=scope_key,
+                read_model_status="refreshing",
+                reason="api_groups_miss",
+            )
+            return self._json_response(
+                HTTPStatus.ACCEPTED,
+                {
+                    "month": current_month,
+                    "scope_key": scope_key,
+                    "zone": normalized_zone,
+                    "page": 1,
+                    "page_size": 50,
+                    "total": 0,
+                    "has_more": False,
+                    "groups": [],
+                    "read_model_status": "refreshing",
+                },
+            )
+        payload = dict(payload)
+        payload["read_model_scope_key"] = scope_key
+        groups_status = str(payload.get("read_model_status") or "fresh")
+        if groups_status != "fresh":
+            self._enqueue_workbench_read_model_refresh(scope_key, reason="api_groups_stale")
+            self._emit_workbench_read_model_status_metric(
+                endpoint="/api/workbench/groups",
+                scope_key=scope_key,
+                read_model_status=groups_status,
+                reason="sql_status",
+            )
+        set_cached = getattr(redis_helper, "set_json", None)
+        if cache_key and callable(set_cached) and payload.get("read_model_status") == "fresh":
+            set_cached(cache_key, {"payload": payload}, ttl_seconds=self._workbench_groups_redis_ttl_seconds())
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_workbench_group_detail(
+        self,
+        month: str | None,
+        *,
+        zone: str | None,
+        group_id: str | None,
+    ) -> Response:
+        current_month = month or "all"
+        normalized_zone = str(zone or "").strip()
+        normalized_group_id = str(group_id or "").strip()
+        if normalized_zone not in {"open", "paired"}:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_workbench_zone", "message": "zone must be open or paired."},
+            )
+        if not normalized_group_id:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_workbench_group_detail_request", "message": "group_id is required."},
+            )
+        repository = getattr(self, "_workbench_sql_read_repository", None)
+        get_group_detail = getattr(repository, "get_workbench_group_detail", None)
+        scope_key = self._workbench_read_model_scope_key(current_month)
+        if not callable(get_group_detail):
+            self._emit_workbench_read_model_status_metric(
+                endpoint="/api/workbench/groups/detail",
+                scope_key=scope_key,
+                read_model_status="unavailable",
+                reason="repository_unavailable",
+            )
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "read_model_unavailable",
+                    "read_model_status": "unavailable",
+                    "scope_key": scope_key,
+                    "message": "Workbench SQL group detail repository is not configured.",
+                },
+            )
+        try:
+            group = get_group_detail(scope_key=scope_key, zone=normalized_zone, group_id=normalized_group_id)
+        except Exception as error:
+            if self._is_missing_workbench_groups_read_model_error(error):
+                self._emit_workbench_read_model_status_metric(
+                    endpoint="/api/workbench/groups/detail",
+                    scope_key=scope_key,
+                    read_model_status="unavailable",
+                    reason="migration_missing",
+                )
+                return self._json_response(
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    {
+                        "error": "read_model_unavailable",
+                        "read_model_status": "unavailable",
+                        "scope_key": scope_key,
+                        "message": "Workbench SQL groups read model table is not migrated.",
+                    },
+                )
+            raise
+        if not isinstance(group, dict):
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {
+                    "error": "workbench_group_not_found",
+                    "scope_key": scope_key,
+                    "zone": normalized_zone,
+                    "group_id": normalized_group_id,
+                },
+            )
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "month": current_month,
+                "scope_key": scope_key,
+                "zone": normalized_zone,
+                "group_id": normalized_group_id,
+                "group": group,
+                "read_model_status": "fresh",
+            },
+        )
+
+    def _handle_api_workbench_refresh_status(self, month: str | None) -> Response:
+        current_month = month or "all"
+        repository = getattr(self, "_workbench_sql_read_repository", None)
+        get_refresh_status = getattr(repository, "get_workbench_refresh_status", None)
+        scope_key = self._workbench_read_model_scope_key(current_month)
+        if not callable(get_refresh_status):
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "read_model_unavailable",
+                    "read_model_status": "unavailable",
+                    "scope_key": scope_key,
+                    "message": "Workbench SQL refresh status repository is not configured.",
+                },
+            )
+        payload = get_refresh_status(scope_key=scope_key)
+        return self._json_response(HTTPStatus.OK, payload if isinstance(payload, dict) else {"read_model_status": "unavailable"})
+
+    @staticmethod
+    def _is_missing_workbench_groups_read_model_error(error: Exception) -> bool:
+        message = str(error).lower()
+        return (
+            ("read_model.workbench_groups" in message or "read_model.workbench_summary" in message)
+            and ("does not exist" in message or "undefinedtable" in error.__class__.__name__.lower())
+        )
+
+    def _workbench_groups_redis_cache_key(
+        self,
+        *,
+        repository: object,
+        scope_key: str,
+        zone: str,
+        page: str | None,
+        page_size: str | None,
+        status: str | None,
+        source_kind: str | None,
+        search: str | None,
+        sort: str | None,
+        detail_level: str | None,
+    ) -> str | None:
+        cache_version_loader = getattr(repository, "workbench_groups_cache_version", None)
+        if not callable(cache_version_loader):
+            return None
+        cache_version = cache_version_loader(scope_key=scope_key)
+        if not cache_version:
+            return None
+        key_payload = {
+            "scope": scope_key,
+            "zone": zone,
+            "page": page or "1",
+            "page_size": page_size or "50",
+            "status": status or "",
+            "source_kind": source_kind or "",
+            "search": search or "",
+            "sort": sort or "",
+            "detail_level": self._normalize_workbench_group_detail_level(detail_level),
+        }
+        digest = hashlib.sha256(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+        return f"workbench:{cache_version}:groups:{digest}"
+
+    @staticmethod
+    def _workbench_groups_redis_version_key(scope_key: str) -> str:
+        safe_scope_key = str(scope_key or "all").strip() or "all"
+        return f"workbench:groups:version:{safe_scope_key}"
+
+    @staticmethod
+    def _workbench_groups_redis_cache_version_from_key(cache_key: str) -> str | None:
+        parts = str(cache_key or "").split(":")
+        if len(parts) >= 3 and parts[0] == "workbench" and parts[2] == "groups":
+            return parts[1]
+        return None
+
+    def _workbench_groups_redis_cache_key_from_version(
+        self,
+        *,
+        cache_version: str | None,
+        scope_key: str,
+        zone: str,
+        page: str | None,
+        page_size: str | None,
+        status: str | None,
+        source_kind: str | None,
+        search: str | None,
+        sort: str | None,
+        detail_level: str | None,
+    ) -> str | None:
+        if not cache_version:
+            return None
+        key_payload = {
+            "scope": scope_key,
+            "zone": zone,
+            "page": page or "1",
+            "page_size": page_size or "50",
+            "status": status or "",
+            "source_kind": source_kind or "",
+            "search": search or "",
+            "sort": sort or "",
+            "detail_level": self._normalize_workbench_group_detail_level(detail_level),
+        }
+        digest = hashlib.sha256(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+        return f"workbench:{cache_version}:groups:{digest}"
+
+    @staticmethod
+    def _normalize_workbench_group_detail_level(detail_level: str | None) -> str:
+        normalized = str(detail_level or "full").strip().lower()
+        return "summary" if normalized == "summary" else "full"
+
+    @staticmethod
+    def _workbench_groups_redis_ttl_seconds() -> int:
+        return 20
 
     def _enqueue_workbench_read_model_refresh(self, scope_key: str, *, reason: str) -> None:
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
@@ -4858,6 +5361,54 @@ class Application:
             payload["detail"] = detail.strip()
         print(json.dumps(payload, ensure_ascii=False), flush=True)
 
+    def _emit_workbench_api_metric(
+        self,
+        *,
+        endpoint: str,
+        scope_key: str,
+        status_code: int,
+        duration_ms: float,
+    ) -> None:
+        print(
+            json.dumps(
+                {
+                    "kind": "workbench_api_metric",
+                    "metric": "workbench.api.duration_ms",
+                    "endpoint": endpoint,
+                    "scope_key": scope_key,
+                    "status_code": int(status_code),
+                    "duration_ms": round(float(duration_ms), 3),
+                    "timestamp": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+
+    def _emit_workbench_read_model_status_metric(
+        self,
+        *,
+        endpoint: str,
+        scope_key: str,
+        read_model_status: str,
+        reason: str,
+    ) -> None:
+        print(
+            json.dumps(
+                {
+                    "kind": "workbench_read_model_status_metric",
+                    "metric": "workbench.read_model.status.count",
+                    "endpoint": endpoint,
+                    "scope_key": scope_key,
+                    "read_model_status": read_model_status,
+                    "reason": reason,
+                    "timestamp": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+
     def _emit_workbench_persistence_warning(self, *, operation: str, detail: str) -> None:
         print(
             json.dumps(
@@ -7463,6 +8014,18 @@ class Application:
         status = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" and not payload.get("input_plan_items") and not payload.get("output_items") and not payload.get("certified_items") else HTTPStatus.OK
         return self._json_response(status, payload)
 
+    def _handle_api_tax_offset_summary(self, month: str | None) -> Response:
+        current_month = month or datetime.now().strftime("%Y-%m")
+        try:
+            payload, _cache_hit = self._get_tax_offset_month_summary_payload(current_month)
+        except ValueError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_tax_offset_request", "message": str(exc)},
+            )
+        status = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
+        return self._json_response(status, payload)
+
     def _get_or_build_tax_offset_month_payload(self, month: str) -> tuple[dict[str, object], bool]:
         sql_result = self._get_tax_offset_month_from_sql_read_model(month)
         if sql_result is not None:
@@ -7511,7 +8074,7 @@ class Application:
         redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
         get_cached = getattr(redis_helper, "get_json", None)
         if callable(get_cached):
-            cached = get_cached(cache_key)
+            cached = self._runtime_redis_get_json_best_effort(cache_key)
             if isinstance(cached, dict):
                 cached_payload = cached.get("payload") if isinstance(cached.get("payload"), dict) else cached
                 payload = dict(cached_payload)
@@ -7539,8 +8102,140 @@ class Application:
             payload["read_model_schema_version"] = view.get("schema_version")
         set_cached = getattr(redis_helper, "set_json", None)
         if callable(set_cached) and refresh_status == "fresh":
-            set_cached(cache_key, {"payload": payload}, ttl_seconds=self._tax_offset_redis_ttl_seconds())
+            self._runtime_redis_set_json_best_effort(
+                cache_key,
+                {"payload": payload},
+                ttl_seconds=self._tax_offset_redis_ttl_seconds(),
+            )
         return payload, False
+
+    def _get_tax_offset_month_summary_payload(self, month: str) -> tuple[dict[str, object], bool]:
+        scope_key = self._tax_offset_request_scope_key(month)
+        cache_key = self._tax_offset_summary_redis_cache_key(scope_key)
+        cached = self._runtime_redis_get_json_best_effort(cache_key)
+        if isinstance(cached, dict):
+            cached_payload = cached.get("payload") if isinstance(cached.get("payload"), dict) else cached
+            payload = dict(cached_payload)
+            payload["read_model_status"] = "fresh"
+            payload["read_model_scope_key"] = scope_key
+            return payload, True
+
+        repository = getattr(self, "_tax_offset_sql_read_repository", None)
+        get_view = getattr(repository, "get_tax_offset_view", None)
+        if not callable(get_view):
+            full_payload, cache_hit = self._get_or_build_tax_offset_month_payload(month)
+            return self._tax_offset_summary_payload(full_payload, scope_key=scope_key), cache_hit
+
+        view = get_view(scope_key=scope_key)
+        if not isinstance(view, dict):
+            self._enqueue_tax_offset_read_model_refresh(scope_key, reason="api_summary_miss")
+            payload = self._tax_offset_summary_payload(
+                self._empty_tax_offset_month_payload(month),
+                scope_key=scope_key,
+            )
+            payload["read_model_status"] = "refreshing"
+            return payload, False
+
+        full_payload = dict(view.get("payload") if isinstance(view.get("payload"), dict) else {})
+        payload = self._tax_offset_summary_payload(full_payload, scope_key=scope_key)
+        refresh_status = str(view.get("refresh_status") or "fresh")
+        if refresh_status != "fresh":
+            self._enqueue_tax_offset_read_model_refresh(scope_key, reason="api_summary_stale")
+        payload["read_model_status"] = refresh_status
+        if view.get("generated_at"):
+            payload["read_model_generated_at"] = view.get("generated_at")
+        if view.get("schema_version"):
+            payload["read_model_schema_version"] = view.get("schema_version")
+        if refresh_status == "fresh":
+            self._runtime_redis_set_json_best_effort(
+                cache_key,
+                {"payload": payload},
+                ttl_seconds=self._tax_offset_redis_ttl_seconds(),
+            )
+        return payload, False
+
+    def _runtime_redis_get_json_best_effort(self, cache_key: str) -> dict[str, object] | None:
+        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
+        get_cached = getattr(redis_helper, "get_json", None)
+        if not callable(get_cached):
+            return None
+        try:
+            cached = get_cached(cache_key)
+        except Exception as exc:  # pragma: no cover - concrete Redis exception classes vary by client version.
+            self._emit_runtime_cache_error(operation="get_json", cache_key=cache_key, error=exc)
+            return None
+        return cached if isinstance(cached, dict) else None
+
+    def _runtime_redis_set_json_best_effort(self, cache_key: str, payload: dict[str, object], *, ttl_seconds: int) -> bool:
+        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
+        set_cached = getattr(redis_helper, "set_json", None)
+        if not callable(set_cached):
+            return False
+        try:
+            return bool(set_cached(cache_key, payload, ttl_seconds=ttl_seconds))
+        except Exception as exc:  # pragma: no cover - concrete Redis exception classes vary by client version.
+            self._emit_runtime_cache_error(operation="set_json", cache_key=cache_key, error=exc)
+            return False
+
+    def _runtime_redis_delete_best_effort(self, cache_key: str) -> bool:
+        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
+        delete = getattr(redis_helper, "delete", None)
+        if not callable(delete):
+            return False
+        try:
+            return bool(delete(cache_key))
+        except Exception as exc:  # pragma: no cover - concrete Redis exception classes vary by client version.
+            self._emit_runtime_cache_error(operation="delete", cache_key=cache_key, error=exc)
+            return False
+
+    @staticmethod
+    def _emit_runtime_cache_error(*, operation: str, cache_key: str, error: Exception) -> None:
+        print(
+            json.dumps(
+                {
+                    "kind": "runtime_cache_error",
+                    "operation": operation,
+                    "cache_key": cache_key,
+                    "error_type": type(error).__name__,
+                    "timestamp": datetime.now().isoformat(),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+
+    @staticmethod
+    def _tax_offset_summary_payload(payload: dict[str, object], *, scope_key: str) -> dict[str, object]:
+        item_list_keys = (
+            "output_items",
+            "input_plan_items",
+            "certified_items",
+            "certified_matched_rows",
+            "certified_outside_plan_rows",
+            "locked_certified_input_ids",
+            "default_selected_output_ids",
+            "default_selected_input_ids",
+        )
+        summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+        result: dict[str, object] = {
+            "month": str(payload.get("month") or scope_key),
+            "summary": dict(summary),
+            "item_counts": {
+                key: len(value) if isinstance(value, list) else 0
+                for key in item_list_keys
+                for value in [payload.get(key)]
+            },
+            "read_model_scope_key": scope_key,
+        }
+        if payload.get("read_model_status"):
+            result["read_model_status"] = payload.get("read_model_status")
+        if payload.get("read_model_generated_at"):
+            result["read_model_generated_at"] = payload.get("read_model_generated_at")
+        if payload.get("read_model_schema_version"):
+            result["read_model_schema_version"] = payload.get("read_model_schema_version")
+        if payload.get("error"):
+            result["error"] = payload.get("error")
+        return result
 
     @staticmethod
     def _tax_offset_request_scope_key(month: str) -> str:
@@ -7552,6 +8247,10 @@ class Application:
     @staticmethod
     def _tax_offset_redis_cache_key(scope_key: str) -> str:
         return f"tax_offset:month:{scope_key}"
+
+    @staticmethod
+    def _tax_offset_summary_redis_cache_key(scope_key: str) -> str:
+        return f"tax_offset:summary:{scope_key}"
 
     @staticmethod
     def _tax_offset_redis_ttl_seconds() -> int:
@@ -8270,7 +8969,7 @@ class Application:
 
     def _no_oa_bank_transaction_rows(self) -> list[dict[str, object]]:
         rows: list[dict[str, object]] = []
-        for transaction in list(self._import_service.list_transactions()):
+        for transaction in list(self._import_service.list_transactions(month="all")):
             payload = self._serialize_value(transaction)
             if not isinstance(payload, dict):
                 continue
@@ -11669,9 +12368,14 @@ class Application:
             cached_payload = dict(payload)
             cached_payload["read_model_status"] = "fresh"
             cached_payload["read_model_scope_key"] = warmed_scope_key
-            set_cached(
+            self._runtime_redis_set_json_best_effort(
                 self._tax_offset_redis_cache_key(warmed_scope_key),
                 {"payload": cached_payload},
+                ttl_seconds=self._tax_offset_redis_ttl_seconds(),
+            )
+            self._runtime_redis_set_json_best_effort(
+                self._tax_offset_summary_redis_cache_key(warmed_scope_key),
+                {"payload": self._tax_offset_summary_payload(cached_payload, scope_key=warmed_scope_key)},
                 ttl_seconds=self._tax_offset_redis_ttl_seconds(),
             )
         return {
@@ -14310,10 +15014,8 @@ class Application:
         return enqueued
 
     def _delete_tax_offset_redis_cache(self, scope_key: str) -> None:
-        redis_helper = getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None)
-        delete = getattr(redis_helper, "delete", None)
-        if callable(delete):
-            delete(self._tax_offset_redis_cache_key(scope_key))
+        self._runtime_redis_delete_best_effort(self._tax_offset_redis_cache_key(scope_key))
+        self._runtime_redis_delete_best_effort(self._tax_offset_summary_redis_cache_key(scope_key))
 
     @staticmethod
     def _tax_offset_months_from_scope_keys(scope_keys: list[str]) -> set[str]:

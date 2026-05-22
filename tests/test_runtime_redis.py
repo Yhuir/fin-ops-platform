@@ -71,6 +71,17 @@ class RuntimeRedisTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             helper.set_json("bad", {"count": 1}, ttl_seconds=0)
 
+    def test_helper_supports_plain_text_version_keys(self) -> None:
+        client = FakeRedisClient()
+        helper = RuntimeRedisHelper(client=client, key_prefix="finops")
+
+        self.assertTrue(helper.set_text("workbench:version:all", "v7", ttl_seconds=60))
+        self.assertEqual(helper.get_text("workbench:version:all"), "v7")
+
+        self.assertEqual(client.calls[0], ("set", ("finops:workbench:version:all", "v7"), {"ex": 60}))
+        with self.assertRaises(ValueError):
+            helper.set_text("bad", "v1", ttl_seconds=0)
+
     def test_lock_uses_set_nx_with_ttl(self) -> None:
         client = FakeRedisClient()
         helper = RuntimeRedisHelper(client=client, key_prefix="finops")
@@ -83,13 +94,27 @@ class RuntimeRedisTests(unittest.TestCase):
         client = FakeRedisClient()
         helper = RuntimeRedisHelper(client=client, key_prefix="finops")
 
-        self.assertEqual(helper.health_summary(), {"redis_status": "ready"})
+        self.assertEqual(helper.health_summary(), {"redis_status": "ready", "redis_hit_count": 0, "redis_miss_count": 0})
         self.assertEqual(client.calls[0], ("ping", (), {}))
 
     def test_health_summary_reports_redis_errors(self) -> None:
         helper = RuntimeRedisHelper(client=FailingRedisClient(), key_prefix="finops")
 
-        self.assertEqual(helper.health_summary(), {"redis_status": "error", "redis_error": "redis unavailable"})
+        self.assertEqual(
+            helper.health_summary(),
+            {"redis_status": "error", "redis_error": "redis unavailable", "redis_hit_count": 0, "redis_miss_count": 0},
+        )
+
+    def test_health_summary_reports_cache_hit_and_miss_counts(self) -> None:
+        client = FakeRedisClient()
+        helper = RuntimeRedisHelper(client=client, key_prefix="finops")
+
+        self.assertIsNone(helper.get_json("missing"))
+        self.assertTrue(helper.set_json("ready", {"ok": True}, ttl_seconds=15))
+        self.assertEqual(helper.get_json("ready"), {"ok": True})
+
+        self.assertEqual(helper.health_summary()["redis_hit_count"], 1)
+        self.assertEqual(helper.health_summary()["redis_miss_count"], 1)
 
 
 if __name__ == "__main__":
