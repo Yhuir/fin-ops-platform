@@ -112,9 +112,20 @@ class RuntimeQueueRepository:
             dirty_row = transaction.fetch_one(
                 """
                 insert into job.read_model_dirty_scopes(
-                    tenant_id, scope_type, scope_key, reason, payload, raw_payload, status, next_run_at
+                    tenant_id, scope_type, scope_key, reason, payload, raw_payload, source_version, status, next_run_at
                 )
-                values (%s, %s, %s, %s, %s, %s, 'pending', now())
+                values (
+                    %s, %s, %s, %s, %s, %s,
+                    coalesce((
+                        select max(existing.source_version) + 1
+                        from job.read_model_dirty_scopes existing
+                        where existing.tenant_id = %s
+                          and existing.scope_type = %s
+                          and existing.scope_key = %s
+                    ), 0),
+                    'pending',
+                    now()
+                )
                 on conflict (tenant_id, scope_type, scope_key)
                 where status in ('pending', 'processing')
                 do update set
@@ -134,6 +145,9 @@ class RuntimeQueueRepository:
                     normalized_reason,
                     self._json_param(payload),
                     self._json_param(payload),
+                    tenant_id,
+                    normalized_scope_type,
+                    normalized_scope_key,
                 ),
             )
             source_version = int((dirty_row or {}).get("source_version") or 0)
