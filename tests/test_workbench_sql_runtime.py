@@ -654,6 +654,37 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(evidences[0]["source_expense_item_id"], "item-1")
         self.assertEqual(evidences[0]["source_expense_row_index"], "0")
 
+    def test_sql_projection_ignores_expense_item_artifact_when_same_attachment_has_parsed_invoice(self) -> None:
+        payload = {
+            "expense_items": [
+                {
+                    "expense_item_id": "item-1",
+                    "row_index": "0",
+                    "attachment_invoices": [
+                        {
+                            "source_attachment_key": "invoice-pdf",
+                            "source_attachment_name": "交通发票.pdf",
+                            "seller_name": "供应商A",
+                            "total_with_tax": "167.00",
+                        }
+                    ],
+                    "attachment_artifacts": [
+                        {
+                            "source_attachment_key": "invoice-pdf",
+                            "source_attachment_name": "交通发票.pdf",
+                            "document_kind": "发票附件",
+                        }
+                    ],
+                }
+            ]
+        }
+
+        evidences = WorkbenchSqlProjectionBuilder._attachment_evidences_from_expense_items(payload)
+
+        self.assertEqual(len(evidences), 1)
+        self.assertEqual(evidences[0]["seller_name"], "供应商A")
+        self.assertEqual(evidences[0]["total_with_tax"], "167.00")
+
     def test_sql_projection_materializes_attachment_invoice_rows_from_structured_oa_tables(self) -> None:
         class StructuredOAConnection(WorkbenchProjectionSettingsConnection):
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:

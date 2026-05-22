@@ -399,16 +399,35 @@ class WorkbenchSqlProjectionBuilder:
                 continue
             source_expense_item_id = item.get("expense_item_id")
             source_expense_row_index = item.get("row_index")
-            for source_key in ("attachment_invoices", "attachment_evidences", "attachment_artifacts"):
-                for evidence in list(item.get(source_key) or []):
-                    if not isinstance(evidence, dict):
-                        continue
-                    normalized = dict(evidence)
-                    normalized.setdefault("source_expense_item_id", source_expense_item_id)
-                    normalized.setdefault("source_expense_row_index", source_expense_row_index)
-                    if source_key == "attachment_artifacts" and not _looks_like_invoice_artifact(normalized):
-                        continue
-                    evidences.append(normalized)
+            parsed_evidences = [
+                evidence
+                for source_key in ("attachment_invoices", "attachment_evidences")
+                for evidence in list(item.get(source_key) or [])
+                if isinstance(evidence, dict)
+            ]
+            parsed_attachment_keys = {
+                str(evidence.get("source_attachment_key") or "").strip()
+                for evidence in parsed_evidences
+                if str(evidence.get("source_attachment_key") or "").strip()
+            }
+            item_evidences = [*parsed_evidences]
+            for artifact in list(item.get("attachment_artifacts") or []):
+                if not isinstance(artifact, dict):
+                    continue
+                normalized_artifact = dict(artifact)
+                artifact_attachment_key = str(normalized_artifact.get("source_attachment_key") or "").strip()
+                if artifact_attachment_key and artifact_attachment_key in parsed_attachment_keys:
+                    continue
+                if not _looks_like_invoice_artifact(normalized_artifact):
+                    continue
+                item_evidences.append(normalized_artifact)
+
+            for evidence in WorkbenchSqlProjectionBuilder._dedupe_structured_attachment_evidences(
+                [dict(item_evidence) for item_evidence in item_evidences]
+            ):
+                evidence.setdefault("source_expense_item_id", source_expense_item_id)
+                evidence.setdefault("source_expense_row_index", source_expense_row_index)
+                evidences.append(evidence)
         return evidences
 
     def _legacy_oa_rows(self, month: str) -> list[dict[str, Any]]:
