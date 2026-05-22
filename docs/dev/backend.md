@@ -59,7 +59,10 @@ FIN_OPS_POSTGRES_DATABASE_URL=postgresql://... \
 PYTHONPATH=backend/src \
 python3 -m fin_ops_platform.app.worker \
   --enable-workbench-read-model-refresh \
-  --event-type workbench.read_model.refresh
+  --event-type workbench.read_model.refresh \
+  --lock-timeout-seconds 300 \
+  --task-timeout-seconds 60 \
+  --statement-timeout-seconds 30
 ```
 
 本地 smoke 可用 `--check` 查看 handler、queue、Redis 配置，不会开始 claim：
@@ -79,7 +82,10 @@ FIN_OPS_POSTGRES_DATABASE_URL=postgresql://... \
 PYTHONPATH=backend/src \
 python3 -m fin_ops_platform.app.worker \
   --enable-cost-statistics-read-model-refresh \
-  --event-type cost_statistics.read_model.refresh
+  --event-type cost_statistics.read_model.refresh \
+  --lock-timeout-seconds 300 \
+  --task-timeout-seconds 60 \
+  --statement-timeout-seconds 30
 ```
 
 `/api/cost-statistics/explorer` 和 `/api/cost-statistics` month summary 在 PostgreSQL read model 存在时从 SQL 返回，并用 Redis 短 TTL 缓存热点 `month/all + project_scope` payload。Redis 清空后仍会回落 PostgreSQL；SQL miss 时返回 `202 Accepted` 和 `read_model_status=refreshing`，只 enqueue durable refresh。
@@ -91,7 +97,10 @@ FIN_OPS_POSTGRES_DATABASE_URL=postgresql://... \
 PYTHONPATH=backend/src \
 python3 -m fin_ops_platform.app.worker \
   --enable-tax-offset-read-model-refresh \
-  --event-type tax_offset.read_model.refresh
+  --event-type tax_offset.read_model.refresh \
+  --lock-timeout-seconds 300 \
+  --task-timeout-seconds 60 \
+  --statement-timeout-seconds 30
 ```
 
 `/api/tax-offset` 在 PostgreSQL read model 存在时从 SQL 返回，并用 Redis 短 TTL 缓存热点 month payload。Redis 清空后仍会回落 PostgreSQL；SQL miss 时返回 `202 Accepted` 和 `read_model_status=refreshing`，只 enqueue durable refresh。
@@ -105,7 +114,10 @@ python3 -m fin_ops_platform.app.worker \
   --enable-search-read-model-refresh \
   --enable-pending-invoice-read-model-refresh \
   --event-type search.read_model.refresh \
-  --event-type pending_invoice.read_model.refresh
+  --event-type pending_invoice.read_model.refresh \
+  --lock-timeout-seconds 300 \
+  --task-timeout-seconds 60 \
+  --statement-timeout-seconds 30
 ```
 
 `/api/search` 从 `read_model.search_index_rows` 查询，`/api/pending-invoices/rows` 从 `read_model.pending_invoice_rows` 分页查询。SQL miss/stale 时返回 `202 Accepted` 和 `read_model_status=refreshing`，只 enqueue durable refresh；API 请求路径不得同步扫描全量发票、流水、OA 或关系数据。
@@ -119,7 +131,10 @@ FIN_OPS_OA_MONGO_DATABASE=... \
 PYTHONPATH=backend/src \
 python3 -m fin_ops_platform.app.worker \
   --enable-oa-sync \
-  --event-type oa.sync
+  --event-type oa.sync \
+  --lock-timeout-seconds 300 \
+  --task-timeout-seconds 60 \
+  --statement-timeout-seconds 30
 ```
 
 PostgreSQL mode 下工作台 OA 行由 `app.oa_applications` projection 提供，`POST /integrations/oa/sync` 只写入 `oa.sync` durable queue event。API server 默认不启动 in-process OA polling；本地临时兼容旧轮询时才设置 `FIN_OPS_OA_POLLING_ENABLED=1`。

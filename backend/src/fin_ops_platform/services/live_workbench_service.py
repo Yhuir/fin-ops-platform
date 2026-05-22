@@ -46,17 +46,17 @@ class LiveWorkbenchService:
 
     def has_rows_for_month(self, month: str) -> bool:
         if month == "all":
-            return bool([invoice for invoice in self._import_service.list_invoices() if self._invoice_is_workbench_visible(invoice)] or self._import_service.list_transactions())
+            return bool([invoice for invoice in self._import_service.list_invoices(month="all") if self._invoice_is_workbench_visible(invoice)] or self._import_service.list_transactions(month="all"))
         return any(
             invoice.invoice_date and invoice.invoice_date.startswith(month)
-            for invoice in self._import_service.list_invoices()
+            for invoice in self._import_service.list_invoices(month=month)
             if self._invoice_is_workbench_visible(invoice)
         ) or any(
-            transaction.txn_date and transaction.txn_date.startswith(month) for transaction in self._import_service.list_transactions()
+            transaction.txn_date and transaction.txn_date.startswith(month) for transaction in self._import_service.list_transactions(month=month)
         )
 
     def get_workbench(self, month: str) -> dict[str, Any]:
-        self._rebuild_cache()
+        self._rebuild_cache(month=month)
 
         paired: dict[str, list[dict[str, Any]]] = {"oa": [], "bank": [], "invoice": []}
         open_rows: dict[str, list[dict[str, Any]]] = {"oa": [], "bank": [], "invoice": []}
@@ -313,18 +313,18 @@ class LiveWorkbenchService:
             },
         }
 
-    def _rebuild_cache(self) -> None:
+    def _rebuild_cache(self, *, month: str = "all") -> None:
         self._company_identity = self._resolve_company_identity()
         excluded_transaction_batch_ids = self._excluded_transaction_batch_ids()
         result_by_object_id = self._existing_results_by_object_id()
         self._detail_rows_by_id = {}
-        for invoice in self._import_service.list_invoices():
+        for invoice in self._import_service.list_invoices(month=month):
             if not self._invoice_is_workbench_visible(invoice):
                 continue
             self._detail_rows_by_id[invoice.id] = self._build_invoice_row(invoice, result_by_object_id.get(invoice.id))
         transactions = [
             transaction
-            for transaction in self._import_service.list_transactions()
+            for transaction in self._import_service.list_transactions(month=month)
             if transaction.source_batch_id not in excluded_transaction_batch_ids
         ]
         categories_by_transaction_id = self._categories_for_transactions(transactions)

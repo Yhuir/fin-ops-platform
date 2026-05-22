@@ -291,6 +291,14 @@ class PostgresReadModelRepository:
         search: str | None = None,
     ) -> dict[str, Any] | None:
         normalized_scope_key = str(scope_key or "").strip() or "all"
+        if normalized_scope_key == "all":
+            return self._load_all_workbench_view(
+                page=page,
+                page_size=page_size,
+                status=status,
+                source_kind=source_kind,
+                search=search,
+            )
         row = self._connection.fetch_one(
             """
             select scope_key, payload, raw_payload, cache_status, generated_at, source_versions, row_count
@@ -342,6 +350,175 @@ class PostgresReadModelRepository:
             )
         return result
 
+    def _load_all_workbench_view(
+        self,
+        *,
+        page: int | str | None,
+        page_size: int | str | None,
+        status: str | None,
+        source_kind: str | None,
+        search: str | None,
+    ) -> dict[str, Any] | None:
+        if page is not None or page_size is not None or status or source_kind or search:
+            return self._load_all_workbench_rows_page_view(
+                page=page,
+                page_size=page_size,
+                status=status,
+                source_kind=source_kind,
+                search=search,
+            )
+        rows = self._connection.fetch_all(
+            """
+            select scope_key, payload, raw_payload, cache_status, generated_at, source_versions, row_count
+            from read_model.workbench_snapshots
+            where scope_key <> 'all'
+            order by scope_key desc
+            """
+        )
+        if not rows:
+            return None
+        payloads = [_read_model_payload(row) for row in rows]
+        grouped_payloads = [
+            payload.get("payload") if isinstance(payload, dict) and isinstance(payload.get("payload"), dict) else payload
+            for payload in payloads
+            if isinstance(payload, dict)
+        ]
+        combined = {
+            "month": "all",
+            "summary": {
+                "oa_count": 0,
+                "bank_count": 0,
+                "invoice_count": 0,
+                "paired_count": 0,
+                "open_count": 0,
+                "exception_count": 0,
+            },
+            "paired": {"groups": []},
+            "open": {"groups": []},
+            "read_model_scope_key": "all",
+        }
+        for payload in grouped_payloads:
+            summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+            for key in ("oa_count", "bank_count", "invoice_count", "paired_count", "open_count", "exception_count"):
+                combined["summary"][key] += int_value(summary.get(key), 0)
+            for section_name in ("paired", "open"):
+                section = payload.get(section_name) if isinstance(payload.get(section_name), dict) else {}
+                groups = section.get("groups") if isinstance(section, dict) else []
+                if isinstance(groups, list):
+                    combined[section_name]["groups"].extend(groups)
+        dirty_row = self._connection.fetch_one(
+            """
+            select status, updated_at, last_error
+            from job.read_model_dirty_scopes
+            where tenant_id = 'default'
+              and scope_type = 'workbench'
+              and scope_key = 'all'
+              and status in ('pending', 'processing', 'failed')
+            order by updated_at desc
+            limit 1
+            """
+        )
+        refresh_status = "fresh"
+        if dirty_row is not None:
+            refresh_status = "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
+        result = {
+            "scope_key": "all",
+            "payload": combined,
+            "cache_status": "fresh",
+            "generated_at": max((text(row.get("generated_at")) or "" for row in rows), default=""),
+            "source_versions": {},
+            "row_count": sum(int_value(row.get("row_count"), 0) for row in rows),
+            "refresh_status": refresh_status,
+            "dirty_scope": dict(dirty_row) if isinstance(dirty_row, dict) else None,
+        }
+        if page is not None or page_size is not None or status or source_kind or search:
+            result["rows_page"] = self._load_workbench_rows_page(
+                scope_key="all",
+                page=page,
+                page_size=page_size,
+                status=status,
+                source_kind=source_kind,
+                search=search,
+            )
+        return result
+
+    def _load_all_workbench_rows_page_view(
+        self,
+        *,
+        page: int | str | None,
+        page_size: int | str | None,
+        status: str | None,
+        source_kind: str | None,
+        search: str | None,
+    ) -> dict[str, Any] | None:
+        rows = self._connection.fetch_all(
+            """
+            select
+                scope_key,
+                coalesce(payload #> '{payload,summary}', payload->'summary', '{}'::jsonb) as summary,
+                cache_status,
+                generated_at,
+                row_count
+            from read_model.workbench_snapshots
+            where scope_key <> 'all'
+            order by scope_key desc
+            """
+        )
+        if not rows:
+            return None
+        combined = {
+            "month": "all",
+            "summary": {
+                "oa_count": 0,
+                "bank_count": 0,
+                "invoice_count": 0,
+                "paired_count": 0,
+                "open_count": 0,
+                "exception_count": 0,
+            },
+            "paired": {"groups": []},
+            "open": {"groups": []},
+            "read_model_scope_key": "all",
+            "page_mode": "sql_rows",
+        }
+        for row in rows:
+            summary = row.get("summary") if isinstance(row.get("summary"), dict) else {}
+            for key in ("oa_count", "bank_count", "invoice_count", "paired_count", "open_count", "exception_count"):
+                combined["summary"][key] += int_value(summary.get(key), 0)
+        dirty_row = self._connection.fetch_one(
+            """
+            select status, updated_at, last_error
+            from job.read_model_dirty_scopes
+            where tenant_id = 'default'
+              and scope_type = 'workbench'
+              and scope_key = 'all'
+              and status in ('pending', 'processing', 'failed')
+            order by updated_at desc
+            limit 1
+            """
+        )
+        refresh_status = "fresh"
+        if dirty_row is not None:
+            refresh_status = "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
+        return {
+            "scope_key": "all",
+            "payload": combined,
+            "cache_status": "fresh",
+            "generated_at": max((text(row.get("generated_at")) or "" for row in rows), default=""),
+            "source_versions": {},
+            "row_count": sum(int_value(row.get("row_count"), 0) for row in rows),
+            "refresh_status": refresh_status,
+            "dirty_scope": dict(dirty_row) if isinstance(dirty_row, dict) else None,
+            "rows_page": self._load_workbench_rows_page(
+                scope_key="all",
+                page=page,
+                page_size=page_size,
+                status=status,
+                source_kind=source_kind,
+                search=search,
+            ),
+        }
+
     def load_workbench_read_models(self) -> dict[str, Any]:
         rows = self._connection.fetch_all("select scope_key as key, payload, raw_payload from read_model.workbench_snapshots order by scope_key")
         if rows:
@@ -371,6 +548,18 @@ class PostgresReadModelRepository:
                 cache_status = text(payload.get("cache_status") or "fresh") or "fresh"
                 scope_month = month_start(payload.get("scope_month") or payload.get("month") or grouped_payload.get("month") or scope_key)
                 workbench_rows = list(self._iter_workbench_rows(grouped_payload))
+                incoming_source_version = _source_version_value(source_versions)
+                existing_row = connection.fetch_one(
+                    "select source_versions from read_model.workbench_snapshots where scope_key = %s",
+                    (scope_key,),
+                )
+                existing_source_versions = existing_row.get("source_versions") if isinstance(existing_row, dict) else {}
+                if (
+                    incoming_source_version is not None
+                    and _source_version_value(existing_source_versions) is not None
+                    and incoming_source_version < _source_version_value(existing_source_versions)
+                ):
+                    continue
                 connection.execute(
                     """
                     insert into read_model.workbench_snapshots(scope_key, scope_month, source_versions, generated_at, cache_status, row_count, payload, raw_payload)
@@ -408,7 +597,7 @@ class PostgresReadModelRepository:
                             counterparty_name, amount, source_versions, generated_at, cache_status, payload, raw_payload
                         )
                         values (%s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s, %s)
-                        on conflict (row_id) do update set
+                        on conflict (scope_key, row_id) do update set
                             scope_month = excluded.scope_month,
                             scope_key = excluded.scope_key,
                             source_kind = excluded.source_kind,
@@ -457,8 +646,12 @@ class PostgresReadModelRepository:
         normalized_page = max(1, int_value(page, 1))
         normalized_page_size = min(200, max(1, int_value(page_size, 100)))
         offset = (normalized_page - 1) * normalized_page_size
-        clauses = ["scope_key = %s"]
-        params: list[Any] = [scope_key]
+        if scope_key == "all":
+            clauses = ["scope_key <> 'all'"]
+            params: list[Any] = []
+        else:
+            clauses = ["scope_key = %s"]
+            params = [scope_key]
         if normalized := text(status):
             clauses.append("status = %s")
             params.append(normalized)
@@ -469,12 +662,21 @@ class PostgresReadModelRepository:
             clauses.append("(project_name ilike %s or counterparty_name ilike %s or row_id ilike %s)")
             pattern = f"%{normalized}%"
             params.extend([pattern, pattern, pattern])
+        where_sql = " and ".join(clauses)
+        count_row = self._connection.fetch_one(
+            f"""
+            select count(*) as total_count
+            from read_model.workbench_rows
+            where {where_sql}
+            """,
+            tuple(params),
+        )
         params.extend([normalized_page_size + 1, offset])
         rows = self._connection.fetch_all(
             f"""
             select row_id, source_kind, status, payload, raw_payload
             from read_model.workbench_rows
-            where {' and '.join(clauses)}
+            where {where_sql}
             order by updated_at desc, row_id
             limit %s offset %s
             """,
@@ -488,6 +690,7 @@ class PostgresReadModelRepository:
         return {
             "page": normalized_page,
             "page_size": normalized_page_size,
+            "total": int_value((count_row or {}).get("total_count"), 0),
             "has_more": len(rows) > normalized_page_size,
             "rows": payload_rows,
         }
@@ -507,14 +710,46 @@ class PostgresReadModelRepository:
         def write(connection: Any) -> None:
             candidates = snapshot.get("candidates") if isinstance(snapshot, dict) else None
             normalized_months = {str(month)[:7] for month in changed_scope_months or set() if str(month or "").strip()}
+            scope_runs = snapshot.get("scope_runs") if isinstance(snapshot, dict) else None
+            incoming_versions_by_month = {
+                str(month)[:7]: _source_version_value(
+                    run.get("source_versions") if isinstance(run, dict) else {}
+                )
+                for month, run in iter_mapping(scope_runs)
+                if str(month or "").strip()
+            }
+            stale_months: set[str] = set()
             for scope_month in sorted(normalized_months):
+                incoming_source_version = incoming_versions_by_month.get(scope_month)
+                existing_row = connection.fetch_one(
+                    """
+                    select max((source_versions->>'source_version')::bigint) as source_version
+                    from read_model.workbench_candidate_matches
+                    where to_char(scope_month, 'YYYY-MM') = %s
+                      and source_versions ? 'source_version'
+                    """,
+                    (scope_month,),
+                )
+                existing_source_version = _source_version_value(
+                    {"source_version": existing_row.get("source_version")} if isinstance(existing_row, dict) else {}
+                )
+                if (
+                    incoming_source_version is not None
+                    and existing_source_version is not None
+                    and incoming_source_version < existing_source_version
+                ):
+                    stale_months.add(scope_month)
+                    continue
                 connection.execute(
                     "delete from read_model.workbench_candidate_matches where to_char(scope_month, 'YYYY-MM') = %s",
                     (scope_month,),
                 )
             for candidate_key, payload in iter_mapping(candidates):
                 scope_month = month_start(payload.get("scope_month") or payload.get("month"))
-                if normalized_months and str(scope_month or "")[:7] not in normalized_months:
+                normalized_scope_month = str(scope_month or "")[:7]
+                if normalized_months and normalized_scope_month not in normalized_months:
+                    continue
+                if normalized_scope_month in stale_months:
                     continue
                 connection.execute(
                     """
@@ -862,6 +1097,18 @@ def _read_model_payload(row: dict[str, Any], *, drop_rebuildable_rows: bool = Fa
     if drop_rebuildable_rows and isinstance(payload, dict) and payload.get("rebuildable") is True:
         return None
     return without_keys(payload, {"rebuildable"})
+
+
+def _source_version_value(source_versions: Any) -> int | None:
+    if not isinstance(source_versions, dict):
+        return None
+    value = source_versions.get("source_version")
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _empty_search_payload(

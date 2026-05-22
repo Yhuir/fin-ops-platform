@@ -35,14 +35,16 @@ class WorkbenchQueryService:
         *,
         oa_adapter: OAAdapter | None = None,
         bank_account_resolver: BankAccountResolver | None = None,
+        seed_demo_rows: bool = True,
     ) -> None:
         self._bank_account_resolver = bank_account_resolver or BankAccountResolver()
-        self._oa_adapter = oa_adapter or InMemoryOAAdapter(self._seed_oa_records())
+        self._oa_adapter = oa_adapter or InMemoryOAAdapter(self._seed_oa_records() if seed_demo_rows else {})
         self._records_by_id: dict[str, dict[str, Any]] = {}
         self._records_lock = RLock()
         self._attachment_invoice_rows_by_issue_month_cache: dict[str, list[dict[str, Any]]] = {}
         self._has_full_oa_snapshot = False
-        self._seed_all_rows()
+        if seed_demo_rows:
+            self._seed_all_rows()
 
     def get_workbench(self, month: str) -> dict[str, Any]:
         if month == "all":

@@ -109,7 +109,7 @@ class RuntimeQueueRepository:
         }
         event_type = f"{normalized_scope_type}.read_model.refresh"
         with self._connection.transaction() as transaction:
-            transaction.execute(
+            dirty_row = transaction.fetch_one(
                 """
                 insert into job.read_model_dirty_scopes(
                     tenant_id, scope_type, scope_key, reason, payload, raw_payload, status, next_run_at
@@ -121,9 +121,11 @@ class RuntimeQueueRepository:
                     reason = excluded.reason,
                     payload = job.read_model_dirty_scopes.payload || excluded.payload,
                     raw_payload = excluded.raw_payload,
+                    source_version = job.read_model_dirty_scopes.source_version + 1,
                     status = 'pending',
                     next_run_at = now(),
                     updated_at = now()
+                returning source_version
                 """,
                 (
                     tenant_id,
@@ -134,6 +136,8 @@ class RuntimeQueueRepository:
                     self._json_param(payload),
                 ),
             )
+            source_version = int((dirty_row or {}).get("source_version") or 0)
+            payload = {**payload, "source_version": source_version}
             row = transaction.fetch_one(
                 """
                 insert into job.outbox_events (
@@ -143,7 +147,10 @@ class RuntimeQueueRepository:
                 values (%s, %s, 'read_model', %s, %s, %s, %s, %s)
                 on conflict (tenant_id, dedupe_key)
                 where dedupe_key is not null and status in ('pending', 'processing')
-                do update set updated_at = job.outbox_events.updated_at
+                do update set
+                    payload = job.outbox_events.payload || excluded.payload,
+                    raw_payload = excluded.raw_payload,
+                    updated_at = now()
                 returning
                     id::text as event_id,
                     tenant_id,
@@ -320,6 +327,12 @@ class RuntimeQueueRepository:
             retry=True,
             retry_delay_seconds=retry_delay_seconds,
         )
+
+    def set_statement_timeout_seconds(self, seconds: int | None) -> None:
+        setter = getattr(self._connection, "set_statement_timeout_ms", None)
+        if not callable(setter):
+            return
+        setter(None if seconds is None else max(1, int(seconds)) * 1000)
 
     def complete_read_model_refresh(self, *, tenant_id: str, scope_type: str, scope_key: str) -> bool:
         with self._connection.transaction() as transaction:

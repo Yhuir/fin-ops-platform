@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
+from dataclasses import replace
+from datetime import datetime
 from typing import Any
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
+
+
+MONTH_FORMAT = "%Y-%m"
 
 
 class OAProjectionSyncService:
@@ -13,15 +19,19 @@ class OAProjectionSyncService:
         source_adapter: Any,
         projection_repository: Any,
         queue_repository: Any,
+        retention_cutoff_date_provider: Any | None = None,
     ) -> None:
         self._source_adapter = source_adapter
         self._projection_repository = projection_repository
         self._queue_repository = queue_repository
+        self._retention_cutoff_date_provider = retention_cutoff_date_provider
 
     def handle_runtime_event(self, event: RuntimeQueueEvent) -> dict[str, Any]:
         scope_key = self._event_scope_key(event)
-        records = self._load_records(scope_key)
+        cutoff_month = self._retention_cutoff_month()
+        records = self._sanitized_records(self._load_records(scope_key))
         upserted_count = self._projection_repository.upsert_application_records(records, scope_key=scope_key)
+        pruned_months = self._prune_before_cutoff(scope_key, cutoff_month)
         result = {
             "sync_type": "oa_projection",
             "scope_key": scope_key,
@@ -29,12 +39,13 @@ class OAProjectionSyncService:
             "scanned_count": len(records),
             "upserted_count": upserted_count,
             "skipped_count": max(0, len(records) - upserted_count),
+            "pruned_count": len(pruned_months),
             "error_count": 0,
         }
         record_sync_run = getattr(self._projection_repository, "record_sync_run", None)
         if callable(record_sync_run):
             record_sync_run(result)
-        self._mark_downstream_dirty(scope_key, records)
+        self._mark_downstream_dirty(scope_key, records, extra_months=pruned_months)
         return result
 
     @staticmethod
@@ -43,24 +54,133 @@ class OAProjectionSyncService:
         return str(payload_scope or event.scope_key or event.aggregate_id or "all").strip() or "all"
 
     def _load_records(self, scope_key: str) -> list[OAApplicationRecord]:
+        cutoff_month = self._retention_cutoff_month()
+        if cutoff_month and scope_key != "all" and self._is_month_scope(scope_key) and scope_key < cutoff_month:
+            return []
+        sync_parse = getattr(self._source_adapter, "force_attachment_invoice_sync_parse", None)
+        context = sync_parse() if callable(sync_parse) else nullcontext()
+        with context:
+            return self._load_records_with_attachment_parse(scope_key, cutoff_month=cutoff_month)
+
+    def _load_records_with_attachment_parse(self, scope_key: str, *, cutoff_month: str | None) -> list[OAApplicationRecord]:
         if scope_key != "all":
             return list(self._source_adapter.list_application_records(scope_key))
+        list_months = getattr(self._source_adapter, "list_available_months", None)
+        months = [
+            month
+            for month in (list(list_months()) if callable(list_months) else [])
+            if self._is_month_scope(month) and (cutoff_month is None or month >= cutoff_month)
+        ]
+        if months:
+            records: list[OAApplicationRecord] = []
+            for month in months:
+                records.extend(self._source_adapter.list_application_records(month))
+            return records
         list_all = getattr(self._source_adapter, "list_all_application_records", None)
         if callable(list_all):
-            return list(list_all())
+            return [
+                record
+                for record in list(list_all())
+                if cutoff_month is None or not self._is_month_scope(str(record.month)) or str(record.month) >= cutoff_month
+            ]
         records: list[OAApplicationRecord] = []
-        list_months = getattr(self._source_adapter, "list_available_months", None)
-        months = list(list_months()) if callable(list_months) else []
         for month in months:
             records.extend(self._source_adapter.list_application_records(month))
         return records
 
-    def _mark_downstream_dirty(self, scope_key: str, records: list[OAApplicationRecord]) -> None:
+    def _retention_cutoff_month(self) -> str | None:
+        provider = self._retention_cutoff_date_provider
+        if not callable(provider):
+            return None
+        try:
+            raw_value = provider()
+        except Exception:
+            return None
+        text = str(raw_value or "").strip()
+        if len(text) < 7:
+            return None
+        try:
+            parsed = datetime.strptime(text[:10], "%Y-%m-%d")
+        except ValueError:
+            return None
+        return parsed.strftime(MONTH_FORMAT)
+
+    @staticmethod
+    def _is_month_scope(value: object) -> bool:
+        text = str(value or "").strip()
+        if len(text) != 7:
+            return False
+        try:
+            datetime.strptime(text, MONTH_FORMAT)
+        except ValueError:
+            return False
+        return True
+
+    @staticmethod
+    def _sanitized_records(records: list[OAApplicationRecord]) -> list[OAApplicationRecord]:
+        sanitized: list[OAApplicationRecord] = []
+        for record in list(records or []):
+            if not isinstance(record, OAApplicationRecord):
+                continue
+            expense_items = []
+            for item in list(record.expense_items or []):
+                if not isinstance(item, dict):
+                    continue
+                normalized_item = dict(item)
+                normalized_item["attachment_evidences"] = [
+                    dict(evidence)
+                    for evidence in list(item.get("attachment_evidences") or [])
+                    if _is_invoice_attachment_payload(evidence)
+                ]
+                normalized_item["attachment_artifacts"] = [
+                    dict(artifact)
+                    for artifact in list(item.get("attachment_artifacts") or [])
+                    if _is_invoice_attachment_payload(artifact)
+                ]
+                expense_items.append(normalized_item)
+            sanitized.append(
+                replace(
+                    record,
+                    attachment_evidences=[
+                        dict(evidence)
+                        for evidence in list(record.attachment_evidences or [])
+                        if _is_invoice_attachment_payload(evidence)
+                    ],
+                    attachment_artifacts=[
+                        dict(artifact)
+                        for artifact in list(record.attachment_artifacts or [])
+                        if _is_invoice_attachment_payload(artifact)
+                    ],
+                    expense_items=expense_items,
+                )
+            )
+        return sanitized
+
+    def _prune_before_cutoff(self, scope_key: str, cutoff_month: str | None) -> list[str]:
+        if scope_key != "all" or not cutoff_month:
+            return []
+        prune = getattr(self._projection_repository, "prune_records_before", None)
+        if not callable(prune):
+            return []
+        return [
+            month
+            for month in list(prune(cutoff_month) or [])
+            if self._is_month_scope(month)
+        ]
+
+    def _mark_downstream_dirty(
+        self,
+        scope_key: str,
+        records: list[OAApplicationRecord],
+        *,
+        extra_months: list[str] | None = None,
+    ) -> None:
         months = {
             str(record.month).strip()
             for record in list(records or [])
             if str(getattr(record, "month", "")).strip()
         }
+        months.update(month for month in list(extra_months or []) if month)
         if scope_key != "all" and scope_key:
             months.add(scope_key)
         target_scopes = sorted({month for month in months if month and month != "all"})
@@ -77,3 +197,31 @@ class OAProjectionSyncService:
         for pending_scope in ("expense:all", "income:all"):
             enqueue(scope_type="pending_invoice", scope_key=pending_scope, reason="oa_projection_sync")
 
+
+def _is_invoice_attachment_payload(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    invoice_fields = (
+        "invoice_no",
+        "invoice_code",
+        "digital_invoice_no",
+        "seller_name",
+        "seller_tax_no",
+        "buyer_name",
+        "buyer_tax_no",
+        "total_with_tax",
+        "tax_amount",
+    )
+    if any(str(value.get(field) or "").strip() for field in invoice_fields):
+        return True
+    kind_text = " ".join(
+        str(value.get(field) or "").strip().lower()
+        for field in ("source_kind", "evidence_type", "document_kind", "attachment_type", "file_type")
+    )
+    if any(token in kind_text for token in ("invoice", "发票")):
+        return True
+    name_text = " ".join(
+        str(value.get(field) or "").strip().lower()
+        for field in ("source_attachment_name", "attachment_name", "filename", "name")
+    )
+    return "发票" in name_text or "invoice" in name_text

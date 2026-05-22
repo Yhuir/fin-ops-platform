@@ -15,6 +15,15 @@ from fin_ops_platform.services.postgres_repositories.common import (
 )
 
 
+def _int_or_none(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 class PostgresOAProjectionRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
@@ -28,7 +37,7 @@ class PostgresOAProjectionRepository:
         def write(connection: Any) -> None:
             for record in normalized_records:
                 payload = serialize_value(record)
-                connection.execute(
+                application_row = connection.fetch_one(
                     """
                     insert into app.oa_applications(
                         oa_source_id, form_id, row_id, form_type, workflow_no, status,
@@ -52,6 +61,7 @@ class PostgresOAProjectionRepository:
                         raw_payload = excluded.raw_payload,
                         synced_at = now(),
                         updated_at = now()
+                    returning id::text as application_id
                     """,
                     (
                         record.id,
@@ -70,6 +80,11 @@ class PostgresOAProjectionRepository:
                         jsonb({"normalized_payload": payload}),
                     ),
                 )
+                application_id = text((application_row or {}).get("application_id"))
+                if not application_id:
+                    raise RuntimeError(f"OA projection upsert did not return application id for {record.id}.")
+                self._replace_application_items(connection, application_id=application_id, record=record)
+                self._replace_application_attachments(connection, application_id=application_id, record=record)
             self._record_watermark(
                 scope_key=scope_key,
                 status="succeeded",
@@ -79,6 +94,151 @@ class PostgresOAProjectionRepository:
 
         run_in_transaction(self._connection, write)
         return len(normalized_records)
+
+    def _replace_application_items(self, connection: Any, *, application_id: str, record: OAApplicationRecord) -> None:
+        connection.execute("delete from app.oa_application_items where oa_application_id = %s::uuid", (application_id,))
+        for index, item in enumerate(list(record.expense_items or [])):
+            if not isinstance(item, dict):
+                continue
+            payload = serialize_value(item)
+            row_id = text(
+                payload.get("expense_item_id")
+                or payload.get("row_id")
+                or payload.get("item_id")
+                or f"{record.id}:item:{index + 1}"
+            )
+            connection.execute(
+                """
+                insert into app.oa_application_items(
+                    oa_application_id, oa_source_id, form_id, row_id, item_type, item_no,
+                    amount, tax_amount, project_id, project_name, normalized_payload, raw_payload
+                )
+                values (%s::uuid, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    application_id,
+                    record.id,
+                    self._form_id_for_record(record),
+                    row_id,
+                    text(payload.get("item_type") or payload.get("expense_type") or record.expense_type),
+                    text(payload.get("item_no") or payload.get("row_index") or str(index)),
+                    decimal_text(payload.get("settlement_amount") or payload.get("amount") or payload.get("total_with_tax")),
+                    decimal_text(payload.get("tax_amount")),
+                    text(payload.get("project_id")),
+                    text(payload.get("project_name") or record.project_name),
+                    jsonb(payload),
+                    jsonb({"normalized_payload": payload}),
+                ),
+            )
+
+    def _replace_application_attachments(self, connection: Any, *, application_id: str, record: OAApplicationRecord) -> None:
+        connection.execute("delete from app.oa_attachments where oa_application_id = %s::uuid", (application_id,))
+        for attachment in self._attachment_payloads_for_record(record):
+            source_attachment_key = text(attachment.get("source_attachment_key"))
+            if not source_attachment_key:
+                continue
+            connection.execute(
+                """
+                insert into app.oa_attachments(
+                    oa_application_id, oa_source_id, form_id, row_id, source_attachment_key,
+                    filename, content_type, size_bytes, source_modified_at, normalized_payload, raw_payload
+                )
+                values (%s::uuid, %s, %s, %s, %s, %s, %s, %s, %s::timestamptz, %s, %s)
+                on conflict (source_attachment_key) do update set
+                    oa_application_id = excluded.oa_application_id,
+                    oa_source_id = excluded.oa_source_id,
+                    form_id = excluded.form_id,
+                    row_id = excluded.row_id,
+                    filename = excluded.filename,
+                    content_type = excluded.content_type,
+                    size_bytes = excluded.size_bytes,
+                    source_modified_at = excluded.source_modified_at,
+                    normalized_payload = excluded.normalized_payload,
+                    raw_payload = excluded.raw_payload
+                """,
+                (
+                    application_id,
+                    record.id,
+                    self._form_id_for_record(record),
+                    text(attachment.get("row_id")),
+                    source_attachment_key,
+                    text(
+                        attachment.get("filename")
+                        or attachment.get("source_attachment_name")
+                        or attachment.get("attachment_name")
+                        or attachment.get("name")
+                    ),
+                    text(attachment.get("content_type") or attachment.get("mime_type")),
+                    _int_or_none(attachment.get("size_bytes") or attachment.get("source_size_bytes")),
+                    text(attachment.get("source_modified_at") or attachment.get("modified_at")),
+                    jsonb(serialize_value(attachment)),
+                    jsonb({"normalized_payload": serialize_value(attachment)}),
+                ),
+            )
+
+    def _attachment_payloads_for_record(self, record: OAApplicationRecord) -> list[dict[str, Any]]:
+        attachments: list[dict[str, Any]] = []
+
+        def add(raw: Any, *, source_expense_item_id: Any = None, source_expense_row_index: Any = None, fallback_index: int = 0) -> None:
+            if not isinstance(raw, dict):
+                return
+            payload = dict(serialize_value(raw))
+            payload.setdefault("source_expense_item_id", source_expense_item_id)
+            payload.setdefault("source_expense_row_index", source_expense_row_index)
+            source_key = text(
+                payload.get("source_attachment_key")
+                or payload.get("attachment_key")
+                or payload.get("file_id")
+                or payload.get("object_id")
+            )
+            if not source_key:
+                name = text(payload.get("source_attachment_name") or payload.get("attachment_name") or payload.get("filename"))
+                source_key = f"{record.id}:attachment:{source_expense_item_id or 'root'}:{fallback_index}:{name or 'unnamed'}"
+            payload["source_attachment_key"] = source_key
+            payload.setdefault("row_id", text(source_expense_item_id) or record.id)
+            attachments.append(payload)
+
+        for index, evidence in enumerate(list(record.attachment_invoices or [])):
+            add(evidence, fallback_index=index)
+        for index, evidence in enumerate(list(record.attachment_evidences or [])):
+            add(evidence, fallback_index=index)
+        for index, artifact in enumerate(list(record.attachment_artifacts or [])):
+            add(artifact, fallback_index=index)
+        for item_index, item in enumerate(list(record.expense_items or [])):
+            if not isinstance(item, dict):
+                continue
+            source_expense_item_id = item.get("expense_item_id") or item.get("row_id") or f"{record.id}:item:{item_index + 1}"
+            source_expense_row_index = item.get("row_index") or str(item_index)
+            offset = len(attachments)
+            for evidence_index, evidence in enumerate(list(item.get("attachment_invoices") or [])):
+                add(
+                    evidence,
+                    source_expense_item_id=source_expense_item_id,
+                    source_expense_row_index=source_expense_row_index,
+                    fallback_index=offset + evidence_index,
+                )
+            offset = len(attachments)
+            for evidence_index, evidence in enumerate(list(item.get("attachment_evidences") or [])):
+                add(
+                    evidence,
+                    source_expense_item_id=source_expense_item_id,
+                    source_expense_row_index=source_expense_row_index,
+                    fallback_index=offset + evidence_index,
+                )
+            offset = len(attachments)
+            for evidence_index, artifact in enumerate(list(item.get("attachment_artifacts") or [])):
+                add(
+                    artifact,
+                    source_expense_item_id=source_expense_item_id,
+                    source_expense_row_index=source_expense_row_index,
+                    fallback_index=offset + evidence_index,
+                )
+        deduped: dict[str, dict[str, Any]] = {}
+        for attachment in attachments:
+            source_key = text(attachment.get("source_attachment_key"))
+            if source_key:
+                deduped[source_key] = attachment
+        return list(deduped.values())
 
     def list_application_records(self, month: str) -> list[OAApplicationRecord]:
         normalized_month = str(month or "").strip()
@@ -132,8 +292,176 @@ class PostgresOAProjectionRepository:
         )
         return [month for row in rows if (month := text(row.get("month")))]
 
+    def prune_records_before(self, cutoff_month: str) -> list[str]:
+        normalized_cutoff_month = text(cutoff_month)
+        if not normalized_cutoff_month:
+            return []
+
+        def write(connection: Any) -> list[str]:
+            rows = connection.fetch_all(
+                """
+                with stale as (
+                    select oa.id, oa.row_id, oa.scope_month
+                    from app.oa_applications oa
+                    where oa.scope_month < %s::date
+                      and not exists (
+                          select 1
+                          from app.manual_oa_imports manual
+                          where manual.row_id = oa.row_id
+                            and manual.status = 'active'
+                      )
+                ),
+                deleted_items as (
+                    delete from app.oa_application_items item
+                    using stale
+                    where item.oa_application_id = stale.id
+                    returning item.id
+                ),
+                deleted_attachments as (
+                    delete from app.oa_attachments attachment
+                    using stale
+                    where attachment.oa_application_id = stale.id
+                    returning attachment.id
+                )
+                delete from app.oa_applications oa
+                using stale
+                where oa.id = stale.id
+                returning to_char(stale.scope_month, 'YYYY-MM') as month
+                """,
+                (month_start(normalized_cutoff_month),),
+            )
+            return sorted({month for row in rows if (month := text(row.get("month")))})
+
+        return run_in_transaction(self._connection, write) or []
+
     def get_read_status(self) -> OAReadStatus:
         return OAReadStatus(code="ready", message="OA projection ready")
+
+    def build_dashboard(self) -> dict[str, Any]:
+        summary = self._connection.fetch_one(
+            """
+            select
+                count(*)::int as document_count,
+                count(distinct nullif(project_name, ''))::int as project_count
+            from app.oa_applications
+            """
+        ) or {}
+        run_summary = self._connection.fetch_one(
+            """
+            select count(*)::int as run_count
+            from app.oa_sync_runs
+            where sync_type = 'oa_projection'
+            """
+        ) or {}
+        latest_run = self._connection.fetch_one(
+            """
+            select id::text as id
+            from app.oa_sync_runs
+            where sync_type = 'oa_projection'
+            order by started_at desc, id desc
+            limit 1
+            """
+        ) or {}
+        projects = self._connection.fetch_all(
+            """
+            select project_name
+            from app.oa_applications
+            where nullif(project_name, '') is not null
+            group by project_name
+            order by project_name
+            limit 100
+            """
+        )
+        documents = self._connection.fetch_all(
+            """
+            select row_id, form_id, form_type, workflow_no, status, applicant, project_name, amount, scope_month
+            from app.oa_applications
+            order by scope_month desc nulls last, row_id
+            limit 100
+            """
+        )
+        return {
+            "source_system": "oa",
+            "adapter": "postgres_oa_projection",
+            "supported_scopes": ["all", "payment_requests", "expense_claims"],
+            "summary": {
+                "mapping_count": 0,
+                "project_count": int(summary.get("project_count") or 0),
+                "document_count": int(summary.get("document_count") or 0),
+                "run_count": int(run_summary.get("run_count") or 0),
+                "latest_run_id": text(latest_run.get("id")),
+            },
+            "runs": self.list_sync_runs(limit=20),
+            "mappings": [],
+            "projects": [
+                {"project_name": text(row.get("project_name"))}
+                for row in projects
+                if text(row.get("project_name"))
+            ],
+            "documents": [
+                {
+                    "id": text(row.get("row_id")),
+                    "form_id": text(row.get("form_id")),
+                    "form_type": text(row.get("form_type")),
+                    "form_no": text(row.get("workflow_no")),
+                    "status": text(row.get("status")),
+                    "applicant": text(row.get("applicant")),
+                    "project_name": text(row.get("project_name")),
+                    "amount": decimal_text(row.get("amount")),
+                    "scope_month": row.get("scope_month").isoformat() if row.get("scope_month") else None,
+                }
+                for row in documents
+            ],
+        }
+
+    def list_sync_runs(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        rows = self._connection.fetch_all(
+            """
+            select
+                id::text as id,
+                sync_type,
+                status,
+                started_at,
+                finished_at,
+                scanned_count,
+                upserted_count,
+                skipped_count,
+                error_count,
+                last_error,
+                payload,
+                raw_payload
+            from app.oa_sync_runs
+            where sync_type = 'oa_projection'
+            order by started_at desc, id desc
+            limit %s
+            """,
+            (max(1, int(limit or 1)),),
+        )
+        return [self._sync_run_from_row(row) for row in rows]
+
+    def get_sync_run(self, run_id: str) -> dict[str, Any] | None:
+        row = self._connection.fetch_one(
+            """
+            select
+                id::text as id,
+                sync_type,
+                status,
+                started_at,
+                finished_at,
+                scanned_count,
+                upserted_count,
+                skipped_count,
+                error_count,
+                last_error,
+                payload,
+                raw_payload
+            from app.oa_sync_runs
+            where id = %s::uuid
+              and sync_type = 'oa_projection'
+            """,
+            (text(run_id),),
+        )
+        return self._sync_run_from_row(row) if row else None
 
     def record_sync_run(self, payload: dict[str, object]) -> None:
         normalized_payload = serialize_value(payload if isinstance(payload, dict) else {})
@@ -228,6 +556,28 @@ class PostgresOAProjectionRepository:
         kwargs.setdefault("relation_tone", text(data.get("relation_tone")) or "warn")
         return OAApplicationRecord(**kwargs)
 
+    @staticmethod
+    def _sync_run_from_row(row: dict[str, Any]) -> dict[str, Any]:
+        payload = row_payload(row, "payload", "raw_payload")
+        scope_key = text(payload.get("scope_key")) if isinstance(payload, dict) else ""
+        return {
+            "id": text(row.get("id")),
+            "source_system": "oa",
+            "scope": scope_key or "all",
+            "triggered_by": text(payload.get("triggered_by")) if isinstance(payload, dict) else None,
+            "status": text(row.get("status")) or "unknown",
+            "pulled_count": int(row.get("scanned_count") or 0),
+            "success_count": int(row.get("upserted_count") or 0),
+            "failed_count": int(row.get("error_count") or 0),
+            "skipped_count": int(row.get("skipped_count") or 0),
+            "retry_of_run_id": text(payload.get("retry_run_id")) if isinstance(payload, dict) else None,
+            "started_at": row.get("started_at").isoformat() if row.get("started_at") else None,
+            "finished_at": row.get("finished_at").isoformat() if row.get("finished_at") else None,
+            "last_error": text(row.get("last_error")),
+            "issue_count": int(row.get("error_count") or 0),
+            "payload": serialize_value(payload if isinstance(payload, dict) else {}),
+        }
+
 
 class PostgresOAProjectionAdapter:
     name = "postgres_oa_projection"
@@ -263,4 +613,3 @@ class PostgresOAProjectionAdapter:
         if callable(get_status):
             return get_status()
         return OAReadStatus(code="ready", message="OA projection ready")
-

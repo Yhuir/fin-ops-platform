@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 import unittest
 
 from fin_ops_platform.services.runtime_state_policy import (
@@ -143,6 +144,33 @@ class RuntimeStatePolicyTests(unittest.TestCase):
 
                 self.assertEqual(decision.classification, BLOCKED_UNKNOWN)
                 self.assertTrue(decision.cutover_blocking)
+
+    def test_production_worker_refresh_paths_do_not_use_application_or_snapshot_fallback(self) -> None:
+        repository_root = Path(__file__).resolve().parents[1]
+        production_worker_files = [
+            repository_root / "backend/src/fin_ops_platform/app/worker.py",
+            repository_root / "backend/src/fin_ops_platform/services/workbench_read_model_refresh.py",
+            repository_root / "backend/src/fin_ops_platform/services/cost_statistics_read_model_refresh.py",
+            repository_root / "backend/src/fin_ops_platform/services/tax_offset_read_model_refresh.py",
+            repository_root / "backend/src/fin_ops_platform/services/search_pending_read_model_refresh.py",
+            repository_root / "backend/src/fin_ops_platform/services/workbench_sql_projection.py",
+            repository_root / "backend/src/fin_ops_platform/services/cost_tax_sql_projection.py",
+            repository_root / "backend/src/fin_ops_platform/services/search_pending_sql_projection.py",
+        ]
+        forbidden_tokens = (
+            "build_application",
+            ".load()",
+            "StateStore.load",
+            "ApplicationStateStore.load",
+            "PostgresStateStore.load",
+            "state:",
+        )
+
+        for path in production_worker_files:
+            source = path.read_text(encoding="utf-8")
+            with self.subTest(path=str(path)):
+                for token in forbidden_tokens:
+                    self.assertNotIn(token, source)
 
 
 if __name__ == "__main__":

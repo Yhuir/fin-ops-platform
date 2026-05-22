@@ -128,6 +128,17 @@ class RuntimeBootstrapTests(unittest.TestCase):
 
         self.assertEqual(app.readiness_summary()["bootstrap"]["mode"], "production")
 
+    def test_production_postgres_bootstrap_does_not_seed_demo_workbench_rows(self) -> None:
+        store = LoadTrackingStore()
+        with patch("fin_ops_platform.app.server.build_state_store", return_value=store), patch.object(
+            server_module.WorkbenchQueryService,
+            "_seed_all_rows",
+            side_effect=AssertionError("production PostgreSQL bootstrap must not seed demo workbench rows"),
+        ):
+            app = build_application(data_dir=Path("/tmp/ignored"))
+
+        self.assertEqual(app.readiness_summary()["bootstrap"]["mode"], "production")
+
     def test_postgres_state_store_does_not_auto_configure_legacy_gridfs_reader(self) -> None:
         connection = ImportFactBootstrapConnection()
         with patch(

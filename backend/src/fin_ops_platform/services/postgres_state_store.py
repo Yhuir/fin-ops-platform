@@ -738,6 +738,12 @@ class PostgresStateStore:
         self._workbench_repository.save_workbench_overrides(workbench_overrides_snapshot, changed_row_ids=changed_row_ids)
         self._save_snapshot("workbench_overrides", workbench_overrides_snapshot)
 
+    def load_workbench_overrides(self) -> dict[str, Any]:
+        snapshot = self._workbench_repository.load_workbench_overrides()
+        if snapshot:
+            return snapshot
+        return self._load_snapshot("workbench_overrides") or {}
+
     def load_workbench_exception_cases(self) -> dict[str, Any]:
         snapshot = self._workbench_repository.load_workbench_exception_cases()
         if snapshot:

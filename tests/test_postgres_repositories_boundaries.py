@@ -215,6 +215,40 @@ def test_ops_tax_etc_multi_table_saves_use_transactions() -> None:
     assert "insert into app.etc_reconciliation_files" in executed_sql
 
 
+def test_ops_tax_etc_attachment_cache_save_updates_source_lookup_rows() -> None:
+    connection = RecordingConnection()
+    repository = PostgresOpsTaxEtcRepository(connection)
+
+    repository.save_oa_attachment_invoice_cache_entry(
+        "cache-key-1",
+        {
+            "parser_version": "v1",
+            "cache_schema_version": "s1",
+            "invoices": [
+                {
+                    "source_attachment_key": "actual-attachment-key",
+                    "source_expense_item_id": "item-1",
+                    "invoice_no": "INV-001",
+                }
+            ],
+            "evidences": [],
+            "artifacts": [],
+        },
+    )
+
+    executed_sql = " ".join(sql for sql, _ in connection.executed)
+    assert connection.transaction_enters == 1
+    assert connection.transaction_exits == 1
+    assert "insert into app.oa_attachment_invoice_cache" in executed_sql
+    assert "delete from app.oa_attachment_invoice_cache_sources" in executed_sql
+    assert "insert into app.oa_attachment_invoice_cache_sources" in executed_sql
+    assert any(
+        params[1] == "actual-attachment-key"
+        for sql, params in connection.executed
+        if "insert into app.oa_attachment_invoice_cache_sources" in sql
+    )
+
+
 def test_workbench_pair_history_load_preserves_original_mongo_array_order() -> None:
     repository = PostgresWorkbenchRepository(WorkbenchReadConnection())
 

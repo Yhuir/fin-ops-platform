@@ -70,6 +70,12 @@ def redact_database_url(database_url: str) -> str:
 class PostgresConnection:
     def __init__(self, settings: PostgresSettings) -> None:
         self.settings = settings
+        self._statement_timeout_ms_override: int | None = None
+
+    def set_statement_timeout_ms(self, value: int | None) -> None:
+        if value is not None and value <= 0:
+            raise ValueError("statement timeout must be positive when provided.")
+        self._statement_timeout_ms_override = value
 
     @contextmanager
     def connection(self) -> Iterator[Any]:
@@ -84,8 +90,11 @@ class PostgresConnection:
             connect_timeout=self.settings.connect_timeout_seconds,
             row_factory=dict_row,
         ) as connection:
+            connection.autocommit = True
             with connection.cursor() as cursor:
-                cursor.execute("select set_config('statement_timeout', %s, true)", (str(self.settings.statement_timeout_ms),))
+                timeout_ms = self._statement_timeout_ms_override or self.settings.statement_timeout_ms
+                cursor.execute("select set_config('statement_timeout', %s, false)", (str(timeout_ms),))
+            connection.autocommit = False
             yield connection
 
     def fetch_one(self, sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:

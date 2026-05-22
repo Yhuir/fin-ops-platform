@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 import json
 import os
+import signal
 from time import sleep
-from typing import Any
+from typing import Any, Iterator
 
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
@@ -28,6 +30,8 @@ class RuntimeWorkerConfig:
     event_types: list[str] = field(default_factory=list)
     lock_timeout_seconds: int = 300
     retry_delay_seconds: int = 60
+    task_timeout_seconds: int | None = None
+    statement_timeout_seconds: int | None = None
     poll_interval_seconds: float = 5.0
     max_iterations: int | None = None
 
@@ -36,6 +40,10 @@ class RuntimeWorkerConfig:
             raise ValueError("lock_timeout_seconds must be positive.")
         if self.retry_delay_seconds <= 0:
             raise ValueError("retry_delay_seconds must be positive.")
+        if self.task_timeout_seconds is not None and self.task_timeout_seconds <= 0:
+            raise ValueError("task_timeout_seconds must be positive when provided.")
+        if self.statement_timeout_seconds is not None and self.statement_timeout_seconds <= 0:
+            raise ValueError("statement_timeout_seconds must be positive when provided.")
         if self.poll_interval_seconds <= 0:
             raise ValueError("poll_interval_seconds must be positive.")
 
@@ -78,8 +86,20 @@ class RuntimeWorker:
             self._log("runtime_worker.event_failed", event=event, retry=False, error=message)
             return RuntimeWorkerResult.FAILED_PERMANENT
 
+        self._record_heartbeat(
+            "processing",
+            {
+                "event_id": event.event_id,
+                "event_type": event.event_type,
+                "scope_type": event.scope_type,
+                "scope_key": event.scope_key,
+                "attempts": event.attempts,
+            },
+        )
+        self._set_statement_timeout(self._config.statement_timeout_seconds)
         try:
-            result_payload = handler(event)
+            with self._task_timeout(self._config.task_timeout_seconds):
+                result_payload = handler(event)
         except Exception as exc:
             error = str(exc) or exc.__class__.__name__
             self._queue.fail(
@@ -92,6 +112,8 @@ class RuntimeWorker:
             self._record_heartbeat("failed", {"event_id": event.event_id, "retry": True, "error": error})
             self._log("runtime_worker.event_failed", event=event, retry=True, error=error)
             return RuntimeWorkerResult.FAILED_RETRYABLE
+        finally:
+            self._set_statement_timeout(None)
 
         self._queue.complete(event.event_id, self._config.worker_id, result_payload=result_payload)
         self._record_heartbeat("idle", {"event_id": event.event_id, "processed": True})
@@ -116,6 +138,32 @@ class RuntimeWorker:
         record = getattr(self._queue, "record_worker_heartbeat", None)
         if callable(record):
             record(self._config.worker_id, self._config.worker_kind, status, payload=payload)
+
+    def _set_statement_timeout(self, seconds: int | None) -> None:
+        setter = getattr(self._queue, "set_statement_timeout_seconds", None)
+        if callable(setter):
+            setter(seconds)
+
+    @contextmanager
+    def _task_timeout(self, seconds: int | None) -> Iterator[None]:
+        if seconds is None:
+            yield
+            return
+        if not hasattr(signal, "SIGALRM") or not hasattr(signal, "setitimer"):
+            yield
+            return
+
+        def timeout_handler(_signum: int, _frame: Any) -> None:
+            raise TimeoutError(f"runtime worker task exceeded {seconds}s timeout")
+
+        previous_handler = signal.getsignal(signal.SIGALRM)
+        try:
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.setitimer(signal.ITIMER_REAL, float(seconds))
+            yield
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous_handler)
 
     def _log(self, event_name: str, *, event: RuntimeQueueEvent, retry: bool | None = None, error: str | None = None) -> None:
         payload: dict[str, Any] = {

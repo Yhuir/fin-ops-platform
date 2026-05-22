@@ -348,6 +348,23 @@ class Application:
             return False
         return str(getattr(self._state_store, "storage_backend", "") or "").strip() == "postgres"
 
+    def _runtime_repository_snapshot(
+        self,
+        persisted_state: dict[str, object],
+        key: str,
+        loader_name: str,
+    ) -> dict[str, object]:
+        snapshot = persisted_state.get(key)
+        if isinstance(snapshot, dict):
+            return snapshot
+        loader = getattr(self._state_store, loader_name, None) if self._state_store is not None else None
+        if not callable(loader):
+            return {}
+        loaded = loader()
+        if isinstance(loaded, dict):
+            return loaded
+        return {}
+
     def _build_legacy_direct_oa_mongo_adapter(self) -> MongoOAAdapter | None:
         if self._bootstrap_mode != "legacy":
             return None
@@ -377,7 +394,11 @@ class Application:
             fact_repository=import_fact_repository,
         )
         self._bank_transaction_category_service = BankTransactionCategoryService.from_snapshot(
-            persisted_state.get("bank_transaction_categories"),
+            self._runtime_repository_snapshot(
+                persisted_state,
+                "bank_transaction_categories",
+                "load_bank_transaction_categories",
+            ),
             transaction_exists=self._bank_transaction_exists,
         )
         self._bank_transaction_auto_category_service = BankTransactionAutoCategoryService()
@@ -386,7 +407,11 @@ class Application:
             auto_category_service=self._bank_transaction_auto_category_service,
         )
         self._turnover_relation_service = TurnoverRelationService.from_snapshot(
-            persisted_state.get("turnover_relations"),
+            self._runtime_repository_snapshot(
+                persisted_state,
+                "turnover_relations",
+                "load_turnover_relations",
+            ),
             bank_rows=self._turnover_bank_transaction_rows(),
         )
         self._file_import_service = FileImportService.from_snapshot(
@@ -399,19 +424,32 @@ class Application:
             persisted_state.get("matching"),
         )
         self._workbench_override_service = WorkbenchOverrideService.from_snapshot(
-            persisted_state.get("workbench_overrides"),
+            self._runtime_repository_snapshot(
+                persisted_state,
+                "workbench_overrides",
+                "load_workbench_overrides",
+            ),
         )
         self._workbench_exception_case_service = WorkbenchExceptionCaseService.from_snapshot(
-            persisted_state.get("workbench_exception_cases"),
+            self._runtime_repository_snapshot(
+                persisted_state,
+                "workbench_exception_cases",
+                "load_workbench_exception_cases",
+            ),
         )
         self._workbench_pair_relation_service = WorkbenchPairRelationService.from_snapshot(
-            persisted_state.get("workbench_pair_relations"),
+            self._runtime_repository_snapshot(
+                persisted_state,
+                "workbench_pair_relations",
+                "load_workbench_pair_relations",
+            ),
         )
-        no_oa_bank_batches_snapshot = persisted_state.get("no_oa_bank_batches")
-        if not isinstance(no_oa_bank_batches_snapshot, dict) and self._state_store is not None:
-            no_oa_bank_batches_snapshot = self._state_store.load_no_oa_bank_batches()
         self._no_oa_bank_batch_service = NoOaBankBatchService.from_snapshot(
-            no_oa_bank_batches_snapshot if isinstance(no_oa_bank_batches_snapshot, dict) else None,
+            self._runtime_repository_snapshot(
+                persisted_state,
+                "no_oa_bank_batches",
+                "load_no_oa_bank_batches",
+            ),
             pair_relation_service=self._workbench_pair_relation_service,
         )
         self._workbench_amount_check_service = WorkbenchAmountCheckService()
@@ -484,7 +522,10 @@ class Application:
         )
         bank_account_resolver = BankAccountResolver(self._app_settings_service.get_bank_account_mapping_dict)
         self._candidate_grouping_service = WorkbenchCandidateGroupingService()
-        self._workbench_query_service = WorkbenchQueryService(oa_adapter=oa_adapter)
+        self._workbench_query_service = WorkbenchQueryService(
+            oa_adapter=oa_adapter,
+            seed_demo_rows=not self._requires_sql_read_model_runtime(),
+        )
         self._oa_manual_import_service = (
             OAManualImportService(
                 state_store=self._state_store,
@@ -10001,6 +10042,9 @@ class Application:
         return self._json_response(HTTPStatus.OK, {"case": case, "offset_note": offset_note})
 
     def _handle_oa_dashboard(self) -> Response:
+        postgres_dashboard = self._postgres_oa_projection_dashboard()
+        if postgres_dashboard is not None:
+            return self._json_response(HTTPStatus.OK, postgres_dashboard)
         return self._json_response(HTTPStatus.OK, self._integration_service.build_dashboard())
 
     def _handle_oa_sync(self, body: str | bytes | None) -> Response:
@@ -10065,12 +10109,18 @@ class Application:
         )
 
     def _handle_oa_sync_runs(self) -> Response:
+        postgres_runs = self._postgres_oa_projection_sync_runs()
+        if postgres_runs is not None:
+            return self._json_response(HTTPStatus.OK, {"runs": postgres_runs})
         return self._json_response(
             HTTPStatus.OK,
             {"runs": [self._serialize_sync_run(run) for run in self._integration_service.list_sync_runs()]},
         )
 
     def _handle_oa_sync_run_detail(self, run_id: str) -> Response:
+        postgres_run = self._postgres_oa_projection_sync_run(run_id)
+        if postgres_run is not None:
+            return self._json_response(HTTPStatus.OK, {"run": postgres_run, "issues": []})
         try:
             run = self._integration_service.get_sync_run(run_id)
         except KeyError:
@@ -10082,6 +10132,33 @@ class Application:
             HTTPStatus.OK,
             {"run": self._serialize_sync_run(run), "issues": self._serialize_value(run.issues)},
         )
+
+    def _postgres_oa_projection_repository(self) -> object | None:
+        if not self._requires_sql_read_model_runtime():
+            return None
+        repository = getattr(self._state_store, "oa_projection_repository", None)
+        return repository if repository is not None else None
+
+    def _postgres_oa_projection_dashboard(self) -> dict[str, object] | None:
+        repository = self._postgres_oa_projection_repository()
+        build_dashboard = getattr(repository, "build_dashboard", None)
+        if not callable(build_dashboard):
+            return None
+        return build_dashboard()
+
+    def _postgres_oa_projection_sync_runs(self) -> list[dict[str, object]] | None:
+        repository = self._postgres_oa_projection_repository()
+        list_runs = getattr(repository, "list_sync_runs", None)
+        if not callable(list_runs):
+            return None
+        return list_runs()
+
+    def _postgres_oa_projection_sync_run(self, run_id: str) -> dict[str, object] | None:
+        repository = self._postgres_oa_projection_repository()
+        get_run = getattr(repository, "get_sync_run", None)
+        if not callable(get_run):
+            return None
+        return get_run(run_id)
 
     def _handle_projects(self) -> Response:
         return self._json_response(HTTPStatus.OK, self._project_costing_service.build_project_hub())

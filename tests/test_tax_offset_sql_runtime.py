@@ -218,7 +218,7 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
         self.assertLessEqual(redis.sets[0][2], 120)
 
     def test_tax_offset_refresh_handler_rebuilds_scope_and_marks_dirty_scope_done(self) -> None:
-        class FakeApplication:
+        class FakeBuilder:
             def __init__(self) -> None:
                 self.rebuilt: list[str] = []
 
@@ -227,8 +227,8 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
                 return {"scope_key": scope_key, "entry_count": 2}
 
         queue = QueueRecorder()
-        application = FakeApplication()
-        service = TaxOffsetReadModelRefreshService(application=application, queue_repository=queue)
+        builder = FakeBuilder()
+        service = TaxOffsetReadModelRefreshService(projection_builder=builder, queue_repository=queue)
         event = RuntimeQueueEvent(
             event_id="event-1",
             tenant_id="tenant-a",
@@ -245,9 +245,45 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
 
         result = service.handle_runtime_event(event)
 
-        self.assertEqual(application.rebuilt, ["2026-05"])
+        self.assertEqual(builder.rebuilt, ["2026-05"])
         self.assertEqual(queue.completed, [("tenant-a", "tax_offset", "2026-05")])
         self.assertEqual(result["entry_count"], 2)
+
+    def test_tax_offset_refresh_handler_expands_all_into_month_shards(self) -> None:
+        class FakeBuilder:
+            def list_tax_offset_scope_shards(self, scope_key: str) -> list[str]:
+                return ["2026-05", "2026-04"]
+
+            def rebuild_tax_offset_read_model_scope(self, scope_key: str) -> dict[str, object]:
+                raise AssertionError(scope_key)
+
+        queue = QueueRecorder()
+        service = TaxOffsetReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
+        event = RuntimeQueueEvent(
+            event_id="event-all",
+            tenant_id="tenant-a",
+            event_type="tax_offset.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="all",
+            scope_type="tax_offset",
+            scope_key="all",
+            dedupe_key=None,
+            payload={"scope_key": "all"},
+            attempts=1,
+            status="processing",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(
+            queue.refreshes,
+            [
+                ("tax_offset", "2026-05", "tax_offset_all_shard"),
+                ("tax_offset", "2026-04", "tax_offset_all_shard"),
+            ],
+        )
+        self.assertEqual(queue.completed, [("tenant-a", "tax_offset", "all")])
+        self.assertEqual(result["entry_count"], 0)
 
     def test_tax_offset_invalidation_marks_dirty_and_deletes_redis_even_when_no_cached_model_exists(self) -> None:
         class EmptyTaxOffsetReadModelService:

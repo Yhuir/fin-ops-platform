@@ -80,10 +80,12 @@ class RuntimeRepositoryContext:
         )
 
     def summary(self) -> dict[str, object]:
+        redis_summary = self.redis_helper.health_summary()
         return {
             "state_store_backend": getattr(self.state_store, "storage_backend", None),
             "queue_repository": self.queue_repository is not None,
             "redis_enabled": self.redis_helper.enabled,
+            **redis_summary,
             "object_storage_backend": self.object_storage_settings.backend,
             "object_storage_enabled": self.object_storage_settings.enabled,
         }

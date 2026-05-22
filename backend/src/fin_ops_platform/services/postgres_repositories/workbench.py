@@ -364,6 +364,31 @@ class PostgresWorkbenchRepository:
                 ),
             )
 
+    def load_workbench_overrides(self) -> dict[str, Any]:
+        rows = self._connection.fetch_all(
+            """
+            select row_id as key, raw_payload
+            from app.workbench_row_overrides
+            order by row_id
+            """
+        )
+        if not rows:
+            return {}
+        row_overrides = {str(row.get("key")): row_payload(row, "raw_payload") for row in rows}
+        case_counter = 0
+        for payload in row_overrides.values():
+            if not isinstance(payload, dict):
+                continue
+            for field_name in ("case_id", "exception_case_id"):
+                raw_case_id = str(payload.get(field_name) or "")
+                if not raw_case_id.startswith("CASE-AUTO-"):
+                    continue
+                try:
+                    case_counter = max(case_counter, int(raw_case_id.removeprefix("CASE-AUTO-")))
+                except ValueError:
+                    continue
+        return {"case_counter": case_counter, "row_overrides": row_overrides}
+
     def load_workbench_exception_cases(self) -> dict[str, Any]:
         rows = self._connection.fetch_all("select case_id as key, raw_payload from app.workbench_exception_cases order by case_id")
         if not rows:

@@ -204,6 +204,33 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertEqual(event.payload, {})
         self.assertEqual(transaction.outcomes, ["commit"])
 
+    def test_enqueue_read_model_refresh_increments_and_returns_source_version(self) -> None:
+        transaction = FakeTransaction(
+            rows=[
+                {"source_version": 3},
+                event_row(
+                    event_type="workbench.read_model.refresh",
+                    aggregate_type="read_model",
+                    aggregate_id="2026-05",
+                    scope_type="workbench",
+                    scope_key="2026-05",
+                    dedupe_key="workbench.read_model.refresh:workbench:2026-05",
+                    payload={"scope_type": "workbench", "scope_key": "2026-05", "reason": "test", "source_version": 3},
+                ),
+            ]
+        )
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        event = repository.enqueue_read_model_refresh(scope_type="workbench", scope_key="2026-05", reason="test")
+
+        self.assertEqual(event.payload["source_version"], 3)
+        self.assertEqual(len(transaction.calls), 2)
+        _, dirty_sql, _ = transaction.calls[0]
+        _, outbox_sql, outbox_params = transaction.calls[1]
+        self.assertIn("source_version = job.read_model_dirty_scopes.source_version + 1", " ".join(dirty_sql.lower().split()))
+        self.assertIn("payload = job.outbox_events.payload || excluded.payload", " ".join(outbox_sql.lower().split()))
+        self.assertEqual(outbox_params[-1]["source_version"], 3)
+
     def test_claim_next_without_event_type_filter_has_no_any_clause(self) -> None:
         transaction = FakeTransaction(rows=[None])
         repository = RuntimeQueueRepository(FakeConnection(transaction))

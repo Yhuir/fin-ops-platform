@@ -10,6 +10,11 @@ from fin_ops_platform.services.postgres_connection import PostgresConfigurationE
 
 
 class FakeStore:
+    def __init__(self, *, runtime_snapshots: dict[str, dict] | None = None) -> None:
+        self.runtime_snapshots = runtime_snapshots or {}
+        self.runtime_loader_calls: list[str] = []
+        self.full_snapshot_load_called = False
+
     def __getattr__(self, name: str):
         if name.startswith("load_"):
             return lambda *args, **kwargs: {}
@@ -42,7 +47,15 @@ class FakeStore:
         return {}
 
     def load(self) -> dict:
+        self.full_snapshot_load_called = True
         return {}
+
+    def load_workbench_pair_relations(self) -> dict:
+        self.runtime_loader_calls.append("load_workbench_pair_relations")
+        return self.runtime_snapshots.get("workbench_pair_relations", {})
+
+    def load_workbench_candidate_matches(self) -> dict:
+        raise AssertionError("production bootstrap must not eagerly load candidate match read models")
 
     def load_app_settings(self) -> dict:
         return {
@@ -112,6 +125,36 @@ class AppPostgresModeTests(unittest.TestCase):
         self.assertEqual(storage["postgres_schema_version"], 7)
         self.assertNotIn("url", str(storage).lower())
         self.assertNotIn("password", str(storage).lower())
+
+    def test_postgres_runtime_bootstrap_loads_pair_relations_without_full_snapshot(self) -> None:
+        pair_snapshot = {
+            "pair_relations": {
+                "case-1": {
+                    "case_id": "case-1",
+                    "row_ids": ["txn-1", "invoice-1"],
+                    "row_types": ["bank", "invoice"],
+                    "status": "active",
+                    "relation_mode": "manual_confirmed",
+                    "month_scope": "2026-05",
+                    "created_by": "test",
+                    "created_at": "2026-05-21T00:00:00+00:00",
+                    "updated_at": "2026-05-21T00:00:00+00:00",
+                }
+            }
+        }
+        store = FakeStore(runtime_snapshots={"workbench_pair_relations": pair_snapshot})
+
+        with TemporaryDirectory() as temp_dir, patch("fin_ops_platform.app.server.build_state_store", return_value=store):
+            app = build_application(data_dir=Path(temp_dir))
+
+        self.assertFalse(store.full_snapshot_load_called)
+        self.assertEqual(store.runtime_loader_calls, ["load_workbench_pair_relations"])
+        active_relations = app._workbench_pair_relation_service.list_active_relations()
+        self.assertEqual(len(active_relations), 1)
+        self.assertEqual(active_relations[0]["case_id"], "case-1")
+        self.assertEqual(active_relations[0]["row_ids"], ["txn-1", "invoice-1"])
+        self.assertEqual(active_relations[0]["relation_mode"], "manual_confirmed")
+        self.assertEqual(active_relations[0]["month_scope"], "2026-05")
 
 
 if __name__ == "__main__":

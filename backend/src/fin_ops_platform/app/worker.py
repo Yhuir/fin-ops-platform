@@ -3,7 +3,17 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Sequence
+from typing import Any
 
+from fin_ops_platform.services.app_settings_service import (
+    DEFAULT_OA_IMPORT_FORM_TYPES,
+    DEFAULT_OA_IMPORT_STATUSES,
+    DEFAULT_OA_RETENTION_CUTOFF_DATE,
+)
+from fin_ops_platform.services.cost_tax_sql_projection import (
+    CostStatisticsSqlProjectionBuilder,
+    TaxOffsetSqlProjectionBuilder,
+)
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.cost_statistics_read_model_refresh import CostStatisticsReadModelRefreshService
 from fin_ops_platform.services.file_object_migration import GridFSObjectMigrationService
@@ -16,9 +26,16 @@ from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from fin_ops_platform.services.runtime_redis import RuntimeRedisHelper, RuntimeRedisSettings
 from fin_ops_platform.services.runtime_worker import RuntimeWorker, RuntimeWorkerConfig
 from fin_ops_platform.services.search_pending_read_model_refresh import SearchPendingReadModelRefreshService
+from fin_ops_platform.services.search_pending_sql_projection import SearchPendingSqlProjectionBuilder
 from fin_ops_platform.services.state_store import default_data_dir
 from fin_ops_platform.services.tax_offset_read_model_refresh import TaxOffsetReadModelRefreshService
 from fin_ops_platform.services.workbench_read_model_refresh import WorkbenchReadModelRefreshService
+from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProjectionBuilder
+
+
+APP_SETTINGS_KEY = "app_settings"
+OA_IMPORT_FORM_TYPES = {"payment_request", "expense_claim"}
+OA_IMPORT_STATUSES = {"completed", "in_progress"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -28,6 +45,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--poll-interval-seconds", type=float, default=5.0)
     parser.add_argument("--lock-timeout-seconds", type=int, default=300)
     parser.add_argument("--retry-delay-seconds", type=int, default=60)
+    parser.add_argument("--task-timeout-seconds", type=int, default=None)
+    parser.add_argument("--statement-timeout-seconds", type=int, default=None)
     parser.add_argument("--max-iterations", type=int, default=None, help="Testing/smoke limit. Omit to run continuously.")
     parser.add_argument("--enable-file-object-migration", action="store_true", help="Register GridFS to object storage migration handler.")
     parser.add_argument("--enable-workbench-read-model-refresh", action="store_true", help="Register workbench SQL read model refresh handler.")
@@ -52,10 +71,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         poll_interval_seconds=args.poll_interval_seconds,
         lock_timeout_seconds=args.lock_timeout_seconds,
         retry_delay_seconds=args.retry_delay_seconds,
+        task_timeout_seconds=args.task_timeout_seconds,
+        statement_timeout_seconds=args.statement_timeout_seconds,
         max_iterations=args.max_iterations,
     )
     handlers = {}
-    application = None
     if args.enable_file_object_migration:
         object_storage_settings = ObjectStorageSettings.from_env()
         object_storage_repository = S3ObjectStorageRepository(object_storage_settings)
@@ -77,44 +97,45 @@ def main(argv: Sequence[str] | None = None) -> int:
         if oa_settings is None:
             raise RuntimeError("OA sync worker requires FIN_OPS_OA_MONGO_* configuration or oa_mongo_config.json.")
         source_adapter = MongoOAAdapter(settings=oa_settings)
+        oa_runtime_settings = _load_oa_runtime_settings(connection)
+        source_adapter.set_import_settings_provider(lambda: dict(oa_runtime_settings["oa_import"]))
         projection_repository = PostgresOAProjectionRepository(connection)
         sync_service = OAProjectionSyncService(
             source_adapter=source_adapter,
             projection_repository=projection_repository,
             queue_repository=queue,
+            retention_cutoff_date_provider=lambda: str(oa_runtime_settings["cutoff_date"]),
         )
         handlers["oa.sync"] = sync_service.handle_runtime_event
         if "oa.sync" not in config.event_types:
             config.event_types.append("oa.sync")
     if args.enable_workbench_read_model_refresh:
-        from fin_ops_platform.app.server import build_application
-
-        application = application or build_application(data_dir=default_data_dir())
-        refresh_service = WorkbenchReadModelRefreshService(application=application, queue_repository=queue)
+        projection_builder = WorkbenchSqlProjectionBuilder(connection=connection)
+        refresh_service = WorkbenchReadModelRefreshService(projection_builder=projection_builder, queue_repository=queue)
         handlers["workbench.read_model.refresh"] = refresh_service.handle_runtime_event
         if "workbench.read_model.refresh" not in config.event_types:
             config.event_types.append("workbench.read_model.refresh")
     if args.enable_cost_statistics_read_model_refresh:
-        from fin_ops_platform.app.server import build_application
-
-        application = application or build_application(data_dir=default_data_dir())
-        refresh_service = CostStatisticsReadModelRefreshService(application=application, queue_repository=queue)
+        projection_builder = CostStatisticsSqlProjectionBuilder(connection=connection, redis_helper=redis_helper)
+        refresh_service = CostStatisticsReadModelRefreshService(
+            projection_builder=projection_builder,
+            queue_repository=queue,
+        )
         handlers["cost_statistics.read_model.refresh"] = refresh_service.handle_runtime_event
         if "cost_statistics.read_model.refresh" not in config.event_types:
             config.event_types.append("cost_statistics.read_model.refresh")
     if args.enable_tax_offset_read_model_refresh:
-        from fin_ops_platform.app.server import build_application
-
-        application = application or build_application(data_dir=default_data_dir())
-        refresh_service = TaxOffsetReadModelRefreshService(application=application, queue_repository=queue)
+        projection_builder = TaxOffsetSqlProjectionBuilder(connection=connection, redis_helper=redis_helper)
+        refresh_service = TaxOffsetReadModelRefreshService(projection_builder=projection_builder, queue_repository=queue)
         handlers["tax_offset.read_model.refresh"] = refresh_service.handle_runtime_event
         if "tax_offset.read_model.refresh" not in config.event_types:
             config.event_types.append("tax_offset.read_model.refresh")
     if args.enable_search_read_model_refresh or args.enable_pending_invoice_read_model_refresh:
-        from fin_ops_platform.app.server import build_application
-
-        application = application or build_application(data_dir=default_data_dir())
-        refresh_service = SearchPendingReadModelRefreshService(application=application, queue_repository=queue)
+        projection_builder = SearchPendingSqlProjectionBuilder(connection=connection)
+        refresh_service = SearchPendingReadModelRefreshService(
+            projection_builder=projection_builder,
+            queue_repository=queue,
+        )
         if args.enable_search_read_model_refresh:
             handlers["search.read_model.refresh"] = refresh_service.handle_runtime_event
             if "search.read_model.refresh" not in config.event_types:
@@ -135,6 +156,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "handlers": sorted(handlers),
                     "poll_interval_seconds": config.poll_interval_seconds,
                     "lock_timeout_seconds": config.lock_timeout_seconds,
+                    "task_timeout_seconds": config.task_timeout_seconds,
+                    "statement_timeout_seconds": config.statement_timeout_seconds,
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -146,6 +169,42 @@ def main(argv: Sequence[str] | None = None) -> int:
     worker = RuntimeWorker(queue_repository=queue, config=config, redis_helper=redis_helper, handlers=handlers)
     worker.run_forever()
     return 0
+
+
+def _load_oa_runtime_settings(connection: PostgresConnection) -> dict[str, Any]:
+    row = connection.fetch_one(
+        "select settings_payload from app.app_settings where settings_key = %s",
+        (APP_SETTINGS_KEY,),
+    )
+    payload = row.get("settings_payload") if isinstance(row, dict) else {}
+    settings = payload if isinstance(payload, dict) else {}
+    import_settings = settings.get("oa_import") if isinstance(settings.get("oa_import"), dict) else {}
+    retention_settings = settings.get("oa_retention") if isinstance(settings.get("oa_retention"), dict) else {}
+    return {
+        "cutoff_date": str(retention_settings.get("cutoff_date") or DEFAULT_OA_RETENTION_CUTOFF_DATE).strip()
+        or DEFAULT_OA_RETENTION_CUTOFF_DATE,
+        "oa_import": {
+            "form_types": _normalize_option_list(
+                import_settings.get("form_types"),
+                allowed_values=OA_IMPORT_FORM_TYPES,
+                default_values=DEFAULT_OA_IMPORT_FORM_TYPES,
+            ),
+            "statuses": _normalize_option_list(
+                import_settings.get("statuses"),
+                allowed_values=OA_IMPORT_STATUSES,
+                default_values=DEFAULT_OA_IMPORT_STATUSES,
+            ),
+        },
+    }
+
+
+def _normalize_option_list(value: Any, *, allowed_values: set[str], default_values: list[str]) -> list[str]:
+    if not isinstance(value, list):
+        return list(default_values)
+    seen = {str(item).strip() for item in value if str(item).strip() in allowed_values}
+    return [item for item in default_values if item in seen] + [
+        item for item in sorted(seen) if item not in default_values
+    ]
 
 
 if __name__ == "__main__":

@@ -2,8 +2,8 @@ from decimal import Decimal
 import unittest
 from unittest.mock import patch
 
-from fin_ops_platform.domain.enums import BatchType, InvoiceType
-from fin_ops_platform.domain.models import Counterparty, Invoice
+from fin_ops_platform.domain.enums import BatchType, InvoiceType, TransactionDirection
+from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
 from fin_ops_platform.services.bank_transaction_auto_category_service import (
     BankTransactionAutoCategoryService,
 )
@@ -28,6 +28,43 @@ class StaticCategoryProvider:
         }
 
 
+class PagedFactRepository:
+    def __init__(self, invoices: list[Invoice], transactions: list[BankTransaction]) -> None:
+        self.invoices = invoices
+        self.transactions = transactions
+        self.invoice_calls: list[dict[str, object]] = []
+        self.transaction_calls: list[dict[str, object]] = []
+
+    def list_invoices_page(self, *, page: int = 1, page_size: int = 100, month: str | None = None, **_: object) -> tuple[list[Invoice], int]:
+        self.invoice_calls.append({"page": page, "page_size": page_size, "month": month})
+        rows = [
+            invoice
+            for invoice in self.invoices
+            if month in (None, "", "all") or (invoice.invoice_date or "").startswith(str(month))
+        ]
+        start = (page - 1) * page_size
+        return rows[start:start + page_size], len(rows)
+
+    def list_bank_transactions_page(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 100,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        **_: object,
+    ) -> tuple[list[BankTransaction], int]:
+        self.transaction_calls.append({"page": page, "page_size": page_size, "date_from": date_from, "date_to": date_to})
+        rows = [
+            transaction
+            for transaction in self.transactions
+            if (date_from is None or (transaction.txn_date or "") >= date_from)
+            and (date_to is None or (transaction.txn_date or "") <= date_to)
+        ]
+        start = (page - 1) * page_size
+        return rows[start:start + page_size], len(rows)
+
+
 class LiveWorkbenchServiceTests(unittest.TestCase):
     def _effective_category_provider(
         self,
@@ -45,6 +82,49 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
                 auto_category_service=BankTransactionAutoCategoryService(),
             ),
         )
+
+    def test_workbench_reads_month_scoped_rows_from_sql_fact_repository_without_snapshot_imports(self) -> None:
+        counterparty = Counterparty(
+            id="cp-sql-001",
+            name="真实 SQL 供应商",
+            normalized_name="真实 SQL 供应商",
+            counterparty_type="supplier",
+        )
+        invoice = Invoice(
+            id="sql-invoice-202603",
+            invoice_type=InvoiceType.INPUT,
+            invoice_no="SQL-INV-001",
+            counterparty=counterparty,
+            amount=Decimal("123.45"),
+            signed_amount=Decimal("123.45"),
+            invoice_date="2026-03-18",
+            seller_name="真实 SQL 供应商",
+            buyer_name="云南溯源科技有限公司",
+            workbench_visibility="visible",
+        )
+        transaction = BankTransaction(
+            id="sql-bank-202603",
+            account_no="622200001234",
+            txn_direction=TransactionDirection.OUTFLOW,
+            counterparty_name_raw="真实 SQL 供应商",
+            amount=Decimal("123.45"),
+            signed_amount=Decimal("-123.45"),
+            txn_date="2026-03-19",
+            trade_time="2026-03-19 09:30:00",
+            source_batch_id="batch-sql",
+        )
+        repository = PagedFactRepository([invoice], [transaction])
+        import_service = ImportNormalizationService(fact_repository=repository)
+
+        service = LiveWorkbenchService(import_service, MatchingEngineService(import_service))
+        payload = service.get_workbench("2026-03")
+
+        self.assertEqual([row["id"] for row in payload["open"]["invoice"]], ["sql-invoice-202603"])
+        self.assertEqual([row["id"] for row in payload["open"]["bank"]], ["sql-bank-202603"])
+        self.assertEqual(payload["summary"]["invoice_count"], 1)
+        self.assertEqual(payload["summary"]["bank_count"], 1)
+        self.assertEqual(repository.invoice_calls[0]["month"], "2026-03")
+        self.assertEqual(repository.transaction_calls[0]["date_from"], "2026-03-01")
 
     def test_invoice_rows_expose_invoice_identity_fields_in_workbench_list(self) -> None:
         import_service = ImportNormalizationService()

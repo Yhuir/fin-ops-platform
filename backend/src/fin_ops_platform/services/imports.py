@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 import re
 from typing import Any
@@ -23,6 +23,19 @@ CENT = Decimal("0.01")
 WHITESPACE_RE = re.compile(r"\s+")
 PLACEHOLDER_EMPTY_VALUES = {"", "--", "—", "-", "——", "nan", "NaN", "None"}
 BANK_TEXT_FIELD_LABELS = ("摘要", "备注", "用途", "交易用途", "客户附言", "附言")
+
+
+def _month_date_range(month: str) -> tuple[str, str] | None:
+    normalized = str(month or "").strip()[:7]
+    if not re.match(r"^\d{4}-\d{2}$", normalized):
+        return None
+    start = date.fromisoformat(f"{normalized}-01")
+    if start.month == 12:
+        next_month = date(start.year + 1, 1, 1)
+    else:
+        next_month = date(start.year, start.month + 1, 1)
+    end = next_month - timedelta(days=1)
+    return start.isoformat(), end.isoformat()
 
 
 @dataclass(slots=True)
@@ -258,7 +271,18 @@ class ImportNormalizationService:
     def list_batches(self) -> list[ImportPreview]:
         return list(self._batches.values())
 
-    def list_invoices(self) -> list[Invoice]:
+    def list_invoices(self, *, month: str | None = None) -> list[Invoice]:
+        normalized_month = str(month).strip() if month not in (None, "") else ""
+        if normalized_month:
+            repository_rows = self._list_repository_invoices(month=normalized_month)
+            if repository_rows is not None:
+                return repository_rows
+            if normalized_month != "all":
+                return [
+                    invoice
+                    for invoice in self._invoices_by_id.values()
+                    if invoice.invoice_date and invoice.invoice_date.startswith(normalized_month[:7])
+                ]
         return list(self._invoices_by_id.values())
 
     def get_invoice(self, invoice_id: str) -> Invoice:
@@ -279,11 +303,61 @@ class ImportNormalizationService:
             counterparty = self._get_or_create_counterparty(name)
         return counterparty
 
-    def list_transactions(self) -> list[BankTransaction]:
+    def list_transactions(self, *, month: str | None = None) -> list[BankTransaction]:
+        normalized_month = str(month).strip() if month not in (None, "") else ""
+        if normalized_month:
+            repository_rows = self._list_repository_transactions(month=normalized_month)
+            if repository_rows is not None:
+                return repository_rows
+            if normalized_month != "all":
+                return [
+                    transaction
+                    for transaction in self._transactions_by_id.values()
+                    if transaction.txn_date and transaction.txn_date.startswith(normalized_month[:7])
+                ]
         return list(self._transactions_by_id.values())
 
     def get_transaction(self, transaction_id: str) -> BankTransaction:
         return self._transactions_by_id[transaction_id]
+
+    def _list_repository_invoices(self, *, month: str) -> list[Invoice] | None:
+        list_page = getattr(self._fact_repository, "list_invoices_page", None)
+        if not callable(list_page):
+            return None
+        page = 1
+        page_size = 500
+        rows: list[Invoice] = []
+        query_month = None if month == "all" else month[:7]
+        while True:
+            page_rows, total = list_page(page=page, page_size=page_size, month=query_month)
+            typed_rows = [row for row in list(page_rows or []) if isinstance(row, Invoice)]
+            rows.extend(typed_rows)
+            if len(rows) >= int(total or 0) or len(page_rows or []) < page_size:
+                break
+            page += 1
+        return rows
+
+    def _list_repository_transactions(self, *, month: str) -> list[BankTransaction] | None:
+        list_page = getattr(self._fact_repository, "list_bank_transactions_page", None)
+        if not callable(list_page):
+            return None
+        date_from: str | None = None
+        date_to: str | None = None
+        if month != "all":
+            month_range = _month_date_range(month)
+            if month_range is not None:
+                date_from, date_to = month_range
+        page = 1
+        page_size = 500
+        rows: list[BankTransaction] = []
+        while True:
+            page_rows, total = list_page(page=page, page_size=page_size, date_from=date_from, date_to=date_to)
+            typed_rows = [row for row in list(page_rows or []) if isinstance(row, BankTransaction)]
+            rows.extend(typed_rows)
+            if len(rows) >= int(total or 0) or len(page_rows or []) < page_size:
+                break
+            page += 1
+        return rows
 
     def _find_invoice_by_identity(
         self,

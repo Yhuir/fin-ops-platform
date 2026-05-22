@@ -20,6 +20,41 @@ from fin_ops_platform.services.postgres_repositories.common import (
 from fin_ops_platform.services.postgres_snapshot_contracts import normalize_app_health_alerts
 
 
+def _oa_attachment_cache_source_rows(cache_key: str, payload: dict[str, Any]) -> list[dict[str, str | None]]:
+    rows: dict[tuple[str, str], dict[str, str | None]] = {}
+
+    def add(kind: str, item: Any) -> None:
+        if not isinstance(item, dict):
+            return
+        source_attachment_key = text(item.get("source_attachment_key"))
+        if not source_attachment_key:
+            return
+        rows[(source_attachment_key, kind)] = {
+            "source_attachment_key": source_attachment_key,
+            "source_kind": kind,
+            "source_expense_item_id": text(item.get("source_expense_item_id")),
+            "source_expense_row_index": text(item.get("source_expense_row_index")),
+            "source_attachment_name": text(
+                item.get("source_attachment_name")
+                or item.get("attachment_name")
+                or item.get("filename")
+            ),
+        }
+
+    add("cache_key", {"source_attachment_key": cache_key, **dict(payload)})
+    for invoice in list(payload.get("invoices") or []):
+        add("invoice", invoice)
+    for evidence in list(payload.get("evidences") or []):
+        add("evidence", evidence)
+    artifacts = payload.get("artifacts")
+    if isinstance(artifacts, list):
+        for artifact in artifacts:
+            add("artifact", artifact)
+    elif isinstance(artifacts, dict):
+        add("artifact", artifacts)
+    return list(rows.values())
+
+
 class PostgresOpsTaxEtcRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
@@ -163,35 +198,66 @@ class PostgresOpsTaxEtcRepository:
         if not normalized_key:
             raise ValueError("OA attachment cache key is required.")
         normalized_payload = serialize_value({**dict(payload), "cache_key": normalized_key})
-        self._connection.execute(
-            """
-            insert into app.oa_attachment_invoice_cache(
-                source_attachment_key, parser_version, cache_schema_version, parsed_at,
-                evidences, invoices, artifacts, normalized_payload, raw_payload
+
+        def write(connection: Any) -> None:
+            connection.execute(
+                """
+                insert into app.oa_attachment_invoice_cache(
+                    source_attachment_key, parser_version, cache_schema_version, parsed_at,
+                    evidences, invoices, artifacts, normalized_payload, raw_payload
+                )
+                values (%s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s, %s, %s, %s)
+                on conflict (source_attachment_key) do update set
+                    parser_version = excluded.parser_version,
+                    cache_schema_version = excluded.cache_schema_version,
+                    parsed_at = excluded.parsed_at,
+                    evidences = excluded.evidences,
+                    invoices = excluded.invoices,
+                    artifacts = excluded.artifacts,
+                    normalized_payload = excluded.normalized_payload,
+                    raw_payload = excluded.raw_payload
+                """,
+                (
+                    normalized_key,
+                    str(normalized_payload.get("parser_version") or "unknown"),
+                    str(normalized_payload.get("cache_schema_version") or "unknown"),
+                    normalized_payload.get("parsed_at"),
+                    jsonb(normalized_payload.get("evidences") or []),
+                    jsonb(normalized_payload.get("invoices") or []),
+                    jsonb(normalized_payload.get("artifacts") or {}),
+                    jsonb(normalized_payload),
+                    jsonb({"normalized_payload": normalized_payload}),
+                ),
             )
-            values (%s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s, %s, %s, %s)
-            on conflict (source_attachment_key) do update set
-                parser_version = excluded.parser_version,
-                cache_schema_version = excluded.cache_schema_version,
-                parsed_at = excluded.parsed_at,
-                evidences = excluded.evidences,
-                invoices = excluded.invoices,
-                artifacts = excluded.artifacts,
-                normalized_payload = excluded.normalized_payload,
-                raw_payload = excluded.raw_payload
-            """,
-            (
-                normalized_key,
-                str(normalized_payload.get("parser_version") or "unknown"),
-                str(normalized_payload.get("cache_schema_version") or "unknown"),
-                normalized_payload.get("parsed_at"),
-                jsonb(normalized_payload.get("evidences") or []),
-                jsonb(normalized_payload.get("invoices") or []),
-                jsonb(normalized_payload.get("artifacts") or {}),
-                jsonb(normalized_payload),
-                jsonb({"normalized_payload": normalized_payload}),
-            ),
-        )
+            connection.execute(
+                "delete from app.oa_attachment_invoice_cache_sources where cache_source_attachment_key = %s",
+                (normalized_key,),
+            )
+            for source in _oa_attachment_cache_source_rows(normalized_key, normalized_payload):
+                connection.execute(
+                    """
+                    insert into app.oa_attachment_invoice_cache_sources(
+                        cache_source_attachment_key, source_attachment_key, source_kind,
+                        source_expense_item_id, source_expense_row_index, source_attachment_name, updated_at
+                    )
+                    values (%s, %s, %s, %s, %s, %s, now())
+                    on conflict (cache_source_attachment_key, source_attachment_key, source_kind) do update set
+                        source_expense_item_id = excluded.source_expense_item_id,
+                        source_expense_row_index = excluded.source_expense_row_index,
+                        source_attachment_name = excluded.source_attachment_name,
+                        updated_at = now()
+                    """,
+                    (
+                        normalized_key,
+                        source["source_attachment_key"],
+                        source["source_kind"],
+                        source["source_expense_item_id"],
+                        source["source_expense_row_index"],
+                        source["source_attachment_name"],
+                    ),
+                )
+
+        run_in_transaction(self._connection, write)
 
     def clear_oa_attachment_invoice_cache(self) -> int:
         return self._connection.execute("delete from app.oa_attachment_invoice_cache")

@@ -6,8 +6,14 @@ from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
 class SearchPendingReadModelRefreshService:
-    def __init__(self, *, application: Any, queue_repository: Any | None = None) -> None:
-        self._application = application
+    def __init__(
+        self,
+        *,
+        projection_builder: Any | None = None,
+        application: Any | None = None,
+        queue_repository: Any | None = None,
+    ) -> None:
+        self._projection_builder = projection_builder if projection_builder is not None else application
         self._queue_repository = queue_repository
 
     def handle_runtime_event(self, event: RuntimeQueueEvent) -> dict[str, Any]:
@@ -16,11 +22,15 @@ class SearchPendingReadModelRefreshService:
         if event.event_type == "search.read_model.refresh":
             if scope_type != "search" or not scope_key:
                 raise ValueError("Search refresh requires scope_type='search' and scope_key.")
-            rebuild = getattr(self._application, "rebuild_search_index_scope", None)
+            if scope_key == "all":
+                shard_result = self._enqueue_search_scope_shards(event, scope_key)
+                if shard_result is not None:
+                    return shard_result
+            rebuild = getattr(self._projection_builder, "rebuild_search_index_scope", None)
         elif event.event_type == "pending_invoice.read_model.refresh":
             if scope_type != "pending_invoice" or not scope_key:
                 raise ValueError("Pending invoice refresh requires scope_type='pending_invoice' and scope_key.")
-            rebuild = getattr(self._application, "rebuild_pending_invoice_read_model_scope", None)
+            rebuild = getattr(self._projection_builder, "rebuild_pending_invoice_read_model_scope", None)
         else:
             raise ValueError(f"Unsupported search/pending read model event type: {event.event_type}")
         if not callable(rebuild):
@@ -31,3 +41,16 @@ class SearchPendingReadModelRefreshService:
         if callable(complete_dirty_scope):
             complete_dirty_scope(tenant_id=event.tenant_id, scope_type=scope_type, scope_key=scope_key)
         return payload
+
+    def _enqueue_search_scope_shards(self, event: RuntimeQueueEvent, scope_key: str) -> dict[str, Any] | None:
+        list_shards = getattr(self._projection_builder, "list_search_scope_shards", None)
+        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
+        if not callable(list_shards) or not callable(enqueue):
+            return None
+        shard_keys = [str(item).strip() for item in list(list_shards(scope_key) or []) if str(item).strip()]
+        for shard_key in shard_keys:
+            enqueue(scope_type="search", scope_key=shard_key, reason="search_all_shard")
+        complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)
+        if callable(complete_dirty_scope):
+            complete_dirty_scope(tenant_id=event.tenant_id, scope_type="search", scope_key=scope_key)
+        return {"scope_key": scope_key, "enqueued_scope_keys": shard_keys, "row_count": 0}

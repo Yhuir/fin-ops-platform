@@ -290,7 +290,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(saved[-1]["payload"]["id"], "txn-201")
 
     def test_refresh_handler_rebuilds_search_and_pending_scopes(self) -> None:
-        class FakeApplication:
+        class FakeBuilder:
             def __init__(self) -> None:
                 self.search_rebuilt: list[str] = []
                 self.pending_rebuilt: list[str] = []
@@ -304,8 +304,8 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                 return {"scope_key": scope_key, "row_count": 2}
 
         queue = QueueRecorder()
-        application = FakeApplication()
-        service = SearchPendingReadModelRefreshService(application=application, queue_repository=queue)
+        builder = FakeBuilder()
+        service = SearchPendingReadModelRefreshService(projection_builder=builder, queue_repository=queue)
         search_event = RuntimeQueueEvent(
             event_id="event-1",
             tenant_id="tenant-a",
@@ -336,12 +336,55 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(service.handle_runtime_event(search_event)["row_count"], 1)
         self.assertEqual(service.handle_runtime_event(pending_event)["row_count"], 2)
 
-        self.assertEqual(application.search_rebuilt, ["2026-05"])
-        self.assertEqual(application.pending_rebuilt, ["expense:all"])
+        self.assertEqual(builder.search_rebuilt, ["2026-05"])
+        self.assertEqual(builder.pending_rebuilt, ["expense:all"])
         self.assertEqual(
             queue.completed,
             [("tenant-a", "search", "2026-05"), ("tenant-a", "pending_invoice", "expense:all")],
         )
+
+    def test_refresh_handler_expands_search_all_into_month_shards(self) -> None:
+        class FakeBuilder:
+            def __init__(self) -> None:
+                self.rebuilt: list[str] = []
+
+            def list_search_scope_shards(self, scope_key: str) -> list[str]:
+                self.rebuilt.append(f"list:{scope_key}")
+                return ["2026-05", "2026-04"]
+
+            def rebuild_search_index_scope(self, scope_key: str) -> dict[str, object]:
+                self.rebuilt.append(scope_key)
+                return {"scope_key": scope_key, "row_count": 1}
+
+            def rebuild_pending_invoice_read_model_scope(self, scope_key: str) -> dict[str, object]:
+                raise AssertionError(scope_key)
+
+        queue = QueueRecorder()
+        builder = FakeBuilder()
+        service = SearchPendingReadModelRefreshService(projection_builder=builder, queue_repository=queue)
+        event = RuntimeQueueEvent(
+            event_id="event-all",
+            tenant_id="tenant-a",
+            event_type="search.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="all",
+            scope_type="search",
+            scope_key="all",
+            dedupe_key=None,
+            payload={"scope_key": "all"},
+            attempts=1,
+            status="processing",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(result, {"scope_key": "all", "enqueued_scope_keys": ["2026-05", "2026-04"], "row_count": 0})
+        self.assertEqual(builder.rebuilt, ["list:all"])
+        self.assertEqual(
+            queue.refreshes,
+            [("search", "2026-05", "search_all_shard"), ("search", "2026-04", "search_all_shard")],
+        )
+        self.assertEqual(queue.completed, [("tenant-a", "search", "all")])
 
 
 if __name__ == "__main__":

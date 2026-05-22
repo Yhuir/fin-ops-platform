@@ -32,6 +32,35 @@ def oa_record(row_id: str = "oa-pay-001", month: str = "2026-05") -> OAApplicati
     )
 
 
+def oa_record_with_structured_attachments(row_id: str = "oa-exp-structured", month: str = "2026-05") -> OAApplicationRecord:
+    record = oa_record(row_id=row_id, month=month)
+    record.expense_items = [
+        {
+            "expense_item_id": f"{row_id}:item:1",
+            "row_index": "0",
+            "expense_content": "设备款",
+            "settlement_amount": "199.00",
+            "attachment_invoices": [
+                {
+                    "source_attachment_key": f"{row_id}:invoice:1",
+                    "source_attachment_name": "发票.pdf",
+                    "invoice_no": "INV-STRUCT-001",
+                    "seller_name": "杭州供应商",
+                    "total_with_tax": "199.00",
+                }
+            ],
+            "attachment_artifacts": [
+                {
+                    "source_attachment_key": f"{row_id}:payment:1",
+                    "source_attachment_name": "付款截图.png",
+                    "evidence_type": "payment_receipt",
+                }
+            ],
+        }
+    ]
+    return record
+
+
 class QueueRecorder:
     def __init__(self) -> None:
         self.refreshes: list[tuple[str, str, str]] = []
@@ -63,6 +92,17 @@ class OAProjectionConnection:
         self.executed.append((" ".join(sql.lower().split()), params))
 
 
+class OAProjectionWriteConnection(OAProjectionConnection):
+    def __init__(self) -> None:
+        super().__init__(rows=[])
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        self.executed.append((" ".join(sql.lower().split()), params))
+        if "returning id::text" in self.executed[-1][0]:
+            return {"application_id": "00000000-0000-0000-0000-000000000001"}
+        return None
+
+
 class OAProjectionSqlRuntimeTests(unittest.TestCase):
     def test_postgres_oa_projection_repository_lists_records_by_month(self) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
@@ -83,6 +123,30 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual([record.id for record in records], ["oa-pay-001"])
         self.assertEqual(records[0].project_name, "玉烟维护项目")
+
+    def test_postgres_oa_projection_repository_writes_structured_items_and_attachments(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
+
+        connection = OAProjectionWriteConnection()
+        repository = PostgresOAProjectionRepository(connection)
+
+        count = repository.upsert_application_records(
+            [oa_record_with_structured_attachments()],
+            scope_key="2026-05",
+        )
+
+        self.assertEqual(count, 1)
+        executed_sql = "\n".join(sql for sql, _params in connection.executed)
+        self.assertIn("insert into app.oa_applications", executed_sql)
+        self.assertIn("returning id::text as application_id", executed_sql)
+        self.assertIn("delete from app.oa_application_items", executed_sql)
+        self.assertIn("insert into app.oa_application_items", executed_sql)
+        self.assertIn("delete from app.oa_attachments", executed_sql)
+        self.assertIn("insert into app.oa_attachments", executed_sql)
+        item_insert = [params for sql, params in connection.executed if "insert into app.oa_application_items" in sql]
+        attachment_inserts = [params for sql, params in connection.executed if "insert into app.oa_attachments" in sql]
+        self.assertEqual(len(item_insert), 1)
+        self.assertEqual(len(attachment_inserts), 2)
 
     def test_workbench_query_service_reads_oa_rows_from_sql_projection_adapter(self) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionAdapter
@@ -159,6 +223,188 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         self.assertIn(("search", "2026-05", "oa_projection_sync"), queue.refreshes)
         self.assertIn(("pending_invoice", "expense:all", "oa_projection_sync"), queue.refreshes)
         self.assertEqual(repository.runs[0]["status"], "succeeded")
+
+    def test_oa_sync_all_scope_respects_retention_cutoff_months(self) -> None:
+        from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService
+
+        class SourceAdapter:
+            def __init__(self) -> None:
+                self.listed_months: list[str] = []
+                self.list_all_called = False
+
+            def list_available_months(self) -> list[str]:
+                return ["2025-12", "2026-01", "2026-02"]
+
+            def list_all_application_records(self) -> list[OAApplicationRecord]:
+                self.list_all_called = True
+                return [oa_record(row_id="oa-old", month="2025-12")]
+
+            def list_application_records(self, month: str) -> list[OAApplicationRecord]:
+                self.listed_months.append(month)
+                return [oa_record(row_id=f"oa-{month}", month=month)]
+
+        class ProjectionRepository:
+            def __init__(self) -> None:
+                self.records: list[OAApplicationRecord] = []
+
+            def upsert_application_records(self, records: list[OAApplicationRecord], *, scope_key: str) -> int:
+                self.records.extend(records)
+                return len(records)
+
+        source = SourceAdapter()
+        repository = ProjectionRepository()
+        service = OAProjectionSyncService(
+            source_adapter=source,
+            projection_repository=repository,
+            queue_repository=QueueRecorder(),
+            retention_cutoff_date_provider=lambda: "2026-01-01",
+        )
+        event = RuntimeQueueEvent(
+            event_id="event-1",
+            tenant_id="default",
+            event_type="oa.sync",
+            aggregate_type="oa",
+            aggregate_id="all",
+            scope_type="oa",
+            scope_key="all",
+            dedupe_key=None,
+            payload={"scope_key": "all"},
+            attempts=1,
+            status="processing",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertFalse(source.list_all_called)
+        self.assertEqual(source.listed_months, ["2026-01", "2026-02"])
+        self.assertEqual(result["scanned_count"], 2)
+        self.assertEqual([record.month for record in repository.records], ["2026-01", "2026-02"])
+
+    def test_oa_sync_all_scope_prunes_non_manual_projection_rows_before_cutoff(self) -> None:
+        from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService
+
+        class SourceAdapter:
+            def list_available_months(self) -> list[str]:
+                return ["2026-01"]
+
+            def list_application_records(self, month: str) -> list[OAApplicationRecord]:
+                return [oa_record(row_id="oa-2026-01", month=month)]
+
+        class ProjectionRepository:
+            def __init__(self) -> None:
+                self.pruned_cutoff_months: list[str] = []
+
+            def upsert_application_records(self, records: list[OAApplicationRecord], *, scope_key: str) -> int:
+                return len(records)
+
+            def prune_records_before(self, cutoff_month: str) -> list[str]:
+                self.pruned_cutoff_months.append(cutoff_month)
+                return ["2025-12"]
+
+        queue = QueueRecorder()
+        repository = ProjectionRepository()
+        service = OAProjectionSyncService(
+            source_adapter=SourceAdapter(),
+            projection_repository=repository,
+            queue_repository=queue,
+            retention_cutoff_date_provider=lambda: "2026-01-01",
+        )
+        event = RuntimeQueueEvent(
+            event_id="event-1",
+            tenant_id="default",
+            event_type="oa.sync",
+            aggregate_type="oa",
+            aggregate_id="all",
+            scope_type="oa",
+            scope_key="all",
+            dedupe_key=None,
+            payload={"scope_key": "all"},
+            attempts=1,
+            status="processing",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(repository.pruned_cutoff_months, ["2026-01"])
+        self.assertEqual(result["pruned_count"], 1)
+        self.assertIn(("workbench", "2025-12", "oa_projection_sync"), queue.refreshes)
+        self.assertIn(("search", "2025-12", "oa_projection_sync"), queue.refreshes)
+
+    def test_oa_sync_projection_preserves_source_bound_invoice_attachment_facts(self) -> None:
+        from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService
+
+        source_record = oa_record(row_id="oa-exp-001", month="2026-02")
+        source_record.attachment_invoices = [
+            {"invoice_no": "INV-001", "attachment_name": "invoice.pdf", "source_attachment_key": "root-invoice"},
+        ]
+        source_record.attachment_evidences = [
+            {"evidence_type": "invoice", "attachment_name": "invoice-evidence.pdf", "source_attachment_key": "root-evidence"},
+            {"evidence_type": "payment_receipt", "attachment_name": "payment.png"},
+            {"evidence_type": "unknown", "attachment_name": "note.docx"},
+        ]
+        source_record.attachment_artifacts = [
+            {"document_kind": "invoice", "attachment_name": "invoice-artifact.pdf", "source_attachment_key": "root-artifact"},
+            {"attachment_name": "payment.png"},
+            {"attachment_name": "note.docx"},
+        ]
+        source_record.expense_items = [
+            {
+                "expense_item_id": "oa-exp-001:item:1",
+                "row_index": "0",
+                "attachment_invoices": [
+                    {"invoice_no": "INV-ITEM-001", "source_attachment_key": "item-invoice"},
+                ],
+                "attachment_evidences": [
+                    {"evidence_type": "invoice", "source_attachment_key": "item-evidence"},
+                    {"evidence_type": "payment_receipt", "source_attachment_key": "item-payment"},
+                ],
+                "attachment_artifacts": [
+                    {"document_kind": "invoice", "source_attachment_key": "item-artifact"},
+                    {"document_kind": "payment_receipt", "source_attachment_key": "item-payment-artifact"},
+                ],
+            }
+        ]
+
+        class SourceAdapter:
+            def list_application_records(self, month: str) -> list[OAApplicationRecord]:
+                return [source_record]
+
+        class ProjectionRepository:
+            def __init__(self) -> None:
+                self.records: list[OAApplicationRecord] = []
+
+            def upsert_application_records(self, records: list[OAApplicationRecord], *, scope_key: str) -> int:
+                self.records.extend(records)
+                return len(records)
+
+        repository = ProjectionRepository()
+        service = OAProjectionSyncService(
+            source_adapter=SourceAdapter(),
+            projection_repository=repository,
+            queue_repository=QueueRecorder(),
+        )
+        event = RuntimeQueueEvent(
+            event_id="event-1",
+            tenant_id="default",
+            event_type="oa.sync",
+            aggregate_type="oa",
+            aggregate_id="2026-02",
+            scope_type="oa",
+            scope_key="2026-02",
+            dedupe_key=None,
+            payload={"scope_key": "2026-02"},
+            attempts=1,
+            status="processing",
+        )
+
+        service.handle_runtime_event(event)
+
+        self.assertEqual(repository.records[0].attachment_invoices, source_record.attachment_invoices)
+        self.assertEqual(repository.records[0].attachment_evidences, [source_record.attachment_evidences[0]])
+        self.assertEqual(repository.records[0].attachment_artifacts, [source_record.attachment_artifacts[0]])
+        self.assertEqual(repository.records[0].expense_items[0]["attachment_invoices"], source_record.expense_items[0]["attachment_invoices"])
+        self.assertEqual(repository.records[0].expense_items[0]["attachment_evidences"], [source_record.expense_items[0]["attachment_evidences"][0]])
+        self.assertEqual(repository.records[0].expense_items[0]["attachment_artifacts"], [source_record.expense_items[0]["attachment_artifacts"][0]])
 
     def test_manual_oa_sync_api_enqueues_worker_job_without_running_sync_inline(self) -> None:
         app = object.__new__(server_module.Application)

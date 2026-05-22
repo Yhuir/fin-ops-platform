@@ -62,10 +62,24 @@ class RuntimeRedisHelper:
         except ImportError as exc:
             raise RuntimeRedisConfigurationError("Redis support requires the optional redis package.") from exc
         return cls(
-            client=redis.Redis.from_url(settings.url, decode_responses=True),
+            client=redis.Redis.from_url(
+                settings.url,
+                decode_responses=True,
+                socket_connect_timeout=1,
+                socket_timeout=1,
+            ),
             key_prefix=settings.key_prefix,
             wakeup_channel=settings.wakeup_channel,
         )
+
+    def health_summary(self) -> dict[str, Any]:
+        if self._client is None:
+            return {"redis_status": "disabled"}
+        try:
+            self._client.ping()
+        except Exception as exc:  # pragma: no cover - concrete exception type comes from optional redis package.
+            return {"redis_status": "error", "redis_error": str(exc)}
+        return {"redis_status": "ready"}
 
     def get_json(self, key: str) -> dict[str, Any] | None:
         if self._client is None:

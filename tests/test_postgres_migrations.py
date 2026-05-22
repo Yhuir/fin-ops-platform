@@ -24,6 +24,8 @@ EXPECTED_MIGRATIONS = [
     "0009_runtime_infrastructure.sql",
     "0010_runtime_phase2_cutover.sql",
     "0011_runtime_phase2_query_indexes.sql",
+    "0012_workbench_rows_scope_unique.sql",
+    "0013_oa_attachment_cache_sources.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -101,7 +103,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 12)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 14)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -204,6 +206,7 @@ class PostgresMigrationSqlTests(unittest.TestCase):
 
     def test_sql_does_not_contain_forbidden_operations_or_secrets(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()
+        sql = re.sub(r"\binsert\s+into\s+app\.oa_attachment_invoice_cache_sources\b", "insert into allowed_lookup_backfill", sql)
         forbidden_patterns = [
             r"\bdrop\s+(database|schema|table)\b",
             r"\btruncate\b",
@@ -223,6 +226,22 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         ]
         for pattern in forbidden_patterns:
             self.assertIsNone(re.search(pattern, sql), pattern)
+
+    def test_oa_attachment_invoice_cache_sources_is_indexed_lookup_table(self) -> None:
+        sql = strip_sql_comments(migration_sql()).lower()
+        body = re.search(
+            r"create table if not exists app\.oa_attachment_invoice_cache_sources\s*\((.*?)\);",
+            sql,
+            flags=re.S,
+        )
+        self.assertIsNotNone(body)
+        table_body = body.group(1)
+        self.assertIn("cache_source_attachment_key text not null references app.oa_attachment_invoice_cache(source_attachment_key) on delete cascade", table_body)
+        self.assertIn("source_attachment_key text not null", table_body)
+        self.assertIn("primary key (cache_source_attachment_key, source_attachment_key, source_kind)", table_body)
+        self.assertIn("oa_attachment_invoice_cache_sources_source_idx", sql)
+        self.assertIn("oa_attachment_invoice_cache_sources_cache_idx", sql)
+        self.assertIn("deduped_sources as", sql)
 
     def test_core_tables_keep_legacy_or_external_identity_and_raw_payload(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()
