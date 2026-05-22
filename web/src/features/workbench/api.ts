@@ -47,8 +47,10 @@ import type {
   OaManualSearchResult,
   OaManualSearchRow,
 } from "./types";
+import { apiUrl } from "../../app/runtime";
 import { countWorkbenchGroupsRows } from "./groupDisplayModel";
 import { mapBankTransactionTagDictionary } from "../pendingInvoices/api";
+import { readOATokenCookie } from "../session/api";
 import type { BankTransactionTagDictionary, PendingInvoiceTagGroups } from "../pendingInvoices/types";
 
 export type WorkbenchBootstrapProgress = {
@@ -1645,8 +1647,21 @@ function resolveWorkbenchApiErrorMessage(payload: unknown, rawText: string) {
   return rawText.trim() || "request failed";
 }
 
+function withWorkbenchAuthHeaders(headers?: HeadersInit) {
+  const nextHeaders = new Headers(headers ?? undefined);
+  const token = readOATokenCookie();
+  if (token && !nextHeaders.has("Authorization")) {
+    nextHeaders.set("Authorization", `Bearer ${token}`);
+  }
+  return nextHeaders;
+}
+
 async function requestJson<T>(url: string, init: RequestInit = {}) {
-  const response = await fetch(url, init);
+  const response = await fetch(apiUrl(url), {
+    ...init,
+    credentials: init.credentials ?? "include",
+    headers: withWorkbenchAuthHeaders(init.headers),
+  });
   const rawText = await response.text();
   let payload: T | null = null;
   if (rawText.trim()) {
@@ -1739,7 +1754,11 @@ async function requestJsonWithByteProgress<T>(
 
     signal?.addEventListener("abort", handleAbort, { once: true });
 
-    xhr.open("GET", url, true);
+    xhr.open("GET", apiUrl(url), true);
+    xhr.withCredentials = true;
+    for (const [key, value] of withWorkbenchAuthHeaders()) {
+      xhr.setRequestHeader(key, value);
+    }
     xhr.responseType = "text";
 
     xhr.onprogress = (event) => {

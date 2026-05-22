@@ -1308,7 +1308,10 @@ describe("workbench api bank amount mapping", () => {
     const openBankRows = payload.open.groups.flatMap((group) => group.rows.bank);
     const displayBankRows = displayGroups.flatMap((group) => group.rows.bank);
 
-    expect(fetchMock).toHaveBeenCalledWith("/api/workbench?month=all", { method: "GET", signal: undefined });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench?month=all",
+      expect.objectContaining({ method: "GET", signal: undefined, credentials: "include" }),
+    );
     expect(payload.summary.bankCount).toBe(4);
     expect(pairedBankRows.map((row) => row.id)).toEqual(["ccb-apr-paired"]);
     expect(openBankRows.map((row) => row.id)).toEqual(["ccb-jan-open", "ccb-feb-open", "ccb-mar-open"]);
