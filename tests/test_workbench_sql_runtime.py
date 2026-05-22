@@ -768,6 +768,128 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(rows[0]["source_attachment_key"], "actual-attachment-key")
         self.assertIn("INV-LEGACY-CACHE-001", rows[0]["detail_fields"]["发票号码"])
 
+    def test_sql_projection_ignores_artifact_placeholders_when_cache_has_parsed_invoice(self) -> None:
+        class StructuredOAConnection(WorkbenchProjectionSettingsConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                if "from app.oa_application_items" in normalized:
+                    return [
+                        {
+                            "oa_row_id": "oa-exp-with-artifact-placeholder",
+                            "scope_month": "2026-02-01",
+                            "item_payload": {
+                                "expense_item_id": "oa-exp-with-artifact-placeholder:item:1",
+                                "row_index": "0",
+                            },
+                            "attachment_payload": {
+                                "source_attachment_key": "attachment-key-1",
+                                "filename": "发票.pdf",
+                            },
+                            "cache_invoices": [
+                                {
+                                    "source_attachment_key": "attachment-key-1",
+                                    "seller_name": "供应商A",
+                                    "buyer_name": "云南溯源科技有限公司",
+                                    "amount": "165.35",
+                                    "tax_amount": "1.65",
+                                    "total_with_tax": "167.00",
+                                    "issue_date": "2026-02-04",
+                                }
+                            ],
+                            "cache_evidences": [],
+                            "cache_artifacts": [
+                                {
+                                    "source_attachment_key": "attachment-key-1",
+                                    "source_attachment_name": "发票.pdf",
+                                    "document_kind": "发票附件",
+                                }
+                            ],
+                        }
+                    ]
+                if "from app.oa_applications" in normalized:
+                    return []
+                return super().fetch_all(sql, params)
+
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=StructuredOAConnection(),
+            read_model_repository=CandidateSnapshotRecorder(),
+        )
+        rows = builder._attachment_invoice_rows_from_expense_items(
+            "2026-02",
+            {
+                "oa-exp-with-artifact-placeholder": {
+                    "id": "oa-exp-with-artifact-placeholder",
+                    "type": "oa",
+                    "source_kind": "oa",
+                    "status": "open",
+                    "amount": "652.99",
+                    "counterparty_name": "",
+                    "detail_fields": {"申请日期": "2026-02-26"},
+                }
+            },
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["seller_name"], "供应商A")
+        self.assertEqual(rows[0]["amount"], "165.35")
+        self.assertEqual(rows[0]["total_with_tax"], "167.00")
+
+    def test_sql_projection_keeps_attachment_invoice_rows_source_bound_to_parent_oa(self) -> None:
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=WorkbenchProjectionSettingsConnection(),
+            read_model_repository=CandidateSnapshotRecorder(),
+        )
+        rows_by_id = {
+            "oa-left": {
+                "id": "oa-left",
+                "type": "oa",
+                "source_kind": "oa",
+                "status": "open",
+                "amount": "100.00",
+                "counterparty_name": "供应商A",
+                "apply_type": "付款",
+                "pay_receive_time": "2026-02-10",
+            },
+            "oa-right": {
+                "id": "oa-right",
+                "type": "oa",
+                "source_kind": "oa",
+                "status": "open",
+                "amount": "100.00",
+                "counterparty_name": "供应商A",
+                "apply_type": "付款",
+                "pay_receive_time": "2026-02-10",
+            },
+            "oa-left-att-inv": {
+                "id": "oa-left-att-inv",
+                "type": "invoice",
+                "source_kind": "oa_attachment_invoice",
+                "status": "open",
+                "derived_from_oa_id": "oa-left",
+                "seller_name": "供应商A",
+                "buyer_name": "云南溯源科技有限公司",
+                "invoice_type": "进项发票",
+                "amount": "100.00",
+                "total_with_tax": "100.00",
+                "issue_date": "2026-02-10",
+            },
+        }
+
+        payload = builder._group_payload("2026-02", rows_by_id, [])
+        groups = payload["open"]["groups"]
+        linked_groups = [
+            group
+            for group in groups
+            if any(row.get("source_kind") == "oa_attachment_invoice" for row in group["invoice_rows"])
+        ]
+
+        self.assertEqual(len(linked_groups), 1)
+        self.assertEqual([row["id"] for row in linked_groups[0]["oa_rows"]], ["oa-left"])
+        self.assertEqual(
+            {row["derived_from_oa_id"] for row in linked_groups[0]["invoice_rows"]},
+            {"oa-left"},
+        )
+
     def test_sql_projection_rebuilds_candidate_matches_from_sql_rows(self) -> None:
         recorder = CandidateSnapshotRecorder()
         builder = WorkbenchSqlProjectionBuilder(

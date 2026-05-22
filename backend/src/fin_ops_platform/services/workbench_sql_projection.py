@@ -295,11 +295,11 @@ class WorkbenchSqlProjectionBuilder:
             )
             source_attachment_key_text = str(source_attachment_key or "").strip()
             cache_artifacts = row.get("cache_artifacts") if isinstance(row.get("cache_artifacts"), list) else []
-            for evidence in [
-                *list(row.get("cache_invoices") or []),
-                *list(row.get("cache_evidences") or []),
-                *list(cache_artifacts),
-            ]:
+            for evidence in self._select_structured_attachment_evidences(
+                invoices=row.get("cache_invoices") if isinstance(row.get("cache_invoices"), list) else [],
+                evidences=row.get("cache_evidences") if isinstance(row.get("cache_evidences"), list) else [],
+                artifacts=cache_artifacts,
+            ):
                 if not isinstance(evidence, dict):
                     continue
                 evidence_attachment_key = str(evidence.get("source_attachment_key") or "").strip()
@@ -334,6 +334,62 @@ class WorkbenchSqlProjectionBuilder:
                 serialized.setdefault("source_kind", serialized.get("source_kind") or "oa_attachment_invoice")
                 result.append(serialized)
         return result
+
+    @classmethod
+    def _select_structured_attachment_evidences(
+        cls,
+        *,
+        invoices: list[Any],
+        evidences: list[Any],
+        artifacts: list[Any],
+    ) -> list[dict[str, Any]]:
+        parsed_payloads = [
+            dict(payload)
+            for payload in [*invoices, *evidences]
+            if isinstance(payload, dict)
+        ]
+        if parsed_payloads:
+            return cls._dedupe_structured_attachment_evidences(parsed_payloads)
+
+        artifact_payloads = [
+            dict(payload)
+            for payload in artifacts
+            if isinstance(payload, dict) and _looks_like_invoice_artifact(payload)
+        ]
+        return cls._dedupe_structured_attachment_evidences(artifact_payloads)
+
+    @classmethod
+    def _dedupe_structured_attachment_evidences(cls, evidences: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        seen: set[tuple[str, ...]] = set()
+        for evidence in evidences:
+            identity = cls._structured_attachment_evidence_identity(evidence)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            result.append(evidence)
+        return result
+
+    @staticmethod
+    def _structured_attachment_evidence_identity(evidence: dict[str, Any]) -> tuple[str, ...]:
+        def clean(value: Any) -> str:
+            text = str(value or "").strip()
+            return "" if text in {"—", "--"} else text
+
+        return (
+            clean(evidence.get("source_attachment_key")),
+            clean(evidence.get("invoice_no")),
+            clean(evidence.get("digital_invoice_no")),
+            clean(evidence.get("issue_date")),
+            clean(evidence.get("seller_tax_no")),
+            clean(evidence.get("seller_name")),
+            clean(evidence.get("buyer_tax_no")),
+            clean(evidence.get("buyer_name")),
+            clean(evidence.get("total_with_tax") or evidence.get("amount")),
+            clean(evidence.get("tax_amount")),
+            clean(evidence.get("evidence_type")),
+            clean(evidence.get("transaction_no") or evidence.get("merchant_order_no")),
+        )
 
     @staticmethod
     def _attachment_evidences_from_expense_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
