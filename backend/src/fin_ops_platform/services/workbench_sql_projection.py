@@ -191,6 +191,11 @@ class WorkbenchSqlProjectionBuilder:
             return []
         structured = self._attachment_invoice_rows_from_structured_oa_tables(month, oa_rows_by_id)
         structured_ids = {str(row.get("id") or "") for row in structured}
+        structured_attachment_keys = {
+            str(row.get("source_attachment_key") or "").strip()
+            for row in structured
+            if str(row.get("source_attachment_key") or "").strip()
+        }
         rows = self._connection.fetch_all(
             """
             select row_id, scope_month, normalized_payload, raw_payload
@@ -212,6 +217,12 @@ class WorkbenchSqlProjectionBuilder:
             if not isinstance(oa_row, dict):
                 continue
             attachment_evidences = self._attachment_evidences_from_expense_items(payload)
+            if structured_attachment_keys:
+                attachment_evidences = [
+                    evidence
+                    for evidence in attachment_evidences
+                    if str(evidence.get("source_attachment_key") or "").strip() not in structured_attachment_keys
+                ]
             if not attachment_evidences:
                 continue
             record = SimpleNamespace(attachment_evidences=attachment_evidences, attachment_invoices=[])

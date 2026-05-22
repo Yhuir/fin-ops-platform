@@ -865,6 +865,85 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(rows[0]["amount"], "165.35")
         self.assertEqual(rows[0]["total_with_tax"], "167.00")
 
+    def test_sql_projection_does_not_fallback_to_payload_artifact_for_structured_attachment(self) -> None:
+        class StructuredOAConnection(WorkbenchProjectionSettingsConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                if "from app.oa_application_items" in normalized:
+                    return [
+                        {
+                            "oa_row_id": "oa-exp-structured-and-payload",
+                            "scope_month": "2026-02-01",
+                            "item_payload": {
+                                "expense_item_id": "oa-exp-structured-and-payload:item:1",
+                                "row_index": "0",
+                            },
+                            "attachment_payload": {
+                                "source_attachment_key": "shared-attachment-key",
+                                "filename": "发票.pdf",
+                            },
+                            "cache_invoices": [
+                                {
+                                    "source_attachment_key": "shared-attachment-key",
+                                    "seller_name": "供应商A",
+                                    "buyer_name": "云南溯源科技有限公司",
+                                    "amount": "165.35",
+                                    "tax_amount": "1.65",
+                                    "total_with_tax": "167.00",
+                                    "issue_date": "2026-02-04",
+                                }
+                            ],
+                            "cache_evidences": [],
+                            "cache_artifacts": [],
+                        }
+                    ]
+                if "from app.oa_applications" in normalized:
+                    return [
+                        {
+                            "row_id": "oa-exp-structured-and-payload",
+                            "scope_month": "2026-02-01",
+                            "normalized_payload": {
+                                "expense_items": [
+                                    {
+                                        "expense_item_id": "oa-exp-structured-and-payload:item:1",
+                                        "row_index": "0",
+                                        "attachment_artifacts": [
+                                            {
+                                                "source_attachment_key": "shared-attachment-key",
+                                                "source_attachment_name": "发票.pdf",
+                                            }
+                                        ],
+                                    }
+                                ]
+                            },
+                            "raw_payload": {},
+                        }
+                    ]
+                return super().fetch_all(sql, params)
+
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=StructuredOAConnection(),
+            read_model_repository=CandidateSnapshotRecorder(),
+        )
+        rows = builder._attachment_invoice_rows_from_expense_items(
+            "2026-02",
+            {
+                "oa-exp-structured-and-payload": {
+                    "id": "oa-exp-structured-and-payload",
+                    "type": "oa",
+                    "source_kind": "oa",
+                    "status": "open",
+                    "amount": "652.99",
+                    "counterparty_name": "",
+                    "detail_fields": {"申请日期": "2026-02-26"},
+                }
+            },
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["source_attachment_key"], "shared-attachment-key")
+        self.assertEqual(rows[0]["total_with_tax"], "167.00")
+
     def test_sql_projection_keeps_attachment_invoice_rows_source_bound_to_parent_oa(self) -> None:
         builder = WorkbenchSqlProjectionBuilder(
             connection=WorkbenchProjectionSettingsConnection(),
