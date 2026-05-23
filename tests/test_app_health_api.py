@@ -11,6 +11,56 @@ from pathlib import Path
 from fin_ops_platform.app.server import build_application
 
 
+class FakeOperationsDashboardConnection:
+    def fetch_one(self, sql: str, params: tuple[object, ...] = ()):
+        normalized = " ".join(sql.lower().split())
+        if "from app.bank_transactions" in normalized:
+            return {"total_count": 1, "latest_synced_at": "2026-05-20T10:00:00+00:00"}
+        if "invoice_flags" in normalized:
+            return {
+                "total_count": 2,
+                "standard_count": 1,
+                "manual_count": 0,
+                "etc_count": 1,
+                "app_oa_attachment_count": 0,
+                "latest_synced_at": "2026-05-20T10:00:00+00:00",
+                "standard_latest_synced_at": "2026-05-20T10:00:00+00:00",
+                "manual_latest_synced_at": None,
+                "etc_latest_synced_at": "2026-05-20T10:00:00+00:00",
+                "app_oa_attachment_latest_synced_at": None,
+            }
+        if "from read_model.workbench_rows" in normalized and "oa_attachment_invoice" in normalized:
+            return {"count": 0, "latest_synced_at": None}
+        if "oa_records_count" in normalized:
+            return {
+                "oa_records_count": 3,
+                "oa_items_count": 4,
+                "oa_records_latest_synced_at": "2026-05-20T10:00:00+00:00",
+                "oa_latest_synced_at": "2026-05-20T10:00:00+00:00",
+            }
+        if "from job.outbox_events" in normalized and "pending_count" in normalized:
+            return {
+                "pending_count": 0,
+                "publishing_count": 0,
+                "failed_count": 0,
+                "publish_failed_count": 0,
+                "oldest_pending_age_seconds": None,
+            }
+        if "max_pending_age_seconds" in normalized:
+            return {"max_pending_age_seconds": None}
+        raise AssertionError(sql)
+
+    def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
+        normalized = " ".join(sql.lower().split())
+        if "from job.outbox_events" in normalized:
+            return []
+        if "from job.read_model_dirty_scopes" in normalized:
+            return []
+        if "from job.runtime_worker_heartbeats" in normalized:
+            return []
+        raise AssertionError(sql)
+
+
 class AppHealthApiTests(unittest.TestCase):
     @contextmanager
     def _temporary_env(self, **updates: str | None):
@@ -302,6 +352,31 @@ class AppHealthApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 401)
         self.assertEqual(payload["error"], "invalid_oa_session")
+
+    def test_operations_app_health_dashboard_is_admin_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            response = app.handle_request("GET", "/api/operations/app-health-dashboard")
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(payload["error"], "admin_only")
+
+    def test_operations_app_health_dashboard_returns_read_only_payload_for_admin(self) -> None:
+        with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            setattr(app._state_store, "_connection", FakeOperationsDashboardConnection())
+
+            response = app.handle_request("GET", "/api/operations/app-health-dashboard")
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("data_inventory", payload)
+        self.assertIn("request_performance", payload)
+        self.assertIn("runtime_performance", payload)
+        self.assertNotIn("status", payload)
+        self.assertEqual(payload["data_inventory"]["bank"]["total_count"], 1)
 
 
 if __name__ == "__main__":

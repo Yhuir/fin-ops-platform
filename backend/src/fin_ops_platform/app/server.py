@@ -135,6 +135,7 @@ from fin_ops_platform.services.oa_identity_service import (
     OAIdentityServiceError,
     OASessionExpiredError,
 )
+from fin_ops_platform.services.operations_dashboard import OperationsDashboardService
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError, OARoleSyncService
 from fin_ops_platform.services.oa_sync_service import OASyncService
 from fin_ops_platform.services.pending_invoice_service import (
@@ -972,6 +973,8 @@ class Application:
             return self._handle_api_app_health_stream(headers)
         if method == "GET" and route_path == "/api/app-health":
             return self._handle_api_app_health(headers)
+        if method == "GET" and route_path == "/api/operations/app-health-dashboard":
+            return self._handle_api_operations_app_health_dashboard(headers)
         if method == "GET" and route_path == "/api/search":
             q = query.get("q", [""])[0]
             scope = query.get("scope", ["all"])[0]
@@ -2062,6 +2065,25 @@ class Application:
                 "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
             },
         )
+
+    def _handle_api_operations_app_health_dashboard(self, headers: dict[str, str] | None) -> Response:
+        _, admin_error = self._resolve_admin_session(headers)
+        if admin_error is not None:
+            return admin_error
+        connection = getattr(self._state_store, "_connection", None)
+        if connection is None:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "postgres_required",
+                    "message": "AppHealth dashboard requires PostgreSQL runtime metrics.",
+                },
+            )
+        service = OperationsDashboardService(
+            connection,
+            api_performance_recorder=self._api_performance_recorder,
+        )
+        return self._json_response(HTTPStatus.OK, service.build_payload())
 
     def _resolve_app_health_session(
         self,

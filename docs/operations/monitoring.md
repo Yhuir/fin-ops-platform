@@ -3,6 +3,7 @@
 ## 当前可观察对象
 
 - `/health` 和 app health API。
+- `GET /api/operations/app-health-dashboard` 管理员只读 Dashboard。
 - OA 同步状态。
 - 工作台 dirty scopes。
 - 后台任务状态。
@@ -78,6 +79,31 @@ RabbitMQ 接入后仍以 PostgreSQL 指标为准；RabbitMQ queue depth 和 DLQ 
 - `rabbitmq_unacked_messages` 长时间不下降。
 - `rabbitmq_dlq_count > 0`。
 - PostgreSQL `failed/dead_lettered` 增长优先级高于 RabbitMQ DLQ，因为 PostgreSQL 才是失败事实。
+
+## AppHealth 运维状态 Dashboard
+
+设置页 `AppHealth 运维状态` 调用：
+
+```text
+GET /api/operations/app-health-dashboard
+```
+
+它是管理员只读观测入口，不执行 retry、acknowledge、requeue、republish 或数据修复。生产排障时先看 Dashboard 定位方向，再进入对应 runbook 或后台命令处理。
+
+Dashboard 三个区域：
+
+- `数据`：`app.bank_transactions`、`app.invoices`、`app.oa_applications`、`app.oa_application_items` 的数量和最近同步时间。发票来源拆为普通导入、OA 解析、ETC、手工导入。
+- `请求`：当前 API 进程内 rolling window 的 p95/p99，包括完整请求耗时、DB 总耗时、连接获取、SQL execute/fetch 和 SQL 次数。
+- `后台`：`job.outbox_events`、RabbitMQ queue/DLQ、`job.runtime_worker_heartbeats`、read model refresh duration 和 dirty scope 计数。
+
+判读原则：
+
+- `--` 表示 unknown 或当前无可靠样本，不等于 0。
+- RabbitMQ 指标缺失时仍以 PostgreSQL outbox/dirty scopes 为准。
+- API/DB p95 同时升高，优先看 PostgreSQL、连接池和 top SQL。
+- API p95 升高但 DB 指标不高，优先看 Python 对象构造、JSON 序列化、前端请求量和网络。
+- outbox pending 和 RabbitMQ queue 同时增长，优先看 worker/consumer。
+- RabbitMQ queue 增长但 outbox 不增长，优先看 broker consumer、prefetch、DLQ 和 ack/nack。
 
 ## API/SQL 性能拆分
 

@@ -1,742 +1,486 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
+import RefreshIcon from "@mui/icons-material/Refresh";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Chip from "@mui/material/Chip";
+import CircularProgress from "@mui/material/CircularProgress";
+import IconButton from "@mui/material/IconButton";
 import Stack from "@mui/material/Stack";
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import TableHead from "@mui/material/TableHead";
+import TableRow from "@mui/material/TableRow";
+import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
-import { DataGrid, type GridColDef } from "@mui/x-data-grid";
 
+import { settingsTokens } from "../components/settings/settingsDesign";
 import { useSession, useSessionPermissions } from "../contexts/SessionContext";
-import { fetchAppHealth } from "../features/appHealth/api";
-import type { ApiAppHealthPayload } from "../features/appHealth/types";
-import { acknowledgeBackgroundJob, retryBackgroundJobById } from "../features/backgroundJobs/api";
-import { settingsDataGridSx, settingsTokens } from "../components/settings/settingsDesign";
+import { fetchAppHealthDashboard } from "../features/appHealth/api";
+import type {
+  OperationsDashboardEndpointPerformance,
+  OperationsDashboardInventoryBlock,
+  OperationsDashboardPayload,
+  OperationsDashboardPercentiles,
+  OperationsDashboardReadModelMetric,
+} from "../features/appHealth/types";
 
-type OperationsPayload = ApiAppHealthPayload & Record<string, unknown>;
-
-type GridRow = {
-  id: string;
-  status: string;
-  type: string;
-  label: string;
-  updatedAt: string;
-  message: string;
-  retryable: boolean;
-  acknowledgeable: boolean;
-  attention: boolean;
-};
-
-type JobSummary = {
-  id: string;
-  status: string;
-  type: string;
-  label: string;
-  message: string;
-  retryable: boolean;
-  acknowledgeable: boolean;
-};
-
-type AlertRow = {
-  id: string;
-  state: "active" | "recovered";
-  severity: string;
-  source: string;
-  message: string;
-  changedAt: string;
-};
-
-const EMPTY_VALUE = "—";
+const EMPTY_VALUE = "--";
+const REFRESH_INTERVAL_MS = 10_000;
 
 const sectionSx = {
   border: `1px solid ${settingsTokens.borderSubtle}`,
-  borderRadius: "4px",
-  bgcolor: settingsTokens.page,
+  borderRadius: "8px",
+  bgcolor: "#fff",
+  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
   minWidth: 0,
 };
 
-const sectionHeaderSx = {
-  px: 2,
-  py: 1.25,
-  borderBottom: `1px solid ${settingsTokens.borderSubtle}`,
+const tableSx = {
+  "& th": {
+    borderColor: settingsTokens.borderSubtle,
+    color: settingsTokens.textMuted,
+    fontSize: 12,
+    fontWeight: 600,
+    py: 1,
+    whiteSpace: "nowrap",
+  },
+  "& td": {
+    borderColor: settingsTokens.borderSubtle,
+    color: settingsTokens.textPrimary,
+    fontSize: 13,
+    py: 1.1,
+    verticalAlign: "top",
+  },
+  "& tr:last-child td": {
+    borderBottom: 0,
+  },
 };
 
-const sectionBodySx = {
-  p: 2,
-  minWidth: 0,
-};
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return isRecord(value) ? value : {};
-}
-
-function readString(source: Record<string, unknown>, keys: string[], fallback = EMPTY_VALUE) {
-  for (const key of keys) {
-    const value = source[key];
-    if (typeof value === "string" && value.trim().length > 0) {
-      return value.trim();
-    }
-    if (typeof value === "number" || typeof value === "boolean") {
-      return String(value);
-    }
-  }
-  return fallback;
-}
-
-function readNumber(source: Record<string, unknown>, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
-    if (typeof value === "number" && Number.isFinite(value)) {
-      return value;
-    }
-    if (typeof value === "string" && value.trim().length > 0) {
-      const parsed = Number(value);
-      if (Number.isFinite(parsed)) {
-        return parsed;
-      }
-    }
-  }
-  return 0;
-}
-
-function readBoolean(source: Record<string, unknown>, keys: string[], fallback = false) {
-  for (const key of keys) {
-    const value = source[key];
-    if (typeof value === "boolean") {
-      return value;
-    }
-  }
-  return fallback;
-}
-
-function readStringArray(source: Record<string, unknown>, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
-    if (Array.isArray(value)) {
-      return value.map((item) => String(item ?? "").trim()).filter(Boolean);
-    }
-  }
-  return [];
-}
-
-function readRecordArray(source: Record<string, unknown>, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
-    if (Array.isArray(value)) {
-      return value.filter(isRecord);
-    }
-  }
-  return [];
-}
-
-function uniqueRecordsById(records: Record<string, unknown>[]) {
-  const seen = new Set<string>();
-  return records.filter((record, index) => {
-    const id = readString(record, ["job_id", "jobId", "id"], `job-${index + 1}`);
-    if (seen.has(id)) {
-      return false;
-    }
-    seen.add(id);
-    return true;
-  });
-}
-
-function readRecord(source: Record<string, unknown>, keys: string[]) {
-  for (const key of keys) {
-    const value = source[key];
-    if (isRecord(value)) {
-      return value;
-    }
-  }
-  return {};
-}
-
-function statusReason(status: string) {
-  if (status === "blocked") {
-    return "系统阻断写操作或依赖不可用";
-  }
-  if (status === "busy") {
-    return "后台任务、OA 同步或读模型处理中";
-  }
-  if (status === "ok") {
-    return "系统状态正常";
-  }
-  return EMPTY_VALUE;
-}
-
-function statusColor(status: string): "default" | "success" | "warning" | "error" | "info" {
-  if (["ok", "ready", "synced", "available", "authenticated", "completed", "success", "recovered"].includes(status)) {
-    return "success";
-  }
-  if (["blocked", "error", "failed", "unavailable", "expired", "forbidden", "critical"].includes(status)) {
-    return "error";
-  }
-  if (["busy", "refreshing", "rebuilding", "stale", "dirty", "queued", "running", "partial_success", "warning"].includes(status)) {
-    return "warning";
-  }
-  return "default";
-}
-
-function Section({ title, children, testId }: { title: string; children: ReactNode; testId?: string }) {
+function Section({ title, children, testId }: { title: string; children: React.ReactNode; testId: string }) {
   return (
     <Box component="section" data-testid={testId} sx={sectionSx}>
-      <Box sx={sectionHeaderSx}>
-        <Typography component="h2" sx={{ color: settingsTokens.textPrimary, fontSize: 16, fontWeight: 600, lineHeight: 1.3 }}>
+      <Box sx={{ borderBottom: `1px solid ${settingsTokens.borderSubtle}`, px: 2, py: 1.25 }}>
+        <Typography component="h2" sx={{ color: settingsTokens.textPrimary, fontSize: 16, fontWeight: 650, lineHeight: 1.3 }}>
           {title}
         </Typography>
       </Box>
-      <Box sx={sectionBodySx}>{children}</Box>
+      <Box sx={{ p: { xs: 1.25, md: 1.5 } }}>{children}</Box>
     </Box>
   );
 }
 
-function Field({ label, value }: { label: string; value: React.ReactNode }) {
+function formatNumber(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return EMPTY_VALUE;
+  }
+  return new Intl.NumberFormat("zh-CN").format(value);
+}
+
+function formatMs(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return EMPTY_VALUE;
+  }
+  return `${Math.round(value)} ms`;
+}
+
+function formatSeconds(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return EMPTY_VALUE;
+  }
+  return `${Math.round(value)} s`;
+}
+
+function formatTimestamp(value: string | null | undefined) {
+  if (!value) {
+    return EMPTY_VALUE;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function valueColor(value: number | null | undefined, kind: "p95" | "p99") {
+  if (value === null || value === undefined) {
+    return settingsTokens.textMuted;
+  }
+  if (kind === "p95" && value > 1500) {
+    return "#dc2626";
+  }
+  if (kind === "p99" && value > 5000) {
+    return "#dc2626";
+  }
+  if ((kind === "p95" && value >= 500) || (kind === "p99" && value > 2500)) {
+    return "#b45309";
+  }
+  return settingsTokens.textPrimary;
+}
+
+function PercentileCells({ value }: { value: OperationsDashboardPercentiles }) {
   return (
-    <Stack direction="row" spacing={1} sx={{ minWidth: 0, alignItems: "baseline" }}>
-      <Typography sx={{ color: settingsTokens.textMuted, flex: "0 0 128px", fontSize: 12, lineHeight: 1.6 }}>
-        {label}
+    <>
+      <TableCell sx={{ color: valueColor(value.p95, "p95"), fontWeight: value.p95 ? 650 : 500 }}>
+        {formatMs(value.p95)}
+      </TableCell>
+      <TableCell sx={{ color: valueColor(value.p99, "p99"), fontWeight: value.p99 ? 650 : 500 }}>
+        {formatMs(value.p99)}
+      </TableCell>
+    </>
+  );
+}
+
+function InventorySummary({ title, block }: { title: string; block: OperationsDashboardInventoryBlock }) {
+  return (
+    <Box sx={{ border: `1px solid ${settingsTokens.borderSubtle}`, borderRadius: "8px", minWidth: 0, p: 1.5 }}>
+      <Typography sx={{ color: settingsTokens.textMuted, fontSize: 12, fontWeight: 600 }}>{title}</Typography>
+      <Typography sx={{ color: settingsTokens.textPrimary, fontSize: 28, fontWeight: 700, lineHeight: 1.2, mt: 0.5 }}>
+        {formatNumber(block.total_count)}
       </Typography>
-      <Box sx={{ color: settingsTokens.textPrimary, minWidth: 0, overflowWrap: "anywhere", fontSize: 14, lineHeight: 1.6 }}>
-        {value}
+      <Typography sx={{ color: settingsTokens.textMuted, fontSize: 12, mt: 0.5 }}>{formatTimestamp(block.latest_synced_at)}</Typography>
+    </Box>
+  );
+}
+
+function InventorySourceRows({ block }: { block: OperationsDashboardInventoryBlock }) {
+  return (
+    <TableContainer>
+      <Table size="small" sx={tableSx}>
+        <TableHead>
+          <TableRow>
+            <TableCell>来源</TableCell>
+            <TableCell align="right">数量</TableCell>
+            <TableCell>同步</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {block.sources.map((source) => (
+            <TableRow key={source.key}>
+              <TableCell>{source.label}</TableCell>
+              <TableCell align="right">{formatNumber(source.count)}</TableCell>
+              <TableCell>{formatTimestamp(source.latest_synced_at)}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+}
+
+function DataInventory({ payload }: { payload: OperationsDashboardPayload }) {
+  return (
+    <Section title="数据" testId="app-health-data">
+      <Box
+        sx={{
+          display: "grid",
+          gap: 1.25,
+          gridTemplateColumns: { xs: "1fr", md: "repeat(3, minmax(0, 1fr))" },
+        }}
+      >
+        <InventorySummary title="流水" block={payload.data_inventory.bank} />
+        <InventorySummary title="发票" block={payload.data_inventory.invoice} />
+        <InventorySummary title="OA" block={payload.data_inventory.oa} />
       </Box>
-    </Stack>
+      <Box
+        sx={{
+          display: "grid",
+          gap: 1.25,
+          gridTemplateColumns: { xs: "1fr", lg: "repeat(3, minmax(0, 1fr))" },
+          mt: 1.25,
+        }}
+      >
+        <InventorySourceRows block={payload.data_inventory.bank} />
+        <InventorySourceRows block={payload.data_inventory.invoice} />
+        <InventorySourceRows block={payload.data_inventory.oa} />
+      </Box>
+    </Section>
   );
 }
 
-function StatusChip({ value }: { value: string }) {
-  return <Chip label={value || EMPTY_VALUE} size="small" color={statusColor(value)} variant="outlined" />;
-}
-
-function ChipList({ values }: { values: string[] }) {
-  if (values.length === 0) {
-    return <Typography component="span">{EMPTY_VALUE}</Typography>;
-  }
+function RequestPerformance({ rows }: { rows: OperationsDashboardEndpointPerformance[] }) {
   return (
-    <Stack direction="row" spacing={0.75} useFlexGap sx={{ minWidth: 0, flexWrap: "wrap" }}>
-      {values.map((value) => (
-        <Chip
-          key={value}
-          label={value}
-          size="small"
-          variant="outlined"
-          sx={{ maxWidth: "100%", "& .MuiChip-label": { overflow: "hidden", textOverflow: "ellipsis" } }}
-        />
-      ))}
-    </Stack>
+    <Section title="请求" testId="app-health-requests">
+      <TableContainer>
+        <Table size="small" sx={tableSx}>
+          <TableHead>
+            <TableRow>
+              <TableCell>接口</TableCell>
+              <TableCell align="right">样本</TableCell>
+              <TableCell>API p95</TableCell>
+              <TableCell>API p99</TableCell>
+              <TableCell>DB p95</TableCell>
+              <TableCell>DB p99</TableCell>
+              <TableCell>SQL p95</TableCell>
+              <TableCell>连接 p95</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow key={row.endpoint}>
+                <TableCell sx={{ maxWidth: 260, overflowWrap: "anywhere" }}>{row.endpoint}</TableCell>
+                <TableCell align="right">{formatNumber(row.sample_count)}</TableCell>
+                <PercentileCells value={row.duration_ms} />
+                <PercentileCells value={row.database_duration_ms} />
+                <TableCell>{formatMs(row.sql_execute_fetch_ms.p95)}</TableCell>
+                <TableCell>{formatMs(row.connection_acquire_ms.p95)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Section>
   );
 }
 
-function JobSummaryFields({ job }: { job: JobSummary | null }) {
-  if (!job) {
-    return <Typography component="span">{EMPTY_VALUE}</Typography>;
-  }
+function OutboxTable({ payload }: { payload: OperationsDashboardPayload }) {
+  const outbox = payload.runtime_performance.outbox;
+  const rows = [
+    ["pending", outbox.pending_count],
+    ["publishing", outbox.publishing_count],
+    ["failed", outbox.failed_count],
+    ["publish_failed", outbox.publish_failed_count],
+    ["oldest_pending", outbox.oldest_pending_age_seconds],
+  ] as const;
   return (
-    <Stack spacing={0.75} sx={{ minWidth: 0 }}>
-      <Stack direction="row" spacing={1} useFlexGap sx={{ minWidth: 0, flexWrap: "wrap", alignItems: "center" }}>
-        <StatusChip value={job.status} />
-        <Chip label={job.type} size="small" variant="outlined" />
-        <Chip label={`Retryable ${job.retryable ? "是" : "否"}`} size="small" color={job.retryable ? "warning" : "default"} variant="outlined" />
-        <Chip label={`Acknowledgeable ${job.acknowledgeable ? "是" : "否"}`} size="small" color={job.acknowledgeable ? "warning" : "default"} variant="outlined" />
-      </Stack>
-      <Typography sx={{ color: settingsTokens.textPrimary, fontSize: 13, lineHeight: 1.5, overflowWrap: "anywhere" }}>
-        {job.id} / {job.label}
-      </Typography>
-      {job.message !== EMPTY_VALUE ? (
-        <Typography sx={{ color: settingsTokens.textSecondary, fontSize: 12, lineHeight: 1.5, overflowWrap: "anywhere" }}>
-          {job.message}
-        </Typography>
-      ) : null}
-    </Stack>
+    <TableContainer>
+      <Table size="small" sx={tableSx}>
+        <TableHead>
+          <TableRow>
+            <TableCell>Outbox</TableCell>
+            <TableCell align="right">值</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {rows.map(([label, value]) => (
+            <TableRow key={label}>
+              <TableCell>{label}</TableCell>
+              <TableCell align="right">{label === "oldest_pending" ? formatSeconds(value) : formatNumber(value)}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
   );
 }
 
-function normalizeJobs(backgroundJobs: Record<string, unknown>): GridRow[] {
-  const jobs = uniqueRecordsById([
-    ...readRecordArray(backgroundJobs, ["jobs", "recent_jobs", "recentJobs", "recent"]),
-    ...readRecordArray(backgroundJobs, ["active_jobs", "activeJobs"]),
-    ...readRecordArray(backgroundJobs, ["attention_jobs", "attentionJobs"]),
-  ]);
-  return jobs.map((job, index) => {
-    const id = readString(job, ["job_id", "jobId", "id"], `job-${index + 1}`);
-    const status = readString(job, ["status"]);
-    const attention = readBoolean(job, ["attention"]) || status === "failed" || status === "partial_success";
-    return {
-      id,
-      status,
-      type: readString(job, ["type", "job_type", "jobType"]),
-      label: readString(job, ["label", "name"]),
-      updatedAt: readString(job, ["updated_at", "updatedAt", "finished_at", "finishedAt", "started_at", "startedAt", "created_at", "createdAt"]),
-      message: readString(job, ["message", "error", "detail", "details"]),
-      retryable: readBoolean(job, ["retryable"]),
-      acknowledgeable: readBoolean(job, ["acknowledgeable"]),
-      attention,
-    };
-  });
-}
-
-function normalizeJobSummary(job: Record<string, unknown>): JobSummary | null {
-  if (Object.keys(job).length === 0) {
-    return null;
-  }
-  return {
-    id: readString(job, ["job_id", "jobId", "id"]),
-    status: readString(job, ["status"]),
-    type: readString(job, ["type", "job_type", "jobType"]),
-    label: readString(job, ["label", "short_label", "shortLabel", "name"]),
-    message: readString(job, ["message", "error", "detail", "details"]),
-    retryable: readBoolean(job, ["retryable"]),
-    acknowledgeable: readBoolean(job, ["acknowledgeable"]),
-  };
-}
-
-function normalizeAlerts(payload: OperationsPayload): AlertRow[] {
-  const alerts = asRecord(payload.alerts);
-  const active = readRecordArray(alerts, ["active", "active_alerts", "activeAlerts"])
-    .concat(readRecordArray(payload, ["active_alerts", "activeAlerts"]));
-  const recovered = readRecordArray(alerts, ["recent_recovered", "recentRecovered", "recovered"])
-    .concat(readRecordArray(payload, ["recent_recovered", "recentRecovered", "recent_recovered_alerts"]));
-
-  return [
-    ...active.map((alert, index) => toAlertRow(alert, index, "active")),
-    ...recovered.map((alert, index) => toAlertRow(alert, index, "recovered")),
-  ];
-}
-
-function toAlertRow(alert: Record<string, unknown>, index: number, state: "active" | "recovered"): AlertRow {
-  return {
-    id: readString(alert, ["id", "alert_id", "alertId"], `${state}-${index + 1}`),
-    state,
-    severity: readString(alert, ["severity", "level", "status"]),
-    source: readString(alert, ["source", "dependency", "scope"]),
-    message: readString(alert, ["message", "reason", "details"]),
-    changedAt: state === "active"
-      ? readString(alert, ["started_at", "startedAt", "created_at", "createdAt", "last_seen_at", "lastSeenAt"])
-      : readString(alert, ["recovered_at", "recoveredAt", "resolved_at", "resolvedAt", "updated_at", "updatedAt"]),
-  };
-}
-
-const alertColumns: GridColDef<AlertRow>[] = [
-  { field: "id", headerName: "Alert ID", minWidth: 128, flex: 0.8 },
-  { field: "state", headerName: "State", minWidth: 112, flex: 0.5, renderCell: (params) => <StatusChip value={String(params.value ?? "")} /> },
-  { field: "severity", headerName: "Severity", minWidth: 112, flex: 0.6, renderCell: (params) => <StatusChip value={String(params.value ?? "")} /> },
-  { field: "source", headerName: "Source", minWidth: 144, flex: 0.8 },
-  { field: "message", headerName: "Message", minWidth: 220, flex: 1.4 },
-  { field: "changedAt", headerName: "Changed", minWidth: 180, flex: 1 },
-];
-
-function OperationsGrid({ rows, columns, ariaLabel, height }: {
-  rows: GridRow[] | AlertRow[];
-  columns: GridColDef[];
-  ariaLabel: string;
-  height: number;
-}) {
+function QueueTable({ payload }: { payload: OperationsDashboardPayload }) {
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", height, minHeight: 220, width: "100%" }}>
-      <DataGrid
-        aria-label={ariaLabel}
-        rows={rows}
-        columns={columns}
-        disableColumnMenu
-        disableRowSelectionOnClick
-        hideFooter
-        rowHeight={36}
-        columnHeaderHeight={36}
-        sx={{ ...settingsDataGridSx, minWidth: 0 }}
-      />
-    </Box>
+    <TableContainer>
+      <Table size="small" sx={tableSx}>
+        <TableHead>
+          <TableRow>
+            <TableCell>RabbitMQ</TableCell>
+            <TableCell>queue</TableCell>
+            <TableCell align="right">ready</TableCell>
+            <TableCell align="right">unacked</TableCell>
+            <TableCell align="right">consumer</TableCell>
+            <TableCell align="right">DLQ</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {payload.runtime_performance.queues.map((row) => (
+            <TableRow key={`${row.event_type}:${row.queue}`}>
+              <TableCell>{row.event_type}</TableCell>
+              <TableCell sx={{ maxWidth: 240, overflowWrap: "anywhere" }}>{row.queue}</TableCell>
+              <TableCell align="right">{formatNumber(row.messages)}</TableCell>
+              <TableCell align="right">{formatNumber(row.unacked)}</TableCell>
+              <TableCell align="right">{formatNumber(row.consumers)}</TableCell>
+              <TableCell align="right">{formatNumber(row.dlq_messages)}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+}
+
+function ReadModelTable({ rows }: { rows: OperationsDashboardReadModelMetric[] }) {
+  return (
+    <TableContainer>
+      <Table size="small" sx={tableSx}>
+        <TableHead>
+          <TableRow>
+            <TableCell>Read Model</TableCell>
+            <TableCell>p95</TableCell>
+            <TableCell>p99</TableCell>
+            <TableCell align="right">stale</TableCell>
+            <TableCell align="right">unavailable</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {rows.map((row) => (
+            <TableRow key={row.key}>
+              <TableCell>{row.key}</TableCell>
+              <PercentileCells value={row.refresh_duration_ms} />
+              <TableCell align="right">{formatNumber(row.stale_count)}</TableCell>
+              <TableCell align="right">{formatNumber(row.unavailable_count)}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+}
+
+function WorkerTable({ payload }: { payload: OperationsDashboardPayload }) {
+  return (
+    <TableContainer>
+      <Table size="small" sx={tableSx}>
+        <TableHead>
+          <TableRow>
+            <TableCell>Worker</TableCell>
+            <TableCell align="right">lag</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {payload.runtime_performance.workers.length === 0 ? (
+            <TableRow>
+              <TableCell>{EMPTY_VALUE}</TableCell>
+              <TableCell align="right">{EMPTY_VALUE}</TableCell>
+            </TableRow>
+          ) : (
+            payload.runtime_performance.workers.map((row) => (
+              <TableRow key={row.worker_kind}>
+                <TableCell>{row.worker_kind}</TableCell>
+                <TableCell align="right">{formatSeconds(row.heartbeat_lag_seconds)}</TableCell>
+              </TableRow>
+            ))
+          )}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+}
+
+function RuntimePerformance({ payload }: { payload: OperationsDashboardPayload }) {
+  return (
+    <Section title="后台" testId="app-health-runtime">
+      <Box sx={{ display: "grid", gap: 1.25, gridTemplateColumns: { xs: "1fr", xl: "0.8fr 1.2fr" } }}>
+        <OutboxTable payload={payload} />
+        <QueueTable payload={payload} />
+      </Box>
+      <Box sx={{ display: "grid", gap: 1.25, gridTemplateColumns: { xs: "1fr", lg: "1.4fr 0.6fr" }, mt: 1.25 }}>
+        <ReadModelTable rows={payload.runtime_performance.read_models} />
+        <WorkerTable payload={payload} />
+      </Box>
+    </Section>
   );
 }
 
 export default function AppHealthOperationsPage() {
   const session = useSession();
-  const { canAdminAccess, accessTier } = useSessionPermissions();
-  const [payload, setPayload] = useState<OperationsPayload | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const permissions = useSessionPermissions();
+  const [payload, setPayload] = useState<OperationsDashboardPayload | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [operationError, setOperationError] = useState<string | null>(null);
-  const [operatingJobId, setOperatingJobId] = useState<string | null>(null);
-  const [isAcknowledgingAll, setIsAcknowledgingAll] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const inFlightRef = useRef<AbortController | null>(null);
 
-  const loadPayload = useCallback(async (signal?: AbortSignal) => {
-    const nextPayload = await fetchAppHealth(signal);
-    setPayload(nextPayload as OperationsPayload);
-  }, []);
-
-  useEffect(() => {
-    if (!canAdminAccess) {
-      setPayload(null);
-      setLoadError(null);
-      setOperationError(null);
-      setIsLoading(false);
-      return undefined;
-    }
-
-    const controller = new AbortController();
-    setIsLoading(true);
-    setLoadError(null);
-
-    loadPayload(controller.signal)
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") {
-          return;
-        }
-        setLoadError(error instanceof Error && error.message.trim() ? error.message : "AppHealth 状态加载失败。");
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setIsLoading(false);
-        }
-      });
-
-    return () => {
-      controller.abort();
-    };
-  }, [canAdminAccess, loadPayload]);
-
-  const normalized = useMemo(() => {
-    const source = payload ?? {};
-    const sessionSource = asRecord(source.session);
-    const sessionUser = asRecord(sessionSource.user);
-    const currentSession = session.status === "authenticated" ? session.session : null;
-    const oaSync = asRecord(source.oa_sync);
-    const workbench = asRecord(source.workbench_read_model);
-    const backgroundJobs = asRecord(source.background_jobs);
-    const dependencies = asRecord(source.dependencies);
-    const status = readString(source, ["status"], "unknown");
-
-    return {
-      status,
-      reason: readString(source, ["reason", "message"], statusReason(status)),
-      generatedAt: readString(source, ["generated_at", "generatedAt"]),
-      session: {
-        status: readString(sessionSource, ["status"]),
-        username: readString(sessionUser, ["username"], currentSession?.user.username ?? EMPTY_VALUE),
-        displayName: readString(sessionUser, ["display_name", "displayName", "nickname"], currentSession?.user.displayName ?? EMPTY_VALUE),
-        accessTier: readString(sessionSource, ["access_tier", "accessTier"], accessTier),
-        canMutateData: readBoolean(sessionSource, ["can_mutate_data", "canMutateData"], false),
-      },
-      oaSync: {
-        status: readString(oaSync, ["status"]),
-        dirtyScopes: readStringArray(oaSync, ["dirty_scopes", "dirtyScopes", "changed_scopes", "changedScopes"]),
-        lastSyncedAt: readString(oaSync, ["last_synced_at", "lastSyncedAt"]),
-        version: readString(oaSync, ["version"]),
-        message: readString(oaSync, ["message"]),
-      },
-      workbench: {
-        status: readString(workbench, ["status"]),
-        dirtyScopes: readStringArray(workbench, ["dirty_scopes", "dirtyScopes"]),
-        staleScopes: readStringArray(workbench, ["stale_scopes", "staleScopes"]),
-        rebuildingScopes: readStringArray(workbench, ["rebuilding_scopes", "rebuildingScopes", "rebuild_job_ids", "rebuildJobIds"]),
-        matchingRunningScopes: readStringArray(workbench, ["matching_running_scopes", "matchingRunningScopes"]),
-        matchingDirtyScopes: readRecordArray(workbench, ["matching_dirty_scopes", "matchingDirtyScopes"])
-          .map((entry) => readString(entry, ["scope_month", "scopeMonth", "month"], ""))
-          .filter(Boolean),
-        matchingError: readString(workbench, ["last_matching_error", "lastMatchingError"]),
-        lastRebuiltAt: readString(workbench, ["last_rebuilt_at", "lastRebuiltAt", "last_built_at", "lastBuiltAt", "generated_at", "generatedAt"]),
-      },
-      backgroundJobs: {
-        active: readNumber(backgroundJobs, ["active"]),
-        queued: readNumber(backgroundJobs, ["queued"]),
-        running: readNumber(backgroundJobs, ["running"]),
-        attention: readNumber(backgroundJobs, ["attention"]),
-        primaryRunning: normalizeJobSummary(readRecord(backgroundJobs, ["primary_running", "primaryRunning"])),
-        primaryAttention: normalizeJobSummary(readRecord(backgroundJobs, ["primary_attention", "primaryAttention"])),
-        rows: normalizeJobs(backgroundJobs),
-      },
-      dependencies,
-      alertRows: normalizeAlerts(source as OperationsPayload),
-    };
-  }, [accessTier, payload, session]);
-
-  const dependencyRows = useMemo(() => {
-    const preferredKeys = ["oa_identity", "oa_sync", "background_jobs", "state_store"];
-    const entries = Object.entries(normalized.dependencies);
-    const orderedKeys = [
-      ...preferredKeys.filter((key) => Object.prototype.hasOwnProperty.call(normalized.dependencies, key)),
-      ...entries.map(([key]) => key).filter((key) => !preferredKeys.includes(key)),
-    ];
-    return orderedKeys.map((key) => {
-      const dependency = asRecord(normalized.dependencies[key]);
-      return {
-        key,
-        status: readString(dependency, ["status"]),
-        message: readString(dependency, ["message", "detail", "details"]),
-        meta: [
-          readString(dependency, ["storage_mode", "storageMode"], ""),
-          readString(dependency, ["backend"], ""),
-        ].filter(Boolean).join(" / ") || EMPTY_VALUE,
-      };
-    });
-  }, [normalized.dependencies]);
-
-  const attentionRows = useMemo(
-    () => normalized.backgroundJobs.rows.filter((row) => row.attention && row.acknowledgeable),
-    [normalized.backgroundJobs.rows],
-  );
-
-  const refreshAfterOperation = useCallback(async () => {
-    await loadPayload();
-  }, [loadPayload]);
-
-  const handleRetryJob = useCallback(
-    async (row: GridRow) => {
-      if (!row.retryable) {
-        return;
-      }
-      setOperatingJobId(row.id);
-      setOperationError(null);
-      try {
-        await retryBackgroundJobById(row.id);
-        await refreshAfterOperation();
-      } catch (error) {
-        setOperationError(error instanceof Error && error.message.trim() ? error.message : "后台任务操作失败。");
-      } finally {
-        setOperatingJobId(null);
-      }
-    },
-    [refreshAfterOperation],
-  );
-
-  const handleAcknowledgeJob = useCallback(
-    async (row: GridRow) => {
-      if (!row.acknowledgeable) {
-        return;
-      }
-      setOperatingJobId(row.id);
-      setOperationError(null);
-      try {
-        await acknowledgeBackgroundJob(row.id);
-        await refreshAfterOperation();
-      } catch (error) {
-        setOperationError(error instanceof Error && error.message.trim() ? error.message : "后台任务操作失败。");
-      } finally {
-        setOperatingJobId(null);
-      }
-    },
-    [refreshAfterOperation],
-  );
-
-  const handleAcknowledgeAllAttention = useCallback(async () => {
-    if (attentionRows.length === 0) {
+  const loadDashboard = useCallback(async () => {
+    if (!permissions.canAdminAccess || inFlightRef.current) {
       return;
     }
-    setIsAcknowledgingAll(true);
-    setOperationError(null);
+    const controller = new AbortController();
+    inFlightRef.current = controller;
+    setIsLoading(true);
     try {
-      for (const row of attentionRows) {
-        await acknowledgeBackgroundJob(row.id);
-      }
-      await refreshAfterOperation();
+      const nextPayload = await fetchAppHealthDashboard(controller.signal);
+      setPayload(nextPayload);
+      setLoadError(null);
     } catch (error) {
-      setOperationError(error instanceof Error && error.message.trim() ? error.message : "后台任务操作失败。");
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
+      setLoadError(error instanceof Error && error.message.trim() ? error.message : "AppHealth 状态加载失败。");
     } finally {
-      setIsAcknowledgingAll(false);
+      if (inFlightRef.current === controller) {
+        inFlightRef.current = null;
+      }
+      setIsLoading(false);
     }
-  }, [attentionRows, refreshAfterOperation]);
+  }, [permissions.canAdminAccess]);
 
-  const jobColumns = useMemo<GridColDef<GridRow>[]>(() => [
-    { field: "id", headerName: "Job ID", minWidth: 128, flex: 0.9 },
-    { field: "status", headerName: "Status", minWidth: 112, flex: 0.6, renderCell: (params) => <StatusChip value={String(params.value ?? "")} /> },
-    { field: "type", headerName: "Type", minWidth: 144, flex: 0.9 },
-    { field: "label", headerName: "Label", minWidth: 160, flex: 1 },
-    { field: "updatedAt", headerName: "Updated", minWidth: 180, flex: 1 },
-    { field: "message", headerName: "Message", minWidth: 180, flex: 1.2 },
-    {
-      field: "retryable",
-      headerName: "Retryable",
-      minWidth: 104,
-      flex: 0.5,
-      renderCell: (params) => params.row.retryable ? "是" : "否",
-    },
-    {
-      field: "acknowledgeable",
-      headerName: "Acknowledgeable",
-      minWidth: 136,
-      flex: 0.6,
-      renderCell: (params) => params.row.acknowledgeable ? "是" : "否",
-    },
-    {
-      field: "actions",
-      headerName: "Actions",
-      minWidth: 188,
-      sortable: false,
-      filterable: false,
-      renderCell: (params) => (
-        <Stack direction="row" spacing={0.75} sx={{ alignItems: "center", height: "100%" }}>
-          <Button
-            aria-label={`Retry ${params.row.id}`}
-            disabled={!params.row.retryable || operatingJobId === params.row.id || isAcknowledgingAll}
-            size="small"
-            variant="outlined"
-            onClick={() => { void handleRetryJob(params.row); }}
-          >
-            Retry
-          </Button>
-          <Button
-            aria-label={`Acknowledge ${params.row.id}`}
-            disabled={!params.row.acknowledgeable || operatingJobId === params.row.id || isAcknowledgingAll}
-            size="small"
-            variant="outlined"
-            onClick={() => { void handleAcknowledgeJob(params.row); }}
-          >
-            Acknowledge
-          </Button>
-        </Stack>
-      ),
-    },
-  ], [handleAcknowledgeJob, handleRetryJob, isAcknowledgingAll, operatingJobId]);
+  useEffect(() => {
+    if (!permissions.canAdminAccess) {
+      return undefined;
+    }
+    void loadDashboard();
+    const timer = window.setInterval(() => {
+      void loadDashboard();
+    }, REFRESH_INTERVAL_MS);
+    return () => {
+      window.clearInterval(timer);
+      inFlightRef.current?.abort();
+      inFlightRef.current = null;
+    };
+  }, [loadDashboard, permissions.canAdminAccess]);
 
-  if (!canAdminAccess) {
+  if (session.status === "loading") {
     return (
-      <Box sx={{ p: { xs: 2, md: 3 }, bgcolor: settingsTokens.page, minHeight: "100%", minWidth: 0 }}>
-        <Alert severity="warning" variant="outlined" sx={{ bgcolor: settingsTokens.page }}>
-          当前账号没有管理员权限，不能查看 AppHealth 运维状态。
-        </Alert>
+      <Box sx={{ p: 3 }}>
+        <Alert severity="info">正在加载。</Alert>
+      </Box>
+    );
+  }
+
+  if (!permissions.canAdminAccess) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert severity="warning">当前账号没有管理员权限，不能查看 AppHealth 运维状态。</Alert>
       </Box>
     );
   }
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", minHeight: "100%", bgcolor: settingsTokens.page, minWidth: 0 }}>
-      <Stack
-        direction={{ xs: "column", md: "row" }}
-        spacing={1.5}
-        sx={{
-          px: { xs: 2, md: 3 },
-          py: 2,
-          borderBottom: `1px solid ${settingsTokens.borderSubtle}`,
-          alignItems: { xs: "stretch", md: "center" },
-          justifyContent: "space-between",
-          minWidth: 0,
-        }}
-      >
-        <Typography component="h1" sx={{ color: settingsTokens.textPrimary, fontSize: 20, fontWeight: 600, lineHeight: 1.3 }}>
-          AppHealth 运维状态
-        </Typography>
-        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap", minWidth: 0 }}>
-          <StatusChip value={normalized.status} />
-          <Chip label={normalized.generatedAt} size="small" variant="outlined" sx={{ maxWidth: "100%" }} />
-        </Stack>
-      </Stack>
-
-      <Stack spacing={2} sx={{ p: { xs: 2, md: 3 }, minWidth: 0 }}>
-        {isLoading ? <Alert severity="info">正在加载 AppHealth 状态。</Alert> : null}
-        {loadError ? <Alert severity="error">{loadError}</Alert> : null}
-        {operationError ? <Alert severity="error">{operationError}</Alert> : null}
-
-        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "repeat(2, minmax(0, 1fr))" }, gap: 2, minWidth: 0 }}>
-          <Section title="Summary" testId="app-health-summary">
-            <Stack spacing={1}>
-              <Field label="Status" value={<StatusChip value={normalized.status} />} />
-              <Field label="Reason" value={normalized.reason} />
-              <Field label="Generated" value={normalized.generatedAt} />
-            </Stack>
-          </Section>
-
-          <Section title="Session" testId="app-health-session">
-            <Stack spacing={1}>
-              <Field label="Status" value={<StatusChip value={normalized.session.status} />} />
-              <Field label="User" value={`${normalized.session.displayName} / ${normalized.session.username}`} />
-              <Field label="Access tier" value={normalized.session.accessTier} />
-              <Field label="Writable" value={normalized.session.canMutateData ? "是" : "否"} />
-            </Stack>
-          </Section>
-
-          <Section title="OA Sync" testId="app-health-oa-sync">
-            <Stack spacing={1}>
-              <Field label="Status" value={<StatusChip value={normalized.oaSync.status} />} />
-              <Field label="Dirty scopes" value={<ChipList values={normalized.oaSync.dirtyScopes} />} />
-              <Field label="Last synced" value={normalized.oaSync.lastSyncedAt} />
-              <Field label="Version" value={normalized.oaSync.version} />
-              <Field label="Message" value={normalized.oaSync.message} />
-            </Stack>
-          </Section>
-
-          <Section title="Workbench Read Model" testId="app-health-workbench">
-            <Stack spacing={1}>
-              <Field label="Status" value={<StatusChip value={normalized.workbench.status} />} />
-              <Field label="Stale scopes" value={<ChipList values={normalized.workbench.staleScopes} />} />
-              <Field label="Dirty scopes" value={<ChipList values={normalized.workbench.dirtyScopes} />} />
-              <Field label="Rebuilding" value={<ChipList values={normalized.workbench.rebuildingScopes} />} />
-              <Field label="Matching running" value={<ChipList values={normalized.workbench.matchingRunningScopes} />} />
-              <Field label="Matching dirty" value={<ChipList values={normalized.workbench.matchingDirtyScopes} />} />
-              <Field label="Matching error" value={normalized.workbench.matchingError} />
-              <Field label="Last rebuilt" value={normalized.workbench.lastRebuiltAt} />
-            </Stack>
-          </Section>
+    <Stack spacing={2} sx={{ bgcolor: settingsTokens.layer01, minHeight: "100%", p: { xs: 2, md: 3 } }}>
+      <Stack direction="row" spacing={1.5} sx={{ alignItems: "center", justifyContent: "space-between", minWidth: 0 }}>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography component="h1" sx={{ color: settingsTokens.textPrimary, fontSize: { xs: 24, md: 28 }, fontWeight: 750, lineHeight: 1.2 }}>
+            AppHealth 运维状态
+          </Typography>
+          <Typography sx={{ color: settingsTokens.textMuted, fontSize: 12, mt: 0.5 }}>
+            {payload ? formatTimestamp(payload.generated_at) : EMPTY_VALUE}
+          </Typography>
         </Box>
-
-        <Section title="Background Jobs" testId="app-health-background-jobs">
-          <Stack spacing={1.5} sx={{ minWidth: 0 }}>
-            <Stack
-              direction={{ xs: "column", md: "row" }}
-              spacing={1}
-              useFlexGap
-              sx={{ alignItems: { xs: "stretch", md: "center" }, justifyContent: "space-between", minWidth: 0 }}
+        <Tooltip title="刷新">
+          <span>
+            <IconButton
+              aria-label="刷新"
+              disabled={isLoading}
+              onClick={() => {
+                void loadDashboard();
+              }}
+              size="small"
+              sx={{
+                border: `1px solid ${settingsTokens.borderSubtle}`,
+                bgcolor: "#fff",
+                borderRadius: "8px",
+              }}
             >
-              <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap", minWidth: 0 }}>
-                <Chip label={`Active ${normalized.backgroundJobs.active}`} size="small" variant="outlined" />
-                <Chip label={`Queued ${normalized.backgroundJobs.queued}`} size="small" color={normalized.backgroundJobs.queued > 0 ? "warning" : "default"} variant="outlined" />
-                <Chip label={`Running ${normalized.backgroundJobs.running}`} size="small" color={normalized.backgroundJobs.running > 0 ? "warning" : "default"} variant="outlined" />
-                <Chip label={`Attention ${normalized.backgroundJobs.attention}`} size="small" color={normalized.backgroundJobs.attention > 0 ? "error" : "default"} variant="outlined" />
-              </Stack>
-              <Button
-                aria-label="Acknowledge all attention"
-                disabled={attentionRows.length === 0 || isAcknowledgingAll || operatingJobId !== null}
-                size="small"
-                variant="outlined"
-                onClick={() => { void handleAcknowledgeAllAttention(); }}
-              >
-                Acknowledge all attention
-              </Button>
-            </Stack>
-            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(2, minmax(0, 1fr))" }, gap: 1.5, minWidth: 0 }}>
-              <Field label="Primary running" value={<JobSummaryFields job={normalized.backgroundJobs.primaryRunning} />} />
-              <Field label="Primary attention" value={<JobSummaryFields job={normalized.backgroundJobs.primaryAttention} />} />
-            </Box>
-            <OperationsGrid ariaLabel="最近后台任务" rows={normalized.backgroundJobs.rows} columns={jobColumns} height={300} />
-          </Stack>
-        </Section>
-
-        <Section title="Dependencies" testId="app-health-dependencies">
-          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(2, minmax(0, 1fr))" }, gap: 1, minWidth: 0 }}>
-            {dependencyRows.length === 0 ? (
-              <Typography sx={{ color: settingsTokens.textSecondary, fontSize: 14 }}>{EMPTY_VALUE}</Typography>
-            ) : dependencyRows.map((dependency) => (
-              <Stack
-                key={dependency.key}
-                direction="row"
-                spacing={1}
-                sx={{
-                  minWidth: 0,
-                  alignItems: "center",
-                  px: 1.25,
-                  py: 1,
-                  border: `1px solid ${settingsTokens.borderSubtle}`,
-                  borderRadius: "4px",
-                }}
-              >
-                <Typography sx={{ flex: "0 0 132px", minWidth: 0, overflowWrap: "anywhere", fontSize: 13 }}>
-                  {dependency.key}
-                </Typography>
-                <StatusChip value={dependency.status} />
-                <Typography sx={{ minWidth: 0, flex: 1, color: settingsTokens.textSecondary, fontSize: 13, overflowWrap: "anywhere" }}>
-                  {dependency.message !== EMPTY_VALUE ? dependency.message : dependency.meta}
-                </Typography>
-              </Stack>
-            ))}
-          </Box>
-        </Section>
-
-        <Section title="Alerts" testId="app-health-alerts">
-          <OperationsGrid ariaLabel="AppHealth 告警" rows={normalized.alertRows} columns={alertColumns} height={260} />
-        </Section>
+              {isLoading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}
+            </IconButton>
+          </span>
+        </Tooltip>
       </Stack>
-    </Box>
+
+      {loadError ? <Alert severity="error">{loadError}</Alert> : null}
+
+      {payload ? (
+        <>
+          <DataInventory payload={payload} />
+          <RequestPerformance rows={payload.request_performance.endpoints} />
+          <RuntimePerformance payload={payload} />
+        </>
+      ) : !loadError ? (
+        <Alert severity="info">正在加载。</Alert>
+      ) : null}
+    </Stack>
   );
 }

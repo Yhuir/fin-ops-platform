@@ -103,3 +103,100 @@ export type ApiOaSyncStatus = {
   last_synced_at?: string | null;
   lastSyncedAt?: string | null;
 };
+
+export type OperationsDashboardAvailability = "available" | "unknown";
+
+export type OperationsDashboardPercentiles = {
+  p50: number | null;
+  p95: number | null;
+  p99: number | null;
+};
+
+export type OperationsDashboardInventorySource = {
+  key: string;
+  label: string;
+  count: number | null;
+  latest_synced_at: string | null;
+  status: OperationsDashboardAvailability;
+};
+
+export type OperationsDashboardInventoryBlock = {
+  total_count: number | null;
+  latest_synced_at: string | null;
+  status: OperationsDashboardAvailability;
+  sources: OperationsDashboardInventorySource[];
+};
+
+export type OperationsDashboardEndpointPerformance = {
+  endpoint: string;
+  sample_count: number;
+  last_status_code: number | null;
+  duration_ms: OperationsDashboardPercentiles;
+  database_duration_ms: OperationsDashboardPercentiles;
+  connection_acquire_ms: OperationsDashboardPercentiles;
+  sql_execute_fetch_ms: OperationsDashboardPercentiles;
+  database_query_count: OperationsDashboardPercentiles;
+};
+
+export type OperationsDashboardOutboxMetric = {
+  pending_count: number | null;
+  publishing_count: number | null;
+  failed_count: number | null;
+  publish_failed_count: number | null;
+  oldest_pending_age_seconds: number | null;
+  status: OperationsDashboardAvailability;
+  warning_code?: string;
+};
+
+export type OperationsDashboardQueueMetric = {
+  event_type: string;
+  queue: string;
+  messages: number | null;
+  unacked: number | null;
+  consumers: number | null;
+  dlq_messages: number | null;
+  status: OperationsDashboardAvailability;
+  warning_code?: string;
+};
+
+export type OperationsDashboardReadModelMetric = {
+  key: string;
+  refresh_duration_ms: OperationsDashboardPercentiles;
+  stale_count: number | null;
+  unavailable_count: number | null;
+  status: OperationsDashboardAvailability;
+  warning_code?: string;
+};
+
+export type OperationsDashboardWorkerMetric = {
+  worker_kind: string;
+  heartbeat_lag_seconds: number | null;
+  status: OperationsDashboardAvailability;
+  warning_code?: string;
+};
+
+export type OperationsDashboardPayload = {
+  generated_at: string;
+  data_inventory: {
+    bank: OperationsDashboardInventoryBlock;
+    invoice: OperationsDashboardInventoryBlock;
+    oa: OperationsDashboardInventoryBlock;
+  };
+  request_performance: {
+    window: {
+      type: "process_rolling_window";
+      sample_limit_per_endpoint: number;
+      reset_on_restart: true;
+    };
+    endpoints: OperationsDashboardEndpointPerformance[];
+  };
+  runtime_performance: {
+    outbox: OperationsDashboardOutboxMetric;
+    queues: OperationsDashboardQueueMetric[];
+    read_models: OperationsDashboardReadModelMetric[];
+    workers: OperationsDashboardWorkerMetric[];
+  };
+  freshness: {
+    warnings: string[];
+  };
+};

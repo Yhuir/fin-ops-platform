@@ -19,361 +19,205 @@ function renderOperationsPage(options: Parameters<typeof installMockApiFetch>[0]
 }
 
 describe("AppHealthOperationsPage", () => {
-  test("renders admin app health diagnostics", async () => {
-    renderOperationsPage({
-      appHealth: {
-        status: "ok",
-        reason: "系统状态正常",
-        generated_at: "2026-05-06T09:00:00+08:00",
-        session: {
-          status: "authenticated",
-          user: {
-            username: "admin.ops",
-            display_name: "运维管理员",
-          },
-          access_tier: "admin",
-          can_mutate_data: true,
-        },
-        oa_sync: {
-          status: "synced",
-          dirty_scopes: [],
-          last_synced_at: "2026-05-06T08:59:00+08:00",
-          version: 12,
-          message: "OA 已同步",
-        },
-        workbench_read_model: {
-          status: "ready",
-          dirty_scopes: [],
-          stale_scopes: [],
-          rebuilding_scopes: [],
-          last_rebuilt_at: "2026-05-06T08:58:00+08:00",
-        },
-        background_jobs: {
-          queued: 0,
-          running: 0,
-          attention: 0,
-          jobs: [
-            {
-              job_id: "job-001",
-              type: "oa_sync",
-              label: "OA 同步",
-              status: "completed",
-              updated_at: "2026-05-06T08:57:00+08:00",
-              message: "done",
-            },
-          ],
-        },
-        dependencies: {
-          oa_identity: { status: "available" },
-          oa_sync: { status: "available", message: "OA 已同步" },
-          background_jobs: { status: "available" },
-          state_store: { status: "available", storage_mode: "file", backend: "json" },
-        },
-        alerts: {
-          active: [],
-          recent_recovered: [],
-        },
-      },
-    });
+  test("renders the read-only operations dashboard", async () => {
+    const fetchMock = renderOperationsPage();
 
     expect(await screen.findByRole("heading", { name: "AppHealth 运维状态" }, { timeout: PAGE_TIMEOUT })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByTestId("app-health-summary")).toHaveTextContent("ok"));
-    expect(screen.getByTestId("app-health-summary")).toHaveTextContent("系统状态正常");
-    expect(screen.getByTestId("app-health-session")).toHaveTextContent("运维管理员");
-    expect(screen.getByTestId("app-health-session")).toHaveTextContent("admin.ops");
-    expect(screen.getByTestId("app-health-session")).toHaveTextContent("admin");
-    expect(screen.getByTestId("app-health-oa-sync")).toHaveTextContent("OA 已同步");
-    expect(screen.getByTestId("app-health-oa-sync")).toHaveTextContent("12");
-    expect(screen.getByTestId("app-health-workbench")).toHaveTextContent("ready");
-    expect(await within(screen.getByTestId("app-health-background-jobs")).findByText("job-001")).toBeInTheDocument();
-    expect(screen.getByTestId("app-health-dependencies")).toHaveTextContent("oa_identity");
-    expect(screen.getByTestId("app-health-dependencies")).toHaveTextContent("state_store");
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/operations/app-health-dashboard"))).toBe(true);
+    });
+
+    const data = await screen.findByTestId("app-health-data", {}, { timeout: PAGE_TIMEOUT });
+    expect(data).toHaveTextContent("数据");
+    expect(data).toHaveTextContent("流水");
+    expect(data).toHaveTextContent("128");
+    expect(data).toHaveTextContent("发票");
+    expect(data).toHaveTextContent("256");
+    expect(data).toHaveTextContent("OA 解析");
+    expect(data).toHaveTextContent("ETC");
+
+    const requests = screen.getByTestId("app-health-requests");
+    expect(requests).toHaveTextContent("请求");
+    expect(requests).toHaveTextContent("GET /api/workbench/summary");
+    expect(requests).toHaveTextContent("640 ms");
+    expect(requests).toHaveTextContent("260 ms");
+
+    const runtime = screen.getByTestId("app-health-runtime");
+    expect(runtime).toHaveTextContent("后台");
+    expect(runtime).toHaveTextContent("pending");
+    expect(runtime).toHaveTextContent("finops.workbench.read_model.refresh");
+    expect(runtime).toHaveTextContent("workbench");
+    expect(runtime).toHaveTextContent("runtime-worker");
+
+    expect(screen.queryByTestId("app-health-summary")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("app-health-background-jobs")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Retry/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Acknowledge/i })).not.toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([url, init]) => String(url).includes("/api/background-jobs") && String(init?.method ?? "GET").toUpperCase() === "POST"),
+    ).toBe(false);
   });
 
-  test("blocks non admin users without showing diagnostics", async () => {
-    renderOperationsPage({
+  test("blocks non admin users without fetching dashboard data", async () => {
+    const fetchMock = renderOperationsPage({
       sessionAccessTier: "full_access",
       sessionUsername: "finance.user",
       sessionDisplayName: "财务用户",
-      appHealth: {
-        status: "blocked",
-        reason: "OA identity secret",
-        dependencies: {
-          oa_identity: { status: "unavailable", message: "secret connection failure" },
-        },
-      },
     });
 
     expect(await screen.findByText("当前账号没有管理员权限，不能查看 AppHealth 运维状态。", {}, { timeout: PAGE_TIMEOUT })).toBeInTheDocument();
-    expect(screen.queryByTestId("app-health-summary")).not.toBeInTheDocument();
-    expect(screen.queryByText("secret connection failure")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("app-health-data")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/operations/app-health-dashboard"))).toBe(false);
   });
 
-  test("shows busy, blocked and alert details", async () => {
+  test("renders unknown metrics as dashes instead of zero", async () => {
     renderOperationsPage({
-      appHealth: {
-        status: "blocked",
-        reason: "OA 同步失败",
-        generated_at: "2026-05-06T09:05:00+08:00",
-        session: {
-          status: "authenticated",
-          user: { username: "admin.ops", display_name: "运维管理员" },
-          access_tier: "admin",
-          can_mutate_data: true,
-        },
-        oa_sync: {
-          status: "error",
-          dirty_scopes: ["all", "2026-05"],
-          last_synced_at: "2026-05-06T08:50:00+08:00",
-          version: 13,
-          message: "OA 同步失败",
-        },
-        workbench_read_model: {
-          status: "rebuilding",
-          dirty_scopes: ["all"],
-          stale_scopes: ["2026-05"],
-          rebuilding_scopes: ["all"],
-          matching_running_scopes: ["2026-05"],
-          matching_dirty_scopes: [
-            { scope_month: "2026-04", state: "dirty", last_error: "候选生成失败" },
-          ],
-          last_matching_error: "候选生成失败",
-          last_rebuilt_at: "2026-05-06T08:40:00+08:00",
-        },
-        background_jobs: {
-          queued: 2,
-          running: 1,
-          attention: 1,
-          primary_running: {
-            job_id: "job-running",
-            type: "workbench_matching",
-            label: "生成关联台候选",
-            status: "running",
-            updated_at: "2026-05-06T09:04:00+08:00",
-            message: "正在生成关联台候选：2026-05",
-            affected_months: ["2026-05"],
-            retryable: true,
-            acknowledgeable: false,
+      appHealthDashboard: {
+        generated_at: "2026-05-23T10:00:00+08:00",
+        data_inventory: {
+          bank: {
+            total_count: null,
+            latest_synced_at: null,
+            status: "unknown",
+            sources: [{ key: "bank_transactions", label: "银行流水", count: null, latest_synced_at: null, status: "unknown" }],
           },
-          primary_attention: {
-            job_id: "job-failed",
-            type: "file_import",
-            label: "导入发票",
-            status: "failed",
-            updated_at: "2026-05-06T09:03:00+08:00",
-            message: "发票导入失败",
-            retryable: true,
-            acknowledgeable: true,
+          invoice: {
+            total_count: null,
+            latest_synced_at: null,
+            status: "unknown",
+            sources: [
+              { key: "standard_import", label: "普通导入", count: null, latest_synced_at: null, status: "unknown" },
+              { key: "oa_attachment", label: "OA 解析", count: null, latest_synced_at: null, status: "unknown" },
+              { key: "etc", label: "ETC", count: null, latest_synced_at: null, status: "unknown" },
+              { key: "manual", label: "手工导入", count: null, latest_synced_at: null, status: "unknown" },
+            ],
           },
-          jobs: [
+          oa: {
+            total_count: null,
+            latest_synced_at: null,
+            status: "unknown",
+            sources: [
+              { key: "oa_records", label: "单据", count: null, latest_synced_at: null, status: "unknown" },
+              { key: "oa_items", label: "明细", count: null, latest_synced_at: null, status: "unknown" },
+            ],
+          },
+        },
+        request_performance: {
+          window: { type: "process_rolling_window", sample_limit_per_endpoint: 512, reset_on_restart: true },
+          endpoints: [
             {
-              job_id: "job-running",
-              type: "workbench_matching",
-              label: "生成关联台候选",
-              status: "running",
-              updated_at: "2026-05-06T09:04:00+08:00",
-              message: "处理中",
-              retryable: true,
-              acknowledgeable: false,
-            },
-            {
-              job_id: "job-failed",
-              type: "file_import",
-              label: "导入发票",
-              status: "failed",
-              updated_at: "2026-05-06T09:03:00+08:00",
-              message: "发票导入失败",
-              retryable: true,
-              acknowledgeable: true,
+              endpoint: "GET /api/search",
+              sample_count: 0,
+              last_status_code: null,
+              duration_ms: { p50: null, p95: null, p99: null },
+              database_duration_ms: { p50: null, p95: null, p99: null },
+              connection_acquire_ms: { p50: null, p95: null, p99: null },
+              sql_execute_fetch_ms: { p50: null, p95: null, p99: null },
+              database_query_count: { p50: null, p95: null, p99: null },
             },
           ],
         },
-        dependencies: {
-          oa_identity: { status: "available" },
-          oa_sync: { status: "unavailable", message: "OA 同步失败" },
-          background_jobs: { status: "available" },
-          state_store: { status: "available" },
-        },
-        alerts: {
-          active: [
+        runtime_performance: {
+          outbox: {
+            pending_count: null,
+            publishing_count: null,
+            failed_count: null,
+            publish_failed_count: null,
+            oldest_pending_age_seconds: null,
+            status: "unknown",
+            warning_code: "outbox_metrics_unavailable",
+          },
+          queues: [
             {
-              id: "alert-001",
-              severity: "critical",
-              source: "oa_sync",
-              message: "OA 同步失败",
-              started_at: "2026-05-06T09:03:00+08:00",
+              event_type: "workbench.read_model.refresh",
+              queue: "finops.workbench.read_model.refresh",
+              messages: null,
+              unacked: null,
+              consumers: null,
+              dlq_messages: null,
+              status: "unknown",
+              warning_code: "rabbitmq_metrics_unavailable",
             },
           ],
-          recent_recovered: [
+          read_models: [
             {
-              id: "alert-000",
-              severity: "warning",
-              source: "background_jobs",
-              message: "任务积压恢复",
-              recovered_at: "2026-05-06T08:30:00+08:00",
+              key: "workbench",
+              refresh_duration_ms: { p50: null, p95: null, p99: null },
+              stale_count: null,
+              unavailable_count: null,
+              status: "unknown",
             },
           ],
+          workers: [{ worker_kind: "runtime-worker", heartbeat_lag_seconds: null, status: "unknown" }],
         },
+        freshness: { warnings: ["rabbitmq_metrics_unavailable"] },
       },
     });
 
-    expect(await screen.findByRole("heading", { name: "AppHealth 运维状态" }, { timeout: PAGE_TIMEOUT })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByTestId("app-health-summary")).toHaveTextContent("blocked"));
-    expect(screen.getByTestId("app-health-oa-sync")).toHaveTextContent("all");
-    expect(screen.getByTestId("app-health-oa-sync")).toHaveTextContent("2026-05");
-    expect(screen.getByTestId("app-health-workbench")).toHaveTextContent("rebuilding");
-    expect(screen.getByTestId("app-health-workbench")).toHaveTextContent("Matching running");
-    expect(screen.getByTestId("app-health-workbench")).toHaveTextContent("2026-05");
-    expect(screen.getByTestId("app-health-workbench")).toHaveTextContent("Matching dirty");
-    expect(screen.getByTestId("app-health-workbench")).toHaveTextContent("2026-04");
-    expect(screen.getByTestId("app-health-workbench")).toHaveTextContent("候选生成失败");
-    expect(screen.getByTestId("app-health-background-jobs")).toHaveTextContent("Queued");
-    expect(screen.getByTestId("app-health-background-jobs")).toHaveTextContent("2");
-    expect(screen.getByTestId("app-health-background-jobs")).toHaveTextContent("Primary running");
-    expect(screen.getByTestId("app-health-background-jobs")).toHaveTextContent("生成关联台候选");
-    expect(screen.getByTestId("app-health-background-jobs")).toHaveTextContent("Primary attention");
-    expect(screen.getByTestId("app-health-background-jobs")).toHaveTextContent("Retryable");
-    expect(screen.getByTestId("app-health-background-jobs")).toHaveTextContent("Acknowledgeable");
-    expect(await within(screen.getByTestId("app-health-background-jobs")).findByText("job-failed")).toBeInTheDocument();
-    expect(screen.getByTestId("app-health-dependencies")).toHaveTextContent("unavailable");
-
-    const alerts = screen.getByTestId("app-health-alerts");
-    expect(within(alerts).getByText("alert-001")).toBeInTheDocument();
-    expect(within(alerts).getByText("active")).toBeInTheDocument();
-    expect(within(alerts).getByText("alert-000")).toBeInTheDocument();
-    expect(within(alerts).getByText("recovered")).toBeInTheDocument();
+    const data = await screen.findByTestId("app-health-data", {}, { timeout: PAGE_TIMEOUT });
+    expect(within(data).getAllByText("--").length).toBeGreaterThan(2);
+    expect(screen.getByTestId("app-health-requests")).toHaveTextContent("--");
+    expect(screen.getByTestId("app-health-runtime")).toHaveTextContent("--");
   });
 
-  test("retries and acknowledges background jobs from the operations table", async () => {
+  test("keeps the current dashboard visible when refresh fails", async () => {
     const user = userEvent.setup();
-    const fetchMock = renderOperationsPage({
-      appHealth: {
-        status: "blocked",
-        generated_at: "2026-05-06T09:05:00+08:00",
-        session: {
-          status: "authenticated",
-          user: { username: "admin.ops", display_name: "运维管理员" },
-          access_tier: "admin",
-          can_mutate_data: true,
-        },
-        background_jobs: {
-          queued: 0,
-          running: 0,
-          attention: 1,
-          jobs: [
-            {
-              job_id: "job-cost-warmup",
-              type: "cost_statistics_cache_warmup",
-              label: "成本统计缓存预热",
-              status: "partial_success",
-              updated_at: "2026-05-06T09:03:00+08:00",
-              message: "成本统计缓存预热部分完成",
-              retryable: true,
-              retry_mode: "failed_scopes",
-              acknowledgeable: true,
-              attention: true,
+    renderOperationsPage({
+      appHealthDashboardSequence: [
+        {
+          body: {
+            generated_at: "2026-05-23T10:00:00+08:00",
+            data_inventory: {
+              bank: {
+                total_count: 128,
+                latest_synced_at: "2026-05-23T09:50:00+08:00",
+                status: "available",
+                sources: [{ key: "bank_transactions", label: "银行流水", count: 128, latest_synced_at: "2026-05-23T09:50:00+08:00", status: "available" }],
+              },
+              invoice: {
+                total_count: 256,
+                latest_synced_at: "2026-05-23T09:48:00+08:00",
+                status: "available",
+                sources: [
+                  { key: "standard_import", label: "普通导入", count: 180, latest_synced_at: "2026-05-23T09:44:00+08:00", status: "available" },
+                  { key: "oa_attachment", label: "OA 解析", count: 40, latest_synced_at: "2026-05-23T09:48:00+08:00", status: "available" },
+                  { key: "etc", label: "ETC", count: 30, latest_synced_at: "2026-05-23T09:30:00+08:00", status: "available" },
+                  { key: "manual", label: "手工导入", count: 6, latest_synced_at: "2026-05-23T09:20:00+08:00", status: "available" },
+                ],
+              },
+              oa: {
+                total_count: 72,
+                latest_synced_at: "2026-05-23T09:45:00+08:00",
+                status: "available",
+                sources: [
+                  { key: "oa_records", label: "单据", count: 72, latest_synced_at: "2026-05-23T09:45:00+08:00", status: "available" },
+                  { key: "oa_items", label: "明细", count: 316, latest_synced_at: "2026-05-23T09:45:00+08:00", status: "available" },
+                ],
+              },
             },
-          ],
-        },
-        dependencies: {},
-        alerts: {
-          active: [],
-          recent_recovered: [],
-        },
-      },
-    });
-
-    const backgroundJobs = await screen.findByTestId("app-health-background-jobs", {}, { timeout: PAGE_TIMEOUT });
-    expect(await within(backgroundJobs).findByText("job-cost-warmup")).toBeInTheDocument();
-
-    const appHealthCallsBeforeRetry = fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/app-health")).length;
-    await user.click(within(backgroundJobs).getByRole("button", { name: "Retry job-cost-warmup" }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/background-jobs/job-cost-warmup/retry"),
-        expect.objectContaining({ method: "POST" }),
-      );
-    });
-    await waitFor(() => {
-      expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/app-health"))).toHaveLength(appHealthCallsBeforeRetry + 1);
-    });
-
-    const appHealthCallsBeforeAcknowledge = fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/app-health")).length;
-    await user.click(within(backgroundJobs).getByRole("button", { name: "Acknowledge job-cost-warmup" }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/background-jobs/job-cost-warmup/acknowledge"),
-        expect.objectContaining({ method: "POST" }),
-      );
-    });
-    await waitFor(() => {
-      expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/app-health"))).toHaveLength(appHealthCallsBeforeAcknowledge + 1);
-    });
-  });
-
-  test("acknowledges all attention jobs one by one when bulk endpoint is unavailable", async () => {
-    const user = userEvent.setup();
-    const fetchMock = renderOperationsPage({
-      appHealth: {
-        status: "blocked",
-        generated_at: "2026-05-06T09:05:00+08:00",
-        session: {
-          status: "authenticated",
-          user: { username: "admin.ops", display_name: "运维管理员" },
-          access_tier: "admin",
-          can_mutate_data: true,
-        },
-        background_jobs: {
-          queued: 0,
-          running: 0,
-          attention: 2,
-          jobs: [
-            {
-              job_id: "job-attention-1",
-              type: "cost_statistics_cache_warmup",
-              label: "成本统计缓存预热",
-              status: "failed",
-              retryable: true,
-              acknowledgeable: true,
-              attention: true,
+            request_performance: {
+              window: { type: "process_rolling_window", sample_limit_per_endpoint: 512, reset_on_restart: true },
+              endpoints: [],
             },
-            {
-              job_id: "job-attention-2",
-              type: "file_import",
-              label: "导入发票",
-              status: "partial_success",
-              retryable: true,
-              acknowledgeable: true,
-              attention: true,
+            runtime_performance: {
+              outbox: { pending_count: 3, publishing_count: 0, failed_count: 0, publish_failed_count: 0, oldest_pending_age_seconds: 42, status: "available" },
+              queues: [],
+              read_models: [],
+              workers: [],
             },
-          ],
+            freshness: { warnings: [] },
+          },
         },
-        dependencies: {},
-        alerts: {
-          active: [],
-          recent_recovered: [],
-        },
-      },
+        { status: 500, body: { message: "dashboard failed" } },
+      ],
     });
 
-    const backgroundJobs = await screen.findByTestId("app-health-background-jobs", {}, { timeout: PAGE_TIMEOUT });
-    const appHealthCallsBeforeAcknowledgeAll = fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/app-health")).length;
-    await user.click(within(backgroundJobs).getByRole("button", { name: "Acknowledge all attention" }));
+    const data = await screen.findByTestId("app-health-data", {}, { timeout: PAGE_TIMEOUT });
+    expect(data).toHaveTextContent("128");
 
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/background-jobs/job-attention-1/acknowledge"),
-        expect.objectContaining({ method: "POST" }),
-      );
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/background-jobs/job-attention-2/acknowledge"),
-        expect.objectContaining({ method: "POST" }),
-      );
-    });
-    await waitFor(() => {
-      expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/app-health"))).toHaveLength(appHealthCallsBeforeAcknowledgeAll + 1);
-    });
+    await user.click(screen.getByRole("button", { name: "刷新" }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("dashboard failed"));
+    expect(screen.getByTestId("app-health-data")).toHaveTextContent("128");
   });
 });

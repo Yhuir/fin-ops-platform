@@ -6,6 +6,7 @@ import type {
   AppHealthBackgroundJobsSource,
   AppHealthOaSyncSource,
   AppHealthWorkbenchSource,
+  OperationsDashboardPayload,
 } from "./types";
 
 function withAuthHeaders(headers?: HeadersInit) {
@@ -93,6 +94,10 @@ export async function fetchOaSyncStatus(signal?: AbortSignal): Promise<ApiOaSync
 
 export async function fetchAppHealth(signal?: AbortSignal): Promise<ApiAppHealthPayload> {
   return requestJson<ApiAppHealthPayload>("/api/app-health", signal);
+}
+
+export async function fetchAppHealthDashboard(signal?: AbortSignal): Promise<OperationsDashboardPayload> {
+  return requestJson<OperationsDashboardPayload>("/api/operations/app-health-dashboard", signal);
 }
 
 export type AppHealthSubscription = {

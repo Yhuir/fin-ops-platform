@@ -2,7 +2,19 @@ from __future__ import annotations
 
 from typing import Any
 
+from fin_ops_platform.services.rabbitmq_runtime import rabbitmq_event_routes
 from fin_ops_platform.services.runtime_queue import DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES, RuntimeQueueSettings
+
+
+READ_MODEL_EVENT_TYPES: dict[str, tuple[str, str]] = {
+    "workbench.read_model.refresh": ("workbench", "workbench"),
+    "search.read_model.refresh": ("search", "search"),
+    "pending_invoice.read_model.refresh": ("pending_invoice", "pending_invoice"),
+    "cost_statistics.read_model.refresh": ("cost_statistics", "cost_statistics"),
+    "tax_offset.read_model.refresh": ("tax_offset", "tax_offset"),
+}
+
+EMPTY_PERCENTILES = {"p50": None, "p95": None, "p99": None}
 
 
 class RuntimeMonitoringRepository:
@@ -185,9 +197,162 @@ class RuntimeMonitoringRepository:
         summary = provider.summary()
         return summary if isinstance(summary, dict) else {}
 
+    def dashboard_outbox_metric(self) -> dict[str, Any]:
+        row = self._connection.fetch_one(
+            """
+            select
+              count(*) filter (where status = 'pending')::bigint as pending_count,
+              count(*) filter (where publish_status = 'publishing')::bigint as publishing_count,
+              count(*) filter (where status in ('failed', 'dead_lettered'))::bigint as failed_count,
+              count(*) filter (where publish_status = 'failed')::bigint as publish_failed_count,
+              extract(epoch from max(now() - created_at) filter (where status = 'pending'))::float as oldest_pending_age_seconds
+            from job.outbox_events
+            """
+        ) or {}
+        return {
+            "pending_count": _optional_int(row.get("pending_count")),
+            "publishing_count": _optional_int(row.get("publishing_count")),
+            "failed_count": _optional_int(row.get("failed_count")),
+            "publish_failed_count": _optional_int(row.get("publish_failed_count")),
+            "oldest_pending_age_seconds": _optional_float(row.get("oldest_pending_age_seconds")),
+            "status": "available",
+        }
+
+    def dashboard_queue_metrics(self) -> list[dict[str, Any]]:
+        settings = RuntimeQueueSettings.from_env()
+        routes = rabbitmq_event_routes(settings)
+        summary = self._rabbitmq_metrics()
+        queues = summary.get("rabbitmq_queues") if isinstance(summary, dict) else None
+        metric_error = summary.get("rabbitmq_metric_error") if isinstance(summary, dict) else None
+        metrics_available = isinstance(queues, dict) and not metric_error
+        rows: list[dict[str, Any]] = []
+        for event_type, route in routes.items():
+            queue_metric = queues.get(event_type) if metrics_available else None
+            queue_payload = queue_metric if isinstance(queue_metric, dict) else {}
+            if metrics_available:
+                rows.append(
+                    {
+                        "event_type": event_type,
+                        "queue": route.queue,
+                        "messages": _optional_int(queue_payload.get("messages")),
+                        "unacked": _optional_int(queue_payload.get("unacked")),
+                        "consumers": _optional_int(queue_payload.get("consumers")),
+                        "dlq_messages": _optional_int(queue_payload.get("dead_letter_messages")),
+                        "status": "available",
+                    }
+                )
+            else:
+                rows.append(
+                    {
+                        "event_type": event_type,
+                        "queue": route.queue,
+                        "messages": None,
+                        "unacked": None,
+                        "consumers": None,
+                        "dlq_messages": None,
+                        "status": "unknown",
+                        "warning_code": "rabbitmq_metrics_unavailable",
+                    }
+                )
+        return rows
+
+    def dashboard_read_model_metrics(self) -> list[dict[str, Any]]:
+        event_types = tuple(READ_MODEL_EVENT_TYPES.keys())
+        duration_rows = self._connection.fetch_all(
+            """
+            select
+              event_type,
+              percentile_cont(0.5) within group (
+                order by ((raw_payload->'runtime_result'->>'duration_ms')::numeric)
+              )::float as p50_ms,
+              percentile_cont(0.95) within group (
+                order by ((raw_payload->'runtime_result'->>'duration_ms')::numeric)
+              )::float as p95_ms,
+              percentile_cont(0.99) within group (
+                order by ((raw_payload->'runtime_result'->>'duration_ms')::numeric)
+              )::float as p99_ms
+            from job.outbox_events
+            where event_type = any(%s)
+              and status = 'done'
+              and raw_payload->'runtime_result' ? 'duration_ms'
+            group by event_type
+            """,
+            (list(event_types),),
+        )
+        dirty_rows = self._connection.fetch_all(
+            """
+            select
+              scope_type,
+              count(*) filter (where status in ('pending', 'processing', 'failed'))::bigint as stale_count,
+              count(*) filter (where status = 'failed')::bigint as unavailable_count
+            from job.read_model_dirty_scopes
+            where scope_type = any(%s)
+            group by scope_type
+            """,
+            (list({scope_type for _, scope_type in READ_MODEL_EVENT_TYPES.values()}),),
+        )
+        duration_by_event_type = {str(row.get("event_type")): row for row in duration_rows}
+        dirty_by_scope_type = {str(row.get("scope_type")): row for row in dirty_rows}
+        rows: list[dict[str, Any]] = []
+        for event_type, (key, scope_type) in READ_MODEL_EVENT_TYPES.items():
+            duration = duration_by_event_type.get(event_type, {})
+            dirty = dirty_by_scope_type.get(scope_type, {})
+            rows.append(
+                {
+                    "key": key,
+                    "refresh_duration_ms": {
+                        "p50": _optional_float(duration.get("p50_ms")),
+                        "p95": _optional_float(duration.get("p95_ms")),
+                        "p99": _optional_float(duration.get("p99_ms")),
+                    },
+                    "stale_count": _optional_int(dirty.get("stale_count")) or 0,
+                    "unavailable_count": _optional_int(dirty.get("unavailable_count")) or 0,
+                    "status": "available",
+                }
+            )
+        return rows
+
+    def dashboard_worker_metrics(self) -> list[dict[str, Any]]:
+        rows = self._connection.fetch_all(
+            """
+            select
+              worker_kind,
+              extract(epoch from max(now() - last_seen_at))::float as heartbeat_lag_seconds
+            from job.runtime_worker_heartbeats
+            group by worker_kind
+            order by worker_kind
+            """
+        )
+        return [
+            {
+                "worker_kind": str(row.get("worker_kind") or "unknown"),
+                "heartbeat_lag_seconds": _optional_float(row.get("heartbeat_lag_seconds")),
+                "status": "available",
+            }
+            for row in rows
+        ]
+
 
 def _rabbitmq_dispatch_event_types() -> tuple[str, ...]:
     try:
         return RuntimeQueueSettings.from_env().rabbitmq_dispatch_event_types
     except Exception:
         return DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return round(float(value), 3)
+    except (TypeError, ValueError):
+        return None

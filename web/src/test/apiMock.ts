@@ -60,6 +60,10 @@ type MockApiOptions = {
   appHealth?: Record<string, unknown>;
   appHealthErrorStatus?: number;
   appHealthErrorBody?: Record<string, unknown>;
+  appHealthDashboard?: Record<string, unknown>;
+  appHealthDashboardSequence?: Array<{ status?: number; body: Record<string, unknown> }>;
+  appHealthDashboardErrorStatus?: number;
+  appHealthDashboardErrorBody?: Record<string, unknown>;
   workbenchExceptionPreview?: Record<string, unknown>;
   workbenchExceptionApply?: Record<string, unknown>;
   workbenchExceptionPreviewStatus?: number;
@@ -4110,6 +4114,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   const dataResetJobs = new Map<string, Record<string, unknown>>();
   let backgroundJobs = cloneJson(options.backgroundJobs ?? []);
   let workbenchOaSyncStatusIndex = 0;
+  let appHealthDashboardIndex = 0;
 
   const handlers: Record<string, MockFetchHandler> = {
     "/api/session/me": () => {
@@ -4265,6 +4270,124 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             attention,
           },
           dependencies: {},
+        },
+      };
+    },
+    "/api/operations/app-health-dashboard": () => {
+      if (options.appHealthDashboardSequence && options.appHealthDashboardSequence.length > 0) {
+        const item = options.appHealthDashboardSequence[
+          Math.min(appHealthDashboardIndex, options.appHealthDashboardSequence.length - 1)
+        ];
+        appHealthDashboardIndex += 1;
+        return {
+          status: item.status,
+          body: item.body,
+        };
+      }
+      if (options.appHealthDashboardErrorStatus) {
+        return {
+          status: options.appHealthDashboardErrorStatus,
+          body: options.appHealthDashboardErrorBody ?? { message: "app health dashboard failed" },
+        };
+      }
+      return {
+        body: options.appHealthDashboard ?? {
+          generated_at: "2026-05-23T10:00:00+08:00",
+          data_inventory: {
+            bank: {
+              total_count: 128,
+              latest_synced_at: "2026-05-23T09:50:00+08:00",
+              status: "available",
+              sources: [
+                {
+                  key: "bank_transactions",
+                  label: "银行流水",
+                  count: 128,
+                  latest_synced_at: "2026-05-23T09:50:00+08:00",
+                  status: "available",
+                },
+              ],
+            },
+            invoice: {
+              total_count: 256,
+              latest_synced_at: "2026-05-23T09:48:00+08:00",
+              status: "available",
+              sources: [
+                { key: "standard_import", label: "普通导入", count: 180, latest_synced_at: "2026-05-23T09:44:00+08:00", status: "available" },
+                { key: "oa_attachment", label: "OA 解析", count: 40, latest_synced_at: "2026-05-23T09:48:00+08:00", status: "available" },
+                { key: "etc", label: "ETC", count: 30, latest_synced_at: "2026-05-23T09:30:00+08:00", status: "available" },
+                { key: "manual", label: "手工导入", count: 6, latest_synced_at: "2026-05-23T09:20:00+08:00", status: "available" },
+              ],
+            },
+            oa: {
+              total_count: 72,
+              latest_synced_at: "2026-05-23T09:45:00+08:00",
+              status: "available",
+              sources: [
+                { key: "oa_records", label: "单据", count: 72, latest_synced_at: "2026-05-23T09:45:00+08:00", status: "available" },
+                { key: "oa_items", label: "明细", count: 316, latest_synced_at: "2026-05-23T09:45:00+08:00", status: "available" },
+              ],
+            },
+          },
+          request_performance: {
+            window: { type: "process_rolling_window", sample_limit_per_endpoint: 512, reset_on_restart: true },
+            endpoints: [
+              {
+                endpoint: "GET /api/workbench/summary",
+                sample_count: 12,
+                last_status_code: 200,
+                duration_ms: { p50: 120, p95: 640, p99: 880 },
+                database_duration_ms: { p50: 40, p95: 260, p99: 330 },
+                connection_acquire_ms: { p50: 2, p95: 8, p99: 10 },
+                sql_execute_fetch_ms: { p50: 36, p95: 240, p99: 300 },
+                database_query_count: { p50: 4, p95: 8, p99: 10 },
+              },
+              {
+                endpoint: "GET /api/search",
+                sample_count: 0,
+                last_status_code: null,
+                duration_ms: { p50: null, p95: null, p99: null },
+                database_duration_ms: { p50: null, p95: null, p99: null },
+                connection_acquire_ms: { p50: null, p95: null, p99: null },
+                sql_execute_fetch_ms: { p50: null, p95: null, p99: null },
+                database_query_count: { p50: null, p95: null, p99: null },
+              },
+            ],
+          },
+          runtime_performance: {
+            outbox: {
+              pending_count: 3,
+              publishing_count: 1,
+              failed_count: 0,
+              publish_failed_count: 0,
+              oldest_pending_age_seconds: 42,
+              status: "available",
+            },
+            queues: [
+              {
+                event_type: "workbench.read_model.refresh",
+                queue: "finops.workbench.read_model.refresh",
+                messages: 2,
+                unacked: 1,
+                consumers: 1,
+                dlq_messages: 0,
+                status: "available",
+              },
+            ],
+            read_models: [
+              {
+                key: "workbench",
+                refresh_duration_ms: { p50: 110, p95: 450, p99: 700 },
+                stale_count: 1,
+                unavailable_count: 0,
+                status: "available",
+              },
+            ],
+            workers: [
+              { worker_kind: "runtime-worker", heartbeat_lag_seconds: 8, status: "available" },
+            ],
+          },
+          freshness: { warnings: [] },
         },
       };
     },
