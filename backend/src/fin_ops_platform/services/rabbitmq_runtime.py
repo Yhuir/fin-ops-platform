@@ -22,6 +22,7 @@ SUPPORTED_EVENT_TYPES = (
     "tax_offset.read_model.refresh",
     "oa.sync",
     "file_object.gridfs_migration",
+    "import.process.requested",
 )
 
 
@@ -358,7 +359,26 @@ class RabbitMqConsumer:
 
             for queue_name in self._queue_names_for_event_types():
                 channel.basic_consume(queue=queue_name, on_message_callback=on_message)
-            channel.start_consuming()
+            heartbeat_interval_seconds = min(30.0, max(5.0, float(self._settings.rabbitmq_heartbeat_seconds) / 2.0))
+            next_heartbeat_at = 0.0
+            while True:
+                connection.process_data_events(time_limit=1.0)
+                now = monotonic()
+                if now >= next_heartbeat_at:
+                    self._record_consumer_heartbeat("idle")
+                    next_heartbeat_at = now + heartbeat_interval_seconds
+
+    def _record_consumer_heartbeat(self, status: str) -> None:
+        record = getattr(self._worker, "record_heartbeat", None)
+        if callable(record):
+            record(
+                status,
+                {
+                    "transport": "rabbitmq",
+                    "event_types": list(self._event_types),
+                    "consumer_idle": status == "idle",
+                },
+            )
 
     def _queue_names_for_event_types(self) -> list[str]:
         routes = rabbitmq_event_routes(self._settings)

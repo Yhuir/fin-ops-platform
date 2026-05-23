@@ -38,6 +38,16 @@ class _PagedBankTransactionRepository:
         return list(self.rows), self.total
 
 
+class _BankAccountRepository:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self.rows = rows
+        self.calls: list[dict[str, object]] = []
+
+    def list_bank_transaction_accounts(self, **kwargs: object) -> list[dict[str, object]]:
+        self.calls.append(dict(kwargs))
+        return list(self.rows)
+
+
 class BankDetailsServiceTests(unittest.TestCase):
     def _transaction(
         self,
@@ -193,6 +203,37 @@ class BankDetailsServiceTests(unittest.TestCase):
         self.assertEqual(repository.calls[0]["page"], 4)
         self.assertEqual(repository.calls[0]["page_size"], 25)
         self.assertEqual(repository.calls[0]["keyword"], "供应商")
+
+    def test_accounts_use_sql_account_repository_when_available(self) -> None:
+        repository = _BankAccountRepository(
+            [
+                {
+                    "bank_name": "交通银行",
+                    "account_last4": "3847",
+                    "transaction_count": 51,
+                    "latest_balance": Decimal("16091.81"),
+                    "latest_balance_at": "2026-04-23 17:33:58",
+                },
+                {
+                    "bank_name": "建设银行",
+                    "account_last4": "8106",
+                    "transaction_count": 12,
+                    "latest_balance": Decimal("139098.31"),
+                    "latest_balance_at": "2026-04-23 17:10:27",
+                },
+            ]
+        )
+        service = BankDetailsService(_ExplodingImportService(), fact_repository=repository)
+
+        payload = service.list_accounts(date_from="2026-01-01", date_to="2026-12-31")
+
+        self.assertEqual(repository.calls, [{"date_from": "2026-01-01", "date_to": "2026-12-31"}])
+        self.assertEqual([account["display_name"] for account in payload["accounts"]], ["交通银行 3847", "建设银行 8106"])
+        self.assertEqual(payload["accounts"][0]["transaction_count"], 51)
+        self.assertEqual(payload["accounts"][0]["latest_balance"], "16091.81")
+        self.assertEqual(payload["total_balance"], "155190.12")
+        self.assertEqual(payload["balance_account_count"], 2)
+        self.assertEqual(payload["missing_balance_account_count"], 0)
 
     def test_accounts_transaction_count_respects_date_range(self) -> None:
         service = BankDetailsService(

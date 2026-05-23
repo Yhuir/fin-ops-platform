@@ -17,6 +17,7 @@ DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES = (
     "tax_offset.read_model.refresh",
     "oa.sync",
     "file_object.gridfs_migration",
+    "import.process.requested",
 )
 
 

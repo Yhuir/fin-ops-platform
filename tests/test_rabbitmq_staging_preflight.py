@@ -55,8 +55,9 @@ class RabbitMqStagingPreflightTests(unittest.TestCase):
             "rabbitmq.consumer_worker_check.cost_tax",
             "rabbitmq.consumer_worker_check.oa_sync",
             "rabbitmq.consumer_worker_check.file_migration",
+            "rabbitmq.consumer_worker_check.import_job",
         ])
-        self.assertEqual(len(runner.calls), 9)
+        self.assertEqual(len(runner.calls), 10)
         dispatcher_env = runner.calls[3][1]
         self.assertEqual(dispatcher_env["FIN_OPS_QUEUE_BACKEND"], "postgres")
         self.assertEqual(dispatcher_env["RABBITMQ_SHADOW_PUBLISH"], "true")
@@ -66,6 +67,7 @@ class RabbitMqStagingPreflightTests(unittest.TestCase):
         self.assertIn("--event-type", dispatcher_command)
         self.assertIn("workbench.read_model.refresh", dispatcher_command)
         self.assertIn("file_object.gridfs_migration", dispatcher_command)
+        self.assertIn("import.process.requested", dispatcher_command)
         worker_env = runner.calls[4][1]
         self.assertEqual(worker_env["FIN_OPS_QUEUE_BACKEND"], "rabbitmq")
         encoded = stdout.getvalue()

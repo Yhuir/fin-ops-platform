@@ -109,31 +109,69 @@ function formatTimestamp(value: string | null | undefined) {
   }).format(date);
 }
 
-function valueColor(value: number | null | undefined, kind: "p95" | "p99") {
+type MetricTone = "green" | "yellow" | "red" | "unknown";
+
+function metricTone(value: number | null | undefined, kind: "p95" | "p99"): MetricTone {
   if (value === null || value === undefined) {
-    return settingsTokens.textMuted;
+    return "unknown";
   }
   if (kind === "p95" && value > 1500) {
-    return "#dc2626";
+    return "red";
   }
   if (kind === "p99" && value > 5000) {
-    return "#dc2626";
+    return "red";
   }
   if ((kind === "p95" && value >= 500) || (kind === "p99" && value > 2500)) {
-    return "#b45309";
+    return "yellow";
   }
-  return settingsTokens.textPrimary;
+  return "green";
+}
+
+function metricToneSx(tone: MetricTone) {
+  if (tone === "green") {
+    return { bgcolor: "#ecfdf3", color: "#067647", borderColor: "#abefc6" };
+  }
+  if (tone === "yellow") {
+    return { bgcolor: "#fffaeb", color: "#b54708", borderColor: "#fedf89" };
+  }
+  if (tone === "red") {
+    return { bgcolor: "#fef3f2", color: "#b42318", borderColor: "#fecdca" };
+  }
+  return { bgcolor: "#f8fafc", color: settingsTokens.textMuted, borderColor: settingsTokens.borderSubtle };
+}
+
+function PerformanceCell({ value, kind }: { value: number | null | undefined; kind: "p95" | "p99" }) {
+  const tone = metricTone(value, kind);
+  const toneSx = metricToneSx(tone);
+  return (
+    <TableCell data-tone={tone} sx={{ minWidth: 92 }}>
+      <Box
+        component="span"
+        sx={{
+          ...toneSx,
+          border: "1px solid",
+          borderRadius: "6px",
+          display: "inline-flex",
+          fontSize: 12,
+          fontWeight: 700,
+          justifyContent: "center",
+          lineHeight: 1.4,
+          minWidth: 72,
+          px: 0.75,
+          py: 0.25,
+        }}
+      >
+        {formatMs(value)}
+      </Box>
+    </TableCell>
+  );
 }
 
 function PercentileCells({ value }: { value: OperationsDashboardPercentiles }) {
   return (
     <>
-      <TableCell sx={{ color: valueColor(value.p95, "p95"), fontWeight: value.p95 ? 650 : 500 }}>
-        {formatMs(value.p95)}
-      </TableCell>
-      <TableCell sx={{ color: valueColor(value.p99, "p99"), fontWeight: value.p99 ? 650 : 500 }}>
-        {formatMs(value.p99)}
-      </TableCell>
+      <PerformanceCell value={value.p95} kind="p95" />
+      <PerformanceCell value={value.p99} kind="p99" />
     </>
   );
 }
@@ -229,8 +267,8 @@ function RequestPerformance({ rows }: { rows: OperationsDashboardEndpointPerform
                 <TableCell align="right">{formatNumber(row.sample_count)}</TableCell>
                 <PercentileCells value={row.duration_ms} />
                 <PercentileCells value={row.database_duration_ms} />
-                <TableCell>{formatMs(row.sql_execute_fetch_ms.p95)}</TableCell>
-                <TableCell>{formatMs(row.connection_acquire_ms.p95)}</TableCell>
+                <PerformanceCell value={row.sql_execute_fetch_ms.p95} kind="p95" />
+                <PerformanceCell value={row.connection_acquire_ms.p95} kind="p95" />
               </TableRow>
             ))}
           </TableBody>

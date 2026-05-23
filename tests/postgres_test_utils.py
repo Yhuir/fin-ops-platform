@@ -30,6 +30,7 @@ EXPECTED_MIGRATION_FILES = [
     "0016_runtime_outbox_envelope_fields.sql",
     "0017_rabbitmq_outbox_publish_state.sql",
     "0018_api_performance_read_model.sql",
+    "0019_import_jobs.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (
@@ -37,6 +38,7 @@ TEST_TABLES = (
     "audit.app_health_alerts",
     "job.outbox_events",
     "job.background_jobs",
+    "job.import_jobs",
     "job.workbench_matching_dirty_scopes",
     "job.read_model_dirty_scopes",
     "job.runtime_worker_heartbeats",

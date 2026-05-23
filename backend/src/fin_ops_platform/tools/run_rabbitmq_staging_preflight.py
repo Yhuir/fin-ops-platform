@@ -182,6 +182,7 @@ def run_checks(
         "tax_offset.read_model.refresh",
         "oa.sync",
         "file_object.gridfs_migration",
+        "import.process.requested",
     ):
         dispatcher_command.extend(["--event-type", event_type])
     checks.append(
@@ -234,6 +235,13 @@ def run_checks(
             "file_object.gridfs_migration",
             "--worker-kind",
             "file-object-migration",
+        ],
+        "rabbitmq.consumer_worker_check.import_job": [
+            "--enable-import-job-processing",
+            "--event-type",
+            "import.process.requested",
+            "--worker-kind",
+            "import-job",
         ],
     }
     for name, worker_args in worker_checks.items():

@@ -117,10 +117,14 @@ class FakeQueue:
 class FakeWorker:
     def __init__(self) -> None:
         self.processed: list[str] = []
+        self.heartbeats: list[tuple[str, dict[str, object]]] = []
 
     def process_claimed_event(self, claimed):
         self.processed.append(claimed.event_id)
         return RuntimeWorkerResult.PROCESSED
+
+    def record_heartbeat(self, status, payload):
+        self.heartbeats.append((status, payload))
 
 
 class RabbitMqRuntimeTests(unittest.TestCase):
@@ -171,6 +175,7 @@ class RabbitMqRuntimeTests(unittest.TestCase):
         self.assertIn("finops.workbench.read_model.refresh", declared_queues)
         self.assertIn("finops.search.read_model.refresh", declared_queues)
         self.assertIn("finops.oa.sync.dlq", declared_queues)
+        self.assertIn("finops.import.process.requested", declared_queues)
 
     def test_dispatcher_marks_published_only_after_publisher_success(self) -> None:
         queue = FakeQueue()
@@ -246,6 +251,24 @@ class RabbitMqRuntimeTests(unittest.TestCase):
         self.assertEqual(worker.processed, ["event-1"])
         self.assertEqual(channel.acked, [123])
         self.assertEqual(channel.nacked, [])
+
+    def test_consumer_records_idle_heartbeat_for_rabbitmq_transport(self) -> None:
+        worker = FakeWorker()
+        settings = RuntimeQueueSettings.from_env({"RABBITMQ_URL": "amqp://rabbitmq.internal"})
+        consumer = RabbitMqConsumer(
+            settings=settings,
+            queue_repository=FakeQueue(),
+            worker=worker,
+            worker_id="worker-1",
+            event_types=["workbench.read_model.refresh"],
+            lock_timeout_seconds=300,
+        )
+
+        consumer._record_consumer_heartbeat("idle")
+
+        self.assertEqual(worker.heartbeats[0][0], "idle")
+        self.assertEqual(worker.heartbeats[0][1]["transport"], "rabbitmq")
+        self.assertEqual(worker.heartbeats[0][1]["event_types"], ["workbench.read_model.refresh"])
 
     def test_consumer_rejects_message_without_postgres_fact(self) -> None:
         queue = FakeQueue()

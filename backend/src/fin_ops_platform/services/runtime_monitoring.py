@@ -66,8 +66,16 @@ class RuntimeMonitoringRepository:
         )
         worker_lag_row = self._connection.fetch_one(
             """
+            with latest_worker_kind_heartbeats as (
+              select distinct on (worker_kind)
+                worker_kind,
+                last_seen_at
+              from job.runtime_worker_heartbeats
+              order by worker_kind, last_seen_at desc
+            )
             select extract(epoch from max(now() - last_seen_at))::float as max_worker_heartbeat_lag_seconds
-            from job.runtime_worker_heartbeats
+            from latest_worker_kind_heartbeats
+            where worker_kind <> 'runtime'
             """
         )
         refresh_duration_row = self._connection.fetch_one(
@@ -315,17 +323,21 @@ class RuntimeMonitoringRepository:
     def dashboard_worker_metrics(self) -> list[dict[str, Any]]:
         rows = self._connection.fetch_all(
             """
-            select
+            select distinct on (worker_kind)
+              worker_id,
               worker_kind,
-              extract(epoch from max(now() - last_seen_at))::float as heartbeat_lag_seconds
+              status,
+              extract(epoch from now() - last_seen_at)::float as heartbeat_lag_seconds
             from job.runtime_worker_heartbeats
-            group by worker_kind
-            order by worker_kind
+            where worker_kind <> 'runtime'
+            order by worker_kind, last_seen_at desc
             """
         )
         return [
             {
+                "worker_id": str(row.get("worker_id") or ""),
                 "worker_kind": str(row.get("worker_kind") or "unknown"),
+                "worker_status": str(row.get("status") or ""),
                 "heartbeat_lag_seconds": _optional_float(row.get("heartbeat_lag_seconds")),
                 "status": "available",
             }

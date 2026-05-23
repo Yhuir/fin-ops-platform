@@ -659,19 +659,21 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     }
                 ),
             )
-            linked_response = app.handle_request(
-                "GET",
-                "/api/bank-details/transactions?account_key=%E5%B7%A5%E5%95%86%E9%93%B6%E8%A1%8C%3A6386",
-            )
+            with patch.object(app, "_get_or_build_workbench_read_model", side_effect=AssertionError("should not rebuild read model")):
+                linked_response = app.handle_request(
+                    "GET",
+                    "/api/bank-details/transactions?account_key=%E5%B7%A5%E5%95%86%E9%93%B6%E8%A1%8C%3A6386",
+                )
             cancel_response = app.handle_request(
                 "POST",
                 "/api/workbench/actions/cancel-link",
                 json.dumps({"month": "2026-05", "row_id": transaction_id, "comment": "取消测试关联"}),
             )
-            unlinked_response = app.handle_request(
-                "GET",
-                "/api/bank-details/transactions?account_key=%E5%B7%A5%E5%95%86%E9%93%B6%E8%A1%8C%3A6386",
-            )
+            with patch.object(app, "_get_or_build_workbench_read_model", side_effect=AssertionError("should not rebuild read model")):
+                unlinked_response = app.handle_request(
+                    "GET",
+                    "/api/bank-details/transactions?account_key=%E5%B7%A5%E5%95%86%E9%93%B6%E8%A1%8C%3A6386",
+                )
 
         self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
         confirm_payload = json.loads(confirm_response.body)
@@ -3434,6 +3436,24 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual(payload["month"], "all")
         self.assertEqual(payload["rows"][0]["id"], "bk-ignored-001")
+
+    def test_get_api_workbench_ignored_uses_sql_read_model_without_rebuild(self) -> None:
+        class SqlReadRepository:
+            def list_workbench_ignored_rows(self, *, scope_key: str) -> list[dict[str, object]]:
+                self.scope_key = scope_key
+                return [{"id": "bk-sql-ignored-001", "type": "bank"}]
+
+        app = build_application()
+        repository = SqlReadRepository()
+        app._workbench_sql_read_repository = repository
+
+        with patch.object(app, "_get_or_build_workbench_read_model", side_effect=AssertionError("should not rebuild read model")):
+            response = app.handle_request("GET", "/api/workbench/ignored?month=all")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        self.assertEqual(repository.scope_key, "all")
+        self.assertEqual(payload["rows"], [{"id": "bk-sql-ignored-001", "type": "bank"}])
 
     def test_merge_live_workbench_keeps_oa_rows_when_live_bank_invoice_exist(self) -> None:
         live_payload = {

@@ -55,7 +55,9 @@ class OperationsDashboardService:
         row = self._connection.fetch_one(
             """
             select
-              count(*) filter (where coalesce(nullif(status, ''), 'active') <> 'deleted')::bigint as total_count,
+              count(*) filter (
+                where coalesce(nullif(bank_transactions.status, ''), 'active') <> 'deleted'
+              )::bigint as total_count,
               max(coalesce(import_batches.imported_at, bank_transactions.updated_at, bank_transactions.created_at)) as latest_synced_at
             from app.bank_transactions
             left join app.import_batches on import_batches.id = bank_transactions.source_batch_id

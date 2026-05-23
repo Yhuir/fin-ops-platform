@@ -36,6 +36,29 @@ class BankDetailsService:
         self._fact_repository = fact_repository
 
     def list_accounts(self, *, date_from: str | None = None, date_to: str | None = None) -> dict[str, Any]:
+        sql_account_loader = getattr(self._fact_repository, "list_bank_transaction_accounts", None)
+        if callable(sql_account_loader):
+            account_rows = list(sql_account_loader(date_from=date_from, date_to=date_to) or [])
+            accounts = []
+            for row in account_rows:
+                account = self._account_payload(row)
+                latest_balance = row.get("latest_balance")
+                account["latest_balance"] = self._format_decimal(latest_balance) if latest_balance is not None else None
+                account["latest_balance_at"] = self._date_text(row.get("latest_balance_at"))
+                account["has_balance"] = latest_balance is not None
+                account["transaction_count"] = int(row.get("transaction_count") or 0)
+                accounts.append(account)
+            sorted_accounts = sorted(accounts, key=lambda item: (item["bank_name"], item["account_last4"]))
+            total_balance = sum(
+                (Decimal(str(account["latest_balance"])) for account in sorted_accounts if account.get("has_balance")),
+                Decimal("0.00"),
+            )
+            return {
+                "accounts": sorted_accounts,
+                "total_balance": self._format_decimal(total_balance) if any(account.get("has_balance") for account in sorted_accounts) else None,
+                "balance_account_count": sum(1 for account in sorted_accounts if account.get("has_balance")),
+                "missing_balance_account_count": sum(1 for account in sorted_accounts if not account.get("has_balance")),
+            }
         transactions = self._transactions()
         filtered_counts: dict[str, int] = {}
         accounts: dict[str, dict[str, Any]] = {}

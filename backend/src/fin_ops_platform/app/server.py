@@ -109,6 +109,7 @@ from fin_ops_platform.services.etc_reconciliation_zip_filter import (
     validate_etc_zip_confirm_for_task,
 )
 from fin_ops_platform.services.historical_etc_repair_service import HistoricalEtcRepairService
+from fin_ops_platform.services.import_job_queue import ImportJob, ImportJobRepository
 from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile
 from fin_ops_platform.services.import_preview_audit import ImportPreviewStaleError
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -562,7 +563,7 @@ class Application:
         self._bank_details_relation_tag_projection_service = BankDetailsRelationTagProjectionService(
             pair_relation_service=self._workbench_pair_relation_service,
             candidate_match_service=self._workbench_candidate_match_service,
-            workbench_read_model_provider=lambda: self._get_or_build_workbench_read_model("all"),
+            workbench_read_model_provider=lambda: self._get_persisted_workbench_read_model("all"),
         )
         self._bank_details_service = BankDetailsService(
             self._import_service,
@@ -3498,77 +3499,45 @@ class Application:
             self._background_job_service.fail_job(job.job_id, "ETC发票导入任务未启动。", str(error))
             return self._reconciliation_error_response(error)
 
-        def run_etc_import(running_job):
-            def progress_callback(result) -> None:
-                summary = self._etc_import_job_summary(result, total)
-                self._background_job_service.update_progress(
-                    running_job.job_id,
-                    phase="persist_items",
-                    message=f"正在导入 ETC发票 {summary['total_current']}/{total}。",
-                    current=int(summary["total_current"]),
-                    total=total,
-                    result_summary={key: value for key, value in summary.items() if key != "total_current"},
+        if self._import_job_processing_enabled():
+            try:
+                import_job, event = self._enqueue_import_process_job(
+                    import_type="etc_invoice_import.confirm",
+                    import_session_id=normalized_session_id,
+                    idempotency_key=f"etc_invoice_import.confirm:{normalized_task_id}:{normalized_session_id}",
+                    payload={
+                        "session_id": normalized_session_id,
+                        "task_id": normalized_task_id,
+                        "owner_user_id": owner_user_id,
+                        "background_job_id": job.job_id,
+                        "task_version": reconciliation_preview.task_version,
+                        "confirmed_item_set_hash": reconciliation_preview.confirmed_item_set_hash,
+                        "total": total,
+                    },
+                    created_by=owner_user_id,
+                    reason="etc_invoice_import_confirm",
+                )
+                job_payload = job.to_payload()
+                job_payload["import_job"] = self._serialize_import_job(import_job)
+                job_payload["event_id"] = getattr(event, "event_id", None)
+                return self._json_response(HTTPStatus.ACCEPTED, {"job": job_payload})
+            except RuntimeError as exc:
+                self._background_job_service.fail_job(job.job_id, "ETC发票导入任务未启动。", str(exc))
+                return self._json_response(
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    {"error": "import_queue_unavailable", "message": str(exc), "job": job.to_payload()},
                 )
 
-            try:
-                business_batch = self._resolve_task_etc_business_batch(
-                    task_id=normalized_task_id,
-                    owner_user_id=owner_user_id,
-                    idempotency_key=f"etc_business_task_import:{normalized_task_id}:{normalized_session_id}",
-                )
-                business_batch, result = self._etc_service.confirm_business_batch_import(
-                    business_batch.business_batch_id,
-                    normalized_session_id,
-                    expected_version=business_batch.version,
-                    idempotency_key=f"etc_import_session:{normalized_session_id}",
-                    progress_callback=progress_callback,
-                )
-            except Exception as exc:
-                self._etc_reconciliation_task_service.mark_import_failed(
-                    task_id=normalized_task_id,
-                    task_version=reconciliation_preview.task_version,
-                    confirmed_item_set_hash=reconciliation_preview.confirmed_item_set_hash,
-                    actor=owner_user_id,
-                    note=str(exc),
-                )
-                raise
-            import_batch = next(
-                (
-                    batch
-                    for batch in self._etc_service.list_import_batches()
-                    if batch.id in set(getattr(business_batch, "import_batch_ids", []) or [])
-                ),
-                None,
+        def run_etc_import(running_job):
+            return self._execute_etc_invoice_import_confirm_job(
+                session_id=normalized_session_id,
+                task_id=normalized_task_id,
+                owner_user_id=owner_user_id,
+                background_job_id=running_job.job_id,
+                task_version=reconciliation_preview.task_version,
+                confirmed_item_set_hash=reconciliation_preview.confirmed_item_set_hash,
+                total=total,
             )
-            changed_months = self._sync_etc_import_result_to_canonical_invoices(result)
-            self._refresh_after_etc_invoice_sync(changed_months, reason="etc_invoice_import_confirm")
-            summary = self._etc_import_job_summary(result, total)
-            result_summary = {key: value for key, value in summary.items() if key != "total_current"}
-            status = "partial_success" if result.failed > 0 else "succeeded"
-            if status == "partial_success":
-                self._etc_reconciliation_task_service.mark_import_failed(
-                    task_id=normalized_task_id,
-                    task_version=reconciliation_preview.task_version,
-                    confirmed_item_set_hash=reconciliation_preview.confirmed_item_set_hash,
-                    actor=owner_user_id,
-                    note="ETC zip import partially failed; task remains ready for retry.",
-                )
-            else:
-                self._etc_reconciliation_task_service.mark_imported(
-                    task_id=normalized_task_id,
-                    task_version=reconciliation_preview.task_version,
-                    confirmed_item_set_hash=reconciliation_preview.confirmed_item_set_hash,
-                    import_batch_id=getattr(import_batch, "id", None),
-                    actor=owner_user_id,
-                )
-            message = "ETC发票导入部分完成。" if status == "partial_success" else "ETC发票导入完成。"
-            self._background_job_service.succeed_job(
-                running_job.job_id,
-                message,
-                result_summary=result_summary,
-                status=status,
-            )
-            return result_summary
 
         self._background_job_service.run_job(job, run_etc_import)
         return self._json_response(
@@ -3592,6 +3561,97 @@ class Application:
             owner_user_id=owner_user_id,
             idempotency_key=idempotency_key,
         )
+
+    def _execute_etc_invoice_import_confirm_job(
+        self,
+        *,
+        session_id: str,
+        task_id: str,
+        owner_user_id: str,
+        background_job_id: str,
+        task_version: int,
+        confirmed_item_set_hash: str,
+        total: int,
+    ) -> dict[str, object]:
+        if not session_id or not task_id or task_version <= 0:
+            raise ValueError("ETC import job payload requires session_id, task_id and task_version.")
+        running_job = self._background_job_service.start_job(background_job_id) if background_job_id else None
+
+        def progress_callback(result) -> None:
+            if running_job is None:
+                return
+            summary = self._etc_import_job_summary(result, total)
+            self._background_job_service.update_progress(
+                running_job.job_id,
+                phase="persist_items",
+                message=f"正在导入 ETC发票 {summary['total_current']}/{total}。",
+                current=int(summary["total_current"]),
+                total=total,
+                result_summary={key: value for key, value in summary.items() if key != "total_current"},
+            )
+
+        try:
+            business_batch = self._resolve_task_etc_business_batch(
+                task_id=task_id,
+                owner_user_id=owner_user_id,
+                idempotency_key=f"etc_business_task_import:{task_id}:{session_id}",
+            )
+            business_batch, result = self._etc_service.confirm_business_batch_import(
+                business_batch.business_batch_id,
+                session_id,
+                expected_version=business_batch.version,
+                idempotency_key=f"etc_import_session:{session_id}",
+                progress_callback=progress_callback,
+            )
+        except Exception as exc:
+            self._etc_reconciliation_task_service.mark_import_failed(
+                task_id=task_id,
+                task_version=task_version,
+                confirmed_item_set_hash=confirmed_item_set_hash,
+                actor=owner_user_id,
+                note=str(exc),
+            )
+            if running_job is not None:
+                self._background_job_service.fail_job(running_job.job_id, "后台任务失败。", str(exc))
+            raise
+        import_batch = next(
+            (
+                batch
+                for batch in self._etc_service.list_import_batches()
+                if batch.id in set(getattr(business_batch, "import_batch_ids", []) or [])
+            ),
+            None,
+        )
+        changed_months = self._sync_etc_import_result_to_canonical_invoices(result)
+        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_invoice_import_confirm")
+        summary = self._etc_import_job_summary(result, total)
+        result_summary = {key: value for key, value in summary.items() if key != "total_current"}
+        status = "partial_success" if result.failed > 0 else "succeeded"
+        if status == "partial_success":
+            self._etc_reconciliation_task_service.mark_import_failed(
+                task_id=task_id,
+                task_version=task_version,
+                confirmed_item_set_hash=confirmed_item_set_hash,
+                actor=owner_user_id,
+                note="ETC zip import partially failed; task remains ready for retry.",
+            )
+        else:
+            self._etc_reconciliation_task_service.mark_imported(
+                task_id=task_id,
+                task_version=task_version,
+                confirmed_item_set_hash=confirmed_item_set_hash,
+                import_batch_id=getattr(import_batch, "id", None),
+                actor=owner_user_id,
+            )
+        message = "ETC发票导入部分完成。" if status == "partial_success" else "ETC发票导入完成。"
+        if running_job is not None:
+            self._background_job_service.succeed_job(
+                running_job.job_id,
+                message,
+                result_summary=result_summary,
+                status=status,
+            )
+        return result_summary
 
     def _handle_api_etc_import_confirm_legacy(self, normalized_session_id: str, headers: dict[str, str] | None) -> Response:
         try:
@@ -6346,9 +6406,40 @@ class Application:
         if row_ids_error is not None:
             return row_ids_error
         actor_id = str(payload.get("actor_id") or payload.get("actor") or "workbench_settings").strip()
-        result = service.import_row_ids(row_ids, actor_id=actor_id or "workbench_settings")
-        self._invalidate_after_oa_manual_import_mutation(result, row_ids=row_ids)
+        normalized_actor_id = actor_id or "workbench_settings"
+        if self._import_job_processing_enabled():
+            try:
+                import_job, event = self._enqueue_import_process_job(
+                    import_type="oa_manual_import.create",
+                    import_session_id=",".join(sorted(row_ids)),
+                    idempotency_key=f"oa_manual_import.create:{normalized_actor_id}:{','.join(sorted(row_ids))}",
+                    payload={"row_ids": row_ids, "actor_id": normalized_actor_id},
+                    created_by=normalized_actor_id,
+                    reason="oa_manual_import_create",
+                )
+            except RuntimeError as exc:
+                return self._json_response(
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    {"error": "import_queue_unavailable", "message": str(exc)},
+                )
+            return self._json_response(
+                HTTPStatus.ACCEPTED,
+                {
+                    "status": "queued",
+                    "import_job": self._serialize_import_job(import_job),
+                    "event_id": getattr(event, "event_id", None),
+                },
+            )
+        result = self._execute_oa_manual_import_create(row_ids, actor_id=normalized_actor_id)
         return self._json_response(HTTPStatus.OK, result)
+
+    def _execute_oa_manual_import_create(self, row_ids: list[str], *, actor_id: str) -> dict[str, object]:
+        service = self._oa_manual_import_service_or_response()
+        if isinstance(service, Response):
+            raise RuntimeError("OA manual import service is not available.")
+        result = service.import_row_ids(row_ids, actor_id=actor_id)
+        self._invalidate_after_oa_manual_import_mutation(result, row_ids=row_ids)
+        return result
 
     def _handle_api_workbench_settings_oa_manual_import_delete(
         self,
@@ -8632,10 +8723,14 @@ class Application:
             return self._no_oa_bank_batch_value_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
 
-    def _batch_accounting_service(self) -> BatchAccountingService:
+    def _batch_accounting_service(self, *, use_sql_read_model: bool = False) -> BatchAccountingService:
+        batch_workbench_loader = None
+        if use_sql_read_model and self._workbench_sql_read_repository is not None:
+            batch_workbench_loader = self._workbench_sql_read_repository.load_batch_accounting_workbench_payload
         return BatchAccountingService(
             grouped_workbench_loader=lambda month: self._build_api_workbench_payload(month),
             pair_relation_service=self._workbench_pair_relation_service,
+            batch_workbench_loader=batch_workbench_loader,
         )
 
     def _handle_api_batch_accounting(self, query: dict[str, list[str]]) -> Response:
@@ -8645,7 +8740,7 @@ class Application:
         bucket = query.get("bucket", ["unsubmitted"])[0] or "unsubmitted"
         repair_result = self._repair_batch_accounting_relation_case_ids()
         try:
-            payload = self._batch_accounting_service().build_payload(
+            payload = self._batch_accounting_service(use_sql_read_model=True).build_payload(
                 year=year,
                 bank_year=bank_year,
                 oa_year=oa_year,
@@ -9538,24 +9633,48 @@ class Application:
                     "message": "session_id is required.",
                 },
             )
+        if self._import_job_processing_enabled():
+            try:
+                import_job, event = self._enqueue_import_process_job(
+                    import_type="tax_certified_import.confirm",
+                    import_session_id=session_id,
+                    idempotency_key=f"tax_certified_import.confirm:{session_id}",
+                    payload={"session_id": session_id},
+                    created_by=str(payload.get("actor_id") or payload.get("imported_by") or "tax_certified_api"),
+                    reason="tax_certified_import_confirm",
+                )
+            except RuntimeError as exc:
+                return self._json_response(
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    {"error": "import_queue_unavailable", "message": str(exc)},
+                )
+            return self._json_response(
+                HTTPStatus.ACCEPTED,
+                {
+                    "status": "queued",
+                    "import_job": self._serialize_import_job(import_job),
+                    "event_id": getattr(event, "event_id", None),
+                },
+            )
         try:
-            batch = self._tax_certified_import_service.confirm_session(session_id)
+            result = self._execute_tax_certified_import_confirm(session_id)
         except KeyError as exc:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
                 {"error": "tax_certified_import_session_not_found", "message": str(exc)},
             )
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _execute_tax_certified_import_confirm(self, session_id: str) -> dict[str, object]:
+        batch = self._tax_certified_import_service.confirm_session(session_id)
         self._invalidate_tax_offset_read_model_scopes(
             list(getattr(batch, "months", []) or []),
             reason="tax_certified_import_confirm",
         )
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "success": True,
-                "batch": batch,
-            },
-        )
+        return {
+            "success": True,
+            "batch": self._serialize_value(batch),
+        }
 
     def _handle_api_tax_certified_imports(self, month: str | None) -> Response:
         if month is None or not month.strip():
@@ -11088,14 +11207,96 @@ class Application:
                     "message": "batch_id is required.",
                 },
             )
+        if self._import_job_processing_enabled():
+            try:
+                import_job, event = self._enqueue_import_process_job(
+                    import_type="general_import.confirm",
+                    import_session_id=str(batch_id),
+                    idempotency_key=f"general_import.confirm:{batch_id}",
+                    payload={"batch_id": str(batch_id)},
+                    created_by=str(payload.get("actor_id") or payload.get("imported_by") or "imports_api"),
+                    reason="general_import_confirm",
+                )
+            except RuntimeError as exc:
+                return self._json_response(
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    {"error": "import_queue_unavailable", "message": str(exc)},
+                )
+            return self._json_response(
+                HTTPStatus.ACCEPTED,
+                {
+                    "status": "queued",
+                    "import_job": self._serialize_import_job(import_job),
+                    "event_id": getattr(event, "event_id", None),
+                },
+            )
         try:
-            batch = self._import_service.confirm_import(batch_id)
-            preview = self._import_service.get_batch(batch_id)
+            result = self._execute_general_import_confirm(str(batch_id))
         except KeyError:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
                 {"error": "batch_not_found", "batch_id": batch_id},
             )
+        return self._json_response(
+            HTTPStatus.OK,
+            result,
+        )
+
+    def build_import_job_processors(self) -> dict[str, Callable[[ImportJob], dict[str, object]]]:
+        return {
+            "general_import.confirm": self._process_general_import_confirm_job,
+            "file_import.confirm": self._process_file_import_confirm_job,
+            "etc_invoice_import.confirm": self._process_etc_invoice_import_confirm_job,
+            "tax_certified_import.confirm": self._process_tax_certified_import_confirm_job,
+            "oa_manual_import.create": self._process_oa_manual_import_create_job,
+        }
+
+    def _process_general_import_confirm_job(self, import_job: ImportJob) -> dict[str, object]:
+        batch_id = str(import_job.payload.get("batch_id") or "").strip()
+        if not batch_id:
+            raise ValueError("import job payload.batch_id is required.")
+        return self._execute_general_import_confirm(batch_id)
+
+    def _process_tax_certified_import_confirm_job(self, import_job: ImportJob) -> dict[str, object]:
+        session_id = str(import_job.payload.get("session_id") or "").strip()
+        if not session_id:
+            raise ValueError("import job payload.session_id is required.")
+        return self._execute_tax_certified_import_confirm(session_id)
+
+    def _process_file_import_confirm_job(self, import_job: ImportJob) -> dict[str, object]:
+        session_id = str(import_job.payload.get("session_id") or "").strip()
+        selected_file_ids = import_job.payload.get("selected_file_ids")
+        if not session_id or not isinstance(selected_file_ids, list):
+            raise ValueError("import job payload.session_id and payload.selected_file_ids are required.")
+        return self._execute_file_import_confirm_job(
+            session_id=session_id,
+            selected_file_ids=[str(item) for item in selected_file_ids],
+            owner_user_id=str(import_job.payload.get("owner_user_id") or import_job.created_by or "system"),
+            background_job_id=str(import_job.payload.get("background_job_id") or "").strip(),
+        )
+
+    def _process_etc_invoice_import_confirm_job(self, import_job: ImportJob) -> dict[str, object]:
+        payload = import_job.payload
+        return self._execute_etc_invoice_import_confirm_job(
+            session_id=str(payload.get("session_id") or "").strip(),
+            task_id=str(payload.get("task_id") or "").strip(),
+            owner_user_id=str(payload.get("owner_user_id") or import_job.created_by or "system").strip(),
+            background_job_id=str(payload.get("background_job_id") or "").strip(),
+            task_version=int(payload.get("task_version") or 0),
+            confirmed_item_set_hash=str(payload.get("confirmed_item_set_hash") or "").strip(),
+            total=int(payload.get("total") or 0),
+        )
+
+    def _process_oa_manual_import_create_job(self, import_job: ImportJob) -> dict[str, object]:
+        row_ids = import_job.payload.get("row_ids")
+        if not isinstance(row_ids, list):
+            raise ValueError("import job payload.row_ids is required.")
+        actor_id = str(import_job.payload.get("actor_id") or import_job.created_by or "workbench_settings").strip()
+        return self._execute_oa_manual_import_create([str(row_id) for row_id in row_ids], actor_id=actor_id)
+
+    def _execute_general_import_confirm(self, batch_id: str) -> dict[str, object]:
+        batch = self._import_service.confirm_import(batch_id)
+        preview = self._import_service.get_batch(batch_id)
         self._invalidate_tax_offset_read_model_scopes(
             self._tax_offset_scope_keys_for_import_preview(preview),
             reason="invoice_import_confirm",
@@ -11107,13 +11308,10 @@ class Application:
         self._persist_state_with_workbench_invalidation(
             cost_statistics_scope_keys=self._cost_statistics_scope_keys_for_import_preview(preview),
         )
-        return self._json_response(
-            HTTPStatus.OK,
-            {
-                "batch": self._serialize_value(batch),
-                "row_results": self._serialize_value(preview.row_results),
-            },
-        )
+        return {
+            "batch": self._serialize_value(batch),
+            "row_results": self._serialize_value(preview.row_results),
+        }
 
     def _handle_import_batch(self, batch_id: str) -> Response:
         try:
@@ -11124,6 +11322,84 @@ class Application:
                 {"error": "batch_not_found", "batch_id": batch_id},
             )
         return self._json_response(HTTPStatus.OK, self._serialize_preview(preview))
+
+    def _import_processing_backend(self) -> str:
+        explicit = str(os.getenv("FIN_OPS_IMPORT_PROCESSING_BACKEND") or "").strip().lower()
+        if explicit:
+            if explicit not in {"inline", "rabbitmq"}:
+                raise RuntimeError("FIN_OPS_IMPORT_PROCESSING_BACKEND must be inline or rabbitmq.")
+            return explicit
+        queue_settings = getattr(getattr(self, "_runtime_repositories", None), "queue_settings", None)
+        return "rabbitmq" if str(getattr(queue_settings, "backend", "") or "").strip().lower() == "rabbitmq" else "inline"
+
+    def _import_job_processing_enabled(self) -> bool:
+        if self._import_processing_backend() != "rabbitmq":
+            return False
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        return callable(getattr(queue_repository, "enqueue", None))
+
+    def _get_import_job_repository(self) -> ImportJobRepository:
+        injected = getattr(self, "_import_job_repository_override", None)
+        if injected is None:
+            injected = self.__dict__.get("_import_job_repository")
+        if injected is not None:
+            return injected
+        connection = getattr(self._state_store, "_connection", None)
+        if connection is None:
+            raise RuntimeError("PostgreSQL import job repository is not available.")
+        repository = ImportJobRepository(connection)
+        self._import_job_repository = repository
+        return repository
+
+    def _enqueue_import_process_job(
+        self,
+        *,
+        import_type: str,
+        payload: dict[str, object],
+        idempotency_key: str,
+        import_session_id: str | None = None,
+        source_file_id: str | None = None,
+        created_by: str | None = None,
+        priority: str = "normal",
+        reason: str = "import_confirm",
+    ):
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        if queue_repository is None or not callable(getattr(queue_repository, "enqueue", None)):
+            raise RuntimeError("Runtime queue repository is not available.")
+        repository = self._get_import_job_repository()
+        import_job = repository.create_or_get_job(
+            import_type=import_type,
+            import_session_id=import_session_id,
+            source_file_id=source_file_id,
+            idempotency_key=idempotency_key,
+            payload=payload,
+            raw_payload={"request_payload": payload},
+            created_by=created_by,
+            priority=priority,
+        )
+        event = repository.enqueue_process_requested(
+            queue_repository=queue_repository,
+            import_job=import_job,
+            reason=reason,
+        )
+        return import_job, event
+
+    @staticmethod
+    def _serialize_import_job(import_job: ImportJob) -> dict[str, object]:
+        return {
+            "import_job_id": import_job.import_job_id,
+            "tenant_id": import_job.tenant_id,
+            "import_type": import_job.import_type,
+            "import_session_id": import_job.import_session_id,
+            "source_file_id": import_job.source_file_id,
+            "status": import_job.status,
+            "stage": import_job.stage,
+            "priority": import_job.priority,
+            "attempt_count": import_job.attempt_count,
+            "max_attempts": import_job.max_attempts,
+            "last_error": import_job.last_error,
+            "trace_id": import_job.trace_id,
+        }
 
     def _handle_import_batch_download(self, batch_id: str) -> Response:
         try:
@@ -11274,72 +11550,41 @@ class Application:
             source={"session_id": normalized_session_id, "selected_file_ids": normalized_selected_file_ids},
             affected_scopes=["imports", "workbench"],
         )
+        if created and self._import_job_processing_enabled():
+            try:
+                import_job, event = self._enqueue_import_process_job(
+                    import_type="file_import.confirm",
+                    import_session_id=normalized_session_id,
+                    idempotency_key=f"file_import.confirm:{normalized_session_id}:{selected_key}",
+                    payload={
+                        "session_id": normalized_session_id,
+                        "selected_file_ids": normalized_selected_file_ids,
+                        "owner_user_id": owner_user_id,
+                        "background_job_id": job.job_id,
+                    },
+                    created_by=owner_user_id,
+                    reason="file_import_confirm",
+                )
+                job_payload = job.to_payload()
+                job_payload["import_job"] = self._serialize_import_job(import_job)
+                job_payload["event_id"] = getattr(event, "event_id", None)
+                response_payload = self._serialize_file_session(session)
+                response_payload["job"] = job_payload
+                return self._json_response(HTTPStatus.ACCEPTED, response_payload)
+            except RuntimeError as exc:
+                self._background_job_service.fail_job(job.job_id, "导入文件任务未启动。", str(exc))
+                return self._json_response(
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    {"error": "import_queue_unavailable", "message": str(exc), "job": job.to_payload()},
+                )
         if created:
             def run_file_import(running_job):
-                def progress_callback(progress_session, current: int, progress_total: int) -> None:
-                    confirmed_count = sum(1 for file in progress_session.files if file.id in selected and file.status == "confirmed")
-                    self._background_job_service.update_progress(
-                        running_job.job_id,
-                        phase="confirm_files",
-                        message=f"正在{label} {current}/{max(progress_total, 1)}。",
-                        current=current,
-                        total=progress_total,
-                        result_summary={
-                            "confirmed": confirmed_count,
-                            "selected": progress_total,
-                            "matching_results": 0,
-                        },
-                    )
-
-                confirmed_session = self._file_import_service.confirm_session(
+                return self._execute_file_import_confirm_job(
                     session_id=normalized_session_id,
                     selected_file_ids=normalized_selected_file_ids,
-                    progress_callback=progress_callback,
+                    owner_user_id=running_job.owner_user_id,
+                    background_job_id=running_job.job_id,
                 )
-                confirmed_count = sum(1 for file in confirmed_session.files if file.id in selected and file.status == "confirmed")
-                scope_months = self._workbench_matching_scope_months_for_import_file_session(
-                    confirmed_session,
-                    normalized_selected_file_ids,
-                )
-                matching_job_id = None
-                if any(file.status == "confirmed" for file in confirmed_session.files):
-                    matching_job = self._enqueue_workbench_auto_matching_for_scopes(
-                        scope_months,
-                        reason="import_file_confirm",
-                        owner_user_id=running_job.owner_user_id,
-                        source={
-                            "session_id": confirmed_session.id,
-                            "selected_file_ids": normalized_selected_file_ids,
-                            "trigger_job_id": running_job.job_id,
-                        },
-                        triggered_by=f"import_session:{confirmed_session.id}",
-                    )
-                    matching_job_id = matching_job.job_id if matching_job is not None else None
-                self._invalidate_tax_offset_read_model_scopes(
-                    self._tax_offset_scope_keys_for_import_file_session(
-                        confirmed_session,
-                        normalized_selected_file_ids,
-                    ),
-                    reason="invoice_file_import_confirm",
-                )
-                self._persist_state_with_workbench_invalidation(
-                    cost_statistics_scope_keys=self._cost_statistics_scope_keys_for_import_file_session(
-                        confirmed_session,
-                        normalized_selected_file_ids,
-                    ),
-                )
-                result_summary = {
-                    "confirmed": confirmed_count,
-                    "selected": total,
-                    "affected_months": scope_months,
-                    "enqueued_matching_job_id": matching_job_id,
-                }
-                self._background_job_service.succeed_job(
-                    running_job.job_id,
-                    f"{label}完成。",
-                    result_summary=result_summary,
-                )
-                return result_summary
 
             self._background_job_service.run_job(job, run_file_import)
 
@@ -11360,6 +11605,93 @@ class Application:
         if batch_types and batch_types.issubset({BatchType.INPUT_INVOICE.value, BatchType.OUTPUT_INVOICE.value}):
             return "导入 发票"
         return "导入文件"
+
+    def _execute_file_import_confirm_job(
+        self,
+        *,
+        session_id: str,
+        selected_file_ids: list[str],
+        owner_user_id: str,
+        background_job_id: str,
+    ) -> dict[str, object]:
+        session = self._file_import_service.get_session(session_id)
+        selected = set(selected_file_ids)
+        total = len(selected_file_ids)
+        label = self._file_import_job_label(session, selected_file_ids)
+        running_job = self._background_job_service.start_job(background_job_id) if background_job_id else None
+
+        def progress_callback(progress_session, current: int, progress_total: int) -> None:
+            if running_job is None:
+                return
+            confirmed_count = sum(1 for file in progress_session.files if file.id in selected and file.status == "confirmed")
+            self._background_job_service.update_progress(
+                running_job.job_id,
+                phase="confirm_files",
+                message=f"正在{label} {current}/{max(progress_total, 1)}。",
+                current=current,
+                total=progress_total,
+                result_summary={
+                    "confirmed": confirmed_count,
+                    "selected": progress_total,
+                    "matching_results": 0,
+                },
+            )
+
+        try:
+            confirmed_session = self._file_import_service.confirm_session(
+                session_id=session_id,
+                selected_file_ids=selected_file_ids,
+                progress_callback=progress_callback,
+            )
+            confirmed_count = sum(1 for file in confirmed_session.files if file.id in selected and file.status == "confirmed")
+            scope_months = self._workbench_matching_scope_months_for_import_file_session(
+                confirmed_session,
+                selected_file_ids,
+            )
+            matching_job_id = None
+            if any(file.status == "confirmed" for file in confirmed_session.files):
+                matching_job = self._enqueue_workbench_auto_matching_for_scopes(
+                    scope_months,
+                    reason="import_file_confirm",
+                    owner_user_id=owner_user_id,
+                    source={
+                        "session_id": confirmed_session.id,
+                        "selected_file_ids": selected_file_ids,
+                        "trigger_job_id": background_job_id,
+                    },
+                    triggered_by=f"import_session:{confirmed_session.id}",
+                )
+                matching_job_id = matching_job.job_id if matching_job is not None else None
+            self._invalidate_tax_offset_read_model_scopes(
+                self._tax_offset_scope_keys_for_import_file_session(
+                    confirmed_session,
+                    selected_file_ids,
+                ),
+                reason="invoice_file_import_confirm",
+            )
+            self._persist_state_with_workbench_invalidation(
+                cost_statistics_scope_keys=self._cost_statistics_scope_keys_for_import_file_session(
+                    confirmed_session,
+                    selected_file_ids,
+                ),
+            )
+            result_summary = {
+                "confirmed": confirmed_count,
+                "selected": total,
+                "affected_months": scope_months,
+                "enqueued_matching_job_id": matching_job_id,
+            }
+            if running_job is not None:
+                self._background_job_service.succeed_job(
+                    running_job.job_id,
+                    f"{label}完成。",
+                    result_summary=result_summary,
+                )
+            return result_summary
+        except Exception as exc:
+            if running_job is not None:
+                self._background_job_service.fail_job(running_job.job_id, "后台任务失败。", str(exc))
+            raise
 
     def _handle_import_file_retry(self, body: str | bytes | None) -> Response:
         payload, error = self._load_json_body(body)
@@ -12686,6 +13018,11 @@ class Application:
             )
         return read_model
 
+    def _get_persisted_workbench_read_model(self, month: str, *, visibility_key: str = "global") -> dict[str, object]:
+        read_model_scope_key = self._workbench_read_model_scope_key(month, visibility_key=visibility_key)
+        cached_read_model = self._workbench_read_model_service.get_read_model(read_model_scope_key)
+        return cached_read_model if isinstance(cached_read_model, dict) else {}
+
     @staticmethod
     def _can_use_legacy_workbench_read_model_without_source_versions(
         read_model: dict[str, object],
@@ -13127,6 +13464,11 @@ class Application:
         return ""
 
     def _build_api_workbench_ignored_rows_payload(self, month: str, *, visibility_key: str = "global") -> list[dict[str, object]]:
+        read_repository = getattr(self, "_workbench_sql_read_repository", None)
+        list_ignored_rows = getattr(read_repository, "list_workbench_ignored_rows", None)
+        if callable(list_ignored_rows):
+            scope_key = self._workbench_read_model_scope_key(month, visibility_key=visibility_key)
+            return self._serialize_value(list_ignored_rows(scope_key=scope_key))
         read_model = self._get_or_build_workbench_read_model(month, visibility_key=visibility_key)
         ignored_rows = read_model.get("ignored_rows")
         return self._serialize_value(ignored_rows if isinstance(ignored_rows, list) else [])

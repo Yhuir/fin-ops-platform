@@ -584,6 +584,33 @@ class PostgresReadModelRepository:
             "source_versions": source_versions,
         }
 
+    def list_workbench_ignored_rows(self, *, scope_key: str) -> list[dict[str, Any]]:
+        normalized_scope_key = str(scope_key or "").strip() or "all"
+        if normalized_scope_key == "all":
+            scope_clause = "scope_key <> 'all'"
+            params: list[Any] = []
+        else:
+            scope_clause = "scope_key = %s"
+            params = [normalized_scope_key]
+        rows = self._connection.fetch_all(
+            f"""
+            select row_id, payload, raw_payload
+            from read_model.workbench_rows
+            where {scope_clause}
+              and status = 'ignored'
+            order by generated_at desc, updated_at desc, row_id
+            """,
+            tuple(params),
+        )
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            payload = _read_model_payload(row)
+            if isinstance(payload, dict):
+                result.append(payload)
+            else:
+                result.append({"id": text(row.get("row_id"))})
+        return result
+
     def get_workbench_groups_page(
         self,
         *,
@@ -1252,6 +1279,90 @@ class PostgresReadModelRepository:
             "has_more": len(rows) > normalized_page_size,
             "rows": payload_rows,
         }
+
+    def load_batch_accounting_workbench_payload(self, *, bank_year: str, oa_year: str) -> dict[str, Any] | None:
+        resolved_bank_year = text(bank_year)
+        resolved_oa_year = text(oa_year)
+        if not resolved_bank_year or not resolved_oa_year:
+            return None
+        bank_start = f"{resolved_bank_year}-01-01"
+        oa_start = f"{resolved_oa_year}-01-01"
+        bank_rows = self._connection.fetch_all(
+            """
+            select row_id, source_kind, status, payload, raw_payload
+            from read_model.workbench_rows
+            where scope_key <> 'all'
+              and source_kind = 'bank'
+              and (
+                    counterparty_name = %s
+                    or payload->>'counterparty_name' = %s
+                    or payload->>'counterparty_name_raw' = %s
+                  )
+              and (
+                    scope_month >= %s::date
+                    and scope_month < (%s::date + interval '1 year')
+                  )
+            order by coalesce(payload->>'trade_time', payload->>'pay_receive_time', payload->>'txn_date', '') desc, row_id
+            """,
+            ("批量账务集中处理", "批量账务集中处理", "批量账务集中处理", bank_start, bank_start),
+        )
+        oa_rows = self._connection.fetch_all(
+            """
+            select row_id, source_kind, status, payload, raw_payload
+            from read_model.workbench_rows
+            where scope_key <> 'all'
+              and source_kind = 'oa'
+              and (
+                    scope_month >= %s::date
+                    and scope_month < (%s::date + interval '1 year')
+                  )
+            order by coalesce(payload->>'apply_time', payload->>'application_time', payload->>'application_date', payload->>'created_at', '') desc, row_id
+            """,
+            (oa_start, oa_start),
+        )
+        invoice_rows = self._connection.fetch_all(
+            """
+            select row_id, source_kind, status, payload, raw_payload
+            from read_model.workbench_rows
+            where scope_key <> 'all'
+              and source_kind = 'oa_attachment_invoice'
+              and (
+                    scope_month >= %s::date
+                    and scope_month < (%s::date + interval '1 year')
+                  )
+            order by row_id
+            """,
+            (oa_start, oa_start),
+        )
+        return {
+            "month": "all",
+            "summary": {},
+            "paired": {"groups": []},
+            "open": {
+                "groups": [
+                    {
+                        "group_id": f"batch-accounting:{resolved_bank_year}:{resolved_oa_year}",
+                        "group_type": "batch_accounting_sql_read_model",
+                        "bank_rows": self._payload_rows(bank_rows),
+                        "oa_rows": self._payload_rows(oa_rows),
+                        "invoice_rows": self._payload_rows(invoice_rows),
+                    }
+                ]
+            },
+        }
+
+    @staticmethod
+    def _payload_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        payload_rows: list[dict[str, Any]] = []
+        for row in rows:
+            payload = _read_model_payload(row)
+            if isinstance(payload, dict):
+                payload_rows.append(payload)
+                continue
+            row_id = text(row.get("row_id"))
+            if row_id:
+                payload_rows.append({"id": row_id, "type": text(row.get("source_kind")) or "unknown"})
+        return payload_rows
 
     def load_workbench_candidate_matches(self) -> dict[str, Any]:
         rows = self._connection.fetch_all(

@@ -41,6 +41,8 @@ describe("AppHealthOperationsPage", () => {
     expect(requests).toHaveTextContent("GET /api/workbench/summary");
     expect(requests).toHaveTextContent("640 ms");
     expect(requests).toHaveTextContent("260 ms");
+    expect(within(requests).getByText("640 ms").closest("td")).toHaveAttribute("data-tone", "yellow");
+    expect(within(requests).getByText("260 ms").closest("td")).toHaveAttribute("data-tone", "green");
 
     const runtime = screen.getByTestId("app-health-runtime");
     expect(runtime).toHaveTextContent("后台");
@@ -157,6 +159,7 @@ describe("AppHealthOperationsPage", () => {
     const data = await screen.findByTestId("app-health-data", {}, { timeout: PAGE_TIMEOUT });
     expect(within(data).getAllByText("--").length).toBeGreaterThan(2);
     expect(screen.getByTestId("app-health-requests")).toHaveTextContent("--");
+    expect(within(screen.getByTestId("app-health-requests")).getAllByText("--")[0].closest("td")).toHaveAttribute("data-tone", "unknown");
     expect(screen.getByTestId("app-health-runtime")).toHaveTextContent("--");
   });
 

@@ -81,13 +81,13 @@ PYTHONPATH=backend/src \
 python3 -m fin_ops_platform.app.rabbitmq_topology --apply
 ```
 
-标准拓扑：
+标准拓扑覆盖所有已迁入 RabbitMQ 的 runtime event。队列名称默认由 `RABBITMQ_QUEUE_PREFIX` 加 event type 生成，例如：
 
 - exchange：`finops.events`，`topic`，durable。
-- queue：`finops.workbench.read_model.refresh`，durable。
-- routing key：`workbench.read_model.refresh`。
+- queue：`finops.workbench.read_model.refresh`、`finops.search.read_model.refresh`、`finops.pending_invoice.read_model.refresh`、`finops.cost_statistics.read_model.refresh`、`finops.tax_offset.read_model.refresh`、`finops.oa.sync`、`finops.file_object.gridfs_migration`、`finops.import.process.requested`，durable。
+- routing key：对应 event type。
 - DLX：`finops.events.dlx`。
-- DLQ：`finops.workbench.read_model.refresh.dlq`。
+- DLQ：每个 queue 对应 `<queue>.dlq`。
 
 RabbitMQ publisher 是独立进程，从 PostgreSQL claim publishable event，只有 publisher confirm 成功后才把 outbox 标记为 `publish_status='published'`：
 
@@ -102,6 +102,12 @@ python3 -m fin_ops_platform.app.rabbitmq_dispatcher \
   --lock-timeout-seconds 300 \
   --retry-delay-seconds 60
 ```
+
+导入确认的执行路径由 `FIN_OPS_IMPORT_PROCESSING_BACKEND` 控制：
+
+- `inline`：请求线程按旧路径执行，作为回滚边界。
+- `rabbitmq`：API 只创建 `job.import_jobs` 和 `import.process.requested` outbox event；worker 回 PostgreSQL 读取 import job 后执行 processor。
+- 未显式设置时，`FIN_OPS_QUEUE_BACKEND=rabbitmq` 会默认启用 `rabbitmq` 导入处理；否则默认 `inline`。
 
 灰度阶段可以保持 `FIN_OPS_QUEUE_BACKEND=postgres`，只启动 shadow publish：
 

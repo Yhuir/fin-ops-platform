@@ -17,6 +17,8 @@ class FakeDashboardConnection:
         self.calls.append((sql, params))
         normalized = " ".join(sql.lower().split())
         if "from app.bank_transactions" in normalized:
+            if "nullif(status" in normalized:
+                raise AssertionError("bank inventory must qualify bank_transactions.status when import_batches is joined")
             return {"total_count": 12, "latest_synced_at": datetime(2026, 5, 20, 10, 30, tzinfo=UTC)}
         if "from app.invoices" in normalized and "invoice_flags" in normalized:
             return {

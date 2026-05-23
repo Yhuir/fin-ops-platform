@@ -93,6 +93,90 @@ class PostgresCoreRepository:
         )
         return [self._transaction_from_row(row) for row in rows], self._int((total_row or {}).get("total"), 0)
 
+    def list_bank_transaction_accounts(self, *, date_from: str | None = None, date_to: str | None = None) -> list[dict[str, Any]]:
+        filter_clauses: list[str] = []
+        params: list[Any] = []
+        if text := self._text(date_from):
+            filter_clauses.append("txn_date >= %s::date")
+            params.append(text[:10])
+        if text := self._text(date_to):
+            filter_clauses.append("txn_date <= %s::date")
+            params.append(text[:10])
+        filtered_where = "where " + " and ".join(filter_clauses) if filter_clauses else ""
+        rows = self._connection.fetch_all(
+            f"""
+            with normalized as (
+                select
+                    coalesce(
+                        nullif(raw_payload->'normalized_payload'->>'imported_bank_name', ''),
+                        nullif(raw_payload->'normalized_payload'->>'bank_name', ''),
+                        '未知银行'
+                    ) as bank_name,
+                    coalesce(
+                        nullif(right(coalesce(
+                            nullif(raw_payload->'normalized_payload'->>'imported_bank_last4', ''),
+                            nullif(raw_payload->'normalized_payload'->>'account_last4', ''),
+                            account_no,
+                            ''
+                        ), 4), ''),
+                        'unknown'
+                    ) as account_last4,
+                    account_no,
+                    balance,
+                    txn_date,
+                    trade_time,
+                    coalesce(trade_time, txn_date::timestamptz) as sort_time
+                from app.bank_transactions
+            ),
+            accounts as (
+                select bank_name, account_last4, count(*)::bigint as total_count
+                from normalized
+                group by bank_name, account_last4
+            ),
+            filtered_counts as (
+                select bank_name, account_last4, count(*)::bigint as transaction_count
+                from normalized
+                {filtered_where}
+                group by bank_name, account_last4
+            ),
+            latest_balances as (
+                select distinct on (bank_name, account_last4)
+                    bank_name,
+                    account_last4,
+                    balance,
+                    coalesce(trade_time::text, txn_date::text) as latest_balance_at
+                from normalized
+                where balance is not null
+                order by bank_name, account_last4, sort_time desc nulls last
+            )
+            select
+                accounts.bank_name,
+                accounts.account_last4,
+                coalesce(filtered_counts.transaction_count, 0)::bigint as transaction_count,
+                latest_balances.balance,
+                latest_balances.latest_balance_at
+            from accounts
+            left join filtered_counts
+              on filtered_counts.bank_name = accounts.bank_name
+             and filtered_counts.account_last4 = accounts.account_last4
+            left join latest_balances
+              on latest_balances.bank_name = accounts.bank_name
+             and latest_balances.account_last4 = accounts.account_last4
+            order by accounts.bank_name, accounts.account_last4
+            """,
+            tuple(params),
+        )
+        return [
+            {
+                "bank_name": self._text(row.get("bank_name")) or "未知银行",
+                "account_last4": self._text(row.get("account_last4")) or "unknown",
+                "transaction_count": self._int(row.get("transaction_count"), 0),
+                "latest_balance": self._decimal_or_none(row.get("balance")),
+                "latest_balance_at": self._date_text(row.get("latest_balance_at")),
+            }
+            for row in rows
+        ]
+
     def list_import_batches_page(
         self,
         *,
@@ -857,6 +941,13 @@ class PostgresCoreRepository:
             summary=self._text(payload.get("summary") or row.get("summary")),
             remark=self._text(payload.get("remark") or row.get("remark")),
             bank_text_fields=list(payload.get("bank_text_fields") if isinstance(payload.get("bank_text_fields"), list) else row.get("bank_text_fields") or []),
+            imported_bank_name=self._text(payload.get("imported_bank_name") or row.get("imported_bank_name") or payload.get("bank_name") or row.get("bank_name")),
+            imported_bank_last4=self._text(
+                payload.get("imported_bank_last4")
+                or row.get("imported_bank_last4")
+                or payload.get("account_last4")
+                or row.get("account_last4")
+            ),
             status=TransactionStatus(self._text(payload.get("status") or row.get("status")) or TransactionStatus.PENDING.value),
         )
 

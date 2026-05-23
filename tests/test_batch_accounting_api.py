@@ -182,6 +182,31 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.addCleanup(payload_patcher.stop)
         return app, payload_patcher
 
+    def test_unsubmitted_list_uses_sql_read_model_loader_when_available(self) -> None:
+        class SqlReadModel:
+            def __init__(self, payload: dict[str, object]) -> None:
+                self.payload = payload
+                self.calls: list[tuple[str, str]] = []
+
+            def load_batch_accounting_workbench_payload(self, *, bank_year: str, oa_year: str) -> dict[str, object]:
+                self.calls.append((bank_year, oa_year))
+                return self.payload
+
+        app = build_application()
+        sql_read_model = SqlReadModel(self._grouped_payload())
+        app._workbench_sql_read_repository = sql_read_model
+        payload_patcher = patch.object(app, "_build_api_workbench_payload", side_effect=AssertionError("full workbench loader must not run"))
+        payload_patcher.start()
+        self.addCleanup(payload_patcher.stop)
+
+        response = app.handle_request("GET", "/api/batch-accounting?bank_year=2026&oa_year=2025&bucket=unsubmitted")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual(sql_read_model.calls, [("2026", "2025")])
+        self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn_imported_202601_batch_001"])
+        self.assertEqual([row["id"] for row in payload["oa_rows"]], ["oa-exp-ba-2025", "oa-exp-ba-2025b"])
+
     def _submit_batch_mismatch_with_note(self, app: Application, *, note: str) -> dict[str, object]:
         response = app.handle_request(
             "POST",

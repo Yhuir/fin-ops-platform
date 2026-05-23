@@ -139,6 +139,9 @@ class RuntimeWorker:
             return configured
         return sorted(self._handlers)
 
+    def record_heartbeat(self, status: str, payload: dict[str, Any]) -> None:
+        self._record_heartbeat(status, payload)
+
     def _record_heartbeat(self, status: str, payload: dict[str, Any]) -> None:
         record = getattr(self._queue, "record_worker_heartbeat", None)
         if callable(record):

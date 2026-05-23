@@ -31,12 +31,14 @@ EXPECTED_MIGRATIONS = [
     "0016_runtime_outbox_envelope_fields.sql",
     "0017_rabbitmq_outbox_publish_state.sql",
     "0018_api_performance_read_model.sql",
+    "0019_import_jobs.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
     "audit.app_health_alerts",
     "job.outbox_events",
     "job.background_jobs",
+    "job.import_jobs",
     "job.workbench_matching_dirty_scopes",
     "job.read_model_dirty_scopes",
     "job.runtime_worker_heartbeats",
@@ -110,7 +112,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 19)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 20)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 

@@ -39,10 +39,12 @@ class BatchAccountingService:
         *,
         grouped_workbench_loader: Callable[[str], dict[str, Any]],
         pair_relation_service: WorkbenchPairRelationService,
+        batch_workbench_loader: Callable[[str, str], dict[str, Any] | None] | None = None,
         case_id_provider: Callable[[str], str] | None = None,
     ) -> None:
         self._grouped_workbench_loader = grouped_workbench_loader
         self._pair_relation_service = pair_relation_service
+        self._batch_workbench_loader = batch_workbench_loader
         self._case_id_provider = case_id_provider or self._default_case_id_for_bank_row
         self._mutation_lock = RLock()
 
@@ -378,7 +380,11 @@ class BatchAccountingService:
         }
 
     def _build_context(self, *, bank_year: str, oa_year: str) -> _WorkbenchContext:
-        payload = self._grouped_workbench_loader("all")
+        payload = None
+        if self._batch_workbench_loader is not None:
+            payload = self._batch_workbench_loader(bank_year=bank_year, oa_year=oa_year)
+        if not isinstance(payload, dict):
+            payload = self._grouped_workbench_loader("all")
         groups = self._groups_from_payload(payload)
         rows_by_id: dict[str, dict[str, Any]] = {}
         bank_rows: list[dict[str, Any]] = []

@@ -145,7 +145,7 @@ RabbitMQ 生产切换分四步，不能一次性把 worker 全量翻到 broker�
 1. 在 staging 配置 `FIN_OPS_TEST_DATABASE_URL` 和 `RABBITMQ_TEST_URL`，运行 RabbitMQ staging preflight。
 2. 确认生产 PostgreSQL migration 已应用到 RabbitMQ publish state 和 envelope view；缺少 `0016/0017/0018` 时不能启动生产 dispatcher。
 3. PostgreSQL polling worker 保持运行，执行 `python3 -m fin_ops_platform.app.rabbitmq_topology --apply` 创建 durable topology。该命令必须使用 topology/bootstrap 用户，不使用 dispatcher 或 worker 运行时账号。
-4. 启动 `python3 -m fin_ops_platform.app.rabbitmq_dispatcher --shadow-publish`，观察 `rabbitmq_publish_failed_backlog`、`rabbitmq_dispatcher_lag_seconds`、RabbitMQ DLQ 和 publisher confirm latency。完整 topology 覆盖 `workbench.read_model.refresh`、`search.read_model.refresh`、`pending_invoice.read_model.refresh`、`cost_statistics.read_model.refresh`、`tax_offset.read_model.refresh`、`oa.sync` 和 `file_object.gridfs_migration`；生产灰度时用 `RABBITMQ_DISPATCH_EVENT_TYPES` 控制实际发布范围。
+4. 启动 `python3 -m fin_ops_platform.app.rabbitmq_dispatcher --shadow-publish`，观察 `rabbitmq_publish_failed_backlog`、`rabbitmq_dispatcher_lag_seconds`、RabbitMQ DLQ 和 publisher confirm latency。完整 topology 覆盖 `workbench.read_model.refresh`、`search.read_model.refresh`、`pending_invoice.read_model.refresh`、`cost_statistics.read_model.refresh`、`tax_offset.read_model.refresh`、`oa.sync`、`file_object.gridfs_migration` 和 `import.process.requested`；生产灰度时用 `RABBITMQ_DISPATCH_EVENT_TYPES` 控制实际发布范围。
 5. 将一个 workbench worker 设置 `FIN_OPS_QUEUE_BACKEND=rabbitmq`，确认 RabbitMQ consumer 收到 envelope 后仍回 PostgreSQL claim/ack/fail。
 6. 稳定后增加 consumer 数量和 `RABBITMQ_PREFETCH`，保留 `FIN_OPS_QUEUE_BACKEND=postgres` 回滚配置。
 
