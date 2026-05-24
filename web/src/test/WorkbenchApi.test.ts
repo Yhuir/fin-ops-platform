@@ -9,6 +9,7 @@ import {
   previewWorkbenchException,
 } from "../features/workbench/api";
 import {
+  buildWorkbenchServerPageQuery,
   buildWorkbenchDisplayGroups,
   countWorkbenchGroupRows,
   createEmptyWorkbenchZoneDisplayState,
@@ -180,7 +181,7 @@ describe("workbench api bank amount mapping", () => {
               month: "all",
               zone: "paired",
               page: 1,
-              page_size: 50,
+              page_size: 200,
               total: 1,
               has_more: false,
               row_counts: { oa: 0, bank: 7, invoice: 0, rows: 7 },
@@ -208,7 +209,7 @@ describe("workbench api bank amount mapping", () => {
               month: "all",
               zone: "open",
               page: 1,
-              page_size: 50,
+              page_size: 200,
               total: 1,
               has_more: false,
               row_counts: { oa: 3, bank: 0, invoice: 5, rows: 8 },
@@ -244,7 +245,12 @@ describe("workbench api bank amount mapping", () => {
     expect(result.data.oaStatus.message).toBe("OA 已同步");
     expect(result.pages.open.hasMore).toBe(false);
     expect(fetchSpy.mock.calls.some(([input]) => String(input).startsWith("/api/workbench?"))).toBe(false);
-    expect(fetchSpy.mock.calls.filter(([input]) => String(input).includes("detail_level=summary"))).toHaveLength(2);
+    const groupCalls = fetchSpy.mock.calls
+      .map(([input]) => new URL(String(input), "http://localhost"))
+      .filter((url) => url.pathname === "/api/workbench/groups");
+    expect(groupCalls).toHaveLength(2);
+    expect(groupCalls.map((url) => url.searchParams.get("page_size"))).toEqual(["200", "200"]);
+    expect(groupCalls.every((url) => url.searchParams.get("detail_level") === "summary")).toBe(true);
   });
 
   test("serializes workbench group page SQL query controls", async () => {
@@ -270,6 +276,15 @@ describe("workbench api bank amount mapping", () => {
       sourceKind: "bank_transaction",
       sort: "bank:desc",
       detailLevel: "summary",
+      filtersByPaneAndColumn: {
+        bank: {
+          amount: ["支出", "建行 8106"],
+          counterparty: ["云南溯源科技有限公司"],
+        },
+      },
+      timeFilterByPane: {
+        bank: { mode: "month", month: "2026-04" },
+      },
     });
 
     const url = new URL(String(fetchSpy.mock.calls[0][0]), "http://localhost");
@@ -283,6 +298,39 @@ describe("workbench api bank amount mapping", () => {
     expect(url.searchParams.get("source_kind")).toBe("bank_transaction");
     expect(url.searchParams.get("sort")).toBe("bank:desc");
     expect(url.searchParams.get("detail_level")).toBe("summary");
+    expect(JSON.parse(url.searchParams.get("column_filters") ?? "{}")).toEqual({
+      bank: { amount: ["建行 8106", "支出"], counterparty: ["云南溯源科技有限公司"] },
+    });
+    expect(JSON.parse(url.searchParams.get("time_filters") ?? "{}")).toEqual({
+      bank: { mode: "month", month: "2026-04" },
+    });
+  });
+
+  test("builds server page query from column and time filters", () => {
+    const state = createEmptyWorkbenchZoneDisplayState();
+    state.activePaneId = "bank";
+    state.filtersByPaneAndColumn.bank = {
+      amount: ["支出", "建行 8106"],
+    };
+    state.timeFilterByPane.bank = { mode: "year", year: "2026" };
+
+    expect(buildWorkbenchServerPageQuery(state)).toEqual({
+      filtersByPaneAndColumn: {
+        bank: { amount: ["支出", "建行 8106"] },
+      },
+      timeFilterByPane: {
+        bank: { mode: "year", year: "2026" },
+      },
+    });
+  });
+
+  test("keeps server filtered summary groups without local preview exclusion", () => {
+    const state = createEmptyWorkbenchZoneDisplayState();
+    state.activePaneId = "bank";
+    state.filtersByPaneAndColumn.bank = { counterparty: ["未出现在摘要预览的供应商"] };
+    const groups = createContextSearchGroups("bank");
+
+    expect(buildWorkbenchDisplayGroups(groups, state, { serverFiltered: true })).toBe(groups);
   });
 
   test("fetches full workbench group detail for collapsed summary expansion", async () => {

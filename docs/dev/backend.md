@@ -107,12 +107,12 @@ RabbitMQ 消息体不得携带 read model payload 或页面 snapshot。回滚时
 工作台首屏读取使用拆分后的 SQL-native 契约：
 
 - `/api/workbench/summary?month=all`：返回 summary、`read_model_status`、`generated_at`，以及轻量 `oa_status`/`invoice_inventory` 状态诊断；不得返回候选组或行级快照。
-- `/api/workbench/groups?month=all&zone=open|paired&page=1&page_size=50&detail_level=summary`：从 `read_model.workbench_groups` 返回当前页 group 摘要，支持 `status`、`source_kind`、`search` 和受控排序 `sort=oa|bank|invoice:asc|desc`，排序字段来自组级 SQL sort key。`detail_level` 默认为 `full` 以兼容旧调用；前端首屏和 load-more 必须显式传 `summary`。
+- `/api/workbench/groups?month=all&zone=open|paired&page=1&page_size=200&detail_level=summary`：从 `read_model.workbench_groups` 返回当前页 group 摘要，支持 `status`、`source_kind`、`search`、受控排序 `sort=oa|bank|invoice:asc|desc`、`column_filters` 和 `time_filters`。列筛选/时间筛选通过 `read_model.workbench_group_rows` 命中 group，不读取 `workbench_snapshots` 大 JSON。`detail_level` 默认为 `full` 以兼容旧调用；前端首屏和 load-more 必须显式传 `summary`。
 - `/api/workbench/groups/detail?month=all&zone=open|paired&group_id=...`：从同一 SQL read model 返回单个 group 的完整 payload。列表页不得通过扩大 page size 或读取旧 snapshot 获取详情。
 - `/api/workbench/refresh-status`：返回 workbench dirty scopes、worker heartbeat/lag、outbox backlog、最近错误和 source version。
 - `/api/workbench` 继续支持 `month`、`page`、`page_size`、`status`、`source_kind`、`search` 作为兼容接口；前端首屏不得依赖它。
 
-`read_model.workbench_rows` 和 `read_model.workbench_groups` 是页面热路径。`read_model.workbench_snapshots.payload/raw_payload` 只用于审计、导出、对账和兼容期。Groups 接口可使用 Redis 短 TTL page cache；Redis key 必须包含 read model source version、分页、筛选、搜索、排序和 `detail_level` 参数，Redis miss 必须回 PostgreSQL read model，Redis 清空不影响正确性。`/api/workbench/summary` 和 `/api/workbench/groups` 输出 `workbench_api_metric` 结构化日志，生产指标系统按 endpoint 聚合 p95。
+`read_model.workbench_rows`、`read_model.workbench_groups` 和 `read_model.workbench_group_rows` 是页面热路径。`read_model.workbench_snapshots.payload/raw_payload` 只用于审计、导出、对账和兼容期。Groups 接口可使用 Redis 短 TTL page cache；Redis key 必须包含 read model source version、分页、列筛选、时间筛选、搜索、排序和 `detail_level` 参数，Redis miss 必须回 PostgreSQL read model，Redis 清空不影响正确性。`/api/workbench/summary` 和 `/api/workbench/groups` 输出 `workbench_api_metric` 结构化日志，生产指标系统按 endpoint 聚合 p95。
 
 成本统计 SQL read model worker：
 

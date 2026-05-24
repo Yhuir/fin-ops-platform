@@ -60,7 +60,11 @@ export function createEmptyWorkbenchZoneDisplayState(): WorkbenchZoneDisplayStat
 export function buildWorkbenchDisplayGroups(
   groups: WorkbenchCandidateGroup[],
   state: WorkbenchZoneDisplayState,
+  options: { serverFiltered?: boolean } = {},
 ): WorkbenchCandidateGroup[] {
+  if (options.serverFiltered) {
+    return groups;
+  }
   const activePaneId = resolveWorkbenchActivePane(state, state.activePaneId);
   if (!activePaneId) {
     return groups;
@@ -137,7 +141,59 @@ export function buildWorkbenchServerPageQuery(state: WorkbenchZoneDisplayState):
       query.sort = `${sortPaneId}:${direction}`;
     }
   }
+  const filtersByPaneAndColumn = normalizeServerColumnFilters(state.filtersByPaneAndColumn);
+  if (Object.keys(filtersByPaneAndColumn).length > 0) {
+    query.filtersByPaneAndColumn = filtersByPaneAndColumn;
+  }
+  const timeFilterByPane = normalizeServerTimeFilters(state.timeFilterByPane);
+  if (Object.keys(timeFilterByPane).length > 0) {
+    query.timeFilterByPane = timeFilterByPane;
+  }
   return query;
+}
+
+export function hasWorkbenchServerPageCriteria(query: WorkbenchGroupsPageQuery) {
+  return Boolean(
+    query.search
+    || query.sort
+    || (query.filtersByPaneAndColumn && Object.keys(query.filtersByPaneAndColumn).length > 0)
+    || (query.timeFilterByPane && Object.keys(query.timeFilterByPane).length > 0),
+  );
+}
+
+function normalizeServerColumnFilters(
+  filtersByPaneAndColumn: WorkbenchZoneDisplayState["filtersByPaneAndColumn"],
+): NonNullable<WorkbenchGroupsPageQuery["filtersByPaneAndColumn"]> {
+  const result: NonNullable<WorkbenchGroupsPageQuery["filtersByPaneAndColumn"]> = {};
+  workbenchPaneIds.forEach((paneId) => {
+    const paneFilters = filtersByPaneAndColumn[paneId] ?? {};
+    const cleanedEntries = Object.entries(paneFilters)
+      .map(([columnKey, selectedValues]) => [
+        columnKey,
+        Array.from(new Set(selectedValues.map((value) => value.trim()).filter(Boolean))),
+      ] as const)
+      .filter(([, selectedValues]) => selectedValues.length > 0);
+    if (cleanedEntries.length > 0) {
+      result[paneId] = Object.fromEntries(cleanedEntries);
+    }
+  });
+  return result;
+}
+
+function normalizeServerTimeFilters(
+  timeFilterByPane: WorkbenchZoneDisplayState["timeFilterByPane"],
+): NonNullable<WorkbenchGroupsPageQuery["timeFilterByPane"]> {
+  const result: NonNullable<WorkbenchGroupsPageQuery["timeFilterByPane"]> = {};
+  workbenchPaneIds.forEach((paneId) => {
+    const filter = timeFilterByPane[paneId] ?? { mode: "none" };
+    if (filter.mode === "year" && filter.year.trim()) {
+      result[paneId] = { mode: "year", year: filter.year.trim() };
+    }
+    if (filter.mode === "month" && filter.month.trim()) {
+      result[paneId] = { mode: "month", month: filter.month.trim() };
+    }
+  });
+  return result;
 }
 
 export function countWorkbenchGroupRows(group: WorkbenchCandidateGroup): number {

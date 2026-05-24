@@ -1976,6 +1976,283 @@ function groupHasDanger(group: {
   });
 }
 
+type MockWorkbenchGroup = ReturnType<typeof buildGroups>[number];
+type MockWorkbenchJsonParam = Record<string, unknown>;
+
+const MOCK_WORKBENCH_PANES: RawWorkbenchPaneKey[] = ["oa", "bank", "invoice"];
+
+function parseWorkbenchGroupJsonParam(value: string | null): MockWorkbenchJsonParam {
+  if (!value) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as MockWorkbenchJsonParam
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function countMockWorkbenchRows(groups: MockWorkbenchGroup[]) {
+  const counts = { oa: 0, bank: 0, invoice: 0, rows: 0 };
+  groups.forEach((group) => {
+    counts.oa += group.oa_rows.length;
+    counts.bank += group.bank_rows.length;
+    counts.invoice += group.invoice_rows.length;
+  });
+  counts.rows = counts.oa + counts.bank + counts.invoice;
+  return counts;
+}
+
+function mockWorkbenchGroupMatchesQuery(
+  group: MockWorkbenchGroup,
+  search: string,
+  columnFilters: MockWorkbenchJsonParam,
+  timeFilters: MockWorkbenchJsonParam,
+) {
+  const normalizedSearch = normalizeMockWorkbenchText(search);
+  if (normalizedSearch && !normalizeMockWorkbenchText(mockWorkbenchSearchText(group)).includes(normalizedSearch)) {
+    return false;
+  }
+
+  return mockWorkbenchGroupMatchesStructuredFilters(group, columnFilters, timeFilters);
+}
+
+function mockWorkbenchGroupMatchesStructuredFilters(
+  group: MockWorkbenchGroup,
+  columnFilters: MockWorkbenchJsonParam,
+  timeFilters: MockWorkbenchJsonParam,
+) {
+  const activePanes = MOCK_WORKBENCH_PANES.filter((pane) => {
+    const paneColumns = columnFilters[pane];
+    const paneTime = timeFilters[pane];
+    return (
+      (paneColumns && typeof paneColumns === "object" && !Array.isArray(paneColumns) && Object.keys(paneColumns).length > 0)
+      || (paneTime && typeof paneTime === "object" && !Array.isArray(paneTime))
+    );
+  });
+
+  if (activePanes.length === 0) {
+    return true;
+  }
+
+  return activePanes.some((pane) =>
+    groupRowsForMockPane(group, pane).some((row) =>
+      mockWorkbenchRowMatchesPaneFilters(row, pane, columnFilters[pane], timeFilters[pane]),
+    ),
+  );
+}
+
+function mockWorkbenchRowMatchesPaneFilters(
+  row: Record<string, unknown>,
+  pane: RawWorkbenchPaneKey,
+  rawColumnFilters: unknown,
+  rawTimeFilter: unknown,
+) {
+  if (rawColumnFilters && typeof rawColumnFilters === "object" && !Array.isArray(rawColumnFilters)) {
+    for (const [columnKey, rawValues] of Object.entries(rawColumnFilters)) {
+      const selectedValues = normalizeMockWorkbenchSelectedValues(rawValues);
+      if (selectedValues.length === 0) {
+        continue;
+      }
+      const rowValues = mockWorkbenchColumnValues(row, pane, columnKey);
+      if (!rowValues.some((value) => selectedValues.includes(value))) {
+        return false;
+      }
+    }
+  }
+
+  if (rawTimeFilter && typeof rawTimeFilter === "object" && !Array.isArray(rawTimeFilter)) {
+    const timeFilter = rawTimeFilter as Record<string, unknown>;
+    const timeValue = String(mockWorkbenchTimeValue(row, pane) ?? "").trim();
+    if (!mockWorkbenchTimeMatches(timeValue, timeFilter)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function normalizeMockWorkbenchSelectedValues(value: unknown) {
+  const values = Array.isArray(value) ? value : [value];
+  return values
+    .map((item) => String(item ?? "").trim())
+    .filter((item) => item && item !== "--" && item !== "—");
+}
+
+function mockWorkbenchColumnValues(row: Record<string, unknown>, pane: RawWorkbenchPaneKey, columnKey: string) {
+  if (pane === "bank" && columnKey === "amount") {
+    return [mockWorkbenchBankDirection(row), stringValue(row.payment_account_label)].filter(Boolean);
+  }
+
+  const valueByColumn: Record<string, string> = pane === "oa"
+    ? {
+      applicant: stringValue(row.applicant),
+      projectName: stringValue(row.project_name_display) || stringValue(row.project_name),
+      applicationType: stringValue(row.apply_type),
+      counterparty: stringValue(row.counterparty_name),
+      reconciliationStatus: mockWorkbenchRelationLabel(row, "oa"),
+    }
+    : pane === "bank"
+      ? {
+        counterparty: stringValue(row.counterparty_name),
+        direction: mockWorkbenchBankDirection(row),
+        paymentAccount: stringValue(row.payment_account_label),
+        invoiceRelationStatus: mockWorkbenchRelationLabel(row, "bank"),
+        loanRepaymentDate: stringValue(row.repayment_date),
+      }
+      : {
+        sellerName: stringValue(row.seller_name),
+        buyerName: stringValue(row.buyer_name),
+        invoiceType: stringValue(row.invoice_type),
+      };
+
+  const value = valueByColumn[columnKey];
+  return value ? [value] : [];
+}
+
+function mockWorkbenchRelationLabel(row: Record<string, unknown>, pane: RawWorkbenchPaneKey) {
+  const relation = pane === "oa"
+    ? row.oa_bank_relation
+    : pane === "bank"
+      ? row.invoice_relation
+      : row.invoice_bank_relation;
+  return relation && typeof relation === "object" ? stringValue((relation as Record<string, unknown>).label) : "待处理";
+}
+
+function mockWorkbenchBankDirection(row: Record<string, unknown>) {
+  const explicit = stringValue(row.direction);
+  if (explicit === "支出" || explicit === "收入") {
+    return explicit;
+  }
+  if (stringValue(row.debit_amount)) {
+    return "支出";
+  }
+  if (stringValue(row.credit_amount)) {
+    return "收入";
+  }
+  return "未识别";
+}
+
+function mockWorkbenchTimeMatches(timeValue: string, timeFilter: Record<string, unknown>) {
+  if (!timeValue) {
+    return false;
+  }
+  const mode = String(timeFilter.mode ?? "").trim();
+  if (mode === "year") {
+    const year = String(timeFilter.year ?? "").trim();
+    return /^\d{4}$/.test(year) && timeValue.startsWith(year);
+  }
+  if (mode === "month") {
+    const month = String(timeFilter.month ?? "").trim();
+    return /^\d{4}-\d{2}$/.test(month) && timeValue.startsWith(month);
+  }
+  return true;
+}
+
+function mockWorkbenchTimeValue(row: Record<string, unknown>, pane: RawWorkbenchPaneKey) {
+  if (pane === "oa") {
+    const detailFields = objectValue(row.detail_fields);
+    const summaryFields = objectValue(row.summary_fields);
+    return (
+      detailFields["审批完成时间"]
+      ?? detailFields["申请日期"]
+      ?? detailFields["创建时间"]
+      ?? summaryFields["审批完成时间"]
+      ?? summaryFields["申请日期"]
+      ?? summaryFields["创建时间"]
+    );
+  }
+  if (pane === "bank") {
+    return row.trade_time;
+  }
+  return row.issue_date;
+}
+
+function sortMockWorkbenchGroups(groups: MockWorkbenchGroup[], sort: string) {
+  const [pane, direction] = sort.split(":") as [RawWorkbenchPaneKey | undefined, string | undefined];
+  if (!pane || !MOCK_WORKBENCH_PANES.includes(pane) || (direction !== "asc" && direction !== "desc")) {
+    return groups;
+  }
+
+  return [...groups].sort((left, right) => {
+    const leftKey = mockWorkbenchGroupSortKey(left, pane, direction);
+    const rightKey = mockWorkbenchGroupSortKey(right, pane, direction);
+    if (!leftKey && !rightKey) {
+      return 0;
+    }
+    if (!leftKey) {
+      return 1;
+    }
+    if (!rightKey) {
+      return -1;
+    }
+    const comparison = leftKey.localeCompare(rightKey, "zh-CN");
+    return direction === "asc" ? comparison : -comparison;
+  });
+}
+
+function mockWorkbenchGroupSortKey(group: MockWorkbenchGroup, pane: RawWorkbenchPaneKey, direction: "asc" | "desc") {
+  const values = groupRowsForMockPane(group, pane)
+    .map((row) => String(mockWorkbenchTimeValue(row, pane) ?? "").trim())
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right, "zh-CN"));
+  if (values.length === 0) {
+    return null;
+  }
+  return direction === "asc" ? values[0] : values[values.length - 1];
+}
+
+function groupRowsForMockPane(group: MockWorkbenchGroup, pane: RawWorkbenchPaneKey) {
+  if (pane === "oa") {
+    return group.oa_rows;
+  }
+  if (pane === "bank") {
+    return group.bank_rows;
+  }
+  return group.invoice_rows;
+}
+
+function mockWorkbenchSearchText(group: MockWorkbenchGroup) {
+  return [
+    group.group_id,
+    group.group_type,
+    group.reason,
+    ...MOCK_WORKBENCH_PANES.flatMap((pane) => groupRowsForMockPane(group, pane).map(mockWorkbenchRowSearchText)),
+  ].join(" ");
+}
+
+function mockWorkbenchRowSearchText(row: Record<string, unknown>) {
+  return flattenMockWorkbenchText(row).join(" ");
+}
+
+function flattenMockWorkbenchText(value: unknown): string[] {
+  if (value === null || value === undefined) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(flattenMockWorkbenchText);
+  }
+  if (typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).flatMap(flattenMockWorkbenchText);
+  }
+  return [String(value)];
+}
+
+function normalizeMockWorkbenchText(value: string) {
+  return value.replace(/\s+/g, "").trim().toLowerCase();
+}
+
+function stringValue(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
 const WORKBENCH_STATE_MONTHS = ["2026-03", "2026-04"] as const;
 
 function createWorkbenchStateStore() {
@@ -4202,8 +4479,16 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
       const pageSize = Math.max(1, Number(url.searchParams.get("page_size") ?? "50") || 50);
       const payload = toGroupedWorkbenchPayload(cloneJson(workbenchStateStore.get(month)), options.workbenchOaStatus);
-      const groups = payload[zone].groups;
+      const search = String(url.searchParams.get("search") ?? "").trim();
+      const sort = String(url.searchParams.get("sort") ?? "").trim();
+      const columnFilters = parseWorkbenchGroupJsonParam(url.searchParams.get("column_filters"));
+      const timeFilters = parseWorkbenchGroupJsonParam(url.searchParams.get("time_filters"));
+      const groups = sortMockWorkbenchGroups(
+        payload[zone].groups.filter((group) => mockWorkbenchGroupMatchesQuery(group, search, columnFilters, timeFilters)),
+        sort,
+      );
       const offset = (page - 1) * pageSize;
+      const rowCounts = countMockWorkbenchRows(groups);
       return {
         body: {
           month: payload.month,
@@ -4211,6 +4496,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           page,
           page_size: pageSize,
           total: groups.length,
+          row_counts: rowCounts,
           has_more: offset + pageSize < groups.length,
           groups: groups.slice(offset, offset + pageSize),
           read_model_status: "fresh",

@@ -824,33 +824,41 @@ describe("Workbench candidate grouping layout", () => {
 
     fireEvent.click(within(openBankPane).getByRole("button", { name: "银行流水按时间降序" }));
 
-    const openDescOrder = getZoneGroupOrder(openZone);
-    expect(openDescOrder.indexOf("candidate-group-open-case:CASE-202604-101")).toBeLessThan(
-      openDescOrder.indexOf("candidate-group-open-case:CASE-202603-101"),
-    );
-    expect(openDescOrder.indexOf("candidate-group-open-row:oa-o-202603-002")).toBeGreaterThan(
-      openDescOrder.indexOf("candidate-group-open-case:CASE-202603-101"),
-    );
+    await waitFor(() => {
+      const openDescOrder = getZoneGroupOrder(openZone);
+      expect(openDescOrder.indexOf("candidate-group-open-case:CASE-202604-101")).toBeLessThan(
+        openDescOrder.indexOf("candidate-group-open-case:CASE-202603-101"),
+      );
+      expect(openDescOrder.indexOf("candidate-group-open-row:oa-o-202603-002")).toBeGreaterThan(
+        openDescOrder.indexOf("candidate-group-open-case:CASE-202603-101"),
+      );
+    });
 
     fireEvent.click(within(openBankPane).getByRole("button", { name: "银行流水按时间升序" }));
 
-    const openAscOrder = getZoneGroupOrder(openZone);
-    expect(openAscOrder.indexOf("candidate-group-open-case:CASE-202603-101")).toBeLessThan(
-      openAscOrder.indexOf("candidate-group-open-case:CASE-202604-101"),
-    );
+    await waitFor(() => {
+      const openAscOrder = getZoneGroupOrder(openZone);
+      expect(openAscOrder.indexOf("candidate-group-open-case:CASE-202603-101")).toBeLessThan(
+        openAscOrder.indexOf("candidate-group-open-case:CASE-202604-101"),
+      );
+    });
 
     fireEvent.click(within(pairedInvoicePane).getByRole("button", { name: "进销项发票按时间降序" }));
 
-    const pairedDescOrder = getZoneGroupOrder(pairedZone);
-    expect(pairedDescOrder.indexOf("candidate-group-paired-case:CASE-202604-001")).toBeLessThan(
-      pairedDescOrder.indexOf("candidate-group-paired-case:CASE-202603-001"),
-    );
+    await waitFor(() => {
+      const pairedDescOrder = getZoneGroupOrder(pairedZone);
+      expect(pairedDescOrder.indexOf("candidate-group-paired-case:CASE-202604-001")).toBeLessThan(
+        pairedDescOrder.indexOf("candidate-group-paired-case:CASE-202603-001"),
+      );
+    });
 
     fireEvent.click(within(pairedInvoicePane).getByRole("button", { name: "进销项发票按时间升序" }));
 
-    const pairedAscOrder = getZoneGroupOrder(pairedZone);
-    expect(pairedAscOrder.indexOf("candidate-group-paired-case:CASE-202603-001")).toBeLessThan(
-      pairedAscOrder.indexOf("candidate-group-paired-case:CASE-202604-001"),
-    );
+    await waitFor(() => {
+      const pairedAscOrder = getZoneGroupOrder(pairedZone);
+      expect(pairedAscOrder.indexOf("candidate-group-paired-case:CASE-202603-001")).toBeLessThan(
+        pairedAscOrder.indexOf("candidate-group-paired-case:CASE-202604-001"),
+      );
+    });
   });
 });

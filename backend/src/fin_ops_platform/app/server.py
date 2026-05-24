@@ -890,6 +890,8 @@ class Application:
                 search=query.get("search", [None])[0],
                 sort=query.get("sort", [None])[0],
                 detail_level=query.get("detail_level", [None])[0],
+                column_filters=query.get("column_filters", [None])[0],
+                time_filters=query.get("time_filters", [None])[0],
             )
             self._emit_workbench_api_metric(
                 endpoint="/api/workbench/groups",
@@ -1681,6 +1683,8 @@ class Application:
         search: str | None = None,
         sort: str | None = None,
         detail_level: str | None = None,
+        column_filters: str | None = None,
+        time_filters: str | None = None,
     ) -> Response:
         current_month = month or "all"
         normalized_zone = str(zone or "").strip()
@@ -1690,6 +1694,14 @@ class Application:
                 {"error": "invalid_workbench_zone", "message": "zone must be open or paired."},
             )
         normalized_detail_level = self._normalize_workbench_group_detail_level(detail_level)
+        try:
+            normalized_column_filters = self._normalize_workbench_group_json_query_param(column_filters, "column_filters")
+            normalized_time_filters = self._normalize_workbench_group_json_query_param(time_filters, "time_filters")
+        except ValueError as error:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_workbench_groups_query", "message": str(error)},
+            )
         repository = getattr(self, "_workbench_sql_read_repository", None)
         get_groups_page = getattr(repository, "get_workbench_groups_page", None)
         scope_key = self._workbench_read_model_scope_key(current_month)
@@ -1726,6 +1738,8 @@ class Application:
             search=search,
             sort=sort,
             detail_level=normalized_detail_level,
+            column_filters=normalized_column_filters,
+            time_filters=normalized_time_filters,
         )
         if cache_key and callable(get_cached):
             cached = get_cached(cache_key)
@@ -1746,6 +1760,8 @@ class Application:
                 search=search,
                 sort=sort,
                 detail_level=normalized_detail_level,
+                column_filters=normalized_column_filters,
+                time_filters=normalized_time_filters,
             )
         if cache_key and callable(get_cached):
             if callable(set_text):
@@ -1769,6 +1785,8 @@ class Application:
                 search=search,
                 sort=sort,
                 detail_level=normalized_detail_level,
+                column_filters=normalized_column_filters,
+                time_filters=normalized_time_filters,
             )
         except Exception as error:
             if self._is_missing_workbench_groups_read_model_error(error):
@@ -1946,6 +1964,8 @@ class Application:
         search: str | None,
         sort: str | None,
         detail_level: str | None,
+        column_filters: dict[str, object] | None = None,
+        time_filters: dict[str, object] | None = None,
     ) -> str | None:
         cache_version_loader = getattr(repository, "workbench_groups_cache_version", None)
         if not callable(cache_version_loader):
@@ -1963,6 +1983,9 @@ class Application:
             "search": search or "",
             "sort": sort or "",
             "detail_level": self._normalize_workbench_group_detail_level(detail_level),
+            "column_filters": self._stable_json_value(column_filters or {}),
+            "time_filters": self._stable_json_value(time_filters or {}),
+            "filter_semantics": "row_any_pane_v1",
         }
         digest = hashlib.sha256(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
         return f"workbench:{cache_version}:groups:{digest}"
@@ -1992,6 +2015,8 @@ class Application:
         search: str | None,
         sort: str | None,
         detail_level: str | None,
+        column_filters: dict[str, object] | None = None,
+        time_filters: dict[str, object] | None = None,
     ) -> str | None:
         if not cache_version:
             return None
@@ -2005,9 +2030,40 @@ class Application:
             "search": search or "",
             "sort": sort or "",
             "detail_level": self._normalize_workbench_group_detail_level(detail_level),
+            "column_filters": self._stable_json_value(column_filters or {}),
+            "time_filters": self._stable_json_value(time_filters or {}),
+            "filter_semantics": "row_any_pane_v1",
         }
         digest = hashlib.sha256(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
         return f"workbench:{cache_version}:groups:{digest}"
+
+    @staticmethod
+    def _normalize_workbench_group_json_query_param(value: str | None, name: str) -> dict[str, object]:
+        raw_value = str(value or "").strip()
+        if not raw_value:
+            return {}
+        try:
+            parsed = json.loads(raw_value)
+        except json.JSONDecodeError as error:
+            raise ValueError(f"{name} must be valid JSON object.") from error
+        if not isinstance(parsed, dict):
+            raise ValueError(f"{name} must be a JSON object.")
+        return Application._stable_json_value(parsed)
+
+    @staticmethod
+    def _stable_json_value(value: object) -> object:
+        if isinstance(value, dict):
+            return {
+                str(key): Application._stable_json_value(value[key])
+                for key in sorted(value, key=lambda item: str(item))
+                if value[key] is not None
+            }
+        if isinstance(value, list):
+            normalized_items = [Application._stable_json_value(item) for item in value]
+            if all(not isinstance(item, (dict, list)) for item in normalized_items):
+                return sorted(normalized_items, key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True))
+            return normalized_items
+        return value
 
     @staticmethod
     def _normalize_workbench_group_detail_level(detail_level: str | None) -> str:

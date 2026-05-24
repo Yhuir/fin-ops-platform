@@ -652,6 +652,31 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             )
         )
 
+    def test_repository_filters_workbench_groups_page_from_structured_group_rows(self) -> None:
+        connection = WorkbenchSummaryGroupsConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.get_workbench_groups_page(
+            scope_key="all",
+            zone="open",
+            page=1,
+            page_size=25,
+            column_filters={
+                "bank": {
+                    "amount": ["支出", "建行 8106"],
+                    "counterparty": ["云南溯源科技有限公司"],
+                }
+            },
+            time_filters={"bank": {"mode": "month", "month": "2026-04"}},
+        )
+
+        all_queries = [*connection.fetch_one_calls, *connection.fetch_all_calls]
+        group_row_queries = [(sql, params) for sql, params in all_queries if "read_model.workbench_group_rows" in sql]
+        self.assertTrue(group_row_queries)
+        self.assertTrue(any("column_values @> %s::jsonb" in sql for sql, _params in group_row_queries))
+        self.assertTrue(any("time_date >= %s::date and r.time_date < %s::date" in sql for sql, _params in group_row_queries))
+        self.assertTrue(any('"direction": "支出"' in str(params) and "2026-04-01" in str(params) for _sql, params in group_row_queries))
+
     def test_repository_reads_all_scope_groups_from_materialized_all_groups(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()
         repository = PostgresReadModelRepository(connection)
@@ -779,7 +804,9 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         sql = "\n".join(statement for statement, _params in connection.executed)
         self.assertIn("delete from read_model.workbench_groups", sql)
+        self.assertIn("delete from read_model.workbench_group_rows", sql)
         self.assertIn("insert into read_model.workbench_groups", sql)
+        self.assertIn("insert into read_model.workbench_group_rows", sql)
         self.assertIn("insert into read_model.workbench_summary", sql)
 
     def test_repository_rebuilds_all_scope_from_month_group_shards(self) -> None:
@@ -986,6 +1013,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             search="供应商",
             sort="bank:desc",
             detail_level="summary",
+            column_filters='{"bank":{"amount":["支出"]}}',
+            time_filters='{"bank":{"mode":"month","month":"2026-04"}}',
         )
         payload = json.loads(response.body)
 
@@ -1004,6 +1033,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                     "search": "供应商",
                     "sort": "bank:desc",
                     "detail_level": "summary",
+                    "column_filters": {"bank": {"amount": ["支出"]}},
+                    "time_filters": {"bank": {"mode": "month", "month": "2026-04"}},
                 }
             ],
         )
@@ -1113,6 +1144,38 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(len(redis.set_json_calls), 2)
         self.assertNotEqual(redis.set_json_calls[0][0], redis.set_json_calls[1][0])
+
+    def test_workbench_groups_api_redis_cache_key_includes_canonical_filters(self) -> None:
+        app = object.__new__(Application)
+
+        base_kwargs = {
+            "cache_version": "v7",
+            "scope_key": "all",
+            "zone": "open",
+            "page": "1",
+            "page_size": "200",
+            "status": None,
+            "source_kind": None,
+            "search": None,
+            "sort": None,
+            "detail_level": "summary",
+            "time_filters": {"bank": {"mode": "month", "month": "2026-04"}},
+        }
+        key_a = app._workbench_groups_redis_cache_key_from_version(
+            **base_kwargs,
+            column_filters={"bank": {"amount": ["支出", "建行 8106"]}},
+        )
+        key_b = app._workbench_groups_redis_cache_key_from_version(
+            **base_kwargs,
+            column_filters={"bank": {"amount": ["建行 8106", "支出"]}},
+        )
+        key_c = app._workbench_groups_redis_cache_key_from_version(
+            **base_kwargs,
+            column_filters={"bank": {"amount": ["收入"]}},
+        )
+
+        self.assertEqual(key_a, key_b)
+        self.assertNotEqual(key_a, key_c)
 
     def test_workbench_groups_api_reports_missing_groups_table_as_unavailable(self) -> None:
         app = object.__new__(Application)

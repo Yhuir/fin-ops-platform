@@ -5,7 +5,7 @@ import {
   createEmptyWorkbenchZoneDisplayState,
 } from "../features/workbench/groupDisplayModel";
 import type { WorkbenchCandidateGroup, WorkbenchRecord, WorkbenchRecordType } from "../features/workbench/types";
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 
 import { installMockApiFetch } from "./apiMock";
 import { renderWorkbenchPage } from "./renderHelpers";
@@ -229,7 +229,9 @@ describe("Workbench pane display model", () => {
     expect(within(openOaPane).getByRole("button", { name: "收起搜索 OA" })).toHaveClass("pane-search-toggle-btn", "fixed");
     fireEvent.change(oaSearchInput, { target: { value: "陈涛" } });
 
-    expect(within(openZone).queryByTestId("candidate-group-open-row:oa-o-202603-002")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(openZone).queryByTestId("candidate-group-open-row:oa-o-202603-002")).not.toBeInTheDocument();
+    });
     expect(within(openZone).getAllByText((content) => content.includes("智能工厂设备商")).length).toBeGreaterThan(1);
     expect(oaSearchInput.closest(".pane-search-field")).not.toBeNull();
     expect(within(openOaPane).getByRole("button", { name: "收起搜索 OA" })).toHaveClass("pane-search-toggle-btn", "fixed");
@@ -255,7 +257,9 @@ describe("Workbench pane display model", () => {
     fireEvent.click(within(openOaPane).getByRole("button", { name: "搜索 OA，当前关键词 陈涛" }));
     expect(within(openOaPane).getByRole("searchbox", { name: "搜索 OA" })).toBeInTheDocument();
     fireEvent.click(within(openOaPane).getByRole("button", { name: "清空搜索 OA" }));
-    expect(within(openZone).getByTestId("candidate-group-open-row:oa-o-202603-002")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(openZone).getByTestId("candidate-group-open-row:oa-o-202603-002")).toBeInTheDocument();
+    });
     expect(within(openOaPane).getByRole("searchbox", { name: "搜索 OA" })).toHaveValue("");
     expect(within(openOaPane).getByRole("button", { name: "收起搜索 OA" })).toBeInTheDocument();
 
@@ -276,15 +280,22 @@ describe("Workbench pane display model", () => {
     const menu = screen.getByRole("dialog", { name: "筛选 申请人" });
     fireEvent.click(within(menu).getByLabelText("陈涛"));
 
-    expect(within(openZone).getAllByText("陈涛").length).toBeGreaterThan(0);
-    expect(within(openZone).queryByTestId("candidate-group-open-row:oa-o-202603-002")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(openZone).getAllByText("陈涛").length).toBeGreaterThan(0);
+      expect(within(openZone).queryByTestId("candidate-group-open-row:oa-o-202603-002")).not.toBeInTheDocument();
+    });
 
     fireEvent.click(within(menu).getByRole("button", { name: "全选" }));
-    expect(within(openZone).getByTestId("candidate-group-open-row:oa-o-202603-002")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(openZone).getAllByText("陈涛").length).toBeGreaterThan(0);
+      expect(within(openZone).queryByTestId("candidate-group-open-row:oa-o-202603-002")).not.toBeInTheDocument();
+    });
 
     fireEvent.click(within(menu).getByRole("button", { name: "清空" }));
-    expect(within(openZone).getAllByText("陈涛").length).toBeGreaterThan(0);
-    expect(within(openZone).getByTestId("candidate-group-open-row:oa-o-202603-002")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(openZone).getAllByText("陈涛").length).toBeGreaterThan(0);
+      expect(within(openZone).getByTestId("candidate-group-open-row:oa-o-202603-002")).toBeInTheDocument();
+    });
   });
 
   test("uses direction and payment account options for the bank amount filter instead of raw amounts", () => {

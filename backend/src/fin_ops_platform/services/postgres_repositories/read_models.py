@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from decimal import Decimal, InvalidOperation
+import json
 import re
 from typing import Any
 
@@ -20,6 +21,13 @@ from fin_ops_platform.services.postgres_repositories.common import (
 )
 
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
+WORKBENCH_PANES = ("oa", "bank", "invoice")
+WORKBENCH_FILTER_PLACEHOLDERS = {"", "--", "—"}
+WORKBENCH_ALLOWED_FILTER_COLUMNS = {
+    "oa": {"applicant", "projectName", "applicationType", "counterparty", "reconciliationStatus"},
+    "bank": {"counterparty", "amount", "direction", "paymentAccount", "invoiceRelationStatus", "loanRepaymentDate"},
+    "invoice": {"sellerName", "buyerName", "invoiceType"},
+}
 _TAX_OFFSET_ITEM_TYPES = {
     "output_items": "output",
     "input_plan_items": "input_plan",
@@ -678,6 +686,8 @@ class PostgresReadModelRepository:
         search: str | None = None,
         sort: str | None = None,
         detail_level: str | None = None,
+        column_filters: Any = None,
+        time_filters: Any = None,
     ) -> dict[str, Any]:
         normalized_scope_key = str(scope_key or "").strip() or "all"
         normalized_zone = str(zone or "").strip()
@@ -686,24 +696,33 @@ class PostgresReadModelRepository:
         normalized_page_size = min(200, max(1, int_value(page_size, 50)))
         offset = (normalized_page - 1) * normalized_page_size
         scope_where, scope_params = self._workbench_scope_filter(normalized_scope_key)
-        clauses = [scope_where, "zone = %s"]
+        normalized_column_filters = _normalize_workbench_column_filters(column_filters)
+        normalized_time_filters = _normalize_workbench_time_filters(time_filters)
+        clauses = [f"g.{scope_where}", "g.zone = %s"]
         params = [*scope_params, normalized_zone]
         if normalized := text(status):
-            clauses.append("status = %s")
+            clauses.append("g.status = %s")
             params.append(normalized)
         if normalized := text(source_kind):
-            clauses.append("%s = any(source_kinds)")
+            clauses.append("%s = any(g.source_kinds)")
             params.append(normalized)
         if normalized := text(search):
-            clauses.append("(searchable_text ilike %s or group_id ilike %s)")
+            clauses.append("(g.searchable_text ilike %s or g.group_id ilike %s)")
             pattern = f"%{normalized}%"
             params.extend([pattern, pattern])
+        row_filter_sql, row_filter_params = _workbench_group_row_filter_exists_sql(
+            column_filters=normalized_column_filters,
+            time_filters=normalized_time_filters,
+        )
+        if row_filter_sql:
+            clauses.append(row_filter_sql)
+            params.extend(row_filter_params)
         where_sql = " and ".join(clauses)
         order_by_sql = _workbench_groups_order_by(sort)
         count_row = self._connection.fetch_one(
             f"""
             select count(*) as total_count
-            from read_model.workbench_groups
+            from read_model.workbench_groups g
             where {where_sql}
             """,
             tuple(params),
@@ -729,7 +748,7 @@ class PostgresReadModelRepository:
                         else 0
                     end
                 ), 0)::bigint as invoice_count
-            from read_model.workbench_groups
+            from read_model.workbench_groups g
             where {where_sql}
             """,
             tuple(params),
@@ -738,7 +757,7 @@ class PostgresReadModelRepository:
         rows = self._connection.fetch_all(
             f"""
             select group_id, zone, payload, raw_payload
-            from read_model.workbench_groups
+            from read_model.workbench_groups g
             where {where_sql}
             order by {order_by_sql}
             limit %s offset %s
@@ -1105,6 +1124,10 @@ class PostgresReadModelRepository:
                         (scope_key,),
                     )
                     connection.execute(
+                        "delete from read_model.workbench_group_rows where scope_key = %s",
+                        (scope_key,),
+                    )
+                    connection.execute(
                         "delete from read_model.workbench_summary where scope_key = %s",
                         (scope_key,),
                     )
@@ -1169,6 +1192,7 @@ class PostgresReadModelRepository:
                 )
                 connection.execute("delete from read_model.workbench_rows where scope_key = %s", (scope_key,))
                 connection.execute("delete from read_model.workbench_groups where scope_key = %s", (scope_key,))
+                connection.execute("delete from read_model.workbench_group_rows where scope_key = %s", (scope_key,))
                 connection.execute(
                     """
                     insert into read_model.workbench_summary(
@@ -1302,6 +1326,56 @@ class PostgresReadModelRepository:
                             jsonb({"normalized_payload": group}),
                         ),
                     )
+                    for group_row in _workbench_group_row_records(_workbench_group_payload_for_rows(group)):
+                        connection.execute(
+                            """
+                            insert into read_model.workbench_group_rows(
+                                scope_key, scope_month, zone, group_id, pane, row_id, row_role, row_index,
+                                source_kind, status, time_value, time_date, column_values, searchable_text,
+                                source_versions, generated_at, cache_status, payload, raw_payload
+                            )
+                            values (
+                                %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::date, %s, %s,
+                                %s, coalesce(%s::timestamptz, now()), %s, %s, %s
+                            )
+                            on conflict (scope_key, zone, group_id, pane, row_role, row_id) do update set
+                                scope_month = excluded.scope_month,
+                                row_index = excluded.row_index,
+                                source_kind = excluded.source_kind,
+                                status = excluded.status,
+                                time_value = excluded.time_value,
+                                time_date = excluded.time_date,
+                                column_values = excluded.column_values,
+                                searchable_text = excluded.searchable_text,
+                                source_versions = excluded.source_versions,
+                                generated_at = excluded.generated_at,
+                                cache_status = excluded.cache_status,
+                                payload = excluded.payload,
+                                raw_payload = excluded.raw_payload,
+                                updated_at = now()
+                            """,
+                            (
+                                scope_key,
+                                month_start(group.get("scope_month") or group.get("month") or scope_month),
+                                text(group_row.get("zone")) or text(group.get("zone")) or "open",
+                                group_id,
+                                text(group_row.get("pane")) or "",
+                                text(group_row.get("row_id")) or "",
+                                text(group_row.get("row_role")) or "normal",
+                                int_value(group_row.get("row_index"), 0),
+                                text(group_row.get("source_kind")) or "workbench_row",
+                                text(group_row.get("status")) or text(group.get("status")) or "open",
+                                text(group_row.get("time_value")),
+                                text(group_row.get("time_date")),
+                                jsonb(group_row.get("column_values") if isinstance(group_row.get("column_values"), dict) else {}),
+                                text(group_row.get("searchable_text")) or "",
+                                jsonb(source_versions),
+                                generated_at,
+                                cache_status,
+                                jsonb(group_row.get("payload") if isinstance(group_row.get("payload"), dict) else group_row),
+                                jsonb({"normalized_payload": group_row}),
+                            ),
+                        )
             if refresh_all_scope:
                 self._refresh_workbench_all_scope_from_month_shards(connection)
 
@@ -1356,6 +1430,7 @@ class PostgresReadModelRepository:
 
         connection.execute("delete from read_model.workbench_rows where scope_key = 'all'")
         connection.execute("delete from read_model.workbench_groups where scope_key = 'all'")
+        connection.execute("delete from read_model.workbench_group_rows where scope_key = 'all'")
         connection.execute("delete from read_model.workbench_summary where scope_key = 'all'")
         connection.execute("delete from read_model.workbench_snapshots where scope_key = 'all'")
         connection.execute(
@@ -1497,6 +1572,53 @@ class PostgresReadModelRepository:
                     jsonb({"normalized_payload": group}),
                 ),
             )
+            for group_row in _workbench_group_row_records(_workbench_group_payload_for_rows(group)):
+                connection.execute(
+                    """
+                    insert into read_model.workbench_group_rows(
+                        scope_key, scope_month, zone, group_id, pane, row_id, row_role, row_index,
+                        source_kind, status, time_value, time_date, column_values, searchable_text,
+                        source_versions, generated_at, cache_status, payload, raw_payload
+                    )
+                    values (
+                        'all', null, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::date, %s, %s,
+                        %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s
+                    )
+                    on conflict (scope_key, zone, group_id, pane, row_role, row_id) do update set
+                        scope_month = excluded.scope_month,
+                        row_index = excluded.row_index,
+                        source_kind = excluded.source_kind,
+                        status = excluded.status,
+                        time_value = excluded.time_value,
+                        time_date = excluded.time_date,
+                        column_values = excluded.column_values,
+                        searchable_text = excluded.searchable_text,
+                        source_versions = excluded.source_versions,
+                        generated_at = excluded.generated_at,
+                        cache_status = excluded.cache_status,
+                        payload = excluded.payload,
+                        raw_payload = excluded.raw_payload,
+                        updated_at = now()
+                    """,
+                    (
+                        text(group_row.get("zone")) or text(group.get("zone")) or "open",
+                        group_id,
+                        text(group_row.get("pane")) or "",
+                        text(group_row.get("row_id")) or "",
+                        text(group_row.get("row_role")) or "normal",
+                        int_value(group_row.get("row_index"), 0),
+                        text(group_row.get("source_kind")) or "workbench_row",
+                        text(group_row.get("status")) or text(group.get("status")) or "open",
+                        text(group_row.get("time_value")),
+                        text(group_row.get("time_date")),
+                        jsonb(group_row.get("column_values") if isinstance(group_row.get("column_values"), dict) else {}),
+                        text(group_row.get("searchable_text")) or "",
+                        jsonb(aggregate_source_versions),
+                        generated_at,
+                        jsonb(group_row.get("payload") if isinstance(group_row.get("payload"), dict) else group_row),
+                        jsonb({"normalized_payload": group_row}),
+                    ),
+                )
         final_summary_payload = self._workbench_summary_from_payload(
             scope_key="all",
             grouped_payload=aggregate_payload,
@@ -2919,6 +3041,139 @@ def _workbench_group_page_row_counts(row: dict[str, Any] | None) -> dict[str, in
     return {"oa": oa_count, "bank": bank_count, "invoice": invoice_count, "rows": oa_count + bank_count + invoice_count}
 
 
+def _normalize_workbench_column_filters(value: Any) -> dict[str, dict[str, list[str]]]:
+    payload = _json_object_payload(value)
+    result: dict[str, dict[str, list[str]]] = {}
+    total_values = 0
+    for pane in WORKBENCH_PANES:
+        pane_payload = payload.get(pane)
+        if not isinstance(pane_payload, dict):
+            continue
+        pane_filters: dict[str, list[str]] = {}
+        for column_key, raw_values in pane_payload.items():
+            normalized_column = text(column_key)
+            if normalized_column is None or normalized_column not in WORKBENCH_ALLOWED_FILTER_COLUMNS[pane]:
+                continue
+            values = raw_values if isinstance(raw_values, list) else [raw_values]
+            cleaned = sorted(
+                {
+                    value
+                    for item in values
+                    if (value := text(item)) is not None
+                    if value not in WORKBENCH_FILTER_PLACEHOLDERS
+                }
+            )
+            if not cleaned:
+                continue
+            pane_filters[normalized_column] = cleaned[:20]
+            total_values += len(pane_filters[normalized_column])
+            if total_values >= 80:
+                break
+        if pane_filters:
+            result[pane] = pane_filters
+        if total_values >= 80:
+            break
+    return result
+
+
+def _normalize_workbench_time_filters(value: Any) -> dict[str, dict[str, str]]:
+    payload = _json_object_payload(value)
+    result: dict[str, dict[str, str]] = {}
+    for pane in WORKBENCH_PANES:
+        pane_payload = payload.get(pane)
+        if not isinstance(pane_payload, dict):
+            continue
+        mode = text(pane_payload.get("mode"))
+        if mode == "year":
+            year = text(pane_payload.get("year"))
+            if year and re.match(r"^\d{4}$", year):
+                result[pane] = {"mode": "year", "year": year}
+        elif mode == "month":
+            month = text(pane_payload.get("month"))
+            if month and re.match(r"^\d{4}-\d{2}$", month):
+                result[pane] = {"mode": "month", "month": month}
+    return result
+
+
+def _json_object_payload(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _workbench_group_row_filter_exists_sql(
+    *,
+    column_filters: dict[str, dict[str, list[str]]],
+    time_filters: dict[str, dict[str, str]],
+) -> tuple[str, list[Any]]:
+    pane_exists: list[str] = []
+    params: list[Any] = []
+    for pane in WORKBENCH_PANES:
+        pane_column_filters = column_filters.get(pane, {})
+        pane_time_filter = time_filters.get(pane)
+        if not pane_column_filters and not pane_time_filter:
+            continue
+        row_clauses = [
+            "r.scope_key = g.scope_key",
+            "r.zone = g.zone",
+            "r.group_id = g.group_id",
+            "r.pane = %s",
+        ]
+        row_params: list[Any] = [pane]
+        for column_key in sorted(pane_column_filters):
+            values = pane_column_filters[column_key]
+            if pane == "bank" and column_key == "amount":
+                value_clauses = []
+                for value in values:
+                    value_clauses.append("r.column_values @> %s::jsonb")
+                    row_params.append(json.dumps({"direction": value}, ensure_ascii=False))
+                    value_clauses.append("r.column_values @> %s::jsonb")
+                    row_params.append(json.dumps({"paymentAccount": value}, ensure_ascii=False))
+                row_clauses.append("(" + " or ".join(value_clauses) + ")")
+            else:
+                value_clauses = []
+                for value in values:
+                    value_clauses.append("r.column_values @> %s::jsonb")
+                    row_params.append(json.dumps({column_key: value}, ensure_ascii=False))
+                row_clauses.append("(" + " or ".join(value_clauses) + ")")
+        if pane_time_filter:
+            start_date, end_date = _workbench_time_filter_date_range(pane_time_filter)
+            if start_date and end_date:
+                row_clauses.append("r.time_date >= %s::date and r.time_date < %s::date")
+                row_params.extend([start_date, end_date])
+        pane_exists.append(
+            "exists (select 1 from read_model.workbench_group_rows r where " + " and ".join(row_clauses) + ")"
+        )
+        params.extend(row_params)
+    if not pane_exists:
+        return "", []
+    return "(" + " or ".join(pane_exists) + ")", params
+
+
+def _workbench_time_filter_date_range(time_filter: dict[str, str]) -> tuple[str | None, str | None]:
+    if time_filter.get("mode") == "year":
+        year = time_filter.get("year") or ""
+        if not re.match(r"^\d{4}$", year):
+            return None, None
+        return f"{year}-01-01", f"{int(year) + 1:04d}-01-01"
+    if time_filter.get("mode") == "month":
+        month = time_filter.get("month") or ""
+        if not re.match(r"^\d{4}-\d{2}$", month):
+            return None, None
+        year_number = int(month[:4])
+        month_number = int(month[5:7])
+        if month_number == 12:
+            return f"{year_number:04d}-12-01", f"{year_number + 1:04d}-01-01"
+        return f"{year_number:04d}-{month_number:02d}-01", f"{year_number:04d}-{month_number + 1:02d}-01"
+    return None, None
+
+
 def _summarize_workbench_payload_groups(payload: dict[str, Any]) -> dict[str, Any]:
     summary = {
         "oa_count": 0,
@@ -3107,6 +3362,116 @@ def _workbench_row_sort_value(row: dict[str, Any], pane_id: str) -> str | None:
     return None
 
 
+def _workbench_row_column_values(row: dict[str, Any], pane_id: str) -> dict[str, str]:
+    table_values = row.get("table_values")
+    if not isinstance(table_values, dict):
+        table_values = row.get("tableValues")
+    table_values = table_values if isinstance(table_values, dict) else {}
+    if pane_id == "oa":
+        return _clean_workbench_column_values(
+            {
+                "applicant": table_values.get("applicant") or row.get("applicant"),
+                "projectName": table_values.get("projectName") or row.get("project_name_display") or row.get("project_name"),
+                "applicationType": table_values.get("applicationType") or row.get("apply_type"),
+                "counterparty": table_values.get("counterparty") or row.get("counterparty_name"),
+                "reconciliationStatus": table_values.get("reconciliationStatus") or _workbench_relation_label(row),
+                "amount": table_values.get("amount") or row.get("amount"),
+                "reason": table_values.get("reason") or row.get("reason"),
+            }
+        )
+    if pane_id == "bank":
+        direction = text(table_values.get("direction")) or _workbench_bank_direction(row)
+        payment_account = text(table_values.get("paymentAccount")) or text(row.get("payment_account_label"))
+        return _clean_workbench_column_values(
+            {
+                "transactionTime": table_values.get("transactionTime") or row.get("trade_time"),
+                "direction": direction,
+                "amount": table_values.get("amount") or _workbench_bank_amount(row),
+                "debitAmount": table_values.get("debitAmount") or row.get("debit_amount"),
+                "creditAmount": table_values.get("creditAmount") or row.get("credit_amount"),
+                "counterparty": table_values.get("counterparty") or row.get("counterparty_name"),
+                "paymentAccount": payment_account,
+                "invoiceRelationStatus": table_values.get("invoiceRelationStatus") or _workbench_relation_label(row),
+                "paymentOrReceiptTime": table_values.get("paymentOrReceiptTime") or row.get("pay_receive_time"),
+                "note": table_values.get("note") or row.get("remark"),
+                "loanRepaymentDate": table_values.get("loanRepaymentDate") or row.get("repayment_date"),
+            }
+        )
+    if pane_id == "invoice":
+        return _clean_workbench_column_values(
+            {
+                "sellerTaxId": table_values.get("sellerTaxId") or row.get("seller_tax_no"),
+                "sellerName": table_values.get("sellerName") or row.get("seller_name"),
+                "buyerTaxId": table_values.get("buyerTaxId") or row.get("buyer_tax_no"),
+                "buyerName": table_values.get("buyerName") or row.get("buyer_name"),
+                "invoiceCode": table_values.get("invoiceCode") or row.get("invoice_code"),
+                "invoiceNo": table_values.get("invoiceNo") or row.get("invoice_no") or row.get("digital_invoice_no"),
+                "digitalInvoiceNo": table_values.get("digitalInvoiceNo") or row.get("digital_invoice_no"),
+                "issueDate": table_values.get("issueDate") or row.get("issue_date"),
+                "amount": table_values.get("amount") or row.get("amount"),
+                "taxRate": table_values.get("taxRate") or row.get("tax_rate"),
+                "taxAmount": table_values.get("taxAmount") or row.get("tax_amount"),
+                "grossAmount": table_values.get("grossAmount") or row.get("total_with_tax"),
+                "invoiceType": table_values.get("invoiceType") or row.get("invoice_type"),
+            }
+        )
+    return {}
+
+
+def _clean_workbench_column_values(values: dict[str, Any]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for key, value in values.items():
+        normalized = text(value)
+        if normalized is None or normalized in WORKBENCH_FILTER_PLACEHOLDERS:
+            continue
+        result[key] = normalized
+    return result
+
+
+def _workbench_bank_direction(row: dict[str, Any]) -> str | None:
+    direction = text(row.get("direction"))
+    if direction in {"支出", "收入"}:
+        return direction
+    if text(row.get("debit_amount")) not in {None, "", "--", "—"}:
+        return "支出"
+    if text(row.get("credit_amount")) not in {None, "", "--", "—"}:
+        return "收入"
+    return None
+
+
+def _workbench_bank_amount(row: dict[str, Any]) -> str | None:
+    return text(row.get("debit_amount")) or text(row.get("credit_amount")) or text(row.get("amount"))
+
+
+def _workbench_relation_label(row: dict[str, Any]) -> str | None:
+    for key in ("oa_bank_relation", "invoice_relation", "relation"):
+        relation = row.get(key)
+        if isinstance(relation, dict):
+            label = text(relation.get("label"))
+            if label:
+                return label
+    return text(row.get("status"))
+
+
+def _workbench_date_from_text(value: str | None) -> str | None:
+    normalized = text(value)
+    if normalized is None:
+        return None
+    match = re.search(r"(\d{4})-(\d{2})-(\d{2})", normalized)
+    if not match:
+        return None
+    return f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
+
+
+def _searchable_row_text(row: dict[str, Any], pane_id: str) -> str:
+    values = [text(row.get("id") or row.get("row_id")), text(row.get("label")), text(row.get("status"))]
+    values.extend(text(value) for value in _workbench_row_column_values(row, pane_id).values())
+    tags = row.get("tags")
+    if isinstance(tags, list):
+        values.extend(text(tag) for tag in tags)
+    return " ".join(value for value in values if value)
+
+
 def _workbench_group_row_identity(group: dict[str, Any]) -> tuple[tuple[str, str], ...]:
     identities = []
     for fallback_row_type, row in _iter_typed_group_rows(group):
@@ -3118,17 +3483,66 @@ def _workbench_group_row_identity(group: dict[str, Any]) -> tuple[tuple[str, str
     return tuple(sorted(set(identities)))
 
 
-def _iter_typed_group_rows(group: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
-    rows: list[tuple[str, dict[str, Any]]] = []
+def _workbench_group_row_records(group: dict[str, Any]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    group_id = text(group.get("group_id") or group.get("id"))
+    zone = text(group.get("zone") or group.get("status")) or "open"
+    if group_id is None:
+        return records
+    for pane, row_role, row_index, row in _iter_typed_group_rows_with_metadata(group):
+        row_id = text(row.get("id") or row.get("row_id"))
+        if row_id is None:
+            continue
+        column_values = _workbench_row_column_values(row, pane)
+        time_value = _workbench_row_sort_value(row, pane)
+        records.append(
+            {
+                "group_id": group_id,
+                "zone": zone,
+                "pane": pane,
+                "row_id": row_id,
+                "row_role": row_role,
+                "row_index": row_index,
+                "source_kind": text(row.get("source_kind") or row.get("type") or pane) or pane,
+                "status": text(row.get("status") or zone) or zone,
+                "time_value": time_value,
+                "time_date": _workbench_date_from_text(time_value),
+                "column_values": column_values,
+                "searchable_text": _searchable_row_text(row, pane),
+                "payload": serialize_value(row),
+            }
+        )
+    return records
+
+
+def _workbench_group_payload_for_rows(group: dict[str, Any]) -> dict[str, Any]:
+    payload = deepcopy(group.get("payload") if isinstance(group.get("payload"), dict) else group)
+    payload.setdefault("group_id", text(group.get("group_id") or group.get("id")))
+    payload.setdefault("zone", text(group.get("zone") or group.get("status")) or "open")
+    payload.setdefault("status", text(group.get("status") or group.get("zone")) or "open")
+    payload.setdefault("scope_month", group.get("scope_month"))
+    payload.setdefault("month", group.get("month"))
+    return payload
+
+
+def _iter_typed_group_rows_with_metadata(group: dict[str, Any]) -> list[tuple[str, str, int, dict[str, Any]]]:
+    rows: list[tuple[str, str, int, dict[str, Any]]] = []
     for row_type, key in (("oa", "oa_rows"), ("bank", "bank_rows"), ("invoice", "invoice_rows")):
         value = group.get(key)
         if isinstance(value, list):
-            rows.extend((row_type, row) for row in value if isinstance(row, dict))
+            rows.extend((row_type, "normal", index, row) for index, row in enumerate(value) if isinstance(row, dict))
     collapsed_rows = group.get("collapsed_rows")
     if isinstance(collapsed_rows, dict):
         for row_type, value in collapsed_rows.items():
             if isinstance(value, list):
-                rows.extend((str(row_type), row) for row in value if isinstance(row, dict))
+                rows.extend((str(row_type), "collapsed", index, row) for index, row in enumerate(value) if isinstance(row, dict))
+    return rows
+
+
+def _iter_typed_group_rows(group: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    rows: list[tuple[str, dict[str, Any]]] = []
+    for row_type, _row_role, _row_index, row in _iter_typed_group_rows_with_metadata(group):
+        rows.append((row_type, row))
     return rows
 
 

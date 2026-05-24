@@ -34,6 +34,7 @@ EXPECTED_MIGRATION_FILES = [
     "0020_oa_attachment_cache_source_identity_links.sql",
     "0021_read_model_hot_path_indexes.sql",
     "0022_read_model_native_closeout.sql",
+    "0023_workbench_group_rows_filters.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (
@@ -47,6 +48,7 @@ TEST_TABLES = (
     "job.runtime_worker_heartbeats",
     "read_model.workbench_rows",
     "read_model.workbench_groups",
+    "read_model.workbench_group_rows",
     "read_model.workbench_summary",
     "read_model.workbench_snapshots",
     "read_model.workbench_candidate_matches",

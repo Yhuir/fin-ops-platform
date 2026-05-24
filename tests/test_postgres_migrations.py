@@ -35,6 +35,7 @@ EXPECTED_MIGRATIONS = [
     "0020_oa_attachment_cache_source_identity_links.sql",
     "0021_read_model_hot_path_indexes.sql",
     "0022_read_model_native_closeout.sql",
+    "0023_workbench_group_rows_filters.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -92,6 +93,7 @@ EXPECTED_TABLES = [
     "app.pending_invoice_manual_invoice_commands",
     "read_model.workbench_rows",
     "read_model.workbench_groups",
+    "read_model.workbench_group_rows",
     "read_model.workbench_summary",
     "read_model.workbench_snapshots",
     "read_model.workbench_candidate_matches",
@@ -119,7 +121,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 23)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 24)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -301,6 +303,8 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "grant select, insert, update on job.runtime_worker_heartbeats to fin_ops_worker",
             "grant select, insert, update, delete on read_model.workbench_groups to fin_ops_worker",
             "grant select, insert, update, delete on read_model.workbench_groups to fin_ops_migrator",
+            "grant select, insert, update, delete on read_model.workbench_group_rows to fin_ops_worker",
+            "grant select, insert, update, delete on read_model.workbench_group_rows to fin_ops_migrator",
             "create extension if not exists pg_stat_statements",
             "create table if not exists read_model.workbench_summary",
             "workbench_summary_scope_key_uidx",

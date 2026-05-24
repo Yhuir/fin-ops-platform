@@ -241,6 +241,8 @@ export type WorkbenchGroupsPageQuery = {
   sourceKind?: string;
   sort?: WorkbenchGroupsSort;
   detailLevel?: "summary" | "full";
+  filtersByPaneAndColumn?: Partial<Record<WorkbenchRecordType, Record<string, string[]>>>;
+  timeFilterByPane?: Partial<Record<WorkbenchRecordType, { mode: "year"; year: string } | { mode: "month"; month: string }>>;
 };
 
 export type WorkbenchZonePageInfo = {

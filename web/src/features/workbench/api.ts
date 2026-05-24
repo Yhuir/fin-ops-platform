@@ -62,6 +62,8 @@ export type WorkbenchBootstrapProgress = {
   indeterminate: boolean;
 };
 
+export const WORKBENCH_GROUP_PAGE_SIZE = 200;
+
 type ApiRelation = {
   code: string;
   label: string;
@@ -1917,6 +1919,8 @@ function workbenchGroupsUrl(
   const sourceKind = String(query.sourceKind ?? "").trim();
   const sort = String(query.sort ?? "").trim();
   const detailLevel = query.detailLevel === "full" ? "full" : query.detailLevel === "summary" ? "summary" : "";
+  const columnFilters = stableJsonQueryParam(query.filtersByPaneAndColumn);
+  const timeFilters = stableJsonQueryParam(query.timeFilterByPane);
   if (search) {
     params.set("search", search);
   }
@@ -1932,14 +1936,50 @@ function workbenchGroupsUrl(
   if (detailLevel) {
     params.set("detail_level", detailLevel);
   }
+  if (columnFilters) {
+    params.set("column_filters", columnFilters);
+  }
+  if (timeFilters) {
+    params.set("time_filters", timeFilters);
+  }
   return `/api/workbench/groups?${params.toString()}`;
+}
+
+function stableJsonQueryParam(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+  const normalized = stableJsonValue(value);
+  if (!normalized || (typeof normalized === "object" && !Array.isArray(normalized) && Object.keys(normalized).length === 0)) {
+    return "";
+  }
+  return JSON.stringify(normalized);
+}
+
+function stableJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    const normalized = value.map(stableJsonValue);
+    if (normalized.every((item) => !item || typeof item !== "object")) {
+      return normalized.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+    }
+    return normalized;
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, entryValue]) => entryValue !== undefined && entryValue !== null)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entryValue]) => [key, stableJsonValue(entryValue)]),
+  );
 }
 
 export async function fetchWorkbenchGroupsPage(
   month: string,
   zone: WorkbenchZoneId,
   page: number,
-  pageSize = 50,
+  pageSize = WORKBENCH_GROUP_PAGE_SIZE,
   signal?: AbortSignal,
   query: WorkbenchGroupsPageQuery = {},
 ): Promise<WorkbenchGroupsPageResult> {
@@ -1999,8 +2039,14 @@ export async function fetchWorkbenchInitialPage(
     indeterminate: false,
   });
   const [pairedPage, openPage] = await Promise.all([
-    fetchWorkbenchGroupsPage(month, "paired", 1, 50, signal, { ...zoneQueries.paired, detailLevel: "summary" }),
-    fetchWorkbenchGroupsPage(month, "open", 1, 50, signal, { ...zoneQueries.open, detailLevel: "summary" }),
+    fetchWorkbenchGroupsPage(month, "paired", 1, WORKBENCH_GROUP_PAGE_SIZE, signal, {
+      ...zoneQueries.paired,
+      detailLevel: "summary",
+    }),
+    fetchWorkbenchGroupsPage(month, "open", 1, WORKBENCH_GROUP_PAGE_SIZE, signal, {
+      ...zoneQueries.open,
+      detailLevel: "summary",
+    }),
   ]);
   onProgress?.({
     label: "关联台数据已加载完成",
