@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 import re
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Any
 
 
@@ -78,22 +80,26 @@ class WorkbenchReconciliationDecision:
     source_versions: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        _normalize_required_text(self.decision_id, "decision_id")
-        _normalize_required_text(self.decision_key, "decision_key")
-        _normalize_month(self.scope_month, "scope_month")
+        object.__setattr__(self, "decision_id", _normalize_required_text(self.decision_id, "decision_id"))
+        object.__setattr__(self, "decision_key", _normalize_required_text(self.decision_key, "decision_key"))
+        object.__setattr__(self, "scope_month", _normalize_month(self.scope_month, "scope_month"))
         _validate_choice(self.display_state, DISPLAY_STATES, "display_state")
         _validate_choice(self.decision_status, DECISION_STATUSES, "decision_status")
         _validate_choice(self.match_domain, MATCH_DOMAINS, "match_domain")
-        _normalize_required_text(self.match_shape, "match_shape")
-        _normalize_required_text(self.rule_code, "rule_code")
-        _normalize_required_text(self.rule_version, "rule_version")
-        _normalize_row_ids(self.row_ids, "row_ids")
-        _normalize_row_ids(self.oa_row_ids, "oa_row_ids")
-        _normalize_row_ids(self.bank_row_ids, "bank_row_ids")
-        _normalize_row_ids(self.invoice_row_ids, "invoice_row_ids")
+        object.__setattr__(self, "match_shape", _normalize_required_text(self.match_shape, "match_shape"))
+        object.__setattr__(self, "rule_code", _normalize_required_text(self.rule_code, "rule_code"))
+        object.__setattr__(self, "rule_version", _normalize_required_text(self.rule_version, "rule_version"))
+        object.__setattr__(self, "row_ids", _normalize_row_ids(self.row_ids, "row_ids"))
+        object.__setattr__(self, "oa_row_ids", _normalize_row_ids(self.oa_row_ids, "oa_row_ids"))
+        object.__setattr__(self, "bank_row_ids", _normalize_row_ids(self.bank_row_ids, "bank_row_ids"))
+        object.__setattr__(self, "invoice_row_ids", _normalize_row_ids(self.invoice_row_ids, "invoice_row_ids"))
         for warning in self.warnings:
             if not isinstance(warning, DecisionWarning):
                 raise ValueError("warnings must contain DecisionWarning values.")
+        object.__setattr__(self, "warnings", tuple(self.warnings))
+        object.__setattr__(self, "evidence", _freeze_plain_value(self.evidence or {}))
+        object.__setattr__(self, "blockers", _freeze_plain_value(tuple(self.blockers)))
+        object.__setattr__(self, "source_versions", _freeze_plain_value(self.source_versions or {}))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -121,6 +127,9 @@ class WorkbenchReconciliationDecision:
             "generated_at": _to_plain_value(self.generated_at),
             "source_versions": _to_plain_value(self.source_versions or {}),
         }
+
+
+WorkbenchDecision = WorkbenchReconciliationDecision
 
 
 def resolve_decision_scope_month(
@@ -208,6 +217,24 @@ def _to_plain_value(value: Any) -> Any:
         return value.isoformat()
     if isinstance(value, dict):
         return {str(key): _to_plain_value(item) for key, item in value.items()}
+    if isinstance(value, Mapping):
+        return {str(key): _to_plain_value(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_to_plain_value(item) for item in value]
+    return value
+
+
+def _freeze_plain_value(value: Any) -> Any:
+    if isinstance(value, DecisionWarning):
+        return value
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, Mapping):
+        return MappingProxyType({str(key): _freeze_plain_value(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_plain_value(item) for item in value)
     return value

@@ -21,6 +21,7 @@ from fin_ops_platform.services.workbench_reconciliation_models import (
     MATCH_DOMAINS,
     WARNING_INVOICE_AMOUNT_MISMATCH,
     DecisionWarning,
+    WorkbenchDecision,
     WorkbenchReconciliationDecision,
     expand_scope_month_window,
     resolve_decision_scope_month,
@@ -157,6 +158,82 @@ class WorkbenchReconciliationModelTests(unittest.TestCase):
             ],
         )
         json.dumps(payload, ensure_ascii=False)
+
+    def test_workbench_decision_public_name_matches_reconciliation_decision(self) -> None:
+        self.assertIs(WorkbenchDecision, WorkbenchReconciliationDecision)
+
+    def test_model_serialization_uses_normalized_values(self) -> None:
+        decision = WorkbenchDecision(
+            decision_id=" decision:2026-03:free:normalized ",
+            decision_key=" decision:2026-03:free:normalized ",
+            scope_month=" 2026-03 ",
+            display_state=DISPLAY_STATE_OPEN,
+            decision_status=DECISION_STATUS_OPEN,
+            match_domain=MATCH_DOMAIN_FREE,
+            match_shape=" oa_bank ",
+            rule_code=" no_unique_match ",
+            rule_version=" 2026-05-25 ",
+            row_ids=(" oa-exp-1994 ", " bk-o-1 "),
+            oa_row_ids=(" oa-exp-1994 ",),
+            bank_row_ids=(" bk-o-1 ",),
+        )
+
+        payload = decision.to_dict()
+
+        self.assertEqual(payload["decision_id"], "decision:2026-03:free:normalized")
+        self.assertEqual(payload["decision_key"], "decision:2026-03:free:normalized")
+        self.assertEqual(payload["scope_month"], "2026-03")
+        self.assertEqual(payload["match_shape"], "oa_bank")
+        self.assertEqual(payload["rule_code"], "no_unique_match")
+        self.assertEqual(payload["rule_version"], "2026-05-25")
+        self.assertEqual(payload["row_ids"], ["oa-exp-1994", "bk-o-1"])
+        self.assertEqual(payload["oa_row_ids"], ["oa-exp-1994"])
+        self.assertEqual(payload["bank_row_ids"], ["bk-o-1"])
+
+    def test_model_detaches_mutable_metadata_inputs(self) -> None:
+        evidence = {"tokens": ["广告"], "nested": {"score": Decimal("1.00")}}
+        blockers = ({"code": "duplicate", "rows": ["iv-1"]},)
+        source_versions = {"schema": "v1"}
+        decision = WorkbenchDecision(
+            decision_id="decision:2026-03:free:detached",
+            decision_key="decision:2026-03:free:detached",
+            scope_month="2026-03",
+            display_state=DISPLAY_STATE_OPEN,
+            decision_status=DECISION_STATUS_OPEN,
+            match_domain=MATCH_DOMAIN_FREE,
+            match_shape="oa_invoice",
+            rule_code="duplicate_invoice",
+            rule_version="2026-05-25",
+            row_ids=("oa-exp-1994", "iv-1"),
+            oa_row_ids=("oa-exp-1994",),
+            invoice_row_ids=("iv-1",),
+            evidence=evidence,
+            blockers=blockers,
+            source_versions=source_versions,
+        )
+
+        before = decision.to_dict()
+        evidence["tokens"].append("篡改")
+        evidence["nested"]["score"] = Decimal("9.00")
+        blockers[0]["rows"].append("iv-2")
+        source_versions["schema"] = "v2"
+
+        self.assertEqual(decision.to_dict(), before)
+
+    def test_model_rejects_invalid_display_state(self) -> None:
+        with self.assertRaisesRegex(ValueError, "display_state"):
+            WorkbenchDecision(
+                decision_id="decision:2026-03:free:bad",
+                decision_key="decision:2026-03:free:bad",
+                scope_month="2026-03",
+                display_state="needs_review",
+                decision_status=DECISION_STATUS_OPEN,
+                match_domain=MATCH_DOMAIN_FREE,
+                match_shape="oa_bank",
+                rule_code="bad_status",
+                rule_version="2026-05-25",
+                row_ids=("oa-exp-1994",),
+            )
 
 
 if __name__ == "__main__":
