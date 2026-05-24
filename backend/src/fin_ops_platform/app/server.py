@@ -113,6 +113,14 @@ from fin_ops_platform.services.import_job_queue import ImportJob, ImportJobRepos
 from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile
 from fin_ops_platform.services.import_preview_audit import ImportPreviewStaleError
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.input_invoice_usage_service import (
+    InputInvoiceUsageError,
+    InputInvoiceUsageQueryService,
+)
+from fin_ops_platform.services.output_invoice_collection_service import (
+    OutputInvoiceCollectionError,
+    OutputInvoiceCollectionQueryService,
+)
 from fin_ops_platform.services.invoice_inventory_stats_service import InvoiceInventoryStatsService
 from fin_ops_platform.services.integrations import IntegrationHubService
 from fin_ops_platform.services.ledgers import LedgerReminderService
@@ -585,6 +593,15 @@ class Application:
             app_settings_provider=self._app_settings_service.get_settings_payload,
             effective_category_provider=self._bank_transaction_effective_category_provider,
         )
+        self._input_invoice_usage_query_service = InputInvoiceUsageQueryService(
+            import_service=self._import_service,
+            pair_relation_service=self._workbench_pair_relation_service,
+            oa_projection=oa_adapter,
+        )
+        self._output_invoice_collection_query_service = OutputInvoiceCollectionQueryService(
+            import_service=self._import_service,
+            pair_relation_service=self._workbench_pair_relation_service,
+        )
         self._pending_invoice_application_service = PendingInvoiceApplicationService(
             import_service=self._import_service,
             pair_relation_service=self._workbench_pair_relation_service,
@@ -927,6 +944,45 @@ class Application:
             return self._handle_api_bank_transaction_categories(body, headers)
         if method == "GET" and route_path == "/api/pending-invoices/rows":
             return self._handle_api_pending_invoice_rows(query)
+        if method == "GET" and route_path == "/api/input-invoice-usage/rows":
+            return self._handle_api_input_invoice_usage_rows(query)
+        if method == "GET" and route_path == "/api/input-invoice-usage/filter-options":
+            return self._handle_api_input_invoice_usage_filter_options(query)
+        if method == "GET" and route_path == "/api/input-invoice-usage/payment-status-rules":
+            return self._handle_api_input_invoice_usage_payment_status_rules()
+        if method == "POST" and route_path == "/api/input-invoice-usage/oa-reverse/preview":
+            return self._handle_api_input_invoice_usage_oa_reverse_preview(body)
+        if method == "GET" and route_path == "/api/output-invoice-collections/rows":
+            return self._handle_api_output_invoice_collections_rows(query)
+        if method == "GET" and route_path == "/api/output-invoice-collections/filter-options":
+            return self._handle_api_output_invoice_collections_filter_options(query)
+        if method == "GET" and route_path == "/api/output-invoice-collections/status-rules":
+            return self._handle_api_output_invoice_collections_status_rules()
+        if method == "POST" and route_path == "/api/output-invoice-collections/receipt-preview":
+            return self._handle_api_output_invoice_collections_receipt_preview(body)
+        if method == "GET" and route_path == "/api/output-invoice-collections/receipts/history":
+            return self._handle_api_output_invoice_collections_receipt_history(query)
+        if method == "GET" and route_path.startswith("/api/output-invoice-collections/invoices/") and route_path.endswith("/detail"):
+            invoice_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_output_invoice_collections_invoice_detail(invoice_id)
+        if method == "GET" and route_path.startswith("/api/output-invoice-collections/bank-transactions/") and route_path.endswith("/detail"):
+            bank_transaction_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_output_invoice_collections_bank_transaction_detail(bank_transaction_id)
+        if method == "GET" and route_path.startswith("/api/output-invoice-collections/rows/") and route_path.endswith("/relation-details"):
+            row_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_output_invoice_collections_relation_details(row_id, query)
+        if method == "GET" and route_path.startswith("/api/input-invoice-usage/invoices/") and route_path.endswith("/detail"):
+            invoice_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_input_invoice_usage_invoice_detail(invoice_id)
+        if method == "GET" and route_path.startswith("/api/input-invoice-usage/bank-transactions/") and route_path.endswith("/detail"):
+            bank_transaction_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_input_invoice_usage_bank_transaction_detail(bank_transaction_id)
+        if method == "GET" and route_path.startswith("/api/input-invoice-usage/oa/") and route_path.endswith("/detail"):
+            oa_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_input_invoice_usage_oa_detail(oa_id)
+        if method == "GET" and route_path.startswith("/api/input-invoice-usage/rows/") and route_path.endswith("/relation-details"):
+            row_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_input_invoice_usage_relation_details(row_id, query)
         if method == "POST" and route_path == "/api/pending-invoices/manual-invoices/preview":
             return self._handle_api_pending_invoice_manual_preview(body)
         if method == "POST" and route_path == "/api/pending-invoices/manual-invoices":
@@ -6133,6 +6189,199 @@ class Application:
                     duration_ms=self._duration_ms(auth_started_at),
                 )
         return None
+
+    def _input_invoice_usage_service(self) -> InputInvoiceUsageQueryService:
+        service = getattr(self, "_input_invoice_usage_query_service", None)
+        if isinstance(service, InputInvoiceUsageQueryService):
+            return service
+        service = InputInvoiceUsageQueryService(
+            import_service=self._import_service,
+            pair_relation_service=self._workbench_pair_relation_service,
+            oa_projection=getattr(self, "_workbench_query_service", None),
+        )
+        self._input_invoice_usage_query_service = service
+        return service
+
+    def _handle_api_input_invoice_usage_rows(self, query: dict[str, list[str]]) -> Response:
+        try:
+            payload = self._input_invoice_usage_service().list_rows(
+                page=query.get("page", [1])[0],
+                page_size=query.get("page_size", [50])[0],
+                keyword=query.get("keyword", [None])[0],
+                invoice_date_from=query.get("invoice_date_from", [None])[0],
+                invoice_date_to=query.get("invoice_date_to", [None])[0],
+                month=query.get("month", [None])[0],
+                filters=query.get("filters", [None])[0],
+                sort_field=query.get("sort_field", ["invoice_date"])[0],
+                sort_direction=query.get("sort_direction", ["desc"])[0],
+            )
+        except InputInvoiceUsageError as exc:
+            return self._input_invoice_usage_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_input_invoice_usage_filter_options(self, query: dict[str, list[str]]) -> Response:
+        try:
+            payload = self._input_invoice_usage_service().filter_options(
+                keyword=query.get("keyword", [None])[0],
+                invoice_date_from=query.get("invoice_date_from", [None])[0],
+                invoice_date_to=query.get("invoice_date_to", [None])[0],
+                month=query.get("month", [None])[0],
+                filters=query.get("filters", [None])[0],
+            )
+        except InputInvoiceUsageError as exc:
+            return self._input_invoice_usage_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_input_invoice_usage_invoice_detail(self, invoice_id: str) -> Response:
+        try:
+            payload = self._input_invoice_usage_service().invoice_detail(invoice_id)
+        except InputInvoiceUsageError as exc:
+            return self._input_invoice_usage_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_input_invoice_usage_bank_transaction_detail(self, bank_transaction_id: str) -> Response:
+        try:
+            payload = self._input_invoice_usage_service().bank_transaction_detail(bank_transaction_id)
+        except InputInvoiceUsageError as exc:
+            return self._input_invoice_usage_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_input_invoice_usage_oa_detail(self, oa_id: str) -> Response:
+        try:
+            payload = self._input_invoice_usage_service().oa_detail(oa_id)
+        except InputInvoiceUsageError as exc:
+            return self._input_invoice_usage_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_input_invoice_usage_relation_details(self, row_id: str, query: dict[str, list[str]]) -> Response:
+        try:
+            payload = self._input_invoice_usage_service().row_relation_details(
+                row_id,
+                kind=query.get("kind", [""])[0],
+            )
+        except InputInvoiceUsageError as exc:
+            return self._input_invoice_usage_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_input_invoice_usage_payment_status_rules(self) -> Response:
+        return self._json_response(HTTPStatus.OK, self._input_invoice_usage_service().payment_status_rules())
+
+    def _handle_api_input_invoice_usage_oa_reverse_preview(self, body: str | bytes | None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            result = self._input_invoice_usage_service().oa_reverse_preview(payload)
+        except InputInvoiceUsageError as exc:
+            return self._input_invoice_usage_error_response(exc)
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _input_invoice_usage_error_response(self, exc: InputInvoiceUsageError) -> Response:
+        payload: dict[str, object] = {
+            "error": {
+                "code": exc.error_code,
+                "message": str(exc),
+                "details": exc.details,
+            }
+        }
+        return self._json_response(exc.status_code, payload)
+
+    def _output_invoice_collection_service(self) -> OutputInvoiceCollectionQueryService:
+        service = getattr(self, "_output_invoice_collection_query_service", None)
+        if isinstance(service, OutputInvoiceCollectionQueryService):
+            return service
+        service = OutputInvoiceCollectionQueryService(
+            import_service=self._import_service,
+            pair_relation_service=self._workbench_pair_relation_service,
+        )
+        self._output_invoice_collection_query_service = service
+        return service
+
+    def _handle_api_output_invoice_collections_rows(self, query: dict[str, list[str]]) -> Response:
+        try:
+            payload = self._output_invoice_collection_service().list_rows(
+                page=query.get("page", [1])[0],
+                page_size=query.get("page_size", [50])[0],
+                keyword=query.get("keyword", [None])[0],
+                invoice_date_from=query.get("invoice_date_from", [None])[0],
+                invoice_date_to=query.get("invoice_date_to", [None])[0],
+                month=query.get("month", [None])[0],
+                filters=query.get("filters", [None])[0],
+                sort_field=query.get("sort_field", ["invoice_date"])[0],
+                sort_direction=query.get("sort_direction", ["desc"])[0],
+            )
+        except OutputInvoiceCollectionError as exc:
+            return self._output_invoice_collection_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_output_invoice_collections_filter_options(self, query: dict[str, list[str]]) -> Response:
+        try:
+            payload = self._output_invoice_collection_service().filter_options(
+                keyword=query.get("keyword", [None])[0],
+                invoice_date_from=query.get("invoice_date_from", [None])[0],
+                invoice_date_to=query.get("invoice_date_to", [None])[0],
+                month=query.get("month", [None])[0],
+                filters=query.get("filters", [None])[0],
+            )
+        except OutputInvoiceCollectionError as exc:
+            return self._output_invoice_collection_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_output_invoice_collections_invoice_detail(self, invoice_id: str) -> Response:
+        try:
+            payload = self._output_invoice_collection_service().invoice_detail(invoice_id)
+        except OutputInvoiceCollectionError as exc:
+            return self._output_invoice_collection_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_output_invoice_collections_bank_transaction_detail(self, bank_transaction_id: str) -> Response:
+        try:
+            payload = self._output_invoice_collection_service().bank_transaction_detail(bank_transaction_id)
+        except OutputInvoiceCollectionError as exc:
+            return self._output_invoice_collection_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_output_invoice_collections_relation_details(self, row_id: str, query: dict[str, list[str]]) -> Response:
+        try:
+            payload = self._output_invoice_collection_service().row_relation_details(
+                row_id,
+                kind=query.get("kind", [""])[0],
+            )
+        except OutputInvoiceCollectionError as exc:
+            return self._output_invoice_collection_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_output_invoice_collections_status_rules(self) -> Response:
+        return self._json_response(HTTPStatus.OK, self._output_invoice_collection_service().status_rules())
+
+    def _handle_api_output_invoice_collections_receipt_preview(self, body: str | bytes | None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            result = self._output_invoice_collection_service().receipt_preview(payload)
+        except OutputInvoiceCollectionError as exc:
+            return self._output_invoice_collection_error_response(exc)
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _handle_api_output_invoice_collections_receipt_history(self, query: dict[str, list[str]]) -> Response:
+        try:
+            payload = self._output_invoice_collection_service().receipt_history(
+                invoice_id=query.get("invoice_id", [""])[0],
+            )
+        except OutputInvoiceCollectionError as exc:
+            return self._output_invoice_collection_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _output_invoice_collection_error_response(self, exc: OutputInvoiceCollectionError) -> Response:
+        payload: dict[str, object] = {
+            "error": {
+                "code": exc.error_code,
+                "message": str(exc),
+                "details": exc.details,
+            }
+        }
+        return self._json_response(exc.status_code, payload)
 
     def _handle_api_pending_invoice_rows(self, query: dict[str, list[str]]) -> Response:
         try:

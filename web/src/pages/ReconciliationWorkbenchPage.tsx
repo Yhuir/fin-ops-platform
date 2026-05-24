@@ -174,6 +174,25 @@ const WORKBENCH_VIEW_MONTH = "all";
 const OA_SYNC_POLL_INTERVAL_MS = 3_000;
 const OA_SYNC_REFRESH_DEBOUNCE_MS = 120;
 
+function createWorkbenchServerPageQueryKey(query: WorkbenchGroupsPageQuery) {
+  return JSON.stringify(query);
+}
+
+function createWorkbenchZoneServerPageQueryKeys(
+  queries: Record<"paired" | "open", WorkbenchGroupsPageQuery>,
+) {
+  return {
+    paired: createWorkbenchServerPageQueryKey(queries.paired),
+    open: createWorkbenchServerPageQueryKey(queries.open),
+  };
+}
+
+function createWorkbenchZoneServerPageQueriesKey(
+  queries: Record<"paired" | "open", WorkbenchGroupsPageQuery>,
+) {
+  return JSON.stringify(createWorkbenchZoneServerPageQueryKeys(queries));
+}
+
 function isNoOaSummaryRow(row: WorkbenchRecord) {
   return row.sourceKind === "no_oa_bank_batch_summary" || Boolean(noOaSourceBatchId(row));
 }
@@ -275,6 +294,9 @@ export default function ReconciliationWorkbenchPage() {
   } =
     useWorkbenchSelection();
   const [workbenchData, setWorkbenchData] = useState<WorkbenchData | null>(null);
+  const [loadedZoneServerPageQueryKeys, setLoadedZoneServerPageQueryKeys] = useState<
+    Record<"paired" | "open", string> | null
+  >(null);
   const [selectionSourceGroups, setSelectionSourceGroups] = useState<Record<"paired" | "open", WorkbenchCandidateGroup[]>>({
     paired: [],
     open: [],
@@ -348,8 +370,12 @@ export default function ReconciliationWorkbenchPage() {
     }),
     [openServerPageQuery, pairedServerPageQuery],
   );
+  const zoneServerPageQueryKeys = useMemo(
+    () => createWorkbenchZoneServerPageQueryKeys(zoneServerPageQueries),
+    [zoneServerPageQueries],
+  );
   const zoneServerPageQueryKey = useMemo(
-    () => JSON.stringify(zoneServerPageQueries),
+    () => createWorkbenchZoneServerPageQueriesKey(zoneServerPageQueries),
     [zoneServerPageQueries],
   );
   const lastZoneServerPageQueryKeyRef = useRef(zoneServerPageQueryKey);
@@ -729,6 +755,7 @@ export default function ReconciliationWorkbenchPage() {
         return;
       }
       setWorkbenchData(workbenchPayload.data);
+      setLoadedZoneServerPageQueryKeys(createWorkbenchZoneServerPageQueryKeys(resolvedZoneQueries));
       setZonePages(workbenchPayload.pages);
       if (!background) {
         setIsLoading(false);
@@ -745,6 +772,7 @@ export default function ReconciliationWorkbenchPage() {
       }
       if (!background) {
         setWorkbenchData(null);
+        setLoadedZoneServerPageQueryKeys(null);
         setZonePages(createInitialZonePages());
         setIgnoredData({ month, rows: [] });
         setLoadError("工作台数据加载失败，请稍后重试。");
@@ -991,18 +1019,38 @@ export default function ReconciliationWorkbenchPage() {
     () => buildWorkbenchDisplayGroups(
       workbenchData?.paired.groups ?? [],
       deferredPairedDisplayState,
-      { serverFiltered: hasWorkbenchServerPageCriteria(pairedServerPageQuery) },
+      {
+        serverFiltered:
+          loadedZoneServerPageQueryKeys?.paired === zoneServerPageQueryKeys.paired
+          && hasWorkbenchServerPageCriteria(pairedServerPageQuery),
+      },
     ),
-    [deferredPairedDisplayState, pairedServerPageQuery, workbenchData],
+    [
+      deferredPairedDisplayState,
+      loadedZoneServerPageQueryKeys?.paired,
+      pairedServerPageQuery,
+      workbenchData,
+      zoneServerPageQueryKeys.paired,
+    ],
   );
 
   const displayOpenGroups = useMemo(
     () => buildWorkbenchDisplayGroups(
       visibleOpenGroups,
       deferredOpenDisplayState,
-      { serverFiltered: hasWorkbenchServerPageCriteria(openServerPageQuery) },
+      {
+        serverFiltered:
+          loadedZoneServerPageQueryKeys?.open === zoneServerPageQueryKeys.open
+          && hasWorkbenchServerPageCriteria(openServerPageQuery),
+      },
     ),
-    [deferredOpenDisplayState, openServerPageQuery, visibleOpenGroups],
+    [
+      deferredOpenDisplayState,
+      loadedZoneServerPageQueryKeys?.open,
+      openServerPageQuery,
+      visibleOpenGroups,
+      zoneServerPageQueryKeys.open,
+    ],
   );
 
   const sourceAllGroups = useMemo(() => {

@@ -12,6 +12,7 @@
 ## 接口和契约
 
 - `api-contracts.md`：核心 API 分组和契约维护原则。
+- `pending-invoices-api.md`：待找发票列表、筛选、关系、候选发票、规则和导出 API。
 - `etc-business-batches-api.md`：ETC 业务批次、OA 自动检测、人工兜底和撤销草稿 API。
 - `reconciliation-workbench-v2-data-contracts.md`：关联工作台 V2 DTO。
 

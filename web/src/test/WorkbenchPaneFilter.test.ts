@@ -298,6 +298,37 @@ describe("Workbench pane display model", () => {
     });
   });
 
+  test("applies pane search and column filters locally while the server page refresh is pending", async () => {
+    const fetchMock = installMockApiFetch({ workbenchLoadDelayMs: 1000 });
+    renderWorkbenchPage();
+    await screen.findByTestId("zone-open", {}, { timeout: 3000 });
+
+    const openZone = screen.getByTestId("zone-open");
+    const openBankPane = within(openZone).getByTestId("pane-bank");
+    await waitFor(() => {
+      expect(within(openZone).getByRole("row", { name: /智能工厂设备商.*建设银行 1138/ })).toBeInTheDocument();
+      expect(within(openZone).getByRole("row", { name: /尾差设备商.*建设银行 1138/ })).toBeInTheDocument();
+    }, { timeout: 3000 });
+
+    fireEvent.click(within(openBankPane).getByRole("button", { name: "搜索 银行流水" }));
+    fireEvent.change(within(openBankPane).getByRole("searchbox", { name: "搜索 银行流水" }), {
+      target: { value: "智能工厂" },
+    });
+    fireEvent.click(within(openBankPane).getByRole("button", { name: "筛选 金额" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "筛选 金额" })).getByLabelText("建设银行 1138"));
+
+    await waitFor(() => {
+      expect(within(openZone).getByRole("row", { name: /智能工厂设备商.*建设银行 1138/ })).toBeInTheDocument();
+      expect(within(openZone).queryByRole("row", { name: /尾差设备商.*建设银行 1138/ })).not.toBeInTheDocument();
+    }, { timeout: 400 });
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([input]) => {
+        const url = new URL(String(input), "http://localhost");
+        return url.pathname === "/api/workbench/groups" && url.searchParams.has("search_by_pane");
+      })).toBe(true);
+    }, { timeout: 3000 });
+  });
+
   test("uses direction and payment account options for the bank amount filter instead of raw amounts", () => {
     const groups: WorkbenchCandidateGroup[] = [
       {

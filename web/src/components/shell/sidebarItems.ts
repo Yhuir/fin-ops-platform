@@ -32,6 +32,8 @@ export const sidebarGroups: SidebarGroup[] = [
       { label: "成本统计", to: "/cost-statistics", icon: AssessmentOutlinedIcon },
       { label: "银行明细", to: "/bank-details", icon: AccountBalanceOutlinedIcon },
       { label: "待找发票", to: "/pending-invoices", icon: ReceiptLongOutlinedIcon },
+      { label: "进项发票使用情况", to: "/input-invoice-usage", icon: ReceiptLongOutlinedIcon },
+      { label: "销项发票收款情况", to: "/output-invoice-collections", icon: ReceiptLongOutlinedIcon },
       { label: "免OA流水批量处理", to: "/no-oa-bank-batches", icon: AccountBalanceOutlinedIcon },
       { label: "批量账务", to: "/batch-accounting", icon: AccountBalanceOutlinedIcon },
       { label: "往来款管理", to: "/turnover-ledger", icon: HandshakeOutlinedIcon },

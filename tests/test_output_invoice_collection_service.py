@@ -1,0 +1,319 @@
+from __future__ import annotations
+
+from decimal import Decimal
+import unittest
+
+from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
+from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
+from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.output_invoice_collection_service import (
+    OutputInvoiceCollectionError,
+    OutputInvoiceCollectionQueryService,
+)
+from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+
+
+class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
+    def test_rows_are_one_formal_output_invoice_with_read_model_shape(self) -> None:
+        buyer = self._counterparty("buyer", "昆明客户有限公司", tax_no="91530000BUYER")
+        line_1 = self._invoice(
+            "out-line-1",
+            "8001-A",
+            buyer,
+            digital_invoice_no="26372000000990000001",
+            taxable_item_name="软件服务费",
+            amount="80.00",
+            tax_amount="4.80",
+            total_with_tax="84.80",
+        )
+        line_2 = self._invoice(
+            "out-line-2",
+            "8001-B",
+            buyer,
+            digital_invoice_no="26372000000990000001",
+            taxable_item_name="技术服务费",
+            amount="20.00",
+            tax_amount="1.20",
+            total_with_tax="21.20",
+        )
+        service = self._service(invoices=[line_2, line_1])
+
+        payload = service.list_rows()
+
+        self.assertEqual(payload["readModelStatus"], "live_query")
+        self.assertEqual(payload["sourceVersion"], "output-invoice-collections:v1")
+        self.assertIn("generatedAt", payload)
+        self.assertEqual(payload["pagination"], {"page": 1, "pageSize": 50, "total": 1})
+        row = payload["rows"][0]
+        self.assertEqual(row["invoiceId"], "out-line-1")
+        self.assertEqual(row["invoiceIdentityKey"], "digital:26372000000990000001")
+        self.assertEqual(row["invoice"]["buyerName"], "昆明客户有限公司")
+        self.assertEqual(row["invoice"]["totalWithTax"], "106.00")
+        self.assertEqual(row["invoice"]["lineItemCount"], 2)
+        self.assertEqual(row["collectionStatus"]["code"], "pending_collection")
+        self.assertEqual(row["receipt"]["status"], "not_available")
+
+    def test_collection_status_uses_red_refund_priority_before_collected_and_pending_rules(self) -> None:
+        buyer = self._counterparty("buyer", "客户")
+        paid_invoice = self._invoice("out-paid", "9001", buyer, total_with_tax="100.00")
+        partial_invoice = self._invoice("out-partial", "9002", buyer, total_with_tax="100.00")
+        pending_invoice = self._invoice("out-pending", "9003", buyer, total_with_tax="100.00")
+        red_invoice = self._invoice(
+            "out-red",
+            "9004",
+            buyer,
+            amount="-94.34",
+            tax_amount="-5.66",
+            total_with_tax="-100.00",
+            is_positive_invoice="否",
+        )
+        paid_bank = self._bank("bank-paid", "100.00", TransactionDirection.INFLOW)
+        partial_bank = self._bank("bank-partial", "40.00", TransactionDirection.INFLOW)
+        refund_bank = self._bank("bank-refund", "100.00", TransactionDirection.OUTFLOW)
+        pair_service = WorkbenchPairRelationService()
+        self._relation(pair_service, "case-paid", [paid_invoice.id, paid_bank.id], amount_matched=True)
+        self._relation(pair_service, "case-partial", [partial_invoice.id, partial_bank.id], amount_matched=False)
+        self._relation(pair_service, "case-refund", [red_invoice.id, refund_bank.id], amount_matched=True)
+        service = self._service(
+            invoices=[pending_invoice, red_invoice, partial_invoice, paid_invoice],
+            transactions=[paid_bank, partial_bank, refund_bank],
+            pair_service=pair_service,
+        )
+
+        rows = {row["invoiceId"]: row for row in service.list_rows(page_size=20)["rows"]}
+
+        self.assertEqual(rows["out-paid"]["collectionStatus"]["code"], "collected_red_refunded")
+        self.assertEqual(rows["out-paid"]["collectionStatus"]["label"], "开票已收款，冲红并退款")
+        self.assertEqual(rows["out-partial"]["collectionStatus"]["code"], "partial_collected")
+        self.assertEqual(rows["out-partial"]["collectionStatus"]["collectedAmount"], "40.00")
+        self.assertEqual(rows["out-partial"]["collectionStatus"]["pendingAmount"], "60.00")
+        self.assertEqual(rows["out-pending"]["collectionStatus"]["code"], "pending_collection")
+        self.assertEqual(rows["out-red"]["collectionStatus"]["code"], "collected_red_refunded")
+        self.assertEqual(rows["out-paid"]["redInvoiceRelation"]["relationCount"], 1)
+
+    def test_pagination_filter_sort_and_filter_options_are_server_side_contracts(self) -> None:
+        buyer_a = self._counterparty("buyer-a", "甲客户")
+        buyer_b = self._counterparty("buyer-b", "乙客户")
+        service = self._service(
+            invoices=[
+                self._invoice("out-1", "1001", buyer_a, total_with_tax="30.00", invoice_date="2026-05-01"),
+                self._invoice("out-2", "1002", buyer_b, total_with_tax="10.00", invoice_date="2026-05-02"),
+                self._invoice("out-3", "1003", buyer_a, total_with_tax="20.00", invoice_date="2026-05-03"),
+            ]
+        )
+
+        payload = service.list_rows(
+            page=1,
+            page_size=1,
+            filters='[{"field":"buyer_name","operator":"in","values":["甲客户"]}]',
+            sort_field="total_with_tax",
+            sort_direction="desc",
+        )
+        options = service.filter_options(month="2026-05")
+
+        self.assertEqual(payload["pagination"], {"page": 1, "pageSize": 1, "total": 2})
+        self.assertEqual(payload["rows"][0]["invoiceId"], "out-1")
+        self.assertEqual(payload["summary"]["invoiceCount"], 2)
+        self.assertEqual(payload["summary"]["totalWithTax"], "50.00")
+        self.assertIn("collection_status", [field["field"] for field in options["fields"]])
+        self.assertIn("receipt_status", [field["field"] for field in options["fields"]])
+
+    def test_receipt_preview_uses_single_income_transaction_or_requires_selection(self) -> None:
+        buyer = self._counterparty("buyer", "客户")
+        single_invoice = self._invoice("out-single", "2001", buyer, total_with_tax="80.00")
+        multi_invoice = self._invoice("out-multi", "2002", buyer, total_with_tax="100.00")
+        single_bank = self._bank("bank-single", "80.00", TransactionDirection.INFLOW)
+        bank_a = self._bank("bank-a", "40.00", TransactionDirection.INFLOW, trade_time="2026-05-02 10:00:00")
+        bank_b = self._bank("bank-b", "60.00", TransactionDirection.INFLOW, trade_time="2026-05-03 10:00:00")
+        pair_service = WorkbenchPairRelationService()
+        self._relation(pair_service, "case-single", [single_invoice.id, single_bank.id], amount_matched=True)
+        self._relation(pair_service, "case-a", [multi_invoice.id, bank_a.id], amount_matched=False)
+        self._relation(pair_service, "case-b", [multi_invoice.id, bank_b.id], amount_matched=False)
+        service = self._service(
+            invoices=[multi_invoice, single_invoice],
+            transactions=[single_bank, bank_a, bank_b],
+            pair_service=pair_service,
+        )
+
+        rows = {row["invoiceId"]: row for row in service.list_rows(page_size=20)["rows"]}
+        single_preview = service.receipt_preview({"rowId": rows["out-single"]["id"]})
+        multi_preview = service.receipt_preview({"rowId": rows["out-multi"]["id"]})
+        selected_preview = service.receipt_preview(
+            {"rowId": rows["out-multi"]["id"], "selectedBankTransactionId": "bank-b"}
+        )
+
+        self.assertTrue(single_preview["canPreview"])
+        self.assertEqual(single_preview["receipt"]["amount"], "80.00")
+        self.assertEqual(single_preview["receipt"]["payerName"], "客户")
+        self.assertEqual(single_preview["receipt"]["templateVersion"], "sheet7-static-v1")
+        self.assertFalse(multi_preview["canPreview"])
+        self.assertEqual(multi_preview["reasonCode"], "bank_selection_required")
+        self.assertEqual([candidate["bankTransactionId"] for candidate in multi_preview["candidates"]], ["bank-b", "bank-a"])
+        self.assertTrue(selected_preview["canPreview"])
+        self.assertEqual(selected_preview["receipt"]["amount"], "60.00")
+
+    def test_receipt_preview_blocks_no_income_and_red_refund_rows_without_fake_history(self) -> None:
+        buyer = self._counterparty("buyer", "客户")
+        no_income = self._invoice("out-no-income", "3001", buyer, total_with_tax="100.00")
+        paid = self._invoice("out-paid", "3002", buyer, total_with_tax="100.00")
+        red = self._invoice(
+            "out-red",
+            "3003",
+            buyer,
+            amount="-94.34",
+            tax_amount="-5.66",
+            total_with_tax="-100.00",
+            is_positive_invoice="否",
+        )
+        income = self._bank("bank-income", "100.00", TransactionDirection.INFLOW)
+        refund = self._bank("bank-refund", "100.00", TransactionDirection.OUTFLOW)
+        pair_service = WorkbenchPairRelationService()
+        self._relation(pair_service, "case-income", [paid.id, income.id], amount_matched=True)
+        self._relation(pair_service, "case-refund", [red.id, refund.id], amount_matched=True)
+        service = self._service(
+            invoices=[red, paid, no_income],
+            transactions=[income, refund],
+            pair_service=pair_service,
+        )
+
+        rows = {row["invoiceId"]: row for row in service.list_rows(page_size=20)["rows"]}
+        no_income_preview = service.receipt_preview({"rowId": rows["out-no-income"]["id"]})
+        refund_preview = service.receipt_preview({"rowId": rows["out-paid"]["id"]})
+        history = service.receipt_history(invoice_id="out-paid")
+
+        self.assertFalse(no_income_preview["canPreview"])
+        self.assertEqual(no_income_preview["reasonCode"], "no_income_transaction")
+        self.assertEqual(no_income_preview["pendingAmount"], "100.00")
+        self.assertFalse(refund_preview["canPreview"])
+        self.assertEqual(refund_preview["reasonCode"], "red_refund_blocked")
+        self.assertFalse(history["sourceAvailable"])
+        self.assertEqual(history["receipts"], [])
+
+    def test_validation_rejects_unknown_filter_sort_and_relation_kind(self) -> None:
+        service = self._service(invoices=[])
+
+        with self.assertRaises(OutputInvoiceCollectionError) as field_context:
+            service.list_rows(filters='[{"field":"unknown","operator":"equals","value":"x"}]')
+        with self.assertRaises(OutputInvoiceCollectionError) as sort_context:
+            service.list_rows(sort_field="unknown")
+        with self.assertRaises(OutputInvoiceCollectionError) as relation_context:
+            service.row_relation_details("missing", kind="oa")
+
+        self.assertEqual(field_context.exception.error_code, "invalid_filter_field")
+        self.assertEqual(sort_context.exception.error_code, "invalid_sort_field")
+        self.assertEqual(relation_context.exception.error_code, "invalid_relation_kind")
+
+    @staticmethod
+    def _counterparty(counterparty_id: str, name: str, *, tax_no: str | None = None) -> Counterparty:
+        return Counterparty(
+            id=counterparty_id,
+            name=name,
+            normalized_name=name,
+            counterparty_type="customer",
+            tax_no=tax_no,
+        )
+
+    @staticmethod
+    def _invoice(
+        invoice_id: str,
+        invoice_no: str,
+        buyer: Counterparty,
+        *,
+        invoice_code: str | None = None,
+        digital_invoice_no: str | None = None,
+        amount: str = "94.34",
+        tax_amount: str = "5.66",
+        total_with_tax: str = "100.00",
+        invoice_date: str = "2026-05-20",
+        taxable_item_name: str = "服务费",
+        is_positive_invoice: str = "是",
+    ) -> Invoice:
+        return Invoice(
+            id=invoice_id,
+            invoice_type=InvoiceType.OUTPUT,
+            invoice_no=invoice_no,
+            invoice_code=invoice_code,
+            digital_invoice_no=digital_invoice_no,
+            counterparty=buyer,
+            amount=Decimal(amount),
+            signed_amount=Decimal(total_with_tax),
+            invoice_date=invoice_date,
+            seller_name="云南溯源科技有限公司",
+            buyer_name=buyer.name,
+            seller_tax_no="91530000SELLER",
+            buyer_tax_no=buyer.tax_no or "91530000BUYER",
+            tax_rate="6%",
+            tax_amount=Decimal(tax_amount),
+            total_with_tax=Decimal(total_with_tax),
+            specific_business_type="信息技术服务",
+            taxable_item_name=taxable_item_name,
+            invoice_source="import",
+            invoice_kind="增值税专用发票",
+            invoice_status_from_source="valid",
+            is_positive_invoice=is_positive_invoice,
+            risk_level="低",
+            issuer="开票人",
+            source_batch_id="batch-output",
+            source_links=[{"kind": "import_batch", "id": "batch-output"}],
+        )
+
+    @staticmethod
+    def _bank(
+        transaction_id: str,
+        amount: str,
+        direction: TransactionDirection,
+        *,
+        trade_time: str = "2026-05-21 10:00:00",
+    ) -> BankTransaction:
+        signed_amount = Decimal(amount) if direction == TransactionDirection.INFLOW else -Decimal(amount)
+        return BankTransaction(
+            id=transaction_id,
+            account_no="622200001234",
+            txn_direction=direction,
+            counterparty_name_raw="客户",
+            amount=Decimal(amount),
+            signed_amount=signed_amount,
+            txn_date=trade_time[:10],
+            trade_time=trade_time,
+            currency="CNY",
+            counterparty_account_no="622233334444",
+            counterparty_bank_name="开户行",
+            booked_date=trade_time[:10],
+            summary="服务费",
+            remark="银行备注",
+            imported_bank_name="中国银行",
+            imported_bank_last4="1234",
+            bank_text_fields=[{"label": "摘要", "value": "服务费"}],
+        )
+
+    @staticmethod
+    def _relation(
+        pair_service: WorkbenchPairRelationService,
+        case_id: str,
+        row_ids: list[str],
+        *,
+        amount_matched: bool,
+    ) -> None:
+        pair_service.create_active_relation(
+            case_id=case_id,
+            row_ids=row_ids,
+            row_types=["invoice" if row_id.startswith("out") else "bank" for row_id in row_ids],
+            relation_mode="manual_confirmed",
+            created_by="tester",
+            amount_check={"matched": amount_matched},
+        )
+
+    @staticmethod
+    def _service(
+        *,
+        invoices: list[Invoice],
+        transactions: list[BankTransaction] | None = None,
+        pair_service: WorkbenchPairRelationService | None = None,
+    ) -> OutputInvoiceCollectionQueryService:
+        return OutputInvoiceCollectionQueryService(
+            import_service=ImportNormalizationService(
+                existing_invoices=invoices,
+                existing_transactions=transactions or [],
+            ),
+            pair_relation_service=pair_service or WorkbenchPairRelationService(),
+        )
