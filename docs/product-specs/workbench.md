@@ -16,12 +16,12 @@
 
 - 未配对：`display_state=open` 的独立对象，可确认或转异常。
 - 已配对：`display_state=paired` 的同组对象，来源可以是人工确认关系或自动确定性关系。
-- 已忽略：用户主动忽略但可恢复的对象。
-- 已处理异常：结构化异常 case 处理后的对象。
+- 已忽略：用户主动忽略但可恢复的 override 视图，位于 `display_state` 之外，不是合法 `zone` 值。
+- 已处理异常：结构化异常 case 处理后的异常视图，位于 `display_state` 之外，不是合法 `zone` 值。
 
 ## 展示状态和自动决策
 
-- 前端和 API 当前展示状态只允许 `paired` 和 `open`，并通过 `zone=open|paired` 分页读取。
+- 前端和 API 当前展示状态只允许 `paired` 和 `open`，并通过 `zone=open|paired` 分页读取；`zone` 只接受 `open|paired`。
 - Legacy/internal compatibility only: `needs_review` 和 `candidate` 只能出现在迁移期内部字段、调试信息或旧表兼容说明中，不能作为当前前端展示状态、zone 或筛选值。
 - 自动决策使用 `display_state` 和 `decision_status` 两层字段：`display_state` 决定读模型和前端展示区，`decision_status` 表达自动决策生命周期，不直接作为前端展示状态。
 - Warning 不是展示状态；带 warning 的自动关系仍可展示为 `paired`。
@@ -48,8 +48,8 @@
 
 首屏读取不得依赖全量页面快照：
 
-- `GET /api/workbench/summary?month=all` 返回汇总、`read_model_status`、`generated_at`，以及轻量 `oa_status`/`invoice_inventory` 状态诊断；不得返回候选组或行级快照。
-- `GET /api/workbench/groups?month=all&zone=open|paired&page=1&page_size=200&detail_level=summary` 返回当前页候选组摘要；支持服务端 `status`、`source_kind`、`search`、`sort=oa|bank|invoice:asc|desc`、`column_filters` 和 `time_filters`。前端首屏和分页必须使用 `summary`，避免把重 `detail_fields` 带入列表页。
+- `GET /api/workbench/summary?month=all` 返回汇总、`read_model_status`、`generated_at`，以及轻量 `oa_status`/`invoice_inventory` 状态诊断；不得返回投影 group 或行级快照。
+- `GET /api/workbench/groups?month=all&zone=open|paired&page=1&page_size=200&detail_level=summary` 返回当前页 group 摘要；支持服务端 `status`、`source_kind`、`search`、`sort=oa|bank|invoice:asc|desc`、`column_filters` 和 `time_filters`。前端首屏和分页必须使用 `summary`，避免把重 `detail_fields` 带入列表页。
 - `GET /api/workbench/groups/detail?month=all&zone=open|paired&group_id=...` 返回单个 group 完整详情，用于详情抽屉、审计和需要重字段的交互。
 - `GET /api/workbench/refresh-status` 返回 dirty scope、worker heartbeat/lag、failed backlog 和最近错误。
 - 旧 `GET /api/workbench?month=all` 只作为兼容期接口，不再作为前端首屏依赖。
@@ -82,11 +82,11 @@ SQL 读模型只消费手工关系事实和自动决策结果，不在投影阶�
 ## 搜索、筛选和排序
 
 - 三栏局部搜索按当前栏驱动，整组联动。
-- 三栏局部搜索、列筛选和时间筛选按交集组合：同一栏内必须存在同一行同时满足该栏搜索词、列筛选和时间筛选；多个栏同时有条件时，候选组必须分别满足每个栏的条件。
+- 三栏局部搜索、列筛选和时间筛选按交集组合：同一栏内必须存在同一行同时满足该栏搜索词、列筛选和时间筛选；多个栏同时有条件时，业务组必须分别满足每个栏的条件。
 - 三栏局部搜索和时间排序触发 `/api/workbench/groups` 重新读取首屏页；前端只保留当前分页窗口和后续显式加载的页，不再为了筛选/排序预取全量快照。
 - 列筛选和时间筛选也必须进入 `/api/workbench/groups`，未加载的 group 只要命中 SQL read model 就能进入筛选后的分页结果；前端不得用已裁剪的 summary preview 再次排除服务端返回的 group。
 - 银行流水栏金额按不带千分位分隔符的固定小数文本展示，例如 `19370.00`，以便财务人员按连续数字直接搜索。
-- 多选筛选按列生效，不破坏候选组上下文。
+- 多选筛选按列生效，不破坏业务组上下文。
 - 排序按组排序，不按单行排序。
 - 全局搜索要能跳回对应月份、区域、行和详情。
 

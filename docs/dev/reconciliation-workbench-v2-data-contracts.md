@@ -273,14 +273,14 @@ OA 附件发票仍展开为独立 invoice rows，row id 为 `oa-att-inv-{oa_row_
 
 ```json
 {
-  "decision_id": "decision:2026-03:oa_attachment_invoice_amount_mismatch:...",
-  "decision_key": "decision:2026-03:oa_attachment_invoice_amount_mismatch:...",
+  "decision_id": "decision:2026-03:oa_attachment_invoice_with_bank:...",
+  "decision_key": "decision:2026-03:oa_attachment_invoice_with_bank:...",
   "scope_month": "2026-03",
   "display_state": "paired",
   "decision_status": "paired",
   "match_domain": "free",
   "match_shape": "oa_bank_invoice",
-  "rule_code": "oa_attachment_invoice_amount_mismatch",
+  "rule_code": "oa_attachment_invoice_with_bank",
   "rule_version": "2026-05-25",
   "row_ids": ["oa-1", "bk-1", "iv-1", "iv-2"],
   "oa_row_ids": ["oa-1"],
@@ -340,7 +340,7 @@ OA 附件发票仍展开为独立 invoice rows，row id 为 `oa-att-inv-{oa_row_
 
 - 发票导入确认：按发票日期提取月份，并扩展到 `T-2 / T / T+2`。
 - 银行流水导入确认：按交易日期提取月份，并扩展到 `T-2 / T / T+2`。
-- OA hot rebuild / OA reset / `/integrations/oa/sync`：按可用 OA 月份触发。
+- OA hot rebuild / OA reset / `/integrations/oa/sync`：按每个受影响 OA 月份 T 触发，并分别扩展到 `T-2 / T / T+2`。
 - 手工确认、撤回关联、异常单创建或关闭、特殊规则配置变化、自由匹配规则版本升级：在同一数据库事务中写入 dirty scope。
 - 生产执行机制是 DB-backed dirty scope queue，推荐表为 `job.workbench_matching_dirty_scopes`。
 - 同一月份已有自动配对任务运行时，新任务合并为 dirty scope，不并发删除和写入自动决策。
