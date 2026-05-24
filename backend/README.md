@@ -25,6 +25,17 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
 
 脚本默认加载 `.runtime/fin_ops_platform/local-postgres.env`。该文件不入库；本地需要接入服务器 PostgreSQL/MinIO/Redis 时，把 `FIN_OPS_POSTGRES_DATABASE_URL`、`FIN_OPS_REDIS_URL`、对象存储变量和可选 `FIN_OPS_SSH_TUNNEL_*` 写在这里即可。检测到 PostgreSQL URL 后，脚本会自动启用 PostgreSQL storage/read backend。非交互 shell 解析到错误 Python 时，可在该文件中设置 `FIN_OPS_PYTHON_BIN=/path/to/python3`。
 
+本地执行 schema migration 时不要复用 runtime 账号。把 migrator DSN 放在 `.runtime/fin_ops_platform/local-postgres-migrator.env`，只配置 `FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL`，然后执行：
+
+```bash
+set -a
+source .runtime/fin_ops_platform/local-postgres.env
+source .runtime/fin_ops_platform/local-postgres-migrator.env
+set +a
+
+PYTHONPATH=backend/src python3 -m fin_ops_platform.postgres apply
+```
+
 本地和服务器同构运行时必须先通过：
 
 ```bash
@@ -48,7 +59,8 @@ PYTHONPATH=backend/src python3 -m unittest discover -s tests -v
 ## 持久化
 
 - 生产主读写通过 `FIN_OPS_APP_STORAGE_BACKEND=postgres` 和 `FIN_OPS_APP_READ_BACKEND=postgres` 接入 PostgreSQL。
-- PostgreSQL 连接使用 `FIN_OPS_POSTGRES_DATABASE_URL` 或 `DATABASE_URL`，生产环境应从 root-only credential file 注入。
+- PostgreSQL 运行时连接使用 `FIN_OPS_POSTGRES_DATABASE_URL` 或 `DATABASE_URL`，生产环境应从 root-only credential file 注入。
+- PostgreSQL migration 连接优先使用 `DATABASE_URL`，其次使用专用 `FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL`，最后才回退到 `FIN_OPS_POSTGRES_DATABASE_URL`。
 - app Mongo 旧路径仍保留，用于迁移观察期回滚、shadow-read、导出和审计工具。
 - OA 数据库保持只读，只能通过 `MongoOAAdapter` 读取，不能作为 app 写库。
 

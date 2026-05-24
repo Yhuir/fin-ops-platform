@@ -36,6 +36,8 @@ EXPECTED_MIGRATIONS = [
     "0021_read_model_hot_path_indexes.sql",
     "0022_read_model_native_closeout.sql",
     "0023_workbench_group_rows_filters.sql",
+    "0024_pending_invoice_query_fields.sql",
+    "0025_pending_invoice_runtime_grants.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -99,6 +101,7 @@ EXPECTED_TABLES = [
     "read_model.workbench_candidate_matches",
     "read_model.search_index_rows",
     "read_model.pending_invoice_rows",
+    "read_model.pending_invoice_scopes",
     "read_model.cost_statistics_read_models",
     "read_model.cost_statistics_rows",
     "read_model.tax_offset_read_models",
@@ -121,7 +124,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 24)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 26)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -149,16 +152,37 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_status_requires_database_url(self) -> None:
         stdout = StringIO()
         stderr = StringIO()
-        with patch.dict(os.environ, {"DATABASE_URL": "", "FIN_OPS_POSTGRES_DATABASE_URL": ""}):
+        with patch.dict(
+            os.environ,
+            {"DATABASE_URL": "", "FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL": "", "FIN_OPS_POSTGRES_DATABASE_URL": ""},
+        ):
             exit_code = migrate.main(["status", "--migrations-dir", str(MIGRATIONS_DIR)], stdout=stdout, stderr=stderr)
         self.assertEqual(exit_code, 1)
         self.assertEqual(stdout.getvalue(), "")
         self.assertIn("PostgreSQL connection is required", stderr.getvalue())
 
+    def test_database_url_can_use_migrator_env(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "DATABASE_URL": "",
+                "FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL": "postgresql://migrator:pw@127.0.0.1:5432/fin_ops",
+                "FIN_OPS_POSTGRES_DATABASE_URL": "postgresql://runtime:pw@127.0.0.1:5432/fin_ops",
+            },
+        ):
+            self.assertEqual(
+                migrate.database_url_from_env_or_arg(None),
+                "postgresql://migrator:pw@127.0.0.1:5432/fin_ops",
+            )
+
     def test_database_url_can_use_fin_ops_postgres_env(self) -> None:
         with patch.dict(
             os.environ,
-            {"DATABASE_URL": "", "FIN_OPS_POSTGRES_DATABASE_URL": "postgresql://user:pw@127.0.0.1:5432/fin_ops"},
+            {
+                "DATABASE_URL": "",
+                "FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL": "",
+                "FIN_OPS_POSTGRES_DATABASE_URL": "postgresql://user:pw@127.0.0.1:5432/fin_ops",
+            },
         ):
             self.assertEqual(
                 migrate.database_url_from_env_or_arg(None),

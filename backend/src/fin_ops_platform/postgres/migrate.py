@@ -97,9 +97,18 @@ def discover_migrations(migrations_dir: Path = MIGRATIONS_DIR) -> list[Migration
 
 
 def database_url_from_env_or_arg(database_url: str | None) -> str:
-    resolved = database_url or os.getenv("DATABASE_URL") or os.getenv("FIN_OPS_POSTGRES_DATABASE_URL")
+    resolved = (
+        database_url
+        or os.getenv("DATABASE_URL")
+        or os.getenv("FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL")
+        or os.getenv("FIN_OPS_POSTGRES_DATABASE_URL")
+    )
     if not resolved:
-        raise MigrationError("PostgreSQL connection is required. Set DATABASE_URL or pass --database-url.")
+        raise MigrationError(
+            "PostgreSQL connection is required. Set DATABASE_URL, "
+            "FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL, FIN_OPS_POSTGRES_DATABASE_URL, "
+            "or pass --database-url."
+        )
     return resolved
 
 

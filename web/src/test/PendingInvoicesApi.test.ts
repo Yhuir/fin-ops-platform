@@ -1,19 +1,40 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { fetchBankDetailTransactions } from "../features/bankDetails/api";
-import {
-  confirmManualPendingInvoice,
-  fetchPendingInvoiceRows,
-  previewManualPendingInvoice,
-} from "../features/pendingInvoices/api";
+import * as pendingInvoicesApi from "../features/pendingInvoices/api";
 import { fetchWorkbenchSettings, saveWorkbenchSettings } from "../features/workbench/api";
+import type {
+  AttachExistingInvoiceConfirmRequest,
+  AttachExistingInvoicePreviewRequest,
+  FetchPendingInvoiceCandidatesRequest,
+  FetchPendingInvoiceRowsRequest,
+  ManualPendingInvoiceRequest,
+  PendingInvoiceColumnFilter,
+  PendingInvoiceObjectDetailTarget,
+  PendingInvoiceRulesPayload,
+} from "../features/pendingInvoices/types";
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function api() {
+  return pendingInvoicesApi as typeof pendingInvoicesApi & {
+    fetchPendingInvoiceFilterOptions: (request: FetchPendingInvoiceRowsRequest) => Promise<unknown>;
+    fetchPendingInvoiceRules: () => Promise<PendingInvoiceRulesPayload>;
+    savePendingInvoiceRules: (payload: PendingInvoiceRulesPayload) => Promise<PendingInvoiceRulesPayload>;
+    fetchPendingInvoiceRelationDetail: (transactionId: string) => Promise<unknown>;
+    fetchPendingInvoiceObjectDetail: (target: PendingInvoiceObjectDetailTarget) => Promise<unknown>;
+    fetchPendingInvoiceCandidates: (request: FetchPendingInvoiceCandidatesRequest) => Promise<unknown>;
+    previewAttachExistingInvoice: (request: AttachExistingInvoicePreviewRequest) => Promise<unknown>;
+    confirmAttachExistingInvoice: (request: AttachExistingInvoiceConfirmRequest) => Promise<unknown>;
+    fetchPendingInvoiceExportPreview: (request: FetchPendingInvoiceRowsRequest) => Promise<unknown>;
+    downloadPendingInvoiceExport: (request: FetchPendingInvoiceRowsRequest) => Promise<{ blob: Blob; fileName: string }>;
+  };
+}
+
 describe("pending invoices and tag settings API mapping", () => {
-  test("maps pending invoice rows, pagination, summary, and sends filter query", async () => {
+  test("maps upgraded four-zone pending invoice rows and sends filters/sort query", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       direction: "expense",
       filter: "requires_invoice",
@@ -23,32 +44,82 @@ describe("pending invoices and tag settings API mapping", () => {
           bank_transaction: {
             id: "txn_001",
             counterparty_name: "云南供应商有限公司",
+            counterparty_account_no: "6222000011112222",
+            counterparty_bank_name: "工行昆明分行",
             trade_time: "2026-05-02 10:00:00",
-            amount: "1200.00",
+            booked_date: "2026-05-02",
+            debit_amount: "1200.00",
+            credit_amount: "0.00",
+            balance: "9800.00",
+            currency: "人民币元",
             bank_name: "工商银行",
+            account_name: "云南溯源科技有限公司",
             account_last4: "6386",
-            effective_tag_code: "fee",
-            effective_tag_label: "手续费",
+            summary: "电子转账",
+            remark: "维护费",
+            statement_serial_no: "stmt-001",
+            enterprise_serial_no: "ent-001",
+            voucher_type: "电子凭证",
+            voucher_no: "v-001",
           },
-          invoices: [
-            {
-              id: "inv_001",
-              invoice_no: "INV-001",
-              digital_invoice_no: "DIG-001",
-              issue_date: "2026-05-03",
-              total_with_tax: "1200.00",
-              seller_name: "云南供应商有限公司",
-              buyer_name: "云南溯源科技有限公司",
-              invoice_type: "input",
+          invoice_acquisition_status: {
+            code: "invoice_not_fully_paid",
+            label: "未支付完已开票",
+            reason: "发票价税合计大于已付合计",
+            severity: "warning",
+            primary_action: "view_payment_detail",
+            matched_rule: {
+              source: "pending_invoice_tag_groups",
+              group: "requires_invoice",
+              tag_code: "fee",
+              tag_label: "手续费",
             },
-          ],
-          oa_applicant: "张三",
-          can_create_invoice: true,
-          relation_case_ids: ["case_001"],
+          },
+          input_invoices: {
+            primary: {
+              id: "inv_001",
+              digital_invoice_no: "DIG-001",
+              invoice_no: "INV-001",
+              invoice_code: "CODE-001",
+              issue_date: "2026-05-03",
+              seller_name: "云南供应商有限公司",
+              seller_tax_no: "915300001111",
+              total_with_tax: "2000.00",
+            },
+            relation_count: 2,
+            has_multiple: true,
+            summaries: [
+              { id: "inv_001", digital_invoice_no: "DIG-001", issue_date: "2026-05-03", seller_name: "云南供应商有限公司", seller_tax_no: "915300001111", total_with_tax: "2000.00" },
+              { id: "inv_002", digital_invoice_no: "DIG-002", issue_date: "2026-05-04", seller_name: "云南供应商二号", seller_tax_no: "915300002222", total_with_tax: "800.00" },
+            ],
+            payment_summary: {
+              paid_total: "1200.00",
+              invoice_total: "2000.00",
+              remaining_amount: "800.00",
+              difference_amount: "-800.00",
+            },
+          },
+          oa: {
+            primary: {
+              id: "oa_001",
+              applicant: "张三",
+              application_type: "支付",
+              project_name: "维护项目",
+              status: "进行中",
+            },
+            relation_count: 2,
+            has_multiple: true,
+            detail_available: true,
+            summaries: [
+              { id: "oa_001", applicant: "张三", application_type: "支付", project_name: "维护项目", status: "进行中" },
+              { id: "oa_002", applicant: "李四", application_type: "报销", project_name: "维护项目二期", status: "已完成" },
+            ],
+          },
         },
       ],
       pagination: { page: 2, page_size: 25, total: 51 },
       summary: { total_rows: 51, missing_invoice_rows: 8, create_invoice_available_rows: 7 },
+      read_model_status: "fresh",
       tag_dictionary: {
         version: 9,
         tags: [{ code: "fee", label: "手续费", path: ["自动识别", "手续费"], status: "active", source: "system" }],
@@ -56,36 +127,285 @@ describe("pending invoices and tag settings API mapping", () => {
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const payload = await fetchPendingInvoiceRows({
+    const filters: PendingInvoiceColumnFilter[] = [
+      { field: "status_code", operator: "in", values: ["invoice_not_fully_paid"] },
+      { field: "amount", operator: "between", value: { min: "1000.00", max: "2000.00" } },
+    ];
+
+    const payload = await pendingInvoicesApi.fetchPendingInvoiceRows({
       direction: "expense",
       filter: "requires_invoice",
+      dateFrom: "2026-05-01",
+      dateTo: "2026-05-31",
       page: 2,
       pageSize: 25,
       keyword: "供应商",
+      filters,
+      sortField: "invoice_total",
+      sortDirection: "asc",
     });
 
     const url = new URL(String(fetchMock.mock.calls[0][0]), "http://localhost");
     expect(url.pathname).toBe("/api/pending-invoices/rows");
     expect(url.searchParams.get("direction")).toBe("expense");
     expect(url.searchParams.get("filter")).toBe("requires_invoice");
+    expect(url.searchParams.get("date_from")).toBe("2026-05-01");
+    expect(url.searchParams.get("date_to")).toBe("2026-05-31");
     expect(url.searchParams.get("page")).toBe("2");
     expect(url.searchParams.get("page_size")).toBe("25");
     expect(url.searchParams.get("keyword")).toBe("供应商");
+    expect(url.searchParams.get("sort_field")).toBe("invoice_total");
+    expect(url.searchParams.get("sort_direction")).toBe("asc");
+    expect(JSON.parse(url.searchParams.get("filters") ?? "[]")).toEqual(filters);
     expect(payload.rows[0]).toMatchObject({
       id: "txn_001",
       bankTransaction: {
         counterpartyName: "云南供应商有限公司",
-        accountLast4: "6386",
-        effectiveTagLabel: "手续费",
+        counterpartyAccountNo: "6222000011112222",
+        debitAmount: "1200.00",
+        accountName: "云南溯源科技有限公司",
+        summary: "电子转账",
+        voucherNo: "v-001",
       },
-      invoices: [{ invoiceNo: "INV-001", digitalInvoiceNo: "DIG-001", invoiceType: "input" }],
-      oaApplicant: "张三",
-      canCreateInvoice: true,
-      relationCaseIds: ["case_001"],
+      invoiceAcquisitionStatus: {
+        code: "invoice_not_fully_paid",
+        label: "未支付完已开票",
+        primaryAction: "view_payment_detail",
+        matchedRule: { group: "requires_invoice", tagLabel: "手续费" },
+      },
+      inputInvoices: {
+        relationCount: 2,
+        hasMultiple: true,
+        primary: { digitalInvoiceNo: "DIG-001", sellerTaxNo: "915300001111" },
+        paymentSummary: { paidTotal: "1200.00", remainingAmount: "800.00" },
+      },
+      oa: {
+        relationCount: 2,
+        hasMultiple: true,
+        detailAvailable: true,
+        primary: { applicant: "张三", projectName: "维护项目" },
+      },
     });
     expect(payload.pagination).toEqual({ page: 2, pageSize: 25, total: 51 });
     expect(payload.summary).toEqual({ totalRows: 51, missingInvoiceRows: 8, createInvoiceAvailableRows: 7 });
+    expect(payload.readModelStatus).toBe("fresh");
     expect(payload.tagDictionary?.version).toBe(9);
+  });
+
+  test("maps filter options from top-level backend options map", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      fields: [
+        { field: "status_code", label: "发票获取状态", operators: ["in"] },
+        { field: "seller_name", label: "销方", operators: ["contains", "in"] },
+      ],
+      options: {
+        status_code: [{ value: "paid_pending_invoice", label: "已支付待开票", count: 3 }],
+        seller_name: [{ value: "云南供应商", label: "云南供应商", count: 2 }],
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await api().fetchPendingInvoiceFilterOptions({ direction: "expense", filter: "all" });
+
+    expect(payload.fields).toEqual([
+      {
+        field: "status_code",
+        label: "发票获取状态",
+        operators: ["in"],
+        options: [{ value: "paid_pending_invoice", label: "已支付待开票", count: 3 }],
+      },
+      {
+        field: "seller_name",
+        label: "销方",
+        operators: ["contains", "in"],
+        options: [{ value: "云南供应商", label: "云南供应商", count: 2 }],
+      },
+    ]);
+  });
+
+  test("maps rules, relation detail, object detail, candidates, attach-existing, and export endpoints", async () => {
+    expect(api().fetchPendingInvoiceRules).toBeTypeOf("function");
+    expect(api().savePendingInvoiceRules).toBeTypeOf("function");
+    expect(api().fetchPendingInvoiceRelationDetail).toBeTypeOf("function");
+    expect(api().fetchPendingInvoiceObjectDetail).toBeTypeOf("function");
+    expect(api().fetchPendingInvoiceCandidates).toBeTypeOf("function");
+    expect(api().previewAttachExistingInvoice).toBeTypeOf("function");
+    expect(api().confirmAttachExistingInvoice).toBeTypeOf("function");
+    expect(api().fetchPendingInvoiceExportPreview).toBeTypeOf("function");
+    expect(api().downloadPendingInvoiceExport).toBeTypeOf("function");
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (url.pathname === "/api/pending-invoices/rules" && method === "GET") {
+        return new Response(JSON.stringify({
+          version: 3,
+          permissions: { can_save: true },
+          bank_transaction_tags: {
+            version: 3,
+            tags: [
+              { code: "fee", label: "手续费", status: "active" },
+              { code: "internal_transfer", label: "内部转账", status: "active" },
+              { code: "salary", label: "工资", status: "active" },
+            ],
+          },
+          groups: {
+            requires_invoice: { tag_codes: ["fee"], tags: [{ code: "fee", label: "手续费", status: "active" }] },
+            bank_statement_as_invoice: { tag_codes: ["internal_transfer"], tags: [{ code: "internal_transfer", label: "内部转账", status: "active" }] },
+            no_invoice_required: { tag_codes: ["salary"], tags: [{ code: "salary", label: "工资", status: "active" }] },
+          },
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.pathname === "/api/pending-invoices/rules" && method === "PUT") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        expect(body).toEqual({
+          groups: {
+            requires_invoice: { tag_codes: ["fee"] },
+            bank_statement_as_invoice: { tag_codes: ["internal_transfer"] },
+            no_invoice_required: { tag_codes: ["salary"] },
+          },
+        });
+        return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.pathname === "/api/pending-invoices/rows/txn_001/relation-detail") {
+        return new Response(JSON.stringify({
+          transaction_summary: { id: "txn_001", counterparty_name: "云南供应商", trade_time: "2026-05-02", debit_amount: "1200.00" },
+          related_invoices: [{ id: "inv_001", digital_invoice_no: "DIG-001", seller_name: "云南供应商", total_with_tax: "2000.00" }],
+          payment_rows: [{ id: "txn_001", trade_time: "2026-05-02", debit_amount: "1200.00", relation_case_id: "case_001" }],
+          paid_total: "1200.00",
+          invoice_total: "2000.00",
+          remaining_amount: "800.00",
+          difference_amount: "-800.00",
+          available_actions: ["attach_existing_invoice"],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.pathname === "/api/pending-invoices/invoices/inv_001/detail") {
+        return new Response(JSON.stringify({
+          title: "DIG-001",
+          detail_available: true,
+          sections: [{ title: "发票字段", fields: [{ label: "销方", value: "云南供应商" }] }],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.pathname === "/api/pending-invoices/invoice-candidates") {
+        expect(url.searchParams.get("transaction_id")).toBe("txn_001");
+        expect(url.searchParams.get("sort_field")).toBe("amount_difference_abs");
+        return new Response(JSON.stringify({
+          rows: [{
+            invoice_id: "inv_001",
+            digital_invoice_no: "DIG-001",
+            seller_name: "云南供应商",
+            total_with_tax: "1200.00",
+            related_paid_total: "0.00",
+            remaining_amount: "1200.00",
+            amount_difference_abs: "0.00",
+            candidate_status: "available",
+          }],
+          pagination: { page: 1, page_size: 20, total: 1 },
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.pathname === "/api/pending-invoices/rows/txn_001/attach-existing-invoice/preview") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        expect(body).toMatchObject({ invoice_id: "inv_001", request_id: "preview-request" });
+        return new Response(JSON.stringify({
+          preview_id: "attach_preview_001",
+          request_key: "pending_invoice_attach_existing:txn_001:inv_001",
+          can_confirm: true,
+          transaction_summary: { id: "txn_001", counterparty_name: "云南供应商", trade_time: "2026-05-02", debit_amount: "1200.00" },
+          invoice_summary: { id: "inv_001", digital_invoice_no: "DIG-001", issue_date: "2026-05-03", seller_name: "云南供应商", seller_tax_no: "9153", total_with_tax: "1200.00" },
+          payment_impact: { paid_total_before: "0.00", paid_total_after: "1200.00", invoice_total: "1200.00", remaining_amount_after: "0.00", difference_amount_after: "0.00" },
+          affected_months: ["2026-05"],
+          warnings: [],
+          conflicts: [],
+          expires_at: "2026-05-25T10:10:00+08:00",
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.pathname === "/api/pending-invoices/rows/txn_001/attach-existing-invoice") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        expect(body).toMatchObject({ preview_id: "attach_preview_001", invoice_id: "inv_001", request_id: "confirm-request" });
+        return new Response(JSON.stringify({
+          status: "completed",
+          request_id: "confirm-request",
+          request_key: "pending_invoice_attach_existing:txn_001:inv_001",
+          transaction_id: "txn_001",
+          invoice_id: "inv_001",
+          relation_case_id: "case_001",
+          relation_mode: "pending_invoice_attach_existing_invoice",
+          affected_transaction_ids: ["txn_001"],
+          affected_invoice_ids: ["inv_001"],
+          affected_months: ["2026-05"],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.pathname === "/api/pending-invoices/export-preview") {
+        expect(url.searchParams.get("page")).toBeNull();
+        return new Response(JSON.stringify({
+          file_name: "pending-invoices.xlsx",
+          row_count: 128,
+          scope_label: "当前筛选",
+          columns: ["对方户名", "发票状态"],
+          sample_rows: [{ counterparty_name: "云南供应商", status_label: "已支付待开票" }],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.pathname === "/api/pending-invoices/export") {
+        expect(url.searchParams.get("page")).toBeNull();
+        return new Response(new Blob(["xlsx"], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "Content-Disposition": "attachment; filename*=UTF-8''pending-invoices.xlsx",
+          },
+        });
+      }
+      throw new Error(`Unhandled request ${method} ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const rules = await api().fetchPendingInvoiceRules();
+    expect(rules.groups.requiresInvoice.tags[0]).toMatchObject({ code: "fee", label: "手续费" });
+    expect(rules.availableTags.map((tag) => tag.code)).toEqual(["fee", "internal_transfer", "salary"]);
+    await api().savePendingInvoiceRules(rules);
+
+    const relation = await api().fetchPendingInvoiceRelationDetail("txn_001");
+    expect(relation).toMatchObject({
+      paidTotal: "1200.00",
+      invoiceTotal: "2000.00",
+      availableActions: ["attach_existing_invoice"],
+    });
+
+    const detail = await api().fetchPendingInvoiceObjectDetail({ kind: "invoice", id: "inv_001", rowId: "txn_001" });
+    expect(detail).toMatchObject({ title: "DIG-001", sections: [{ title: "发票字段" }] });
+
+    const candidates = await api().fetchPendingInvoiceCandidates({
+      transactionId: "txn_001",
+      sortField: "amount_difference_abs",
+      sortDirection: "asc",
+      page: 1,
+      pageSize: 20,
+    });
+    expect(candidates).toMatchObject({ rows: [{ invoiceId: "inv_001", candidateStatus: "available" }] });
+
+    const preview = await api().previewAttachExistingInvoice({ transactionId: "txn_001", invoiceId: "inv_001", requestId: "preview-request" });
+    expect(preview).toMatchObject({ previewId: "attach_preview_001", paymentImpact: { remainingAmountAfter: "0.00" } });
+    const confirm = await api().confirmAttachExistingInvoice({
+      transactionId: "txn_001",
+      invoiceId: "inv_001",
+      previewId: "attach_preview_001",
+      requestId: "confirm-request",
+    });
+    expect(confirm).toMatchObject({ status: "completed", relationCaseId: "case_001", affectedMonths: ["2026-05"] });
+
+    const exportPreview = await api().fetchPendingInvoiceExportPreview({
+      direction: "expense",
+      filter: "requires_invoice",
+      page: 7,
+      pageSize: 25,
+      sortField: "trade_date",
+      sortDirection: "desc",
+    });
+    expect(exportPreview).toMatchObject({ fileName: "pending-invoices.xlsx", rowCount: 128, sampleRows: [{ counterpartyName: "云南供应商" }] });
+
+    const downloaded = await api().downloadPendingInvoiceExport({ direction: "expense", filter: "requires_invoice", page: 7, pageSize: 25 });
+    expect(downloaded.fileName).toBe("pending-invoices.xlsx");
+    expect(downloaded.blob).toBeInstanceOf(Blob);
   });
 
   test("previews and confirms manual invoice with request id preserved", async () => {
@@ -118,12 +438,12 @@ describe("pending invoices and tag settings API mapping", () => {
         affected_transaction_ids: ["txn_001"],
         affected_invoice_ids: ["inv_002"],
         affected_months: ["2026-05"],
-        row: { id: "txn_001", bank_transaction: { id: "txn_001" }, invoices: [], can_create_invoice: false },
+        row: { id: "txn_001", bank_transaction: { id: "txn_001" }, invoice_acquisition_status: { code: "paid_invoiced", label: "已支付已开票" } },
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const request = {
+    const request: ManualPendingInvoiceRequest = {
       requestId: "request-001",
       bankTransactionId: "txn_001",
       invoiceNo: "INV-001",
@@ -133,8 +453,8 @@ describe("pending invoices and tag settings API mapping", () => {
       buyerName: "云南溯源科技有限公司",
     };
 
-    const preview = await previewManualPendingInvoice(request);
-    const result = await confirmManualPendingInvoice({ ...request, previewId: preview.previewId });
+    const preview = await pendingInvoicesApi.previewManualPendingInvoice(request);
+    const result = await pendingInvoicesApi.confirmManualPendingInvoice({ ...request, previewId: preview.previewId });
 
     expect(preview).toMatchObject({
       previewId: "preview_001",

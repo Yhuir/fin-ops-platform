@@ -571,10 +571,10 @@ class OutputInvoiceCollectionQueryService:
         return [self._row_payload(group, groups) for group in groups]
 
     def _invoice_groups(self, *, month: str | None = None) -> list[dict[str, Any]]:
+        source_month = str(month).strip() if month not in (None, "") else "all"
         invoices = [
             invoice
-            for invoice in self._import_service.list_invoices(month=month or None)
-            if invoice.invoice_type == InvoiceType.OUTPUT
+            for invoice in self._import_service.list_invoices(month=source_month, invoice_type=InvoiceType.OUTPUT)
         ]
         grouped: dict[str, list[Invoice]] = {}
         for invoice in invoices:

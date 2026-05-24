@@ -30,7 +30,61 @@ class StaticOAProjection:
         self.write_calls.append("create_draft")
 
 
+class RepositoryOnlyInvoiceFacts:
+    def __init__(self, invoices: list[Invoice]) -> None:
+        self.invoices = invoices
+        self.invoice_page_calls: list[dict[str, object]] = []
+
+    def list_invoices_page(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 100,
+        month: str | None = None,
+        invoice_type: str | None = None,
+        status: str | None = None,
+        keyword: str | None = None,
+    ) -> tuple[list[Invoice], int]:
+        self.invoice_page_calls.append(
+            {
+                "page": page,
+                "page_size": page_size,
+                "month": month,
+                "invoice_type": invoice_type,
+                "status": status,
+                "keyword": keyword,
+            }
+        )
+        return list(self.invoices), len(self.invoices)
+
+    def list_bank_transactions_page(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 100,
+        **_: object,
+    ) -> tuple[list[BankTransaction], int]:
+        return [], 0
+
+
 class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
+    def test_default_rows_read_repository_invoice_facts_when_memory_snapshot_is_empty(self) -> None:
+        vendor = self._counterparty("vendor", "生产库供应商")
+        invoice = self._invoice("inv-postgres", "PG-001", vendor, total_with_tax="118.00")
+        repository = RepositoryOnlyInvoiceFacts([invoice])
+        service = InputInvoiceUsageQueryService(
+            import_service=ImportNormalizationService(fact_repository=repository),
+            pair_relation_service=WorkbenchPairRelationService(),
+        )
+
+        payload = service.list_rows()
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        self.assertEqual(payload["rows"][0]["invoiceId"], "inv-postgres")
+        self.assertEqual(payload["rows"][0]["invoice"]["sellerName"], "生产库供应商")
+        self.assertEqual(repository.invoice_page_calls[0]["month"], None)
+        self.assertEqual(repository.invoice_page_calls[0]["invoice_type"], InvoiceType.INPUT.value)
+
     def test_import_invoices_are_aggregated_one_row_per_digital_invoice_and_detail_preserves_line_items(self) -> None:
         vendor = self._counterparty("vendor", "云南中招招标有限公司")
         line_1 = self._invoice(

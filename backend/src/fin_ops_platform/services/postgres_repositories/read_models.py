@@ -36,6 +36,30 @@ _TAX_OFFSET_ITEM_TYPES = {
     "certified_outside_plan_rows": "certified_outside",
 }
 _TAX_OFFSET_PAYLOAD_KEYS = {item_type: payload_key for payload_key, item_type in _TAX_OFFSET_ITEM_TYPES.items()}
+PENDING_INVOICE_FILTER_FIELDS = {
+    "trade_date": {"between"},
+    "bank_name": {"in", "contains"},
+    "account_name": {"in", "contains"},
+    "counterparty_name": {"contains", "in"},
+    "amount": {"between", "eq"},
+    "summary_remark": {"contains"},
+    "status_code": {"in"},
+    "rule_group": {"in"},
+    "seller_name": {"contains", "in"},
+    "invoice_total": {"between", "eq"},
+    "oa_applicant": {"contains", "in"},
+    "project_name": {"contains", "in"},
+}
+PENDING_INVOICE_SORT_EXPRESSIONS = {
+    "trade_date": "trade_date",
+    "amount": "amount",
+    "counterparty_name": "counterparty_name",
+    "status_code": "status_code",
+    "seller_name": "seller_name",
+    "invoice_total": "invoice_total",
+    "oa_applicant": "oa_applicant",
+    "project_name": "project_name",
+}
 
 
 class PostgresReadModelRepository:
@@ -174,6 +198,9 @@ class PostgresReadModelRepository:
         date_from: str | None = None,
         date_to: str | None = None,
         keyword: str | None = None,
+        filters: str | list[dict[str, Any]] | None = None,
+        sort_field: str | None = None,
+        sort_direction: str | None = None,
         page: int | str | None = 1,
         page_size: int | str | None = 50,
     ) -> dict[str, Any] | None:
@@ -195,20 +222,37 @@ class PostgresReadModelRepository:
         if keyword:
             where.append("searchable_text ilike %s")
             params.append(f"%{keyword}%")
+        for clause, clause_params in _pending_invoice_filter_clauses(filters):
+            where.append(clause)
+            params.extend(clause_params)
         where_sql = " and ".join(where)
+        order_sql = _pending_invoice_order_sql(sort_field=sort_field, sort_direction=sort_direction)
         total_row = self._connection.fetch_one(
             f"select count(*) as count from read_model.pending_invoice_rows where {where_sql}",
             tuple(params),
         )
         total = int_value(total_row.get("count") if isinstance(total_row, dict) else 0, 0)
+        scope_key = f"{normalized_direction}:{normalized_filter}"
+        refresh_status = self._refresh_status(scope_type="pending_invoice", scope_key=scope_key)
         if total == 0:
-            return None
+            if not self._pending_invoice_scope_exists(scope_key):
+                return None
+            return {
+                "direction": normalized_direction,
+                "filter": normalized_filter,
+                "rows": [],
+                "pagination": {"page": page_number, "page_size": page_limit, "total": 0},
+                "summary": {"total_rows": 0, "missing_invoice_rows": 0, "create_invoice_available_rows": 0},
+                "bank_transaction_tags": {},
+                "bank_transaction_tags_version": 1,
+                "refresh_status": refresh_status,
+            }
         rows = self._connection.fetch_all(
             f"""
             select payload, raw_payload, missing_invoice, can_create_invoice
             from read_model.pending_invoice_rows
             where {where_sql}
-            order by trade_date desc, row_id
+            order by {order_sql}
             limit %s offset %s
             """,
             tuple([*params, page_limit, (page_number - 1) * page_limit]),
@@ -227,11 +271,12 @@ class PostgresReadModelRepository:
             },
             "bank_transaction_tags": {},
             "bank_transaction_tags_version": 1,
-            "refresh_status": self._refresh_status(scope_type="pending_invoice", scope_key=f"{normalized_direction}:{normalized_filter}"),
+            "refresh_status": refresh_status,
         }
 
     def save_pending_invoice_rows(self, *, scope_key: str, rows: list[dict[str, Any]]) -> None:
         normalized_direction, normalized_filter, scope_month = _parse_pending_invoice_scope_key(scope_key)
+        rows_to_save = list(rows or [])
 
         def write(connection: Any) -> None:
             if scope_month:
@@ -249,9 +294,23 @@ class PostgresReadModelRepository:
                     "delete from read_model.pending_invoice_rows where direction = %s and (%s = 'all' or filter_group = %s)",
                     (normalized_direction, normalized_filter, normalized_filter),
                 )
-            for row in list(rows or []):
+            for row in rows_to_save:
                 payload = serialize_value(row.get("payload") if isinstance(row.get("payload"), dict) else row)
                 bank_transaction = payload.get("bank_transaction") if isinstance(payload.get("bank_transaction"), dict) else {}
+                status = payload.get("invoice_acquisition_status") if isinstance(payload.get("invoice_acquisition_status"), dict) else {}
+                input_invoices = payload.get("input_invoices") if isinstance(payload.get("input_invoices"), dict) else {}
+                primary_invoice = (
+                    input_invoices.get("primary")
+                    if isinstance(input_invoices.get("primary"), dict)
+                    else {}
+                )
+                payment_summary = (
+                    input_invoices.get("payment_summary")
+                    if isinstance(input_invoices.get("payment_summary"), dict)
+                    else {}
+                )
+                oa = payload.get("oa") if isinstance(payload.get("oa"), dict) else {}
+                primary_oa = oa.get("primary") if isinstance(oa.get("primary"), dict) else {}
                 row_scope_month = scope_month or month_start(bank_transaction.get("trade_time"))
                 row_filter_group = text(row.get("filter_group") or payload.get("filter_group") or normalized_filter) or "all"
                 row_scope_key = _pending_invoice_row_scope_key(
@@ -263,15 +322,21 @@ class PostgresReadModelRepository:
                     """
                     insert into read_model.pending_invoice_rows(
                         row_id, direction, filter_group, scope_month, trade_date, counterparty_name,
-                        amount, missing_invoice, can_create_invoice, searchable_text, scope_key, generated_at, payload, raw_payload
+                        amount, status_code, seller_name, invoice_total, oa_applicant, project_name,
+                        missing_invoice, can_create_invoice, searchable_text, scope_key, generated_at, payload, raw_payload
                     )
-                    values (%s, %s, %s, %s::date, %s::date, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s)
+                    values (%s, %s, %s, %s::date, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s)
                     on conflict (row_id, direction) do update set
                         filter_group = excluded.filter_group,
                         scope_month = excluded.scope_month,
                         trade_date = excluded.trade_date,
                         counterparty_name = excluded.counterparty_name,
                         amount = excluded.amount,
+                        status_code = excluded.status_code,
+                        seller_name = excluded.seller_name,
+                        invoice_total = excluded.invoice_total,
+                        oa_applicant = excluded.oa_applicant,
+                        project_name = excluded.project_name,
                         missing_invoice = excluded.missing_invoice,
                         can_create_invoice = excluded.can_create_invoice,
                         searchable_text = excluded.searchable_text,
@@ -289,6 +354,11 @@ class PostgresReadModelRepository:
                         text(bank_transaction.get("trade_time"))[:10] if text(bank_transaction.get("trade_time")) else None,
                         text(bank_transaction.get("counterparty_name")),
                         decimal_text(bank_transaction.get("amount")),
+                        text(status.get("code")),
+                        text(primary_invoice.get("seller_name")),
+                        decimal_text(payment_summary.get("invoice_total") or primary_invoice.get("total_with_tax")),
+                        text(primary_oa.get("applicant") or payload.get("oa_applicant")),
+                        text(primary_oa.get("project_name")),
                         not bool(payload.get("invoices")),
                         bool(payload.get("can_create_invoice")),
                         text(row.get("searchable_text") or payload),
@@ -298,8 +368,75 @@ class PostgresReadModelRepository:
                         jsonb({"normalized_payload": payload}),
                     ),
                 )
+            self._upsert_pending_invoice_scope(
+                connection,
+                scope_key=scope_key,
+                direction=normalized_direction,
+                filter_group=normalized_filter,
+                row_count=len(rows_to_save),
+            )
 
         run_in_transaction(self._connection, write)
+
+    def mark_pending_invoice_scope(self, *, scope_key: str, row_count: int = 0) -> None:
+        normalized_direction, normalized_filter, _scope_month = _parse_pending_invoice_scope_key(scope_key)
+
+        def write(connection: Any) -> None:
+            self._upsert_pending_invoice_scope(
+                connection,
+                scope_key=str(scope_key or "").strip() or f"{normalized_direction}:{normalized_filter}",
+                direction=normalized_direction,
+                filter_group=normalized_filter,
+                row_count=max(int_value(row_count, 0), 0),
+            )
+
+        run_in_transaction(self._connection, write)
+
+    def _pending_invoice_scope_exists(self, scope_key: str) -> bool:
+        row = self._connection.fetch_one(
+            """
+            select scope_key
+            from read_model.pending_invoice_scopes
+            where scope_key = %s
+               or scope_key like %s
+            limit 1
+            """,
+            (scope_key, f"{scope_key}:%"),
+        )
+        return row is not None
+
+    @staticmethod
+    def _upsert_pending_invoice_scope(
+        connection: Any,
+        *,
+        scope_key: str,
+        direction: str,
+        filter_group: str,
+        row_count: int,
+    ) -> None:
+        connection.execute(
+            """
+            insert into read_model.pending_invoice_scopes(
+                scope_key, direction, filter_group, row_count, generated_at, cache_status, raw_payload
+            )
+            values (%s, %s, %s, %s, now(), 'fresh', %s)
+            on conflict (scope_key) do update set
+                direction = excluded.direction,
+                filter_group = excluded.filter_group,
+                row_count = excluded.row_count,
+                generated_at = excluded.generated_at,
+                cache_status = excluded.cache_status,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            """,
+            (
+                scope_key,
+                direction,
+                filter_group,
+                row_count,
+                jsonb({"scope_key": scope_key, "row_count": row_count}),
+            ),
+        )
 
     def _refresh_status(self, *, scope_type: str, scope_key: str) -> str:
         dirty_row = self._connection.fetch_one(
@@ -2648,6 +2785,76 @@ def _pending_invoice_row_scope_key(*, direction: str, filter_group: str, scope_m
     if scope_month:
         return f"{direction}:{filter_group}:{scope_month[:7]}"
     return f"{direction}:{filter_group}"
+
+
+def _pending_invoice_filter_clauses(filters: str | list[dict[str, Any]] | None) -> list[tuple[str, list[Any]]]:
+    if filters in (None, ""):
+        return []
+    if isinstance(filters, str):
+        parsed = json.loads(filters)
+    else:
+        parsed = filters
+    if not isinstance(parsed, list):
+        raise ValueError("pending invoice filters must be a list")
+    clauses: list[tuple[str, list[Any]]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            raise ValueError("pending invoice filter must be an object")
+        field = text(item.get("field")) or ""
+        operator = text(item.get("operator")) or ""
+        if field not in PENDING_INVOICE_FILTER_FIELDS or operator not in PENDING_INVOICE_FILTER_FIELDS[field]:
+            raise ValueError(f"unsupported pending invoice filter: {field}/{operator}")
+        expression = _pending_invoice_filter_expression(field)
+        if operator == "contains":
+            clauses.append((f"{expression} ilike %s", [f"%{text(item.get('value')) or ''}%"]))
+        elif operator == "in":
+            values = [str(value).strip() for value in list(item.get("values") or []) if str(value).strip()]
+            if values:
+                clauses.append((f"{expression} = any(%s)", [values]))
+        elif operator == "between":
+            bounds = item.get("value") if isinstance(item.get("value"), dict) else {}
+            if field in {"amount", "invoice_total"}:
+                minimum = decimal_text(bounds.get("min"))
+                maximum = decimal_text(bounds.get("max"))
+                if minimum is not None:
+                    clauses.append((f"{expression} >= %s", [minimum]))
+                if maximum is not None:
+                    clauses.append((f"{expression} <= %s", [maximum]))
+            else:
+                start = text(bounds.get("from"))
+                end = text(bounds.get("to"))
+                if start:
+                    clauses.append((f"{expression} >= %s::date", [start]))
+                if end:
+                    clauses.append((f"{expression} <= %s::date", [end]))
+        elif operator == "eq":
+            clauses.append((f"{expression} = %s", [decimal_text(item.get("value"))]))
+    return clauses
+
+
+def _pending_invoice_filter_expression(field: str) -> str:
+    if field == "bank_name":
+        return "coalesce(payload->'bank_transaction'->>'bank_name', '')"
+    if field == "account_name":
+        return "coalesce(payload->'bank_transaction'->>'account_name', '')"
+    if field == "summary_remark":
+        return "(coalesce(payload->'bank_transaction'->>'summary', '') || ' ' || coalesce(payload->'bank_transaction'->>'remark', ''))"
+    if field == "rule_group":
+        return "filter_group"
+    return PENDING_INVOICE_SORT_EXPRESSIONS.get(field, field)
+
+
+def _pending_invoice_order_sql(*, sort_field: str | None, sort_direction: str | None) -> str:
+    field = text(sort_field) or ""
+    if not field:
+        return "trade_date desc nulls last, row_id"
+    if field not in PENDING_INVOICE_SORT_EXPRESSIONS:
+        raise ValueError(f"unsupported pending invoice sort field: {field}")
+    direction = (text(sort_direction) or "asc").lower()
+    if direction not in {"asc", "desc"}:
+        raise ValueError("pending invoice sort direction must be asc or desc")
+    expression = PENDING_INVOICE_SORT_EXPRESSIONS[field]
+    return f"{expression} {direction} nulls last, row_id"
 
 
 def _parse_cost_statistics_scope_parts(scope_key: str, *, payload: dict[str, Any]) -> tuple[str, str]:

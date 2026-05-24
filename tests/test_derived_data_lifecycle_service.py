@@ -74,6 +74,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         service = DerivedDataLifecycleService()
 
         plan = service.plan_event("pending_invoice_manual_invoice_confirmed", months=["2026-05"])
+        attach_plan = service.plan_event("pending_invoice_attach_existing_invoice_confirmed", months=["2026-05"])
 
         self.assertEqual(plan["affected_scopes"], ["2026-05", "all"])
         self.assertEqual(
@@ -89,6 +90,8 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
             ],
         )
         self.assertIn("tax_offset_cache_warmup", plan["will_enqueue_jobs"])
+        self.assertEqual([domain["domain"] for domain in attach_plan["domains"]], [domain["domain"] for domain in plan["domains"]])
+        self.assertEqual(attach_plan["will_enqueue_jobs"], plan["will_enqueue_jobs"])
 
     def test_oa_rebuilt_maps_oa_workbench_candidate_tax_cost_and_historical_reconcile_domains(self) -> None:
         service = DerivedDataLifecycleService()
@@ -199,6 +202,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "exception_case_changed",
                 "bank_transaction_category_changed",
                 "pending_invoice_manual_invoice_confirmed",
+                "pending_invoice_attach_existing_invoice_confirmed",
                 "no_oa_bank_batch_changed",
                 "batch_accounting_relation_changed",
                 "turnover_relation_changed",

@@ -24,6 +24,67 @@ class PendingInvoiceApiTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["id"], transaction_id)
         self.assertEqual(payload["rows"][0]["bank_transaction"]["counterparty_name"], "Vendor API")
         self.assertTrue(payload["rows"][0]["can_create_invoice"])
+        self.assertEqual(payload["rows"][0]["invoice_acquisition_status"]["code"], "paid_pending_invoice")
+
+    def test_detail_candidates_attach_rules_and_export_endpoints(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            transaction_id = self._create_bank_transaction(app, counterparty_name="Vendor Attach")
+            invoice_id = self._create_input_invoice(app, seller_name="Vendor Attach", invoice_no="ATTACH-001")
+
+            candidates_response = app.handle_request(
+                "GET",
+                f"/api/pending-invoices/invoice-candidates?transaction_id={transaction_id}",
+            )
+            preview_response = app.handle_request(
+                "POST",
+                f"/api/pending-invoices/rows/{transaction_id}/attach-existing-invoice/preview",
+                body=json.dumps({"invoice_id": invoice_id, "request_id": "preview-attach-api"}),
+            )
+            preview_payload = json.loads(preview_response.body)
+            confirm_response = app.handle_request(
+                "POST",
+                f"/api/pending-invoices/rows/{transaction_id}/attach-existing-invoice",
+                body=json.dumps({
+                    "preview_id": preview_payload["preview_id"],
+                    "invoice_id": invoice_id,
+                    "request_id": "attach-api-001",
+                }),
+            )
+            relation_response = app.handle_request(
+                "GET",
+                f"/api/pending-invoices/rows/{transaction_id}/relation-detail",
+            )
+            invoice_detail_response = app.handle_request(
+                "GET",
+                f"/api/pending-invoices/invoices/{invoice_id}/detail",
+            )
+            export_preview_response = app.handle_request("GET", "/api/pending-invoices/export-preview?direction=expense")
+            export_response = app.handle_request("GET", "/api/pending-invoices/export?direction=expense")
+            rules_response = app.handle_request("GET", "/api/pending-invoices/rules")
+
+        candidates_payload = json.loads(candidates_response.body)
+        confirm_payload = json.loads(confirm_response.body)
+        relation_payload = json.loads(relation_response.body)
+        invoice_detail_payload = json.loads(invoice_detail_response.body)
+        export_preview_payload = json.loads(export_preview_response.body)
+        rules_payload = json.loads(rules_response.body)
+        self.assertEqual(candidates_response.status_code, 200)
+        self.assertEqual(candidates_payload["rows"][0]["invoice_id"], invoice_id)
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(confirm_response.status_code, 200)
+        self.assertEqual(confirm_payload["status"], "completed")
+        self.assertEqual(confirm_payload["relation_mode"], "pending_invoice_attach_existing_invoice")
+        self.assertEqual(relation_response.status_code, 200)
+        self.assertEqual(relation_payload["transaction_summary"]["id"], transaction_id)
+        self.assertEqual(invoice_detail_response.status_code, 200)
+        self.assertEqual(invoice_detail_payload["invoice"]["id"], invoice_id)
+        self.assertEqual(export_preview_response.status_code, 200)
+        self.assertIn("columns", export_preview_payload)
+        self.assertEqual(export_response.status_code, 200)
+        self.assertTrue(export_response.body)
+        self.assertEqual(rules_response.status_code, 200)
+        self.assertIn("pending_invoice_tag_groups", rules_payload)
 
     def test_income_endpoint_rejects_expense_only_filter(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -221,6 +282,37 @@ class PendingInvoiceApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(payload["error"], "permission_denied")
 
+    def test_pending_invoice_rules_update_requires_write_permission(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            current = app._app_settings_service.get_settings_payload()
+            app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[],
+                allowed_usernames=["READONLY001"],
+                readonly_export_usernames=["READONLY001"],
+                admin_usernames=[],
+            )
+            app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
+                user_id="readonly-user-id",
+                username="READONLY001",
+                nickname="只读用户",
+                display_name="只读用户",
+                roles=["finance"],
+                permissions=[],
+            )
+
+            response = app.handle_request(
+                "PUT",
+                "/api/pending-invoices/rules",
+                body=json.dumps({"pending_invoice_tag_groups": current["pending_invoice_tag_groups"]}),
+                headers={"Authorization": "Bearer readonly-user"},
+            )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(payload["error"], "permission_denied")
+
     def test_recoverable_manual_invoice_failure_persists_command_log(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)
@@ -277,6 +369,27 @@ class PendingInvoiceApiTests(unittest.TestCase):
                     "bank_serial_no": f"SERIAL-{counterparty_name}",
                     "selected_bank_name": "工商银行",
                     "selected_bank_last4": "1234",
+                }
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+        return str(preview.row_results[0].linked_object_id)
+
+    @staticmethod
+    def _create_input_invoice(app: object, *, seller_name: str, invoice_no: str) -> str:
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.INPUT_INVOICE,
+            source_name="api-input-invoice.json",
+            imported_by="api-test",
+            rows=[
+                {
+                    "counterparty_name": seller_name,
+                    "invoice_no": invoice_no,
+                    "invoice_date": "2026-05-20",
+                    "seller_name": seller_name,
+                    "buyer_name": "云南溯源科技有限公司",
+                    "amount": "118.00",
+                    "total_with_tax": "118.00",
                 }
             ],
         )

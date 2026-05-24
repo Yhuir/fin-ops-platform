@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal, InvalidOperation
 import json
 import re
 from typing import Any
@@ -54,6 +55,19 @@ class SearchPendingSqlProjectionBuilder:
             rows=rows,
         )
         return {"scope_key": f"{normalized_direction}:{normalized_filter}:{month}", "row_count": len(rows)}
+
+    def mark_pending_invoice_scope_empty(self, scope_key: str) -> dict[str, object]:
+        normalized_direction, normalized_filter, _month = _parse_pending_invoice_scope_key(scope_key)
+        if normalized_direction not in {"expense", "income"}:
+            raise ValueError("pending invoice direction must be expense or income.")
+        if normalized_filter not in PENDING_INVOICE_FILTERS:
+            raise ValueError("pending invoice filter must be all or a supported filter group.")
+        mark_scope = getattr(self._read_model_repository, "mark_pending_invoice_scope", None)
+        if not callable(mark_scope):
+            return {"scope_key": f"{normalized_direction}:{normalized_filter}", "row_count": 0}
+        normalized_scope_key = str(scope_key or "").strip() or f"{normalized_direction}:{normalized_filter}"
+        mark_scope(scope_key=normalized_scope_key, row_count=0)
+        return {"scope_key": normalized_scope_key, "row_count": 0}
 
     def list_pending_invoice_scope_shards(self, scope_key: str) -> list[str]:
         normalized_direction, normalized_filter, month = _parse_pending_invoice_scope_key(scope_key)
@@ -159,13 +173,20 @@ class SearchPendingSqlProjectionBuilder:
                 t.trade_time,
                 t.txn_date,
                 t.amount,
+                t.balance,
+                t.currency,
+                t.summary,
+                t.remark,
+                t.bank_serial_no,
                 t.account_name,
                 t.account_no,
                 t.txn_direction,
                 t.txn_month,
                 c.raw_payload as category_payload,
                 coalesce(inv.invoices, '[]'::jsonb) as invoices,
+                coalesce(pay.paid_total, 0)::text as paid_total,
                 coalesce(rel.oa_applicant, '') as oa_applicant,
+                coalesce(rel.oa_project_name, '') as oa_project_name,
                 coalesce(rel.case_ids, array[]::text[]) as relation_case_ids
             from app.bank_transactions t
             left join lateral (
@@ -200,6 +221,21 @@ class SearchPendingSqlProjectionBuilder:
                   and coalesce(t.legacy_mongo_id, t.id::text) = any(pr.row_ids)
             ) inv on true
             left join lateral (
+                select coalesce(sum(paid.amount), 0) as paid_total
+                from (
+                    select distinct coalesce(tb.legacy_mongo_id, tb.id::text) as bank_row_id, tb.amount
+                    from app.workbench_pair_relations pr
+                    join app.bank_transactions tb
+                      on coalesce(tb.legacy_mongo_id, tb.id::text) = any(pr.row_ids)
+                    where pr.status = 'active'
+                      and exists (
+                          select 1
+                          from jsonb_array_elements(coalesce(inv.invoices, '[]'::jsonb)) invoice_item
+                          where invoice_item->>'id' = any(pr.row_ids)
+                      )
+                ) paid
+            ) pay on true
+            left join lateral (
                 select
                     array_agg(distinct pr.case_id) as case_ids,
                     max(coalesce(
@@ -207,7 +243,13 @@ class SearchPendingSqlProjectionBuilder:
                         pr.raw_payload->'normalized_payload'->'special_metadata'->>'applicant',
                         pr.raw_payload->'normalized_payload'->'evidence'->>'oa_applicant',
                         pr.raw_payload->'normalized_payload'->'evidence'->>'applicant'
-                    )) as oa_applicant
+                    )) as oa_applicant,
+                    max(coalesce(
+                        pr.raw_payload->'normalized_payload'->'special_metadata'->>'oa_project_name',
+                        pr.raw_payload->'normalized_payload'->'special_metadata'->>'project_name',
+                        pr.raw_payload->'normalized_payload'->'evidence'->>'oa_project_name',
+                        pr.raw_payload->'normalized_payload'->'evidence'->>'project_name'
+                    )) as oa_project_name
                 from app.workbench_pair_relations pr
                 where pr.status = 'active'
                   and coalesce(t.legacy_mongo_id, t.id::text) = any(pr.row_ids)
@@ -228,25 +270,78 @@ class SearchPendingSqlProjectionBuilder:
             if direction == "expense" and filter_name != "all" and filter_group != filter_name:
                 continue
             invoices = row.get("invoices") if isinstance(row.get("invoices"), list) else []
+            payment_summary = _payment_summary_from_invoices(invoices, paid_total=row.get("paid_total"))
             can_create_invoice = not invoices and not (direction == "expense" and filter_group == "no_invoice_required")
             transaction_id = str(row.get("transaction_id") or "").strip()
+            relation_case_ids = list(row.get("relation_case_ids") or [])
+            oa_applicant = str(row.get("oa_applicant") or "").strip()
+            oa_project_name = str(row.get("oa_project_name") or "").strip()
+            oa_summaries = [
+                {
+                    "id": relation_case_ids[0] if relation_case_ids else transaction_id,
+                    "applicant": oa_applicant,
+                    "project_name": oa_project_name,
+                }
+            ] if oa_applicant or oa_project_name or relation_case_ids else []
+            status_payload = _pending_invoice_status_payload(
+                direction=direction,
+                group=filter_group if filter_group != "all" else None,
+                has_invoices=bool(invoices),
+                payment_summary=payment_summary,
+                matched_rule=_matched_rule_payload(
+                    group=filter_group if filter_group != "all" else None,
+                    category_code=category_code,
+                    category_label=category.get("category_label"),
+                ),
+            )
             bank_transaction = {
                 "id": transaction_id,
                 "counterparty_name": row.get("counterparty_name_raw"),
+                "counterparty_account_no": "",
+                "counterparty_bank_name": "",
                 "trade_time": _date_text(row.get("trade_time") or row.get("txn_date")),
+                "booked_date": _date_text(row.get("txn_date")),
+                "trade_date": _date_text(row.get("txn_date") or row.get("trade_time"))[:10],
                 "amount": str(row.get("amount") or ""),
+                "debit_amount": str(row.get("amount") or "") if direction == "expense" else "0.00",
+                "credit_amount": str(row.get("amount") or "") if direction == "income" else "0.00",
+                "balance": str(row.get("balance") or ""),
+                "currency": row.get("currency") or "CNY",
                 "bank_name": row.get("account_name") or "",
+                "account_name": row.get("account_name") or "",
                 "account_last4": str(row.get("account_no") or "")[-4:],
+                "summary": row.get("summary") or "",
+                "remark": row.get("remark") or "",
+                "statement_serial_no": row.get("bank_serial_no") or "",
+                "enterprise_serial_no": "",
+                "voucher_type": "",
+                "voucher_no": "",
                 "effective_tag_code": category_code or None,
                 "effective_tag_label": category.get("category_label"),
+            }
+            input_invoices = {
+                "primary": invoices[0] if invoices else None,
+                "relation_count": len(invoices),
+                "has_multiple": len(invoices) > 1,
+                "summaries": invoices,
+                "payment_summary": payment_summary,
+            }
+            oa_payload = {
+                "primary": oa_summaries[0] if oa_summaries else None,
+                "relation_count": len(oa_summaries),
+                "has_multiple": len(oa_summaries) > 1,
+                "summaries": oa_summaries,
             }
             payload = {
                 "id": transaction_id,
                 "bank_transaction": bank_transaction,
+                "invoice_acquisition_status": status_payload,
+                "input_invoices": input_invoices,
+                "oa": oa_payload,
                 "invoices": invoices,
-                "oa_applicant": str(row.get("oa_applicant") or "").strip() or "—",
+                "oa_applicant": oa_applicant or "—",
                 "can_create_invoice": can_create_invoice,
-                "relation_case_ids": list(row.get("relation_case_ids") or []),
+                "relation_case_ids": relation_case_ids,
                 "filter_group": filter_group,
             }
             searchable_text = _join_text(
@@ -330,6 +425,114 @@ def _filter_group_for_category(category_code: str, tag_groups: dict[str, set[str
         if category_code in tag_groups.get(group_name, set()):
             return group_name
     return None
+
+
+def _matched_rule_payload(*, group: str | None, category_code: str, category_label: object) -> dict[str, object] | None:
+    if not group:
+        return None
+    return {
+        "group": group,
+        "tag_code": category_code or None,
+        "tag_label": category_label,
+    }
+
+
+def _pending_invoice_status_payload(
+    *,
+    direction: str,
+    group: str | None,
+    has_invoices: bool,
+    payment_summary: dict[str, object],
+    matched_rule: dict[str, object] | None,
+) -> dict[str, object]:
+    if direction != "expense":
+        return {
+            "code": "pending",
+            "label": "待确认",
+            "reason": "收入方向保留原有待找发票逻辑。",
+            "severity": "default",
+            "primary_action": None,
+            "matched_rule": matched_rule,
+        }
+    invoice_total = _decimal_from_text(payment_summary.get("invoice_total"))
+    paid_total = _decimal_from_text(payment_summary.get("paid_total"))
+    if has_invoices and invoice_total > paid_total:
+        return {
+            "code": "invoice_not_fully_paid",
+            "label": "未支付完已开票",
+            "reason": "已有关联进项发票，但关联支付流水合计小于发票价税合计。",
+            "severity": "warning",
+            "primary_action": "view_relation",
+            "matched_rule": matched_rule,
+        }
+    if has_invoices:
+        return {
+            "code": "paid_invoiced",
+            "label": "已支付已开票",
+            "reason": "支出流水已关联进项发票。",
+            "severity": "success",
+            "primary_action": "view_relation",
+            "matched_rule": matched_rule,
+        }
+    if group == "no_invoice_required":
+        return {
+            "code": "no_invoice_required",
+            "label": "无需开票",
+            "reason": "流水分类命中无需开票规则。",
+            "severity": "default",
+            "primary_action": "view_rules",
+            "matched_rule": matched_rule,
+        }
+    if group == "bank_statement_as_invoice":
+        return {
+            "code": "bank_statement_as_invoice",
+            "label": "流水代替发票",
+            "reason": "流水分类命中流水代替发票规则。",
+            "severity": "info",
+            "primary_action": "view_rules",
+            "matched_rule": matched_rule,
+        }
+    return {
+        "code": "paid_pending_invoice",
+        "label": "已支付待开票",
+        "reason": "支出流水未关联进项发票，也未命中免票或流水替票规则。",
+        "severity": "error",
+        "primary_action": "attach_or_create_invoice",
+        "matched_rule": matched_rule,
+    }
+
+
+def _payment_summary_from_invoices(invoices: list[object], *, paid_total: object) -> dict[str, object]:
+    invoice_total = sum(
+        (_invoice_total_from_payload(invoice) for invoice in invoices if isinstance(invoice, dict)),
+        start=Decimal("0.00"),
+    )
+    normalized_paid_total = _decimal_from_text(paid_total)
+    remaining = invoice_total - normalized_paid_total
+    if remaining < Decimal("0.00"):
+        remaining = Decimal("0.00")
+    return {
+        "invoice_total": _decimal_to_str(invoice_total),
+        "paid_total": _decimal_to_str(normalized_paid_total),
+        "remaining_amount": _decimal_to_str(remaining),
+        "difference_amount": _decimal_to_str(invoice_total - normalized_paid_total),
+        "payment_transaction_count": 0,
+    }
+
+
+def _invoice_total_from_payload(invoice: dict[str, object]) -> Decimal:
+    return _decimal_from_text(invoice.get("total_with_tax") or invoice.get("amount"))
+
+
+def _decimal_from_text(value: object) -> Decimal:
+    try:
+        return Decimal(str(value or "0").strip() or "0")
+    except (InvalidOperation, ValueError):
+        return Decimal("0.00")
+
+
+def _decimal_to_str(value: Decimal) -> str:
+    return str(value.quantize(Decimal("0.01")))
 
 
 def _date_text(value: object) -> str:

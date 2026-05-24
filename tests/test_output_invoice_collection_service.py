@@ -13,7 +13,61 @@ from fin_ops_platform.services.output_invoice_collection_service import (
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
+class RepositoryOnlyOutputInvoiceFacts:
+    def __init__(self, invoices: list[Invoice]) -> None:
+        self.invoices = invoices
+        self.invoice_page_calls: list[dict[str, object]] = []
+
+    def list_invoices_page(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 100,
+        month: str | None = None,
+        invoice_type: str | None = None,
+        status: str | None = None,
+        keyword: str | None = None,
+    ) -> tuple[list[Invoice], int]:
+        self.invoice_page_calls.append(
+            {
+                "page": page,
+                "page_size": page_size,
+                "month": month,
+                "invoice_type": invoice_type,
+                "status": status,
+                "keyword": keyword,
+            }
+        )
+        return list(self.invoices), len(self.invoices)
+
+    def list_bank_transactions_page(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 100,
+        **_: object,
+    ) -> tuple[list[BankTransaction], int]:
+        return [], 0
+
+
 class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
+    def test_default_rows_read_repository_output_invoice_facts_when_memory_snapshot_is_empty(self) -> None:
+        buyer = self._counterparty("buyer", "生产库客户")
+        invoice = self._invoice("out-postgres", "PG-OUT-001", buyer, total_with_tax="218.00")
+        repository = RepositoryOnlyOutputInvoiceFacts([invoice])
+        service = OutputInvoiceCollectionQueryService(
+            import_service=ImportNormalizationService(fact_repository=repository),
+            pair_relation_service=WorkbenchPairRelationService(),
+        )
+
+        payload = service.list_rows()
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        self.assertEqual(payload["rows"][0]["invoiceId"], "out-postgres")
+        self.assertEqual(payload["rows"][0]["invoice"]["buyerName"], "生产库客户")
+        self.assertEqual(repository.invoice_page_calls[0]["month"], None)
+        self.assertEqual(repository.invoice_page_calls[0]["invoice_type"], InvoiceType.OUTPUT.value)
+
     def test_rows_are_one_formal_output_invoice_with_read_model_shape(self) -> None:
         buyer = self._counterparty("buyer", "昆明客户有限公司", tax_no="91530000BUYER")
         line_1 = self._invoice(

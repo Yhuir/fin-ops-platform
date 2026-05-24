@@ -8,6 +8,7 @@ from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.search_pending_read_model_refresh import SearchPendingReadModelRefreshService
+from fin_ops_platform.services.search_pending_sql_projection import SearchPendingSqlProjectionBuilder
 
 
 class QueueRecorder:
@@ -23,10 +24,18 @@ class QueueRecorder:
 
 
 class SearchPendingConnection:
-    def __init__(self, *, search_rows: list[dict] | None = None, pending_rows: list[dict] | None = None, dirty: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        search_rows: list[dict] | None = None,
+        pending_rows: list[dict] | None = None,
+        dirty: bool = False,
+        pending_scope_exists: bool = True,
+    ) -> None:
         self.search_rows = list(search_rows or [])
         self.pending_rows = list(pending_rows or [])
         self.dirty = dirty
+        self.pending_scope_exists = pending_scope_exists
         self.fetch_all_calls: list[tuple[str, tuple]] = []
         self.fetch_one_calls: list[tuple[str, tuple]] = []
 
@@ -44,8 +53,55 @@ class SearchPendingConnection:
         self.fetch_one_calls.append((normalized, params))
         if "from job.read_model_dirty_scopes" in normalized:
             return {"status": "pending", "updated_at": "2026-05-21T09:00:00+00:00"} if self.dirty else None
+        if "from read_model.pending_invoice_scopes" in normalized:
+            return {"scope_key": params[0]} if self.pending_scope_exists else None
         if "count(*)" in normalized and "from read_model.pending_invoice_rows" in normalized:
             return {"count": len(self.pending_rows)}
+        return None
+
+
+class PendingProjectionConnection:
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        if "from app.bank_transactions" in normalized:
+            return [
+                {
+                    "transaction_id": "txn-1",
+                    "counterparty_name_raw": "云南供应商",
+                    "trade_time": "2026-05-20 10:00:00",
+                    "txn_date": "2026-05-20",
+                    "amount": "118.00",
+                    "balance": "1000.00",
+                    "currency": "CNY",
+                    "summary": "转账",
+                    "remark": "服务费",
+                    "bank_serial_no": "SERIAL-1",
+                    "account_name": "工商银行",
+                    "account_no": "622200001234",
+                    "category_payload": {"category_code": "service_fee", "category_label": "服务费"},
+                    "invoices": [],
+                    "paid_total": "0.00",
+                    "oa_applicant": "",
+                    "oa_project_name": "",
+                    "relation_case_ids": [],
+                }
+            ]
+        return []
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        if "from app.app_settings" in normalized:
+            return {
+                "settings_payload": {
+                    "pending_invoice_tag_groups": {
+                        "groups": {
+                            "requires_invoice": {"tag_codes": ["service_fee"]},
+                            "bank_statement_as_invoice": {"tag_codes": []},
+                            "no_invoice_required": {"tag_codes": []},
+                        }
+                    }
+                }
+            }
         return None
 
 
@@ -150,6 +206,75 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["missing_invoice_rows"], 1)
         self.assertEqual(payload["rows"][0]["id"], "txn-1")
 
+    def test_pending_invoice_repository_returns_fresh_empty_scope_without_api_miss(self) -> None:
+        connection = SearchPendingConnection(pending_rows=[], dirty=False)
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_pending_invoice_rows(
+            direction="expense",
+            filter="all",
+            date_from=None,
+            date_to=None,
+            keyword=None,
+            page=1,
+            page_size=50,
+        )
+
+        self.assertIsInstance(payload, dict)
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["pagination"], {"page": 1, "page_size": 50, "total": 0})
+        self.assertEqual(payload["refresh_status"], "fresh")
+
+    def test_pending_invoice_repository_returns_none_when_scope_was_never_built(self) -> None:
+        connection = SearchPendingConnection(pending_rows=[], dirty=False, pending_scope_exists=False)
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_pending_invoice_rows(
+            direction="expense",
+            filter="all",
+            date_from=None,
+            date_to=None,
+            keyword=None,
+            page=1,
+            page_size=50,
+        )
+
+        self.assertIsNone(payload)
+
+    def test_pending_invoice_repository_accepts_filter_json_and_native_sort_fields(self) -> None:
+        connection = SearchPendingConnection(
+            pending_rows=[
+                {
+                    "payload": {
+                        "id": "txn-1",
+                        "bank_transaction": {"id": "txn-1", "counterparty_name": "昆明供应商"},
+                        "input_invoices": {"primary": {"seller_name": "昆明供应商"}},
+                    },
+                    "missing_invoice": False,
+                    "can_create_invoice": False,
+                }
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_pending_invoice_rows(
+            direction="expense",
+            filter="all",
+            date_from=None,
+            date_to=None,
+            keyword=None,
+            filters='[{"field":"status_code","operator":"in","values":["paid_invoiced"]}]',
+            sort_field="seller_name",
+            sort_direction="asc",
+            page=1,
+            page_size=50,
+        )
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
+        self.assertIn("status_code", executed_sql)
+        self.assertIn("seller_name asc", executed_sql)
+
     def test_pending_invoice_api_miss_enqueues_refresh_without_sync_scan(self) -> None:
         queue = QueueRecorder()
         app = object.__new__(Application)
@@ -182,7 +307,14 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                 "list_pending_invoice_rows": lambda *_args, **_kwargs: {
                     "direction": "expense",
                     "filter": "all",
-                    "rows": [{"id": "txn-1"}],
+                    "rows": [
+                        {
+                            "id": "txn-1",
+                            "invoice_acquisition_status": {"code": "paid_pending_invoice"},
+                            "input_invoices": {"primary": None, "summaries": []},
+                            "oa": {"primary": None, "summaries": []},
+                        }
+                    ],
                     "pagination": {"page": 1, "page_size": 50, "total": 1},
                     "summary": {"total_rows": 1, "missing_invoice_rows": 1, "create_invoice_available_rows": 1},
                     "bank_transaction_tags": {},
@@ -201,8 +333,78 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
-        self.assertEqual(payload["rows"], [{"id": "txn-1"}])
+        self.assertEqual(payload["rows"][0]["id"], "txn-1")
         self.assertEqual(payload["read_model_status"], "fresh")
+
+    def test_pending_invoice_api_treats_legacy_sql_payload_shape_as_refreshing(self) -> None:
+        queue = QueueRecorder()
+        app = object.__new__(Application)
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._pending_invoice_sql_read_repository = type(
+            "PendingRepo",
+            (),
+            {
+                "list_pending_invoice_rows": lambda *_args, **_kwargs: {
+                    "direction": "expense",
+                    "filter": "all",
+                    "rows": [{"id": "txn-legacy", "bank_transaction": {"id": "txn-legacy"}, "invoices": []}],
+                    "pagination": {"page": 1, "page_size": 50, "total": 1},
+                    "summary": {"total_rows": 1, "missing_invoice_rows": 1, "create_invoice_available_rows": 1},
+                    "bank_transaction_tags": {},
+                    "bank_transaction_tags_version": 1,
+                    "refresh_status": "fresh",
+                }
+            },
+        )()
+        app._pending_invoice_query_service = type(
+            "PendingService",
+            (),
+            {"list_rows": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("legacy SQL shape must not scan in-memory state"))},
+        )()
+
+        response = app._handle_api_pending_invoice_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(queue.refreshes, [("pending_invoice", "expense:all", "api_schema_stale")])
+
+    def test_pending_invoice_api_returns_refreshing_without_stale_rows(self) -> None:
+        queue = QueueRecorder()
+        app = object.__new__(Application)
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._pending_invoice_sql_read_repository = type(
+            "PendingRepo",
+            (),
+            {
+                "list_pending_invoice_rows": lambda *_args, **_kwargs: {
+                    "direction": "expense",
+                    "filter": "all",
+                    "rows": [
+                        {
+                            "id": "txn-stale",
+                            "invoice_acquisition_status": {"code": "paid_pending_invoice"},
+                            "input_invoices": {"primary": None, "summaries": []},
+                            "oa": {"primary": None, "summaries": []},
+                        }
+                    ],
+                    "pagination": {"page": 1, "page_size": 50, "total": 1},
+                    "summary": {"total_rows": 1, "missing_invoice_rows": 1, "create_invoice_available_rows": 1},
+                    "bank_transaction_tags": {},
+                    "bank_transaction_tags_version": 1,
+                    "refresh_status": "stale",
+                }
+            },
+        )()
+
+        response = app._handle_api_pending_invoice_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(queue.refreshes, [("pending_invoice", "expense:all", "api_stale")])
 
     def test_pending_invoice_sql_page_preserves_bank_tag_settings(self) -> None:
         app = object.__new__(Application)
@@ -219,7 +421,14 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                 "list_pending_invoice_rows": lambda *_args, **_kwargs: {
                     "direction": "expense",
                     "filter": "all",
-                    "rows": [{"id": "txn-1"}],
+                    "rows": [
+                        {
+                            "id": "txn-1",
+                            "invoice_acquisition_status": {"code": "paid_pending_invoice"},
+                            "input_invoices": {"primary": None, "summaries": []},
+                            "oa": {"primary": None, "summaries": []},
+                        }
+                    ],
                     "pagination": {"page": 1, "page_size": 50, "total": 1},
                     "summary": {"total_rows": 1, "missing_invoice_rows": 1, "create_invoice_available_rows": 1},
                     "bank_transaction_tags": {},
@@ -288,6 +497,19 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(result["row_count"], 201)
         self.assertEqual(len(saved), 201)
         self.assertEqual(saved[-1]["payload"]["id"], "txn-201")
+
+    def test_pending_invoice_sql_projection_emits_upgraded_four_zone_payload(self) -> None:
+        builder = SearchPendingSqlProjectionBuilder(connection=PendingProjectionConnection())
+
+        rows = builder._pending_invoice_rows(direction="expense", filter_name="all", month="2026-05")
+
+        payload = rows[0]["payload"]
+        self.assertEqual(payload["id"], "txn-1")
+        self.assertEqual(payload["invoice_acquisition_status"]["code"], "paid_pending_invoice")
+        self.assertEqual(payload["invoice_acquisition_status"]["label"], "已支付待开票")
+        self.assertIn("input_invoices", payload)
+        self.assertIn("oa", payload)
+        self.assertEqual(payload["bank_transaction"]["account_last4"], "1234")
 
     def test_refresh_handler_rebuilds_search_and_pending_scopes(self) -> None:
         class FakeBuilder:

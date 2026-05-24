@@ -943,7 +943,37 @@ class Application:
         if method == "PATCH" and route_path == "/api/bank-details/transactions/categories":
             return self._handle_api_bank_transaction_categories(body, headers)
         if method == "GET" and route_path == "/api/pending-invoices/rows":
-            return self._handle_api_pending_invoice_rows(query)
+            return self._handle_api_pending_invoice_rows(query, headers)
+        if method == "GET" and route_path == "/api/pending-invoices/filter-options":
+            return self._handle_api_pending_invoice_filter_options(query, headers)
+        if method == "GET" and route_path == "/api/pending-invoices/invoice-candidates":
+            return self._handle_api_pending_invoice_candidates(query, headers)
+        if method == "GET" and route_path == "/api/pending-invoices/rules":
+            return self._handle_api_pending_invoice_rules(headers)
+        if method == "PUT" and route_path == "/api/pending-invoices/rules":
+            return self._handle_api_pending_invoice_rules_update(body, headers)
+        if method == "GET" and route_path == "/api/pending-invoices/export-preview":
+            return self._handle_api_pending_invoice_export_preview(query, headers)
+        if method == "GET" and route_path == "/api/pending-invoices/export":
+            return self._handle_api_pending_invoice_export(query, headers)
+        if method == "GET" and route_path.startswith("/api/pending-invoices/rows/") and route_path.endswith("/relation-detail"):
+            transaction_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_pending_invoice_relation_detail(transaction_id, headers)
+        if method == "POST" and route_path.startswith("/api/pending-invoices/rows/") and route_path.endswith("/attach-existing-invoice/preview"):
+            transaction_id = unquote(route_path.rsplit("/", 3)[-3])
+            return self._handle_api_pending_invoice_attach_existing_preview(transaction_id, body, headers)
+        if method == "POST" and route_path.startswith("/api/pending-invoices/rows/") and route_path.endswith("/attach-existing-invoice"):
+            transaction_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_pending_invoice_attach_existing_confirm(transaction_id, body, headers)
+        if method == "GET" and route_path.startswith("/api/pending-invoices/bank-transactions/") and route_path.endswith("/detail"):
+            bank_transaction_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_pending_invoice_bank_transaction_detail(bank_transaction_id, headers)
+        if method == "GET" and route_path.startswith("/api/pending-invoices/invoices/") and route_path.endswith("/detail"):
+            invoice_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_pending_invoice_invoice_detail(invoice_id, headers)
+        if method == "GET" and route_path.startswith("/api/pending-invoices/oa/") and route_path.endswith("/detail"):
+            oa_id = unquote(route_path.rsplit("/", 2)[-2])
+            return self._handle_api_pending_invoice_oa_detail(oa_id, headers)
         if method == "GET" and route_path == "/api/input-invoice-usage/rows":
             return self._handle_api_input_invoice_usage_rows(query)
         if method == "GET" and route_path == "/api/input-invoice-usage/filter-options":
@@ -1437,6 +1467,34 @@ class Application:
                 "/api/workbench",
                 "/api/workbench/groups/detail",
                 "/api/search",
+                "/api/pending-invoices/rows",
+                "/api/pending-invoices/filter-options",
+                "/api/pending-invoices/rows/{transaction_id}/relation-detail",
+                "/api/pending-invoices/invoice-candidates",
+                "/api/pending-invoices/bank-transactions/{bank_transaction_id}/detail",
+                "/api/pending-invoices/invoices/{invoice_id}/detail",
+                "/api/pending-invoices/oa/{oa_id}/detail",
+                "/api/pending-invoices/rules",
+                "/api/pending-invoices/rows/{transaction_id}/attach-existing-invoice/preview",
+                "/api/pending-invoices/rows/{transaction_id}/attach-existing-invoice",
+                "/api/pending-invoices/export-preview",
+                "/api/pending-invoices/export",
+                "/api/input-invoice-usage/rows",
+                "/api/input-invoice-usage/filter-options",
+                "/api/input-invoice-usage/payment-status-rules",
+                "/api/input-invoice-usage/oa-reverse/preview",
+                "/api/input-invoice-usage/invoices/{invoice_id}/detail",
+                "/api/input-invoice-usage/bank-transactions/{bank_transaction_id}/detail",
+                "/api/input-invoice-usage/oa/{oa_id}/detail",
+                "/api/input-invoice-usage/rows/{row_id}/relation-details",
+                "/api/output-invoice-collections/rows",
+                "/api/output-invoice-collections/filter-options",
+                "/api/output-invoice-collections/status-rules",
+                "/api/output-invoice-collections/receipt-preview",
+                "/api/output-invoice-collections/receipts/history",
+                "/api/output-invoice-collections/invoices/{invoice_id}/detail",
+                "/api/output-invoice-collections/bank-transactions/{bank_transaction_id}/detail",
+                "/api/output-invoice-collections/rows/{row_id}/relation-details",
                 "/api/background-jobs/active",
                 "/api/background-jobs/{job_id}",
                 "/api/background-jobs/{job_id}/acknowledge",
@@ -1528,6 +1586,9 @@ class Application:
                 "cost_statistics_foundation",
                 "cost_statistics_export",
                 "etc_invoice_management",
+                "pending_invoice_read_model",
+                "input_invoice_usage_read_model",
+                "output_invoice_collection_read_model",
                 "no_oa_bank_batch_processing",
                 "background_job_foundation",
             ],
@@ -6383,11 +6444,14 @@ class Application:
         }
         return self._json_response(exc.status_code, payload)
 
-    def _handle_api_pending_invoice_rows(self, query: dict[str, list[str]]) -> Response:
+    def _handle_api_pending_invoice_rows(self, query: dict[str, list[str]], headers: dict[str, str] | None = None) -> Response:
+        _session, auth_error = self._resolve_pending_invoice_read_session(headers)
+        if auth_error is not None:
+            return auth_error
         try:
             sql_payload = self._get_pending_invoice_rows_from_sql_read_model(query)
             if sql_payload is not None:
-                status_code = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" and not sql_payload.get("rows") else HTTPStatus.OK
+                status_code = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
                 return self._json_response(status_code, sql_payload)
             payload = self._pending_invoice_query_service.list_rows(
                 direction=query.get("direction", [""])[0],
@@ -6395,12 +6459,429 @@ class Application:
                 date_from=query.get("date_from", [None])[0],
                 date_to=query.get("date_to", [None])[0],
                 keyword=query.get("keyword", [None])[0],
+                filters=query.get("filters", [None])[0],
+                sort_field=query.get("sort_field", [None])[0],
+                sort_direction=query.get("sort_direction", [None])[0],
                 page=query.get("page", [1])[0],
                 page_size=query.get("page_size", [50])[0],
             )
         except PendingInvoiceError as exc:
             return self._pending_invoice_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_pending_invoice_filter_options(self, query: dict[str, list[str]], headers: dict[str, str] | None = None) -> Response:
+        _session, auth_error = self._resolve_pending_invoice_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            sql_rows_payload = self._get_pending_invoice_all_rows_from_sql_read_model(query)
+            if isinstance(sql_rows_payload, Response):
+                return sql_rows_payload
+            if isinstance(sql_rows_payload, dict):
+                payload = self._pending_invoice_query_service.filter_options_for_rows(
+                    rows=list(sql_rows_payload.get("rows") or []),
+                    direction=str(sql_rows_payload.get("direction") or query.get("direction", ["expense"])[0]),
+                    filter=str(sql_rows_payload.get("filter") or query.get("filter", ["all"])[0]),
+                )
+            else:
+                payload = self._pending_invoice_query_service.filter_options(
+                    direction=query.get("direction", ["expense"])[0],
+                    filter=query.get("filter", ["all"])[0],
+                    date_from=query.get("date_from", [None])[0],
+                    date_to=query.get("date_to", [None])[0],
+                    keyword=query.get("keyword", [None])[0],
+                    filters=query.get("filters", [None])[0],
+                )
+        except PendingInvoiceError as exc:
+            return self._pending_invoice_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_pending_invoice_candidates(self, query: dict[str, list[str]], headers: dict[str, str] | None = None) -> Response:
+        _session, auth_error = self._resolve_pending_invoice_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            payload = self._pending_invoice_query_service.invoice_candidates(
+                transaction_id=query.get("transaction_id", [""])[0],
+                keyword=query.get("keyword", [None])[0],
+                seller_name=query.get("seller_name", [None])[0],
+                issue_date_from=query.get("issue_date_from", [None])[0],
+                issue_date_to=query.get("issue_date_to", [None])[0],
+                amount_min=query.get("amount_min", [None])[0],
+                amount_max=query.get("amount_max", [None])[0],
+                sort_field=query.get("sort_field", [None])[0],
+                sort_direction=query.get("sort_direction", [None])[0],
+                page=query.get("page", [1])[0],
+                page_size=query.get("page_size", [50])[0],
+            )
+        except PendingInvoiceError as exc:
+            return self._pending_invoice_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_pending_invoice_relation_detail(self, transaction_id: str, headers: dict[str, str] | None = None) -> Response:
+        _session, auth_error = self._resolve_pending_invoice_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            payload = self._pending_invoice_query_service.relation_detail(transaction_id=transaction_id)
+        except PendingInvoiceError as exc:
+            return self._pending_invoice_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_pending_invoice_bank_transaction_detail(self, bank_transaction_id: str, headers: dict[str, str] | None = None) -> Response:
+        _session, auth_error = self._resolve_pending_invoice_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            payload = self._pending_invoice_query_service.bank_transaction_detail(bank_transaction_id)
+        except PendingInvoiceError as exc:
+            return self._pending_invoice_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_pending_invoice_invoice_detail(self, invoice_id: str, headers: dict[str, str] | None = None) -> Response:
+        _session, auth_error = self._resolve_pending_invoice_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            payload = self._pending_invoice_query_service.invoice_detail(invoice_id)
+        except PendingInvoiceError as exc:
+            return self._pending_invoice_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_pending_invoice_oa_detail(self, oa_id: str, headers: dict[str, str] | None = None) -> Response:
+        _session, auth_error = self._resolve_pending_invoice_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            payload = self._pending_invoice_query_service.oa_detail(oa_id)
+        except PendingInvoiceError as exc:
+            return self._pending_invoice_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_pending_invoice_attach_existing_preview(
+        self,
+        transaction_id: str,
+        body: str | bytes | None,
+        headers: dict[str, str] | None = None,
+    ) -> Response:
+        _session, auth_error = self._resolve_pending_invoice_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            preview = self._pending_invoice_application_service.preview_attach_existing_invoice(
+                transaction_id=transaction_id,
+                payload=payload,
+            )
+        except PendingInvoiceError as exc:
+            return self._pending_invoice_error_response(exc)
+        return self._json_response(HTTPStatus.OK, preview)
+
+    def _handle_api_pending_invoice_attach_existing_confirm(
+        self,
+        transaction_id: str,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        session = resolve_oa_request_session(
+            headers,
+            identity_service=self._oa_identity_service,
+            access_control_service=self._access_control_service,
+        )
+        if not session.can_mutate_data:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "permission_denied", "message": "当前账户没有选择已有发票权限。"},
+            )
+        actor_id = str(session.identity.username or "pending_invoice").strip()
+        try:
+            result = self._pending_invoice_application_service.confirm_attach_existing_invoice(
+                transaction_id=transaction_id,
+                payload=payload,
+                actor_id=actor_id,
+            )
+        except PendingInvoiceError as exc:
+            self._persist_state()
+            return self._pending_invoice_error_response(exc)
+        except Exception:
+            self._persist_state()
+            raise
+        self._persist_state()
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _handle_api_pending_invoice_rules(self, headers: dict[str, str] | None = None) -> Response:
+        session, auth_error = self._resolve_pending_invoice_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        settings = self._app_settings_service.get_settings_payload()
+        rules_payload = self._pending_invoice_rules_payload(settings)
+        rules_payload["permissions"] = {"can_save": bool(session.can_mutate_data) if session is not None else True}
+        return self._json_response(
+            HTTPStatus.OK,
+            rules_payload,
+        )
+
+    def _handle_api_pending_invoice_rules_update(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            session = resolve_oa_request_session(
+                headers,
+                identity_service=self._oa_identity_service,
+                access_control_service=self._access_control_service,
+            )
+        except UnauthorizedOASessionError as exc:
+            return self._json_response(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized", "message": str(exc)})
+        except ForbiddenOAAccessError as exc:
+            return self._json_response(HTTPStatus.FORBIDDEN, {"error": "permission_denied", "message": str(exc)})
+        if not session.can_mutate_data:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "permission_denied", "message": "当前账户没有保存待找发票规则权限。"},
+            )
+        pending_invoice_tag_groups = payload.get("pending_invoice_tag_groups", payload)
+        if not isinstance(pending_invoice_tag_groups, dict):
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_pending_invoice_rules_request", "message": "pending_invoice_tag_groups must be an object."},
+            )
+        current = self._app_settings_service.get_settings_payload()
+        access_control = current.get("access_control") if isinstance(current.get("access_control"), dict) else {}
+        projects = current.get("projects") if isinstance(current.get("projects"), dict) else {}
+        actor_id = str(session.identity.username or "pending_invoice_rules").strip()
+        try:
+            updated = self._app_settings_service.update_settings(
+                completed_project_ids=list(projects.get("completed_project_ids") or projects.get("completed") or []),
+                bank_account_mappings=list(current.get("bank_account_mappings") or []),
+                allowed_usernames=list(access_control.get("allowed_usernames") or []),
+                readonly_export_usernames=list(access_control.get("readonly_export_usernames") or []),
+                admin_usernames=list(access_control.get("admin_usernames") or []),
+                workbench_column_layouts=current.get("workbench_column_layouts") if isinstance(current.get("workbench_column_layouts"), dict) else {},
+                oa_retention=current.get("oa_retention") if isinstance(current.get("oa_retention"), dict) else {},
+                oa_import=current.get("oa_import") if isinstance(current.get("oa_import"), dict) else {},
+                oa_invoice_offset=current.get("oa_invoice_offset") if isinstance(current.get("oa_invoice_offset"), dict) else {},
+                bank_transaction_tags=current.get("bank_transaction_tags") if isinstance(current.get("bank_transaction_tags"), dict) else None,
+                pending_invoice_tag_groups=pending_invoice_tag_groups,
+                actor_id=actor_id or "pending_invoice_rules",
+                after_bank_transaction_tag_settings_saved=self._finalize_bank_transaction_tag_settings_update,
+            )
+        except AppSettingsValidationError as exc:
+            return self._json_response(HTTPStatus.BAD_REQUEST, {"error": exc.error_code, "message": str(exc)})
+        if self._state_store is not None:
+            self._persist_state()
+        self._invalidate_pending_invoice_read_model_scopes(reason="pending_invoice_rules_update")
+        rules_payload = self._pending_invoice_rules_payload(updated)
+        rules_payload["permissions"] = {"can_save": True}
+        return self._json_response(HTTPStatus.OK, rules_payload)
+
+    @staticmethod
+    def _pending_invoice_rules_payload(settings: dict[str, object]) -> dict[str, object]:
+        tag_dictionary = settings.get("bank_transaction_tags") if isinstance(settings.get("bank_transaction_tags"), dict) else {}
+        pending_groups = (
+            settings.get("pending_invoice_tag_groups")
+            if isinstance(settings.get("pending_invoice_tag_groups"), dict)
+            else {}
+        )
+        groups = pending_groups.get("groups") if isinstance(pending_groups.get("groups"), dict) else {}
+        tags = list(tag_dictionary.get("tags") or tag_dictionary.get("definitions") or []) if isinstance(tag_dictionary, dict) else []
+        tags_by_code = {
+            str(tag.get("code") or ""): tag
+            for tag in tags
+            if isinstance(tag, dict) and str(tag.get("code") or "").strip()
+        }
+        enriched_groups: dict[str, object] = {}
+        for group_name in ("requires_invoice", "bank_statement_as_invoice", "no_invoice_required"):
+            group = groups.get(group_name) if isinstance(groups, dict) and isinstance(groups.get(group_name), dict) else {}
+            tag_codes = [str(code).strip() for code in list(group.get("tag_codes") or []) if str(code).strip()]
+            enriched_groups[group_name] = {
+                "tag_codes": tag_codes,
+                "tags": [
+                    {
+                        "code": code,
+                        "label": str((tags_by_code.get(code) or {}).get("label") or code),
+                        "status": str((tags_by_code.get(code) or {}).get("status") or "active"),
+                    }
+                    for code in tag_codes
+                ],
+            }
+        return {
+            "version": int(pending_groups.get("version") or 1) if isinstance(pending_groups, dict) else 1,
+            "groups": enriched_groups,
+            "bank_transaction_tags": tag_dictionary,
+            "pending_invoice_tag_groups": pending_groups,
+        }
+
+    def _handle_api_pending_invoice_export_preview(
+        self,
+        query: dict[str, list[str]],
+        headers: dict[str, str] | None = None,
+    ) -> Response:
+        _session, auth_error = self._resolve_pending_invoice_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            sql_rows_payload = self._get_pending_invoice_all_rows_from_sql_read_model(query)
+            if isinstance(sql_rows_payload, Response):
+                return sql_rows_payload
+            if isinstance(sql_rows_payload, dict):
+                payload = self._pending_invoice_query_service.export_preview_for_rows(
+                    rows=list(sql_rows_payload.get("rows") or []),
+                    filters=self._pending_invoice_query_kwargs(query),
+                )
+            else:
+                payload = self._pending_invoice_query_service.export_preview(**self._pending_invoice_query_kwargs(query))
+        except PendingInvoiceError as exc:
+            return self._pending_invoice_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_pending_invoice_export(
+        self,
+        query: dict[str, list[str]],
+        headers: dict[str, str] | None = None,
+    ) -> Response:
+        session, auth_error = self._resolve_pending_invoice_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            sql_rows_payload = self._get_pending_invoice_all_rows_from_sql_read_model(query)
+            if isinstance(sql_rows_payload, Response):
+                return sql_rows_payload
+            if isinstance(sql_rows_payload, dict):
+                filename, content = self._pending_invoice_query_service.export_for_rows(
+                    rows=list(sql_rows_payload.get("rows") or []),
+                )
+            else:
+                filename, content = self._pending_invoice_query_service.export(**self._pending_invoice_query_kwargs(query))
+        except PendingInvoiceError as exc:
+            return self._pending_invoice_error_response(exc)
+        self._audit_service.record_action(
+            actor_id=str(session.identity.username or "pending_invoice_export") if session is not None else "pending_invoice_export",
+            action="pending_invoice_export_downloaded",
+            entity_type="pending_invoice_export",
+            entity_id=filename,
+            metadata={"query": {key: values[0] for key, values in query.items() if values}},
+        )
+        return Response(
+            status_code=int(HTTPStatus.OK),
+            body=content,
+            headers={
+                "Content-Type": XLSX_MIME_TYPE,
+                "Content-Disposition": _build_content_disposition(filename),
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+            },
+        )
+
+    @staticmethod
+    def _pending_invoice_query_kwargs(query: dict[str, list[str]]) -> dict[str, object]:
+        return {
+            "direction": query.get("direction", ["expense"])[0],
+            "filter": query.get("filter", ["all"])[0],
+            "date_from": query.get("date_from", [None])[0],
+            "date_to": query.get("date_to", [None])[0],
+            "keyword": query.get("keyword", [None])[0],
+            "filters": query.get("filters", [None])[0],
+            "sort_field": query.get("sort_field", [None])[0],
+            "sort_direction": query.get("sort_direction", [None])[0],
+        }
+
+    def _resolve_pending_invoice_read_session(
+        self,
+        headers: dict[str, str] | None,
+    ) -> tuple[OARequestSession | None, Response | None]:
+        identity_service = getattr(self, "_oa_identity_service", None)
+        access_control_service = getattr(self, "_access_control_service", None)
+        if identity_service is None or access_control_service is None:
+            return None, None
+        try:
+            session = resolve_oa_request_session(
+                headers,
+                identity_service=identity_service,
+                access_control_service=access_control_service,
+            )
+        except OASessionExpiredError as error:
+            return None, self._json_response(
+                HTTPStatus.UNAUTHORIZED,
+                {"error": "invalid_oa_session", "message": str(error) or "OA 登录状态已过期。"},
+            )
+        except UnauthorizedOASessionError as error:
+            return None, self._json_response(
+                HTTPStatus.UNAUTHORIZED,
+                {"error": "invalid_oa_session", "message": str(error) or "缺少 OA 登录态，请从 OA 系统进入。"},
+            )
+        except ForbiddenOAAccessError as error:
+            return None, self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "permission_denied", "message": str(error) or "当前 OA 账户未被授权访问财务运营平台。"},
+            )
+        except OAIdentityConfigurationError as error:
+            return None, self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "oa_identity_unavailable", "message": str(error) or "OA 身份服务未配置。"},
+            )
+        except OAIdentityServiceError as error:
+            return None, self._json_response(
+                HTTPStatus.BAD_GATEWAY,
+                {"error": "oa_identity_lookup_failed", "message": str(error) or "OA 身份解析失败。"},
+            )
+        if not session.can_access_app:
+            return None, self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "permission_denied", "message": "当前账户没有访问待找发票页面权限。"},
+            )
+        return session, None
+
+    def _get_pending_invoice_all_rows_from_sql_read_model(
+        self,
+        query: dict[str, list[str]],
+    ) -> dict[str, object] | Response | None:
+        repository = getattr(self, "_pending_invoice_sql_read_repository", None)
+        list_rows = getattr(repository, "list_pending_invoice_rows", None)
+        if not callable(list_rows):
+            return None
+        page_size = 200
+        first_query = {key: list(values) for key, values in query.items()}
+        first_query["page"] = ["1"]
+        first_query["page_size"] = [str(page_size)]
+        first_payload = self._get_pending_invoice_rows_from_sql_read_model(first_query)
+        if first_payload is None:
+            return None
+        if first_payload.get("read_model_status") != "fresh":
+            return self._json_response(HTTPStatus.ACCEPTED, first_payload)
+        rows = list(first_payload.get("rows") or [])
+        pagination = first_payload.get("pagination") if isinstance(first_payload.get("pagination"), dict) else {}
+        total = int(pagination.get("total") or len(rows))
+        page = 2
+        while len(rows) < total:
+            page_query = {key: list(values) for key, values in query.items()}
+            page_query["page"] = [str(page)]
+            page_query["page_size"] = [str(page_size)]
+            page_payload = self._get_pending_invoice_rows_from_sql_read_model(page_query)
+            if not isinstance(page_payload, dict):
+                return None
+            if page_payload.get("read_model_status") != "fresh":
+                return self._json_response(HTTPStatus.ACCEPTED, page_payload)
+            page_rows = list(page_payload.get("rows") or [])
+            if not page_rows:
+                break
+            rows.extend(page_rows)
+            page += 1
+        return {
+            "direction": first_payload.get("direction"),
+            "filter": first_payload.get("filter"),
+            "rows": rows,
+            "pagination": {"page": 1, "page_size": page_size, "total": total},
+            "summary": first_payload.get("summary") if isinstance(first_payload.get("summary"), dict) else {},
+            "read_model_status": "fresh",
+            "read_model_scope_key": first_payload.get("read_model_scope_key"),
+        }
 
     def _get_pending_invoice_rows_from_sql_read_model(self, query: dict[str, list[str]]) -> dict[str, object] | None:
         repository = getattr(self, "_pending_invoice_sql_read_repository", None)
@@ -6421,15 +6902,21 @@ class Application:
                 "Income pending invoice rows do not support expense invoice tag filters.",
                 status_code=HTTPStatus.BAD_REQUEST,
             )
-        payload = list_rows(
-            direction=normalized_direction,
-            filter=normalized_filter,
-            date_from=query.get("date_from", [None])[0],
-            date_to=query.get("date_to", [None])[0],
-            keyword=query.get("keyword", [None])[0],
-            page=query.get("page", [1])[0],
-            page_size=query.get("page_size", [50])[0],
-        )
+        try:
+            payload = list_rows(
+                direction=normalized_direction,
+                filter=normalized_filter,
+                date_from=query.get("date_from", [None])[0],
+                date_to=query.get("date_to", [None])[0],
+                keyword=query.get("keyword", [None])[0],
+                filters=query.get("filters", [None])[0],
+                sort_field=query.get("sort_field", [None])[0],
+                sort_direction=query.get("sort_direction", [None])[0],
+                page=query.get("page", [1])[0],
+                page_size=query.get("page_size", [50])[0],
+            )
+        except ValueError as exc:
+            raise PendingInvoiceError("invalid_pending_invoice_query", str(exc)) from exc
         scope_key = self._pending_invoice_scope_key(direction=normalized_direction, filter_name=normalized_filter)
         if not isinstance(payload, dict):
             self._enqueue_pending_invoice_read_model_refresh(scope_key, reason="api_miss")
@@ -6444,9 +6931,33 @@ class Application:
                 "read_model_status": "refreshing",
                 "read_model_scope_key": scope_key,
             }
+        if self._pending_invoice_sql_payload_requires_schema_refresh(payload):
+            self._enqueue_pending_invoice_read_model_refresh(scope_key, reason="api_schema_stale")
+            return {
+                "direction": normalized_direction,
+                "filter": normalized_filter,
+                "rows": [],
+                "pagination": {"page": 1, "page_size": 50, "total": 0},
+                "summary": {"total_rows": 0, "missing_invoice_rows": 0, "create_invoice_available_rows": 0},
+                "bank_transaction_tags": {},
+                "bank_transaction_tags_version": 1,
+                "read_model_status": "refreshing",
+                "read_model_scope_key": scope_key,
+            }
         refresh_status = str(payload.get("refresh_status") or "fresh")
         if refresh_status != "fresh":
             self._enqueue_pending_invoice_read_model_refresh(scope_key, reason="api_stale")
+            return {
+                "direction": normalized_direction,
+                "filter": normalized_filter,
+                "rows": [],
+                "pagination": {"page": 1, "page_size": 50, "total": 0},
+                "summary": {"total_rows": 0, "missing_invoice_rows": 0, "create_invoice_available_rows": 0},
+                "bank_transaction_tags": {},
+                "bank_transaction_tags_version": 1,
+                "read_model_status": "refreshing",
+                "read_model_scope_key": scope_key,
+            }
         result = dict(payload)
         settings_service = getattr(self, "_app_settings_service", None)
         get_settings_payload = getattr(settings_service, "get_settings_payload", None)
@@ -6466,6 +6977,22 @@ class Application:
         result["read_model_scope_key"] = scope_key
         result.pop("refresh_status", None)
         return result
+
+    @staticmethod
+    def _pending_invoice_sql_payload_requires_schema_refresh(payload: dict[str, object]) -> bool:
+        rows = list(payload.get("rows") or [])
+        if not rows:
+            return False
+        for row in rows:
+            if not isinstance(row, dict):
+                return True
+            if not isinstance(row.get("invoice_acquisition_status"), dict):
+                return True
+            if not isinstance(row.get("input_invoices"), dict):
+                return True
+            if not isinstance(row.get("oa"), dict):
+                return True
+        return False
 
     @staticmethod
     def _pending_invoice_scope_key(*, direction: str, filter_name: str | None = None) -> str:
@@ -6528,20 +7055,28 @@ class Application:
         return self._json_response(exc.status_code, payload)
 
     def _record_pending_invoice_manual_invoice_audit(self, event: dict[str, object]) -> None:
+        action = str(event.get("action") or "pending_invoice_manual_invoice_confirmed")
+        entity_type = str(event.get("entity_type") or event.get("source") or "")
+        if not entity_type:
+            entity_type = "pending_invoice_attach_existing_invoice" if action == "pending_invoice_attach_existing_invoice_confirmed" else "pending_invoice_manual_invoice"
         self._audit_service.record_action(
             actor_id=str(event.get("actor_id") or "pending_invoice"),
-            action="pending_invoice_manual_invoice_confirmed",
-            entity_type="pending_invoice_manual_invoice",
+            action=action,
+            entity_type=entity_type,
             entity_id=str(event.get("request_id") or event.get("invoice_id") or ""),
             metadata=dict(event),
         )
 
     def _finalize_pending_invoice_manual_invoice(self, event: dict[str, object]) -> None:
         affected_months = [str(month) for month in list(event.get("affected_months") or []) if str(month).strip()]
+        action = str(event.get("action") or "pending_invoice_manual_invoice_confirmed")
+        source = str(event.get("source") or event.get("entity_type") or "")
+        if not source:
+            source = "pending_invoice_attach_existing_invoice" if action == "pending_invoice_attach_existing_invoice_confirmed" else "pending_invoice_manual_invoice"
         self._execute_derived_data_lifecycle_event(
-            "pending_invoice_manual_invoice_confirmed",
+            action,
             months=affected_months,
-            metadata={"source": "pending_invoice_manual_invoice", **dict(event)},
+            metadata={"source": source, **dict(event)},
         )
         projection = getattr(self, "_bank_details_relation_tag_projection_service", None)
         if projection is not None:
