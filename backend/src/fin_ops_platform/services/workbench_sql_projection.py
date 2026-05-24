@@ -221,6 +221,11 @@ class WorkbenchSqlProjectionBuilder:
             for row in structured
             if str(row.get("source_attachment_key") or "").strip()
         }
+        structured_attachment_identities = {
+            identity
+            for row in structured
+            if (identity := self._attachment_source_identity(row)) is not None
+        }
         rows = self._connection.fetch_all(
             """
             select row_id, scope_month, normalized_payload, raw_payload
@@ -247,6 +252,7 @@ class WorkbenchSqlProjectionBuilder:
                     evidence
                     for evidence in attachment_evidences
                     if str(evidence.get("source_attachment_key") or "").strip() not in structured_attachment_keys
+                    and self._attachment_source_identity(evidence) not in structured_attachment_identities
                 ]
             if not attachment_evidences:
                 continue
@@ -280,6 +286,7 @@ class WorkbenchSqlProjectionBuilder:
                 oa.scope_month,
                 item.normalized_payload as item_payload,
                 attachment.normalized_payload as attachment_payload,
+                cache.cache_source_attachment_key,
                 coalesce(cache.invoices, '[]'::jsonb) as cache_invoices,
                 coalesce(cache.evidences, '[]'::jsonb) as cache_evidences,
                 coalesce(
@@ -298,7 +305,7 @@ class WorkbenchSqlProjectionBuilder:
                     or attachment.normalized_payload->>'source_expense_item_id' = item.row_id
                  )
             left join lateral (
-                select cache.invoices, cache.evidences, cache.artifacts
+                select source.cache_source_attachment_key, cache.invoices, cache.evidences, cache.artifacts
                 from app.oa_attachment_invoice_cache_sources source
                 join app.oa_attachment_invoice_cache cache
                   on cache.source_attachment_key = source.cache_source_attachment_key
@@ -330,6 +337,7 @@ class WorkbenchSqlProjectionBuilder:
                 or attachment_payload.get("filename")
             )
             source_attachment_key_text = str(source_attachment_key or "").strip()
+            cache_source_attachment_key = str(row.get("cache_source_attachment_key") or "").strip()
             cache_artifacts = row.get("cache_artifacts") if isinstance(row.get("cache_artifacts"), list) else []
             for evidence in self._select_structured_attachment_evidences(
                 invoices=row.get("cache_invoices") if isinstance(row.get("cache_invoices"), list) else [],
@@ -339,12 +347,17 @@ class WorkbenchSqlProjectionBuilder:
                 if not isinstance(evidence, dict):
                     continue
                 evidence_attachment_key = str(evidence.get("source_attachment_key") or "").strip()
-                if source_attachment_key_text and evidence_attachment_key and evidence_attachment_key != source_attachment_key_text:
+                allowed_attachment_keys = {
+                    key for key in (source_attachment_key_text, cache_source_attachment_key) if key
+                }
+                if allowed_attachment_keys and evidence_attachment_key and evidence_attachment_key not in allowed_attachment_keys:
                     continue
                 normalized = dict(evidence)
                 normalized.setdefault("source_expense_item_id", source_expense_item_id)
                 normalized.setdefault("source_expense_row_index", source_expense_row_index)
-                normalized.setdefault("source_attachment_key", source_attachment_key)
+                if cache_source_attachment_key:
+                    normalized.setdefault("cache_source_attachment_key", cache_source_attachment_key)
+                normalized["source_attachment_key"] = source_attachment_key_text or evidence_attachment_key
                 normalized.setdefault("source_attachment_name", source_attachment_name)
                 evidence_by_oa_id.setdefault(oa_row_id, []).append(normalized)
         result: list[dict[str, Any]] = []
@@ -353,6 +366,7 @@ class WorkbenchSqlProjectionBuilder:
             oa_row = oa_rows_by_id.get(oa_row_id)
             if not isinstance(oa_row, dict) or not attachment_evidences:
                 continue
+            attachment_evidences = self._dedupe_attachment_evidences_by_source_identity(attachment_evidences)
             record = SimpleNamespace(attachment_evidences=attachment_evidences, attachment_invoices=[])
             internal_oa_row = {
                 **dict(oa_row),
@@ -427,6 +441,55 @@ class WorkbenchSqlProjectionBuilder:
             clean(evidence.get("transaction_no") or evidence.get("merchant_order_no")),
         )
 
+    @classmethod
+    def _dedupe_attachment_evidences_by_source_identity(cls, evidences: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        by_identity: dict[tuple[str, str], dict[str, Any]] = {}
+        passthrough: list[dict[str, Any]] = []
+        for evidence in evidences:
+            identity = cls._attachment_source_identity(evidence)
+            if identity is None:
+                passthrough.append(evidence)
+                continue
+            current = by_identity.get(identity)
+            if current is None or cls._attachment_evidence_quality_score(evidence) > cls._attachment_evidence_quality_score(current):
+                by_identity[identity] = evidence
+        return [*by_identity.values(), *passthrough]
+
+    @staticmethod
+    def _attachment_evidence_quality_score(evidence: dict[str, Any]) -> int:
+        score = 0
+        for key in (
+            "digital_invoice_no",
+            "invoice_no",
+            "invoice_code",
+            "seller_tax_no",
+            "seller_name",
+            "buyer_tax_no",
+            "buyer_name",
+            "total_with_tax",
+            "tax_amount",
+            "transaction_no",
+            "merchant_order_no",
+        ):
+            value = str(evidence.get(key) or "").strip()
+            if value and value not in {"—", "--"}:
+                score += 1
+        return score
+
+    @staticmethod
+    def _attachment_source_identity(evidence: dict[str, Any]) -> tuple[str, str] | None:
+        source_expense_item_id = str(evidence.get("source_expense_item_id") or "").strip()
+        source_attachment_name = str(
+            evidence.get("source_attachment_name")
+            or evidence.get("attachment_name")
+            or evidence.get("fileName")
+            or evidence.get("filename")
+            or ""
+        ).strip()
+        if not source_expense_item_id or not source_attachment_name:
+            return None
+        return (source_expense_item_id, source_attachment_name)
+
     @staticmethod
     def _attachment_evidences_from_expense_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
         evidences: list[dict[str, Any]] = []
@@ -457,12 +520,39 @@ class WorkbenchSqlProjectionBuilder:
                 if not _looks_like_invoice_artifact(normalized_artifact):
                     continue
                 item_evidences.append(normalized_artifact)
+            file_offset = len(item_evidences)
+            for file_index, attachment_file in enumerate(list(item.get("attachment_files") or [])):
+                if not isinstance(attachment_file, dict):
+                    continue
+                normalized_file = dict(attachment_file)
+                if not _looks_like_invoice_artifact(normalized_file):
+                    continue
+                file_attachment_key = str(normalized_file.get("source_attachment_key") or "").strip()
+                if file_attachment_key and file_attachment_key in parsed_attachment_keys:
+                    continue
+                normalized_file.setdefault("source_attachment_name", normalized_file.get("fileName") or normalized_file.get("filename"))
+                normalized_file.setdefault("attachment_name", normalized_file.get("source_attachment_name"))
+                normalized_file.setdefault(
+                    "source_attachment_key",
+                    _fallback_attachment_source_key(
+                        payload,
+                        source_expense_item_id=source_expense_item_id,
+                        fallback_index=file_offset + file_index,
+                        attachment=normalized_file,
+                    ),
+                )
+                item_evidences.append(normalized_file)
 
-            for evidence in WorkbenchSqlProjectionBuilder._dedupe_structured_attachment_evidences(
-                [dict(item_evidence) for item_evidence in item_evidences]
-            ):
-                evidence.setdefault("source_expense_item_id", source_expense_item_id)
-                evidence.setdefault("source_expense_row_index", source_expense_row_index)
+            normalized_item_evidences: list[dict[str, Any]] = []
+            for item_evidence in item_evidences:
+                normalized_item_evidence = dict(item_evidence)
+                normalized_item_evidence.setdefault("source_expense_item_id", source_expense_item_id)
+                normalized_item_evidence.setdefault("source_expense_row_index", source_expense_row_index)
+                normalized_item_evidences.append(normalized_item_evidence)
+            deduped_item_evidences = WorkbenchSqlProjectionBuilder._dedupe_attachment_evidences_by_source_identity(
+                normalized_item_evidences
+            )
+            for evidence in WorkbenchSqlProjectionBuilder._dedupe_structured_attachment_evidences(deduped_item_evidences):
                 evidences.append(evidence)
         return evidences
 
@@ -1126,3 +1216,23 @@ def _looks_like_invoice_artifact(evidence: dict[str, Any]) -> bool:
     )
     suffix = str(evidence.get("suffix") or "").strip().lower()
     return "发票" in file_name or suffix == "pdf"
+
+
+def _fallback_attachment_source_key(
+    payload: dict[str, Any],
+    *,
+    source_expense_item_id: Any,
+    fallback_index: int,
+    attachment: dict[str, Any],
+) -> str:
+    oa_row_id = str(payload.get("id") or payload.get("row_id") or "").strip()
+    source_item = str(source_expense_item_id or "root").strip() or "root"
+    name = str(
+        attachment.get("source_attachment_name")
+        or attachment.get("attachment_name")
+        or attachment.get("fileName")
+        or attachment.get("filename")
+        or attachment.get("filePath")
+        or "unnamed"
+    ).strip() or "unnamed"
+    return f"{oa_row_id}:attachment:{source_item}:{fallback_index}:{name}"

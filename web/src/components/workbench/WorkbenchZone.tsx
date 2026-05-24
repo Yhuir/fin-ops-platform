@@ -41,6 +41,7 @@ type WorkbenchZoneProps = {
   onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "open") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
+  onEnsureGroupDetail?: (zoneId: "paired" | "open", groupId: string) => Promise<void>;
   canMutateData: boolean;
   highlightedRowId?: string | null;
   selectionSummary?: {
@@ -114,6 +115,7 @@ function WorkbenchZone({
   onSelectRow,
   onOpenDetail,
   onRowAction,
+  onEnsureGroupDetail,
   canMutateData,
   highlightedRowId,
   selectionSummary,
@@ -311,6 +313,7 @@ function WorkbenchZone({
         onClosePaneSearch={onClosePaneSearch}
         onOpenDetail={onOpenDetail}
         onRowAction={onRowAction}
+        onEnsureGroupDetail={onEnsureGroupDetail}
         onColumnFilterChange={onColumnFilterChange}
         onPaneSearchQueryChange={onPaneSearchQueryChange}
         onPaneTimeFilterChange={onPaneTimeFilterChange}

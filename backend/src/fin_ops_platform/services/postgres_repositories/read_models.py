@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+import re
 from typing import Any
 
 from fin_ops_platform.services.postgres_repositories.common import (
@@ -15,6 +17,8 @@ from fin_ops_platform.services.postgres_repositories.common import (
     text_list,
     without_keys,
 )
+
+MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 
 
 class PostgresReadModelRepository:
@@ -1008,9 +1012,12 @@ class PostgresReadModelRepository:
     def save_workbench_read_models(self, snapshot: dict[str, Any], *, changed_scope_keys: set[str] | None = None) -> None:
         def write(connection: Any) -> None:
             read_models = snapshot.get("read_models") if isinstance(snapshot, dict) else None
+            refresh_all_scope = False
             if changed_scope_keys is not None:
                 present_scope_keys = {scope_key for scope_key, _ in iter_mapping(read_models)}
                 for scope_key in sorted(set(changed_scope_keys) - present_scope_keys):
+                    if scope_key == "all" or MONTH_SCOPE_RE.match(str(scope_key or "")):
+                        refresh_all_scope = True
                     connection.execute(
                         "delete from read_model.workbench_rows where scope_key = %s",
                         (scope_key,),
@@ -1030,6 +1037,8 @@ class PostgresReadModelRepository:
             for scope_key, payload in iter_mapping(read_models):
                 if changed_scope_keys is not None and scope_key not in changed_scope_keys:
                     continue
+                if scope_key == "all" or MONTH_SCOPE_RE.match(str(scope_key or "")):
+                    refresh_all_scope = True
                 grouped_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
                 source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
                 generated_at = text(payload.get("generated_at"))
@@ -1215,8 +1224,238 @@ class PostgresReadModelRepository:
                             jsonb({"normalized_payload": group}),
                         ),
                     )
+            if refresh_all_scope:
+                self._refresh_workbench_all_scope_from_month_shards(connection)
 
         run_in_transaction(self._connection, write)
+
+    def _refresh_workbench_all_scope_from_month_shards(self, connection: Any) -> None:
+        group_rows = connection.fetch_all(
+            """
+            select scope_key, scope_month, zone, group_id, payload, source_versions, generated_at::text as generated_at
+            from read_model.workbench_groups
+            where scope_key <> 'all'
+            order by scope_month desc nulls last, zone, group_id, updated_at desc
+            """
+        )
+        groups = []
+        max_generated_at = ""
+        max_source_version: int | None = None
+        for row in group_rows:
+            group = _read_model_payload(row)
+            if not isinstance(group, dict):
+                continue
+            normalized_group = deepcopy(group)
+            normalized_group.setdefault("group_id", text(row.get("group_id")))
+            normalized_group["zone"] = text(row.get("zone")) or normalized_group.get("zone") or "open"
+            normalized_group["scope_key"] = "all"
+            normalized_group["month"] = "all"
+            normalized_group["scope_month"] = None
+            groups.append(normalized_group)
+            generated_at = text(row.get("generated_at")) or ""
+            if generated_at > max_generated_at:
+                max_generated_at = generated_at
+            source_version = _source_version_value(row.get("source_versions"))
+            if source_version is not None:
+                max_source_version = max(source_version, max_source_version or source_version)
+        if not groups:
+            return
+
+        aggregate_payload = _aggregate_workbench_all_scope_payload(groups)
+        aggregate_source_versions = {
+            "builder": "workbench_sql_projection.aggregate.v1",
+            "source_version": max_source_version or 0,
+        }
+        generated_at = max_generated_at or None
+        workbench_rows = list(self._iter_workbench_rows(aggregate_payload))
+        workbench_groups = list(self._iter_workbench_groups(aggregate_payload))
+        summary_payload = self._workbench_summary_from_payload(
+            scope_key="all",
+            grouped_payload=aggregate_payload,
+            source_versions=aggregate_source_versions,
+            generated_at=generated_at,
+        )
+
+        connection.execute("delete from read_model.workbench_rows where scope_key = 'all'")
+        connection.execute("delete from read_model.workbench_groups where scope_key = 'all'")
+        connection.execute("delete from read_model.workbench_summary where scope_key = 'all'")
+        connection.execute("delete from read_model.workbench_snapshots where scope_key = 'all'")
+        connection.execute(
+            """
+            insert into read_model.workbench_snapshots(
+                scope_key, scope_month, source_versions, generated_at, cache_status, row_count, payload, raw_payload
+            )
+            values ('all', null, %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s, %s)
+            """,
+            (
+                jsonb(aggregate_source_versions),
+                generated_at,
+                len(workbench_rows),
+                jsonb(
+                    {
+                        "scope_key": "all",
+                        "scope_month": "all",
+                        "generated_at": generated_at,
+                        "cache_status": "fresh",
+                        "payload": aggregate_payload,
+                        "source_versions": aggregate_source_versions,
+                    }
+                ),
+                jsonb({"normalized_payload": aggregate_payload}),
+            ),
+        )
+        connection.execute(
+            """
+            insert into read_model.workbench_summary(
+                scope_key, scope_month, source_versions, generated_at, cache_status,
+                summary, invoice_inventory, payload, raw_payload
+            )
+            values ('all', null, %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s, %s, %s)
+            """,
+            (
+                jsonb(aggregate_source_versions),
+                generated_at,
+                jsonb(summary_payload.get("summary") if isinstance(summary_payload.get("summary"), dict) else {}),
+                jsonb(summary_payload.get("invoice_inventory") if isinstance(summary_payload.get("invoice_inventory"), dict) else {}),
+                jsonb(summary_payload),
+                jsonb({"normalized_payload": summary_payload}),
+            ),
+        )
+        for row in workbench_rows:
+            row_id = text(row.get("id") or row.get("row_id"))
+            if row_id is None:
+                continue
+            connection.execute(
+                """
+                insert into read_model.workbench_rows(
+                    row_id, scope_month, scope_key, source_kind, status, project_id, project_name,
+                    counterparty_name, amount, source_versions, generated_at, cache_status, payload, raw_payload
+                )
+                values (%s, %s::date, 'all', %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s)
+                on conflict (scope_key, row_id) do update set
+                    scope_month = excluded.scope_month,
+                    source_kind = excluded.source_kind,
+                    status = excluded.status,
+                    project_id = excluded.project_id,
+                    project_name = excluded.project_name,
+                    counterparty_name = excluded.counterparty_name,
+                    amount = excluded.amount,
+                    source_versions = excluded.source_versions,
+                    generated_at = excluded.generated_at,
+                    cache_status = excluded.cache_status,
+                    payload = excluded.payload,
+                    raw_payload = excluded.raw_payload,
+                    updated_at = now()
+                """,
+                (
+                    row_id,
+                    month_start(row.get("scope_month") or row.get("month")),
+                    text(row.get("source_kind") or row.get("type") or "workbench_row") or "workbench_row",
+                    text(row.get("status") or "open") or "open",
+                    text(row.get("project_id")),
+                    text(row.get("project_name") or row.get("project")),
+                    text(row.get("counterparty_name") or row.get("counterparty") or row.get("supplier_name")),
+                    decimal_text(row.get("amount") or row.get("amount_with_tax") or row.get("invoice_amount")),
+                    jsonb(aggregate_source_versions),
+                    generated_at,
+                    jsonb(row),
+                    jsonb({"normalized_payload": row}),
+                ),
+            )
+        for group in workbench_groups:
+            group_id = text(group.get("group_id"))
+            if group_id is None:
+                continue
+            sort_keys = _workbench_group_sort_keys(group)
+            connection.execute(
+                """
+                insert into read_model.workbench_groups(
+                    group_id, scope_key, scope_month, zone, status, group_type, source_kinds,
+                    row_count, searchable_text, oa_sort_min, oa_sort_max, bank_sort_min, bank_sort_max,
+                    invoice_sort_min, invoice_sort_max, source_versions, generated_at, cache_status,
+                    payload, raw_payload
+                )
+                values (
+                    %s, 'all', null, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s
+                )
+                on conflict (scope_key, zone, group_id) do update set
+                    scope_month = excluded.scope_month,
+                    status = excluded.status,
+                    group_type = excluded.group_type,
+                    source_kinds = excluded.source_kinds,
+                    row_count = excluded.row_count,
+                    searchable_text = excluded.searchable_text,
+                    oa_sort_min = excluded.oa_sort_min,
+                    oa_sort_max = excluded.oa_sort_max,
+                    bank_sort_min = excluded.bank_sort_min,
+                    bank_sort_max = excluded.bank_sort_max,
+                    invoice_sort_min = excluded.invoice_sort_min,
+                    invoice_sort_max = excluded.invoice_sort_max,
+                    source_versions = excluded.source_versions,
+                    generated_at = excluded.generated_at,
+                    cache_status = excluded.cache_status,
+                    payload = excluded.payload,
+                    raw_payload = excluded.raw_payload,
+                    updated_at = now()
+                """,
+                (
+                    group_id,
+                    text(group.get("zone")) or "open",
+                    text(group.get("status")) or text(group.get("zone")) or "open",
+                    text(group.get("group_type")) or "candidate",
+                    text_list(group.get("source_kinds")),
+                    int_value(group.get("row_count"), 0),
+                    text(group.get("searchable_text")) or _searchable_group_text(group),
+                    text(group.get("oa_sort_min") or sort_keys.get("oa_sort_min")),
+                    text(group.get("oa_sort_max") or sort_keys.get("oa_sort_max")),
+                    text(group.get("bank_sort_min") or sort_keys.get("bank_sort_min")),
+                    text(group.get("bank_sort_max") or sort_keys.get("bank_sort_max")),
+                    text(group.get("invoice_sort_min") or sort_keys.get("invoice_sort_min")),
+                    text(group.get("invoice_sort_max") or sort_keys.get("invoice_sort_max")),
+                    jsonb(aggregate_source_versions),
+                    generated_at,
+                    jsonb(group.get("payload") if isinstance(group.get("payload"), dict) else group),
+                    jsonb({"normalized_payload": group}),
+                ),
+            )
+        final_summary_payload = self._workbench_summary_from_payload(
+            scope_key="all",
+            grouped_payload=aggregate_payload,
+            source_versions=aggregate_source_versions,
+            generated_at=generated_at,
+        )
+        final_summary_payload["invoice_inventory"] = self._workbench_invoice_inventory(scope_key="all")
+        connection.execute(
+            """
+            insert into read_model.workbench_summary(
+                scope_key, scope_month, source_versions, generated_at, cache_status,
+                summary, invoice_inventory, payload, raw_payload
+            )
+            values ('all', null, %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s, %s, %s)
+            on conflict (scope_key) do update set
+                source_versions = excluded.source_versions,
+                generated_at = excluded.generated_at,
+                cache_status = excluded.cache_status,
+                summary = excluded.summary,
+                invoice_inventory = excluded.invoice_inventory,
+                payload = excluded.payload,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            """,
+            (
+                jsonb(aggregate_source_versions),
+                generated_at,
+                jsonb(final_summary_payload.get("summary") if isinstance(final_summary_payload.get("summary"), dict) else {}),
+                jsonb(
+                    final_summary_payload.get("invoice_inventory")
+                    if isinstance(final_summary_payload.get("invoice_inventory"), dict)
+                    else {}
+                ),
+                jsonb(final_summary_payload),
+                jsonb({"normalized_payload": final_summary_payload}),
+            ),
+        )
 
     def _load_workbench_rows_page(
         self,
@@ -1845,6 +2084,129 @@ def _dedupe_workbench_payload_groups(payload: dict[str, Any]) -> None:
             seen_keys.add(group_key)
             deduped.append(group)
         section["groups"] = deduped
+
+
+def _aggregate_workbench_all_scope_payload(groups: list[dict[str, Any]]) -> dict[str, Any]:
+    aggregate = {
+        "month": "all",
+        "scope_key": "all",
+        "read_model_scope_key": "all",
+        "paired": {"groups": []},
+        "open": {"groups": []},
+        "workbench_read_model_schema_version": "workbench_sql_projection.aggregate.v1",
+    }
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    for group in groups:
+        zone = text(group.get("zone") or group.get("status")) or "open"
+        if zone not in {"paired", "open"}:
+            zone = "open"
+        group_id = text(group.get("group_id") or group.get("id"))
+        if group_id is None:
+            continue
+        key = (zone, group_id)
+        if key not in grouped:
+            grouped[key] = _normalize_all_scope_group(group, zone=zone, group_id=group_id)
+            continue
+        _merge_all_scope_group(grouped[key], group)
+
+    for (zone, _group_id), group in grouped.items():
+        _finalize_all_scope_group(group, zone=zone)
+        aggregate[zone]["groups"].append(group)
+    for zone in ("paired", "open"):
+        aggregate[zone]["groups"].sort(key=lambda item: text(item.get("group_id")) or "")
+    aggregate["summary"] = _summarize_workbench_payload_groups(aggregate)
+    return aggregate
+
+
+def _normalize_all_scope_group(group: dict[str, Any], *, zone: str, group_id: str) -> dict[str, Any]:
+    normalized = deepcopy(group)
+    normalized["group_id"] = group_id
+    normalized["id"] = group_id
+    normalized["zone"] = zone
+    normalized["status"] = zone
+    normalized["scope_key"] = "all"
+    normalized["month"] = "all"
+    normalized["scope_month"] = None
+    normalized.pop("row_counts", None)
+    normalized.pop("collapsed_row_counts", None)
+    for key in ("oa_rows", "bank_rows", "invoice_rows"):
+        normalized[key] = _dedupe_workbench_rows(normalized.get(key))
+    collapsed_rows = normalized.get("collapsed_rows")
+    if isinstance(collapsed_rows, dict):
+        normalized["collapsed_rows"] = {
+            str(row_type): _dedupe_workbench_rows(rows)
+            for row_type, rows in collapsed_rows.items()
+            if isinstance(rows, list)
+        }
+    return normalized
+
+
+def _merge_all_scope_group(target: dict[str, Any], incoming: dict[str, Any]) -> None:
+    for key in ("oa_rows", "bank_rows", "invoice_rows"):
+        target[key] = _merge_workbench_rows(target.get(key), incoming.get(key))
+    incoming_collapsed = incoming.get("collapsed_rows")
+    if isinstance(incoming_collapsed, dict):
+        target_collapsed = target.get("collapsed_rows")
+        if not isinstance(target_collapsed, dict):
+            target_collapsed = {}
+            target["collapsed_rows"] = target_collapsed
+        for row_type, rows in incoming_collapsed.items():
+            existing_rows = target_collapsed.get(str(row_type))
+            target_collapsed[str(row_type)] = _merge_workbench_rows(existing_rows, rows)
+    target["source_kinds"] = sorted(
+        {
+            source_kind
+            for row in _iter_group_rows(target)
+            if (source_kind := text(row.get("source_kind") or row.get("type"))) is not None
+        }
+    )
+    target["searchable_text"] = _searchable_group_text(target)
+
+
+def _finalize_all_scope_group(group: dict[str, Any], *, zone: str) -> None:
+    group.pop("row_counts", None)
+    group.pop("collapsed_row_counts", None)
+    group["zone"] = zone
+    group["status"] = zone
+    group["scope_key"] = "all"
+    group["month"] = "all"
+    group["scope_month"] = None
+    group["row_count"] = len(_workbench_group_row_identity(group))
+    group["source_kinds"] = sorted(
+        {
+            source_kind
+            for row in _iter_group_rows(group)
+            if (source_kind := text(row.get("source_kind") or row.get("type"))) is not None
+        }
+    )
+    group["searchable_text"] = _searchable_group_text(group)
+    group.update(_workbench_group_sort_keys(group))
+
+
+def _merge_workbench_rows(left: Any, right: Any) -> list[dict[str, Any]]:
+    return _dedupe_workbench_rows([*_as_workbench_row_list(left), *_as_workbench_row_list(right)])
+
+
+def _dedupe_workbench_rows(rows: Any) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for row in _as_workbench_row_list(rows):
+        row_id = text(row.get("id") or row.get("row_id"))
+        if row_id is None:
+            continue
+        row_type = text(row.get("type") or row.get("record_type") or row.get("source_kind")) or ""
+        key = (row_type, row_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(row)
+    return result
+
+
+def _as_workbench_row_list(rows: Any) -> list[dict[str, Any]]:
+    if not isinstance(rows, list):
+        return []
+    return [deepcopy(row) for row in rows if isinstance(row, dict)]
 
 
 def _summarize_workbench_payload_groups(payload: dict[str, Any]) -> dict[str, int]:

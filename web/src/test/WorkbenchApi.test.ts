@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   applyWorkbenchException,
   fetchWorkbench,
+  fetchWorkbenchGroupDetail,
   fetchWorkbenchGroupsPage,
   fetchWorkbenchInitialPage,
   previewWorkbenchException,
@@ -274,6 +275,51 @@ describe("workbench api bank amount mapping", () => {
     expect(url.searchParams.get("source_kind")).toBe("bank_transaction");
     expect(url.searchParams.get("sort")).toBe("bank:desc");
     expect(url.searchParams.get("detail_level")).toBe("summary");
+  });
+
+  test("fetches full workbench group detail for collapsed summary expansion", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "all",
+          scope_key: "all",
+          zone: "paired",
+          group_id: "case:no-oa",
+          read_model_status: "fresh",
+          group: {
+            group_id: "case:no-oa",
+            group_type: "manual_confirmed",
+            match_confidence: "high",
+            reason: "免OA批次",
+            relation_mode: "no_oa_bank_batch",
+            display_mode: "collapsed_summary",
+            oa_rows: [],
+            bank_rows: [{ id: "summary", type: "bank", source_kind: "no_oa_bank_batch_summary" }],
+            invoice_rows: [],
+            collapsed_rows: {
+              bank: [
+                { id: "bank-1", type: "bank", source_kind: "bank_transaction" },
+                { id: "bank-2", type: "bank", source_kind: "bank_transaction" },
+                { id: "bank-3", type: "bank", source_kind: "bank_transaction" },
+                { id: "bank-4", type: "bank", source_kind: "bank_transaction" },
+              ],
+            },
+            collapsed_row_counts: { bank: 4 },
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const group = await fetchWorkbenchGroupDetail("all", "paired", "case:no-oa");
+
+    const url = new URL(String(fetchSpy.mock.calls[0][0]), "http://localhost");
+    expect(url.pathname).toBe("/api/workbench/groups/detail");
+    expect(url.searchParams.get("month")).toBe("all");
+    expect(url.searchParams.get("zone")).toBe("paired");
+    expect(url.searchParams.get("group_id")).toBe("case:no-oa");
+    expect(group.id).toBe("case:no-oa");
+    expect(group.collapsedRows?.bank).toHaveLength(4);
   });
 
   test("maps summary workbench rows without requiring heavy detail fields", async () => {

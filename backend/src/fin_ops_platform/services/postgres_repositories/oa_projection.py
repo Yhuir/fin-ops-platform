@@ -164,6 +164,7 @@ class PostgresOAProjectionRepository:
                     source_attachment_key,
                     text(
                         attachment.get("filename")
+                        or attachment.get("fileName")
                         or attachment.get("source_attachment_name")
                         or attachment.get("attachment_name")
                         or attachment.get("name")
@@ -192,9 +193,17 @@ class PostgresOAProjectionRepository:
                 or payload.get("object_id")
             )
             if not source_key:
-                name = text(payload.get("source_attachment_name") or payload.get("attachment_name") or payload.get("filename"))
+                name = text(
+                    payload.get("source_attachment_name")
+                    or payload.get("attachment_name")
+                    or payload.get("fileName")
+                    or payload.get("filename")
+                    or payload.get("filePath")
+                )
                 source_key = f"{record.id}:attachment:{source_expense_item_id or 'root'}:{fallback_index}:{name or 'unnamed'}"
             payload["source_attachment_key"] = source_key
+            payload.setdefault("source_attachment_name", payload.get("fileName") or payload.get("filename"))
+            payload.setdefault("attachment_name", payload.get("source_attachment_name"))
             payload.setdefault("row_id", text(source_expense_item_id) or record.id)
             attachments.append(payload)
 
@@ -232,6 +241,14 @@ class PostgresOAProjectionRepository:
                     source_expense_item_id=source_expense_item_id,
                     source_expense_row_index=source_expense_row_index,
                     fallback_index=offset + evidence_index,
+                )
+            offset = len(attachments)
+            for file_index, file_payload in enumerate(list(item.get("attachment_files") or [])):
+                add(
+                    file_payload,
+                    source_expense_item_id=source_expense_item_id,
+                    source_expense_row_index=source_expense_row_index,
+                    fallback_index=offset + file_index,
                 )
         deduped: dict[str, dict[str, Any]] = {}
         for attachment in attachments:

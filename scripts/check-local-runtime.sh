@@ -40,6 +40,7 @@ from typing import Any
 
 mode = os.environ.get("FIN_OPS_LOCAL_RUNTIME_CHECK_MODE", "--all")
 errors: list[str] = []
+warnings: list[str] = []
 
 
 def ok(message: str) -> None:
@@ -49,6 +50,11 @@ def ok(message: str) -> None:
 def fail(message: str) -> None:
     errors.append(message)
     print(f"ERROR: {message}", file=sys.stderr)
+
+
+def warn(message: str) -> None:
+    warnings.append(message)
+    print(f"WARN: {message}", file=sys.stderr)
 
 
 def http_json(url: str, timeout: float = 5.0) -> dict[str, Any]:
@@ -68,8 +74,18 @@ if not pg_url:
 else:
     try:
         import psycopg
+        import time
+
+        pg_topology = "ssh_tunnel" if os.environ.get("FIN_OPS_SSH_TUNNEL_HOST") else "direct"
+        connect_start = time.perf_counter()
+        with psycopg.connect(pg_url, connect_timeout=3) as conn:
+            with conn.cursor() as cur:
+                cur.execute("select 1")
+                cur.fetchone()
+        connect_select_ms = (time.perf_counter() - connect_start) * 1000.0
 
         with psycopg.connect(pg_url, connect_timeout=3) as conn:
+            query_start = time.perf_counter()
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -85,12 +101,25 @@ else:
                     """
                 )
                 counts = cur.fetchone()
+            count_query_ms = (time.perf_counter() - query_start) * 1000.0
         ok(
             "PostgreSQL ready "
             f"(invoices={counts[0]}, bank_transactions={counts[1]}, import_batches={counts[2]}, "
             f"verified_files={counts[3]}, oa_applications={counts[4]}, oa_sync_runs={counts[5]}, "
-            f"workbench_rows={counts[6]}, candidate_matches={counts[7]})"
+            f"workbench_rows={counts[6]}, candidate_matches={counts[7]}, topology={pg_topology}, "
+            f"connect_select_ms={connect_select_ms:.0f}, count_query_ms={count_query_ms:.0f})"
         )
+        if pg_topology == "ssh_tunnel":
+            warn(
+                "Local backend is using an SSH tunnel to PostgreSQL. "
+                "This is valid for functional checks but is not a production performance benchmark; "
+                "run p95/p99 acceptance on the server or staging where the app is co-located with PostgreSQL."
+            )
+        if connect_select_ms >= 100:
+            warn(
+                "PostgreSQL connect+select latency is high for local development "
+                f"({connect_select_ms:.0f}ms). Multi-query pages such as workbench/groups will be slower locally."
+            )
     except Exception as exc:  # noqa: BLE001 - startup diagnostic must surface exact dependency failure.
         fail(f"PostgreSQL check failed: {exc}")
 
@@ -191,6 +220,10 @@ if mode in {"--all", "--require-backend"}:
 if errors:
     print("\nLocal runtime check failed.", file=sys.stderr)
     sys.exit(1)
+
+if warnings:
+    print(f"\nLocal runtime check passed with {len(warnings)} warning(s).")
+    sys.exit(0)
 
 print("\nLocal runtime check passed.")
 PY

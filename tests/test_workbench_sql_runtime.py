@@ -295,10 +295,15 @@ class WorkbenchWriteConnection:
     def __init__(self) -> None:
         self.executed: list[tuple[str, tuple]] = []
         self.fetch_one_calls: list[tuple[str, tuple]] = []
+        self.fetch_all_calls: list[tuple[str, tuple]] = []
 
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         self.fetch_one_calls.append((" ".join(sql.lower().split()), params))
         return None
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        self.fetch_all_calls.append((" ".join(sql.lower().split()), params))
+        return []
 
     def execute(self, sql: str, params: tuple = ()) -> int:
         self.executed.append((" ".join(sql.lower().split()), params))
@@ -742,6 +747,83 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("delete from read_model.workbench_groups", sql)
         self.assertIn("insert into read_model.workbench_groups", sql)
         self.assertIn("insert into read_model.workbench_summary", sql)
+
+    def test_repository_rebuilds_all_scope_from_month_group_shards(self) -> None:
+        class AggregateAllWorkbenchConnection(WorkbenchWriteConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "from read_model.workbench_groups" not in normalized or "scope_key <> 'all'" not in normalized:
+                    return []
+                return [
+                    {
+                        "scope_key": "2026-01",
+                        "scope_month": "2026-01-01",
+                        "zone": "paired",
+                        "group_id": "case:CASE-1",
+                        "generated_at": "2026-05-24T00:02:00+00:00",
+                        "source_versions": {"source_version": 2},
+                        "payload": {
+                            "group_id": "case:CASE-1",
+                            "zone": "paired",
+                            "oa_rows": [{"id": "oa-1", "type": "oa", "source_kind": "oa"}],
+                            "bank_rows": [{"id": "bank-1", "type": "bank", "source_kind": "bank"}],
+                            "invoice_rows": [
+                                {"id": "oa-att-inv-1", "type": "invoice", "source_kind": "oa_attachment_invoice"}
+                            ],
+                        },
+                    },
+                    {
+                        "scope_key": "2025-12",
+                        "scope_month": "2025-12-01",
+                        "zone": "paired",
+                        "group_id": "case:CASE-1",
+                        "generated_at": "2026-05-24T00:01:00+00:00",
+                        "source_versions": {"source_version": 1},
+                        "payload": {
+                            "group_id": "case:CASE-1",
+                            "zone": "paired",
+                            "oa_rows": [{"id": "oa-1", "type": "oa", "source_kind": "oa"}],
+                            "bank_rows": [],
+                            "invoice_rows": [
+                                {"id": "oa-att-inv-1", "type": "invoice", "source_kind": "oa_attachment_invoice"},
+                                {"id": "oa-att-inv-2", "type": "invoice", "source_kind": "oa_attachment_invoice"},
+                            ],
+                        },
+                    },
+                ]
+
+        connection = AggregateAllWorkbenchConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models(
+            {
+                "read_models": {
+                    "2026-01": {
+                        "scope_key": "2026-01",
+                        "payload": {"paired": {"groups": []}, "open": {"groups": []}},
+                        "source_versions": {"source_version": 3},
+                    }
+                }
+            },
+            changed_scope_keys={"2026-01"},
+        )
+
+        aggregate_group_insert = next(
+            params
+            for sql, params in connection.executed
+            if "insert into read_model.workbench_groups" in sql and "values ( %s, 'all'" in sql
+        )
+        group_payload = aggregate_group_insert[15].obj
+        self.assertEqual(group_payload["row_count"], 4)
+        self.assertEqual([row["id"] for row in group_payload["oa_rows"]], ["oa-1"])
+        self.assertEqual([row["id"] for row in group_payload["bank_rows"]], ["bank-1"])
+        self.assertEqual(
+            [row["id"] for row in group_payload["invoice_rows"]],
+            ["oa-att-inv-1", "oa-att-inv-2"],
+        )
+        self.assertNotIn("row_counts", group_payload)
+        self.assertNotIn("collapsed_row_counts", group_payload)
 
     def test_workbench_api_returns_sql_read_model_without_sync_build(self) -> None:
         app = object.__new__(Application)
@@ -1340,6 +1422,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
     def test_sql_projection_materializes_invoice_like_expense_item_artifacts_only(self) -> None:
         payload = {
+            "id": "oa-exp-files",
             "expense_items": [
                 {
                     "expense_item_id": "item-1",
@@ -1359,8 +1442,32 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(evidences[0]["source_expense_item_id"], "item-1")
         self.assertEqual(evidences[0]["source_expense_row_index"], "0")
 
+    def test_sql_projection_materializes_invoice_like_expense_item_attachment_files(self) -> None:
+        payload = {
+            "id": "oa-exp-files",
+            "expense_items": [
+                {
+                    "expense_item_id": "item-1",
+                    "row_index": "0",
+                    "attachment_files": [
+                        {"fileName": "交通发票.pdf", "filePath": "/交通发票.pdf", "suffix": "pdf"},
+                        {"fileName": "付款截图.jpg", "filePath": "/付款截图.jpg", "suffix": "jpg"},
+                    ],
+                }
+            ],
+        }
+
+        evidences = WorkbenchSqlProjectionBuilder._attachment_evidences_from_expense_items(payload)
+
+        self.assertEqual(len(evidences), 1)
+        self.assertEqual(evidences[0]["source_attachment_name"], "交通发票.pdf")
+        self.assertEqual(evidences[0]["source_attachment_key"], "oa-exp-files:attachment:item-1:0:交通发票.pdf")
+        self.assertEqual(evidences[0]["source_expense_item_id"], "item-1")
+        self.assertEqual(evidences[0]["source_expense_row_index"], "0")
+
     def test_sql_projection_ignores_expense_item_artifact_when_same_attachment_has_parsed_invoice(self) -> None:
         payload = {
+            "id": "oa-exp-files",
             "expense_items": [
                 {
                     "expense_item_id": "item-1",
@@ -1539,6 +1646,65 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(rows[0]["source_attachment_key"], "actual-attachment-key")
         self.assertIn("INV-LEGACY-CACHE-001", rows[0]["detail_fields"]["发票号码"])
 
+    def test_sql_projection_matches_cache_source_bridge_with_legacy_cache_key(self) -> None:
+        class StructuredOAConnection(WorkbenchProjectionSettingsConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                if "from app.oa_application_items" in normalized:
+                    if "oa_attachment_invoice_cache_sources" not in normalized:
+                        return []
+                    return [
+                        {
+                            "oa_row_id": "oa-exp-cache-bridge",
+                            "scope_month": "2026-05-01",
+                            "item_payload": {
+                                "expense_item_id": "oa-exp-cache-bridge:item:1",
+                                "row_index": "0",
+                            },
+                            "attachment_payload": {
+                                "source_attachment_key": "current-structured-attachment-key",
+                                "filename": "迁移后发票.pdf",
+                            },
+                            "cache_source_attachment_key": "legacy-parser-cache-key",
+                            "cache_invoices": [
+                                {
+                                    "source_attachment_key": "legacy-parser-cache-key",
+                                    "invoice_no": "INV-BRIDGED-001",
+                                    "seller_name": "桥接供应商",
+                                    "total_with_tax": "399.00",
+                                }
+                            ],
+                            "cache_evidences": [],
+                            "cache_artifacts": [],
+                        }
+                    ]
+                if "from app.oa_applications" in normalized:
+                    return []
+                return super().fetch_all(sql, params)
+
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=StructuredOAConnection(),
+            read_model_repository=CandidateSnapshotRecorder(),
+        )
+        rows = builder._attachment_invoice_rows_from_expense_items(
+            "2026-05",
+            {
+                "oa-exp-cache-bridge": {
+                    "id": "oa-exp-cache-bridge",
+                    "type": "oa",
+                    "source_kind": "oa",
+                    "status": "open",
+                    "amount": "399.00",
+                    "counterparty_name": "桥接供应商",
+                    "detail_fields": {"申请日期": "2026-05-02"},
+                }
+            },
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["source_attachment_key"], "current-structured-attachment-key")
+        self.assertIn("INV-BRIDGED-001", rows[0]["detail_fields"]["发票号码"])
+
     def test_sql_projection_ignores_artifact_placeholders_when_cache_has_parsed_invoice(self) -> None:
         class StructuredOAConnection(WorkbenchProjectionSettingsConnection):
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
@@ -1683,6 +1849,193 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["source_attachment_key"], "shared-attachment-key")
         self.assertEqual(rows[0]["total_with_tax"], "167.00")
+
+    def test_sql_projection_does_not_duplicate_structured_attachment_with_file_fallback_key(self) -> None:
+        class StructuredOAConnection(WorkbenchProjectionSettingsConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                if "from app.oa_application_items" in normalized:
+                    return [
+                        {
+                            "oa_row_id": "oa-exp-file-fallback",
+                            "scope_month": "2026-02-01",
+                            "item_payload": {
+                                "expense_item_id": "oa-exp-file-fallback:item:1",
+                                "row_index": "0",
+                            },
+                            "attachment_payload": {
+                                "source_attachment_key": "structured-cache-key",
+                                "source_attachment_name": "同一发票.pdf",
+                                "filename": "同一发票.pdf",
+                            },
+                            "cache_source_attachment_key": "legacy-cache-key",
+                            "cache_invoices": [
+                                {
+                                    "source_attachment_key": "legacy-cache-key",
+                                    "source_attachment_name": "同一发票.pdf",
+                                    "invoice_no": "INV-DEDUP-001",
+                                    "seller_name": "供应商A",
+                                    "total_with_tax": "167.00",
+                                }
+                            ],
+                            "cache_evidences": [],
+                            "cache_artifacts": [],
+                        }
+                    ]
+                if "from app.oa_applications" in normalized:
+                    return [
+                        {
+                            "row_id": "oa-exp-file-fallback",
+                            "scope_month": "2026-02-01",
+                            "normalized_payload": {
+                                "expense_items": [
+                                    {
+                                        "expense_item_id": "oa-exp-file-fallback:item:1",
+                                        "row_index": "0",
+                                        "attachment_files": [
+                                            {
+                                                "fileName": "同一发票.pdf",
+                                                "filePath": "/同一发票.pdf",
+                                                "suffix": "pdf",
+                                            }
+                                        ],
+                                    }
+                                ]
+                            },
+                            "raw_payload": {},
+                        }
+                    ]
+                return super().fetch_all(sql, params)
+
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=StructuredOAConnection(),
+            read_model_repository=CandidateSnapshotRecorder(),
+        )
+        rows = builder._attachment_invoice_rows_from_expense_items(
+            "2026-02",
+            {
+                "oa-exp-file-fallback": {
+                    "id": "oa-exp-file-fallback",
+                    "type": "oa",
+                    "source_kind": "oa",
+                    "status": "open",
+                    "amount": "167.00",
+                    "counterparty_name": "",
+                    "detail_fields": {"申请日期": "2026-02-26"},
+                }
+            },
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["source_attachment_key"], "structured-cache-key")
+        self.assertIn("INV-DEDUP-001", rows[0]["detail_fields"]["发票号码"])
+
+    def test_sql_projection_deduplicates_structured_attachment_placeholders_by_item_and_name(self) -> None:
+        class StructuredOAConnection(WorkbenchProjectionSettingsConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                if "from app.oa_application_items" in normalized:
+                    return [
+                        {
+                            "oa_row_id": "oa-exp-duplicate-structured",
+                            "scope_month": "2026-05-01",
+                            "item_payload": {
+                                "expense_item_id": "oa-exp-duplicate-structured:item:1",
+                                "row_index": "0",
+                            },
+                            "attachment_payload": {
+                                "source_attachment_key": "hash-source-key",
+                                "source_attachment_name": "重复发票.pdf",
+                                "filename": "重复发票.pdf",
+                            },
+                            "cache_source_attachment_key": "",
+                            "cache_invoices": [],
+                            "cache_evidences": [],
+                            "cache_artifacts": [
+                                {
+                                    "source_attachment_key": "hash-source-key",
+                                    "source_attachment_name": "重复发票.pdf",
+                                    "document_kind": "发票附件",
+                                }
+                            ],
+                        },
+                        {
+                            "oa_row_id": "oa-exp-duplicate-structured",
+                            "scope_month": "2026-05-01",
+                            "item_payload": {
+                                "expense_item_id": "oa-exp-duplicate-structured:item:1",
+                                "row_index": "0",
+                            },
+                            "attachment_payload": {
+                                "source_attachment_key": "fallback-source-key",
+                                "source_attachment_name": "重复发票.pdf",
+                                "filename": "重复发票.pdf",
+                            },
+                            "cache_source_attachment_key": "",
+                            "cache_invoices": [],
+                            "cache_evidences": [],
+                            "cache_artifacts": [
+                                {
+                                    "source_attachment_key": "fallback-source-key",
+                                    "source_attachment_name": "重复发票.pdf",
+                                    "document_kind": "发票附件",
+                                }
+                            ],
+                        },
+                    ]
+                if "from app.oa_applications" in normalized:
+                    return []
+                return super().fetch_all(sql, params)
+
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=StructuredOAConnection(),
+            read_model_repository=CandidateSnapshotRecorder(),
+        )
+        rows = builder._attachment_invoice_rows_from_expense_items(
+            "2026-05",
+            {
+                "oa-exp-duplicate-structured": {
+                    "id": "oa-exp-duplicate-structured",
+                    "type": "oa",
+                    "source_kind": "oa",
+                    "status": "open",
+                    "amount": "399.00",
+                    "counterparty_name": "",
+                    "detail_fields": {"申请日期": "2026-05-08"},
+                }
+            },
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["source_attachment_name"], "重复发票.pdf")
+
+    def test_sql_projection_deduplicates_payload_attachment_files_by_item_and_name(self) -> None:
+        payload = {
+            "id": "oa-exp-payload-duplicates",
+            "expense_items": [
+                {
+                    "expense_item_id": "oa-exp-payload-duplicates:item:1",
+                    "row_index": "0",
+                    "attachment_files": [
+                        {
+                            "fileName": "重复发票.pdf",
+                            "filePath": "/重复发票.pdf",
+                            "suffix": "pdf",
+                        },
+                        {
+                            "fileName": "重复发票.pdf",
+                            "filePath": "/重复发票.pdf",
+                            "suffix": "pdf",
+                        },
+                    ],
+                }
+            ],
+        }
+
+        evidences = WorkbenchSqlProjectionBuilder._attachment_evidences_from_expense_items(payload)
+
+        self.assertEqual(len(evidences), 1)
+        self.assertEqual(evidences[0]["source_attachment_name"], "重复发票.pdf")
 
     def test_sql_projection_keeps_attachment_invoice_rows_source_bound_to_parent_oa(self) -> None:
         builder = WorkbenchSqlProjectionBuilder(

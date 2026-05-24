@@ -37,6 +37,7 @@ type ResizableTriPaneProps = {
   onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "open") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
+  onEnsureGroupDetail?: (zoneId: "paired" | "open", groupId: string) => Promise<void>;
   onTogglePaneSearch: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
   onClosePaneSearch: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
   onClearPaneSearch: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
@@ -78,6 +79,7 @@ function ResizableTriPane({
   onSelectRow,
   onOpenDetail,
   onRowAction,
+  onEnsureGroupDetail,
   onTogglePaneSearch,
   onClosePaneSearch,
   onClearPaneSearch,
@@ -148,6 +150,7 @@ function ResizableTriPane({
         invoiceInventory={invoiceInventory}
         onOpenDetail={onOpenDetail}
         onRowAction={onRowAction}
+        onEnsureGroupDetail={onEnsureGroupDetail}
         onClearPaneSearch={onClearPaneSearch}
         onClosePaneSearch={onClosePaneSearch}
         onColumnFilterChange={onColumnFilterChange}

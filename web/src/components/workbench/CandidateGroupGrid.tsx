@@ -55,6 +55,7 @@ type CandidateGroupGridProps = {
   onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "open") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
+  onEnsureGroupDetail?: (zoneId: "paired" | "open", groupId: string) => Promise<void>;
   onTogglePaneSearch?: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
   onClosePaneSearch?: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
   onClearPaneSearch?: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
@@ -96,6 +97,7 @@ function CandidateGroupGrid({
   onSelectRow,
   onOpenDetail,
   onRowAction,
+  onEnsureGroupDetail,
   onTogglePaneSearch = () => undefined,
   onClosePaneSearch = () => undefined,
   onClearPaneSearch = () => undefined,
@@ -109,6 +111,7 @@ function CandidateGroupGrid({
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [openFilterMenu, setOpenFilterMenu] = useState<{ paneId: WorkbenchRecordType; columnKey: string } | null>(null);
   const [expandedCollapsedGroups, setExpandedCollapsedGroups] = useState<Set<string>>(() => new Set());
+  const [loadingCollapsedGroups, setLoadingCollapsedGroups] = useState<Set<string>>(() => new Set());
   const syncInFlightRef = useRef<Record<WorkbenchRecordType, boolean>>({
     oa: false,
     bank: false,
@@ -216,18 +219,45 @@ function CandidateGroupGrid({
     ));
   }, []);
 
-  const toggleCollapsedGroup = useCallback((groupId: string, paneId: WorkbenchRecordType) => {
+  const setCollapsedGroupExpanded = useCallback((groupId: string, paneId: WorkbenchRecordType, expanded: boolean) => {
     const key = `${groupId}:${paneId}`;
     setExpandedCollapsedGroups((current) => {
       const next = new Set(current);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
+      if (expanded) {
         next.add(key);
+      } else {
+        next.delete(key);
       }
       return next;
     });
   }, []);
+
+  const toggleCollapsedGroup = useCallback(async (
+    group: WorkbenchCandidateGroup,
+    paneId: WorkbenchRecordType,
+    isExpanded: boolean,
+    collapsedRowCount: number,
+    visibleCollapsedRowCount: number,
+  ) => {
+    const key = `${group.id}:${paneId}`;
+    if (isExpanded) {
+      setCollapsedGroupExpanded(group.id, paneId, false);
+      return;
+    }
+    if (onEnsureGroupDetail && collapsedRowCount > visibleCollapsedRowCount) {
+      setLoadingCollapsedGroups((current) => new Set(current).add(key));
+      try {
+        await onEnsureGroupDetail(zoneId, group.id);
+      } finally {
+        setLoadingCollapsedGroups((current) => {
+          const next = new Set(current);
+          next.delete(key);
+          return next;
+        });
+      }
+    }
+    setCollapsedGroupExpanded(group.id, paneId, true);
+  }, [onEnsureGroupDetail, setCollapsedGroupExpanded, zoneId]);
 
   const clearDragClasses = useCallback(() => {
     const current = dragStateRef.current;
@@ -322,17 +352,19 @@ function CandidateGroupGrid({
           }
           const collapseKey = `${group.id}:${paneId}`;
           const isExpanded = expandedCollapsedGroups.has(collapseKey);
+          const isLoading = loadingCollapsedGroups.has(collapseKey);
           const collapsedRowCount = group.collapsedRowCounts?.[paneId] ?? collapsedRows.length;
           return [
             <button
               aria-expanded={isExpanded}
               aria-label={isExpanded ? "收起免OA批次明细" : `展开免OA批次明细，${collapsedRowCount} 条`}
               className="row-action-btn candidate-group-collapse-control"
+              disabled={isLoading}
               key={collapseKey}
               type="button"
-              onClick={() => toggleCollapsedGroup(group.id, paneId)}
+              onClick={() => void toggleCollapsedGroup(group, paneId, isExpanded, collapsedRowCount, collapsedRows.length)}
             >
-              {isExpanded ? "收起明细" : `展开 ${collapsedRowCount} 条明细`}
+              {isLoading ? "加载中" : isExpanded ? "收起明细" : `展开 ${collapsedRowCount} 条明细`}
             </button>,
           ];
         });
@@ -414,6 +446,8 @@ function CandidateGroupGrid({
     getRowState,
     groups,
     highlightedRowId,
+    loadingCollapsedGroups,
+    onEnsureGroupDetail,
     onOpenDetail,
     onRowAction,
     onSelectRow,

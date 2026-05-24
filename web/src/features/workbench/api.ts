@@ -1900,6 +1900,26 @@ export async function fetchWorkbenchGroupsPage(
   };
 }
 
+export async function fetchWorkbenchGroupDetail(
+  month: string,
+  zone: WorkbenchZoneId,
+  groupId: string,
+  signal?: AbortSignal,
+): Promise<WorkbenchCandidateGroup> {
+  const params = new URLSearchParams({
+    month,
+    zone,
+    group_id: groupId,
+  });
+  const payload = await requestJson<{
+    group: ApiWorkbenchGroup;
+  }>(`/api/workbench/groups/detail?${params.toString()}`, {
+    method: "GET",
+    signal,
+  });
+  return mapGroup(payload.group);
+}
+
 export async function fetchWorkbenchInitialPage(
   month: string,
   signal?: AbortSignal,

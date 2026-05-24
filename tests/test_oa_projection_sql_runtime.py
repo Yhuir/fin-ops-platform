@@ -61,6 +61,23 @@ def oa_record_with_structured_attachments(row_id: str = "oa-exp-structured", mon
     return record
 
 
+def oa_record_with_attachment_files(row_id: str = "oa-exp-files", month: str = "2026-05") -> OAApplicationRecord:
+    record = oa_record(row_id=row_id, month=month)
+    record.expense_items = [
+        {
+            "expense_item_id": f"{row_id}:item:1",
+            "row_index": "0",
+            "expense_content": "交通费",
+            "settlement_amount": "88.00",
+            "attachment_files": [
+                {"fileName": "交通发票.pdf", "filePath": "/交通发票.pdf", "suffix": "pdf"},
+                {"fileName": "付款截图.jpg", "filePath": "/付款截图.jpg", "suffix": "jpg"},
+            ],
+        }
+    ]
+    return record
+
+
 class QueueRecorder:
     def __init__(self) -> None:
         self.refreshes: list[tuple[str, str, str]] = []
@@ -147,6 +164,24 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         attachment_inserts = [params for sql, params in connection.executed if "insert into app.oa_attachments" in sql]
         self.assertEqual(len(item_insert), 1)
         self.assertEqual(len(attachment_inserts), 2)
+
+    def test_postgres_oa_projection_repository_writes_attachment_files_as_structured_attachments(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
+
+        connection = OAProjectionWriteConnection()
+        repository = PostgresOAProjectionRepository(connection)
+
+        count = repository.upsert_application_records(
+            [oa_record_with_attachment_files()],
+            scope_key="2026-05",
+        )
+
+        self.assertEqual(count, 1)
+        attachment_inserts = [params for sql, params in connection.executed if "insert into app.oa_attachments" in sql]
+        self.assertEqual(len(attachment_inserts), 2)
+        self.assertEqual(attachment_inserts[0][4], "oa-exp-files:attachment:oa-exp-files:item:1:0:交通发票.pdf")
+        self.assertEqual(attachment_inserts[0][7], None)
+        self.assertEqual(attachment_inserts[0][9].obj["source_expense_item_id"], "oa-exp-files:item:1")
 
     def test_workbench_query_service_reads_oa_rows_from_sql_projection_adapter(self) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionAdapter

@@ -20,6 +20,7 @@ import {
   confirmWorkbenchCashTicketPurchase,
   confirmWorkbenchLink,
   fetchIgnoredWorkbenchRows,
+  fetchWorkbenchGroupDetail,
   fetchWorkbenchGroupsPage,
   fetchWorkbenchInitialPage,
   fetchWorkbenchOaSyncStatus,
@@ -773,6 +774,32 @@ export default function ReconciliationWorkbenchPage() {
       setLoadingMoreZone(null);
     }
   }, [loadingMoreZone, workbenchData, zonePages, zoneServerPageQueries]);
+
+  const handleEnsureGroupDetail = useCallback(async (zone: "paired" | "open", groupId: string) => {
+    const normalizedGroupId = groupId.trim();
+    if (!normalizedGroupId) {
+      return;
+    }
+    try {
+      const group = await fetchWorkbenchGroupDetail(WORKBENCH_VIEW_MONTH, zone, normalizedGroupId);
+      setWorkbenchData((current) => {
+        if (!current) {
+          return current;
+        }
+        return {
+          ...current,
+          [zone]: {
+            groups: current[zone].groups.map((candidate) => (
+              candidate.id === group.id ? group : candidate
+            )),
+          },
+        };
+      });
+    } catch {
+      setLastActionMessage("加载完整明细失败，请稍后重试。");
+      throw new Error("workbench_group_detail_load_failed");
+    }
+  }, []);
 
   useEffect(() => {
     if (!workbenchData || isLoading) {
@@ -1634,6 +1661,7 @@ export default function ReconciliationWorkbenchPage() {
       isVisible={isPairedVisible}
       onClearSelection={handleClearPairedSelection}
       onOpenDetail={handleOpenDetail}
+      onEnsureGroupDetail={handleEnsureGroupDetail}
       onLoadMore={() => handleLoadMoreZone("paired")}
       onPrimarySelectionAction={handleCancelPairedSelection}
       primarySelectionActionDisabled={isPairedCancelSelectionDisabled || !canWriteWorkbench}
@@ -1674,6 +1702,7 @@ export default function ReconciliationWorkbenchPage() {
       isVisible={isOpenVisible}
       onClearSelection={handleClearOpenSelection}
       onOpenDetail={handleOpenDetail}
+      onEnsureGroupDetail={handleEnsureGroupDetail}
       onLoadMore={() => handleLoadMoreZone("open")}
       onPrimarySelectionAction={handleConfirmOpenSelection}
       primarySelectionActionDisabled={isOpenConfirmSelectionDisabled || !canWriteWorkbench}
