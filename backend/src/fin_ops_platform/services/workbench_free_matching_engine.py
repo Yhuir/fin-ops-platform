@@ -64,11 +64,12 @@ class WorkbenchFreeMatchingEngine:
 
         three_way_candidates = self._three_way_candidates(oa, bank, invoices, window)
         conflicts = self._conflicted_rows(three_way_candidates)
-        if conflicts:
-            return self._open_decisions(scope_month, conflicts, window, source_versions)
 
         decisions: list[WorkbenchDecision] = []
-        claimed: set[str] = set()
+        conflict_row_ids = set(conflicts)
+        if conflicts:
+            decisions.extend(self._open_decisions(scope_month, conflicts, window, source_versions))
+        claimed: set[str] = set(conflict_row_ids)
         for candidate in sorted(three_way_candidates, key=lambda item: self._row_ids(item)):
             row_ids = self._row_ids(candidate)
             if any(row_id in claimed for row_id in row_ids):
@@ -77,10 +78,8 @@ class WorkbenchFreeMatchingEngine:
             decisions.append(decision)
             claimed.update(row_ids)
 
-        if decisions:
-            return decisions
-
-        return self._two_way_decisions(scope_month, oa, bank, invoices, window, source_versions)
+        decisions.extend(self._two_way_decisions(scope_month, oa, bank, invoices, window, source_versions, claimed))
+        return decisions
 
     def _three_way_candidates(
         self,
@@ -229,50 +228,35 @@ class WorkbenchFreeMatchingEngine:
         invoice_rows: list[_Row],
         window: tuple[str, ...],
         source_versions: dict[str, Any],
+        claimed_row_ids: set[str] | None = None,
     ) -> list[WorkbenchDecision]:
-        oa_bank = self._unique_pairs(oa_rows, bank_rows)
-        if oa_bank:
-            return [
-                self._paired_two_way_decision(
-                    scope_month=scope_month,
-                    left=left,
-                    right=right,
-                    match_shape="oa_bank",
-                    rule_code="oa_bank_exact_amount",
-                    window=window,
-                    source_versions=source_versions,
+        claimed = set(claimed_row_ids or set())
+        decisions: list[WorkbenchDecision] = []
+        pair_specs = (
+            (oa_rows, bank_rows, "oa_bank", "oa_bank_exact_amount"),
+            (oa_rows, invoice_rows, "oa_invoice", "oa_invoice_exact_amount"),
+            (bank_rows, invoice_rows, "bank_invoice", "bank_invoice_exact_amount"),
+        )
+        for left_rows, right_rows, match_shape, rule_code in pair_specs:
+            available_left = [row for row in left_rows if row.row_id not in claimed]
+            available_right = [row for row in right_rows if row.row_id not in claimed]
+            pairs = sorted(self._unique_pairs(available_left, available_right), key=lambda pair: (pair[0].row_id, pair[1].row_id))
+            for left, right in pairs:
+                if left.row_id in claimed or right.row_id in claimed:
+                    continue
+                decisions.append(
+                    self._paired_two_way_decision(
+                        scope_month=scope_month,
+                        left=left,
+                        right=right,
+                        match_shape=match_shape,
+                        rule_code=rule_code,
+                        window=window,
+                        source_versions=source_versions,
+                    )
                 )
-                for left, right in oa_bank
-            ]
-
-        oa_invoice = self._unique_pairs(oa_rows, invoice_rows)
-        if oa_invoice:
-            return [
-                self._paired_two_way_decision(
-                    scope_month=scope_month,
-                    left=left,
-                    right=right,
-                    match_shape="oa_invoice",
-                    rule_code="oa_invoice_exact_amount",
-                    window=window,
-                    source_versions=source_versions,
-                )
-                for left, right in oa_invoice
-            ]
-
-        bank_invoice = self._unique_pairs(bank_rows, invoice_rows)
-        return [
-            self._paired_two_way_decision(
-                scope_month=scope_month,
-                left=left,
-                right=right,
-                match_shape="bank_invoice",
-                rule_code="bank_invoice_exact_amount",
-                window=window,
-                source_versions=source_versions,
-            )
-            for left, right in bank_invoice
-        ]
+                claimed.update((left.row_id, right.row_id))
+        return decisions
 
     def _unique_pairs(self, left_rows: list[_Row], right_rows: list[_Row]) -> list[tuple[_Row, _Row]]:
         candidates = [
@@ -421,11 +405,11 @@ class WorkbenchFreeMatchingEngine:
     def _normalize_rows(self, row_type: str, rows: list[dict[str, Any]], window: tuple[str, ...]) -> list[_Row]:
         normalized: list[_Row] = []
         for row in rows:
-            direction = str(row.get("direction") or "").strip().lower()
+            direction = self._direction(row_type, row)
             if direction != "expenditure":
                 continue
             row_id = str(row.get("row_id") or row.get("id") or "").strip()
-            amount = self._amount(row.get("amount"))
+            amount = self._amount(row_type, row)
             month = self._month(row_type, row)
             if not row_id or amount is None or month not in window:
                 continue
@@ -443,9 +427,9 @@ class WorkbenchFreeMatchingEngine:
 
     def _month(self, row_type: str, row: dict[str, Any]) -> str:
         fields = {
-            "oa": ("month", "oa_month", "apply_month"),
-            "bank": ("trade_month", "month", "transaction_month"),
-            "invoice": ("invoice_month", "month"),
+            "oa": ("month", "oa_month", "apply_month", "pay_receive_time"),
+            "bank": ("trade_month", "month", "transaction_month", "pay_receive_time", "trade_time"),
+            "invoice": ("invoice_month", "month", "invoice_date"),
         }[row_type]
         for field in fields:
             value = str(row.get(field) or "").strip()
@@ -453,9 +437,46 @@ class WorkbenchFreeMatchingEngine:
                 return value[:7]
         return ""
 
-    def _amount(self, value: Any) -> Decimal | None:
+    def _direction(self, row_type: str, row: dict[str, Any]) -> str:
+        explicit = str(row.get("direction") or row.get("txn_direction") or "").strip().lower()
+        if explicit in {"expenditure", "outflow", "debit", "支出", "付款", "支付"}:
+            return "expenditure"
+        if explicit in {"income", "inflow", "credit", "收入", "收款"}:
+            return "income"
+        if row_type == "oa":
+            apply_type = str(row.get("apply_type") or row.get("application_type") or "").strip()
+            return "income" if "收" in apply_type and "付" not in apply_type else "expenditure"
+        if row_type == "bank":
+            debit = self._decimal_value(row.get("debit_amount"))
+            credit = self._decimal_value(row.get("credit_amount"))
+            if debit is not None and debit > Decimal("0.00"):
+                return "expenditure"
+            if credit is not None and credit > Decimal("0.00"):
+                return "income"
+            return ""
+        if row_type == "invoice":
+            invoice_type = str(row.get("invoice_type") or "").strip()
+            return "income" if "销" in invoice_type else "expenditure"
+        return ""
+
+    def _amount(self, row_type: str, row: dict[str, Any]) -> Decimal | None:
+        if row_type == "bank":
+            debit = self._decimal_value(row.get("debit_amount"))
+            if debit is not None and debit > Decimal("0.00"):
+                return debit
+            credit = self._decimal_value(row.get("credit_amount"))
+            if credit is not None:
+                return credit
+            return self._decimal_value(row.get("amount"))
+        if row_type == "invoice":
+            total_with_tax = self._decimal_value(row.get("total_with_tax"))
+            if total_with_tax is not None:
+                return total_with_tax
+        return self._decimal_value(row.get("amount"))
+
+    def _decimal_value(self, value: Any) -> Decimal | None:
         try:
-            return Decimal(str(value)).quantize(Decimal("0.01"))
+            return Decimal(str(value).replace(",", "")).quantize(Decimal("0.01"))
         except (InvalidOperation, TypeError, ValueError):
             return None
 

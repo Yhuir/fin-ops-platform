@@ -198,6 +198,95 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
 
         self.assertEqual((oa_rows, bank_rows, invoice_rows), before)
 
+    def test_real_workbench_row_shapes_infer_expenditure_direction_and_amounts(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-03",
+            [
+                {
+                    "id": "oa-exp-1994",
+                    "type": "oa",
+                    "amount": "6,000.00",
+                    "apply_type": "付款申请",
+                    "pay_receive_time": "2026-03-18",
+                    "applicant": "张三",
+                    "project_name": "星河项目",
+                    "reason": "杭州ABC广告投放",
+                }
+            ],
+            [
+                {
+                    "id": "bk-o-1",
+                    "type": "bank",
+                    "debit_amount": "6,000.00",
+                    "credit_amount": "",
+                    "pay_receive_time": "2026-03-20 09:15",
+                    "counterparty_name": "杭州ABC广告有限公司",
+                    "summary": "星河项目付款",
+                    "remark": "张三报销",
+                }
+            ],
+            [
+                {
+                    "id": "iv-o-1",
+                    "type": "invoice",
+                    "invoice_type": "进项专票",
+                    "total_with_tax": "6,000.00",
+                    "invoice_date": "2026-03-19",
+                    "seller_name": "杭州ABC广告有限公司",
+                }
+            ],
+        )
+
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0].match_shape, "oa_bank_invoice")
+        self.assertEqual(decisions[0].row_ids, ("oa-exp-1994", "bk-o-1", "iv-o-1"))
+
+    def test_three_way_conflict_does_not_drop_unrelated_unique_pairing(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-03",
+            [
+                oa("oa-conflict", "1200.00"),
+                oa("oa-unique", "800.00", reason="星河项目 上海测试服务"),
+            ],
+            [
+                bank("bk-conflict", "1200.00"),
+                bank("bk-unique", "800.00", counterparty="上海测试服务有限公司"),
+            ],
+            [
+                invoice("iv-conflict-a", "1200.00", month="2026-02"),
+                invoice("iv-conflict-b", "1200.00", month="2026-04"),
+                invoice("iv-unique", "800.00", seller_name="上海测试服务有限公司"),
+            ],
+        )
+
+        paired = [decision for decision in decisions if decision.display_state == DISPLAY_STATE_PAIRED]
+        open_decisions = [decision for decision in decisions if decision.display_state == DISPLAY_STATE_OPEN]
+
+        self.assertEqual({decision.row_ids for decision in paired}, {("oa-unique", "bk-unique", "iv-unique")})
+        self.assertEqual(
+            {decision.row_ids for decision in open_decisions},
+            {("oa-conflict",), ("bk-conflict",), ("iv-conflict-a",), ("iv-conflict-b",)},
+        )
+
+    def test_two_way_fallback_can_return_disjoint_oa_bank_and_oa_invoice_pairs(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-03",
+            [
+                oa("oa-bank", "1200.00"),
+                oa("oa-invoice", "800.00", reason="星河项目 上海测试服务"),
+            ],
+            [bank("bk-bank", "1200.00")],
+            [invoice("iv-invoice", "800.00", seller_name="上海测试服务有限公司")],
+        )
+
+        self.assertEqual(
+            {decision.match_shape: decision.row_ids for decision in decisions},
+            {
+                "oa_bank": ("oa-bank", "bk-bank"),
+                "oa_invoice": ("oa-invoice", "iv-invoice"),
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
