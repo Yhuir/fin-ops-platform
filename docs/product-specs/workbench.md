@@ -39,7 +39,7 @@
 
 ## 读模型
 
-页面加载优先读取 `workbench_read_models`。如果当前 scope 缺快照或版本不新鲜，才触发重建。
+页面加载优先读取结构化 SQL read model。服务端根据 source version、schema version、dirty scope 和 worker lag 判断当前 scope 是否需要重建；不得把是否存在整包 snapshot 作为首屏正确性的判断依据。
 
 读模型必须按 scope 管理：
 

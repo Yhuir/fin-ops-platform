@@ -265,7 +265,7 @@ OA 附件发票仍展开为独立 invoice rows，row id 为 `oa-att-inv-{oa_row_
 
 ## 10. 自动决策 Read Model
 
-自动寻找 OA、银行流水、发票配对项时，后端统一写自动决策 read model，再由关联台消费。前端不直接运行配对规则，不根据生命周期状态自行推断配对。
+自动寻找 OA、银行流水、发票配对项时，后端统一写自动决策 read model，再由关联台消费。前端不直接运行配对规则，不根据生命周期状态自行推断配对。该章节描述关联台自动决策重构完成后的目标契约；迁移期旧 `workbench_candidate_matches` 只能作为替换前的现行实现或 shadow 对账来源，不能继续扩展为新的展示事实源。
 
 手工确认关系仍以 `app.workbench_pair_relations` 为事实源；自动决策不复制成手工关系。
 
@@ -282,10 +282,10 @@ OA 附件发票仍展开为独立 invoice rows，row id 为 `oa-att-inv-{oa_row_
   "match_shape": "oa_bank_invoice",
   "rule_code": "oa_attachment_invoice_with_bank",
   "rule_version": "2026-05-25",
-  "row_ids": ["oa-1", "bk-1", "iv-1", "iv-2"],
-  "oa_row_ids": ["oa-1"],
-  "bank_row_ids": ["bk-1"],
-  "invoice_row_ids": ["iv-1", "iv-2"],
+  "row_ids": ["oa-exp-1994", "bk-o-1", "oa-att-inv-oa-exp-1994-1", "oa-att-inv-oa-exp-1994-2"],
+  "oa_row_ids": ["oa-exp-1994"],
+  "bank_row_ids": ["bk-o-1"],
+  "invoice_row_ids": ["oa-att-inv-oa-exp-1994-1", "oa-att-inv-oa-exp-1994-2"],
   "amount": "6000.00",
   "direction": "expenditure",
   "payment_amount_closed": true,
