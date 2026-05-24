@@ -210,7 +210,7 @@ OA 附件发票仍展开为独立 invoice rows，row id 为 `oa-att-inv-{oa_row_
 {
   "month": "2026-03",
   "case_id": "MKT-001",
-  "row_ids": ["oa-o-1", "bk-o-1", "iv-o-1"]
+  "row_ids": ["oa-exp-1994", "bk-o-1", "iv-o-1"]
 }
 ```
 
@@ -242,10 +242,10 @@ OA 附件发票仍展开为独立 invoice rows，row id 为 `oa-att-inv-{oa_row_
   "success": true,
   "action": "confirm_link",
   "month": "2026-03",
-  "affected_row_ids": ["oa-o-1", "bk-o-1", "iv-o-1"],
+  "affected_row_ids": ["oa-exp-1994", "bk-o-1", "iv-o-1"],
   "updated_rows": [
     {
-      "id": "oa-o-1",
+      "id": "oa-exp-1994",
       "type": "oa"
     }
   ],
