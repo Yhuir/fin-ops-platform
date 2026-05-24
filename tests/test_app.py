@@ -34,6 +34,12 @@ class AppTests(unittest.TestCase):
         self.assertIn("/api/cost-statistics", payload["entrypoints"])
         self.assertIn("/api/cost-statistics/export", payload["entrypoints"])
         self.assertIn("/api/search", payload["entrypoints"])
+        self.assertIn("/api/pending-invoices/rows", payload["entrypoints"])
+        self.assertIn("/api/pending-invoices/invoice-candidates", payload["entrypoints"])
+        self.assertIn("/api/pending-invoices/rules", payload["entrypoints"])
+        self.assertIn("/api/pending-invoices/export", payload["entrypoints"])
+        self.assertIn("/api/input-invoice-usage/rows", payload["entrypoints"])
+        self.assertIn("/api/output-invoice-collections/rows", payload["entrypoints"])
         self.assertIn("/api/no-oa-bank-batches", payload["entrypoints"])
         self.assertIn("/api/no-oa-bank-batches/submit", payload["entrypoints"])
         self.assertIn("/api/no-oa-bank-batches/{batch_id}", payload["entrypoints"])
@@ -45,6 +51,8 @@ class AppTests(unittest.TestCase):
         self.assertIn("cost_statistics_foundation", payload["capabilities"])
         self.assertIn("cost_statistics_export", payload["capabilities"])
         self.assertIn("workbench_global_search_foundation", payload["capabilities"])
+        self.assertIn("input_invoice_usage_read_model", payload["capabilities"])
+        self.assertIn("output_invoice_collection_read_model", payload["capabilities"])
         self.assertIn("no_oa_bank_batch_processing", payload["capabilities"])
 
 

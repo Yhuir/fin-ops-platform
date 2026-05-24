@@ -65,6 +65,10 @@ class SearchPendingReadModelRefreshService:
         if not callable(list_shards) or not callable(enqueue):
             return None
         shard_keys = [str(item).strip() for item in list(list_shards(scope_key) or []) if str(item).strip()]
+        if not shard_keys:
+            mark_empty = getattr(self._projection_builder, "mark_pending_invoice_scope_empty", None)
+            if callable(mark_empty):
+                mark_empty(scope_key)
         for shard_key in shard_keys:
             enqueue(scope_type="pending_invoice", scope_key=shard_key, reason="pending_invoice_month_shard")
         complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)

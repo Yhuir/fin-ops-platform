@@ -17,6 +17,7 @@ DERIVED_DATA_EVENTS = (
     "exception_case_changed",
     "bank_transaction_category_changed",
     "pending_invoice_manual_invoice_confirmed",
+    "pending_invoice_attach_existing_invoice_confirmed",
     "no_oa_bank_batch_changed",
     "batch_accounting_relation_changed",
     "turnover_relation_changed",
@@ -175,6 +176,15 @@ class DerivedDataLifecycleService:
             "cost_statistics_read_model",
             "search_cache",
         ),
+        "pending_invoice_attach_existing_invoice_confirmed": (
+            "workbench_read_model",
+            "workbench_matching_dirty_scopes",
+            "pending_invoice_read_model",
+            "tax_offset_read_model",
+            "tax_offset_month_cache",
+            "cost_statistics_read_model",
+            "search_cache",
+        ),
         "no_oa_bank_batch_changed": (
             "workbench_read_model",
             "cost_statistics_read_model",
@@ -276,6 +286,11 @@ class DerivedDataLifecycleService:
             "cost_statistics_cache_warmup",
         ),
         "pending_invoice_manual_invoice_confirmed": (
+            "workbench_matching",
+            "tax_offset_cache_warmup",
+            "cost_statistics_cache_warmup",
+        ),
+        "pending_invoice_attach_existing_invoice_confirmed": (
             "workbench_matching",
             "tax_offset_cache_warmup",
             "cost_statistics_cache_warmup",

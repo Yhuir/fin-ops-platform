@@ -271,19 +271,31 @@ class ImportNormalizationService:
     def list_batches(self) -> list[ImportPreview]:
         return list(self._batches.values())
 
-    def list_invoices(self, *, month: str | None = None) -> list[Invoice]:
+    def list_invoices(
+        self,
+        *,
+        month: str | None = None,
+        invoice_type: InvoiceType | str | None = None,
+    ) -> list[Invoice]:
         normalized_month = str(month).strip() if month not in (None, "") else ""
-        if normalized_month:
-            repository_rows = self._list_repository_invoices(month=normalized_month)
+        normalized_invoice_type = self._normalize_invoice_type(invoice_type)
+        if normalized_month or normalized_invoice_type is not None:
+            repository_rows = self._list_repository_invoices(
+                month=normalized_month or "all",
+                invoice_type=normalized_invoice_type,
+            )
             if repository_rows is not None:
                 return repository_rows
-            if normalized_month != "all":
-                return [
-                    invoice
-                    for invoice in self._invoices_by_id.values()
-                    if invoice.invoice_date and invoice.invoice_date.startswith(normalized_month[:7])
-                ]
-        return list(self._invoices_by_id.values())
+        invoices = list(self._invoices_by_id.values())
+        if normalized_month and normalized_month != "all":
+            invoices = [
+                invoice
+                for invoice in invoices
+                if invoice.invoice_date and invoice.invoice_date.startswith(normalized_month[:7])
+            ]
+        if normalized_invoice_type is not None:
+            invoices = [invoice for invoice in invoices if invoice.invoice_type == normalized_invoice_type]
+        return invoices
 
     def get_invoice(self, invoice_id: str) -> Invoice:
         return self._invoices_by_id[invoice_id]
@@ -320,7 +332,12 @@ class ImportNormalizationService:
     def get_transaction(self, transaction_id: str) -> BankTransaction:
         return self._transactions_by_id[transaction_id]
 
-    def _list_repository_invoices(self, *, month: str) -> list[Invoice] | None:
+    def _list_repository_invoices(
+        self,
+        *,
+        month: str,
+        invoice_type: InvoiceType | None = None,
+    ) -> list[Invoice] | None:
         list_page = getattr(self._fact_repository, "list_invoices_page", None)
         if not callable(list_page):
             return None
@@ -329,13 +346,28 @@ class ImportNormalizationService:
         rows: list[Invoice] = []
         query_month = None if month == "all" else month[:7]
         while True:
-            page_rows, total = list_page(page=page, page_size=page_size, month=query_month)
+            page_rows, total = list_page(
+                page=page,
+                page_size=page_size,
+                month=query_month,
+                invoice_type=invoice_type.value if invoice_type is not None else None,
+            )
             typed_rows = [row for row in list(page_rows or []) if isinstance(row, Invoice)]
+            if invoice_type is not None:
+                typed_rows = [row for row in typed_rows if row.invoice_type == invoice_type]
             rows.extend(typed_rows)
             if len(rows) >= int(total or 0) or len(page_rows or []) < page_size:
                 break
             page += 1
         return rows
+
+    @staticmethod
+    def _normalize_invoice_type(value: InvoiceType | str | None) -> InvoiceType | None:
+        if value in (None, ""):
+            return None
+        if isinstance(value, InvoiceType):
+            return value
+        return InvoiceType(str(value))
 
     def _list_repository_transactions(self, *, month: str) -> list[BankTransaction] | None:
         list_page = getattr(self._fact_repository, "list_bank_transactions_page", None)

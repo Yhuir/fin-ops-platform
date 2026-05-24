@@ -153,6 +153,7 @@ VITE_APP_BASE_PATH=/fin-ops/
 - `deploy/oa/fin_ops.env.example`
 - `deploy/oa/env/fin-ops.common.env.example`
 - `deploy/oa/env/fin-ops.secrets.env.example`
+- `deploy/oa/env/fin-ops.postgres-migrator.env.example`
 - `deploy/oa/env/fin-ops.rabbitmq-*.env.example`
 
 systemd 模板位于：
@@ -162,7 +163,23 @@ systemd 模板位于：
 - `deploy/oa/systemd/fin-ops-rabbitmq-topology.service.example`
 - `deploy/oa/systemd/fin-ops-rabbitmq-dispatcher.service.example`
 
-生产部署时，API、worker、RabbitMQ dispatcher 和 RabbitMQ topology bootstrap 应使用不同的 `EnvironmentFile`。`FIN_OPS_POSTGRES_DATABASE_URL`、`RABBITMQ_URL`、Redis、MinIO/S3 和 OA role sync 密码只能放在服务器 root-only secret 文件中，不要写入仓库模板或 systemd inline `Environment=`。
+生产部署时，API、worker、RabbitMQ dispatcher 和 RabbitMQ topology bootstrap 应使用不同的 `EnvironmentFile`。`FIN_OPS_POSTGRES_DATABASE_URL`、`FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL`、`RABBITMQ_URL`、Redis、MinIO/S3 和 OA role sync 密码只能放在服务器 root-only secret 文件中，不要写入仓库模板或 systemd inline `Environment=`。migrator DSN 只能用于手动/受控 migration，不要加载到 API 或 worker unit。
+
+PostgreSQL migration 示例：
+
+```bash
+sudo install -m 0600 -o root -g root \
+  deploy/oa/env/fin-ops.postgres-migrator.env.example \
+  /etc/fin-ops/fin-ops.postgres-migrator.env
+sudoedit /etc/fin-ops/fin-ops.postgres-migrator.env
+
+set -a
+source /etc/fin-ops/fin-ops.postgres-migrator.env
+set +a
+
+PYTHONPATH=/opt/fin-ops/current/backend/src \
+  /opt/fin-ops/venv/bin/python -m fin_ops_platform.postgres apply
+```
 
 RabbitMQ 切换不是发布脚本的默认副作用。先保持 `FIN_OPS_QUEUE_BACKEND=postgres`，完成 topology apply 和 dispatcher shadow publish 观察，再按 worker 族灰度到 `FIN_OPS_QUEUE_BACKEND=rabbitmq`。完整 topology 已覆盖 workbench、search/pending、cost/tax、oa-sync 和 file migration；生产发布范围由 `RABBITMQ_DISPATCH_EVENT_TYPES` 控制。完整步骤见 `docs/operations/runtime-read-model-hardening.md`。
 

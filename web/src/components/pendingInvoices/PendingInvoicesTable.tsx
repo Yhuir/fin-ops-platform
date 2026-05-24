@@ -1,5 +1,8 @@
-import AddIcon from "@mui/icons-material/Add";
+import ExpandLessIcon from "@mui/icons-material/ExpandLess";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import IconButton from "@mui/material/IconButton";
 import Stack from "@mui/material/Stack";
@@ -7,217 +10,489 @@ import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
 import TableHead from "@mui/material/TableHead";
-import TablePagination from "@mui/material/TablePagination";
 import TableRow from "@mui/material/TableRow";
+import TableSortLabel from "@mui/material/TableSortLabel";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
+import type { SxProps, Theme } from "@mui/material/styles";
 
-import type { PendingInvoiceDirection, PendingInvoiceRow } from "../../features/pendingInvoices/types";
+import type {
+  PendingInvoiceObjectDetailTarget,
+  PendingInvoicePrimaryAction,
+  PendingInvoiceRow,
+  PendingInvoiceSortDirection,
+  PendingInvoiceSortField,
+  PendingInvoiceStatusSeverity,
+} from "../../features/pendingInvoices/types";
 
-type PendingInvoicesTableProps = {
-  direction: PendingInvoiceDirection;
-  rows: PendingInvoiceRow[];
-  page: number;
-  pageSize: number;
-  total: number;
-  onPageChange: (page: number) => void;
-  onPageSizeChange: (pageSize: number) => void;
-  onCreateInvoice: (row: PendingInvoiceRow) => void;
+export type PendingInvoicesTableConfig = {
+  sortField: PendingInvoiceSortField;
+  sortDirection: PendingInvoiceSortDirection;
+  expandedCellIds: Set<string>;
 };
 
+type PendingInvoicesTableProps = {
+  rows: PendingInvoiceRow[];
+  config: PendingInvoicesTableConfig;
+  onSortChange: (field: PendingInvoiceSortField) => void;
+  onOpenRelation: (row: PendingInvoiceRow) => void;
+  onOpenInvoicePicker: (row: PendingInvoiceRow) => void;
+  onOpenManualInvoice: (row: PendingInvoiceRow) => void;
+  onOpenObjectDetail: (target: PendingInvoiceObjectDetailTarget) => void;
+  onOpenRules: () => void;
+  onOpenExport: () => void;
+  onToggleCellExpand: (cellId: string) => void;
+};
+
+const GROUP_BORDER = "2px solid";
+const CELL_BORDER = "1px solid";
+
 function formatMoney(value: string) {
-  const parsed = Number(value.replace(/,/g, ""));
+  const parsed = Number(String(value ?? "").replace(/,/g, ""));
   if (!Number.isFinite(parsed)) {
-    return value || "—";
+    return value || "-";
   }
   return parsed.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-const groupHeaderSx = {
-  borderBottom: "1px solid",
-  borderColor: "divider",
-  color: "text.primary",
-  fontWeight: 800,
-  textAlign: "center",
-};
+function invoiceNumber(row: NonNullable<PendingInvoiceRow["inputInvoices"]["primary"]>) {
+  return row.digitalInvoiceNo || [row.invoiceCode, row.invoiceNo].filter(Boolean).join(" ") || row.invoiceNo || "-";
+}
 
-const subHeaderSx = {
-  borderBottom: "1px solid",
-  borderColor: "divider",
-  color: "text.secondary",
-  fontSize: "12px",
-  fontWeight: 700,
-  whiteSpace: "nowrap",
-};
+function overflowText(expanded: boolean): SxProps<Theme> {
+  return expanded ? {
+    whiteSpace: "normal",
+    wordBreak: "break-word",
+  } : {
+    display: "-webkit-box",
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: "vertical",
+    overflow: "hidden",
+    wordBreak: "break-word",
+  };
+}
 
-const bankGroupSx = {
-  bgcolor: "#eaf3ff",
-};
+function chipColor(severity: PendingInvoiceStatusSeverity): "default" | "primary" | "success" | "warning" | "error" | "info" {
+  switch (severity) {
+    case "success":
+      return "success";
+    case "warning":
+      return "warning";
+    case "error":
+      return "error";
+    case "info":
+      return "info";
+    default:
+      return "default";
+  }
+}
 
-const bankSubSx = {
-  bgcolor: "#f5f9ff",
-};
+function sortableLabel(
+  label: string,
+  field: PendingInvoiceSortField,
+  config: PendingInvoicesTableConfig,
+  onSortChange: (field: PendingInvoiceSortField) => void,
+) {
+  return (
+    <TableSortLabel
+      active={config.sortField === field}
+      direction={config.sortField === field ? config.sortDirection : "asc"}
+      onClick={() => onSortChange(field)}
+    >
+      {label}
+    </TableSortLabel>
+  );
+}
 
-const invoiceGroupSx = {
-  bgcolor: "#edf8f2",
-};
+function shouldOpenRelation(action: PendingInvoicePrimaryAction) {
+  return ["view_relation", "view_payment_detail", "view_accumulated", "view_payment_history"].includes(action);
+}
 
-const invoiceSubSx = {
-  bgcolor: "#f6fbf8",
-};
+function shouldOpenRules(action: PendingInvoicePrimaryAction) {
+  return ["view_rules", "open_rules"].includes(action);
+}
 
-const oaGroupSx = {
-  bgcolor: "#f3f4f6",
-};
+function shouldOpenInvoicePicker(action: PendingInvoicePrimaryAction) {
+  return ["attach_existing_invoice", "choose_invoice", "select_invoice"].includes(action);
+}
+
+function shouldOpenManualInvoice(action: PendingInvoicePrimaryAction) {
+  return ["manual_invoice", "create_invoice"].includes(action);
+}
+
+function ActionButtons({
+  row,
+  onOpenRelation,
+  onOpenInvoicePicker,
+  onOpenManualInvoice,
+  onOpenRules,
+}: Pick<PendingInvoicesTableProps, "onOpenRelation" | "onOpenInvoicePicker" | "onOpenManualInvoice" | "onOpenRules"> & { row: PendingInvoiceRow }) {
+  const action = row.invoiceAcquisitionStatus.primaryAction;
+  const prefix = row.bankTransaction.counterpartyName;
+
+  if (action === "attach_or_create_invoice") {
+    return (
+      <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
+        <Button size="small" variant="contained" onClick={() => onOpenInvoicePicker(row)} aria-label={`${prefix} 选择发票`}>
+          选择发票
+        </Button>
+        <Button size="small" variant="outlined" onClick={() => onOpenManualInvoice(row)} aria-label={`${prefix} 补票`}>
+          补票
+        </Button>
+      </Stack>
+    );
+  }
+  if (shouldOpenRelation(action)) {
+    return (
+      <Button size="small" variant="outlined" onClick={() => onOpenRelation(row)} aria-label={`${prefix} 查看支付明细`}>
+        查看支付明细
+      </Button>
+    );
+  }
+  if (shouldOpenRules(action)) {
+    return (
+      <Button size="small" variant="outlined" onClick={onOpenRules} aria-label={`${prefix} 查看规则依据`}>
+        查看规则依据
+      </Button>
+    );
+  }
+  if (shouldOpenInvoicePicker(action)) {
+    return (
+      <Button size="small" variant="contained" onClick={() => onOpenInvoicePicker(row)} aria-label={`${prefix} 选择发票`}>
+        选择发票
+      </Button>
+    );
+  }
+  if (shouldOpenManualInvoice(action)) {
+    return (
+      <Button size="small" variant="outlined" onClick={() => onOpenManualInvoice(row)} aria-label={`${prefix} 补票`}>
+        补票
+      </Button>
+    );
+  }
+  return (
+    <Button size="small" variant="text" onClick={() => onOpenRelation(row)} aria-label={`${prefix} 查看关系`}>
+      查看关系
+    </Button>
+  );
+}
 
 export default function PendingInvoicesTable({
-  direction,
   rows,
-  page,
-  pageSize,
-  total,
-  onCreateInvoice,
-  onPageChange,
-  onPageSizeChange,
+  config,
+  onSortChange,
+  onOpenRelation,
+  onOpenInvoicePicker,
+  onOpenManualInvoice,
+  onOpenObjectDetail,
+  onOpenRules,
+  onOpenExport,
+  onToggleCellExpand,
 }: PendingInvoicesTableProps) {
-  const bankHeader = direction === "expense" ? "支出流水" : "收入流水";
-  const invoiceHeader = direction === "expense" ? "进项发票" : "销项发票";
-  const invoicePartyHeader = direction === "expense" ? "销方名称" : "购方名称";
+  return (
+    <Box sx={{ border: CELL_BORDER, borderColor: "divider", bgcolor: "background.paper" }}>
+      <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }} justifyContent="space-between" sx={{ px: 1.5, py: 1 }}>
+        <Typography variant="subtitle2" fontWeight={900}>
+          支出流水发票获取工作台
+        </Typography>
+        <Stack direction="row" spacing={1}>
+          <Button size="small" variant="outlined" onClick={onOpenRules}>待找发票规则设置</Button>
+          <Button size="small" variant="contained" onClick={onOpenExport}>筛选内容导出</Button>
+        </Stack>
+      </Stack>
+      <Box data-testid="pending-invoices-table-shell" sx={{ overflowX: "hidden" }}>
+        <Table aria-label="待找发票四区表" size="small" sx={{ width: "100%", tableLayout: "fixed" }}>
+          <colgroup>
+            <col style={{ width: "16%" }} />
+            <col style={{ width: "12%" }} />
+            <col style={{ width: "14%" }} />
+            <col style={{ width: "13%" }} />
+            <col style={{ width: "10%" }} />
+            <col style={{ width: "11%" }} />
+            <col style={{ width: "7%" }} />
+            <col style={{ width: "8%" }} />
+            <col style={{ width: "9%" }} />
+          </colgroup>
+          <TableHead>
+            <TableRow>
+              <TableCell colSpan={3} scope="colgroup" sx={groupHeaderSx("#edf5ff")}>支出流水</TableCell>
+              <TableCell scope="colgroup" sx={groupHeaderSx("#fff7e6", true)}>发票获取状态</TableCell>
+              <TableCell colSpan={3} scope="colgroup" sx={groupHeaderSx("#eefaf3", true)}>进项发票</TableCell>
+              <TableCell colSpan={2} scope="colgroup" sx={groupHeaderSx("#f4f4f5", true)}>OA</TableCell>
+            </TableRow>
+            <TableRow>
+              <TableCell scope="col" sx={subHeaderSx("#f6faff")}>
+                {sortableLabel("对方 / 时间", "counterparty_name", config, onSortChange)}
+              </TableCell>
+              <TableCell scope="col" align="right" sx={subHeaderSx("#f6faff")}>
+                {sortableLabel("金额 / 银行账户", "amount", config, onSortChange)}
+              </TableCell>
+              <TableCell scope="col" sx={subHeaderSx("#f6faff")}>摘要 / 凭证</TableCell>
+              <TableCell scope="col" sx={subHeaderSx("#fffaf0", true)}>
+                {sortableLabel("状态 / 依据 / 主操作", "status_code", config, onSortChange)}
+              </TableCell>
+              <TableCell scope="col" sx={subHeaderSx("#f7fcf9", true)}>
+                {sortableLabel("发票号码 / 开票日期", "trade_date", config, onSortChange)}
+              </TableCell>
+              <TableCell scope="col" sx={subHeaderSx("#f7fcf9")}>
+                {sortableLabel("销方 / 识别号", "seller_name", config, onSortChange)}
+              </TableCell>
+              <TableCell scope="col" align="right" sx={subHeaderSx("#f7fcf9")}>
+                {sortableLabel("金额 / 支付差额", "invoice_total", config, onSortChange)}
+              </TableCell>
+              <TableCell scope="col" sx={subHeaderSx("#fafafa", true)}>
+                {sortableLabel("申请人 / 类型", "oa_applicant", config, onSortChange)}
+              </TableCell>
+              <TableCell scope="col" sx={subHeaderSx("#fafafa")}>
+                {sortableLabel("项目 / 详情", "project_name", config, onSortChange)}
+              </TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {rows.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={9} align="center" sx={{ py: 6, color: "text.secondary" }}>
+                  当前条件下没有待找发票流水。
+                </TableCell>
+              </TableRow>
+            ) : rows.map((row) => renderRow({
+              row,
+              config,
+              onOpenRelation,
+              onOpenInvoicePicker,
+              onOpenManualInvoice,
+              onOpenObjectDetail,
+              onOpenRules,
+              onToggleCellExpand,
+            }))}
+          </TableBody>
+        </Table>
+      </Box>
+    </Box>
+  );
+}
+
+function groupHeaderSx(bgcolor: string, leftBorder = false): SxProps<Theme> {
+  return {
+    bgcolor,
+    borderBottom: CELL_BORDER,
+    borderColor: "divider",
+    color: "text.primary",
+    fontWeight: 900,
+    textAlign: "center",
+    ...(leftBorder ? { borderLeft: GROUP_BORDER, borderLeftColor: "divider" } : {}),
+  };
+}
+
+function subHeaderSx(bgcolor: string, leftBorder = false): SxProps<Theme> {
+  return {
+    bgcolor,
+    borderBottom: CELL_BORDER,
+    borderColor: "divider",
+    color: "text.secondary",
+    fontSize: 12,
+    fontWeight: 800,
+    lineHeight: 1.2,
+    whiteSpace: "normal",
+    ...(leftBorder ? { borderLeft: GROUP_BORDER, borderLeftColor: "divider" } : {}),
+  };
+}
+
+function dataCellSx(leftBorder = false): SxProps<Theme> {
+  return {
+    verticalAlign: "top",
+    p: 1,
+    ...(leftBorder ? { borderLeft: GROUP_BORDER, borderLeftColor: "divider" } : {}),
+  };
+}
+
+function renderRow({
+  row,
+  config,
+  onOpenRelation,
+  onOpenInvoicePicker,
+  onOpenManualInvoice,
+  onOpenObjectDetail,
+  onOpenRules,
+  onToggleCellExpand,
+}: Omit<PendingInvoicesTableProps, "rows" | "onSortChange" | "onOpenExport"> & { row: PendingInvoiceRow }) {
+  const summaryCellId = `${row.id}:bank-summary`;
+  const summaryExpanded = config.expandedCellIds.has(summaryCellId);
+  const primaryInvoice = row.inputInvoices.primary;
+  const primaryOa = row.oa.primary;
+  const invoiceExtraCount = Math.max(0, row.inputInvoices.relationCount - 1);
+  const oaExtraCount = Math.max(0, row.oa.relationCount - 1);
 
   return (
-    <Box sx={{ border: "1px solid", borderColor: "divider", bgcolor: "background.paper", overflowX: "auto" }}>
-      <Table aria-label="待找发票流水表" size="small" sx={{ minWidth: 1080, tableLayout: "fixed" }}>
-        <TableHead>
-          <TableRow>
-            <TableCell colSpan={2} scope="colgroup" sx={[groupHeaderSx, bankGroupSx]}>
-              {bankHeader}
-            </TableCell>
-            <TableCell colSpan={3} scope="colgroup" sx={[groupHeaderSx, invoiceGroupSx, { borderLeft: "1px solid", borderLeftColor: "divider" }]}>
-              {invoiceHeader}
-            </TableCell>
-            <TableCell rowSpan={2} scope="col" sx={[groupHeaderSx, oaGroupSx, { width: "12%", borderLeft: "1px solid", borderLeftColor: "divider" }]}>
-              OA申请人
-            </TableCell>
-          </TableRow>
-          <TableRow>
-            <TableCell scope="col" sx={[subHeaderSx, bankSubSx, { width: "22%" }]}>
-              对方户名 / 时间
-            </TableCell>
-            <TableCell scope="col" align="right" sx={[subHeaderSx, bankSubSx, { width: "16%" }]}>
-              金额 / 银行账户
-            </TableCell>
-            <TableCell scope="col" sx={[subHeaderSx, invoiceSubSx, { width: "18%", borderLeft: "1px solid", borderLeftColor: "divider" }]}>
-              发票号码 / 开票日期
-            </TableCell>
-            <TableCell scope="col" align="right" sx={[subHeaderSx, invoiceSubSx, { width: "12%" }]}>
-              价税合计
-            </TableCell>
-            <TableCell scope="col" sx={[subHeaderSx, invoiceSubSx, { width: "20%" }]}>
-              {invoicePartyHeader}
-            </TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {rows.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={6} align="center" sx={{ py: 6, color: "text.secondary" }}>
-                当前条件下没有待找发票流水。
-              </TableCell>
-            </TableRow>
-          ) : rows.map((row) => (
-            <TableRow key={row.id} hover>
-              <TableCell sx={{ verticalAlign: "top" }}>
-                <Typography component="div" variant="body2" fontWeight={700} noWrap title={row.bankTransaction.counterpartyName}>
-                  {row.bankTransaction.counterpartyName}
-                </Typography>
-                <Chip label={row.bankTransaction.tradeTime || "时间为空"} size="small" variant="outlined" sx={{ mt: 0.75 }} />
-              </TableCell>
-              <TableCell align="right" sx={{ verticalAlign: "top" }}>
-                <Typography component="div" variant="body2" fontWeight={800} sx={{ fontVariantNumeric: "tabular-nums" }}>
-                  {formatMoney(row.bankTransaction.amount)}
-                </Typography>
-                <Chip
-                  label={`${row.bankTransaction.bankName || "银行"} ${row.bankTransaction.accountLast4 || "----"}`}
-                  size="small"
-                  variant="outlined"
-                  sx={{ mt: 0.75 }}
-                />
-              </TableCell>
-              <TableCell sx={{ borderLeft: "1px solid", borderLeftColor: "divider", verticalAlign: "top" }}>
-                {row.invoices.length > 0 ? (
-                  <Stack spacing={1.25}>
-                    {row.invoices.map((invoice) => {
-                      const invoiceNumber = invoice.invoiceNo || invoice.digitalInvoiceNo || "号码为空";
-                      return (
-                        <Box key={invoice.id || invoiceNumber} sx={{ minWidth: 0 }}>
-                          <Typography component="div" variant="body2" fontWeight={700} noWrap title={invoiceNumber}>
-                            {invoiceNumber}
-                          </Typography>
-                          <Chip label={invoice.issueDate || "开票日期为空"} size="small" variant="outlined" sx={{ mt: 0.75 }} />
-                        </Box>
-                      );
-                    })}
-                  </Stack>
-                ) : row.canCreateInvoice ? (
-                  <Tooltip title="新增发票">
-                    <IconButton
-                      aria-label={`${row.bankTransaction.counterpartyName} 新增发票`}
-                      color="primary"
-                      size="small"
-                      onClick={() => onCreateInvoice(row)}
-                    >
-                      <AddIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                ) : (
-                  <Typography color="text.secondary">—</Typography>
-                )}
-              </TableCell>
-              <TableCell align="right" sx={{ verticalAlign: "top" }}>
-                {row.invoices.length > 0 ? (
-                  <Stack spacing={1.25}>
-                    {row.invoices.map((invoice) => (
-                      <Typography key={invoice.id || invoice.invoiceNo || invoice.digitalInvoiceNo} component="div" variant="body2" fontWeight={800} sx={{ fontVariantNumeric: "tabular-nums" }}>
-                        {formatMoney(invoice.totalWithTax)}
-                      </Typography>
-                    ))}
-                  </Stack>
-                ) : (
-                  <Typography color="text.secondary">—</Typography>
-                )}
-              </TableCell>
-              <TableCell sx={{ verticalAlign: "top" }}>
-                {row.invoices.length > 0 ? (
-                  <Stack spacing={1.25}>
-                    {row.invoices.map((invoice) => {
-                      const partyName = direction === "expense" ? invoice.sellerName || "销方为空" : invoice.buyerName || "购方为空";
-                      return (
-                        <Typography key={invoice.id || invoice.invoiceNo || invoice.digitalInvoiceNo} component="div" variant="body2" color="text.secondary" noWrap title={partyName}>
-                          {partyName}
-                        </Typography>
-                      );
-                    })}
-                  </Stack>
-                ) : (
-                  <Typography color="text.secondary">—</Typography>
-                )}
-              </TableCell>
-              <TableCell sx={{ borderLeft: "1px solid", borderLeftColor: "divider", verticalAlign: "top" }}>{row.oaApplicant || "—"}</TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-      <TablePagination
-        component="div"
-        count={total}
-        page={Math.max(0, page - 1)}
-        rowsPerPage={pageSize}
-        rowsPerPageOptions={[25, 50, 100]}
-        labelRowsPerPage="每页行数"
-        labelDisplayedRows={({ from, to, count }) => `${from}-${to} / ${count}`}
-        onPageChange={(_event, nextPage) => onPageChange(nextPage + 1)}
-        onRowsPerPageChange={(event) => onPageSizeChange(Number(event.target.value))}
-      />
-    </Box>
+    <TableRow key={row.id} hover>
+      <TableCell sx={dataCellSx()}>
+        <Stack spacing={0.75} sx={{ minWidth: 0 }}>
+          <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 0 }}>
+            <Typography component="div" variant="body2" fontWeight={900} noWrap title={row.bankTransaction.counterpartyName}>
+              {row.bankTransaction.counterpartyName}
+            </Typography>
+            <Tooltip title="流水详情">
+              <IconButton
+                size="small"
+                aria-label={`流水详情 ${row.bankTransaction.counterpartyName}`}
+                onClick={() => onOpenObjectDetail({ kind: "bankTransaction", id: row.bankTransaction.id, rowId: row.id })}
+              >
+                <InfoOutlinedIcon fontSize="inherit" />
+              </IconButton>
+            </Tooltip>
+          </Stack>
+          <Typography variant="caption" color="text.secondary">{row.bankTransaction.tradeTime || "-"}</Typography>
+          {row.bankTransaction.counterpartyAccountNo ? (
+            <Typography variant="caption" color="text.secondary" noWrap title={row.bankTransaction.counterpartyAccountNo}>
+              对方尾号 {row.bankTransaction.counterpartyAccountNo.slice(-4)}
+            </Typography>
+          ) : null}
+        </Stack>
+      </TableCell>
+      <TableCell align="right" sx={dataCellSx()}>
+        <Typography component="div" variant="body2" fontWeight={900} sx={{ fontVariantNumeric: "tabular-nums" }}>
+          {formatMoney(row.bankTransaction.debitAmount)}
+        </Typography>
+        <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>
+          {[row.bankTransaction.bankName, row.bankTransaction.accountLast4].filter(Boolean).join(" ") || "-"}
+        </Typography>
+        <Typography variant="caption" color="text.secondary" component="div">
+          {row.bankTransaction.currency || "-"}
+        </Typography>
+      </TableCell>
+      <TableCell sx={dataCellSx()}>
+        <Stack spacing={0.5}>
+          <Typography variant="body2" sx={overflowText(summaryExpanded)}>
+            {row.bankTransaction.summary || "-"}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={overflowText(summaryExpanded)}>
+            {row.bankTransaction.remark || row.bankTransaction.voucherNo || "-"}
+          </Typography>
+          <Button
+            size="small"
+            variant="text"
+            endIcon={summaryExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+            onClick={() => onToggleCellExpand(summaryCellId)}
+          >
+            {summaryExpanded ? "收起" : "展开"}
+          </Button>
+        </Stack>
+      </TableCell>
+      <TableCell sx={dataCellSx(true)}>
+        <Stack spacing={0.8} alignItems="flex-start">
+          <Chip
+            size="small"
+            color={chipColor(row.invoiceAcquisitionStatus.severity)}
+            variant={row.invoiceAcquisitionStatus.severity === "default" ? "outlined" : "filled"}
+            label={row.invoiceAcquisitionStatus.label}
+          />
+          <Typography variant="caption" color="text.secondary" sx={overflowText(false)}>
+            {row.invoiceAcquisitionStatus.reason || row.invoiceAcquisitionStatus.matchedRule?.tagLabel || "-"}
+          </Typography>
+          <ActionButtons
+            row={row}
+            onOpenRelation={onOpenRelation}
+            onOpenInvoicePicker={onOpenInvoicePicker}
+            onOpenManualInvoice={onOpenManualInvoice}
+            onOpenRules={onOpenRules}
+          />
+        </Stack>
+      </TableCell>
+      <TableCell sx={dataCellSx(true)}>
+        {primaryInvoice ? (
+          <Stack spacing={0.5} sx={{ minWidth: 0 }}>
+            <Typography variant="body2" fontWeight={900} noWrap title={invoiceNumber(primaryInvoice)}>
+              {invoiceNumber(primaryInvoice)}
+            </Typography>
+            <Stack direction="row" spacing={0.5} alignItems="center">
+              <Typography variant="caption" color="text.secondary">{primaryInvoice.issueDate || "-"}</Typography>
+              <Button
+                size="small"
+                variant="text"
+                aria-label={`发票详情 ${invoiceNumber(primaryInvoice)}`}
+                onClick={() => onOpenObjectDetail({ kind: "invoice", id: primaryInvoice.id, rowId: row.id })}
+              >
+                详情
+              </Button>
+              {invoiceExtraCount > 0 ? (
+                <Button size="small" variant="outlined" onClick={() => onOpenRelation(row)} aria-label={`${row.bankTransaction.counterpartyName} 查看全部发票关系`}>
+                  +{invoiceExtraCount}
+                </Button>
+              ) : null}
+            </Stack>
+          </Stack>
+        ) : (
+          <Typography color="text.secondary">-</Typography>
+        )}
+      </TableCell>
+      <TableCell sx={dataCellSx()}>
+        {primaryInvoice ? (
+          <Stack spacing={0.5}>
+            <Typography variant="body2" fontWeight={800} sx={overflowText(false)}>
+              {primaryInvoice.sellerName || "-"}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={overflowText(false)}>
+              {primaryInvoice.sellerTaxNo || "-"}
+            </Typography>
+          </Stack>
+        ) : (
+          <Typography color="text.secondary">-</Typography>
+        )}
+      </TableCell>
+      <TableCell align="right" sx={dataCellSx()}>
+        {primaryInvoice ? (
+          <Stack spacing={0.35}>
+            <Typography variant="body2" fontWeight={900} sx={{ fontVariantNumeric: "tabular-nums" }}>
+              {formatMoney(primaryInvoice.totalWithTax)}
+            </Typography>
+            {row.inputInvoices.paymentSummary ? (
+              <>
+                <Typography variant="caption" color="text.secondary">已付 {formatMoney(row.inputInvoices.paymentSummary.paidTotal)}</Typography>
+                <Typography variant="caption" color="text.secondary">待付 {formatMoney(row.inputInvoices.paymentSummary.remainingAmount)}</Typography>
+              </>
+            ) : null}
+          </Stack>
+        ) : (
+          <Typography color="text.secondary">-</Typography>
+        )}
+      </TableCell>
+      <TableCell sx={dataCellSx(true)}>
+        {primaryOa ? (
+          <Stack spacing={0.5} sx={{ minWidth: 0 }}>
+            <Typography variant="body2" fontWeight={900} noWrap title={primaryOa.applicant}>{primaryOa.applicant || "-"}</Typography>
+            <Typography variant="caption" color="text.secondary">{primaryOa.applicationType || "-"}</Typography>
+          </Stack>
+        ) : (
+          <Typography color="text.secondary">-</Typography>
+        )}
+      </TableCell>
+      <TableCell sx={dataCellSx()}>
+        {primaryOa ? (
+          <Stack spacing={0.5} alignItems="flex-start" sx={{ minWidth: 0 }}>
+            <Typography variant="body2" fontWeight={800} sx={overflowText(false)}>
+              {primaryOa.projectName || "-"}
+            </Typography>
+            <Stack direction="row" spacing={0.5} alignItems="center">
+              <Button
+                size="small"
+                variant="text"
+                disabled={!row.oa.detailAvailable}
+                aria-label={`OA详情 ${primaryOa.applicant || primaryOa.id}`}
+                onClick={() => onOpenObjectDetail({ kind: "oa", id: primaryOa.id, rowId: row.id })}
+              >
+                详情
+              </Button>
+              {oaExtraCount > 0 ? (
+                <Button size="small" variant="outlined" onClick={() => onOpenRelation(row)} aria-label={`${row.bankTransaction.counterpartyName} 查看全部 OA 关系`}>
+                  +{oaExtraCount}
+                </Button>
+              ) : null}
+            </Stack>
+          </Stack>
+        ) : (
+          <Typography color="text.secondary">-</Typography>
+        )}
+      </TableCell>
+    </TableRow>
   );
 }
