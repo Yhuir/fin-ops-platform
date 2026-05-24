@@ -190,6 +190,7 @@ from fin_ops_platform.services.workbench_matching_rules import (
     WorkbenchMatchingRules,
 )
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
+from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_exception_application_service import (
     WorkbenchExceptionApplicationConflict,
     WorkbenchExceptionApplicationService,
@@ -380,6 +381,21 @@ class Application:
             return repository
         return None
 
+    def _workbench_reconciliation_decision_store_repository(self):
+        repository = getattr(self._state_store, "read_model_repository", None)
+        required_methods = (
+            "upsert_workbench_reconciliation_decisions",
+            "list_workbench_reconciliation_decisions",
+            "consume_workbench_reconciliation_decisions_by_row_ids",
+            "suppress_workbench_reconciliation_decisions_by_row_ids",
+            "expire_stale_workbench_reconciliation_decisions",
+        )
+        if repository is not None and all(
+            callable(getattr(repository, method_name, None)) for method_name in required_methods
+        ):
+            return repository
+        return None
+
     def _runtime_repository_snapshot(
         self,
         persisted_state: dict[str, object],
@@ -504,6 +520,15 @@ class Application:
             if dirty_queue_repository is not None
             else None
         )
+        decision_store_repository = self._workbench_reconciliation_decision_store_repository()
+        self._workbench_reconciliation_decision_store = (
+            WorkbenchReconciliationDecisionStore(
+                repository=decision_store_repository,
+                tenant_id=self._workbench_reconciliation_tenant_id(),
+            )
+            if decision_store_repository is not None
+            else None
+        )
         self._cost_statistics_read_model_service = CostStatisticsReadModelService.from_snapshot(
             persisted_state.get("cost_statistics_read_models"),
         )
@@ -586,6 +611,7 @@ class Application:
             rules=self._workbench_matching_rules,
             special_rule_service=self._workbench_special_pair_rule_service,
             exception_case_service=self._workbench_exception_case_service,
+            decision_store=self._workbench_reconciliation_decision_store,
             settings_provider=self._workbench_matching_settings,
             source_versions_provider=self._workbench_matching_source_versions,
         )
@@ -740,8 +766,15 @@ class Application:
             case_service=self._workbench_exception_case_service,
             pair_relation_service=self._workbench_pair_relation_service,
             candidate_match_service=self._workbench_candidate_match_service,
+            decision_store=getattr(self, "_workbench_reconciliation_decision_store", None),
             source_versions_provider=self._workbench_matching_source_versions,
         )
+
+    def _consume_workbench_reconciliation_decisions(self, *, row_ids: list[str], relation_id: str) -> int:
+        decision_store = getattr(self, "_workbench_reconciliation_decision_store", None)
+        if decision_store is None:
+            return 0
+        return decision_store.consume_by_row_ids(row_ids, relation_id=relation_id)
 
     def _reload_runtime_services(self) -> None:
         self._initialize_runtime_services(self._runtime_bootstrap_state())
@@ -11006,6 +11039,10 @@ class Application:
                 changed_case_ids=changed_case_ids,
                 request_id=request_id,
                 action_name=action_name,
+            )
+            self._consume_workbench_reconciliation_decisions(
+                row_ids=row_ids,
+                relation_id=resolved_case_id,
             )
         except Exception as exc:
             self._workbench_pair_relation_service = WorkbenchPairRelationService.from_snapshot(previous_pair_snapshot)

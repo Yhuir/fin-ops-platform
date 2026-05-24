@@ -9,7 +9,11 @@ from typing import Any, Callable, Protocol
 from fin_ops_platform.services.workbench_candidate_match_service import WorkbenchCandidateMatchService
 from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION, WorkbenchMatchingRules
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
+from fin_ops_platform.services.workbench_reconciliation_engine import WorkbenchReconciliationEngine
+from fin_ops_platform.services.workbench_reconciliation_models import expand_scope_month_window
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
+from fin_ops_platform.services.workbench_special_reconciliation_adapter import WorkbenchSpecialReconciliationAdapter
 from fin_ops_platform.services.workbench_special_pair_rule_service import (
     WORKBENCH_SPECIAL_RULES_VERSION,
     WorkbenchSpecialPairRuleService,
@@ -45,6 +49,8 @@ class WorkbenchMatchingOrchestrator:
         rules: WorkbenchMatchingRules,
         special_rule_service: WorkbenchSpecialPairRuleService | None = None,
         exception_case_service: object | None = None,
+        decision_store: WorkbenchReconciliationDecisionStore | None = None,
+        reconciliation_engine: WorkbenchReconciliationEngine | None = None,
         settings_provider: Callable[[], dict[str, Any]] | None = None,
         source_versions_provider: Callable[[], dict[str, Any]] | None = None,
         logger: logging.Logger | None = None,
@@ -56,6 +62,8 @@ class WorkbenchMatchingOrchestrator:
         self._rules = rules
         self._special_rule_service = special_rule_service or WorkbenchSpecialPairRuleService()
         self._exception_case_service = exception_case_service
+        self._decision_store = decision_store
+        self._reconciliation_engine = reconciliation_engine
         self._settings_provider = settings_provider
         self._source_versions_provider = source_versions_provider
         self._logger = logger or LOGGER
@@ -95,6 +103,13 @@ class WorkbenchMatchingOrchestrator:
 
             for scope_month in scope_months:
                 summary["current_month"] = scope_month
+                if self._decision_store is not None:
+                    self._run_decision_scope(scope_month, summary)
+                    summary["processed_months"].append(scope_month)
+                    summary["duration_ms"] = self._duration_ms(started_at)
+                    self._emit_progress(progress_callback, summary)
+                    continue
+
                 self._candidate_match_service.delete_month(scope_month)
                 month_rows = self._rows_for_scope(scope_month)
                 held_row_ids = self._active_pair_relation_row_ids(scope_month)
@@ -168,6 +183,35 @@ class WorkbenchMatchingOrchestrator:
         if not isinstance(special_candidates, list):
             raise ValueError("special_rule_service.generate_candidates(...) must return a list.")
         return self._dedupe_candidates([*ordinary_candidates, *special_candidates])
+
+    def _run_decision_scope(self, scope_month: str, summary: dict[str, Any]) -> None:
+        if self._decision_store is None:
+            raise ValueError("decision_store is required for reconciliation decision mode.")
+        self._candidate_match_service.delete_month(scope_month)
+        month_rows = self._rows_for_scope_window(scope_month)
+        engine = self._reconciliation_engine or WorkbenchReconciliationEngine(
+            decision_store=self._decision_store,
+            pair_relation_service=self._pair_relation_service,
+            special_adapter=WorkbenchSpecialReconciliationAdapter(
+                special_rule_service=self._special_rule_service,
+            ),
+        )
+        result = engine.run_scope(
+            scope_month,
+            oa_rows=month_rows["oa_rows"],
+            bank_rows=month_rows["bank_rows"],
+            invoice_rows=month_rows["invoice_rows"],
+            settings=self._settings(),
+            source_versions=self._source_versions(),
+        )
+        summary["decision_count"] = int(summary.get("decision_count") or 0) + int(result.get("decision_count") or 0)
+        summary["paired_decision_count"] = int(summary.get("paired_decision_count") or 0) + int(result.get("paired_count") or 0)
+        summary["open_decision_count"] = int(summary.get("open_decision_count") or 0) + int(result.get("open_count") or 0)
+        summary["expired_decision_count"] = int(summary.get("expired_decision_count") or 0) + int(
+            result.get("expired_decision_count") or 0
+        )
+        summary["suppressed_by_pair_relation_count"] += int(result.get("suppressed_by_pair_relation_count") or 0)
+        self._invalidate_read_models(scope_month)
 
     def _accumulate_rule_summary(self, summary: dict[str, Any]) -> None:
         last_summary = getattr(self._rules, "last_summary", None)
@@ -264,6 +308,34 @@ class WorkbenchMatchingOrchestrator:
             "bank_rows": self._rows_for_month("bank", scope_month),
             "invoice_rows": self._rows_for_month("invoice", scope_month),
         }
+
+    def _rows_for_scope_window(self, scope_month: str) -> dict[str, list[dict[str, Any]]]:
+        rows = {
+            "oa_rows": [],
+            "bank_rows": [],
+            "invoice_rows": [],
+        }
+        for candidate_month in expand_scope_month_window(scope_month):
+            month_rows = self._rows_for_scope(candidate_month)
+            rows["oa_rows"].extend(month_rows["oa_rows"])
+            rows["bank_rows"].extend(month_rows["bank_rows"])
+            rows["invoice_rows"].extend(month_rows["invoice_rows"])
+        return {
+            "oa_rows": self._dedupe_rows(rows["oa_rows"]),
+            "bank_rows": self._dedupe_rows(rows["bank_rows"]),
+            "invoice_rows": self._dedupe_rows(rows["invoice_rows"]),
+        }
+
+    @staticmethod
+    def _dedupe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        deduped: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            row_id = str(row.get("id") or row.get("row_id") or "").strip()
+            if not row_id:
+                raise ValueError("workbench row requires id or row_id.")
+            if row_id not in deduped:
+                deduped[row_id] = deepcopy(row)
+        return list(deduped.values())
 
     @staticmethod
     def _normalize_rows(row_type: str, rows: Any) -> list[dict[str, Any]]:

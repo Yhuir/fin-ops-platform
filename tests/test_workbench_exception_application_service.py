@@ -9,6 +9,15 @@ from fin_ops_platform.services.workbench_exception_application_service import (
 )
 from fin_ops_platform.services.workbench_exception_case_service import WorkbenchExceptionCaseService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
+from fin_ops_platform.services.workbench_reconciliation_models import (
+    DECISION_STATUS_CONSUMED,
+    DECISION_STATUS_PAIRED,
+    DECISION_STATUS_SUPPRESSED,
+    DISPLAY_STATE_PAIRED,
+    MATCH_DOMAIN_FREE,
+    WorkbenchDecision,
+)
 
 
 class StaticWorkbenchRows:
@@ -73,6 +82,29 @@ def input_invoice_row(row_id: str = "invoice-001", amount: str = "100.00") -> di
     }
 
 
+def reconciliation_decision(key: str, *, row_ids: tuple[str, ...]) -> WorkbenchDecision:
+    return WorkbenchDecision(
+        decision_id=key,
+        decision_key=key,
+        scope_month="2026-05",
+        display_state=DISPLAY_STATE_PAIRED,
+        decision_status=DECISION_STATUS_PAIRED,
+        match_domain=MATCH_DOMAIN_FREE,
+        match_shape="oa_bank_invoice" if any(row_id.startswith("invoice-") for row_id in row_ids) else "oa_bank",
+        rule_code="free.test",
+        rule_version="test",
+        row_ids=row_ids,
+        oa_row_ids=tuple(row_id for row_id in row_ids if row_id.startswith("oa-")),
+        bank_row_ids=tuple(row_id for row_id in row_ids if row_id.startswith("bank-")),
+        invoice_row_ids=tuple(row_id for row_id in row_ids if row_id.startswith("invoice-")),
+        amount="100.00",
+        direction="expense",
+        payment_amount_closed=True,
+        invoice_amount_closed=True,
+        source_versions={"rules": "v1"},
+    )
+
+
 class WorkbenchExceptionApplicationServiceTests(unittest.TestCase):
     def build_service(
         self,
@@ -81,12 +113,14 @@ class WorkbenchExceptionApplicationServiceTests(unittest.TestCase):
         case_service: WorkbenchExceptionCaseService | None = None,
         pair_relation_service: WorkbenchPairRelationService | None = None,
         candidate_match_service: WorkbenchCandidateMatchService | None = None,
+        decision_store: WorkbenchReconciliationDecisionStore | None = None,
     ) -> WorkbenchExceptionApplicationService:
         return WorkbenchExceptionApplicationService(
             row_provider=StaticWorkbenchRows(rows),
             case_service=case_service or WorkbenchExceptionCaseService(),
             pair_relation_service=pair_relation_service or WorkbenchPairRelationService(),
             candidate_match_service=candidate_match_service or WorkbenchCandidateMatchService(),
+            decision_store=decision_store,
             source_versions_provider=lambda: {"workbench_exception_rules_version": "exception_rules_v1"},
         )
 
@@ -186,6 +220,29 @@ class WorkbenchExceptionApplicationServiceTests(unittest.TestCase):
             case["id"],
         )
 
+    def test_apply_open_exception_suppresses_overlapping_reconciliation_decisions(self) -> None:
+        decision_store = WorkbenchReconciliationDecisionStore()
+        decision_store.upsert_decisions([reconciliation_decision("decision-open", row_ids=("oa-001", "bank-001"))])
+        service = self.build_service(
+            [oa_row(), expense_bank_row()],
+            decision_store=decision_store,
+        )
+
+        result = service.apply(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-001", "bank-001"],
+                "scenario_code": "expense_oa_bank_missing_input_invoice_equal",
+                "action_code": "wait_input_invoice",
+                "payload": {"note": "继续追票"},
+            },
+            actor="finance-user",
+        )
+
+        stored = decision_store.list_decisions("2026-05")[0]
+        self.assertEqual(stored["decision_status"], DECISION_STATUS_SUPPRESSED)
+        self.assertEqual(stored["suppressed_by_exception_case_id"], result["case"]["id"])
+
     def test_apply_three_party_closed_creates_closed_case_and_pair_relation(self) -> None:
         pair_relation_service = WorkbenchPairRelationService()
         service = self.build_service(
@@ -213,6 +270,57 @@ class WorkbenchExceptionApplicationServiceTests(unittest.TestCase):
         self.assertEqual(relation["relation_mode"], "normal_match")
         self.assertCountEqual(relation["row_ids"], ["oa-001", "bank-001", "invoice-001"])
         self.assertEqual(pair_relation_service.get_active_relation_by_case_id(result["case"]["id"]), relation)
+
+    def test_apply_closed_exception_consumes_overlapping_reconciliation_decisions(self) -> None:
+        decision_store = WorkbenchReconciliationDecisionStore()
+        decision_store.upsert_decisions(
+            [reconciliation_decision("decision-closed", row_ids=("oa-001", "bank-001", "invoice-001"))]
+        )
+        service = self.build_service(
+            [oa_row(), expense_bank_row(), input_invoice_row()],
+            decision_store=decision_store,
+        )
+
+        result = service.apply(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-001", "bank-001", "invoice-001"],
+                "scenario_code": "expense_all_equal",
+                "action_code": "confirm_closed",
+                "payload": {},
+            },
+            actor="finance-user",
+        )
+
+        stored = decision_store.list_decisions("2026-05")[0]
+        self.assertEqual(stored["decision_status"], DECISION_STATUS_CONSUMED)
+        self.assertEqual(stored["consumed_by_relation_id"], result["pair_relation"]["case_id"])
+
+    def test_idempotent_apply_consumes_late_reconciliation_decisions(self) -> None:
+        decision_store = WorkbenchReconciliationDecisionStore()
+        service = self.build_service(
+            [oa_row(), expense_bank_row(), input_invoice_row()],
+            decision_store=decision_store,
+        )
+        request = {
+            "month": "2026-05",
+            "row_ids": ["oa-001", "bank-001", "invoice-001"],
+            "scenario_code": "expense_all_equal",
+            "action_code": "confirm_closed",
+            "payload": {},
+        }
+        first = service.apply(request, actor="finance-user")
+        decision_store.upsert_decisions(
+            [reconciliation_decision("decision-late", row_ids=("oa-001", "bank-001", "invoice-001"))]
+        )
+
+        second = service.apply(request, actor="finance-user")
+
+        self.assertTrue(second["idempotent"])
+        self.assertEqual(second["case"]["id"], first["case"]["id"])
+        stored = decision_store.list_decisions("2026-05")[0]
+        self.assertEqual(stored["decision_status"], DECISION_STATUS_CONSUMED)
+        self.assertEqual(stored["consumed_by_relation_id"], first["pair_relation"]["case_id"])
 
     def test_apply_auto_oa_exempt_writes_structured_relation_fields(self) -> None:
         service = self.build_service([expense_bank_row(summary="银行手续费")])
