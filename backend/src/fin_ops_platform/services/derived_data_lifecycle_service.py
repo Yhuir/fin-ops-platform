@@ -145,6 +145,7 @@ class DerivedDataLifecycleService:
         ),
         "pair_relation_changed": (
             "workbench_read_model",
+            "workbench_matching_dirty_scopes",
             "pending_invoice_read_model",
             "tax_offset_read_model",
             "tax_offset_month_cache",
@@ -153,6 +154,7 @@ class DerivedDataLifecycleService:
         ),
         "exception_case_changed": (
             "workbench_read_model",
+            "workbench_matching_dirty_scopes",
             "pending_invoice_read_model",
             "tax_offset_read_model",
             "tax_offset_month_cache",
@@ -235,6 +237,7 @@ class DerivedDataLifecycleService:
         "startup_stale_scan": (
             "workbench_read_model",
             "workbench_candidate_matches",
+            "workbench_matching_dirty_scopes",
             "cost_statistics_read_model",
             "tax_offset_read_model",
             "file_import_sessions",
@@ -313,11 +316,20 @@ class DerivedDataLifecycleService:
             "cost_statistics_cache_warmup",
             "historical_etc_reconcile",
         ),
+        "pair_relation_changed": (
+            "workbench_matching",
+        ),
+        "exception_case_changed": (
+            "workbench_matching",
+        ),
         "settings_reset_completed": (
             "workbench_matching",
             "tax_offset_cache_warmup",
             "cost_statistics_cache_warmup",
             "historical_etc_reconcile",
+        ),
+        "startup_stale_scan": (
+            "workbench_matching",
         ),
     }
 

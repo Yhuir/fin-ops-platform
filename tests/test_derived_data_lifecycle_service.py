@@ -70,6 +70,25 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         )
         self.assertIn("workbench_matching", plan["will_enqueue_jobs"])
 
+    def test_pair_and_exception_changes_mark_workbench_matching_dirty_scopes(self) -> None:
+        service = DerivedDataLifecycleService()
+
+        pair_plan = service.plan_event("pair_relation_changed", months=["2026-03"])
+        exception_plan = service.plan_event("exception_case_changed", months=["2026-04"])
+
+        self.assertIn("workbench_matching_dirty_scopes", [domain["domain"] for domain in pair_plan["domains"]])
+        self.assertIn("workbench_matching_dirty_scopes", [domain["domain"] for domain in exception_plan["domains"]])
+        self.assertIn("workbench_matching", pair_plan["will_enqueue_jobs"])
+        self.assertIn("workbench_matching", exception_plan["will_enqueue_jobs"])
+
+    def test_startup_stale_scan_marks_workbench_matching_dirty_scopes_for_rule_backfill(self) -> None:
+        service = DerivedDataLifecycleService()
+
+        plan = service.plan_event("startup_stale_scan", months=["2026-05"], include_all=False)
+
+        self.assertIn("workbench_matching_dirty_scopes", [domain["domain"] for domain in plan["domains"]])
+        self.assertIn("workbench_matching", plan["will_enqueue_jobs"])
+
     def test_manual_invoice_confirmed_maps_invoice_workbench_tax_cost_pending_and_search_domains(self) -> None:
         service = DerivedDataLifecycleService()
 

@@ -621,6 +621,10 @@ class PostgresStateStore:
         return self._core_repository
 
     @property
+    def read_model_repository(self) -> PostgresReadModelRepository:
+        return self._read_model_repository
+
+    @property
     def workbench_sql_read_repository(self) -> PostgresReadModelRepository:
         return self._sql_read_model_repository
 
