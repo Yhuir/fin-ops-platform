@@ -91,7 +91,7 @@ OA 附件发票仍展开为独立 invoice rows，row id 为 `oa-att-inv-{oa_row_
     "tone": "warn"
   },
   "pay_receive_time": "2026-03-20 09:15",
-  "remark": "应付6000，候选OA-051",
+  "remark": "应付6000，对应OA-051",
   "repayment_date": null,
   "available_actions": ["detail", "view_relation", "cancel_link", "handle_exception"]
 }
@@ -154,7 +154,7 @@ OA 附件发票仍展开为独立 invoice rows，row id 为 `oa-att-inv-{oa_row_
     "对方开户机构": "中国银行杭州分行",
     "记账日期": "2026-03-20",
     "摘要": "广告投放尾款",
-    "备注": "候选 OA-202603-051",
+    "备注": "对应 OA-202603-051",
     "账户明细编号-交易流水号": "B202603200019",
     "企业流水号": "ENT202603200051",
     "凭证种类": "转账支付",
