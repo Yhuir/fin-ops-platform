@@ -1963,6 +1963,438 @@ class PostgresReadModelRepository:
         }
         return {"candidates": values} if values else {}
 
+    def upsert_workbench_reconciliation_decisions(
+        self,
+        *,
+        tenant_id: str,
+        decisions: list[dict[str, Any]],
+    ) -> None:
+        def write(connection: Any) -> None:
+            for decision in decisions:
+                payload = serialize_value(decision)
+                connection.execute(
+                    """
+                    insert into read_model.workbench_reconciliation_decisions(
+                        tenant_id, scope_month, decision_id, decision_key, display_state, decision_status,
+                        match_domain, match_shape, rule_code, rule_version, row_ids, row_types,
+                        oa_row_ids, bank_row_ids, invoice_row_ids, amount, direction, cardinality,
+                        payment_amount_closed, invoice_amount_closed, warnings, evidence, blockers,
+                        conflict_set, explanation, source_versions, generated_at, raw_payload
+                    )
+                    values (
+                        %s, %s::date, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s::timestamptz, %s
+                    )
+                    on conflict (tenant_id, decision_key) do update set
+                        scope_month = excluded.scope_month,
+                        decision_id = excluded.decision_id,
+                        display_state = excluded.display_state,
+                        decision_status = excluded.decision_status,
+                        match_domain = excluded.match_domain,
+                        match_shape = excluded.match_shape,
+                        rule_code = excluded.rule_code,
+                        rule_version = excluded.rule_version,
+                        row_ids = excluded.row_ids,
+                        row_types = excluded.row_types,
+                        oa_row_ids = excluded.oa_row_ids,
+                        bank_row_ids = excluded.bank_row_ids,
+                        invoice_row_ids = excluded.invoice_row_ids,
+                        amount = excluded.amount,
+                        direction = excluded.direction,
+                        cardinality = excluded.cardinality,
+                        payment_amount_closed = excluded.payment_amount_closed,
+                        invoice_amount_closed = excluded.invoice_amount_closed,
+                        warnings = excluded.warnings,
+                        evidence = excluded.evidence,
+                        blockers = excluded.blockers,
+                        conflict_set = excluded.conflict_set,
+                        explanation = excluded.explanation,
+                        source_versions = excluded.source_versions,
+                        generated_at = excluded.generated_at,
+                        raw_payload = excluded.raw_payload,
+                        consumed_by_relation_id = null,
+                        suppressed_by_exception_case_id = null,
+                        updated_at = now()
+                    """,
+                    (
+                        text(tenant_id) or "default",
+                        month_start(payload.get("scope_month")),
+                        text(payload.get("decision_id")),
+                        text(payload.get("decision_key")),
+                        text(payload.get("display_state")),
+                        text(payload.get("decision_status")),
+                        text(payload.get("match_domain")),
+                        text(payload.get("match_shape")),
+                        text(payload.get("rule_code")),
+                        text(payload.get("rule_version")),
+                        text_list(payload.get("row_ids")),
+                        _workbench_reconciliation_row_types(payload),
+                        text_list(payload.get("oa_row_ids")),
+                        text_list(payload.get("bank_row_ids")),
+                        text_list(payload.get("invoice_row_ids")),
+                        decimal_text(payload.get("amount")),
+                        text(payload.get("direction")),
+                        text(payload.get("cardinality")),
+                        bool(payload.get("payment_amount_closed")),
+                        bool(payload.get("invoice_amount_closed")),
+                        jsonb(payload.get("warnings") if isinstance(payload.get("warnings"), list) else []),
+                        jsonb(payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}),
+                        jsonb(payload.get("blockers") if isinstance(payload.get("blockers"), list) else []),
+                        jsonb(payload.get("conflict_set") if isinstance(payload.get("conflict_set"), list) else []),
+                        text(payload.get("explanation")),
+                        jsonb(payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}),
+                        text(payload.get("generated_at")),
+                        jsonb({"normalized_payload": payload}),
+                    ),
+                )
+
+        run_in_transaction(self._connection, write)
+
+    def list_workbench_reconciliation_decisions(
+        self,
+        *,
+        tenant_id: str,
+        scope_month: str,
+        statuses: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        where = ["tenant_id = %s", "to_char(scope_month, 'YYYY-MM') = %s"]
+        params: list[Any] = [text(tenant_id) or "default", str(scope_month)[:7]]
+        if statuses:
+            where.append("decision_status = any(%s)")
+            params.append(sorted(str(status) for status in statuses))
+        rows = self._connection.fetch_all(
+            f"""
+            select
+                decision_key, scope_month, display_state, decision_status, match_domain, match_shape,
+                rule_code, rule_version, row_ids, oa_row_ids, bank_row_ids, invoice_row_ids,
+                amount, direction, payment_amount_closed, invoice_amount_closed, warnings, evidence,
+                blockers, source_versions, consumed_by_relation_id, suppressed_by_exception_case_id,
+                decision_id, explanation, raw_payload
+            from read_model.workbench_reconciliation_decisions
+            where {" and ".join(where)}
+            order by decision_key
+            """,
+            tuple(params),
+        )
+        return [_workbench_reconciliation_decision_payload(row) for row in rows]
+
+    def consume_workbench_reconciliation_decisions_by_row_ids(
+        self,
+        *,
+        tenant_id: str,
+        row_ids: list[str],
+        relation_id: str,
+    ) -> int:
+        return int(
+            self._connection.execute(
+                """
+                update read_model.workbench_reconciliation_decisions
+                set decision_status = 'consumed',
+                    consumed_by_relation_id = %s::uuid,
+                    updated_at = now()
+                where tenant_id = %s
+                  and decision_status in ('proposed', 'paired', 'open')
+                  and row_ids && %s
+                """,
+                (relation_id, text(tenant_id) or "default", text_list(row_ids)),
+            )
+            or 0
+        )
+
+    def suppress_workbench_reconciliation_decisions_by_row_ids(
+        self,
+        *,
+        tenant_id: str,
+        row_ids: list[str],
+        exception_case_id: str,
+    ) -> int:
+        return int(
+            self._connection.execute(
+                """
+                update read_model.workbench_reconciliation_decisions
+                set decision_status = 'suppressed',
+                    suppressed_by_exception_case_id = %s::uuid,
+                    updated_at = now()
+                where tenant_id = %s
+                  and decision_status in ('proposed', 'paired', 'open')
+                  and row_ids && %s
+                """,
+                (exception_case_id, text(tenant_id) or "default", text_list(row_ids)),
+            )
+            or 0
+        )
+
+    def expire_stale_workbench_reconciliation_decisions(
+        self,
+        *,
+        tenant_id: str,
+        scope_months: list[str],
+        source_versions: dict[str, object],
+    ) -> int:
+        return int(
+            self._connection.execute(
+                """
+                update read_model.workbench_reconciliation_decisions
+                set decision_status = 'expired',
+                    updated_at = now()
+                where tenant_id = %s
+                  and to_char(scope_month, 'YYYY-MM') = any(%s)
+                  and decision_status in ('proposed', 'paired', 'open')
+                  and source_versions <> %s
+                """,
+                (
+                    text(tenant_id) or "default",
+                    sorted({str(month)[:7] for month in scope_months if str(month or "").strip()}),
+                    jsonb(source_versions),
+                ),
+            )
+            or 0
+        )
+
+    def mark_workbench_matching_dirty_scopes(
+        self,
+        *,
+        tenant_id: str,
+        scope_months: list[str],
+        reason: str,
+        source_versions: dict[str, object],
+        debounce_seconds: int,
+    ) -> list[str]:
+        normalized_months = sorted({str(month)[:7] for month in scope_months if str(month or "").strip()})
+
+        def write(connection: Any) -> None:
+            for scope_month in normalized_months:
+                connection.execute(
+                    """
+                    insert into job.workbench_matching_dirty_scopes(
+                        tenant_id, scope_month, reason, status, available_at, source_versions, raw_payload
+                    )
+                    values (
+                        %s, %s::date, %s, 'dirty', now() + (%s::text || ' seconds')::interval, %s, %s
+                    )
+                    on conflict (tenant_id, scope_month) do update set
+                        reason = excluded.reason,
+                        status = 'dirty',
+                        available_at = greatest(job.workbench_matching_dirty_scopes.available_at, excluded.available_at),
+                        source_versions = job.workbench_matching_dirty_scopes.source_versions || excluded.source_versions,
+                        lease_owner = null,
+                        lease_expires_at = null,
+                        updated_at = now()
+                    """,
+                    (
+                        text(tenant_id) or "default",
+                        month_start(scope_month),
+                        text(reason),
+                        max(0, int_value(debounce_seconds, 60)),
+                        jsonb(source_versions),
+                        jsonb({"reason": reason, "source_versions": source_versions}),
+                    ),
+                )
+
+        run_in_transaction(self._connection, write)
+        return normalized_months
+
+    def claim_workbench_matching_dirty_scopes(
+        self,
+        *,
+        tenant_id: str,
+        worker_id: str,
+        limit: int,
+        lease_seconds: int,
+        request_id: str | None = None,
+    ) -> list[str]:
+        resolved_request_id = text(request_id) or text(worker_id) or "worker"
+        rows = self._connection.fetch_all(
+            """
+            with due as (
+                select id
+                from job.workbench_matching_dirty_scopes
+                where tenant_id = %s
+                  and (
+                    status in ('dirty', 'retry') and available_at <= now()
+                    or status = 'processing' and lease_expires_at <= now()
+                  )
+                order by available_at, scope_month
+                limit %s
+                for update skip locked
+            )
+            update job.workbench_matching_dirty_scopes dirty
+            set status = 'processing',
+                lease_owner = %s,
+                lease_expires_at = now() + (%s::text || ' seconds')::interval,
+                request_id = %s || ':' || to_char(dirty.scope_month, 'YYYY-MM'),
+                started_at = now(),
+                completed_at = null,
+                failed_at = null,
+                duration_ms = null,
+                error_summary = null,
+                updated_at = now()
+            from due
+            where dirty.id = due.id
+            returning to_char(dirty.scope_month, 'YYYY-MM') as scope_month,
+                      dirty.request_id,
+                      dirty.source_versions
+            """,
+            (
+                text(tenant_id) or "default",
+                max(1, int_value(limit, 1)),
+                text(worker_id),
+                max(1, int_value(lease_seconds, 600)),
+                resolved_request_id,
+            ),
+        )
+        for row in rows:
+            self._connection.execute(
+                """
+                insert into app.matching_runs(
+                    run_id, request_id, scope_month, triggered_by, executed_at, started_at, status,
+                    source_versions, raw_payload
+                )
+                values (%s, %s, %s::date, %s, now(), now(), 'running', %s, %s)
+                on conflict (request_id) where request_id is not null do update set
+                    started_at = excluded.started_at,
+                    status = 'running',
+                    source_versions = excluded.source_versions,
+                    updated_at = now()
+                """,
+                (
+                    text(row.get("request_id")),
+                    text(row.get("request_id")),
+                    month_start(row.get("scope_month")),
+                    text(worker_id),
+                    jsonb(row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}),
+                    jsonb({"scope_month": row.get("scope_month"), "worker_id": worker_id}),
+                ),
+            )
+        return [str(row.get("scope_month")) for row in rows if row.get("scope_month")]
+
+    def complete_workbench_matching_dirty_scope(
+        self,
+        *,
+        tenant_id: str,
+        scope_month: str,
+        source_versions: dict[str, object],
+    ) -> None:
+        row = self._connection.fetch_one(
+            """
+            update job.workbench_matching_dirty_scopes
+            set status = 'completed',
+                completed_at = now(),
+                failed_at = null,
+                duration_ms = greatest(0, floor(extract(epoch from (now() - started_at)) * 1000)::integer),
+                source_versions = %s,
+                lease_owner = null,
+                lease_expires_at = null,
+                updated_at = now()
+            where tenant_id = %s and to_char(scope_month, 'YYYY-MM') = %s
+            returning request_id, duration_ms
+            """,
+            (jsonb(source_versions), text(tenant_id) or "default", str(scope_month)[:7]),
+        )
+        self._connection.execute(
+            """
+            update app.matching_runs
+            set status = 'completed',
+                completed_at = now(),
+                failed_at = null,
+                duration_ms = %s,
+                source_versions = %s,
+                updated_at = now()
+            where request_id = %s
+            """,
+            (
+                int_value(row.get("duration_ms") if isinstance(row, dict) else None, 0),
+                jsonb(source_versions),
+                text(row.get("request_id") if isinstance(row, dict) else None),
+            ),
+        )
+
+    def fail_workbench_matching_dirty_scope(
+        self,
+        *,
+        tenant_id: str,
+        scope_month: str,
+        error: str,
+        retry_delay_seconds: int | None,
+        retry_max_attempts: int,
+        retry_backoff_seconds: list[int],
+    ) -> None:
+        delay_seconds = int_value(retry_delay_seconds, 0)
+        if delay_seconds <= 0:
+            delay_seconds = retry_backoff_seconds[0] if retry_backoff_seconds else 0
+        row = self._connection.fetch_one(
+            """
+            update job.workbench_matching_dirty_scopes
+            set attempt_count = attempt_count + 1,
+                status = case when attempt_count + 1 >= %s then 'failed' else 'retry' end,
+                last_error = %s,
+                failed_at = now(),
+                completed_at = null,
+                duration_ms = greatest(0, floor(extract(epoch from (now() - started_at)) * 1000)::integer),
+                error_summary = %s,
+                available_at = now() + (%s::text || ' seconds')::interval,
+                lease_owner = null,
+                lease_expires_at = null,
+                updated_at = now()
+            where tenant_id = %s and to_char(scope_month, 'YYYY-MM') = %s
+            returning request_id, duration_ms, source_versions
+            """,
+            (
+                max(1, int_value(retry_max_attempts, 5)),
+                text(error),
+                text(error),
+                max(0, delay_seconds),
+                text(tenant_id) or "default",
+                str(scope_month)[:7],
+            ),
+        )
+        self._connection.execute(
+            """
+            update app.matching_runs
+            set status = 'failed',
+                failed_at = now(),
+                duration_ms = %s,
+                source_versions = %s,
+                error_summary = %s,
+                updated_at = now()
+            where request_id = %s
+            """,
+            (
+                int_value(row.get("duration_ms") if isinstance(row, dict) else None, 0),
+                jsonb(row.get("source_versions") if isinstance(row, dict) and isinstance(row.get("source_versions"), dict) else {}),
+                text(error),
+                text(row.get("request_id") if isinstance(row, dict) else None),
+            ),
+        )
+
+    def list_workbench_matching_dirty_scopes(self, *, tenant_id: str) -> list[dict[str, Any]]:
+        return self._connection.fetch_all(
+            """
+            select tenant_id, to_char(scope_month, 'YYYY-MM') as scope_month, reason, status,
+                   attempt_count, last_error, available_at, lease_owner, lease_expires_at,
+                   request_id, started_at, completed_at, failed_at, duration_ms, source_versions, error_summary
+            from job.workbench_matching_dirty_scopes
+            where tenant_id = %s
+            order by scope_month
+            """,
+            (text(tenant_id) or "default",),
+        )
+
+    def list_workbench_matching_runs(self, *, tenant_id: str) -> list[dict[str, Any]]:
+        return self._connection.fetch_all(
+            """
+            select to_char(scope_month, 'YYYY-MM') as scope_month, request_id, started_at, completed_at,
+                   failed_at, duration_ms, status, source_versions, error_summary
+            from app.matching_runs
+            where request_id is not null
+            order by started_at, request_id
+            """,
+            (),
+        )
+
     def save_workbench_candidate_matches(self, snapshot: dict[str, Any], *, changed_scope_months: set[str] | None = None) -> None:
         def write(connection: Any) -> None:
             candidates = snapshot.get("candidates") if isinstance(snapshot, dict) else None
@@ -4004,6 +4436,49 @@ def _read_model_payload(row: dict[str, Any], *, drop_rebuildable_rows: bool = Fa
     if drop_rebuildable_rows and isinstance(payload, dict) and payload.get("rebuildable") is True:
         return None
     return without_keys(payload, {"rebuildable"})
+
+
+def _workbench_reconciliation_row_types(payload: dict[str, Any]) -> list[str]:
+    row_types: list[str] = []
+    for row_type, key in (("oa", "oa_row_ids"), ("bank", "bank_row_ids"), ("invoice", "invoice_row_ids")):
+        row_types.extend(row_type for _row_id in text_list(payload.get(key)))
+    return row_types
+
+
+def _workbench_reconciliation_decision_payload(row: dict[str, Any]) -> dict[str, Any]:
+    payload = _read_model_payload(row)
+    if isinstance(payload, dict) and payload:
+        result = dict(payload)
+    else:
+        result = {}
+    for key in (
+        "decision_id",
+        "decision_key",
+        "display_state",
+        "decision_status",
+        "match_domain",
+        "match_shape",
+        "rule_code",
+        "rule_version",
+        "direction",
+        "explanation",
+    ):
+        result[key] = text(row.get(key))
+    result["scope_month"] = str(row.get("scope_month") or "")[:7]
+    result["row_ids"] = text_list(row.get("row_ids"))
+    result["oa_row_ids"] = text_list(row.get("oa_row_ids"))
+    result["bank_row_ids"] = text_list(row.get("bank_row_ids"))
+    result["invoice_row_ids"] = text_list(row.get("invoice_row_ids"))
+    result["amount"] = decimal_text(row.get("amount"))
+    result["payment_amount_closed"] = bool(row.get("payment_amount_closed"))
+    result["invoice_amount_closed"] = bool(row.get("invoice_amount_closed"))
+    result["warnings"] = row.get("warnings") if isinstance(row.get("warnings"), list) else []
+    result["evidence"] = row.get("evidence") if isinstance(row.get("evidence"), dict) else {}
+    result["blockers"] = row.get("blockers") if isinstance(row.get("blockers"), list) else []
+    result["source_versions"] = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
+    result["consumed_by_relation_id"] = text(row.get("consumed_by_relation_id"))
+    result["suppressed_by_exception_case_id"] = text(row.get("suppressed_by_exception_case_id"))
+    return result
 
 
 def _source_version_value(source_versions: Any) -> int | None:
