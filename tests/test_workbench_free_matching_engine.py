@@ -241,6 +241,92 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
         self.assertEqual(decisions[0].match_shape, "oa_bank_invoice")
         self.assertEqual(decisions[0].row_ids, ("oa-exp-1994", "bk-o-1", "iv-o-1"))
 
+    def test_oa_counterparty_name_can_bridge_plain_oa_bank_invoice_match(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-03",
+            [
+                {
+                    "id": "oa-exp-1995",
+                    "type": "oa",
+                    "amount": "6,000.00",
+                    "apply_type": "付款申请",
+                    "pay_receive_time": "2026-03-18",
+                    "counterparty_name": "杭州ABC广告有限公司",
+                    "reason": "服务费尾款",
+                }
+            ],
+            [
+                {
+                    "id": "bk-o-2",
+                    "type": "bank",
+                    "debit_amount": "6,000.00",
+                    "pay_receive_time": "2026-03-20 09:15",
+                    "counterparty_name": "杭州ABC广告有限公司",
+                    "summary": "服务费",
+                }
+            ],
+            [
+                {
+                    "id": "iv-o-2",
+                    "type": "invoice",
+                    "invoice_type": "进项专票",
+                    "total_with_tax": "6,000.00",
+                    "issue_date": "2026-03-19",
+                    "seller_name": "杭州ABC广告有限公司",
+                }
+            ],
+        )
+
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0].match_shape, "oa_bank_invoice")
+        self.assertEqual(decisions[0].row_ids, ("oa-exp-1995", "bk-o-2", "iv-o-2"))
+
+    def test_oa_attachment_invoice_parent_can_come_from_derived_id_or_row_id(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-03",
+            [oa("oa-exp-1994", "1200.00")],
+            [bank("bk-o-1", "1200.00")],
+            [
+                {
+                    "id": "oa-att-inv-oa-exp-1994-1",
+                    "type": "invoice",
+                    "source_kind": "oa_attachment_invoice",
+                    "derived_from_oa_id": "oa-exp-1994",
+                    "total_with_tax": "700.00",
+                    "invoice_date": "2026-03-19",
+                    "seller_name": "杭州ABC广告有限公司",
+                },
+                {
+                    "id": "oa-att-inv-oa-exp-1994-2",
+                    "type": "invoice",
+                    "source_kind": "oa_attachment_invoice",
+                    "total_with_tax": "400.00",
+                    "invoice_date": "2026-03-19",
+                    "seller_name": "杭州ABC广告有限公司",
+                },
+            ],
+        )
+
+        self.assertEqual(len(decisions), 1)
+        decision = decisions[0]
+        self.assertEqual(decision.rule_code, "oa_attachment_invoice_with_bank")
+        self.assertFalse(decision.invoice_amount_closed)
+        self.assertEqual([warning.code for warning in decision.warnings], [WARNING_INVOICE_AMOUNT_MISMATCH])
+        self.assertEqual(
+            decision.invoice_row_ids,
+            ("oa-att-inv-oa-exp-1994-1", "oa-att-inv-oa-exp-1994-2"),
+        )
+
+    def test_generate_decisions_only_returns_decisions_owned_by_dirty_scope(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-02",
+            [oa("oa-1", "1200.00", month="2026-02")],
+            [bank("bk-1", "1200.00", month="2026-03")],
+            [invoice("iv-1", "1200.00", month="2026-03")],
+        )
+
+        self.assertEqual(decisions, [])
+
     def test_three_way_conflict_does_not_drop_unrelated_unique_pairing(self) -> None:
         decisions = self.engine.generate_decisions(
             "2026-03",

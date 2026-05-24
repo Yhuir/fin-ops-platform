@@ -79,7 +79,7 @@ class WorkbenchFreeMatchingEngine:
             claimed.update(row_ids)
 
         decisions.extend(self._two_way_decisions(scope_month, oa, bank, invoices, window, source_versions, claimed))
-        return decisions
+        return [decision for decision in decisions if decision.scope_month == scope_month]
 
     def _three_way_candidates(
         self,
@@ -429,7 +429,7 @@ class WorkbenchFreeMatchingEngine:
         fields = {
             "oa": ("month", "oa_month", "apply_month", "pay_receive_time"),
             "bank": ("trade_month", "month", "transaction_month", "pay_receive_time", "trade_time"),
-            "invoice": ("invoice_month", "month", "invoice_date"),
+            "invoice": ("invoice_month", "month", "invoice_date", "issue_date"),
         }[row_type]
         for field in fields:
             value = str(row.get(field) or "").strip()
@@ -488,6 +488,7 @@ class WorkbenchFreeMatchingEngine:
             return evidence_tokens(
                 {
                     "oa.applicant": row.data.get("applicant"),
+                    "oa.counterparty": row.data.get("counterparty_name") or row.data.get("counterparty"),
                     "oa.project": row.data.get("project_name") or row.data.get("project"),
                     "oa.reason": row.data.get("reason") or row.data.get("summary"),
                 }
@@ -507,9 +508,22 @@ class WorkbenchFreeMatchingEngine:
             invoice
             for invoice in invoices
             if invoice.data.get("source_kind") == OA_ATTACHMENT_INVOICE_SOURCE_KIND
-            and str(invoice.data.get("source_oa_row_id") or invoice.data.get("oa_row_id") or "").strip() == oa.row_id
+            and self._is_attachment_for_oa(invoice, oa)
         ]
         return tuple(sorted(attached, key=lambda row: row.row_id))
+
+    @staticmethod
+    def _is_attachment_for_oa(invoice: _Row, oa: _Row) -> bool:
+        parent_id = str(
+            invoice.data.get("source_oa_row_id")
+            or invoice.data.get("oa_row_id")
+            or invoice.data.get("derived_from_oa_id")
+            or invoice.data.get("derived_from_oa_row_id")
+            or ""
+        ).strip()
+        if parent_id == oa.row_id:
+            return True
+        return invoice.row_id.startswith(f"oa-att-inv-{oa.row_id}-")
 
     def _evidence_payload(
         self,
