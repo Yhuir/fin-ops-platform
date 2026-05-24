@@ -257,34 +257,52 @@ OA 附件发票仍展开为独立 invoice rows，row id 为 `oa-att-inv-{oa_row_
 
 - 字段名在接口层统一使用英文蛇形
 - 状态显示文案由后端产出，前端只做渲染
+- 工作台展示区只使用 `paired` 和 `open`
 - `case_id` 是前端做同组联动的唯一依据
 - `available_actions` 决定每行显示哪些按钮
 - 主表字段与详情字段必须分层返回，避免一个响应既大又难维护
 - 所有 V2 动作统一返回 `success / action / month / affected_row_ids / updated_rows / message`
 
-## 10. 自动配对候选 Read Model
+## 10. 自动决策 Read Model
 
-自动寻找 OA、银行流水、发票配对项时，后端先写候选 read model，再由关联台消费。前端不直接运行配对规则。
+自动寻找 OA、银行流水、发票配对项时，后端统一写自动决策 read model，再由关联台消费。前端不直接运行配对规则，不根据生命周期状态自行推断配对。
 
-候选结构：
+手工确认关系仍以 `app.workbench_pair_relations` 为事实源；自动决策不复制成手工关系。
+
+自动决策结构：
 
 ```json
 {
-  "candidate_id": "candidate:2026-03:oa_bank_multi_invoice_exact_sum:...",
-  "candidate_key": "candidate:2026-03:oa_bank_multi_invoice_exact_sum:...",
+  "decision_id": "decision:2026-03:oa_attachment_invoice_amount_mismatch:...",
+  "decision_key": "decision:2026-03:oa_attachment_invoice_amount_mismatch:...",
   "scope_month": "2026-03",
-  "candidate_type": "oa_bank_invoice",
-  "status": "auto_closed",
-  "confidence": "high",
-  "rule_code": "oa_bank_multi_invoice_exact_sum",
+  "display_state": "paired",
+  "decision_status": "paired",
+  "match_domain": "free",
+  "match_shape": "oa_bank_invoice",
+  "rule_code": "oa_attachment_invoice_amount_mismatch",
+  "rule_version": "2026-05-25",
   "row_ids": ["oa-1", "bk-1", "iv-1", "iv-2"],
   "oa_row_ids": ["oa-1"],
   "bank_row_ids": ["bk-1"],
   "invoice_row_ids": ["iv-1", "iv-2"],
-  "amount": "1549.00",
-  "amount_delta": "0.00",
-  "explanation": "OA、流水、发票金额闭环。",
-  "conflict_candidate_keys": [],
+  "amount": "6000.00",
+  "direction": "expenditure",
+  "payment_amount_closed": true,
+  "invoice_amount_closed": false,
+  "warnings": [
+    {
+      "code": "invoice_amount_mismatch",
+      "message": "OA 与流水金额一致，但 OA 来源附件发票合计金额不一致。"
+    }
+  ],
+  "evidence": {
+    "scope_window": ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05"],
+    "text_tokens": ["杭州张三广告"],
+    "uniqueness_scope": "five_month_window"
+  },
+  "blockers": [],
+  "explanation": "OA、流水金额闭合，OA 来源附件发票合计不一致。",
   "generated_at": "2026-05-07T10:00:00+00:00",
   "source_versions": {
     "workbench_read_model_schema_version": "2026-05-07-invoice-etc-unified-identity"
@@ -294,35 +312,50 @@ OA 附件发票仍展开为独立 invoice rows，row id 为 `oa-att-inv-{oa_row_
 
 状态契约：
 
-- `auto_closed`：系统安全闭环，进入已配对。
-- `incomplete`：缺 OA、流水或发票任一侧，留在未配对。
-- `needs_review`：可解释但需要人工确认，留在未配对。
-- `conflict`：同一 row 被多个候选占用或存在多个等价组合，留在未配对。
+- `display_state` 是读模型和前端展示状态，只允许 `paired` 和 `open`。
+- `decision_status` 是自动决策生命周期状态，只允许 `proposed`、`paired`、`open`、`suppressed`、`consumed`、`expired`。
+- `decision_status=paired` 且 `display_state=paired` 时进入已配对区并同组展示。
+- `decision_status=open` 且 `display_state=open` 时进入未配对区并独立展示。
+- `proposed`、`suppressed`、`consumed`、`expired` 不投影为业务 group，只保留给调试、审计或后续重算。
+- Legacy/internal compatibility only: `needs_review` 和 `candidate` 可作为旧表、迁移脚本或调试字段出现，但不得作为当前前端展示状态、zone、筛选值或分组依据。
+
+自动自由匹配契约：
+
+- 首版只覆盖支出方向：普通支出 OA、银行流出、进项或供应商发票。
+- 收入方向没有 OA 桥接对象，不进入 OA、流水、发票自由匹配。
+- 匹配窗口为 `T-2 / T / T+2`。处理 T 月 dirty scope 时，可读取前后各 2 个月的候选池。
+- 唯一性判断必须覆盖完整 5 个月候选窗口；同金额、同证据等级下存在多个可行组合时，全部保持 `open`。
+- 跨月自动决策只写一个 `scope_month`：包含银行流水时归属银行交易月份；没有银行流水的 OA+发票关系归属 OA 月份。
+- OA 来源附件发票与 OA 强关联。若 OA 金额等于银行流水金额但正式附件发票合计不一致，仍可 `display_state=paired`，同时输出 `invoice_amount_mismatch` warning、`payment_amount_closed=true`、`invoice_amount_closed=false`。
 
 消费顺序：
 
-1. 人工 `workbench_pair_relations` 优先。
-2. 再应用自动候选，把同一候选的 `row_ids` 写成同一 `case_id`。
-3. 候选组内 row 不再作为 standalone 行重复展示。
-4. `auto_closed` 组序列化时保留系统标签，例如“自动匹配”“已匹配：工资”“已匹配：内部往来款”“冲”。
+1. 人工 `app.workbench_pair_relations` 优先形成 `manual_confirmed` group。
+2. 再应用自动决策，把同一 `decision_key` 的 `row_ids` 写成同一 `case_id`。
+3. 自动 `paired` group 内 row 不再作为 standalone 行重复展示。
+4. 自动 `open` 决策只解释未配对原因，不把多个未唯一确定的对象合并成一行。
+5. 已被手工关系覆盖的自动决策更新为 `decision_status=consumed`，不得继续投影。
 
 触发链路：
 
-- 发票导入确认：按发票日期提取月份，并扩展上一月、当前月、下一月。
-- 银行流水导入确认：按交易日期提取月份，并扩展上一月、当前月、下一月。
+- 发票导入确认：按发票日期提取月份，并扩展到 `T-2 / T / T+2`。
+- 银行流水导入确认：按交易日期提取月份，并扩展到 `T-2 / T / T+2`。
 - OA hot rebuild / OA reset / `/integrations/oa/sync`：按可用 OA 月份触发。
-- 同一月份已有自动配对任务运行时，新任务合并为 dirty scope，不并发删除和写入候选。
+- 手工确认、撤回关联、异常单创建或关闭、特殊规则配置变化、自由匹配规则版本升级：在同一数据库事务中写入 dirty scope。
+- 生产执行机制是 DB-backed dirty scope queue，推荐表为 `job.workbench_matching_dirty_scopes`。
+- 同一月份已有自动配对任务运行时，新任务合并为 dirty scope，不并发删除和写入自动决策。
+- 进程内 dirty service 只可作为迁移期或单实例 fallback，不能作为生产正确性的依赖。
 
 可观测性：
 
 - 自动配对结构化日志事件为 `workbench_matching.run.started`、`workbench_matching.run.finished`、`workbench_matching.run.failed`。
-- 日志字段至少包含 `request_id`、`scope_months`、`duration_ms`、`candidate_count`、`auto_closed_count`、`conflict_count`。
+- 日志字段至少包含 `request_id`、`scope_months`、`duration_ms`、`decision_count`、`paired_decision_count`、`open_decision_count`、`warning_count`。
 - `/api/app-health` 的 `workbench_read_model` 节点会返回 `matching_running_scopes`、`matching_dirty_scopes`、`last_matching_error`。
 - dirty scope 后台 worker 会定时重试；失败时保留月份、原因、错误和尝试次数。
 
 ## 11. 三栏上下文搜索
 
-关联台三栏搜索是前端 display model 行为，不改变后端 `GET /api/workbench` payload、候选 read model 或人工 pair relation。
+关联台三栏搜索是前端 display model 行为，不改变后端 `GET /api/workbench` payload、自动决策 read model 或人工 `app.workbench_pair_relations`。
 
 选择状态同样不能依赖 display model。前端只把三栏搜索、列筛选、时间筛选视为可见投影；确认关联、撤回关联、异常处理和选择汇总必须回到未过滤的 zone groups 解析 row id 与关系上下文。
 
