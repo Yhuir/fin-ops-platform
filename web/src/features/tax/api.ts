@@ -8,6 +8,7 @@ import type {
   TaxMonthData,
   TaxSummary,
 } from "./types";
+import { apiRequestJson } from "../apiClient";
 
 type ApiTaxSummary = {
   output_tax: string;
@@ -209,12 +210,7 @@ function mapCertifiedItem(item: ApiCertifiedItem): TaxCertifiedInvoiceRecord {
 }
 
 async function requestJson<T>(url: string, init: RequestInit = {}) {
-  const response = await fetch(url, init);
-  const payload = (await response.json()) as T;
-  if (!response.ok) {
-    throw new Error(typeof payload === "object" && payload ? JSON.stringify(payload) : "request failed");
-  }
-  return payload;
+  return apiRequestJson<T>(url, init);
 }
 
 function mapPreviewRow(row: ApiTaxCertifiedImportPreviewRow): TaxCertifiedImportPreviewRow {

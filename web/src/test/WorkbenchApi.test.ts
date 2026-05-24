@@ -272,6 +272,9 @@ describe("workbench api bank amount mapping", () => {
 
     await fetchWorkbenchGroupsPage("all", "open", 2, 25, undefined, {
       search: "供应商A",
+      searchByPane: {
+        bank: "建行",
+      },
       status: "open",
       sourceKind: "bank_transaction",
       sort: "bank:desc",
@@ -294,6 +297,9 @@ describe("workbench api bank amount mapping", () => {
     expect(url.searchParams.get("page")).toBe("2");
     expect(url.searchParams.get("page_size")).toBe("25");
     expect(url.searchParams.get("search")).toBe("供应商A");
+    expect(JSON.parse(url.searchParams.get("search_by_pane") ?? "{}")).toEqual({
+      bank: "建行",
+    });
     expect(url.searchParams.get("status")).toBe("open");
     expect(url.searchParams.get("source_kind")).toBe("bank_transaction");
     expect(url.searchParams.get("sort")).toBe("bank:desc");
@@ -423,7 +429,7 @@ describe("workbench api bank amount mapping", () => {
                     issue_date: "2026-03-02",
                     amount: "100.00",
                     total_with_tax: "106.00",
-                    summary_fields: { "发票代码": "044001", "发票号码": "12345678" },
+                    summary_fields: { "发票代码": "044001", "发票号码": "12345678", "税率": "6%", "税额": "6.00" },
                     available_actions: ["detail"],
                   },
                 ],
@@ -441,6 +447,8 @@ describe("workbench api bank amount mapping", () => {
     expect(group.rows.oa[0].tableValues.applicationTime).toBe("2026-03-01 08:30:00");
     expect(group.rows.invoice[0].tableValues.invoiceCode).toBe("044001");
     expect(group.rows.invoice[0].tableValues.invoiceNo).toBe("12345678");
+    expect(group.rows.invoice[0].tableValues.taxRate).toBe("6%");
+    expect(group.rows.invoice[0].tableValues.taxAmount).toBe("6");
   });
 
   test("normalizes bank row amounts without grouping separators for display search", async () => {
@@ -1011,6 +1019,68 @@ describe("workbench api bank amount mapping", () => {
     ]);
     expect(payload.paired.groups.map((group) => group.relationMode)).not.toContain("salary_personal_auto_match");
     expect(payload.paired.groups.map((group) => group.relationMode)).not.toContain("internal_transfer_pair");
+  });
+
+  test("maps single-row no-OA bank relations with withdraw action", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "2026-03",
+          summary: {
+            oa_count: 0,
+            bank_count: 1,
+            invoice_count: 0,
+            paired_count: 1,
+            open_count: 0,
+            exception_count: 0,
+          },
+          paired: {
+            groups: [
+              {
+                group_id: "no-oa-bank-batch:NOOA-202603-FEE-SINGLE",
+                group_type: "manual_confirmed",
+                match_confidence: "high",
+                reason: "单条免OA手续费",
+                relation_mode: "no_oa_bank_batch",
+                oa_rows: [],
+                bank_rows: [
+                  {
+                    id: "bank-nooa-single",
+                    type: "bank",
+                    source_kind: "bank_transaction",
+                    trade_time: "2026-03-08 09:00:00",
+                    direction: "支出",
+                    debit_amount: "10.00",
+                    credit_amount: "",
+                    counterparty_name: "建设银行手续费",
+                    payment_account_label: "建设银行 8106",
+                    invoice_relation: { code: "no_oa_bank_batch", label: "已匹配：手续费", tone: "success" },
+                    available_actions: ["detail"],
+                    special_metadata: {
+                      source_batch_id: "NOOA-202603-FEE-SINGLE",
+                      batch_version: 2,
+                      batch_type: "fee",
+                      batch_label: "手续费",
+                    },
+                  },
+                ],
+                invoice_rows: [],
+              },
+            ],
+          },
+          open: { groups: [] },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const payload = await fetchWorkbench("2026-03");
+    const row = payload.paired.groups[0].rows.bank[0];
+
+    expect(payload.paired.groups[0].displayMode).toBeUndefined();
+    expect(row.sourceKind).toBe("bank_transaction");
+    expect(row.availableActions).toContain("withdraw_no_oa_batch");
+    expect(row.specialMetadata?.source_batch_id).toBe("NOOA-202603-FEE-SINGLE");
   });
 
   test("defaults invoice inventory stats when older workbench payloads omit them", async () => {
@@ -1764,7 +1834,7 @@ describe("workbench api bank amount mapping", () => {
   });
 
   test.each(workbenchPanes)(
-    "keeps row context and supplements same-keyword matches when searching the %s pane",
+    "keeps row context for groups whose searched %s pane matches",
     (activePaneId) => {
       const groups = createContextSearchGroups(activePaneId);
       const state = createEmptyWorkbenchZoneDisplayState();
@@ -1777,8 +1847,6 @@ describe("workbench api bank amount mapping", () => {
 
       expect(displayIds).toEqual([
         `${activePaneId}-anchor`,
-        `${supplementPanes[0]}-supplement`,
-        `${supplementPanes[1]}-supplement`,
         "multi-pane-hit",
       ]);
       expect(displayIds.filter((id) => id === "multi-pane-hit")).toHaveLength(1);
@@ -1804,8 +1872,25 @@ describe("workbench api bank amount mapping", () => {
     expect(state.searchQueryByPane.bank).toBe("");
   });
 
-  test("uses another pane search query when the active pane has only row filters", () => {
-    const groups = createContextSearchGroups("invoice");
+  test("intersects another pane search query with active pane row filters", () => {
+    const groups = createContextSearchGroups("invoice").map((group) => {
+      if (group.id !== "invoice-anchor" && group.id !== "multi-pane-hit") {
+        return group;
+      }
+      return {
+        ...group,
+        rows: {
+          ...group.rows,
+          bank: group.rows.bank.map((row) => ({
+            ...row,
+            tableValues: {
+              ...row.tableValues,
+              direction: "支出",
+            },
+          })),
+        },
+      };
+    });
     const state = createEmptyWorkbenchZoneDisplayState();
     state.activePaneId = "bank";
     state.filtersByPaneAndColumn.bank = {
@@ -1817,11 +1902,11 @@ describe("workbench api bank amount mapping", () => {
 
     expect(displayGroups.map((group) => group.id)).toEqual([
       "invoice-anchor",
-      "oa-supplement",
-      "bank-supplement",
       "multi-pane-hit",
     ]);
-    expect(displayGroups.find((group) => group.id === "invoice-anchor")?.rows.bank).toEqual([]);
+    expect(displayGroups.find((group) => group.id === "invoice-anchor")?.rows.bank.map((row) => row.id)).toEqual([
+      "invoice-anchor-bank",
+    ]);
     expect(displayGroups.find((group) => group.id === "invoice-anchor")?.rows.invoice.map((row) => row.counterparty)).toEqual([
       "张三",
     ]);

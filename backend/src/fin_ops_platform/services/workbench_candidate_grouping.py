@@ -934,6 +934,8 @@ class WorkbenchCandidateGroupingService:
     def _should_collapse_no_oa_bank_batch_group(self, group: CandidateGroup) -> bool:
         if group.oa_rows or group.invoice_rows or not group.bank_rows:
             return False
+        if len(group.bank_rows) < 2:
+            return False
         if any(self._relation_code(row) != NO_OA_BANK_BATCH_RELATION_MODE for row in group.bank_rows):
             return False
         source_batch_ids = {
@@ -1109,8 +1111,28 @@ class WorkbenchCandidateGroupingService:
 
         relation_field_name = self._relation_field_name(payload["type"])
         payload[relation_field_name] = self._paired_relation_payload(payload, group)
-        payload["available_actions"] = ["detail"]
+        payload["available_actions"] = self._paired_available_actions(payload)
         return payload
+
+    def _paired_available_actions(self, row: dict[str, Any]) -> list[str]:
+        actions = ["detail"]
+        if (
+            str(row.get("type") or "") == "bank"
+            and self._relation_code(row) == NO_OA_BANK_BATCH_RELATION_MODE
+            and self._no_oa_source_batch_id(row)
+            and self._no_oa_row_is_withdrawable(row)
+        ):
+            actions.append("withdraw_no_oa_batch")
+        return actions
+
+    @staticmethod
+    def _no_oa_row_is_withdrawable(row: dict[str, Any]) -> bool:
+        metadata = row.get("special_metadata")
+        if not isinstance(metadata, dict):
+            return False
+        if "withdrawable" in metadata:
+            return bool(metadata.get("withdrawable"))
+        return bool(str(metadata.get("source_batch_id") or "").strip())
 
     def _paired_relation_payload(self, row: dict[str, Any], group: CandidateGroup) -> dict[str, str]:
         group_kind = self._paired_group_kind(group)

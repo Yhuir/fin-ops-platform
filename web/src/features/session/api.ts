@@ -1,4 +1,6 @@
-import { apiUrl } from "../../app/runtime";
+import { ApiClientError, apiRequestJson } from "../apiClient";
+
+export { readOATokenCookie } from "../authToken";
 
 export type SessionAccessTier = "denied" | "read_export_only" | "full_access" | "admin";
 
@@ -73,56 +75,31 @@ function normalizeArray(value: unknown): string[] {
     .filter((item, index, list) => item.length > 0 && list.indexOf(item) === index);
 }
 
-export function readOATokenCookie(cookieSource = typeof document !== "undefined" ? document.cookie : ""): string | null {
-  const target = "Admin-Token=";
-  const parts = cookieSource.split(";").map((item) => item.trim());
-  for (const part of parts) {
-    if (part.startsWith(target)) {
-      const token = decodeURIComponent(part.slice(target.length)).trim();
-      return token.length > 0 ? token : null;
-    }
-  }
-  return null;
-}
-
 export async function fetchSessionMe(signal?: AbortSignal): Promise<SessionPayload> {
-  const headers: HeadersInit = {
-    "Content-Type": "application/json",
-  };
-  const token = readOATokenCookie();
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-
-  const response = await fetch(apiUrl("/api/session/me"), {
-    method: "GET",
-    headers,
-    credentials: "include",
-    signal,
-  });
-
-  const rawText = await response.text();
-  let payload: ApiSessionPayload | ApiErrorPayload | null = null;
-  if (rawText.trim().length > 0) {
-    try {
-      payload = JSON.parse(rawText) as ApiSessionPayload | ApiErrorPayload;
-    } catch {
-      throw new SessionApiError("会话校验返回了无效数据。", response.status);
+  let payload: ApiSessionPayload | null = null;
+  try {
+    payload = await apiRequestJson<ApiSessionPayload>("/api/session/me", {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      signal,
+    });
+  } catch (error) {
+    if (error instanceof ApiClientError) {
+      const errorPayload = error.payload as ApiErrorPayload | null;
+      throw new SessionApiError(
+        normalizeString(errorPayload?.message, "会话校验失败，请稍后重试。"),
+        error.status,
+        typeof errorPayload?.error === "string" ? errorPayload.error : error.code,
+      );
     }
-  }
-
-  if (!response.ok) {
-    const errorPayload = payload as ApiErrorPayload | null;
-    throw new SessionApiError(
-      normalizeString(errorPayload?.message, "会话校验失败，请稍后重试。"),
-      response.status,
-      errorPayload?.error,
-    );
+    throw error;
   }
 
   const sessionPayload = payload as ApiSessionPayload | null;
   if (!sessionPayload?.user) {
-    throw new SessionApiError("会话信息缺少当前用户。", response.status);
+    throw new SessionApiError("会话信息缺少当前用户。", 200);
   }
 
   return {

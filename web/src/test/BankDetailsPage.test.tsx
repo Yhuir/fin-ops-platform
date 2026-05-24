@@ -8,6 +8,7 @@ import { SessionContext, type SessionContextValue } from "../contexts/SessionCon
 import type { SessionPayload } from "../features/session/api";
 import BankDetailsPage from "../pages/BankDetailsPage";
 import { installMockApiFetch } from "./apiMock";
+import { expectCustomEventDetailContaining } from "./eventAssertions";
 
 const defaultSession: SessionPayload = {
   allowed: true,
@@ -221,9 +222,7 @@ describe("Bank details page", () => {
       });
     });
     await waitFor(() => {
-      expect(categoryUpdatedListener).toHaveBeenCalledWith(expect.objectContaining({
-        detail: { affectedMonths: ["2026-05"] },
-      }));
+      expectCustomEventDetailContaining(categoryUpdatedListener, { affectedMonths: ["2026-05"] });
     });
     expect(await within(page).findByText("分类已保存")).toBeInTheDocument();
     expect(within(page).getByText("未保存 0")).toBeInTheDocument();

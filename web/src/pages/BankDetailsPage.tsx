@@ -41,6 +41,12 @@ import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import BankCategoryTag from "../features/bankDetails/BankCategoryTag";
 import BankCategoryPicker from "../features/bankDetails/BankCategoryPicker";
 import { fetchBankDetailAccounts, fetchBankDetailTransactions, saveBankTransactionCategories } from "../features/bankDetails/api";
+import {
+  FINANCE_DOMAIN_EVENTS,
+  emitFinanceDomainEvent,
+  eventAffectedMonths,
+  subscribeFinanceDomainEvent,
+} from "../features/domainEvents";
 import type {
   BankDateFilter,
   BankDetailAccount,
@@ -188,19 +194,6 @@ function monthIndex(value: string) {
   }
   const [year, month] = value.split("-").map(Number);
   return year * 12 + month;
-}
-
-function eventAffectedMonths(event: Event) {
-  if (!(event instanceof CustomEvent) || !event.detail || typeof event.detail !== "object") {
-    return null;
-  }
-  const detail = event.detail as { affectedMonths?: unknown; affected_months?: unknown };
-  const rawMonths = Array.isArray(detail.affectedMonths)
-    ? detail.affectedMonths
-    : Array.isArray(detail.affected_months)
-      ? detail.affected_months
-      : null;
-  return rawMonths?.map((month) => String(month).trim()).filter(Boolean) ?? null;
 }
 
 function eventTagVersion(event: Event) {
@@ -649,8 +642,10 @@ export default function BankDetailsPage() {
       }
       setRefreshToken((current) => current + 1);
     };
-    window.addEventListener("workbenchRelationUpdated", handleWorkbenchRelationUpdated);
-    return () => window.removeEventListener("workbenchRelationUpdated", handleWorkbenchRelationUpdated);
+    return subscribeFinanceDomainEvent(
+      FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated,
+      handleWorkbenchRelationUpdated,
+    );
   }, [dateFilter]);
 
   useEffect(() => {
@@ -927,9 +922,10 @@ export default function BankDetailsPage() {
       });
       setCategoryCounts(nextCounts);
       setDraftCategoryByRowId({});
-      window.dispatchEvent(new CustomEvent("bankTransactionCategoryUpdated", {
-        detail: { affectedMonths: response.affectedMonths },
-      }));
+      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, {
+        affectedMonths: response.affectedMonths,
+        source: "bank_details_category_save",
+      });
       setSnackbar({ severity: "success", message: "分类已保存" });
       return true;
     } catch (caught) {

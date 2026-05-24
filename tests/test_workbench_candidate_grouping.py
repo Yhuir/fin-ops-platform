@@ -114,6 +114,32 @@ class WorkbenchCandidateGroupingTests(unittest.TestCase):
             ["bk-transfer-income", "bk-transfer-expense"],
         )
 
+    def test_single_row_no_oa_bank_batch_stays_as_regular_bank_row(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+        batch_id = "no_oa_batch_fee_single"
+        payload = service.group_payload(
+            "2026-05",
+            oa_rows=[],
+            bank_rows=[
+                no_oa_bank_row(
+                    "bk-no-oa-fee-single",
+                    batch_id=batch_id,
+                    debit_amount="12.00",
+                    remark="单条手续费",
+                    batch_version=2,
+                ),
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertEqual(payload["summary"]["paired_count"], 1)
+        group = payload["paired"]["groups"][0]
+        self.assertEqual(group["relation_mode"], "no_oa_bank_batch")
+        self.assertNotEqual(group.get("display_mode"), "collapsed_summary")
+        self.assertNotIn("collapsed_rows", group)
+        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bk-no-oa-fee-single"])
+        self.assertEqual(group["bank_rows"][0]["special_metadata"]["source_batch_id"], batch_id)
+
     def test_mixed_no_oa_and_manual_relation_group_does_not_collapse(self) -> None:
         service = WorkbenchCandidateGroupingService()
         payload = service.group_payload(

@@ -34,6 +34,7 @@ from fin_ops_platform.services.workbench_special_pair_rule_service import (
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-05-24-invoice-tax-meta-summary"
 
 
 class WorkbenchSqlProjectionBuilder:
@@ -133,7 +134,7 @@ class WorkbenchSqlProjectionBuilder:
                     "cache_status": "fresh",
                     "payload": payload,
                     "source_versions": {
-                        "builder": "workbench_sql_projection.v1",
+                        "builder": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
                         "source_version": resolved_source_version,
                     },
                 }
@@ -771,9 +772,9 @@ class WorkbenchSqlProjectionBuilder:
     def _invoice_rows(self, month: str) -> list[dict[str, Any]]:
         rows = self._connection.fetch_all(
             """
-            select coalesce(legacy_mongo_id, id::text) as row_id, invoice_type, invoice_no,
-                   digital_invoice_no, invoice_date, counterparty_name, seller_name, buyer_name,
-                   amount, total_with_tax, status, raw_payload
+            select coalesce(legacy_mongo_id, id::text) as row_id, invoice_type, invoice_no, invoice_code,
+                   digital_invoice_no, invoice_date, counterparty_name, seller_name, seller_tax_no,
+                   buyer_name, buyer_tax_no, amount, tax_rate, tax_amount, total_with_tax, status, raw_payload
             from app.invoices
             where invoice_month = %s::date
               and status <> 'deleted'
@@ -811,6 +812,11 @@ class WorkbenchSqlProjectionBuilder:
             return None
         detail_fields = row_payload(row, "raw_payload")
         detail_fields = detail_fields if isinstance(detail_fields, dict) else {}
+        invoice_code = _first_display_value(row.get("invoice_code"), detail_fields.get("发票代码"))
+        invoice_no = _first_display_value(row.get("invoice_no"), detail_fields.get("发票号码"))
+        digital_invoice_no = _first_display_value(row.get("digital_invoice_no"), detail_fields.get("数电发票号码"))
+        tax_rate = _first_display_value(row.get("tax_rate"), detail_fields.get("税率"), detail_fields.get("tax_rate"))
+        tax_amount = _first_display_value(row.get("tax_amount"), detail_fields.get("税额"), detail_fields.get("tax_amount"))
         return {
             "id": row_id,
             "type": "invoice",
@@ -818,9 +824,9 @@ class WorkbenchSqlProjectionBuilder:
             "status": "open",
             "case_id": None,
             "invoice_type": row.get("invoice_type"),
-            "invoice_no": row.get("invoice_no"),
-            "invoice_code": row.get("invoice_code"),
-            "digital_invoice_no": row.get("digital_invoice_no"),
+            "invoice_no": invoice_no,
+            "invoice_code": invoice_code,
+            "digital_invoice_no": digital_invoice_no,
             "issue_date": _date_text(row.get("invoice_date")),
             "counterparty_name": row.get("counterparty_name") or row.get("seller_name") or row.get("buyer_name"),
             "seller_name": row.get("seller_name"),
@@ -828,8 +834,8 @@ class WorkbenchSqlProjectionBuilder:
             "buyer_name": row.get("buyer_name"),
             "buyer_tax_no": row.get("buyer_tax_no"),
             "amount": str(row.get("amount") or ""),
-            "tax_rate": row.get("tax_rate") or "—",
-            "tax_amount": str(row.get("tax_amount") or "—"),
+            "tax_rate": tax_rate,
+            "tax_amount": tax_amount,
             "total_with_tax": str(row.get("total_with_tax") or row.get("amount") or ""),
             "invoice_bank_relation": {"code": "pending_collection", "label": "待匹配流水", "tone": "warn"},
             "available_actions": ["detail", "confirm_link", "mark_exception", "ignore"],
@@ -840,8 +846,8 @@ class WorkbenchSqlProjectionBuilder:
                 "购买方名称": row.get("buyer_name") or "—",
                 "开票日期": _date_text(row.get("invoice_date")),
                 "金额": str(row.get("amount") or "—"),
-                "税率": row.get("tax_rate") or "—",
-                "税额": str(row.get("tax_amount") or "—"),
+                "税率": tax_rate,
+                "税额": tax_amount,
                 "价税合计": str(row.get("total_with_tax") or row.get("amount") or "—"),
                 "发票类型": row.get("invoice_type") or "—",
             },
@@ -928,6 +934,8 @@ class WorkbenchSqlProjectionBuilder:
                 row["case_id"] = case_id
                 row["relation_mode"] = relation.get("relation_mode")
                 row[self._relation_field_name(str(row.get("type") or ""))] = self._active_relation_payload(relation)
+                if str(relation.get("relation_mode") or "").strip() == NO_OA_BANK_BATCH_RELATION_MODE:
+                    self._apply_no_oa_relation_metadata(row, relation)
 
         candidates = self._rebuild_candidate_matches(
             month,
@@ -956,7 +964,7 @@ class WorkbenchSqlProjectionBuilder:
             ],
         )
         grouped["oa_status"] = {"code": "ready", "message": "OA projection ready"}
-        grouped["workbench_read_model_schema_version"] = "workbench_sql_projection.v2"
+        grouped["workbench_read_model_schema_version"] = WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
         return grouped
 
     def _rebuild_candidate_matches(
@@ -1058,7 +1066,7 @@ class WorkbenchSqlProjectionBuilder:
 
     def _matching_source_versions(self, *, source_version: int | str | None = None) -> dict[str, Any]:
         versions: dict[str, Any] = {
-            "builder": "workbench_sql_projection.v2",
+            "builder": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
             "matching_rules": WORKBENCH_MATCHING_RULES_VERSION,
             "special_rules": WORKBENCH_SPECIAL_RULES_VERSION,
         }
@@ -1213,6 +1221,44 @@ class WorkbenchSqlProjectionBuilder:
         return {"code": "fully_linked", "label": "完全关联", "tone": "success"}
 
     @staticmethod
+    def _apply_no_oa_relation_metadata(row: dict[str, Any], relation: dict[str, Any]) -> None:
+        special_metadata = relation.get("special_metadata")
+        if not isinstance(special_metadata, dict):
+            special_metadata = {}
+        if special_metadata:
+            row["special_metadata"] = deepcopy(special_metadata)
+
+        display_tags = [
+            str(tag).strip()
+            for tag in list(relation.get("display_tags") or special_metadata.get("display_tags") or [])
+            if str(tag).strip()
+        ]
+        batch_label = str(special_metadata.get("batch_label") or "").strip()
+        if not display_tags:
+            display_tags = ["免OA"]
+            if batch_label:
+                display_tags.append(batch_label)
+
+        tags = [str(tag).strip() for tag in list(row.get("tags") or []) if str(tag).strip()]
+        for tag in display_tags:
+            if tag not in tags:
+                tags.append(tag)
+        row["tags"] = tags
+        row["display_tags"] = display_tags
+
+        source_batch_id = str(special_metadata.get("source_batch_id") or "").strip()
+        actions = [str(action).strip() for action in list(row.get("available_actions") or []) if str(action).strip()]
+        actions = ["detail"] if not actions else [action for action in actions if action in {"detail", "withdraw_no_oa_batch"}]
+        withdrawable = (
+            bool(special_metadata.get("withdrawable"))
+            if "withdrawable" in special_metadata
+            else bool(source_batch_id)
+        )
+        if source_batch_id and withdrawable and "withdraw_no_oa_batch" not in actions:
+            actions.append("withdraw_no_oa_batch")
+        row["available_actions"] = actions
+
+    @staticmethod
     def _row_is_held_for_matching(row: dict[str, Any]) -> bool:
         if bool(row.get("ignored")) or bool(row.get("handled_exception")):
             return True
@@ -1272,6 +1318,14 @@ def _date_text(value: object) -> str:
     if isinstance(value, date):
         return value.isoformat()
     return str(value or "")[:19]
+
+
+def _first_display_value(*values: object) -> str:
+    for value in values:
+        normalized = str(value or "").strip()
+        if normalized and normalized not in {"—", "--"}:
+            return normalized
+    return "—"
 
 
 def _is_outflow(direction: str, signed_amount: object) -> bool:

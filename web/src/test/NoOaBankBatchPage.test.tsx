@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import MuiProviders from "../app/MuiProviders";
 import { sidebarGroups } from "../components/shell/sidebarItems";
 import NoOaBankBatchPage from "../pages/NoOaBankBatchPage";
+import { expectCustomEventDetailContaining } from "./eventAssertions";
 
 const listPayload = {
   summary: {
@@ -120,6 +121,9 @@ const detailPayload = {
       direction: "expense",
       direction_label: "支",
       amount: "8.80",
+      bank_name: "建设银行",
+      account_last4: "8106",
+      account_key: "建设银行:8106",
       summary: "网银手续费",
       purpose: "结算",
       remark: "月结",
@@ -176,7 +180,7 @@ afterEach(() => {
 });
 
 describe("NoOaBankBatchPage", () => {
-  test("renders bucket toggle, fixed category rail, and right selected batch detail pane", async () => {
+  test("renders bucket toggle, fixed category rail, batch tree, and right selected batch detail pane", async () => {
     installFetchMock();
     renderPage();
 
@@ -196,18 +200,20 @@ describe("NoOaBankBatchPage", () => {
     expect(within(categoryRail).getByRole("button", { name: "社保款 0 批 0 条" })).toBeInTheDocument();
     expect(within(categoryRail).getByRole("button", { name: "内部往来款 1 批 3 条" })).toBeInTheDocument();
 
-    expect(screen.getByRole("region", { name: "免OA批次与明细" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "免OA批次" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "批次明细" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "手续费 1 批 / 2 条" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /手续费.*建设银行8106.*2026-05.*88.00/ })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /内部往来款.*多账户.*2026-05.*存在多解/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /手续费.*建设银行8106.*2026-05.*2 条/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /内部往来款.*多账户.*2026-05.*3 条/ })).not.toBeInTheDocument();
 
     expect(await screen.findByText("网银手续费")).toBeInTheDocument();
     expect(screen.getByText("手续费 1")).toBeInTheDocument();
     expect(screen.getByText("自动")).toBeInTheDocument();
     expect(screen.getByText("交易时间")).toBeInTheDocument();
     expect(screen.getByText("对方户名")).toBeInTheDocument();
-    expect(screen.getByText("收/支")).toBeInTheDocument();
+    expect(screen.queryByText("收/支")).not.toBeInTheDocument();
+    expect(screen.getByText("支")).toBeInTheDocument();
+    expect(screen.getAllByText("建设银行8106").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("摘要/用途/备注")).toBeInTheDocument();
     expect(screen.getByText("分类来源")).toBeInTheDocument();
   });
@@ -217,7 +223,7 @@ describe("NoOaBankBatchPage", () => {
     renderPage();
 
     await screen.findByRole("heading", { name: "手续费 1 批 / 2 条" });
-    const list = screen.getByRole("region", { name: "免OA批次与明细" });
+    const list = screen.getByRole("region", { name: "免OA批次" });
     expect(within(list).getByRole("checkbox", { name: "选择 手续费 建设银行8106 2026-05" })).toBeEnabled();
 
     await userEvent.setup().click(screen.getByRole("button", { name: "内部往来款 1 批 3 条" }));
@@ -265,9 +271,7 @@ describe("NoOaBankBatchPage", () => {
           expect.objectContaining({ method: "POST" }),
         );
       });
-      expect(relationListener).toHaveBeenLastCalledWith(expect.objectContaining({
-        detail: { affectedMonths: ["2026-05"] },
-      }));
+      expectCustomEventDetailContaining(relationListener, { affectedMonths: ["2026-05"] });
 
       await user.click(screen.getByRole("button", { name: "已提交 1" }));
       await user.click(await screen.findByRole("button", { name: "工资 1 批 8 条" }));
@@ -370,7 +374,7 @@ describe("NoOaBankBatchPage", () => {
     await user.click(screen.getByRole("button", { name: "已提交 2" }));
 
     expect(await screen.findByRole("heading", { name: "手续费 1 批 / 2 条" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /手续费.*建设银行8106.*2026-05.*88.00/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /手续费.*建设银行8106.*2026-05.*2 条/ })).toBeInTheDocument();
   });
 
   test("bulk submits only selected draft batches", async () => {

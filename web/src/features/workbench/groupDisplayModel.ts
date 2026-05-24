@@ -70,18 +70,14 @@ export function buildWorkbenchDisplayGroups(
     return groups;
   }
 
-  const searchContext = resolveWorkbenchSearchContext(state);
   const sortDirection = state.sortByPane[activePaneId];
+  const hasPaneCriteria = workbenchPaneIds.some((paneId) => paneHasWorkbenchSearchOrRowCriteria(state, paneId));
   const hasPaneRowCriteria = workbenchPaneIds.some((paneId) => paneHasWorkbenchRowCriteria(state, paneId));
 
-  const displayGroups = !searchContext && !hasPaneRowCriteria
+  const displayGroups = !hasPaneCriteria
     ? groups
     : groups.flatMap((group) => {
-      if (searchContext && !groupMatchesSearchContext(group, searchContext.normalizedQuery)) {
-        return [];
-      }
-
-      if (!searchContext && hasPaneRowCriteria && !groupMatchesPaneRowCriteria(group, state)) {
+      if (!groupMatchesPaneCriteria(group, state)) {
         return [];
       }
 
@@ -90,7 +86,7 @@ export function buildWorkbenchDisplayGroups(
       }
 
       const filteredGroup = applyPaneCriteriaToGroup(group, state);
-      if (!searchContext && hasPaneRowCriteria && !groupHasRowsInCriteriaPanes(filteredGroup, state)) {
+      if (hasPaneRowCriteria && !groupHasRowsInCriteriaPanes(filteredGroup, state)) {
         return [];
       }
 
@@ -134,6 +130,10 @@ export function buildWorkbenchServerPageQuery(state: WorkbenchZoneDisplayState):
   if (searchContext?.rawQuery) {
     query.search = searchContext.rawQuery;
   }
+  const searchByPane = normalizeServerSearchByPane(state.searchQueryByPane);
+  if (Object.keys(searchByPane).length > 0) {
+    query.searchByPane = searchByPane;
+  }
   const sortPaneId = workbenchPaneIds.find((paneId) => state.sortByPane[paneId]);
   if (sortPaneId) {
     const direction = state.sortByPane[sortPaneId];
@@ -155,10 +155,24 @@ export function buildWorkbenchServerPageQuery(state: WorkbenchZoneDisplayState):
 export function hasWorkbenchServerPageCriteria(query: WorkbenchGroupsPageQuery) {
   return Boolean(
     query.search
+    || (query.searchByPane && Object.keys(query.searchByPane).length > 0)
     || query.sort
     || (query.filtersByPaneAndColumn && Object.keys(query.filtersByPaneAndColumn).length > 0)
     || (query.timeFilterByPane && Object.keys(query.timeFilterByPane).length > 0),
   );
+}
+
+function normalizeServerSearchByPane(
+  searchQueryByPane: WorkbenchZoneDisplayState["searchQueryByPane"],
+): NonNullable<WorkbenchGroupsPageQuery["searchByPane"]> {
+  const result: NonNullable<WorkbenchGroupsPageQuery["searchByPane"]> = {};
+  workbenchPaneIds.forEach((paneId) => {
+    const query = (searchQueryByPane[paneId] || "").trim();
+    if (query) {
+      result[paneId] = query;
+    }
+  });
+  return result;
 }
 
 function normalizeServerColumnFilters(
@@ -299,26 +313,18 @@ function resolveWorkbenchSearchContext(state: WorkbenchZoneDisplayState) {
   };
 }
 
-function groupMatchesSearchContext(group: WorkbenchCandidateGroup, normalizedQuery: string) {
-  return workbenchPaneIds.some((paneId) =>
-    getWorkbenchGroupPaneRowsForCriteria(group, paneId).some((row) => matchesWorkbenchRowText(row, normalizedQuery)),
-  );
-}
-
-function groupMatchesPaneRowCriteria(group: WorkbenchCandidateGroup, state: WorkbenchZoneDisplayState) {
-  if (!workbenchPaneIds.some((paneId) => paneHasWorkbenchRowCriteria(state, paneId))) {
+function groupMatchesPaneCriteria(group: WorkbenchCandidateGroup, state: WorkbenchZoneDisplayState) {
+  const activePanes = workbenchPaneIds.filter((paneId) => paneHasWorkbenchSearchOrRowCriteria(state, paneId));
+  if (activePanes.length === 0) {
     return true;
   }
 
-  return workbenchPaneIds.some((paneId) => {
-    if (!paneHasWorkbenchRowCriteria(state, paneId)) {
-      return false;
-    }
-
+  return activePanes.every((paneId) => {
+    const paneSearchQuery = normalizeWorkbenchSearchText(state.searchQueryByPane[paneId] || "");
     const paneFilters = state.filtersByPaneAndColumn[paneId] ?? {};
     const paneTimeFilter = state.timeFilterByPane[paneId] ?? { mode: "none" };
     return getWorkbenchGroupPaneRowsForCriteria(group, paneId).some((row) =>
-      matchesWorkbenchRow(row, paneId, "", paneFilters, paneTimeFilter),
+      matchesWorkbenchRow(row, paneId, paneSearchQuery, paneFilters, paneTimeFilter),
     );
   });
 }
@@ -340,9 +346,10 @@ function applyPaneCriteriaToGroup(
         return [paneId, group.rows[paneId]];
       }
 
+      const paneSearchQuery = normalizeWorkbenchSearchText(state.searchQueryByPane[paneId] || "");
       return [
         paneId,
-        group.rows[paneId].filter((row) => matchesWorkbenchRow(row, paneId, "", paneFilters, paneTimeFilter)),
+        group.rows[paneId].filter((row) => matchesWorkbenchRow(row, paneId, paneSearchQuery, paneFilters, paneTimeFilter)),
       ];
     }),
   ) as WorkbenchPaneRows;
@@ -354,7 +361,7 @@ function applyPaneCriteriaToGroup(
 }
 
 function groupHasRowsInCriteriaPanes(group: WorkbenchCandidateGroup, state: WorkbenchZoneDisplayState) {
-  return workbenchPaneIds.some((paneId) => paneHasWorkbenchRowCriteria(state, paneId) && group.rows[paneId].length > 0);
+  return workbenchPaneIds.every((paneId) => !paneHasWorkbenchRowCriteria(state, paneId) || group.rows[paneId].length > 0);
 }
 
 function matchesWorkbenchRow(
@@ -469,6 +476,10 @@ function paneHasWorkbenchRowCriteria(state: WorkbenchZoneDisplayState, paneId: W
   }
 
   return Object.values(state.filtersByPaneAndColumn[paneId] ?? {}).some((values) => values.length > 0);
+}
+
+function paneHasWorkbenchSearchOrRowCriteria(state: WorkbenchZoneDisplayState, paneId: WorkbenchRecordType) {
+  return Boolean(normalizeWorkbenchSearchText(state.searchQueryByPane[paneId] || "")) || paneHasWorkbenchRowCriteria(state, paneId);
 }
 
 function sortWorkbenchGroups(

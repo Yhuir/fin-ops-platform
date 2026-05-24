@@ -257,8 +257,9 @@ describe("OaManualSearchImportTable", () => {
 
     const importingStatus = await screen.findByRole("status", { name: "OA导入 10%：准备导入已选 OA" });
     expect(importingStatus).toHaveTextContent("10%");
-    await user.hover(importingStatus);
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("OA导入 10%：准备导入已选 OA");
+    const stagedStatus = await screen.findByRole("status", { name: "OA导入 35%：解析 OA 附件发票" });
+    await user.hover(stagedStatus);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("OA导入 35%：解析 OA 附件发票");
 
     importDeferred.resolve(successfulImportResponse());
 

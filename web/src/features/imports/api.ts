@@ -8,8 +8,7 @@ import type {
   MatchingRunSummary,
 } from "./types";
 import { mapBackgroundJob, type ApiBackgroundJob } from "../backgroundJobs/api";
-import { readOATokenCookie } from "../session/api";
-import { apiUrl } from "../../app/runtime";
+import { ApiClientError, apiRequestJson } from "../apiClient";
 
 type ApiImportFile = {
   id: string;
@@ -136,22 +135,18 @@ type ApiImportTemplatesPayload = {
 };
 
 async function requestJson<T>(url: string, init: RequestInit = {}) {
-  const headers = new Headers(init.headers ?? undefined);
-  const token = readOATokenCookie();
-  if (token && !headers.has("Authorization")) {
-    headers.set("Authorization", `Bearer ${token}`);
+  try {
+    return await apiRequestJson<T>(url, init);
+  } catch (error) {
+    if (error instanceof ApiClientError) {
+      throw new Error(
+        error.payload && typeof error.payload === "object"
+          ? JSON.stringify(error.payload)
+          : error.message,
+      );
+    }
+    throw error;
   }
-
-  const response = await fetch(apiUrl(url), {
-    ...init,
-    headers,
-    credentials: init.credentials ?? "include",
-  });
-  const payload = (await response.json()) as T;
-  if (!response.ok) {
-    throw new Error(typeof payload === "object" && payload ? JSON.stringify(payload) : "request failed");
-  }
-  return payload;
 }
 
 export function resolveImportApiErrorMessage(error: unknown, fallback: string): string {

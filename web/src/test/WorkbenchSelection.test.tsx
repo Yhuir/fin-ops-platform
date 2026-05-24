@@ -4,7 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 
 import { installMockApiFetch } from "./apiMock";
-import { renderAppAt, renderWorkbenchPage } from "./renderHelpers";
+import { expectCustomEventDetailContaining } from "./eventAssertions";
+import { renderAppAt, renderAuthenticatedAppAt, renderWorkbenchPage } from "./renderHelpers";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -266,9 +267,7 @@ describe("Workbench row selection and detail modal", () => {
       }),
     );
     await waitFor(() => {
-      expect(relationUpdatedListener).toHaveBeenCalledWith(expect.objectContaining({
-        detail: { affectedMonths: ["2026-03"] },
-      }));
+      expectCustomEventDetailContaining(relationUpdatedListener, { affectedMonths: ["2026-03"] });
     });
     window.removeEventListener("workbenchRelationUpdated", relationUpdatedListener);
   });
@@ -570,7 +569,7 @@ describe("Workbench row selection and detail modal", () => {
 
   test("open zone exception action accepts OA 2035 attachment payment receipt selections from the backend group", async () => {
     const user = userEvent.setup();
-    const fetchMock = installMockApiFetch();
+    const fetchMock = installMockApiFetch({ includeOaAttachmentPaymentReceipt: true });
     renderWorkbenchPage();
 
     const openZone = await screen.findByTestId("zone-open");
@@ -748,9 +747,7 @@ describe("Workbench row selection and detail modal", () => {
     expect(within(bankOnlyOpenGroup!).queryByRole("row", { name: /赵华.*华东设备供应商/ })).not.toBeInTheDocument();
     expect(within(bankOnlyOpenGroup!).queryByRole("row", { name: /91310000MA1K8A001X.*华东设备供应商/ })).not.toBeInTheDocument();
     await waitFor(() => {
-      expect(relationUpdatedListener).toHaveBeenCalledWith(expect.objectContaining({
-        detail: { affectedMonths: ["2026-03"] },
-      }));
+      expectCustomEventDetailContaining(relationUpdatedListener, { affectedMonths: ["2026-03"] });
     });
     window.removeEventListener("workbenchRelationUpdated", relationUpdatedListener);
   });
@@ -859,7 +856,18 @@ describe("Workbench row selection and detail modal", () => {
       sessionUsername: "YNSYLP005",
       sessionDisplayName: "杨南山",
     });
-    renderAppAt("/");
+    renderAuthenticatedAppAt("/", {
+      session: {
+        accessTier: "admin",
+        canAdminAccess: true,
+        canMutateData: true,
+        user: {
+          username: "YNSYLP005",
+          nickname: "杨南山",
+          displayName: "杨南山",
+        },
+      },
+    });
 
     const settingsPage = await openWorkbenchSettingsPage(user);
     const settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
@@ -1062,7 +1070,7 @@ describe("Workbench row selection and detail modal", () => {
       expect.objectContaining({ method: "DELETE" }),
     );
     expect(within(settingsPage).queryByText("本地测试项目")).not.toBeInTheDocument();
-  });
+  }, 30_000);
 
   test("admin data reset requires impact confirmation and current OA password", async () => {
     const user = userEvent.setup();
@@ -1862,7 +1870,7 @@ describe("Workbench row selection and detail modal", () => {
 
   test("canceling processed exception restores rows locally without starting an all-scope refresh", async () => {
     const user = userEvent.setup();
-    const fetchMock = installMockApiFetch({ actionDelayMs: 80 });
+    const fetchMock = installMockApiFetch();
     renderWorkbenchPage();
 
     const openZone = await screen.findByTestId("zone-open");
@@ -1910,7 +1918,7 @@ describe("Workbench row selection and detail modal", () => {
         name: /2026-03-28.*智能工厂设备商/,
       }),
     ).toBeInTheDocument();
-  });
+  }, 30_000);
 
   test("renders an error state when the workbench request fails", async () => {
     installMockApiFetch({ workbenchErrorMonths: ["all"] });

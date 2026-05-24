@@ -9,6 +9,7 @@ import type {
   SubmitBatchAccountingRequest,
   WithdrawBatchAccountingRequest,
 } from "./types";
+import { apiRequestJson } from "../apiClient";
 
 type ApiBankRow = {
   id?: string | null;
@@ -105,45 +106,7 @@ type ApiMutationResult = {
 };
 
 async function requestJson<T>(url: string, init: RequestInit = {}) {
-  const response = await fetch(url, init);
-  const rawText = await response.text();
-  const trimmedText = rawText.trim();
-  const contentType = response.headers?.get?.("Content-Type") ?? "";
-  if (trimmedText && looksLikeHtml(trimmedText)) {
-    throw new Error(
-      `接口返回了 HTML 页面：${url}。说明请求没有进入后端 API，请确认后端服务已启动，并通过支持 /api 代理的前端开发服务访问。`,
-    );
-  }
-
-  let payload = {} as T;
-  if (trimmedText) {
-    try {
-      payload = JSON.parse(trimmedText) as T;
-    } catch {
-      throw new Error(
-        contentType
-          ? `接口 ${url} 返回的不是合法 JSON：${contentType}`
-          : `接口 ${url} 返回的不是合法 JSON。`,
-      );
-    }
-  }
-  if (!response.ok) {
-    throw new Error(extractErrorMessage(payload) || trimmedText || "request failed");
-  }
-  return payload;
-}
-
-function looksLikeHtml(rawText: string) {
-  const trimmedText = rawText.trim();
-  return /^<!doctype\s+html/i.test(trimmedText) || /^<html[\s>]/i.test(trimmedText);
-}
-
-function extractErrorMessage(payload: unknown) {
-  if (payload && typeof payload === "object" && "message" in payload) {
-    const message = (payload as { message?: unknown }).message;
-    return typeof message === "string" ? message : "";
-  }
-  return "";
+  return apiRequestJson<T>(url, init);
 }
 
 function text(value: string | null | undefined, fallback = "") {

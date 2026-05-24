@@ -16,7 +16,7 @@ describe("session api", () => {
   });
 
   test("sends Authorization header from Admin-Token cookie", async () => {
-    document.cookie = "Admin-Token=mock-cookie-token";
+    document.cookie = "Admin-Token=mock-cookie-token; path=/";
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -45,16 +45,13 @@ describe("session api", () => {
 
     const payload = await fetchSessionMe();
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/session/me",
-      expect.objectContaining({
-        method: "GET",
-        credentials: "include",
-        headers: expect.objectContaining({
-          Authorization: "Bearer mock-cookie-token",
-        }),
-      }),
-    );
+    expect(fetchMock).toHaveBeenCalledWith("/api/session/me", expect.objectContaining({
+      method: "GET",
+      credentials: "include",
+    }));
+    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    const requestHeaders = requestInit?.headers as Headers | undefined;
+    expect(requestHeaders?.get("Authorization")).toBe("Bearer mock-cookie-token");
     expect(payload.user.username).toBe("liuji");
     expect(payload.allowed).toBe(true);
     expect(payload.accessTier).toBe("read_export_only");

@@ -684,6 +684,7 @@ class PostgresReadModelRepository:
         status: str | None = None,
         source_kind: str | None = None,
         search: str | None = None,
+        search_by_pane: Any = None,
         sort: str | None = None,
         detail_level: str | None = None,
         column_filters: Any = None,
@@ -698,6 +699,7 @@ class PostgresReadModelRepository:
         scope_where, scope_params = self._workbench_scope_filter(normalized_scope_key)
         normalized_column_filters = _normalize_workbench_column_filters(column_filters)
         normalized_time_filters = _normalize_workbench_time_filters(time_filters)
+        normalized_search_by_pane = _normalize_workbench_search_by_pane(search_by_pane)
         clauses = [f"g.{scope_where}", "g.zone = %s"]
         params = [*scope_params, normalized_zone]
         if normalized := text(status):
@@ -706,13 +708,16 @@ class PostgresReadModelRepository:
         if normalized := text(source_kind):
             clauses.append("%s = any(g.source_kinds)")
             params.append(normalized)
-        if normalized := text(search):
+        normalized_search = text(search)
+        if normalized_search and not normalized_search_by_pane and not normalized_column_filters and not normalized_time_filters:
             clauses.append("(g.searchable_text ilike %s or g.group_id ilike %s)")
-            pattern = f"%{normalized}%"
+            pattern = f"%{normalized_search}%"
             params.extend([pattern, pattern])
         row_filter_sql, row_filter_params = _workbench_group_row_filter_exists_sql(
             column_filters=normalized_column_filters,
             time_filters=normalized_time_filters,
+            search_by_pane=normalized_search_by_pane,
+            fallback_search=normalized_search,
         )
         if row_filter_sql:
             clauses.append(row_filter_sql)
@@ -771,6 +776,13 @@ class PostgresReadModelRepository:
             if not isinstance(group, dict):
                 group = {"group_id": text(row.get("group_id"))}
             if normalized_detail_level == "summary":
+                group = _filter_workbench_group_preview_rows_for_criteria(
+                    group,
+                    column_filters=normalized_column_filters,
+                    time_filters=normalized_time_filters,
+                    search_by_pane=normalized_search_by_pane,
+                    fallback_search=normalized_search,
+                )
                 group = _compact_workbench_group_for_summary_page(group)
             groups.append(group)
         refresh_status = self.get_workbench_refresh_status(scope_key=normalized_scope_key)
@@ -3095,6 +3107,16 @@ def _normalize_workbench_time_filters(value: Any) -> dict[str, dict[str, str]]:
     return result
 
 
+def _normalize_workbench_search_by_pane(value: Any) -> dict[str, str]:
+    payload = _json_object_payload(value)
+    result: dict[str, str] = {}
+    for pane in WORKBENCH_PANES:
+        normalized = text(payload.get(pane))
+        if normalized:
+            result[pane] = normalized[:200]
+    return result
+
+
 def _json_object_payload(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -3111,13 +3133,18 @@ def _workbench_group_row_filter_exists_sql(
     *,
     column_filters: dict[str, dict[str, list[str]]],
     time_filters: dict[str, dict[str, str]],
+    search_by_pane: dict[str, str],
+    fallback_search: str | None,
 ) -> tuple[str, list[Any]]:
     pane_exists: list[str] = []
     params: list[Any] = []
     for pane in WORKBENCH_PANES:
         pane_column_filters = column_filters.get(pane, {})
         pane_time_filter = time_filters.get(pane)
-        if not pane_column_filters and not pane_time_filter:
+        pane_search = search_by_pane.get(pane)
+        if not pane_search and fallback_search and (pane_column_filters or pane_time_filter):
+            pane_search = fallback_search
+        if not pane_column_filters and not pane_time_filter and not pane_search:
             continue
         row_clauses = [
             "r.scope_key = g.scope_key",
@@ -3147,13 +3174,16 @@ def _workbench_group_row_filter_exists_sql(
             if start_date and end_date:
                 row_clauses.append("r.time_date >= %s::date and r.time_date < %s::date")
                 row_params.extend([start_date, end_date])
+        if pane_search:
+            row_clauses.append("r.searchable_text ilike %s")
+            row_params.append(f"%{pane_search}%")
         pane_exists.append(
             "exists (select 1 from read_model.workbench_group_rows r where " + " and ".join(row_clauses) + ")"
         )
         params.extend(row_params)
     if not pane_exists:
         return "", []
-    return "(" + " or ".join(pane_exists) + ")", params
+    return "(" + " and ".join(pane_exists) + ")", params
 
 
 def _workbench_time_filter_date_range(time_filter: dict[str, str]) -> tuple[str | None, str | None]:
@@ -3263,12 +3293,130 @@ def _normalize_workbench_group_detail_level(detail_level: str | None) -> str:
 WORKBENCH_GROUP_SUMMARY_PREVIEW_ROW_LIMIT = 3
 
 
+def _filter_workbench_group_preview_rows_for_criteria(
+    group: dict[str, Any],
+    *,
+    column_filters: dict[str, dict[str, list[str]]],
+    time_filters: dict[str, dict[str, str]],
+    search_by_pane: dict[str, str],
+    fallback_search: str | None,
+) -> dict[str, Any]:
+    panes_to_filter = [
+        pane
+        for pane in WORKBENCH_PANES
+        if column_filters.get(pane) or time_filters.get(pane)
+    ]
+    if not panes_to_filter:
+        return group
+
+    filtered = dict(group)
+    existing_row_counts = group.get("row_counts")
+    row_counts = dict(existing_row_counts) if isinstance(existing_row_counts, dict) else {}
+    for pane in WORKBENCH_PANES:
+        row_key = f"{pane}_rows"
+        rows = group.get(row_key)
+        if isinstance(rows, list):
+            row_counts.setdefault(pane, len(rows))
+
+    collapsed_rows = group.get("collapsed_rows")
+    collapsed_row_counts = dict(group.get("collapsed_row_counts")) if isinstance(group.get("collapsed_row_counts"), dict) else {}
+    if isinstance(collapsed_rows, dict):
+        for pane in WORKBENCH_PANES:
+            rows = collapsed_rows.get(pane)
+            if isinstance(rows, list):
+                collapsed_row_counts.setdefault(pane, len(rows))
+
+    for pane in panes_to_filter:
+        row_key = f"{pane}_rows"
+        rows = group.get(row_key)
+        if isinstance(rows, list):
+            filtered[row_key] = [
+                row
+                for row in rows
+                if isinstance(row, dict)
+                and _workbench_payload_row_matches_preview_criteria(
+                    row,
+                    pane,
+                    column_filters=column_filters,
+                    time_filters=time_filters,
+                    search_by_pane=search_by_pane,
+                    fallback_search=fallback_search,
+                )
+            ]
+        if isinstance(collapsed_rows, dict):
+            collapsed_pane_rows = collapsed_rows.get(pane)
+            if isinstance(collapsed_pane_rows, list):
+                next_collapsed_rows = dict(filtered.get("collapsed_rows")) if isinstance(filtered.get("collapsed_rows"), dict) else dict(collapsed_rows)
+                next_collapsed_rows[pane] = [
+                    row
+                    for row in collapsed_pane_rows
+                    if isinstance(row, dict)
+                    and _workbench_payload_row_matches_preview_criteria(
+                        row,
+                        pane,
+                        column_filters=column_filters,
+                        time_filters=time_filters,
+                        search_by_pane=search_by_pane,
+                        fallback_search=fallback_search,
+                    )
+                ]
+                filtered["collapsed_rows"] = next_collapsed_rows
+
+    if row_counts:
+        filtered["row_counts"] = row_counts
+    if collapsed_row_counts:
+        filtered["collapsed_row_counts"] = collapsed_row_counts
+    return filtered
+
+
+def _workbench_payload_row_matches_preview_criteria(
+    row: dict[str, Any],
+    pane: str,
+    *,
+    column_filters: dict[str, dict[str, list[str]]],
+    time_filters: dict[str, dict[str, str]],
+    search_by_pane: dict[str, str],
+    fallback_search: str | None,
+) -> bool:
+    pane_column_filters = column_filters.get(pane, {})
+    column_values = _workbench_row_column_values(row, pane)
+    for column_key in sorted(pane_column_filters):
+        selected_values = pane_column_filters[column_key]
+        if not selected_values:
+            continue
+        if pane == "bank" and column_key == "amount":
+            row_values = [
+                column_values.get("direction"),
+                column_values.get("paymentAccount"),
+            ]
+        else:
+            row_values = [column_values.get(column_key)]
+        if not any(value in selected_values for value in row_values if value):
+            return False
+
+    pane_time_filter = time_filters.get(pane)
+    if pane_time_filter:
+        start_date, end_date = _workbench_time_filter_date_range(pane_time_filter)
+        row_date = _workbench_date_from_text(_workbench_row_sort_value(row, pane))
+        if start_date and end_date and (not row_date or row_date < start_date or row_date >= end_date):
+            return False
+
+    pane_search = search_by_pane.get(pane)
+    if not pane_search and fallback_search and (pane_column_filters or pane_time_filter):
+        pane_search = fallback_search
+    if pane_search and pane_search.lower() not in _searchable_row_text(row, pane).lower():
+        return False
+
+    return True
+
+
 def _compact_workbench_group_for_summary_page(group: dict[str, Any]) -> dict[str, Any]:
     compact = without_keys(dict(group), {"raw_payload", "payload"})
+    existing_row_counts = group.get("row_counts") if isinstance(group.get("row_counts"), dict) else {}
     compact["row_counts"] = {
-        "oa": len(group.get("oa_rows") if isinstance(group.get("oa_rows"), list) else []),
-        "bank": len(group.get("bank_rows") if isinstance(group.get("bank_rows"), list) else []),
-        "invoice": len(group.get("invoice_rows") if isinstance(group.get("invoice_rows"), list) else []),
+        "oa": int_value(existing_row_counts.get("oa"), len(group.get("oa_rows") if isinstance(group.get("oa_rows"), list) else [])),
+        "bank": int_value(existing_row_counts.get("bank"), len(group.get("bank_rows") if isinstance(group.get("bank_rows"), list) else [])),
+        "invoice": int_value(existing_row_counts.get("invoice"), len(group.get("invoice_rows") if isinstance(group.get("invoice_rows"), list) else [])),
     }
     for row_key in ("oa_rows", "bank_rows", "invoice_rows"):
         rows = group.get(row_key)
@@ -3279,8 +3427,13 @@ def _compact_workbench_group_for_summary_page(group: dict[str, Any]) -> dict[str
         ] if isinstance(rows, list) else []
     collapsed_rows = group.get("collapsed_rows")
     if isinstance(collapsed_rows, dict):
+        existing_collapsed_row_counts = (
+            group.get("collapsed_row_counts")
+            if isinstance(group.get("collapsed_row_counts"), dict)
+            else {}
+        )
         compact["collapsed_row_counts"] = {
-            str(row_type): len(rows)
+            str(row_type): int_value(existing_collapsed_row_counts.get(str(row_type)), len(rows))
             for row_type, rows in collapsed_rows.items()
             if isinstance(rows, list)
         }
@@ -3297,8 +3450,9 @@ def _compact_workbench_group_for_summary_page(group: dict[str, Any]) -> dict[str
 
 
 def _compact_workbench_row_for_summary_page(row: dict[str, Any]) -> dict[str, Any]:
+    compact_source = _normalize_workbench_invoice_display_fields(row)
     return without_keys(
-        dict(row),
+        compact_source,
         {
             "detail_fields",
             "raw_payload",
@@ -3311,6 +3465,68 @@ def _compact_workbench_row_for_summary_page(row: dict[str, Any]) -> dict[str, An
             "full_text",
         },
     )
+
+
+def _normalize_workbench_invoice_display_fields(row: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(row)
+    if text(normalized.get("type")) != "invoice":
+        return normalized
+    detail_fields = normalized.get("detail_fields")
+    detail_fields = detail_fields if isinstance(detail_fields, dict) else {}
+    summary_fields = normalized.get("summary_fields")
+    summary_fields = summary_fields if isinstance(summary_fields, dict) else {}
+
+    _set_workbench_display_value(
+        normalized,
+        "invoice_code",
+        detail_fields.get("发票代码"),
+        summary_fields.get("发票代码"),
+    )
+    _set_workbench_display_value(
+        normalized,
+        "invoice_no",
+        normalized.get("digital_invoice_no"),
+        detail_fields.get("发票号码"),
+        detail_fields.get("数电发票号码"),
+        summary_fields.get("发票号码"),
+        summary_fields.get("数电发票号码"),
+    )
+    _set_workbench_display_value(
+        normalized,
+        "digital_invoice_no",
+        detail_fields.get("数电发票号码"),
+        summary_fields.get("数电发票号码"),
+    )
+    _set_workbench_display_value(
+        normalized,
+        "tax_rate",
+        summary_fields.get("税率"),
+        detail_fields.get("税率"),
+        detail_fields.get("tax_rate"),
+    )
+    _set_workbench_display_value(
+        normalized,
+        "tax_amount",
+        summary_fields.get("税额"),
+        detail_fields.get("税额"),
+        detail_fields.get("tax_amount"),
+    )
+    return normalized
+
+
+def _set_workbench_display_value(row: dict[str, Any], key: str, *fallback_values: Any) -> None:
+    current = text(row.get(key))
+    if current and current not in WORKBENCH_FILTER_PLACEHOLDERS:
+        return
+    row[key] = _first_workbench_display_value(*fallback_values)
+
+
+def _first_workbench_display_value(*values: Any) -> str:
+    for value in values:
+        normalized = text(value)
+        if normalized and normalized not in WORKBENCH_FILTER_PLACEHOLDERS:
+            return normalized
+    return "—"
 
 
 def _workbench_group_sort_keys(group: dict[str, Any]) -> dict[str, str | None]:

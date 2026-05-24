@@ -51,6 +51,45 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         )
         self.assertNotIn("tax_offset_read_model", [domain["domain"] for domain in plan["domains"]])
 
+    def test_bank_transaction_category_changed_maps_workbench_pending_cost_and_search_domains(self) -> None:
+        service = DerivedDataLifecycleService()
+
+        plan = service.plan_event("bank_transaction_category_changed", months=["2026-03"])
+
+        self.assertEqual(plan["affected_scopes"], ["2026-03", "all"])
+        self.assertEqual(
+            [domain["domain"] for domain in plan["domains"]],
+            [
+                "workbench_read_model",
+                "workbench_candidate_matches",
+                "workbench_matching_dirty_scopes",
+                "pending_invoice_read_model",
+                "cost_statistics_read_model",
+                "search_cache",
+            ],
+        )
+        self.assertIn("workbench_matching", plan["will_enqueue_jobs"])
+
+    def test_manual_invoice_confirmed_maps_invoice_workbench_tax_cost_pending_and_search_domains(self) -> None:
+        service = DerivedDataLifecycleService()
+
+        plan = service.plan_event("pending_invoice_manual_invoice_confirmed", months=["2026-05"])
+
+        self.assertEqual(plan["affected_scopes"], ["2026-05", "all"])
+        self.assertEqual(
+            [domain["domain"] for domain in plan["domains"]],
+            [
+                "workbench_read_model",
+                "workbench_matching_dirty_scopes",
+                "pending_invoice_read_model",
+                "tax_offset_read_model",
+                "tax_offset_month_cache",
+                "cost_statistics_read_model",
+                "search_cache",
+            ],
+        )
+        self.assertIn("tax_offset_cache_warmup", plan["will_enqueue_jobs"])
+
     def test_oa_rebuilt_maps_oa_workbench_candidate_tax_cost_and_historical_reconcile_domains(self) -> None:
         service = DerivedDataLifecycleService()
 
@@ -158,6 +197,13 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "oa_attachment_invoice_cache_updated",
                 "pair_relation_changed",
                 "exception_case_changed",
+                "bank_transaction_category_changed",
+                "pending_invoice_manual_invoice_confirmed",
+                "no_oa_bank_batch_changed",
+                "batch_accounting_relation_changed",
+                "turnover_relation_changed",
+                "tax_certified_import_confirmed",
+                "etc_business_batch_changed",
                 "settings_reset_completed",
                 "project_scope_changed",
                 "manual_derived_cache_cleanup",
@@ -173,6 +219,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "cost_statistics_read_model",
                 "tax_offset_read_model",
                 "tax_offset_month_cache",
+                "pending_invoice_read_model",
                 "search_cache",
                 "oa_adapter_records_cache",
                 "file_import_sessions",

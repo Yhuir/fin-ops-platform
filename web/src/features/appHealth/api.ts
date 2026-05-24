@@ -1,5 +1,5 @@
 import { apiUrl } from "../../app/runtime";
-import { readOATokenCookie } from "../session/api";
+import { ApiClientError, apiRequestJson } from "../apiClient";
 import type {
   ApiAppHealthPayload,
   ApiOaSyncStatus,
@@ -9,34 +9,24 @@ import type {
   OperationsDashboardPayload,
 } from "./types";
 
-function withAuthHeaders(headers?: HeadersInit) {
-  const nextHeaders = new Headers(headers ?? undefined);
-  const token = readOATokenCookie();
-  if (token && !nextHeaders.has("Authorization")) {
-    nextHeaders.set("Authorization", `Bearer ${token}`);
-  }
-  return nextHeaders;
-}
-
 async function requestJson<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(apiUrl(path), {
-    method: "GET",
-    credentials: "include",
-    headers: withAuthHeaders(),
-    signal,
-  });
-  const rawText = await response.text();
-  const payload = rawText.trim().length > 0 ? JSON.parse(rawText) as T : {} as T;
-  if (!response.ok) {
-    const error = new Error(rawText.trim() || "App health request failed");
-    error.name = response.status === 401
-      ? "AppHealthUnauthorizedError"
-      : response.status === 403
-        ? "AppHealthForbiddenError"
-        : "AppHealthRequestError";
+  try {
+    return await apiRequestJson<T>(path, {
+      method: "GET",
+      signal,
+    });
+  } catch (error) {
+    if (error instanceof ApiClientError) {
+      const appHealthError = new Error(error.responseText.trim() || error.message || "App health request failed");
+      appHealthError.name = error.status === 401
+        ? "AppHealthUnauthorizedError"
+        : error.status === 403
+          ? "AppHealthForbiddenError"
+          : "AppHealthRequestError";
+      throw appHealthError;
+    }
     throw error;
   }
-  return payload;
 }
 
 export function mapOaSyncSource(payload: ApiOaSyncStatus | null | undefined): AppHealthOaSyncSource {

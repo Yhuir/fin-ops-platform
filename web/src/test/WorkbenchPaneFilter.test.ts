@@ -333,4 +333,62 @@ describe("Workbench pane display model", () => {
       "民生 9486",
     ]);
   });
+
+  test("intersects bank pane search with dropdown filters on the same row", () => {
+    const groups: WorkbenchCandidateGroup[] = [
+      {
+        id: "split-bank-criteria",
+        groupType: "candidate",
+        matchConfidence: "medium",
+        reason: "test",
+        rows: {
+          oa: [],
+          bank: [
+            buildRow("bank-income-ccb", "bank", {
+              counterparty: "建行客户",
+              amount: "800.00",
+              direction: "收入",
+              paymentAccount: "建行 8106",
+            }),
+            buildRow("bank-expense-ms", "bank", {
+              counterparty: "民生供应商",
+              amount: "500.00",
+              direction: "支出",
+              paymentAccount: "民生 9486",
+            }),
+          ],
+          invoice: [],
+        },
+      },
+      {
+        id: "same-bank-row-criteria",
+        groupType: "candidate",
+        matchConfidence: "medium",
+        reason: "test",
+        rows: {
+          oa: [],
+          bank: [
+            buildRow("bank-expense-ccb", "bank", {
+              counterparty: "建行供应商",
+              amount: "300.00",
+              direction: "支出",
+              paymentAccount: "建行 8106",
+            }),
+          ],
+          invoice: [],
+        },
+      },
+    ];
+    const state = createEmptyWorkbenchZoneDisplayState();
+    state.activePaneId = "bank";
+    state.searchQueryByPane.bank = "建行";
+    state.filtersByPaneAndColumn.bank = {
+      amount: ["支出"],
+    };
+
+    const displayGroups = buildWorkbenchDisplayGroups(groups, state);
+
+    expect(displayGroups.map((group) => group.id)).toEqual(["same-bank-row-criteria"]);
+    expect(displayGroups[0].rows.bank.map((row) => row.id)).toEqual(["bank-expense-ccb"]);
+  });
 });

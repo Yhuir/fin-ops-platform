@@ -237,6 +237,7 @@ export type WorkbenchGroupsSort = `${WorkbenchRecordType}:asc` | `${WorkbenchRec
 
 export type WorkbenchGroupsPageQuery = {
   search?: string;
+  searchByPane?: Partial<Record<WorkbenchRecordType, string>>;
   status?: string;
   sourceKind?: string;
   sort?: WorkbenchGroupsSort;

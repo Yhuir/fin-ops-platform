@@ -40,6 +40,7 @@ import AppDialog from "../components/common/AppDialog";
 import PageScaffold from "../components/common/PageScaffold";
 import StatePanel from "../components/common/StatePanel";
 import { useBackgroundJobProgress } from "../features/backgroundJobs/BackgroundJobProgressProvider";
+import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
 import {
   confirmEtcBatchSubmitted,
   confirmEtcReconciliationTask,
@@ -367,6 +368,11 @@ function isEtcBusinessBatchNotFoundError(error: unknown, batchId?: string) {
     return true;
   }
   return /ETC business batch not found:/i.test(message);
+}
+
+function emitEtcBusinessDomainUpdated(detail: { affectedMonths?: string[]; source: string }) {
+  emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.etcBusinessBatchUpdated, detail);
+  emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.invoiceFactUpdated, detail);
 }
 
 type UploadBlockProps = {
@@ -751,6 +757,10 @@ export default function EtcTicketManagementPage() {
       return;
     }
     completedImportJobs.forEach((job) => refreshedImportJobIdsRef.current.add(job.jobId));
+    emitEtcBusinessDomainUpdated({
+      affectedMonths: completedImportJobs.flatMap((job) => job.affectedMonths ?? []),
+      source: "etc_import_job_completed",
+    });
     void loadBatches();
     if (activeStatus === "unsubmitted") {
       void loadReconciliationTasks();
@@ -1601,6 +1611,7 @@ export default function EtcTicketManagementPage() {
       }
     }
     removeDeletedBatchFromState(plan.batchId);
+    emitEtcBusinessDomainUpdated({ source: "etc_business_batch_delete" });
   };
 
   const handleDeleteConfirmed = async () => {
@@ -1677,6 +1688,7 @@ export default function EtcTicketManagementPage() {
         expectedVersion: currentBusinessBatch.version,
       });
       mergeBusinessBatch(result);
+      emitEtcBusinessDomainUpdated({ source: "etc_business_batch_oa_draft_create" });
       setDraftResult({
         batchId: result.businessBatchId,
         etcBatchId: result.externalEtcBatchId,
@@ -1700,6 +1712,7 @@ export default function EtcTicketManagementPage() {
     } else {
       await markEtcBatchNotSubmitted(draftResult.batchId);
     }
+    emitEtcBusinessDomainUpdated({ source: submitted ? "etc_batch_submitted" : "etc_batch_mark_not_submitted" });
     setCreateDialogOpen(false);
     setDraftResult(null);
     await loadBatches();
@@ -1734,6 +1747,7 @@ export default function EtcTicketManagementPage() {
     try {
       const result = await refreshEtcBusinessBatchOaStatus(target.businessBatchId, { expectedVersion: target.version });
       mergeBusinessBatch(result);
+      emitEtcBusinessDomainUpdated({ source: "etc_business_batch_oa_status_refresh" });
     } catch (caught) {
       setActionError(caught instanceof Error ? caught.message : "OA 检测刷新失败。");
     } finally {
@@ -1763,6 +1777,7 @@ export default function EtcTicketManagementPage() {
         expectedVersion: target.version,
       });
       mergeBusinessBatch(result);
+      emitEtcBusinessDomainUpdated({ source: "etc_business_batch_manual_oa_status" });
       setManualOaReason("");
       setManualOaPanelOpen(false);
     } catch (caught) {
@@ -1778,6 +1793,7 @@ export default function EtcTicketManagementPage() {
     }
     setActionError(null);
     await markEtcBatchNotSubmitted(selectedBatchId);
+    emitEtcBusinessDomainUpdated({ source: "etc_batch_revoke_submitted" });
     setRevokeDialogOpen(false);
     await loadBatches();
   };

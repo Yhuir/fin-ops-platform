@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import MuiProviders from "../app/MuiProviders";
 import { sidebarGroups } from "../components/shell/sidebarItems";
 import BatchAccountingPage from "../pages/BatchAccountingPage";
+import { expectCustomEventDetailContaining } from "./eventAssertions";
 
 const unsubmittedPayload = {
   summary: {
@@ -274,9 +275,7 @@ describe("BatchAccountingPage", () => {
         );
       });
       expect(await screen.findByText("已关联批量账务流水与 2 项 OA。")).toBeInTheDocument();
-      expect(relationListener).toHaveBeenCalledWith(expect.objectContaining({
-        detail: { affectedMonths: ["2026-01"] },
-      }));
+      expectCustomEventDetailContaining(relationListener, { affectedMonths: ["2026-01"] });
     } finally {
       window.removeEventListener("workbenchRelationUpdated", relationListener);
     }
@@ -478,9 +477,7 @@ describe("BatchAccountingPage", () => {
         );
       });
       expect(await screen.findByText("已撤回批量账务关联。")).toBeInTheDocument();
-      expect(relationListener).toHaveBeenCalledWith(expect.objectContaining({
-        detail: { affectedMonths: ["2026-02"] },
-      }));
+      expectCustomEventDetailContaining(relationListener, { affectedMonths: ["2026-02"] });
     } finally {
       window.removeEventListener("workbenchRelationUpdated", relationListener);
     }

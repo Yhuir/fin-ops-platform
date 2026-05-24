@@ -15,6 +15,7 @@ import {
 } from "../../features/pendingInvoices/api";
 import type {
   ManualPendingInvoicePreview,
+  ManualPendingInvoiceResult,
   PendingInvoiceDirection,
   PendingInvoiceRow,
 } from "../../features/pendingInvoices/types";
@@ -24,7 +25,7 @@ type ManualInvoiceDialogProps = {
   direction: PendingInvoiceDirection;
   row: PendingInvoiceRow | null;
   onClose: () => void;
-  onConfirmed: (row: PendingInvoiceRow | null) => void;
+  onConfirmed: (result: ManualPendingInvoiceResult) => void;
 };
 
 type FormState = {
@@ -130,7 +131,7 @@ export default function ManualInvoiceDialog({
     setError(null);
     try {
       const result = await confirmManualPendingInvoice(buildRequest(preview.previewId));
-      onConfirmed(result.row);
+      onConfirmed(result);
       setForm(emptyForm);
       setPreview(null);
     } catch (caught) {

@@ -36,6 +36,12 @@ import {
 } from "../features/workbench/api";
 import { fetchNoOaBankBatchDetail, withdrawNoOaBankBatch } from "../features/noOaBankBatches/api";
 import {
+  FINANCE_DOMAIN_EVENTS,
+  emitFinanceDomainEvent,
+  eventAffectedMonths,
+  subscribeFinanceDomainEvent,
+} from "../features/domainEvents";
+import {
   buildWorkbenchServerPageQuery,
   buildWorkbenchDisplayGroups,
   buildWorkbenchPaneRows,
@@ -169,7 +175,22 @@ const OA_SYNC_POLL_INTERVAL_MS = 3_000;
 const OA_SYNC_REFRESH_DEBOUNCE_MS = 120;
 
 function isNoOaSummaryRow(row: WorkbenchRecord) {
-  return row.sourceKind === "no_oa_bank_batch_summary";
+  return row.sourceKind === "no_oa_bank_batch_summary" || Boolean(noOaSourceBatchId(row));
+}
+
+function noOaSourceBatchId(row: WorkbenchRecord) {
+  return readStringMetadata(row.specialMetadata, "source_batch_id");
+}
+
+function uniqueNoOaBatchRows(rows: WorkbenchRecord[]) {
+  const byBatchId = new Map<string, WorkbenchRecord>();
+  rows.forEach((row) => {
+    const sourceBatchId = noOaSourceBatchId(row);
+    if (sourceBatchId && !byBatchId.has(sourceBatchId)) {
+      byBatchId.set(sourceBatchId, row);
+    }
+  });
+  return Array.from(byBatchId.values());
 }
 
 function readStringMetadata(metadata: Record<string, unknown> | undefined, key: string) {
@@ -180,18 +201,6 @@ function readStringMetadata(metadata: Record<string, unknown> | undefined, key: 
 function readNumberMetadata(metadata: Record<string, unknown> | undefined, key: string) {
   const value = metadata?.[key];
   return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function eventAffectedMonths(event: Event) {
-  const detail = event instanceof CustomEvent && event.detail && typeof event.detail === "object"
-    ? event.detail as { affectedMonths?: unknown; affected_months?: unknown }
-    : {};
-  const rawMonths = Array.isArray(detail.affectedMonths)
-    ? detail.affectedMonths
-    : Array.isArray(detail.affected_months)
-      ? detail.affected_months
-      : [];
-  return rawMonths.map((month) => String(month).trim()).filter(Boolean);
 }
 
 function cleanWorkbenchScopeList(value: unknown) {
@@ -653,7 +662,10 @@ export default function ReconciliationWorkbenchPage() {
       : readStringMetadata(row.specialMetadata, "scope_month")
         ? [readStringMetadata(row.specialMetadata, "scope_month") as string]
         : [];
-    window.dispatchEvent(new CustomEvent("workbenchRelationUpdated", { detail: { affectedMonths } }));
+    emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
+      affectedMonths,
+      source: "workbench_no_oa_withdraw",
+    });
     clearPairedSelection();
     refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
     return "已撤回免OA批次。";
@@ -891,13 +903,16 @@ export default function ReconciliationWorkbenchPage() {
         refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
       }
     };
-    window.addEventListener("turnoverRelationUpdated", handleRelationUpdated);
-    window.addEventListener("workbenchRelationUpdated", handleRelationUpdated);
-    window.addEventListener("bankTransactionCategoryUpdated", handleBankCategoryUpdated);
+    const unsubscribeTurnover = subscribeFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverRelationUpdated, handleRelationUpdated);
+    const unsubscribeWorkbench = subscribeFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, handleRelationUpdated);
+    const unsubscribeBankCategory = subscribeFinanceDomainEvent(
+      FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated,
+      handleBankCategoryUpdated,
+    );
     return () => {
-      window.removeEventListener("turnoverRelationUpdated", handleRelationUpdated);
-      window.removeEventListener("workbenchRelationUpdated", handleRelationUpdated);
-      window.removeEventListener("bankTransactionCategoryUpdated", handleBankCategoryUpdated);
+      unsubscribeTurnover();
+      unsubscribeWorkbench();
+      unsubscribeBankCategory();
     };
   }, [currentMonth, refreshWorkbenchDataInBackground]);
 
@@ -1442,9 +1457,10 @@ export default function ReconciliationWorkbenchPage() {
           const affectedRowIds = actionAffectedRowIds(result);
           clearOpenSelection();
           applyLocalConfirmLink(affectedRowIds.length > 0 ? affectedRowIds : rowIds, result.case_id || caseId);
-          window.dispatchEvent(new CustomEvent("workbenchRelationUpdated", {
-            detail: { affectedMonths: actionAffectedMonths(result) },
-          }));
+          emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
+            affectedMonths: actionAffectedMonths(result),
+            source: "workbench_confirm_link",
+          });
           refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
           return result.message;
         },
@@ -1463,9 +1479,10 @@ export default function ReconciliationWorkbenchPage() {
         clearPairedSelection();
         clearOpenSelection();
         applyLocalWithdrawLink(rowIds, preview.after.groups);
-        window.dispatchEvent(new CustomEvent("workbenchRelationUpdated", {
-          detail: { affectedMonths: actionAffectedMonths(result) },
-        }));
+        emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
+          affectedMonths: actionAffectedMonths(result),
+          source: "workbench_withdraw_link",
+        });
         return result.message;
       },
     });
@@ -1554,7 +1571,7 @@ export default function ReconciliationWorkbenchPage() {
       openActionResultDialog("请先选择已配对记录。");
       return;
     }
-    const selectedNoOaSummaryRows = selectedPairedRows.filter(isNoOaSummaryRow);
+    const selectedNoOaSummaryRows = uniqueNoOaBatchRows(selectedPairedRows.filter(isNoOaSummaryRow));
     if (selectedNoOaSummaryRows.length > 0) {
       await runBlockingAction({
         loadingMessage: "正在撤回免OA批次...",

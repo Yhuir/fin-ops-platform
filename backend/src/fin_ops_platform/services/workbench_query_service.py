@@ -667,6 +667,11 @@ class WorkbenchQueryService:
         text = str(value or "").strip()
         return "" if text in {"—", "--"} else text
 
+    @staticmethod
+    def _invoice_identity_display_value(value: Any) -> str:
+        text = str(value or "").strip()
+        return text if text and text not in {"—", "--"} else "—"
+
     @classmethod
     def _attachment_invoice_source_value(cls, attachment_invoice: dict[str, Any], key: str) -> str | None:
         value = cls._clean_identity_part(attachment_invoice.get(key))
@@ -1418,6 +1423,9 @@ class WorkbenchQueryService:
         relation: dict[str, str],
         detail_fields: dict[str, str],
     ) -> dict[str, Any]:
+        invoice_code = self._invoice_identity_display_value(detail_fields.get("发票代码"))
+        invoice_no = self._invoice_identity_display_value(detail_fields.get("发票号码"))
+        digital_invoice_no = self._invoice_identity_display_value(detail_fields.get("数电发票号码"))
         return {
             "id": row_id,
             "type": "invoice",
@@ -1426,6 +1434,9 @@ class WorkbenchQueryService:
             "seller_name": seller_name,
             "buyer_tax_no": buyer_tax_no,
             "buyer_name": buyer_name,
+            "invoice_code": invoice_code,
+            "invoice_no": invoice_no,
+            "digital_invoice_no": digital_invoice_no,
             "issue_date": issue_date,
             "amount": amount,
             "tax_rate": tax_rate,

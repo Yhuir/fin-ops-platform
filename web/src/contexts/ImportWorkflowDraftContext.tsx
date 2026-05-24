@@ -1,4 +1,4 @@
-import { type Dispatch, type ReactNode, type SetStateAction, useCallback } from "react";
+import { type Dispatch, type ReactNode, type SetStateAction, useCallback, useMemo } from "react";
 
 import type { EtcImportPreviewResult } from "../features/etc/types";
 import type { ImportWorkflowMode } from "../features/imports/importRoutes";
@@ -91,7 +91,7 @@ export function useImportWorkflowDraft(mode: ImportWorkflowMode) {
 
   const updateDraft = useCallback((updater: SetStateAction<ImportWorkflowDraft>) => {
     memoryDraft.setValue(updater);
-  }, [memoryDraft]);
+  }, [memoryDraft.setValue]);
 
   const createSetter = useCallback(<Key extends keyof ImportWorkflowDraft>(key: Key) => (
     (updater: SetStateAction<ImportWorkflowDraft[Key]>) => {
@@ -106,12 +106,12 @@ export function useImportWorkflowDraft(mode: ImportWorkflowMode) {
 
   const clearPersistedSession = useCallback(() => {
     persistedSession.reset();
-  }, [persistedSession]);
+  }, [persistedSession.reset]);
 
   const resetDraft = useCallback(() => {
     memoryDraft.reset();
     persistedSession.reset();
-  }, [memoryDraft, persistedSession]);
+  }, [memoryDraft.reset, persistedSession.reset]);
 
   const readPersistedSessionId = useCallback(() => (
     supportsSessionRestore(mode) ? persistedSession.value.sessionId : null
@@ -122,17 +122,9 @@ export function useImportWorkflowDraft(mode: ImportWorkflowMode) {
       return;
     }
     persistedSession.setValue({ sessionId });
-  }, [mode, persistedSession]);
+  }, [mode, persistedSession.setValue]);
 
-  return {
-    draft: memoryDraft.value,
-    restoreState: memoryDraft.restoreState,
-    persistedSessionRestoreState: persistedSession.restoreState,
-    updateDraft,
-    resetDraft,
-    clearPersistedSession,
-    readPersistedSessionId,
-    persistSessionId,
+  const draftSetters = useMemo(() => ({
     setSelectedFiles: createSetter("selectedFiles"),
     setFileSelections: createSetter("fileSelections"),
     setPreviewPayload: createSetter("previewPayload"),
@@ -143,5 +135,17 @@ export function useImportWorkflowDraft(mode: ImportWorkflowMode) {
     setErrorMessage: createSetter("errorMessage"),
     setIsPreviewing: createSetter("isPreviewing"),
     setIsConfirming: createSetter("isConfirming"),
+  }), [createSetter]);
+
+  return {
+    draft: memoryDraft.value,
+    restoreState: memoryDraft.restoreState,
+    persistedSessionRestoreState: persistedSession.restoreState,
+    updateDraft,
+    resetDraft,
+    clearPersistedSession,
+    readPersistedSessionId,
+    persistSessionId,
+    ...draftSetters,
   };
 }

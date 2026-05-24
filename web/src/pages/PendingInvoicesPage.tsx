@@ -15,7 +15,9 @@ import PendingInvoicesTable from "../components/pendingInvoices/PendingInvoicesT
 import {
   fetchPendingInvoiceRows,
 } from "../features/pendingInvoices/api";
+import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
 import type {
+  ManualPendingInvoiceResult,
   PendingInvoiceDirection,
   PendingInvoiceFilter,
   PendingInvoiceRow,
@@ -176,8 +178,19 @@ export default function PendingInvoicesPage() {
     "no_invoice_required",
   ], []);
 
-  function handleConfirmed(updatedRow: PendingInvoiceRow | null) {
+  function handleConfirmed(result: ManualPendingInvoiceResult) {
     setDialogRow(null);
+    emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.invoiceFactUpdated, {
+      affectedMonths: result.affectedMonths,
+      affectedRowIds: [...result.affectedTransactionIds, ...result.affectedInvoiceIds],
+      source: "pending_invoice_manual_invoice",
+    });
+    emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
+      affectedMonths: result.affectedMonths,
+      affectedRowIds: result.affectedTransactionIds,
+      source: "pending_invoice_manual_invoice",
+    });
+    const updatedRow = result.row;
     if (updatedRow) {
       setRows((current) => current.map((row) => (row.id === updatedRow.id ? updatedRow : row)));
       return;

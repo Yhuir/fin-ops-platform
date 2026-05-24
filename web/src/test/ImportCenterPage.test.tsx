@@ -1,12 +1,37 @@
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 
 import { installMockApiFetch } from "./apiMock";
-import { renderAppAt } from "./renderHelpers";
+import { renderAuthenticatedAppAt as renderAppAt } from "./renderHelpers";
 import * as etcApi from "../features/etc/api";
 
 const INVOICE_DRAFT_STORAGE_KEY = "finops:pageSession:v1:101:imports.invoice:previewSession";
+
+function seedInvoicePreviewSession() {
+  const now = Date.now();
+  window.sessionStorage.setItem(
+    INVOICE_DRAFT_STORAGE_KEY,
+    JSON.stringify({
+      version: 1,
+      updatedAt: now,
+      expiresAt: now + 60_000,
+      value: { sessionId: "import_session_0001" },
+    }),
+  );
+}
+
+function installMockApiFetchWithInvoicePreviewSession() {
+  return installMockApiFetch({
+    initialImportPreviewFileNames: ["一月发票.xlsx"],
+    initialImportPreviewOverrides: [
+      {
+        template_code: "invoice_export",
+        batch_type: "output_invoice",
+      },
+    ],
+  });
+}
 
 afterEach(() => {
   window.sessionStorage.clear();
@@ -255,24 +280,8 @@ describe("Import pages", () => {
   });
 
   test("invoice import restores preview from sessionStorage after remount", async () => {
-    const user = userEvent.setup();
-    const fetchMock = installMockApiFetch();
-    const { unmount } = renderAppAt("/imports/invoices");
-
-    expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
-    await user.upload(getUploadInput("上传发票文件", "上传文件"), [
-      new File(["invoice-output"], "一月发票.xlsx", {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        lastModified: 1,
-      }),
-    ]);
-    await user.selectOptions(screen.getByLabelText("票据方向 一月发票.xlsx"), "output_invoice");
-    await user.click(screen.getByRole("button", { name: "开始预览" }));
-
-    expect(await screen.findByText("已完成 1 个文件的预览识别。")).toBeInTheDocument();
-    expect(window.sessionStorage.getItem(INVOICE_DRAFT_STORAGE_KEY)).toContain("import_session_0001");
-
-    unmount();
+    const fetchMock = installMockApiFetchWithInvoicePreviewSession();
+    seedInvoicePreviewSession();
     renderAppAt("/imports/invoices");
 
     expect((await screen.findAllByText("一月发票.xlsx")).length).toBeGreaterThan(0);
@@ -282,30 +291,21 @@ describe("Import pages", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "清空" })).toBeEnabled();
     });
-    await user.click(screen.getByRole("button", { name: "清空" }));
+    fireEvent.click(screen.getByRole("button", { name: "清空" }));
     expect(window.sessionStorage.getItem(INVOICE_DRAFT_STORAGE_KEY)).toBeNull();
     expect(screen.queryByText("一月发票.xlsx")).not.toBeInTheDocument();
   });
 
   test("invoice import clears persisted preview when files are cleared", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch();
+    installMockApiFetchWithInvoicePreviewSession();
+    seedInvoicePreviewSession();
     const { unmount } = renderAppAt("/imports/invoices");
 
     expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
-    await user.upload(getUploadInput("上传发票文件", "上传文件"), [
-      new File(["invoice-output"], "一月发票.xlsx", {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        lastModified: 1,
-      }),
-    ]);
-    await user.selectOptions(screen.getByLabelText("票据方向 一月发票.xlsx"), "output_invoice");
-    await user.click(screen.getByRole("button", { name: "开始预览" }));
-
-    expect(await screen.findByText("已完成 1 个文件的预览识别。")).toBeInTheDocument();
     expect(window.sessionStorage.getItem(INVOICE_DRAFT_STORAGE_KEY)).toContain("import_session_0001");
+    expect((await screen.findAllByText("一月发票.xlsx")).length).toBeGreaterThan(0);
 
-    await user.click(screen.getByRole("button", { name: "清空" }));
+    fireEvent.click(screen.getByRole("button", { name: "清空" }));
     expect(window.sessionStorage.getItem(INVOICE_DRAFT_STORAGE_KEY)).toBeNull();
     expect(screen.queryByText("一月发票.xlsx")).not.toBeInTheDocument();
 

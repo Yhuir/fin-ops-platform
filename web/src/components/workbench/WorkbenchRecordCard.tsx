@@ -268,7 +268,7 @@ function renderCellValue(
   }
 
   if (paneId === "invoice" && column.key === "issueDate") {
-    return renderInvoiceIdentityValue(row.tableValues.invoiceCode ?? "", row.tableValues.invoiceNo ?? "", value);
+    return renderInvoiceIdentityValue(row.tableValues.invoiceNo ?? "", value);
   }
 
   if (paneId === "invoice" && column.key === "amount") {
@@ -739,17 +739,13 @@ function renderInvoiceAmountValue(amount: string, taxRate: string, taxAmount: st
   );
 }
 
-function renderInvoiceIdentityValue(invoiceCode: string, invoiceNo: string, issueDate: string) {
-  const normalizedCode = normalizeDisplayText(invoiceCode);
+function renderInvoiceIdentityValue(invoiceNo: string, issueDate: string) {
   const normalizedNo = normalizeDisplayText(invoiceNo);
   const hasIssueDate = issueDate !== "--" && issueDate !== "—" && issueDate !== "";
 
   return (
     <span className="compound-cell-value invoice-identity-value">
-      <span className="compound-cell-primary cell-text-value cell-text-value-full invoice-identity-code">
-        {`${normalizedCode} /`}
-      </span>
-      <span className="compound-cell-secondary">
+      <span className="compound-cell-primary">
         <span className="cell-text-value cell-text-value-full invoice-identity-no">{normalizedNo}</span>
       </span>
       {hasIssueDate ? (

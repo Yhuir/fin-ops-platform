@@ -7,6 +7,7 @@ import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 import type { SessionPayload } from "../features/session/api";
 import TurnoverLedgerPage from "../pages/TurnoverLedgerPage";
+import { expectCustomEventDetailContaining } from "./eventAssertions";
 
 const fullSession: SessionPayload = {
   allowed: true,
@@ -629,8 +630,7 @@ describe("Turnover ledger page", () => {
       expect(requestUrls(fetchMock, "/api/turnover-ledger").length).toBeGreaterThanOrEqual(2);
     });
     await waitFor(() => {
-      const event = extraListener.mock.calls[0]?.[0] as CustomEvent | undefined;
-      expect(event?.detail).toEqual({ relationId: "rel-personal-1" });
+      expectCustomEventDetailContaining(extraListener, { relationId: "rel-personal-1" });
     });
     window.removeEventListener("turnoverLedgerExtraUpdated", extraListener);
   });

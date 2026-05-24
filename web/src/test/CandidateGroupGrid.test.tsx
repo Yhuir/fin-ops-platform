@@ -8,6 +8,7 @@ import { createEmptyWorkbenchZoneDisplayState } from "../features/workbench/grou
 import { getWorkbenchColumns, getWorkbenchPaneGridStyle } from "../features/workbench/tableConfig";
 import type { WorkbenchCandidateGroup, WorkbenchRecord } from "../features/workbench/types";
 import { installMockApiFetch } from "./apiMock";
+import { expectCustomEventDetailContaining } from "./eventAssertions";
 import { renderWorkbenchPage } from "./renderHelpers";
 
 describe("Workbench candidate grouping layout", () => {
@@ -528,8 +529,7 @@ describe("Workbench candidate grouping layout", () => {
         "/api/workbench/actions/cancel-link",
         expect.anything(),
       );
-      expect(relationListener).toHaveBeenCalled();
-      expect((relationListener.mock.calls[0][0] as CustomEvent).detail).toEqual({ affectedMonths: ["2026-03"] });
+      expectCustomEventDetailContaining(relationListener, { affectedMonths: ["2026-03"] });
     } finally {
       window.removeEventListener("workbenchRelationUpdated", relationListener);
     }

@@ -205,7 +205,7 @@ OA_INVOICE_OFFSET_TAG = "冲"
 CASH_PASS_THROUGH_MODE = "cash_pass_through"
 CASH_TICKET_PURCHASE_MODE = "cash_ticket_purchase"
 PERSONAL_ADVANCE_REPAYMENT_MODE = "personal_advance_repayment_settlement"
-WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-11-oa-attachment-evidence-source-groups"
+WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-24-invoice-tax-meta-summary"
 SYSTEM_AUTO_PAIR_RELATION_MODES = {
     OA_INVOICE_OFFSET_AUTO_MATCH_MODE,
 }
@@ -888,6 +888,7 @@ class Application:
                 status=query.get("status", [None])[0],
                 source_kind=query.get("source_kind", [None])[0],
                 search=query.get("search", [None])[0],
+                search_by_pane=query.get("search_by_pane", [None])[0],
                 sort=query.get("sort", [None])[0],
                 detail_level=query.get("detail_level", [None])[0],
                 column_filters=query.get("column_filters", [None])[0],
@@ -1681,6 +1682,7 @@ class Application:
         status: str | None = None,
         source_kind: str | None = None,
         search: str | None = None,
+        search_by_pane: str | None = None,
         sort: str | None = None,
         detail_level: str | None = None,
         column_filters: str | None = None,
@@ -1697,6 +1699,7 @@ class Application:
         try:
             normalized_column_filters = self._normalize_workbench_group_json_query_param(column_filters, "column_filters")
             normalized_time_filters = self._normalize_workbench_group_json_query_param(time_filters, "time_filters")
+            normalized_search_by_pane = self._normalize_workbench_group_json_query_param(search_by_pane, "search_by_pane")
         except ValueError as error:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
@@ -1736,6 +1739,7 @@ class Application:
             status=status,
             source_kind=source_kind,
             search=search,
+            search_by_pane=normalized_search_by_pane,
             sort=sort,
             detail_level=normalized_detail_level,
             column_filters=normalized_column_filters,
@@ -1758,6 +1762,7 @@ class Application:
                 status=status,
                 source_kind=source_kind,
                 search=search,
+                search_by_pane=normalized_search_by_pane,
                 sort=sort,
                 detail_level=normalized_detail_level,
                 column_filters=normalized_column_filters,
@@ -1783,6 +1788,7 @@ class Application:
                 status=status,
                 source_kind=source_kind,
                 search=search,
+                search_by_pane=normalized_search_by_pane,
                 sort=sort,
                 detail_level=normalized_detail_level,
                 column_filters=normalized_column_filters,
@@ -1962,6 +1968,7 @@ class Application:
         status: str | None,
         source_kind: str | None,
         search: str | None,
+        search_by_pane: dict[str, object] | None = None,
         sort: str | None,
         detail_level: str | None,
         column_filters: dict[str, object] | None = None,
@@ -1974,6 +1981,7 @@ class Application:
         if not cache_version:
             return None
         key_payload = {
+            "workbench_read_model_schema_version": WORKBENCH_READ_MODEL_SCHEMA_VERSION,
             "scope": scope_key,
             "zone": zone,
             "page": page or "1",
@@ -1981,11 +1989,12 @@ class Application:
             "status": status or "",
             "source_kind": source_kind or "",
             "search": search or "",
+            "search_by_pane": self._stable_json_value(search_by_pane or {}),
             "sort": sort or "",
             "detail_level": self._normalize_workbench_group_detail_level(detail_level),
             "column_filters": self._stable_json_value(column_filters or {}),
             "time_filters": self._stable_json_value(time_filters or {}),
-            "filter_semantics": "row_any_pane_v1",
+            "filter_semantics": "row_intersection_v2",
         }
         digest = hashlib.sha256(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
         return f"workbench:{cache_version}:groups:{digest}"
@@ -2013,6 +2022,7 @@ class Application:
         status: str | None,
         source_kind: str | None,
         search: str | None,
+        search_by_pane: dict[str, object] | None = None,
         sort: str | None,
         detail_level: str | None,
         column_filters: dict[str, object] | None = None,
@@ -2021,6 +2031,7 @@ class Application:
         if not cache_version:
             return None
         key_payload = {
+            "workbench_read_model_schema_version": WORKBENCH_READ_MODEL_SCHEMA_VERSION,
             "scope": scope_key,
             "zone": zone,
             "page": page or "1",
@@ -2028,11 +2039,12 @@ class Application:
             "status": status or "",
             "source_kind": source_kind or "",
             "search": search or "",
+            "search_by_pane": self._stable_json_value(search_by_pane or {}),
             "sort": sort or "",
             "detail_level": self._normalize_workbench_group_detail_level(detail_level),
             "column_filters": self._stable_json_value(column_filters or {}),
             "time_filters": self._stable_json_value(time_filters or {}),
-            "filter_semantics": "row_any_pane_v1",
+            "filter_semantics": "row_intersection_v2",
         }
         digest = hashlib.sha256(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
         return f"workbench:{cache_version}:groups:{digest}"
@@ -3861,9 +3873,13 @@ class Application:
         ]
         if not normalized_months:
             return
-        self._invalidate_tax_offset_read_model_scopes(normalized_months, reason=reason)
+        self._execute_derived_data_lifecycle_event(
+            "etc_import_confirmed",
+            months=normalized_months,
+            metadata={"source": "etc_invoice_sync", "reason": reason},
+        )
         self._run_workbench_auto_matching_for_scopes(normalized_months, reason=reason)
-        self._persist_state_with_workbench_invalidation(cost_statistics_scope_keys=normalized_months)
+        self._persist_state()
 
     def _refresh_after_historical_etc_repair_sync(self, changed_months: list[str], *, reason: str) -> None:
         normalized_months = [
@@ -3873,9 +3889,12 @@ class Application:
         ]
         if not normalized_months:
             return
-        self._invalidate_tax_offset_read_model_scopes(normalized_months, reason=reason)
-        self._invalidate_workbench_read_model_scopes(["all", *normalized_months])
-        self._persist_state_with_workbench_invalidation(cost_statistics_scope_keys=normalized_months)
+        self._execute_derived_data_lifecycle_event(
+            "etc_business_batch_changed",
+            months=normalized_months,
+            metadata={"source": "historical_etc_repair_sync", "reason": reason},
+        )
+        self._persist_state()
 
     def _handle_api_etc_business_batches(self, query: dict[str, list[str]]) -> Response:
         requested_status = str(query.get("status", [None])[0] or "").strip()
@@ -5657,7 +5676,11 @@ class Application:
             self._workbench_override_service = WorkbenchOverrideService.from_snapshot(previous_snapshot)
             raise StatePersistenceError("工作台状态暂时无法保存，请稍后重试。") from exc
         if changed_scope_keys is not None:
-            self._invalidate_workbench_read_model_scopes(changed_scope_keys)
+            self._execute_derived_data_lifecycle_event(
+                "exception_case_changed",
+                scope_keys=changed_scope_keys,
+                metadata={"source": action_name or "workbench_override_change"},
+            )
             self._schedule_workbench_read_model_persist(
                 changed_scope_keys=changed_scope_keys,
                 request_id=request_id,
@@ -5693,7 +5716,11 @@ class Application:
             self._workbench_override_service = WorkbenchOverrideService.from_snapshot(previous_override_snapshot)
             raise StatePersistenceError("工作台状态暂时无法保存，请稍后重试。") from exc
         if changed_scope_keys is not None:
-            self._invalidate_workbench_read_model_scopes(changed_scope_keys)
+            self._execute_derived_data_lifecycle_event(
+                "exception_case_changed",
+                scope_keys=changed_scope_keys,
+                metadata={"source": action_name or "workbench_exception_change"},
+            )
             self._schedule_workbench_read_model_persist(
                 changed_scope_keys=changed_scope_keys,
                 request_id=request_id,
@@ -5761,7 +5788,11 @@ class Application:
                 month_scope=str(relation.get("month_scope") or "") if isinstance(relation, dict) else month,
             )
         )
-        self._invalidate_workbench_read_model_scopes(changed_scope_keys)
+        self._execute_derived_data_lifecycle_event(
+            "batch_accounting_relation_changed",
+            scope_keys=changed_scope_keys,
+            metadata={"source": "repair_batch_accounting_relation_case_ids"},
+        )
         if isinstance(relation, dict):
             self._schedule_workbench_pair_relation_persist(
                 changed_case_ids=[str(relation.get("case_id") or "")],
@@ -6258,8 +6289,11 @@ class Application:
 
     def _finalize_pending_invoice_manual_invoice(self, event: dict[str, object]) -> None:
         affected_months = [str(month) for month in list(event.get("affected_months") or []) if str(month).strip()]
-        scope_keys = ["all", *affected_months]
-        self._invalidate_workbench_read_model_scopes(scope_keys)
+        self._execute_derived_data_lifecycle_event(
+            "pending_invoice_manual_invoice_confirmed",
+            months=affected_months,
+            metadata={"source": "pending_invoice_manual_invoice", **dict(event)},
+        )
         projection = getattr(self, "_bank_details_relation_tag_projection_service", None)
         if projection is not None:
             try:
@@ -6267,8 +6301,6 @@ class Application:
                 setattr(projection, "_index_cache", {})
             except Exception:
                 pass
-        self._search_service.clear_cache()
-        self._invalidate_tax_offset_read_model_scopes(affected_months, reason="pending_invoice_manual_invoice")
 
     def _handle_api_workbench_ignored(self, month: str | None) -> Response:
         current_month = month or "all"
@@ -6596,8 +6628,11 @@ class Application:
         row_ids: list[str],
     ) -> None:
         scope_keys = self._oa_manual_import_affected_scope_keys(result, row_ids=row_ids)
-        self._invalidate_workbench_read_model_scopes(scope_keys)
-        self._search_service.clear_cache()
+        self._execute_derived_data_lifecycle_event(
+            "oa_attachment_invoice_cache_updated",
+            scope_keys=scope_keys,
+            metadata={"source": "oa_manual_import_mutation"},
+        )
         invalidate_records_cache = getattr(self._workbench_query_service._oa_adapter, "invalidate_records_cache", None)
         if callable(invalidate_records_cache):
             invalidate_records_cache([scope_key for scope_key in scope_keys if scope_key != "all"])
@@ -8848,7 +8883,11 @@ class Application:
             for case_id in list(repair_result.get("changed_case_ids") or [])
             if str(case_id).strip()
         ]
-        self._invalidate_workbench_read_model_scopes(changed_scope_keys)
+        self._execute_derived_data_lifecycle_event(
+            "batch_accounting_relation_changed",
+            scope_keys=changed_scope_keys,
+            metadata={"source": "submit_batch_accounting"},
+        )
         self._schedule_workbench_pair_relation_persist(
             changed_case_ids=changed_case_ids,
             action_name="repair_batch_accounting_relation_case_ids",
@@ -8903,7 +8942,11 @@ class Application:
             )
         )
         changed_case_ids = [str(case_id) for case_id in list(result.get("changed_case_ids") or []) if str(case_id).strip()]
-        self._invalidate_workbench_read_model_scopes(changed_scope_keys)
+        self._execute_derived_data_lifecycle_event(
+            "batch_accounting_relation_changed",
+            scope_keys=changed_scope_keys,
+            metadata={"source": "withdraw_batch_accounting"},
+        )
         try:
             self._schedule_workbench_pair_relation_persist(
                 changed_case_ids=changed_case_ids,
@@ -8963,7 +9006,11 @@ class Application:
             )
         )
         changed_case_ids = [str(case_id) for case_id in list(result.get("changed_case_ids") or []) if str(case_id).strip()]
-        self._invalidate_workbench_read_model_scopes(changed_scope_keys)
+        self._execute_derived_data_lifecycle_event(
+            "batch_accounting_relation_changed",
+            scope_keys=changed_scope_keys,
+            metadata={"source": "withdraw_batch_accounting"},
+        )
         self._schedule_workbench_pair_relation_persist(
             changed_case_ids=changed_case_ids,
             action_name="withdraw_batch_accounting",
@@ -9305,18 +9352,19 @@ class Application:
             if SEARCH_MONTH_RE.match(str(month).strip())
         ]
         scope_keys = ["all", *normalized_months]
-        read_model_scope_keys = self._invalidate_workbench_read_model_scopes(
-            scope_keys,
-            schedule_cost_statistics_warmup=False,
+        self._execute_derived_data_lifecycle_event(
+            "no_oa_bank_batch_changed",
+            months=normalized_months,
+            metadata={"source": "no_oa_bank_batch"},
+            schedule_cost_warmup=False,
         )
-        self._search_service.clear_cache()
         if persist:
             if changed_case_ids:
                 self._persist_workbench_pair_relations(changed_case_ids=changed_case_ids)
             self._persist_no_oa_bank_batches_best_effort(operation="no_oa_bank_batch_updated")
             self._persist_workbench_read_models_best_effort(
                 snapshot=self._workbench_read_model_service.snapshot(),
-                changed_scope_keys=read_model_scope_keys,
+                changed_scope_keys=self._expand_workbench_read_model_scope_keys_for_base_scopes(scope_keys),
                 operation="no_oa_bank_batch_updated",
             )
         return bool(normalized_months)
@@ -9633,25 +9681,11 @@ class Application:
         if not normalized_months:
             self._search_service.clear_cache()
             return False
-        scope_keys = ["all", *normalized_months]
-        read_model_scope_keys = self._invalidate_workbench_read_model_scopes(scope_keys)
-        for month in normalized_months:
-            self._workbench_candidate_match_service.delete_month(month)
-        self._workbench_matching_dirty_scope_service.mark_dirty(
-            normalized_months,
-            reason="bank_transaction_category_updated",
+        self._execute_derived_data_lifecycle_event(
+            "bank_transaction_category_changed",
+            months=normalized_months,
+            metadata={"source": "bank_transaction_categories"},
         )
-        self._search_service.clear_cache()
-        self._persist_workbench_candidate_matches_best_effort(
-            operation="bank_transaction_category_updated",
-            changed_scope_months=normalized_months,
-        )
-        self._persist_workbench_read_models_best_effort(
-            snapshot=self._workbench_read_model_service.snapshot(),
-            changed_scope_keys=read_model_scope_keys,
-            operation="bank_transaction_category_updated",
-        )
-        self._persist_workbench_matching_dirty_scopes_best_effort(operation="bank_transaction_category_updated")
         return True
 
     def _finalize_bank_transaction_tag_settings_update(self, event: dict[str, object]) -> None:
@@ -9774,9 +9808,15 @@ class Application:
 
     def _execute_tax_certified_import_confirm(self, session_id: str) -> dict[str, object]:
         batch = self._tax_certified_import_service.confirm_session(session_id)
-        self._invalidate_tax_offset_read_model_scopes(
-            list(getattr(batch, "months", []) or []),
-            reason="tax_certified_import_confirm",
+        self._execute_derived_data_lifecycle_event(
+            "tax_certified_import_confirmed",
+            months=list(getattr(batch, "months", []) or []),
+            include_all=False,
+            metadata={
+                "source": "tax_certified_import_confirm",
+                "reason": "tax_certified_import_confirm",
+                "session_id": session_id,
+            },
         )
         return {
             "success": True,
@@ -10012,7 +10052,11 @@ class Application:
             resolved_case_id,
         ]
         invalidate_started_at = monotonic()
-        self._invalidate_workbench_read_model_scopes(changed_scope_keys)
+        self._execute_derived_data_lifecycle_event(
+            "pair_relation_changed",
+            scope_keys=changed_scope_keys,
+            metadata={"source": action_name, "case_id": resolved_case_id},
+        )
         if request_id is not None:
             self._emit_workbench_action_timing(
                 request_id=request_id,
@@ -10183,7 +10227,11 @@ class Application:
             )
         )
         invalidate_started_at = monotonic()
-        self._invalidate_workbench_read_model_scopes(changed_scope_keys)
+        self._execute_derived_data_lifecycle_event(
+            "pair_relation_changed",
+            scope_keys=changed_scope_keys,
+            metadata={"source": action_name, "case_id": str(active_relation.get("case_id") or "")},
+        )
         if request_id is not None:
             self._emit_workbench_action_timing(
                 request_id=request_id,
@@ -10273,7 +10321,11 @@ class Application:
                 month_scope=str(active_relation.get("month_scope") or ""),
             )
         )
-        self._invalidate_workbench_read_model_scopes(changed_scope_keys)
+        self._execute_derived_data_lifecycle_event(
+            "pair_relation_changed",
+            scope_keys=changed_scope_keys,
+            metadata={"source": action_name, "case_id": str(active_relation.get("case_id") or "")},
+        )
         changed_case_ids = [
             str(active_relation.get("case_id") or ""),
             *[str(relation.get("case_id") or "") for relation in restored_relations],
@@ -10579,7 +10631,11 @@ class Application:
                 {"error": "invalid_personal_advance_repayment_request", "message": str(exc)},
             )
 
-        self._invalidate_workbench_read_model_scopes(changed_scope_keys)
+        self._execute_derived_data_lifecycle_event(
+            "pair_relation_changed",
+            scope_keys=changed_scope_keys,
+            metadata={"source": action_name},
+        )
         self._schedule_workbench_pair_relation_persist(
             changed_case_ids=[
                 *[str(before_relation.get("case_id") or "") for before_relation in before_relations],
@@ -14452,8 +14508,11 @@ class Application:
 
         if not changed:
             return
-        self._search_service.clear_cache()
-        self._invalidate_workbench_read_model_scopes(list(changed_scope_keys))
+        self._execute_derived_data_lifecycle_event(
+            "pair_relation_changed",
+            scope_keys=list(changed_scope_keys),
+            metadata={"source": "repair_active_relations_for_removed_rows"},
+        )
         self._persist_workbench_pair_relations(changed_case_ids=changed_case_ids)
 
     def _repair_active_relations_with_oa_attachment_context(self, payload: dict[str, object]) -> None:
@@ -14549,8 +14608,11 @@ class Application:
 
         if not changed_case_ids:
             return
-        self._search_service.clear_cache()
-        self._invalidate_workbench_read_model_scopes(list(changed_scope_keys))
+        self._execute_derived_data_lifecycle_event(
+            "pair_relation_changed",
+            scope_keys=list(changed_scope_keys),
+            metadata={"source": "repair_active_relations_with_oa_attachment_context"},
+        )
         self._persist_workbench_pair_relations(changed_case_ids=changed_case_ids)
 
     @staticmethod
@@ -14725,6 +14787,8 @@ class Application:
             self._apply_no_oa_bank_batch_pair_metadata(payload, relation_payload)
         self._apply_cash_special_pair_metadata(payload, relation)
         payload["available_actions"] = ["detail"]
+        if relation_mode == NO_OA_BANK_BATCH_RELATION_MODE:
+            self._apply_no_oa_bank_batch_available_actions(payload)
         self._apply_cash_special_available_actions(payload, relation)
         payload["handled_exception"] = False
         return payload
@@ -14774,6 +14838,10 @@ class Application:
             dry_run=False,
             metadata=metadata,
         )
+        reason = str((metadata or {}).get("reason") or event).strip()
+        for domain_plan in list(plan.get("domains") or []):
+            if isinstance(domain_plan, dict):
+                domain_plan["reason"] = reason
         return self._derived_data_lifecycle_service.execute_plan(
             plan,
             executors={
@@ -14786,6 +14854,7 @@ class Application:
                 ),
                 "tax_offset_read_model": self._derived_lifecycle_tax_offset_executor,
                 "tax_offset_month_cache": self._derived_lifecycle_tax_offset_month_cache_executor,
+                "pending_invoice_read_model": self._derived_lifecycle_pending_invoice_executor,
                 "search_cache": self._derived_lifecycle_search_cache_executor,
                 "oa_adapter_records_cache": self._derived_lifecycle_oa_adapter_cache_executor,
                 "historical_etc_repair_state": self._derived_lifecycle_historical_etc_executor,
@@ -14794,17 +14863,28 @@ class Application:
 
     def _derived_lifecycle_workbench_read_model_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
         scope_keys = self._domain_plan_scope_keys(domain_plan)
-        if "all" in scope_keys:
+        months = self._months_from_lifecycle_scope_keys(scope_keys)
+        if "all" in scope_keys and not months:
             deleted_scope_keys = list(self._workbench_read_model_service.snapshot().get("read_models", {}).keys())
+            for scope_key in deleted_scope_keys:
+                self._workbench_read_model_service.delete_read_model(scope_key)
+            self._persist_workbench_read_models_best_effort(
+                snapshot=self._workbench_read_model_service.snapshot(),
+                changed_scope_keys=deleted_scope_keys,
+                operation="derived_lifecycle_workbench_read_model",
+            )
         else:
-            deleted_scope_keys = self._expand_workbench_read_model_scope_keys_for_base_scopes(scope_keys)
-        for scope_key in deleted_scope_keys:
-            self._workbench_read_model_service.delete_read_model(scope_key)
-        self._persist_workbench_read_models_best_effort(
-            snapshot=self._workbench_read_model_service.snapshot(),
-            changed_scope_keys=deleted_scope_keys,
-            operation="derived_lifecycle_workbench_read_model",
-        )
+            deleted_scope_keys = self._invalidate_workbench_read_model_scopes(
+                scope_keys,
+                invalidate_cost_statistics=False,
+            )
+            if not isinstance(deleted_scope_keys, list):
+                deleted_scope_keys = list(scope_keys)
+            self._persist_workbench_read_models_best_effort(
+                snapshot=self._workbench_read_model_service.snapshot(),
+                changed_scope_keys=deleted_scope_keys,
+                operation="derived_lifecycle_workbench_read_model",
+            )
         return {
             "deleted_counts": {"workbench_read_models": len(deleted_scope_keys)},
             "invalidated_scopes": deleted_scope_keys,
@@ -14812,13 +14892,20 @@ class Application:
 
     def _derived_lifecycle_candidate_matches_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
         scope_keys = self._domain_plan_scope_keys(domain_plan)
-        if "all" in scope_keys:
+        months = self._months_from_lifecycle_scope_keys(scope_keys)
+        if months:
+            deleted_candidate_keys = []
+            for month in months:
+                deleted_candidate_keys.extend(self._workbench_candidate_match_service.delete_month(month))
+            self._persist_workbench_candidate_matches_best_effort(
+                operation="derived_lifecycle_candidate_matches",
+                changed_scope_months=months,
+            )
+        elif "all" in scope_keys:
             deleted_candidate_keys = self._workbench_candidate_match_service.clear()
+            self._persist_workbench_candidate_matches_best_effort(operation="derived_lifecycle_candidate_matches")
         else:
             deleted_candidate_keys = []
-            for month in self._months_from_lifecycle_scope_keys(scope_keys):
-                deleted_candidate_keys.extend(self._workbench_candidate_match_service.delete_month(month))
-        self._persist_workbench_candidate_matches_best_effort(operation="derived_lifecycle_candidate_matches")
         return {
             "deleted_counts": {"workbench_candidate_matches": len(deleted_candidate_keys)},
             "invalidated_scopes": deleted_candidate_keys,
@@ -14832,7 +14919,7 @@ class Application:
                 months,
                 reason=str(domain_plan.get("reason") or "derived_lifecycle"),
             )
-            self._persist_state()
+            self._persist_workbench_matching_dirty_scopes_best_effort(operation="derived_lifecycle_dirty_scopes")
         else:
             dirty_months = []
         return {
@@ -14852,7 +14939,7 @@ class Application:
         else:
             deleted_scope_keys = self._invalidate_cost_statistics_read_model_scopes(
                 scope_keys,
-                reason="derived_lifecycle_cost_statistics",
+                reason=str(domain_plan.get("reason") or "derived_lifecycle_cost_statistics"),
             )
         return {
             "deleted_counts": {"cost_statistics_read_models": len(deleted_scope_keys)},
@@ -14867,7 +14954,7 @@ class Application:
         else:
             deleted_scope_keys = self._invalidate_tax_offset_read_model_scopes(
                 scope_keys,
-                reason="derived_lifecycle_tax_offset",
+                reason=str(domain_plan.get("reason") or "derived_lifecycle_tax_offset"),
             )
         return {
             "deleted_counts": {"tax_offset_read_models": len(deleted_scope_keys)},
@@ -14882,6 +14969,15 @@ class Application:
         return {
             "deleted_counts": {"tax_offset_month_cache": len(months) if months else int("all" in scope_keys)},
             "invalidated_scopes": months or (["all"] if "all" in scope_keys else []),
+        }
+
+    def _derived_lifecycle_pending_invoice_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
+        invalidated_scope_keys = self._invalidate_pending_invoice_read_model_scopes(
+            reason=str(domain_plan.get("reason") or "derived_lifecycle_pending_invoice")
+        )
+        return {
+            "deleted_counts": {"pending_invoice_read_models": len(invalidated_scope_keys)},
+            "invalidated_scopes": invalidated_scope_keys,
         }
 
     def _derived_lifecycle_search_cache_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
@@ -14982,15 +15078,21 @@ class Application:
         for scope_key in sorted(months or {"all"}):
             self._enqueue_search_read_model_refresh(scope_key, reason=reason)
 
-    def _invalidate_pending_invoice_read_model_scopes(self, *, reason: str) -> None:
-        for scope_key in (
+    @staticmethod
+    def _pending_invoice_read_model_scope_keys() -> list[str]:
+        return [
             "expense:all",
             "expense:requires_invoice",
             "expense:bank_statement_as_invoice",
             "expense:no_invoice_required",
             "income:all",
-        ):
+        ]
+
+    def _invalidate_pending_invoice_read_model_scopes(self, *, reason: str) -> list[str]:
+        scope_keys = self._pending_invoice_read_model_scope_keys()
+        for scope_key in scope_keys:
             self._enqueue_pending_invoice_read_model_refresh(scope_key, reason=reason)
+        return scope_keys
 
     def _invalidate_cost_statistics_read_models(self, *, schedule_warmup: bool = True) -> list[str]:
         read_model_service = self._cost_statistics_read_model_service
@@ -16005,7 +16107,11 @@ class Application:
                 month_scope=str(relation.get("month_scope") or ""),
             )
         )
-        self._invalidate_workbench_read_model_scopes(changed_scope_keys)
+        self._execute_derived_data_lifecycle_event(
+            "pair_relation_changed",
+            scope_keys=changed_scope_keys,
+            metadata={"source": action_name, "case_id": str(relation.get("case_id") or "")},
+        )
         self._schedule_workbench_pair_relation_persist(
             changed_case_ids=[str(relation.get("case_id") or "")],
             request_id=request_id,
@@ -16869,6 +16975,26 @@ class Application:
                 fields["免OA批次"] = batch_label or "免OA流水"
                 if cost_policy == "exclude_all":
                     fields["成本统计"] = "不计入"
+
+    @staticmethod
+    def _apply_no_oa_bank_batch_available_actions(payload: dict[str, object]) -> None:
+        special_metadata = payload.get("special_metadata")
+        if not isinstance(special_metadata, dict):
+            return
+        source_batch_id = str(special_metadata.get("source_batch_id") or "").strip()
+        withdrawable = (
+            bool(special_metadata.get("withdrawable"))
+            if "withdrawable" in special_metadata
+            else bool(source_batch_id)
+        )
+        if not source_batch_id or not withdrawable:
+            return
+        actions = [str(action).strip() for action in list(payload.get("available_actions") or []) if str(action).strip()]
+        if "detail" not in actions:
+            actions.insert(0, "detail")
+        if "withdraw_no_oa_batch" not in actions:
+            actions.append("withdraw_no_oa_batch")
+        payload["available_actions"] = actions
 
     @staticmethod
     def _apply_cash_special_available_actions(payload: dict[str, object], relation: dict[str, object]) -> None:

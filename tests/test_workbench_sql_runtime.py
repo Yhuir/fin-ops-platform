@@ -194,7 +194,21 @@ class WorkbenchSummaryGroupsConnection(WorkbenchSqlReadConnection):
                             for index in range(1, 6)
                         ],
                         "bank_rows": [],
-                        "invoice_rows": [],
+                        "invoice_rows": [
+                            {
+                                "id": "oa-att-inv-summary-1",
+                                "type": "invoice",
+                                "source_kind": "oa_attachment_invoice",
+                                "issue_date": "2026-03-28",
+                                "detail_fields": {
+                                    "发票代码": "053002200111",
+                                    "发票号码": "40512344",
+                                    "数电发票号码": "—",
+                                    "税率": "6%",
+                                    "税额": "22.64",
+                                },
+                            }
+                        ],
                         "collapsed_rows": {
                             "oa": [
                                 {"id": f"collapsed-oa-{index}", "type": "oa", "detail_fields": {"OA单号": f"C{index}"}}
@@ -356,6 +370,37 @@ class WorkbenchProjectionSettingsConnection:
         return []
 
 
+class InvoiceRowsProjectionConnection(WorkbenchProjectionSettingsConnection):
+    def __init__(self, *, raw_payload_only: bool = False) -> None:
+        super().__init__()
+        self.raw_payload_only = raw_payload_only
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        if "from app.invoices" not in normalized:
+            return super().fetch_all(sql, params)
+
+        row = {
+            "row_id": "inv-manual-tax-001",
+            "invoice_type": "进项发票",
+            "invoice_no": "26532000000141671581",
+            "digital_invoice_no": "26532000000141671581",
+            "invoice_date": "2026-01-27",
+            "counterparty_name": "云南建筑技术发展中心",
+            "seller_name": "云南建筑技术发展中心",
+            "buyer_name": "云南溯源科技有限公司",
+            "amount": "377.36",
+            "total_with_tax": "400.00",
+            "status": "active",
+            "raw_payload": {"税率": "6%", "税额": "22.64"} if self.raw_payload_only else {},
+        }
+        if "tax_rate" in normalized and not self.raw_payload_only:
+            row["tax_rate"] = "6%"
+        if "tax_amount" in normalized and not self.raw_payload_only:
+            row["tax_amount"] = "22.64"
+        return [row]
+
+
 class CandidateSnapshotRecorder:
     def __init__(self) -> None:
         self.saved_snapshots: list[tuple[dict[str, object], set[str] | None]] = []
@@ -378,6 +423,30 @@ class FakeWorkbenchReadModelService:
 
 
 class WorkbenchSqlRuntimeTests(unittest.TestCase):
+    def test_sql_projection_manual_invoice_rows_include_tax_meta_for_amount_cell(self) -> None:
+        connection = InvoiceRowsProjectionConnection()
+        builder = WorkbenchSqlProjectionBuilder(connection=connection)
+
+        rows = builder._invoice_rows("2026-01")
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["amount"], "377.36")
+        self.assertEqual(rows[0]["tax_rate"], "6%")
+        self.assertEqual(rows[0]["tax_amount"], "22.64")
+        self.assertEqual(rows[0]["summary_fields"]["税率"], "6%")
+        self.assertEqual(rows[0]["summary_fields"]["税额"], "22.64")
+
+    def test_sql_projection_manual_invoice_rows_fall_back_to_raw_payload_tax_meta(self) -> None:
+        connection = InvoiceRowsProjectionConnection(raw_payload_only=True)
+        builder = WorkbenchSqlProjectionBuilder(connection=connection)
+
+        rows = builder._invoice_rows("2026-01")
+
+        self.assertEqual(rows[0]["tax_rate"], "6%")
+        self.assertEqual(rows[0]["tax_amount"], "22.64")
+        self.assertEqual(rows[0]["summary_fields"]["税率"], "6%")
+        self.assertEqual(rows[0]["summary_fields"]["税额"], "22.64")
+
     def test_repository_reads_workbench_snapshot_and_dirty_status_without_state_fallback(self) -> None:
         connection = WorkbenchSqlReadConnection(
             snapshot_row={
@@ -677,6 +746,93 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertTrue(any("time_date >= %s::date and r.time_date < %s::date" in sql for sql, _params in group_row_queries))
         self.assertTrue(any('"direction": "支出"' in str(params) and "2026-04-01" in str(params) for _sql, params in group_row_queries))
 
+    def test_repository_intersects_pane_search_with_structured_group_row_filters(self) -> None:
+        connection = WorkbenchSummaryGroupsConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.get_workbench_groups_page(
+            scope_key="all",
+            zone="open",
+            page=1,
+            page_size=25,
+            search_by_pane={"bank": "建行"},
+            column_filters={"bank": {"amount": ["支出"]}},
+        )
+
+        all_queries = [*connection.fetch_one_calls, *connection.fetch_all_calls]
+        group_row_queries = [(sql, params) for sql, params in all_queries if "read_model.workbench_group_rows" in sql]
+        self.assertTrue(group_row_queries)
+        self.assertTrue(any("r.searchable_text ilike %s" in sql for sql, _params in group_row_queries))
+        self.assertTrue(
+            any(
+                "%建行%" in params
+                and '"direction": "支出"' in str(params)
+                for _sql, params in group_row_queries
+            )
+        )
+
+    def test_repository_filters_summary_preview_rows_with_intersected_pane_criteria(self) -> None:
+        class PreviewRowsConnection(WorkbenchSummaryGroupsConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "from read_model.workbench_groups" in normalized and "group by zone" not in normalized:
+                    return [
+                        {
+                            "group_id": "case:preview",
+                            "zone": "open",
+                            "payload": {
+                                "group_id": "case:preview",
+                                "group_type": "candidate",
+                                "match_confidence": "medium",
+                                "reason": "preview filter",
+                                "oa_rows": [],
+                                "bank_rows": [
+                                    {
+                                        "id": "bank-income-ccb",
+                                        "type": "bank",
+                                        "direction": "收入",
+                                        "payment_account_label": "建行 8106",
+                                        "counterparty_name": "建行客户",
+                                    },
+                                    {
+                                        "id": "bank-expense-ms",
+                                        "type": "bank",
+                                        "direction": "支出",
+                                        "payment_account_label": "民生 9486",
+                                        "counterparty_name": "民生供应商",
+                                    },
+                                    {
+                                        "id": "bank-expense-ccb",
+                                        "type": "bank",
+                                        "direction": "支出",
+                                        "payment_account_label": "建行 8106",
+                                        "counterparty_name": "建行供应商",
+                                    },
+                                ],
+                                "invoice_rows": [],
+                            },
+                        }
+                    ]
+                return super().fetch_all(sql, params)
+
+        connection = PreviewRowsConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        page = repository.get_workbench_groups_page(
+            scope_key="all",
+            zone="open",
+            page=1,
+            page_size=25,
+            detail_level="summary",
+            search_by_pane={"bank": "建行"},
+            column_filters={"bank": {"amount": ["支出"]}},
+        )
+
+        group = page["groups"][0]
+        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bank-expense-ccb"])
+        self.assertEqual(group["row_counts"]["bank"], 3)
+
     def test_repository_reads_all_scope_groups_from_materialized_all_groups(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()
         repository = PostgresReadModelRepository(connection)
@@ -707,9 +863,15 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         group = page["groups"][0]
         self.assertEqual(page["detail_level"], "summary")
         self.assertEqual(group["group_id"], "case:1")
-        self.assertEqual(group["row_counts"], {"oa": 5, "bank": 0, "invoice": 0})
+        self.assertEqual(group["row_counts"], {"oa": 5, "bank": 0, "invoice": 1})
         self.assertEqual(group["collapsed_row_counts"], {"oa": 4})
         self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-1", "oa-2", "oa-3"])
+        self.assertEqual(group["invoice_rows"][0]["invoice_code"], "053002200111")
+        self.assertEqual(group["invoice_rows"][0]["invoice_no"], "40512344")
+        self.assertEqual(group["invoice_rows"][0]["digital_invoice_no"], "—")
+        self.assertEqual(group["invoice_rows"][0]["tax_rate"], "6%")
+        self.assertEqual(group["invoice_rows"][0]["tax_amount"], "22.64")
+        self.assertNotIn("detail_fields", group["invoice_rows"][0])
         self.assertEqual([row["id"] for row in group["collapsed_rows"]["oa"]], ["collapsed-oa-1", "collapsed-oa-2", "collapsed-oa-3"])
         self.assertEqual(group["oa_rows"][0]["id"], "oa-1")
         self.assertEqual(page["row_counts"], {"oa": 3, "bank": 4, "invoice": 5, "rows": 12})
@@ -1011,6 +1173,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             status="open",
             source_kind="bank_transaction",
             search="供应商",
+            search_by_pane='{"bank":"建行"}',
             sort="bank:desc",
             detail_level="summary",
             column_filters='{"bank":{"amount":["支出"]}}',
@@ -1031,6 +1194,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                     "status": "open",
                     "source_kind": "bank_transaction",
                     "search": "供应商",
+                    "search_by_pane": {"bank": "建行"},
                     "sort": "bank:desc",
                     "detail_level": "summary",
                     "column_filters": {"bank": {"amount": ["支出"]}},
@@ -1176,6 +1340,28 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(key_a, key_b)
         self.assertNotEqual(key_a, key_c)
+
+    def test_workbench_groups_api_redis_cache_key_includes_read_model_schema_version(self) -> None:
+        app = object.__new__(Application)
+        kwargs = {
+            "cache_version": "v7",
+            "scope_key": "all",
+            "zone": "open",
+            "page": "1",
+            "page_size": "50",
+            "status": None,
+            "source_kind": None,
+            "search": None,
+            "sort": None,
+            "detail_level": "summary",
+        }
+
+        with patch("fin_ops_platform.app.server.WORKBENCH_READ_MODEL_SCHEMA_VERSION", "schema-a"):
+            key_a = app._workbench_groups_redis_cache_key_from_version(**kwargs)
+        with patch("fin_ops_platform.app.server.WORKBENCH_READ_MODEL_SCHEMA_VERSION", "schema-b"):
+            key_b = app._workbench_groups_redis_cache_key_from_version(**kwargs)
+
+        self.assertNotEqual(key_a, key_b)
 
     def test_workbench_groups_api_reports_missing_groups_table_as_unavailable(self) -> None:
         app = object.__new__(Application)
@@ -1680,6 +1866,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(rows[0]["derived_from_oa_id"], "oa-exp-structured")
         self.assertEqual(rows[0]["source_expense_item_id"], "oa-exp-structured:item:1")
         self.assertEqual(rows[0]["source_attachment_key"], "oa-exp-structured:invoice:1")
+        self.assertEqual(rows[0]["invoice_no"], "INV-STRUCT-001")
         self.assertIn("INV-STRUCT-001", rows[0]["detail_fields"]["发票号码"])
 
     def test_sql_projection_structured_cache_excludes_payment_receipt_evidence_rows(self) -> None:
@@ -2385,6 +2572,19 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             "relation_mode": "no_oa_bank_batch",
             "row_ids": ["bank-a", "bank-b"],
             "row_types": ["bank", "bank"],
+            "special_metadata": {
+                "source": "no_oa_bank_batch",
+                "source_batch_id": "batch-no-oa-fee-001",
+                "batch_type": "fee",
+                "batch_label": "手续费",
+                "batch_version": 3,
+                "row_count": 2,
+                "total_amount": "20.00",
+                "withdrawable": True,
+                "relation_mode": "no_oa_bank_batch",
+                "display_tags": ["免OA", "手续费"],
+            },
+            "display_tags": ["免OA", "手续费"],
         }
 
         payload = builder._group_payload("2026-05", rows_by_id, [relation])
@@ -2392,6 +2592,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         paired = payload["paired"]["groups"]
         self.assertEqual(len(paired), 1)
         self.assertEqual(paired[0]["relation_mode"], "no_oa_bank_batch")
+        self.assertEqual(paired[0]["display_mode"], "collapsed_summary")
+        self.assertEqual([row["id"] for row in paired[0]["bank_rows"]], ["no_oa_summary:batch-no-oa-fee-001"])
+        self.assertCountEqual([row["id"] for row in paired[0]["collapsed_rows"]["bank"]], ["bank-a", "bank-b"])
+        self.assertEqual(paired[0]["summary_row"]["special_metadata"]["source_batch_id"], "batch-no-oa-fee-001")
         self.assertEqual(paired[0]["bank_rows"][0]["invoice_relation"]["code"], "no_oa_bank_batch")
 
     def test_sql_projection_applies_row_overrides_before_grouping(self) -> None:

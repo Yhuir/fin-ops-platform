@@ -50,6 +50,7 @@ import type {
 } from "./types";
 import { apiUrl } from "../../app/runtime";
 import { countWorkbenchGroupsRows } from "./groupDisplayModel";
+import { ApiClientError, apiRequestJson } from "../apiClient";
 import { mapBankTransactionTagDictionary } from "../pendingInvoices/api";
 import { readOATokenCookie } from "../session/api";
 import type { BankTransactionTagDictionary, PendingInvoiceTagGroups } from "../pendingInvoices/types";
@@ -807,6 +808,11 @@ function isNoOaSummaryRow(row: ApiWorkbenchRow) {
   return row.source_kind === "no_oa_bank_batch_summary";
 }
 
+function isNoOaBatchRow(row: ApiWorkbenchRow) {
+  return isNoOaSummaryRow(row)
+    || (row.type === "bank" && rowRelation(row)?.code === "no_oa_bank_batch" && hasNoOaSourceBatchId(row));
+}
+
 function hasNoOaSourceBatchId(row: ApiWorkbenchRow) {
   const sourceBatchId = row.special_metadata?.source_batch_id;
   return typeof sourceBatchId === "string" && sourceBatchId.trim().length > 0;
@@ -814,7 +820,7 @@ function hasNoOaSourceBatchId(row: ApiWorkbenchRow) {
 
 function normalizeRowAvailableActions(row: ApiWorkbenchRow) {
   const actions = row.available_actions ?? [];
-  if (!isNoOaSummaryRow(row)) {
+  if (!isNoOaBatchRow(row)) {
     return actions;
   }
   if (!hasNoOaSourceBatchId(row)) {
@@ -979,24 +985,24 @@ function mapTableValues(row: ApiWorkbenchRow): Record<string, string> {
     sellerName: toDisplayValue(row.seller_name),
     buyerTaxId: toDisplayValue(row.buyer_tax_no),
     buyerName: toDisplayValue(row.buyer_name),
-    invoiceCode: toDisplayValue(firstNonPlaceholderDisplayValue(detailFields["发票代码"], row.invoice_code, summaryFields["发票代码"])),
+    invoiceCode: toDisplayValue(firstNonPlaceholderDisplayValue(row.invoice_code, detailFields["发票代码"], summaryFields["发票代码"])),
     invoiceNo: toDisplayValue(firstNonPlaceholderDisplayValue(
-      detailFields["发票号码"],
       row.invoice_no,
-      detailFields["数电发票号码"],
       row.digital_invoice_no,
+      detailFields["发票号码"],
+      detailFields["数电发票号码"],
       summaryFields["发票号码"],
       summaryFields["数电发票号码"],
     )),
     digitalInvoiceNo: toDisplayValue(firstNonPlaceholderDisplayValue(
-      detailFields["数电发票号码"],
       row.digital_invoice_no,
+      detailFields["数电发票号码"],
       summaryFields["数电发票号码"],
     )),
     issueDate: toWorkbenchDateTimeDisplayValue(row.issue_date),
     amount: toWorkbenchAmountDisplayValue(row.amount),
-    taxRate: toDisplayValue(row.tax_rate),
-    taxAmount: toWorkbenchAmountDisplayValue(row.tax_amount),
+    taxRate: toDisplayValue(firstNonPlaceholderDisplayValue(row.tax_rate, summaryFields["税率"], detailFields["税率"])),
+    taxAmount: toWorkbenchAmountDisplayValue(firstNonPlaceholderDisplayValue(row.tax_amount, summaryFields["税额"], detailFields["税额"])),
     grossAmount: toWorkbenchAmountDisplayValue(row.total_with_tax),
     invoiceType: toDisplayValue(row.invoice_type),
   };
@@ -1713,27 +1719,14 @@ function withWorkbenchAuthHeaders(headers?: HeadersInit) {
 }
 
 async function requestJson<T>(url: string, init: RequestInit = {}) {
-  const response = await fetch(apiUrl(url), {
-    ...init,
-    credentials: init.credentials ?? "include",
-    headers: withWorkbenchAuthHeaders(init.headers),
-  });
-  const rawText = await response.text();
-  let payload: T | null = null;
-  if (rawText.trim()) {
-    try {
-      payload = JSON.parse(rawText) as T;
-    } catch {
-      if (!response.ok) {
-        throw new Error(rawText.trim() || "request failed");
-      }
-      throw new Error("invalid_json_response");
+  try {
+    return await apiRequestJson<T>(url, init);
+  } catch (error) {
+    if (error instanceof ApiClientError) {
+      throw new Error(resolveWorkbenchApiErrorMessage(error.payload, error.responseText || error.message));
     }
+    throw error;
   }
-  if (!response.ok) {
-    throw new Error(resolveWorkbenchApiErrorMessage(payload, rawText));
-  }
-  return ((payload ?? {}) as T);
 }
 
 async function requestJsonWithTimeout<T>(url: string, init: RequestInit = {}, timeoutMs: number) {
@@ -1915,6 +1908,7 @@ function workbenchGroupsUrl(
     page_size: String(pageSize),
   });
   const search = String(query.search ?? "").trim();
+  const searchByPane = stableJsonQueryParam(query.searchByPane);
   const status = String(query.status ?? "").trim();
   const sourceKind = String(query.sourceKind ?? "").trim();
   const sort = String(query.sort ?? "").trim();
@@ -1923,6 +1917,9 @@ function workbenchGroupsUrl(
   const timeFilters = stableJsonQueryParam(query.timeFilterByPane);
   if (search) {
     params.set("search", search);
+  }
+  if (searchByPane) {
+    params.set("search_by_pane", searchByPane);
   }
   if (status) {
     params.set("status", status);

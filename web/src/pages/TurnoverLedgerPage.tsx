@@ -19,6 +19,11 @@ import TurnoverLedgerExtraDrawer from "../components/turnoverLedger/TurnoverLedg
 import TurnoverLedgerGroupedTable, { formatMoney } from "../components/turnoverLedger/TurnoverLedgerGroupedTable";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import {
+  FINANCE_DOMAIN_EVENTS,
+  emitFinanceDomainEvent,
+  subscribeFinanceDomainEvent,
+} from "../features/domainEvents";
+import {
   confirmTurnoverRelation,
   downloadTurnoverLedgerExport,
   fetchTurnoverLedgerExportPreview,
@@ -169,8 +174,7 @@ export default function TurnoverLedgerPage() {
     const handleCategoryUpdated = () => {
       loadLedger();
     };
-    window.addEventListener("bankTransactionCategoryUpdated", handleCategoryUpdated);
-    return () => window.removeEventListener("bankTransactionCategoryUpdated", handleCategoryUpdated);
+    return subscribeFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, handleCategoryUpdated);
   }, [loadLedger]);
 
   useEffect(() => {
@@ -239,9 +243,10 @@ export default function TurnoverLedgerPage() {
       const saved = await saveTurnoverRelationExtra(selectedRow.relationId, extraForm);
       setExtraForm(saved.extra);
       setExtraDirty(false);
-      window.dispatchEvent(new CustomEvent("turnoverLedgerExtraUpdated", {
-        detail: { relationId: selectedRow.relationId },
-      }));
+      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverLedgerExtraUpdated, {
+        relationId: selectedRow.relationId,
+        source: "turnover_extra_save",
+      });
       setSnackbar({ severity: "success", message: "补充信息已保存" });
       loadLedger();
     } catch (caught) {
@@ -260,12 +265,11 @@ export default function TurnoverLedgerPage() {
       const result = kind === "confirm"
         ? await confirmTurnoverRelation({ bankRowIds: selectedRow.bankRowIds })
         : await withdrawTurnoverRelation({ relationId: selectedRow.relationId });
-      window.dispatchEvent(new CustomEvent("turnoverRelationUpdated", {
-        detail: {
-          relationId: result.relationId || selectedRow.relationId,
-          action: kind,
-        },
-      }));
+      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverRelationUpdated, {
+        relationId: result.relationId || selectedRow.relationId,
+        action: kind,
+        source: "turnover_relation_mutation",
+      });
       setSnackbar({ severity: "success", message: kind === "confirm" ? "往来关系已确认归并" : "往来归并已撤销" });
       loadLedger();
     } catch (caught) {

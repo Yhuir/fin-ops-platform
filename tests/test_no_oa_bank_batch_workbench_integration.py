@@ -91,16 +91,16 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
 
         self.assertEqual(paired_payload["summary"]["paired_count"], 1)
         self.assertEqual(paired_group["relation_mode"], "no_oa_bank_batch")
-        self.assertEqual(paired_group["display_mode"], "collapsed_summary")
-        self.assertTrue(paired_group["default_collapsed"])
-        self.assertEqual(paired_row["id"], f"no_oa_summary:{submitted['batch_id']}")
-        self.assertEqual([row["id"] for row in paired_group["collapsed_rows"]["bank"]], [salary_row_id])
+        self.assertNotEqual(paired_group.get("display_mode"), "collapsed_summary")
+        self.assertNotIn("collapsed_rows", paired_group)
+        self.assertEqual(paired_row["id"], salary_row_id)
         self.assertEqual(paired_row["invoice_relation"]["code"], "no_oa_bank_batch")
         self.assertEqual(paired_row["invoice_relation"]["label"], "已匹配：工资")
         self.assertEqual(paired_row["special_metadata"]["source_batch_id"], submitted["batch_id"])
         self.assertEqual(paired_row["special_metadata"]["batch_version"], submitted["version"])
         self.assertEqual(paired_row["special_metadata"]["row_count"], 1)
         self.assertEqual(paired_row["special_metadata"]["total_amount"], "9.00")
+        self.assertIn("withdraw_no_oa_batch", paired_row["available_actions"])
         self.assertIn("免OA", paired_row["tags"])
         self.assertIn("工资", paired_row["tags"])
 
@@ -444,21 +444,30 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         self.assertEqual(submitted_by_type["internal_transfer"]["evidence"]["legacy_relation_mode"], "internal_transfer_pair")
         self.assertCountEqual(active_modes, ["no_oa_bank_batch", "no_oa_bank_batch"])
         self.assertEqual(payload["summary"]["paired_count"], 2)
-        self.assertTrue(all(group["display_mode"] == "collapsed_summary" for group in paired_groups))
-        summary_rows = flatten_groups(paired_groups, "bank")
-        self.assertCountEqual(
-            [row["id"] for row in summary_rows],
-            [
-                f"no_oa_summary:{submitted_by_type['salary']['batch_id']}",
-                f"no_oa_summary:{submitted_by_type['internal_transfer']['batch_id']}",
-            ],
-        )
-        collapsed_row_ids = [
-            row["id"]
+        salary_group = next(
+            group
             for group in paired_groups
-            for row in group["collapsed_rows"]["bank"]
-        ]
-        self.assertCountEqual(collapsed_row_ids, [salary_row_id, *transfer_row_ids])
+            if group["bank_rows"][0]["special_metadata"]["batch_type"] == "salary"
+        )
+        transfer_group = next(group for group in paired_groups if group is not salary_group)
+        salary_row = salary_group["bank_rows"][0]
+        transfer_summary_row = transfer_group["bank_rows"][0]
+
+        self.assertNotEqual(salary_group.get("display_mode"), "collapsed_summary")
+        self.assertNotIn("collapsed_rows", salary_group)
+        self.assertEqual(salary_row["id"], salary_row_id)
+        self.assertEqual(salary_row["special_metadata"]["source_batch_id"], submitted_by_type["salary"]["batch_id"])
+        self.assertIn("withdraw_no_oa_batch", salary_row["available_actions"])
+        self.assertEqual(transfer_group["display_mode"], "collapsed_summary")
+        self.assertEqual(
+            transfer_summary_row["id"],
+            f"no_oa_summary:{submitted_by_type['internal_transfer']['batch_id']}",
+        )
+        self.assertCountEqual(
+            [row["id"] for row in transfer_group["collapsed_rows"]["bank"]],
+            transfer_row_ids,
+        )
+        summary_rows = flatten_groups(paired_groups, "bank")
         self.assertTrue(
             all(row["invoice_relation"]["code"] == "no_oa_bank_batch" for row in summary_rows)
         )

@@ -108,6 +108,9 @@ OA 附件发票仍展开为独立 invoice rows，row id 为 `oa-att-inv-{oa_row_
   "seller_name": "杭州张三广告有限公司",
   "buyer_tax_no": "91330106589876543T",
   "buyer_name": "杭州溯源科技有限公司",
+  "invoice_code": "0330111200",
+  "invoice_no": "90342011",
+  "digital_invoice_no": "25502000000190342011",
   "issue_date": "2026-03-20",
   "amount": 5660.38,
   "tax_rate": "6%",
@@ -122,6 +125,13 @@ OA 附件发票仍展开为独立 invoice rows，row id 为 `oa-att-inv-{oa_row_
   "available_actions": ["detail", "confirm_link", "mark_exception"]
 }
 ```
+
+发票列表展示、搜索和汇总分页必须使用 row 顶层的 `invoice_no`、`invoice_code`
+和 `digital_invoice_no`。`detail_fields` 只用于详情抽屉和审计追溯，汇总列表会裁掉
+`detail_fields` 以控制 payload 大小；因此 OA 附件解析出的发票行也必须在读模型中
+补齐这些顶层身份字段，不能依赖前端从 `detail_fields` 兜底解析。
+发票金额列统一展示 `amount`、`tax_rate` 和 `tax_amount` 三个顶层字段；人工导入发票、
+系统发票和 OA 附件解析发票必须输出同一组字段，不能只让某一类来源显示税率/税额。
 
 ## 5. 详情响应 DTO
 

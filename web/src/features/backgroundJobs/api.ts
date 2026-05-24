@@ -1,5 +1,4 @@
-import { readOATokenCookie } from "../session/api";
-import { apiUrl } from "../../app/runtime";
+import { apiRequestJson } from "../apiClient";
 import type { BackgroundJob, BackgroundJobActivePayload, BackgroundJobStatus } from "./types";
 
 export type ApiBackgroundJob = {
@@ -40,41 +39,10 @@ type ApiBackgroundJobActivePayload = {
   jobs?: ApiBackgroundJob[];
 };
 
-function withAuthHeaders(headers?: HeadersInit) {
-  const nextHeaders = new Headers(headers ?? undefined);
-  const token = readOATokenCookie();
-  if (token && !nextHeaders.has("Authorization")) {
-    nextHeaders.set("Authorization", `Bearer ${token}`);
-  }
-  return nextHeaders;
-}
-
 async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(apiUrl(url), {
-    ...init,
-    headers: withAuthHeaders(init.headers),
-    credentials: init.credentials ?? "include",
+  return apiRequestJson<T>(url, init, {
+    defaultErrorMessage: "后台任务操作失败。",
   });
-  const rawText = await response.text();
-  const trimmedText = rawText.trim();
-  if (trimmedText && (/^<!doctype\s+html/i.test(trimmedText) || /^<html[\s>]/i.test(trimmedText))) {
-    throw new Error("后台任务接口返回了 HTML 页面，请确认后端服务和 /api 代理已正常启动。");
-  }
-  let payload = {} as T;
-  if (trimmedText) {
-    try {
-      payload = JSON.parse(trimmedText) as T;
-    } catch {
-      throw new Error("后台任务接口返回的不是合法 JSON。");
-    }
-  }
-  if (!response.ok) {
-    const message = payload && typeof payload === "object" && "message" in payload
-      ? String((payload as { message?: unknown }).message || "").trim()
-      : "";
-    throw new Error(message || trimmedText || "后台任务操作失败。");
-  }
-  return payload;
 }
 
 function toNumber(value: unknown) {

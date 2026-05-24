@@ -9,6 +9,7 @@ import type {
   CostTimeRow,
   CostTransactionDetail,
 } from "./types";
+import { apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
 
 type ApiCostSummary = {
   row_count: number;
@@ -132,12 +133,7 @@ function mapSummary(summary: ApiCostSummary) {
 }
 
 async function requestJson<T>(url: string, init: RequestInit = {}) {
-  const response = await fetch(url, init);
-  const payload = (await response.json()) as T;
-  if (!response.ok) {
-    throw new Error(typeof payload === "object" && payload ? JSON.stringify(payload) : "request failed");
-  }
-  return payload;
+  return apiRequestJson<T>(url, init);
 }
 
 function buildScopedUrl(path: string, params: Record<string, string | undefined>) {
@@ -503,7 +499,14 @@ async function readExportBlob(response: Response) {
 
 export async function exportCostStatisticsView(params: CostExportParams) {
   const query = buildCostStatisticsQuery(params, { includeProjectExportOptions: true });
-  const response = await fetch(`/api/cost-statistics/export?${query.toString()}`, { method: "GET" });
+  const response = await apiFetch(`/api/cost-statistics/export?${query.toString()}`, { method: "GET" });
+  const contentType = typeof response.headers?.get === "function" ? response.headers.get("Content-Type") ?? "" : "";
+  if (contentType.toLowerCase().includes("text/html")) {
+    const rawText = await response.text();
+    if (looksLikeHtmlResponse(rawText, contentType)) {
+      throw new Error("成本统计导出接口返回了 HTML 页面，请确认后端服务和 /api 代理已正常启动。");
+    }
+  }
   if (!response.ok) {
     throw new Error("cost_statistics_export_failed");
   }

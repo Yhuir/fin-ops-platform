@@ -59,7 +59,7 @@ set +a
 - `read_model.workbench_groups`：首屏 `open/paired` group 分页、服务端筛选、搜索和排序。
 - `read_model.workbench_snapshots`：兼容期、审计、导出、对账，不作为首屏热路径。
 
-`/api/workbench/groups` 可使用 Redis 短 TTL page cache，key 包含 read model source version 和分页、筛选、搜索、排序参数。Redis miss 回 PostgreSQL；Redis 清空不能改变业务结果。
+`/api/workbench/groups` 可使用 Redis 短 TTL page cache，key 包含 read model schema version、source version、分页、筛选、搜索、排序和 `detail_level` 参数。Redis miss 回 PostgreSQL；Redis 清空不能改变业务结果。工作台 schema 变更时必须提升 schema version，让旧 Redis page cache 与旧 SQL projection payload 自然失效。
 
 长期 worker 建议拆分为：
 

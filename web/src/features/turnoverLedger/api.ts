@@ -22,6 +22,7 @@ import type {
   TurnoverRelationMutationResponse,
   WithdrawTurnoverRelationRequest,
 } from "./types";
+import { apiFetch, apiRequestJson } from "../apiClient";
 
 type ApiTurnoverLedgerChip = string | {
   label?: string | null;
@@ -246,36 +247,11 @@ type ApiTurnoverRelationMutationResponse = {
 };
 
 async function requestJson<T>(url: string, init: RequestInit = {}) {
-  const response = await fetch(url, init);
-  const rawText = await response.text();
-  const trimmedText = rawText.trim();
-  const contentType = response.headers?.get?.("Content-Type") ?? "";
-  if (trimmedText && looksLikeHtml(trimmedText)) {
-    throw new Error(
-      `接口返回了 HTML 页面：${url}。说明请求没有进入后端 API，请确认后端服务已启动，并通过支持 /api 代理的前端开发服务访问。`,
-    );
-  }
-
-  let payload = {} as T;
-  if (trimmedText) {
-    try {
-      payload = JSON.parse(trimmedText) as T;
-    } catch {
-      throw new Error(
-        contentType
-          ? `接口 ${url} 返回的不是合法 JSON：${contentType}`
-          : `接口 ${url} 返回的不是合法 JSON。`,
-      );
-    }
-  }
-  if (!response.ok) {
-    throw new Error(extractErrorMessage(payload) || trimmedText || "request failed");
-  }
-  return payload;
+  return apiRequestJson<T>(url, init);
 }
 
 async function requestBlob(url: string, init: RequestInit = {}): Promise<TurnoverLedgerExportDownload> {
-  const response = await fetch(url, init);
+  const response = await apiFetch(url, init);
   const contentType = response.headers?.get?.("Content-Type") ?? "";
 
   if (contentType.toLowerCase().includes("text/html")) {

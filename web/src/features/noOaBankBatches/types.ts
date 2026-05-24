@@ -92,6 +92,9 @@ export type NoOaBankBatchDetailRow = {
   direction: NoOaBankBatchDirection;
   directionLabel: string;
   amount: string;
+  bankName: string;
+  accountLast4: string;
+  accountKey: string;
   summary: string;
   purpose: string;
   remark: string;

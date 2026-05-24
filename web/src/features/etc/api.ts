@@ -1,6 +1,6 @@
-import { readOATokenCookie } from "../session/api";
 import { mapBackgroundJob, type ApiBackgroundJob } from "../backgroundJobs/api";
 import { apiUrl } from "../../app/runtime";
+import { apiFetchResolved } from "../apiClient";
 import type { ImportPreviewAuditCounts } from "../imports/types";
 import type {
   EtcBusinessBatchAuditEvent,
@@ -615,15 +615,6 @@ export class EtcApiError extends Error {
 const DEFAULT_ETC_REQUEST_TIMEOUT_MS = 60_000;
 const FAST_ETC_MUTATION_TIMEOUT_MS = 15_000;
 
-function withAuthHeaders(headers?: HeadersInit) {
-  const nextHeaders = new Headers(headers ?? undefined);
-  const token = readOATokenCookie();
-  if (token && !nextHeaders.has("Authorization")) {
-    nextHeaders.set("Authorization", `Bearer ${token}`);
-  }
-  return nextHeaders;
-}
-
 function uniqueUrls(urls: string[]) {
   return urls.filter((url, index) => urls.indexOf(url) === index);
 }
@@ -687,11 +678,9 @@ async function requestJson<T>(url: string, init: EtcRequestInit = {}): Promise<T
   const { timeoutMs: _timeoutMs, ...fetchInit } = init;
   try {
     for (const candidateUrl of candidates) {
-      const response = await fetch(candidateUrl, {
+      const response = await apiFetchResolved(candidateUrl, {
         ...fetchInit,
         signal: requestSignal.signal,
-        headers: withAuthHeaders(init.headers),
-        credentials: init.credentials ?? "include",
       });
       const rawText = await response.text();
       const trimmedText = rawText.trim();

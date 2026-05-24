@@ -22,9 +22,11 @@ import {
   fetchCostStatisticsExportPreview,
   fetchCostTransactionDetail,
   getCachedCostStatisticsExplorer,
+  clearCostStatisticsExplorerCache,
   type CostExportParams,
   type PreviewCostExportParams,
 } from "../features/cost-statistics/api";
+import { FINANCE_DOMAIN_EVENTS, subscribeFinanceDomainEvent } from "../features/domainEvents";
 import { importWorkflowPath } from "../features/imports/importRoutes";
 import type {
   CostExpenseTypeExplorerRow,
@@ -428,6 +430,7 @@ export default function CostStatisticsPage() {
   const [isExportCenterOpen, setIsExportCenterOpen] = useState(false);
   const [exportPreview, setExportPreview] = useState<CostStatisticsExportPreview | null>(null);
   const [exportCenterMode, setExportCenterMode] = useState<ExportCenterMode>("time");
+  const [domainRefreshNonce, setDomainRefreshNonce] = useState(0);
 
   const [timeRangeMode, setTimeRangeMode] = useState<ExportRangeMode>("month");
   const [timeMonth, setTimeMonth] = useState(DEFAULT_MONTH);
@@ -518,6 +521,25 @@ export default function CostStatisticsPage() {
   }
 
   useEffect(() => {
+    const handleDomainMutation = () => {
+      clearCostStatisticsExplorerCache();
+      setDomainRefreshNonce((current) => current + 1);
+    };
+    const unsubscribeWorkbench = subscribeFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, handleDomainMutation);
+    const unsubscribeBankCategory = subscribeFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, handleDomainMutation);
+    const unsubscribeTurnover = subscribeFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverRelationUpdated, handleDomainMutation);
+    const unsubscribeInvoice = subscribeFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.invoiceFactUpdated, handleDomainMutation);
+    const unsubscribeEtc = subscribeFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.etcBusinessBatchUpdated, handleDomainMutation);
+    return () => {
+      unsubscribeWorkbench();
+      unsubscribeBankCategory();
+      unsubscribeTurnover();
+      unsubscribeInvoice();
+      unsubscribeEtc();
+    };
+  }, []);
+
+  useEffect(() => {
     const controller = new AbortController();
 
     async function loadExplorer() {
@@ -565,7 +587,7 @@ export default function CostStatisticsPage() {
 
     void loadExplorer();
     return () => controller.abort();
-  }, [costProjectScope, explorerMonth]);
+  }, [costProjectScope, domainRefreshNonce, explorerMonth]);
 
   useEffect(() => {
     const cachedPayload = getCachedCostStatisticsExplorer("all", costProjectScope);

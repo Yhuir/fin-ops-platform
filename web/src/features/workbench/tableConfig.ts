@@ -105,8 +105,8 @@ export const workbenchColumns: Record<WorkbenchRecordType, WorkbenchColumn[]> = 
     },
     {
       key: "issueDate",
-      label: "发票代码/发票号码",
-      headerLines: ["发票代码 /", "发票号码"],
+      label: "发票号码",
+      headerLines: ["发票号码"],
       className: "column-compact column-invoice-identity-compact",
       filterable: false,
       track: "minmax(124px, 124fr)",

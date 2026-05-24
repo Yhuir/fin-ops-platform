@@ -70,6 +70,9 @@ type MockApiOptions = {
   workbenchExceptionApplyStatus?: number;
   workbenchExceptionPreviewDelayMs?: number;
   workbenchExceptionApplyDelayMs?: number;
+  includeOaAttachmentPaymentReceipt?: boolean;
+  initialImportPreviewFileNames?: string[];
+  initialImportPreviewOverrides?: Array<Record<string, string | null | undefined>>;
 };
 
 const templateRegistry = [
@@ -1265,7 +1268,10 @@ type RawWorkbenchSectionKey = "paired" | "open";
 type RawWorkbenchPaneKey = "oa" | "bank" | "invoice";
 type RawWorkbenchRow = RawWorkbenchPayload["paired"][RawWorkbenchPaneKey][number];
 
-function buildWorkbenchRowPayload(month: string) {
+function buildWorkbenchRowPayload(
+  month: string,
+  options: Pick<MockApiOptions, "includeOaAttachmentPaymentReceipt"> = {},
+) {
   if (month === "2026-04") {
     return {
       month,
@@ -1757,6 +1763,34 @@ function buildWorkbenchRowPayload(month: string) {
             source_attachment_key: "oa-exp-2035/item-1/fuel-invoice.pdf",
           },
         },
+        ...(options.includeOaAttachmentPaymentReceipt
+          ? [{
+            id: "pay-oa-2035-fuel-200",
+            type: "invoice",
+            source_kind: "oa_attachment_payment_receipt",
+            case_id: "CASE-202603-OA-ATTACHMENT-2035",
+            seller_tax_no: "",
+            seller_name: "微信支付",
+            buyer_tax_no: "",
+            buyer_name: "胡瑢",
+            issue_date: "2026-03-04",
+            amount: "200.00",
+            tax_rate: "0%",
+            tax_amount: "0.00",
+            total_with_tax: "200.00",
+            invoice_type: "付款凭证",
+            invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
+            available_actions: ["detail", "confirm_link", "mark_exception", "ignore"],
+            detail_fields: {
+              发票号码: "PAY-OA2035-WXPAY-200",
+              derived_from_oa_id: "oa-exp-2035",
+              source_expense_row_index: "1",
+              source_expense_item_id: "oa-exp-2035:item:1",
+              source_attachment_name: "加油微信支付凭证.png",
+              source_attachment_key: "oa-exp-2035/item-1/fuel-payment.png",
+            },
+          }]
+          : []),
         {
           id: "iv-oa-attachment-292-001",
           type: "invoice",
@@ -1931,26 +1965,35 @@ function countMockWorkbenchRows(groups: MockWorkbenchGroup[]) {
 function mockWorkbenchGroupMatchesQuery(
   group: MockWorkbenchGroup,
   search: string,
+  searchByPane: MockWorkbenchJsonParam,
   columnFilters: MockWorkbenchJsonParam,
   timeFilters: MockWorkbenchJsonParam,
 ) {
   const normalizedSearch = normalizeMockWorkbenchText(search);
-  if (normalizedSearch && !normalizeMockWorkbenchText(mockWorkbenchSearchText(group)).includes(normalizedSearch)) {
+  if (
+    normalizedSearch
+    && Object.keys(searchByPane).length === 0
+    && !normalizeMockWorkbenchText(mockWorkbenchSearchText(group)).includes(normalizedSearch)
+  ) {
     return false;
   }
 
-  return mockWorkbenchGroupMatchesStructuredFilters(group, columnFilters, timeFilters);
+  return mockWorkbenchGroupMatchesStructuredFilters(group, searchByPane, columnFilters, timeFilters);
 }
 
 function mockWorkbenchGroupMatchesStructuredFilters(
   group: MockWorkbenchGroup,
+  searchByPane: MockWorkbenchJsonParam,
   columnFilters: MockWorkbenchJsonParam,
   timeFilters: MockWorkbenchJsonParam,
 ) {
   const activePanes = MOCK_WORKBENCH_PANES.filter((pane) => {
+    const paneSearch = normalizeMockWorkbenchText(searchByPane[pane]);
     const paneColumns = columnFilters[pane];
     const paneTime = timeFilters[pane];
     return (
+      Boolean(paneSearch)
+      ||
       (paneColumns && typeof paneColumns === "object" && !Array.isArray(paneColumns) && Object.keys(paneColumns).length > 0)
       || (paneTime && typeof paneTime === "object" && !Array.isArray(paneTime))
     );
@@ -1960,9 +2003,9 @@ function mockWorkbenchGroupMatchesStructuredFilters(
     return true;
   }
 
-  return activePanes.some((pane) =>
+  return activePanes.every((pane) =>
     groupRowsForMockPane(group, pane).some((row) =>
-      mockWorkbenchRowMatchesPaneFilters(row, pane, columnFilters[pane], timeFilters[pane]),
+      mockWorkbenchRowMatchesPaneFilters(row, pane, searchByPane[pane], columnFilters[pane], timeFilters[pane]),
     ),
   );
 }
@@ -1970,9 +2013,15 @@ function mockWorkbenchGroupMatchesStructuredFilters(
 function mockWorkbenchRowMatchesPaneFilters(
   row: Record<string, unknown>,
   pane: RawWorkbenchPaneKey,
+  rawSearch: unknown,
   rawColumnFilters: unknown,
   rawTimeFilter: unknown,
 ) {
+  const normalizedSearch = normalizeMockWorkbenchText(rawSearch);
+  if (normalizedSearch && !normalizeMockWorkbenchText(mockWorkbenchRowSearchText(row)).includes(normalizedSearch)) {
+    return false;
+  }
+
   if (rawColumnFilters && typeof rawColumnFilters === "object" && !Array.isArray(rawColumnFilters)) {
     for (const [columnKey, rawValues] of Object.entries(rawColumnFilters)) {
       const selectedValues = normalizeMockWorkbenchSelectedValues(rawValues);
@@ -2163,8 +2212,8 @@ function flattenMockWorkbenchText(value: unknown): string[] {
   return [String(value)];
 }
 
-function normalizeMockWorkbenchText(value: string) {
-  return value.replace(/\s+/g, "").trim().toLowerCase();
+function normalizeMockWorkbenchText(value: unknown) {
+  return String(value ?? "").replace(/\s+/g, "").trim().toLowerCase();
 }
 
 function stringValue(value: unknown) {
@@ -2177,11 +2226,11 @@ function objectValue(value: unknown): Record<string, unknown> {
 
 const WORKBENCH_STATE_MONTHS = ["2026-03", "2026-04"] as const;
 
-function createWorkbenchStateStore() {
+function createWorkbenchStateStore(options: Pick<MockApiOptions, "includeOaAttachmentPaymentReceipt"> = {}) {
   const store = new Map<string, RawWorkbenchPayload>();
   const ensureMonth = (month: string) => {
     if (!store.has(month)) {
-      store.set(month, cloneJson(buildWorkbenchRowPayload(month)));
+      store.set(month, cloneJson(buildWorkbenchRowPayload(month, options)));
     }
     return store.get(month)!;
   };
@@ -4202,14 +4251,17 @@ function isBinaryLikeResponse(value: MockFetchResult): value is Response {
 }
 
 export function installMockApiFetch(options: MockApiOptions = {}) {
-  let latestImportSession = buildImportPreviewPayload([]);
+  let latestImportSession = buildImportPreviewPayload(
+    options.initialImportPreviewFileNames ?? [],
+    options.initialImportPreviewOverrides ?? [],
+  );
   const etcInvoiceStore = createEtcInvoiceStore();
   const etcReconciliationTaskStore = createEtcReconciliationTaskStore();
   const turnoverExtraStore = new Map<string, Record<string, unknown>>();
   let latestEtcImportPreview = etcInvoiceStore.previewZip([]);
   let latestEtcDraftInvoiceIds: string[] = [];
   let latestEtcDraftBatchId = "";
-  const workbenchStateStore = createWorkbenchStateStore();
+  const workbenchStateStore = createWorkbenchStateStore(options);
   const ignoredRowStore = createIgnoredRowStore();
   const taxOffsetStateStore = createTaxOffsetStateStore();
   let latestTaxCertifiedPreview: {
@@ -4402,11 +4454,12 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const pageSize = Math.max(1, Number(url.searchParams.get("page_size") ?? "50") || 50);
       const payload = toGroupedWorkbenchPayload(cloneJson(workbenchStateStore.get(month)), options.workbenchOaStatus);
       const search = String(url.searchParams.get("search") ?? "").trim();
+      const searchByPane = parseWorkbenchGroupJsonParam(url.searchParams.get("search_by_pane"));
       const sort = String(url.searchParams.get("sort") ?? "").trim();
       const columnFilters = parseWorkbenchGroupJsonParam(url.searchParams.get("column_filters"));
       const timeFilters = parseWorkbenchGroupJsonParam(url.searchParams.get("time_filters"));
       const groups = sortMockWorkbenchGroups(
-        payload[zone].groups.filter((group) => mockWorkbenchGroupMatchesQuery(group, search, columnFilters, timeFilters)),
+        payload[zone].groups.filter((group) => mockWorkbenchGroupMatchesQuery(group, search, searchByPane, columnFilters, timeFilters)),
         sort,
       );
       const offset = (page - 1) * pageSize;

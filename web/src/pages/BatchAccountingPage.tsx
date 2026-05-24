@@ -32,6 +32,7 @@ import Typography from "@mui/material/Typography";
 
 import PageScaffold from "../components/common/PageScaffold";
 import StatePanel from "../components/common/StatePanel";
+import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
 import {
   fetchBatchAccounting,
   submitBatchAccounting,
@@ -345,7 +346,10 @@ export default function BatchAccountingPage() {
   };
 
   const handleMutationComplete = (fallbackMessage: string, result: { affectedMonths?: string[]; message?: string }) => {
-    window.dispatchEvent(new CustomEvent("workbenchRelationUpdated", { detail: mutationEventDetail(result) }));
+    emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
+      ...mutationEventDetail(result),
+      source: "batch_accounting_mutation",
+    });
     setSnackbar({ severity: "success", message: result.message || fallbackMessage });
     loadData();
   };

@@ -12,6 +12,7 @@ import type {
   SaveBankTransactionCategoriesRequest,
   SaveBankTransactionCategoriesResponse,
 } from "./types";
+import { ApiClientError, apiRequestJson } from "../apiClient";
 import { mapBankTransactionTagDictionary } from "../pendingInvoices/api";
 
 type ApiBankDetailAccount = {
@@ -119,32 +120,15 @@ function resolveBankDetailApiErrorMessage(payload: unknown, rawText: string) {
 }
 
 async function requestJson<T>(url: string, init: RequestInit = {}) {
-  const response = await fetch(url, init);
-  const rawText = await response.text();
-  const trimmedText = rawText.trim();
-  const contentType = response.headers?.get?.("Content-Type") ?? "";
-  const looksLikeHtml = /^<!doctype\s+html/i.test(trimmedText) || /^<html[\s>]/i.test(trimmedText);
-  if (trimmedText && looksLikeHtml) {
-    throw new Error(
-      `接口返回了 HTML 页面：${url}。说明请求没有进入后端 API，请确认后端服务已启动，并通过支持 /api 代理的前端开发服务访问。`,
-    );
-  }
-  let payload = {} as T;
-  if (trimmedText) {
-    try {
-      payload = JSON.parse(trimmedText) as T;
-    } catch {
-      throw new Error(
-        contentType
-          ? `接口 ${url} 返回的不是合法 JSON：${contentType}`
-          : `接口 ${url} 返回的不是合法 JSON。`,
-      );
+  try {
+    return await apiRequestJson<T>(url, init);
+  } catch (error) {
+    if (error instanceof ApiClientError) {
+      const mappedMessage = resolveBankDetailApiErrorMessage(error.payload, error.responseText);
+      throw new Error(mappedMessage === error.responseText.trim() ? error.message : mappedMessage);
     }
+    throw error;
   }
-  if (!response.ok) {
-    throw new Error(resolveBankDetailApiErrorMessage(payload, trimmedText));
-  }
-  return payload;
 }
 
 function mapAccount(account: ApiBankDetailAccount): BankDetailAccount {

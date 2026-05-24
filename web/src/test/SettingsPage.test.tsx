@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 
 import { installMockApiFetch } from "./apiMock";
+import { expectCustomEventDetailContaining } from "./eventAssertions";
 import { renderAppAt } from "./renderHelpers";
 
 function installSettingsTagFetch() {
@@ -211,7 +212,7 @@ describe("Settings page", () => {
         const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
         return url.pathname === "/api/workbench/settings" && (init?.method ?? "GET").toUpperCase() === "POST";
       })).toBe(true);
-      expect(listener).toHaveBeenCalledWith(expect.objectContaining({ detail: { version: 5 } }));
+      expectCustomEventDetailContaining(listener, { version: 5 });
     });
 
     window.removeEventListener("finops:bank-transaction-tags-updated", listener);

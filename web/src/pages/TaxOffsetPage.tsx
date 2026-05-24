@@ -18,6 +18,7 @@ import { DEFAULT_MONTH } from "../contexts/MonthContext";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import { calculateTaxOffset, fetchTaxOffsetMonth } from "../features/tax/api";
+import { FINANCE_DOMAIN_EVENTS, subscribeFinanceDomainEvent } from "../features/domainEvents";
 import { importWorkflowPath } from "../features/imports/importRoutes";
 import type {
   TaxCertifiedImportConfirmResult,
@@ -193,9 +194,13 @@ export default function TaxOffsetPage() {
 
     window.addEventListener("focus", handleRefreshTrigger);
     document.addEventListener("visibilitychange", handleRefreshTrigger);
+    const unsubscribeInvoice = subscribeFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.invoiceFactUpdated, handleRefreshTrigger);
+    const unsubscribeEtc = subscribeFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.etcBusinessBatchUpdated, handleRefreshTrigger);
     return () => {
       window.removeEventListener("focus", handleRefreshTrigger);
       document.removeEventListener("visibilitychange", handleRefreshTrigger);
+      unsubscribeInvoice();
+      unsubscribeEtc();
     };
   }, [loadMonthData]);
 

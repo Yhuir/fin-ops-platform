@@ -27,6 +27,11 @@ import Typography from "@mui/material/Typography";
 import PageScaffold from "../components/common/PageScaffold";
 import StatePanel from "../components/common/StatePanel";
 import {
+  FINANCE_DOMAIN_EVENTS,
+  emitFinanceDomainEvent,
+  subscribeFinanceDomainEvent,
+} from "../features/domainEvents";
+import {
   fetchNoOaBankBatchDetail,
   fetchNoOaBankBatches,
   submitNoOaBankBatch,
@@ -113,6 +118,17 @@ function formatMoney(value: string | number | null | undefined) {
 function accountLabel(batch: NoOaBankBatch) {
   const account = batch.accountLast4 ? `${batch.bankName || "多账户"}${batch.accountLast4}` : batch.bankName || "多账户";
   return account || "多账户";
+}
+
+function bankTagLabel(row: { bankName?: string; accountLast4?: string; accountKey?: string }) {
+  if (row.accountLast4) {
+    return `${row.bankName || "银行"}${row.accountLast4}`;
+  }
+  return row.bankName || row.accountKey || "-";
+}
+
+function directionTagLabel(row: { direction?: string; directionLabel?: string }) {
+  return row.directionLabel || (row.direction === "income" ? "收" : row.direction === "expense" ? "支" : "-");
 }
 
 function sourceLabel(source: string) {
@@ -331,8 +347,7 @@ export default function NoOaBankBatchPage() {
       setDetails({});
       loadBatches();
     };
-    window.addEventListener("bankTransactionCategoryUpdated", handleCategoryUpdated);
-    return () => window.removeEventListener("bankTransactionCategoryUpdated", handleCategoryUpdated);
+    return subscribeFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, handleCategoryUpdated);
   }, [loadBatches]);
 
   const handleSelectBatch = (batch: NoOaBankBatch, checked: boolean) => {
@@ -348,7 +363,9 @@ export default function NoOaBankBatchPage() {
   };
 
   const handleMutationComplete = (message: string, result: { affectedMonths?: string[] }) => {
-    window.dispatchEvent(new CustomEvent("workbenchRelationUpdated", { detail: mutationEventDetail(result) }));
+    emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
+      ...mutationEventDetail(result),
+    });
     setDetails({});
     setSnackbar({ severity: "success", message });
     loadBatches();
@@ -399,7 +416,9 @@ export default function NoOaBankBatchPage() {
         return new Set([...previous].filter((batchId) => failedBatchIds.has(batchId)));
       });
       if (submittedCount > 0) {
-        window.dispatchEvent(new CustomEvent("workbenchRelationUpdated", { detail: mutationEventDetail(result) }));
+        emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
+          ...mutationEventDetail(result),
+        });
       }
       setDetails({});
       if (failedResults.length === 0) {
@@ -509,7 +528,7 @@ export default function NoOaBankBatchPage() {
         sx={{
           display: "grid",
           gap: 1.5,
-          gridTemplateColumns: { xs: "1fr", lg: "280px minmax(0, 1fr)" },
+          gridTemplateColumns: { xs: "1fr", lg: "280px 280px minmax(0, 1fr)" },
           alignItems: "start",
         }}
       >
@@ -550,7 +569,7 @@ export default function NoOaBankBatchPage() {
           </Stack>
         </Paper>
 
-        <Paper aria-label="免OA批次与明细" role="region" variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
+        <Paper aria-label="免OA批次" role="region" variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
           <Stack alignItems="center" direction="row" justifyContent="space-between" spacing={1.5} sx={{ px: 2, py: 1.5 }}>
             <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
               <Typography component="h2" variant="h6" fontWeight={900}>
@@ -572,7 +591,7 @@ export default function NoOaBankBatchPage() {
                 const isSubmitReady = canSubmit(batch);
                 return (
                   <Box
-                    aria-label={`${batch.batchLabel || batch.batchType} ${accountLabel(batch)} ${batch.scopeMonth} ${formatMoney(batch.totalAmount)} ${reason}`}
+                    aria-label={`${batch.batchLabel || batch.batchType} ${accountLabel(batch)} ${batch.scopeMonth} ${batch.rowCount} 条 ${reason}`}
                     key={batch.batchId}
                     onClick={() => setSelectedBatchId(batch.batchId)}
                     role="button"
@@ -607,9 +626,11 @@ export default function NoOaBankBatchPage() {
                         </Stack>
                         <BatchStatusChip status={batch.status} />
                       </Stack>
-                      <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
-                        <Typography variant="body2">流水 {batch.rowCount}</Typography>
-                        <Typography variant="body2">金额 {formatMoney(batch.totalAmount)}</Typography>
+                      <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                        <Chip label={batch.scopeMonth || "-"} size="small" />
+                        <Chip label={accountLabel(batch)} size="small" variant="outlined" />
+                        <Chip label={`${batch.rowCount} 条`} size="small" variant="outlined" />
+                        <Chip label={batch.batchLabel || batch.batchType} size="small" variant="outlined" />
                       </Stack>
                       {reason ? (
                         <Typography color={batch.status === "conflict" ? "error" : "text.secondary"} variant="caption">
@@ -645,8 +666,9 @@ export default function NoOaBankBatchPage() {
               })
               : null}
           </Stack>
-          <Divider />
-          <Box aria-label="批次明细" role="region">
+        </Paper>
+
+        <Paper aria-label="批次明细" role="region" variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
             {selectedBatch ? (
               <>
               <Stack spacing={1} sx={{ px: 2, py: 1.5 }}>
@@ -676,26 +698,32 @@ export default function NoOaBankBatchPage() {
               {selectedDetail && selectedDetail.rows.length > 0 ? (
                 <TableContainer sx={{ maxHeight: { lg: "60vh" } }}>
                   <Table stickyHeader size="small" aria-label="批次明细表格">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>交易时间</TableCell>
-                        <TableCell>对方户名</TableCell>
-                        <TableCell>收/支</TableCell>
-                        <TableCell align="right">金额</TableCell>
-                        <TableCell>摘要/用途/备注</TableCell>
-                        <TableCell>分类来源</TableCell>
+	                    <TableHead>
+	                      <TableRow>
+	                        <TableCell>交易时间</TableCell>
+	                        <TableCell>对方户名</TableCell>
+	                        <TableCell align="right">金额</TableCell>
+	                        <TableCell>摘要/用途/备注</TableCell>
+	                        <TableCell>分类来源</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
                       {selectedDetail.rows.map((row) => (
-                        <TableRow key={row.transactionId || `${row.tradeTime}-${row.amount}`}>
-                          <TableCell>{row.tradeTime || "-"}</TableCell>
-                          <TableCell>{row.counterpartyName || "-"}</TableCell>
-                          <TableCell>{row.directionLabel || (row.direction === "income" ? "收" : row.direction === "expense" ? "支" : "-")}</TableCell>
-                          <TableCell align="right">{formatMoney(row.amount)}</TableCell>
-                          <TableCell>
-                            <Stack spacing={0.25}>
-                              <Typography variant="body2">{row.summary || "-"}</Typography>
+	                        <TableRow key={row.transactionId || `${row.tradeTime}-${row.amount}`}>
+	                          <TableCell>{row.tradeTime || "-"}</TableCell>
+	                          <TableCell>{row.counterpartyName || "-"}</TableCell>
+	                          <TableCell align="right">
+	                            <Stack alignItems="flex-end" spacing={0.25}>
+	                              <Stack alignItems="center" direction="row" justifyContent="flex-end" spacing={0.75}>
+	                                <Chip label={directionTagLabel(row)} size="small" />
+	                                <Typography variant="body2">{formatMoney(row.amount)}</Typography>
+	                              </Stack>
+	                              <Chip label={bankTagLabel(row)} size="small" variant="outlined" />
+	                            </Stack>
+	                          </TableCell>
+	                          <TableCell>
+	                            <Stack spacing={0.25}>
+	                              <Typography variant="body2">{row.summary || "-"}</Typography>
                               <Typography color="text.secondary" variant="caption">
                                 {[row.purpose, row.remark].filter(Boolean).join(" / ") || "-"}
                               </Typography>
@@ -712,7 +740,6 @@ export default function NoOaBankBatchPage() {
             ) : (
               <StatePanel compact tone="empty" title="请选择批次查看明细" />
             )}
-          </Box>
         </Paper>
       </Box>
 
