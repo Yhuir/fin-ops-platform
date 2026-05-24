@@ -138,12 +138,21 @@ class WorkbenchReconciliationDirtyQueue:
             claimed.append(scope_month)
         return claimed
 
-    def complete(self, scope_month: str, *, source_versions: dict[str, object]) -> None:
+    def complete(
+        self,
+        scope_month: str,
+        *,
+        source_versions: dict[str, object],
+        worker_id: str | None = None,
+        request_id: str | None = None,
+    ) -> None:
         if self._repository is not None:
             self._repository.complete_workbench_matching_dirty_scope(
                 tenant_id=self._tenant_id,
                 scope_month=scope_month,
                 source_versions=source_versions,
+                worker_id=worker_id,
+                request_id=request_id,
             )
             return
         entry = self._require_scope(scope_month)
@@ -157,7 +166,15 @@ class WorkbenchReconciliationDirtyQueue:
         entry["duration_ms"] = _duration_ms(entry.get("started_at"), now)
         self._finish_run(scope_month, status="completed", at=now, source_versions=source_versions, error=None)
 
-    def fail(self, scope_month: str, *, error: str, retry_delay_seconds: int | None = None) -> None:
+    def fail(
+        self,
+        scope_month: str,
+        *,
+        error: str,
+        retry_delay_seconds: int | None = None,
+        worker_id: str | None = None,
+        request_id: str | None = None,
+    ) -> None:
         if self._repository is not None:
             self._repository.fail_workbench_matching_dirty_scope(
                 tenant_id=self._tenant_id,
@@ -166,6 +183,8 @@ class WorkbenchReconciliationDirtyQueue:
                 retry_delay_seconds=retry_delay_seconds,
                 retry_max_attempts=self._options.retry_max_attempts,
                 retry_backoff_seconds=list(self._options.retry_backoff_seconds),
+                worker_id=worker_id,
+                request_id=request_id,
             )
             return
         entry = self._require_scope(scope_month)

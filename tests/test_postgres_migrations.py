@@ -348,7 +348,7 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "workbench_reconciliation_decisions_scope_status_idx",
             "workbench_reconciliation_decisions_row_ids_gin",
             "workbench_matching_dirty_scopes_claim_idx",
-            "matching_runs_request_id_uidx",
+            "matching_runs_tenant_request_id_uidx",
         ):
             self.assertIn(required, sql)
 
@@ -377,6 +377,8 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "invoice_row_ids text[] not null default '{}'::text[]",
             "source_versions jsonb not null default '{}'::jsonb",
             "raw_payload jsonb not null default '{}'::jsonb",
+            "consumed_by_relation_id text",
+            "suppressed_by_exception_case_id text",
         ):
             self.assertIn(required, body)
         self.assertIn("decision_status in ('proposed', 'paired', 'open', 'suppressed', 'consumed', 'expired')", sql)
@@ -396,6 +398,7 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "add column if not exists lease_expires_at timestamptz",
             "add column if not exists source_versions jsonb not null default '{}'::jsonb",
             "add column if not exists request_id text",
+            "add column if not exists tenant_id text not null default 'default'",
             "add column if not exists started_at timestamptz",
             "add column if not exists completed_at timestamptz",
             "add column if not exists failed_at timestamptz",

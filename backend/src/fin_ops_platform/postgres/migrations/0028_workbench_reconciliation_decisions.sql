@@ -26,8 +26,8 @@ create table if not exists read_model.workbench_reconciliation_decisions (
     conflict_set jsonb not null default '[]'::jsonb,
     explanation text,
     source_versions jsonb not null default '{}'::jsonb,
-    consumed_by_relation_id uuid,
-    suppressed_by_exception_case_id uuid,
+    consumed_by_relation_id text,
+    suppressed_by_exception_case_id text,
     generated_at timestamptz,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
@@ -95,6 +95,7 @@ begin
 end $$;
 
 alter table app.matching_runs
+    add column if not exists tenant_id text not null default 'default',
     add column if not exists request_id text,
     add column if not exists scope_month date,
     add column if not exists started_at timestamptz,
@@ -104,12 +105,12 @@ alter table app.matching_runs
     add column if not exists source_versions jsonb not null default '{}'::jsonb,
     add column if not exists error_summary text;
 
-create unique index if not exists matching_runs_request_id_uidx
-    on app.matching_runs (request_id)
+create unique index if not exists matching_runs_tenant_request_id_uidx
+    on app.matching_runs (tenant_id, request_id)
     where request_id is not null;
 
 create index if not exists matching_runs_scope_status_idx
-    on app.matching_runs (scope_month, status, started_at desc);
+    on app.matching_runs (tenant_id, scope_month, status, started_at desc);
 
 do $$
 begin

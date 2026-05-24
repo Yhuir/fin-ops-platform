@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
+from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_reconciliation_models import (
     DECISION_STATUS_CONSUMED,
@@ -101,6 +103,48 @@ class WorkbenchReconciliationDecisionStoreTests(unittest.TestCase):
         rows = {item["decision_key"]: item for item in store.list_decisions("2026-05")}
         self.assertEqual(rows["stale"]["decision_status"], DECISION_STATUS_EXPIRED)
         self.assertEqual(rows["fresh"]["decision_status"], DECISION_STATUS_PAIRED)
+
+    def test_repository_lifecycle_updates_use_text_case_ids_and_jsonb_subset_versions(self) -> None:
+        connection = RepositoryRecordingConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.consume_workbench_reconciliation_decisions_by_row_ids(
+            tenant_id="tenant-a",
+            row_ids=["oa-1"],
+            relation_id="CASE-REL-1",
+        )
+        repository.suppress_workbench_reconciliation_decisions_by_row_ids(
+            tenant_id="tenant-a",
+            row_ids=["oa-2"],
+            exception_case_id="CASE-EX-1",
+        )
+        with patch("fin_ops_platform.services.postgres_repositories.read_models.jsonb", side_effect=lambda value: value):
+            repository.expire_stale_workbench_reconciliation_decisions(
+                tenant_id="tenant-a",
+                scope_months=["2026-05"],
+                source_versions={"rules": "v2"},
+            )
+
+        consume_sql, consume_params = connection.execute_calls[0]
+        suppress_sql, suppress_params = connection.execute_calls[1]
+        expire_sql, expire_params = connection.execute_calls[2]
+        self.assertNotIn("::uuid", consume_sql)
+        self.assertNotIn("::uuid", suppress_sql)
+        self.assertIn("CASE-REL-1", consume_params)
+        self.assertIn("CASE-EX-1", suppress_params)
+        self.assertIn("not (source_versions @>", expire_sql)
+        self.assertIn("scope_month = any(%s::date[])", expire_sql)
+        self.assertNotIn("to_char(scope_month", expire_sql)
+        self.assertEqual(expire_params[1], ["2026-05-01"])
+
+
+class RepositoryRecordingConnection:
+    def __init__(self) -> None:
+        self.execute_calls: list[tuple[str, tuple]] = []
+
+    def execute(self, sql: str, params: tuple = ()) -> int:
+        self.execute_calls.append((" ".join(sql.lower().split()), params))
+        return 1
 
 
 if __name__ == "__main__":

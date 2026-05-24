@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 import unittest
+from unittest.mock import patch
 
+from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import (
     WorkbenchReconciliationDirtyQueue,
     WorkbenchReconciliationDirtyQueueOptions,
@@ -18,6 +20,65 @@ class Clock:
 
     def advance(self, seconds: int) -> None:
         self.value += timedelta(seconds=seconds)
+
+
+class RepositoryTransaction:
+    def __init__(self, parent: "RepositoryRecordingConnection") -> None:
+        self.parent = parent
+
+    def __enter__(self) -> "RepositoryTransaction":
+        self.parent.transaction_enters += 1
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.parent.transaction_exits += 1
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        return self.parent.fetch_all(sql, params)
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        return self.parent.fetch_one(sql, params)
+
+    def execute(self, sql: str, params: tuple = ()) -> int:
+        return self.parent.execute(sql, params)
+
+
+class RepositoryRecordingConnection:
+    def __init__(self) -> None:
+        self.transaction_enters = 0
+        self.transaction_exits = 0
+        self.fetch_all_calls: list[tuple[str, tuple]] = []
+        self.fetch_one_calls: list[tuple[str, tuple]] = []
+        self.execute_calls: list[tuple[str, tuple]] = []
+        self.claim_rows = [
+            {
+                "scope_month": "2026-03",
+                "request_id": "request-1:2026-03",
+                "source_versions": {"bank": 1},
+            }
+        ]
+        self.scope_update_row = {
+            "request_id": "request-1:2026-03",
+            "duration_ms": 1200,
+            "source_versions": {"bank": 1},
+        }
+
+    def transaction(self) -> RepositoryTransaction:
+        return RepositoryTransaction(self)
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        self.fetch_all_calls.append((" ".join(sql.lower().split()), params))
+        if "update job.workbench_matching_dirty_scopes" in self.fetch_all_calls[-1][0]:
+            return list(self.claim_rows)
+        return []
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        self.fetch_one_calls.append((" ".join(sql.lower().split()), params))
+        return dict(self.scope_update_row)
+
+    def execute(self, sql: str, params: tuple = ()) -> int:
+        self.execute_calls.append((" ".join(sql.lower().split()), params))
+        return 1
 
 
 class WorkbenchReconciliationDirtyQueueTests(unittest.TestCase):
@@ -117,6 +178,77 @@ class WorkbenchReconciliationDirtyQueueTests(unittest.TestCase):
         self.assertEqual(entry["status"], "failed")
         self.assertEqual(entry["attempt_count"], 2)
         self.assertEqual(entry["last_error"], "permanent")
+
+    def test_repository_claim_wraps_scope_claim_and_run_audit_in_one_transaction(self) -> None:
+        connection = RepositoryRecordingConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        with patch("fin_ops_platform.services.postgres_repositories.read_models.jsonb", side_effect=lambda value: value):
+            claimed = repository.claim_workbench_matching_dirty_scopes(
+                tenant_id="tenant-a",
+                worker_id="worker-a",
+                limit=1,
+                lease_seconds=600,
+                request_id="request-1",
+            )
+
+        self.assertEqual(claimed, ["2026-03"])
+        self.assertEqual(connection.transaction_enters, 1)
+        self.assertEqual(connection.transaction_exits, 1)
+        self.assertEqual(len(connection.fetch_all_calls), 1)
+        self.assertIn("for update skip locked", connection.fetch_all_calls[0][0])
+        self.assertEqual(len(connection.execute_calls), 1)
+        run_sql, run_params = connection.execute_calls[0]
+        self.assertIn("insert into app.matching_runs", run_sql)
+        self.assertIn("tenant_id", run_sql)
+        self.assertIn("on conflict (tenant_id, request_id)", run_sql)
+        self.assertIn("tenant-a", run_params)
+
+    def test_repository_complete_and_fail_require_active_lease_identity(self) -> None:
+        connection = RepositoryRecordingConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        with patch("fin_ops_platform.services.postgres_repositories.read_models.jsonb", side_effect=lambda value: value):
+            repository.complete_workbench_matching_dirty_scope(
+                tenant_id="tenant-a",
+                scope_month="2026-03",
+                source_versions={"engine": "v1"},
+                worker_id="worker-a",
+                request_id="request-1:2026-03",
+            )
+        complete_scope_sql, complete_scope_params = connection.fetch_one_calls[-1]
+        complete_run_sql, complete_run_params = connection.execute_calls[-1]
+        self.assertIn("status = 'processing'", complete_scope_sql)
+        self.assertIn("lease_owner = %s", complete_scope_sql)
+        self.assertIn("request_id = %s", complete_scope_sql)
+        self.assertNotIn("to_char(scope_month", complete_scope_sql)
+        self.assertIn("tenant_id = %s", complete_run_sql)
+        self.assertIn("worker-a", complete_scope_params)
+        self.assertIn("request-1:2026-03", complete_scope_params)
+        self.assertIn("tenant-a", complete_run_params)
+
+        with patch("fin_ops_platform.services.postgres_repositories.read_models.jsonb", side_effect=lambda value: value):
+            repository.fail_workbench_matching_dirty_scope(
+                tenant_id="tenant-a",
+                scope_month="2026-03",
+                error="temporary",
+                retry_delay_seconds=None,
+                retry_max_attempts=5,
+                retry_backoff_seconds=[60, 300, 900],
+                worker_id="worker-a",
+                request_id="request-1:2026-03",
+            )
+        fail_scope_sql, fail_scope_params = connection.fetch_one_calls[-1]
+        fail_run_sql, fail_run_params = connection.execute_calls[-1]
+        self.assertIn("status = 'processing'", fail_scope_sql)
+        self.assertIn("lease_owner = %s", fail_scope_sql)
+        self.assertIn("request_id = %s", fail_scope_sql)
+        self.assertIn("attempt_count + 1 = 2 then 300", fail_scope_sql)
+        self.assertNotIn("to_char(scope_month", fail_scope_sql)
+        self.assertIn("tenant_id = %s", fail_run_sql)
+        self.assertIn("worker-a", fail_scope_params)
+        self.assertIn("request-1:2026-03", fail_scope_params)
+        self.assertIn("tenant-a", fail_run_params)
 
 
 if __name__ == "__main__":
