@@ -571,6 +571,20 @@ class WorkbenchQueryService:
             return []
         return [dict(evidence) for evidence in evidences if isinstance(evidence, dict)]
 
+    def _formal_attachment_invoice_candidates(self, record: OAApplicationRecord | object) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for candidate in [*self._attachment_evidences(record), *self._attachment_invoices(record)]:
+            if self._attachment_evidence_source_kind(candidate) != OA_ATTACHMENT_INVOICE_SOURCE_KIND:
+                continue
+            identity = self._attachment_invoice_candidate_identity(candidate)
+            if identity and identity in seen:
+                continue
+            if identity:
+                seen.add(identity)
+            result.append(candidate)
+        return result
+
     @staticmethod
     def _attachment_artifacts(record: OAApplicationRecord | object) -> list[dict[str, Any]]:
         artifacts = getattr(record, "attachment_artifacts", [])
@@ -627,6 +641,27 @@ class WorkbenchQueryService:
             return ""
         return sha1(material.encode("utf-8")).hexdigest()[:16]
 
+    @classmethod
+    def _attachment_invoice_candidate_identity(cls, attachment_invoice: dict[str, Any]) -> str:
+        identity_parts = [
+            cls._clean_identity_part(attachment_invoice.get("source_attachment_key")),
+            cls._clean_identity_part(attachment_invoice.get("source_expense_item_id")),
+            cls._clean_identity_part(attachment_invoice.get("digital_invoice_no")),
+            cls._clean_identity_part(attachment_invoice.get("invoice_no")),
+            cls._clean_identity_part(attachment_invoice.get("invoice_code")),
+            cls._clean_identity_part(attachment_invoice.get("seller_tax_no")),
+            cls._clean_identity_part(attachment_invoice.get("seller_name")),
+            cls._clean_identity_part(attachment_invoice.get("buyer_tax_no")),
+            cls._clean_identity_part(attachment_invoice.get("buyer_name")),
+            cls._clean_identity_part(attachment_invoice.get("total_with_tax")),
+            cls._clean_identity_part(attachment_invoice.get("amount")),
+            cls._clean_identity_part(attachment_invoice.get("tax_amount")),
+        ]
+        material = "|".join(part for part in identity_parts if part)
+        if material:
+            return sha1(material.encode("utf-8")).hexdigest()[:16]
+        return cls._attachment_invoice_stable_identity(attachment_invoice)
+
     @staticmethod
     def _clean_identity_part(value: Any) -> str:
         text = str(value or "").strip()
@@ -651,8 +686,7 @@ class WorkbenchQueryService:
         *,
         oa_row: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        attachment_evidences = self._attachment_evidences(record)
-        attachment_invoices = attachment_evidences or self._attachment_invoices(record)
+        attachment_invoices = self._formal_attachment_invoice_candidates(record)
         if not attachment_invoices:
             return []
 
@@ -662,6 +696,8 @@ class WorkbenchQueryService:
         invoice_rows: list[dict[str, Any]] = []
         for index, attachment_invoice in enumerate(attachment_invoices):
             source_kind = self._attachment_evidence_source_kind(attachment_invoice)
+            if source_kind != OA_ATTACHMENT_INVOICE_SOURCE_KIND:
+                continue
             row_id = self._attachment_evidence_row_id(oa_row["id"], index, source_kind, attachment_invoice)
             source_expense_row_index = self._attachment_invoice_source_value(
                 attachment_invoice,
@@ -676,96 +712,49 @@ class WorkbenchQueryService:
                 "source_attachment_key",
             )
             source_attachment_name = self._attachment_invoice_display_name(attachment_invoice)
-            if source_kind == OA_ATTACHMENT_INVOICE_SOURCE_KIND:
-                display_amount = self._first_valid_attachment_money(
-                    attachment_invoice.get("net_amount"),
-                    attachment_invoice.get("amount"),
-                    attachment_invoice.get("total_with_tax"),
-                )
-                display_total_with_tax = self._first_valid_attachment_money(
-                    attachment_invoice.get("total_with_tax"),
-                    attachment_invoice.get("amount"),
-                    display_amount,
-                )
-                display_tax_amount = self._first_valid_attachment_money(attachment_invoice.get("tax_amount"))
-                detail_fields = self._attachment_invoice_detail_fields(
-                    attachment_invoice,
-                    row_id=row_id,
-                    source_detail_fields=source_detail_fields,
-                    source_expense_row_index=source_expense_row_index,
-                    source_expense_item_id=source_expense_item_id,
-                    source_attachment_key=source_attachment_key,
-                    source_attachment_name=source_attachment_name,
-                )
-                invoice_row = self._build_invoice_row(
-                    row_id=row_id,
-                    month=str(oa_row["_month"]),
-                    section=section,
-                    case_id=oa_row.get("case_id"),
-                    seller_tax_no=str(attachment_invoice.get("seller_tax_no") or "—"),
-                    seller_name=str(attachment_invoice.get("seller_name") or oa_row.get("counterparty_name") or "—"),
-                    buyer_tax_no=str(attachment_invoice.get("buyer_tax_no") or "—"),
-                    buyer_name=str(attachment_invoice.get("buyer_name") or "—"),
-                    issue_date=str(
-                        attachment_invoice.get("issue_date")
-                        or source_detail_fields.get("报销日期")
-                        or source_detail_fields.get("申请日期")
-                        or "—"
-                    ),
-                    amount=display_amount or "—",
-                    tax_rate=str(attachment_invoice.get("tax_rate") or "—"),
-                    tax_amount=display_tax_amount or "—",
-                    total_with_tax=display_total_with_tax or "—",
-                    invoice_type=str(attachment_invoice.get("invoice_type") or "进项发票"),
-                    relation=relation,
-                    detail_fields=detail_fields,
-                )
-            else:
-                detail_fields = self._attachment_non_invoice_detail_fields(
-                    attachment_invoice,
-                    row_id=row_id,
-                    source_kind=source_kind,
-                    source_detail_fields=source_detail_fields,
-                    source_expense_row_index=source_expense_row_index,
-                    source_expense_item_id=source_expense_item_id,
-                    source_attachment_key=source_attachment_key,
-                    source_attachment_name=source_attachment_name,
-                )
-                display_date = str(
-                    attachment_invoice.get("paid_at")
-                    or attachment_invoice.get("issue_date")
+            display_amount = self._first_valid_attachment_money(
+                attachment_invoice.get("net_amount"),
+                attachment_invoice.get("amount"),
+                attachment_invoice.get("total_with_tax"),
+            )
+            display_total_with_tax = self._first_valid_attachment_money(
+                attachment_invoice.get("total_with_tax"),
+                attachment_invoice.get("amount"),
+                display_amount,
+            )
+            display_tax_amount = self._first_valid_attachment_money(attachment_invoice.get("tax_amount"))
+            detail_fields = self._attachment_invoice_detail_fields(
+                attachment_invoice,
+                row_id=row_id,
+                source_detail_fields=source_detail_fields,
+                source_expense_row_index=source_expense_row_index,
+                source_expense_item_id=source_expense_item_id,
+                source_attachment_key=source_attachment_key,
+                source_attachment_name=source_attachment_name,
+            )
+            invoice_row = self._build_invoice_row(
+                row_id=row_id,
+                month=str(oa_row["_month"]),
+                section=section,
+                case_id=oa_row.get("case_id"),
+                seller_tax_no=str(attachment_invoice.get("seller_tax_no") or "—"),
+                seller_name=str(attachment_invoice.get("seller_name") or oa_row.get("counterparty_name") or "—"),
+                buyer_tax_no=str(attachment_invoice.get("buyer_tax_no") or "—"),
+                buyer_name=str(attachment_invoice.get("buyer_name") or "—"),
+                issue_date=str(
+                    attachment_invoice.get("issue_date")
                     or source_detail_fields.get("报销日期")
                     or source_detail_fields.get("申请日期")
                     or "—"
-                )
-                display_amount = self._first_valid_attachment_money(
-                    attachment_invoice.get("amount"),
-                    attachment_invoice.get("total_with_tax"),
-                ) or "—"
-                display_tax_amount = self._first_valid_attachment_money(attachment_invoice.get("tax_amount"))
-                invoice_row = self._build_invoice_row(
-                    row_id=row_id,
-                    month=str(oa_row["_month"]),
-                    section=section,
-                    case_id=oa_row.get("case_id"),
-                    seller_tax_no="—",
-                    seller_name=str(
-                        attachment_invoice.get("merchant_name")
-                        or attachment_invoice.get("seller_name")
-                        or oa_row.get("counterparty_name")
-                        or "—"
-                    ),
-                    buyer_tax_no="—",
-                    buyer_name=str(attachment_invoice.get("buyer_name") or "—"),
-                    issue_date=display_date,
-                    amount=display_amount,
-                    tax_rate="—",
-                    tax_amount=display_tax_amount or "—",
-                    total_with_tax=display_amount,
-                    invoice_type="付款凭证" if source_kind == OA_ATTACHMENT_PAYMENT_RECEIPT_SOURCE_KIND else "未识别附件",
-                    relation=relation,
-                    detail_fields=detail_fields,
-                )
+                ),
+                amount=display_amount or "—",
+                tax_rate=str(attachment_invoice.get("tax_rate") or "—"),
+                tax_amount=display_tax_amount or "—",
+                total_with_tax=display_total_with_tax or "—",
+                invoice_type=str(attachment_invoice.get("invoice_type") or "进项发票"),
+                relation=relation,
+                detail_fields=detail_fields,
+            )
             invoice_row["source_kind"] = source_kind
             invoice_row["derived_from_oa_id"] = oa_row["id"]
             invoice_row["source_expense_row_index"] = source_expense_row_index
@@ -810,6 +799,9 @@ class WorkbenchQueryService:
 
     @staticmethod
     def _attachment_evidence_source_kind(attachment_evidence: dict[str, Any]) -> str:
+        explicit_source_kind = str(attachment_evidence.get("source_kind") or "").strip()
+        if explicit_source_kind in OA_ATTACHMENT_EVIDENCE_SOURCE_KINDS:
+            return explicit_source_kind
         evidence_type = str(attachment_evidence.get("evidence_type") or "").strip()
         if not evidence_type:
             return (
@@ -882,43 +874,6 @@ class WorkbenchQueryService:
                 attachment_invoice.get("net_amount"),
                 attachment_invoice.get("amount"),
             ) or "—",
-        }
-
-    def _attachment_non_invoice_detail_fields(
-        self,
-        attachment_evidence: dict[str, Any],
-        *,
-        row_id: str,
-        source_kind: str,
-        source_detail_fields: dict[str, Any],
-        source_expense_row_index: str | None,
-        source_expense_item_id: str | None,
-        source_attachment_key: str | None,
-        source_attachment_name: str,
-    ) -> dict[str, str]:
-        return {
-            "序号": row_id,
-            "附件凭证来源": "OA附件解析",
-            "附件凭证类型": str(attachment_evidence.get("document_kind") or "未知附件"),
-            "附件凭证分类": "付款凭证" if source_kind == OA_ATTACHMENT_PAYMENT_RECEIPT_SOURCE_KIND else "未识别附件",
-            "付款凭证号": str(
-                attachment_evidence.get("transaction_no")
-                or attachment_evidence.get("merchant_order_no")
-                or "—"
-            ),
-            "付款方式": str(attachment_evidence.get("payment_method") or "—"),
-            "商户名称": str(attachment_evidence.get("merchant_name") or "—"),
-            "付款时间": str(attachment_evidence.get("paid_at") or "—"),
-            "金额": self._first_valid_attachment_money(attachment_evidence.get("amount")) or "—",
-            "来源OA单号": str(source_detail_fields.get("OA单号") or "—"),
-            "来源OA明细行号": str(
-                source_expense_row_index
-                or source_detail_fields.get("明细行号")
-                or "整单"
-            ),
-            "来源付款项ID": str(source_expense_item_id or "—"),
-            "来源附件Key": str(source_attachment_key or "—"),
-            "附件文件名": source_attachment_name,
         }
 
     def _seed_oa_records(self) -> dict[str, list[OAApplicationRecord]]:

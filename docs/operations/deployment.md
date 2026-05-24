@@ -19,6 +19,43 @@
 - OA 菜单和角色 SQL 已按账户类型准备。
 - 有可回滚的后端、前端和配置版本。
 
+## Release-Based 发布
+
+生产主发布路径是服务器 release，而不是覆盖 `/opt/fin-ops/current/backend`：
+
+```bash
+./scripts/deploy-oa.sh
+```
+
+默认发布到：
+
+```text
+/opt/fin-ops/releases/<release-name>/src
+```
+
+发布脚本会生成 `src/RELEASE.json`，并通过 `finops-prod` 免密 SSH 调用服务器上的 root-owned helper：
+
+```bash
+sudo -n /usr/local/sbin/finops-deploy-control check-release <release-name>
+sudo -n /usr/local/sbin/finops-deploy-control activate <release-name>
+```
+
+`activate` 负责让 API、RabbitMQ worker 和 dispatcher 指向该 release 并重启 active services。发布后脚本会检查 live 前端 `index.html` 与 release 内 `web/dist/index.html` 的哈希一致，避免后端和前端版本漂移。
+
+`git push main` 不是部署动作。标准顺序是：本地验证、提交、推送、执行 release 发布、发布后 smoke check。默认脚本会拒绝 dirty worktree；生产发布必须能追溯到具体 commit。
+
+release 目录会占用磁盘。默认保留最近 8 个 release，同时永远保护 deploy-control status 中仍被引用的 active release。旧 root-owned 历史 release 如果当前部署用户没有权限删除，会被跳过并输出原因，需要单独做一次 root 清理。可按磁盘容量调整：
+
+```bash
+./scripts/deploy-oa.sh --keep-releases 12
+```
+
+旧 `/opt/fin-ops/current/backend` 覆盖式部署只保留为显式兼容模式，不作为生产主路径：
+
+```bash
+./scripts/deploy-oa.sh --mode legacy-current --host 139.155.5.132 --user root --reload-nginx
+```
+
 ## Worker 进程矩阵
 
 生产环境按职责拆分 worker 进程，所有进程都连接同一个 PostgreSQL durable queue。不要用 API in-process thread 作为生产刷新机制。

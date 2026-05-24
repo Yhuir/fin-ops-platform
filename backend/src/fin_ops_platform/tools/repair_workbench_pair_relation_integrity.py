@@ -65,7 +65,7 @@ def build_repair_plan(
     for row_id, row in rows_by_id.items():
         source_kind = str(row.get("source_kind") or "").strip()
         parent = str(row.get("derived_from_oa_id") or "").strip()
-        if parent and source_kind.startswith("oa_attachment_"):
+        if parent and source_kind == "oa_attachment_invoice":
             attachment_rows_by_parent.setdefault(parent, []).append(row_id)
 
     repaired_snapshot = deepcopy(snapshot)

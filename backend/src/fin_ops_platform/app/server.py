@@ -14597,11 +14597,7 @@ class Application:
     def _invoice_row_is_oa_attachment_context(row: dict[str, object]) -> bool:
         if str(row.get("type") or "").strip() != "invoice":
             return False
-        return str(row.get("source_kind") or "").strip() in {
-            "oa_attachment_invoice",
-            "oa_attachment_payment_receipt",
-            "oa_attachment_unknown",
-        }
+        return str(row.get("source_kind") or "").strip() == "oa_attachment_invoice"
 
     @staticmethod
     def _raw_workbench_payload_row_ids(payload: dict[str, object]) -> set[str]:
@@ -15913,11 +15909,7 @@ class Application:
         selected_oa_ids: set[str],
     ) -> bool:
         source_kind = str(row.get("source_kind") or "").strip()
-        if source_kind not in {
-            "oa_attachment_invoice",
-            "oa_attachment_payment_receipt",
-            "oa_attachment_unknown",
-        }:
+        if source_kind != "oa_attachment_invoice":
             return False
         derived_from_oa_id = str(row.get("derived_from_oa_id") or "").strip()
         if derived_from_oa_id in selected_oa_ids:

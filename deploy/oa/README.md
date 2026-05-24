@@ -168,30 +168,34 @@ RabbitMQ 切换不是发布脚本的默认副作用。先保持 `FIN_OPS_QUEUE_B
 
 ## 一键发布脚本
 
-仓库根目录已提供一套只发布 `fin-ops`、不触碰 OA 源码的一键发布脚本：
+仓库根目录已提供一套只发布 `fin-ops`、不触碰 OA 源码的一键发布脚本。默认路径是 release-based 部署：
 
 ```bash
-./scripts/deploy-oa.sh --reload-nginx
+./scripts/deploy-oa.sh
 ```
 
 脚本会完成：
 
 - 本地重新构建 `web/dist`
-- 打包 `dist + backend`
-- 通过 SSH 推送到 OA 服务器
-- 覆盖：
-  - `/www/wwwroot/fin-ops/dist`
-  - `/opt/fin-ops/current/backend`
-- 重启 `fin-ops.service`
-- 可选执行 `nginx -t && nginx -s reload`
+- 打包生产运行所需的 `backend + web/dist + scripts + deploy/oa`
+- 生成 `src/RELEASE.json`，记录 release 名称、Git commit、分支和构建信息
+- 通过 `finops-prod` 免密 SSH 推送到：
+  - `/opt/fin-ops/releases/<release-name>/src`
+- 调用服务器 root-owned helper：
+  - `/usr/local/sbin/finops-deploy-control check-release <release-name>`
+  - `/usr/local/sbin/finops-deploy-control activate <release-name>`
+- 激活 API、RabbitMQ worker 和 dispatcher 指向该 release
+- 验证前端 `index.html` 与激活 release 的 `web/dist/index.html` 哈希一致
+- 清理可删除的旧 release，默认保留最近 8 个，并始终保护当前 active release
 
 常用参数：
 
 ```bash
 ./scripts/deploy-oa.sh --dry-run
 ./scripts/deploy-oa.sh --skip-build
-./scripts/deploy-oa.sh --skip-pip
-./scripts/deploy-oa.sh --host 139.155.5.132 --user root --reload-nginx
+./scripts/deploy-oa.sh --release-name main-abcdef12-20260524170000
+./scripts/deploy-oa.sh --no-activate
+./scripts/deploy-oa.sh --keep-releases 12
 ```
 
 说明：
@@ -199,6 +203,18 @@ RabbitMQ 切换不是发布脚本的默认副作用。先保持 `FIN_OPS_QUEUE_B
 - 这套脚本只发布 `fin-ops` 自己的前后端
 - 不会改 OA Java/Vue 源码
 - 也不会自动改 OA 数据库菜单；菜单和角色仍按本文后面的 SQL/菜单配置执行
+- `git push main` 只更新远端仓库，不会自动改变服务器；服务器生效必须执行发布脚本并激活 release
+- 默认拒绝从 dirty worktree 发布；确需发布未提交代码时必须显式加 `--allow-dirty`，但生产发布不建议这样做
+- `--reload-nginx` 只对旧 `legacy-current` 模式有意义；默认 release 模式不修改 nginx 配置，静态文件变更不需要 reload nginx
+- 旧覆盖式部署仍保留为显式模式：
+
+```bash
+./scripts/deploy-oa.sh --mode legacy-current --host 139.155.5.132 --user root --reload-nginx
+```
+
+该模式会覆盖 `/www/wwwroot/fin-ops/dist` 和 `/opt/fin-ops/current/backend`，只用于历史兼容，不作为生产主发布路径。
+
+release 会占用服务器磁盘。生产策略不是无限保留，而是默认保留最近 8 个 release，并保护当前 active release 和 deploy-control status 中仍被引用的 release。旧 root-owned 历史 release 如果当前部署用户没有权限删除，脚本会跳过并输出原因，需要单独做一次 root 清理。
 
 按当前业务要求，初始配置至少要包含：
 

@@ -3585,7 +3585,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual([row["detail_fields"]["发票号码"] for row in group_292["invoice_rows"]], ["29200001"])
         self.assertEqual(group_292["invoice_rows"][0]["derived_from_oa_id"], "oa-exp-hurong-292")
 
-    def test_get_api_workbench_groups_oa_2035_invoice_and_payment_evidences(self) -> None:
+    def test_get_api_workbench_groups_oa_2035_formal_attachment_invoices_only(self) -> None:
         app = build_application()
         record = OAApplicationRecord(
             id="oa-2035",
@@ -3621,14 +3621,14 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         source_group = next(group for group in payload["open"]["groups"] if group["reason"] == "oa_attachment_source_relation")
         self.assertEqual([row["id"] for row in source_group["oa_rows"]], ["oa-2035"])
         self.assertEqual(len(source_group["bank_rows"]), 0)
-        self.assertEqual(len(source_group["invoice_rows"]), 6)
+        self.assertEqual(len(source_group["invoice_rows"]), 3)
         self.assertEqual(
             sum(1 for row in source_group["invoice_rows"] if row["source_kind"] == "oa_attachment_invoice"),
             3,
         )
         self.assertEqual(
             sum(1 for row in source_group["invoice_rows"] if row["source_kind"] == "oa_attachment_payment_receipt"),
-            3,
+            0,
         )
         for row in source_group["invoice_rows"]:
             self.assertEqual(row["derived_from_oa_id"], "oa-2035")

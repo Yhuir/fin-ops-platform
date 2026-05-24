@@ -657,40 +657,35 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
             "oa-exp-hurong-248:item:1:att:c",
         )
 
-    def test_attachment_evidences_project_invoice_payment_and_unknown_rows_with_origin_fields(self) -> None:
+    def test_attachment_evidences_project_only_formal_invoice_rows_with_origin_fields(self) -> None:
         service = WorkbenchQueryService(oa_adapter=EvidenceAttachmentOAAdapter())
 
         payload = service.get_workbench("2026-03")
+
+        oa_row = next(row for row in payload["open"]["oa"] if row["id"] == "oa-evidence-2035")
+        self.assertEqual(oa_row["detail_fields"]["附件发票数量"], "1")
+        self.assertEqual(oa_row["detail_fields"]["付款凭证数量"], "1")
 
         evidence_rows = [
             row
             for row in payload["open"]["invoice"]
             if row.get("derived_from_oa_id") == "oa-evidence-2035"
         ]
-        self.assertCountEqual(
-            [row["source_kind"] for row in evidence_rows],
-            ["oa_attachment_invoice", "oa_attachment_payment_receipt", "oa_attachment_unknown"],
-        )
+        self.assertEqual([row["source_kind"] for row in evidence_rows], ["oa_attachment_invoice"])
         for row in evidence_rows:
             self.assertEqual(row["derived_from_oa_id"], "oa-evidence-2035")
             self.assertTrue(row["source_expense_item_id"])
             self.assertTrue(row["source_attachment_key"])
             self.assertTrue(row["source_attachment_name"])
 
-        by_source_kind = {row["source_kind"]: row for row in evidence_rows}
-        invoice_row = by_source_kind["oa_attachment_invoice"]
+        invoice_row = evidence_rows[0]
         self.assertEqual(invoice_row["detail_fields"]["发票号码"], "53000125")
         self.assertEqual(invoice_row["detail_fields"]["附件文件名"], "过路费发票合图.jpg")
-        payment_row = by_source_kind["oa_attachment_payment_receipt"]
-        self.assertEqual(payment_row["detail_fields"]["付款凭证号"], "wx-toll-25")
-        self.assertEqual(payment_row["detail_fields"]["附件凭证类型"], "微信支付凭证")
-        unknown_row = by_source_kind["oa_attachment_unknown"]
-        self.assertEqual(unknown_row["detail_fields"]["附件凭证类型"], "未知附件")
 
-    def test_attachment_evidence_ignores_ocr_order_numbers_as_money(self) -> None:
+    def test_payment_receipt_evidence_does_not_become_invoice_row(self) -> None:
         service = WorkbenchQueryService(oa_adapter=EvidenceAttachmentOAAdapter())
 
-        row = service._build_attachment_invoice_rows(
+        rows = service._build_attachment_invoice_rows(
             type(
                 "Record",
                 (),
@@ -714,16 +709,14 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
                 "_section": "open",
                 "_detail_fields": {"OA单号": "2062", "申请日期": "2026-03-27"},
             },
-        )[0]
+        )
 
-        self.assertEqual(row["source_kind"], "oa_attachment_payment_receipt")
-        self.assertEqual(row["amount"], "—")
-        self.assertEqual(row["_detail_fields"]["金额"], "—")
+        self.assertEqual(rows, [])
 
-    def test_attachment_artifact_without_invoice_identity_is_unknown_not_invoice(self) -> None:
+    def test_attachment_artifact_without_invoice_identity_does_not_become_invoice_row(self) -> None:
         service = WorkbenchQueryService(oa_adapter=EvidenceAttachmentOAAdapter())
 
-        row = service._build_attachment_invoice_rows(
+        rows = service._build_attachment_invoice_rows(
             type(
                 "Record",
                 (),
@@ -746,10 +739,9 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
                 "_section": "open",
                 "_detail_fields": {"OA单号": "2189", "申请日期": "2026-05-18"},
             },
-        )[0]
+        )
 
-        self.assertEqual(row["source_kind"], "oa_attachment_unknown")
-        self.assertEqual(row["invoice_type"], "未识别附件")
+        self.assertEqual(rows, [])
 
     def test_single_source_attachment_invoice_is_not_duplicated_from_expense_item_copy(self) -> None:
         service = WorkbenchQueryService(oa_adapter=SourceBoundAttachmentOAAdapter())

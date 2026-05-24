@@ -1511,6 +1511,18 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 "source_kind": "oa_attachment_invoice",
                 "derived_from_oa_id": "oa-exp-1",
             },
+            "oa-att-pay-new": {
+                "id": "oa-att-pay-new",
+                "type": "invoice",
+                "source_kind": "oa_attachment_payment_receipt",
+                "derived_from_oa_id": "oa-exp-1",
+            },
+            "oa-att-unk-new": {
+                "id": "oa-att-unk-new",
+                "type": "invoice",
+                "source_kind": "oa_attachment_unknown",
+                "derived_from_oa_id": "oa-exp-1",
+            },
         }
 
         row_ids = WorkbenchSqlProjectionBuilder._attachment_row_ids_for_relation(relation, rows_by_id)
@@ -1669,6 +1681,32 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(rows[0]["source_expense_item_id"], "oa-exp-structured:item:1")
         self.assertEqual(rows[0]["source_attachment_key"], "oa-exp-structured:invoice:1")
         self.assertIn("INV-STRUCT-001", rows[0]["detail_fields"]["发票号码"])
+
+    def test_sql_projection_structured_cache_excludes_payment_receipt_evidence_rows(self) -> None:
+        selected = WorkbenchSqlProjectionBuilder._select_structured_attachment_evidences(
+            invoices=[],
+            evidences=[
+                {
+                    "evidence_type": "tax_invoice",
+                    "invoice_no": "INV-ONLY-001",
+                    "source_attachment_key": "formal-invoice",
+                    "seller_name": "发票供应商",
+                    "total_with_tax": "196.00",
+                },
+                {
+                    "evidence_type": "payment_receipt",
+                    "transaction_no": "wx-pay-001",
+                    "source_attachment_key": "payment-voucher",
+                    "source_attachment_name": "付款凭证.jpg",
+                    "amount": "196.00",
+                },
+            ],
+            artifacts=[],
+        )
+
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0]["source_attachment_key"], "formal-invoice")
+        self.assertEqual(selected[0]["evidence_type"], "tax_invoice")
 
     def test_sql_projection_bank_account_label_uses_settings_mapping_not_account_name(self) -> None:
         connection = WorkbenchProjectionSettingsConnection(
@@ -2113,7 +2151,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(rows[0]["source_attachment_key"], "structured-cache-key")
         self.assertIn("INV-DEDUP-001", rows[0]["detail_fields"]["发票号码"])
 
-    def test_sql_projection_deduplicates_structured_attachment_placeholders_by_item_and_name(self) -> None:
+    def test_sql_projection_skips_structured_attachment_placeholders_without_invoice_identity(self) -> None:
         class StructuredOAConnection(WorkbenchProjectionSettingsConnection):
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
                 normalized = " ".join(sql.lower().split())
@@ -2189,8 +2227,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["source_attachment_name"], "重复发票.pdf")
+        self.assertEqual(rows, [])
 
     def test_sql_projection_deduplicates_payload_attachment_files_by_item_and_name(self) -> None:
         payload = {

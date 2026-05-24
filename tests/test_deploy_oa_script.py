@@ -27,18 +27,24 @@ class DeployOAScriptTest(unittest.TestCase):
         parser = self.module.build_parser()
         args = parser.parse_args([])
 
-        self.assertEqual(args.host, "139.155.5.132")
-        self.assertEqual(args.user, "root")
+        self.assertEqual(args.mode, "release")
+        self.assertEqual(args.host, "finops-prod")
+        self.assertEqual(args.user, "finops-deploy")
         self.assertEqual(args.domain, "www.yn-sourcing.com")
+        self.assertEqual(args.remote_releases_dir, "/opt/fin-ops/releases")
+        self.assertEqual(args.deploy_control_path, "/usr/local/sbin/finops-deploy-control")
+        self.assertEqual(args.keep_releases, 8)
         self.assertFalse(args.skip_build)
         self.assertFalse(args.skip_pip)
         self.assertFalse(args.reload_nginx)
+        self.assertFalse(args.no_activate)
         self.assertFalse(args.dry_run)
 
-    def test_remote_script_uses_expected_targets(self) -> None:
+    def test_release_remote_script_uses_versioned_release_and_deploy_control(self) -> None:
         config = self.module.DeploymentConfig(
-            host="139.155.5.132",
-            user="root",
+            mode="release",
+            host="finops-prod",
+            user="finops-deploy",
             domain="www.yn-sourcing.com",
             root_dir=Path("/Users/yu/Desktop/fin-ops-platform"),
             frontend_base_path="/fin-ops/",
@@ -47,30 +53,99 @@ class DeployOAScriptTest(unittest.TestCase):
             remote_data_dir="/opt/fin-ops/data",
             remote_service_name="fin-ops.service",
             remote_extract_root="/tmp/fin-ops-release",
+            remote_releases_dir="/opt/fin-ops/releases",
+            release_name="main-abcdef1-20260524170000",
+            deploy_control_path="/usr/local/sbin/finops-deploy-control",
+            keep_releases=8,
             skip_build=False,
             skip_pip=False,
             reload_nginx=True,
+            activate=True,
+            allow_dirty=False,
+            replace_release=False,
             dry_run=False,
         )
 
-        remote_script = self.module.build_remote_deploy_script(config)
+        remote_script = self.module.build_release_remote_deploy_script(config)
 
-        self.assertIn("/www/wwwroot/fin-ops/dist", remote_script)
-        self.assertIn("/opt/fin-ops/current/backend", remote_script)
-        self.assertIn("REMOTE_DATA_DIR=/opt/fin-ops/data", remote_script)
-        self.assertIn("cp -an /opt/fin-ops/current/backend/.runtime/fin_ops_platform/.", remote_script)
-        self.assertIn("Environment=FIN_OPS_DATA_DIR=/opt/fin-ops/data", remote_script)
-        self.assertIn("Environment=FIN_OPS_OA_BASE_URL=https://www.yn-sourcing.com/oa-api", remote_script)
-        self.assertIn("Environment=FIN_OPS_ETC_OA_BASE_URL=https://www.yn-sourcing.com/oa-api", remote_script)
-        self.assertIn("Environment=FIN_OPS_ETC_OA_FORM_DRAFT_PATH=/forms/form/{form_id}/records/record", remote_script)
-        self.assertIn("systemctl daemon-reload", remote_script)
-        self.assertIn("systemctl restart fin-ops.service", remote_script)
-        self.assertIn("nginx -t", remote_script)
-        self.assertIn("nginx -s reload", remote_script)
-        self.assertIn("python3 -m venv /opt/fin-ops/venv", remote_script)
+        self.assertIn("RELEASE_DIR=/opt/fin-ops/releases/main-abcdef1-20260524170000", remote_script)
+        self.assertIn("tar -xzf - -C \"$RELEASE_DIR\"", remote_script)
+        self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control check-release main-abcdef1-20260524170000", remote_script)
+        self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control activate main-abcdef1-20260524170000", remote_script)
+        self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control status", remote_script)
+        self.assertIn("KEEP_RELEASES=8", remote_script)
+        self.assertIn("sudo -n /usr/local/sbin/finops-deploy-control cleanup-releases --keep 8", remote_script)
+        self.assertNotIn("/opt/fin-ops/current/backend", remote_script)
+        self.assertNotIn("systemctl restart fin-ops.service", remote_script)
+        self.assertNotIn("pip install -r", remote_script)
 
-    def test_remote_script_can_skip_pip_and_nginx_reload(self) -> None:
+    def test_release_remote_script_can_upload_without_activation(self) -> None:
         config = self.module.DeploymentConfig(
+            mode="release",
+            host="finops-prod",
+            user="finops-deploy",
+            domain="www.yn-sourcing.com",
+            root_dir=Path("/Users/yu/Desktop/fin-ops-platform"),
+            frontend_base_path="/fin-ops/",
+            remote_frontend_dir="/www/wwwroot/fin-ops/dist",
+            remote_backend_dir="/opt/fin-ops/current/backend",
+            remote_data_dir="/opt/fin-ops/data",
+            remote_service_name="fin-ops.service",
+            remote_extract_root="/tmp/fin-ops-release",
+            remote_releases_dir="/opt/fin-ops/releases",
+            release_name="main-abcdef1-20260524170000",
+            deploy_control_path="/usr/local/sbin/finops-deploy-control",
+            keep_releases=8,
+            skip_build=True,
+            skip_pip=True,
+            reload_nginx=False,
+            activate=False,
+            allow_dirty=False,
+            replace_release=False,
+            dry_run=False,
+        )
+
+        remote_script = self.module.build_release_remote_deploy_script(config)
+
+        self.assertIn("check-release main-abcdef1-20260524170000", remote_script)
+        self.assertNotIn("activate main-abcdef1-20260524170000", remote_script)
+        self.assertNotIn("cleanup-releases", remote_script)
+
+    def test_remote_command_quotes_multiline_script_for_ssh(self) -> None:
+        config = self.module.DeploymentConfig(
+            mode="release",
+            host="finops-prod",
+            user="finops-deploy",
+            domain="www.yn-sourcing.com",
+            root_dir=Path("/Users/yu/Desktop/fin-ops-platform"),
+            frontend_base_path="/fin-ops/",
+            remote_frontend_dir="/www/wwwroot/fin-ops/dist",
+            remote_backend_dir="/opt/fin-ops/current/backend",
+            remote_data_dir="/opt/fin-ops/data",
+            remote_service_name="fin-ops.service",
+            remote_extract_root="/tmp/fin-ops-release",
+            remote_releases_dir="/opt/fin-ops/releases",
+            release_name="main-abcdef1-20260524170000",
+            deploy_control_path="/usr/local/sbin/finops-deploy-control",
+            keep_releases=8,
+            skip_build=True,
+            skip_pip=True,
+            reload_nginx=False,
+            activate=False,
+            allow_dirty=False,
+            replace_release=False,
+            dry_run=False,
+        )
+        remote_script = "set -euo pipefail\necho ok\n"
+
+        command = self.module.build_remote_command(config, remote_script)
+
+        self.assertEqual(command[-1], "bash -lc 'set -euo pipefail\necho ok\n'")
+        self.assertNotIn("bash", command[-3:-1])
+
+    def test_legacy_remote_script_keeps_previous_current_deploy_behavior(self) -> None:
+        config = self.module.DeploymentConfig(
+            mode="legacy-current",
             host="139.155.5.132",
             user="root",
             domain="www.yn-sourcing.com",
@@ -81,17 +156,25 @@ class DeployOAScriptTest(unittest.TestCase):
             remote_data_dir="/opt/fin-ops/data",
             remote_service_name="fin-ops.service",
             remote_extract_root="/tmp/fin-ops-release",
+            remote_releases_dir="/opt/fin-ops/releases",
+            release_name="main-abcdef1-20260524170000",
+            deploy_control_path="/usr/local/sbin/finops-deploy-control",
+            keep_releases=8,
             skip_build=True,
             skip_pip=True,
             reload_nginx=False,
+            activate=True,
+            allow_dirty=True,
+            replace_release=False,
             dry_run=False,
         )
 
-        remote_script = self.module.build_remote_deploy_script(config)
+        remote_script = self.module.build_legacy_remote_deploy_script(config)
 
         self.assertNotIn("pip install -r", remote_script)
         self.assertNotIn("nginx -s reload", remote_script)
         self.assertIn("systemctl restart fin-ops.service", remote_script)
+        self.assertIn("/opt/fin-ops/current/backend", remote_script)
 
 
 if __name__ == "__main__":

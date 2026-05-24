@@ -579,7 +579,7 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.queryByText(/客户附言：/)).not.toBeInTheDocument();
   });
 
-  test("renders OA 2035 source OA, attachment invoices, and payment receipts in the same horizontal group row", async () => {
+  test("renders OA 2035 source OA and formal attachment invoices in the same horizontal group row", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
 
@@ -593,12 +593,10 @@ describe("Workbench candidate grouping layout", () => {
     expect(within(invoiceCell).getByRole("row", { name: /OA2035-MACHINE-25.*25/ })).toBeInTheDocument();
     expect(within(invoiceCell).getByRole("row", { name: /OA2035-MACHINE-23.*23/ })).toBeInTheDocument();
     expect(within(invoiceCell).getByRole("row", { name: /OA2035-FUEL-200.*200/ })).toBeInTheDocument();
-    expect(within(invoiceCell).getByRole("row", { name: /微信支付.*胡瑢.*25/ })).toBeInTheDocument();
-    expect(within(invoiceCell).getByRole("row", { name: /微信支付.*胡瑢.*23/ })).toBeInTheDocument();
-    expect(within(invoiceCell).getByRole("row", { name: /微信支付.*胡瑢.*200/ })).toBeInTheDocument();
-    expect(within(invoiceCell).getAllByRole("row")).toHaveLength(6);
+    expect(within(invoiceCell).queryByRole("row", { name: /微信支付/ })).not.toBeInTheDocument();
+    expect(within(invoiceCell).getAllByRole("row")).toHaveLength(3);
     expect(within(invoiceCell).getAllByText("OA附件")).toHaveLength(3);
-    expect(within(invoiceCell).getAllByText("付款凭证")).toHaveLength(3);
+    expect(within(invoiceCell).queryByText("付款凭证")).not.toBeInTheDocument();
     expect(within(invoiceCell).queryByText("人工导入")).not.toBeInTheDocument();
 
     expect(screen.queryByRole("row", { name: /胡瑢付款项/ })).not.toBeInTheDocument();

@@ -1120,7 +1120,7 @@ describe("workbench api bank amount mapping", () => {
     expect(bankRow.tableValues.note).toBe("摘要：电子转账\n备注：代购公车款\n用途：货款");
   });
 
-  test("maps OA 2035 attachment invoices, payment receipts, and unknown evidence without changing the backend group", async () => {
+  test("maps OA 2035 formal attachment invoices without payment evidence rows", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -1198,62 +1198,6 @@ describe("workbench api bank amount mapping", () => {
                     invoice_bank_relation: { code: "pending_collection", label: "待匹配付款", tone: "warn" },
                     available_actions: ["detail"],
                   },
-                  {
-                    id: "pay-oa-2035-etc-25",
-                    type: "invoice",
-                    source_kind: "oa_attachment_payment_receipt",
-                    case_id: "CASE-202603-OA-ATTACHMENT-2035",
-                    seller_name: "微信支付",
-                    buyer_name: "胡瑢",
-                    issue_date: "2026-03-04",
-                    amount: "25.00",
-                    total_with_tax: "25.00",
-                    invoice_type: "付款凭证",
-                    invoice_bank_relation: { code: "evidence_only", label: "附件凭证", tone: "warn" },
-                    available_actions: ["detail"],
-                  },
-                  {
-                    id: "pay-oa-2035-etc-23",
-                    type: "invoice",
-                    source_kind: "oa_attachment_payment_receipt",
-                    case_id: "CASE-202603-OA-ATTACHMENT-2035",
-                    seller_name: "微信支付",
-                    buyer_name: "胡瑢",
-                    issue_date: "2026-03-04",
-                    amount: "23.00",
-                    total_with_tax: "23.00",
-                    invoice_type: "付款凭证",
-                    invoice_bank_relation: { code: "evidence_only", label: "附件凭证", tone: "warn" },
-                    available_actions: ["detail"],
-                  },
-                  {
-                    id: "pay-oa-2035-fuel-200",
-                    type: "invoice",
-                    source_kind: "oa_attachment_payment_receipt",
-                    case_id: "CASE-202603-OA-ATTACHMENT-2035",
-                    seller_name: "微信支付",
-                    buyer_name: "胡瑢",
-                    issue_date: "2026-03-04",
-                    amount: "200.00",
-                    total_with_tax: "200.00",
-                    invoice_type: "付款凭证",
-                    invoice_bank_relation: { code: "evidence_only", label: "附件凭证", tone: "warn" },
-                    available_actions: ["detail"],
-                  },
-                  {
-                    id: "unk-oa-2035-scan",
-                    type: "invoice",
-                    source_kind: "oa_attachment_unknown",
-                    case_id: "CASE-202603-OA-ATTACHMENT-2035",
-                    seller_name: "未识别附件",
-                    buyer_name: "胡瑢",
-                    issue_date: "2026-03-04",
-                    amount: "0.00",
-                    total_with_tax: "0.00",
-                    invoice_type: "未知附件",
-                    invoice_bank_relation: { code: "evidence_only", label: "附件待识别", tone: "warn" },
-                    available_actions: ["detail"],
-                  },
                 ],
               },
             ],
@@ -1272,28 +1216,16 @@ describe("workbench api bank amount mapping", () => {
       "iv-oa-2035-machine-25",
       "iv-oa-2035-machine-23",
       "iv-oa-2035-fuel-200",
-      "pay-oa-2035-etc-25",
-      "pay-oa-2035-etc-23",
-      "pay-oa-2035-fuel-200",
-      "unk-oa-2035-scan",
     ]);
     expect(group.rows.invoice.map((row) => row.sourceKind)).toEqual([
       "oa_attachment_invoice",
       "oa_attachment_invoice",
       "oa_attachment_invoice",
-      "oa_attachment_payment_receipt",
-      "oa_attachment_payment_receipt",
-      "oa_attachment_payment_receipt",
-      "oa_attachment_unknown",
     ]);
     expect(group.rows.invoice.map((row) => row.label)).toEqual([
       "OA附件",
       "OA附件",
       "OA附件",
-      "付款凭证",
-      "付款凭证",
-      "付款凭证",
-      "未识别附件",
     ]);
   });
 

@@ -22,7 +22,11 @@ from fin_ops_platform.services.workbench_matching_rules import (
     WorkbenchMatchingRules,
 )
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
-from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
+from fin_ops_platform.services.workbench_query_service import (
+    OA_ATTACHMENT_INVOICE_EVIDENCE_TYPES,
+    OA_ATTACHMENT_INVOICE_SOURCE_KIND,
+    WorkbenchQueryService,
+)
 from fin_ops_platform.services.workbench_special_pair_rule_service import (
     OA_INVOICE_OFFSET_AUTO_MATCH,
     WORKBENCH_SPECIAL_RULES_VERSION,
@@ -163,7 +167,7 @@ class WorkbenchSqlProjectionBuilder:
             row_type = str(row.get("type") or "").strip()
             if row_month != month or row_type not in {"oa", "invoice"}:
                 continue
-            if row_type == "invoice" and not str(row.get("source_kind") or "").startswith("oa_attachment_"):
+            if row_type == "invoice" and str(row.get("source_kind") or "").strip() != OA_ATTACHMENT_INVOICE_SOURCE_KIND:
                 continue
             payload = self._oa_query_service.serialize_row(row)
             payload["status"] = "open"
@@ -483,7 +487,7 @@ class WorkbenchSqlProjectionBuilder:
         parsed_payloads = [
             dict(payload)
             for payload in [*invoices, *evidences]
-            if isinstance(payload, dict)
+            if isinstance(payload, dict) and _is_formal_attachment_invoice_evidence(payload)
         ]
         if parsed_payloads:
             return cls._dedupe_structured_attachment_evidences(parsed_payloads)
@@ -491,7 +495,11 @@ class WorkbenchSqlProjectionBuilder:
         artifact_payloads = [
             dict(payload)
             for payload in artifacts
-            if isinstance(payload, dict) and _looks_like_invoice_artifact(payload)
+            if (
+                isinstance(payload, dict)
+                and _looks_like_invoice_artifact(payload)
+                and _is_formal_attachment_invoice_evidence(payload)
+            )
         ]
         return cls._dedupe_structured_attachment_evidences(artifact_payloads)
 
@@ -1241,7 +1249,7 @@ class WorkbenchSqlProjectionBuilder:
         return [
             row_id
             for row_id, row in rows_by_id.items()
-            if str(row.get("source_kind") or "").startswith("oa_attachment_")
+            if str(row.get("source_kind") or "").strip() == OA_ATTACHMENT_INVOICE_SOURCE_KIND
             and str(row.get("derived_from_oa_id") or "").strip() in oa_row_ids
         ]
 
@@ -1287,9 +1295,19 @@ def _int_value(value: object, default: int) -> int:
         return default
 
 
+def _is_formal_attachment_invoice_evidence(evidence: dict[str, Any]) -> bool:
+    source_kind = str(evidence.get("source_kind") or "").strip()
+    if source_kind:
+        return source_kind == OA_ATTACHMENT_INVOICE_SOURCE_KIND
+    evidence_type = str(evidence.get("evidence_type") or "").strip()
+    if evidence_type:
+        return evidence_type in OA_ATTACHMENT_INVOICE_EVIDENCE_TYPES
+    return WorkbenchQueryService._attachment_evidence_has_invoice_identity(evidence)
+
+
 def _looks_like_invoice_artifact(evidence: dict[str, Any]) -> bool:
     evidence_type = str(evidence.get("evidence_type") or "").strip()
-    if evidence_type in {"tax_invoice", "machine_invoice", "non_tax_receipt"}:
+    if evidence_type in OA_ATTACHMENT_INVOICE_EVIDENCE_TYPES:
         return True
     document_kind = str(evidence.get("document_kind") or "").strip()
     if "发票" in document_kind:
