@@ -21,6 +21,7 @@ from fin_ops_platform.services.oa_adapter import (
 OA_ATTACHMENT_INVOICE_SOURCE_KIND = "oa_attachment_invoice"
 OA_ATTACHMENT_PAYMENT_RECEIPT_SOURCE_KIND = "oa_attachment_payment_receipt"
 OA_ATTACHMENT_UNKNOWN_SOURCE_KIND = "oa_attachment_unknown"
+MAX_ATTACHMENT_DISPLAY_AMOUNT_ABS = Decimal("1000000000000")
 OA_ATTACHMENT_EVIDENCE_SOURCE_KINDS = {
     OA_ATTACHMENT_INVOICE_SOURCE_KIND,
     OA_ATTACHMENT_PAYMENT_RECEIPT_SOURCE_KIND,
@@ -676,6 +677,17 @@ class WorkbenchQueryService:
             )
             source_attachment_name = self._attachment_invoice_display_name(attachment_invoice)
             if source_kind == OA_ATTACHMENT_INVOICE_SOURCE_KIND:
+                display_amount = self._first_valid_attachment_money(
+                    attachment_invoice.get("net_amount"),
+                    attachment_invoice.get("amount"),
+                    attachment_invoice.get("total_with_tax"),
+                )
+                display_total_with_tax = self._first_valid_attachment_money(
+                    attachment_invoice.get("total_with_tax"),
+                    attachment_invoice.get("amount"),
+                    display_amount,
+                )
+                display_tax_amount = self._first_valid_attachment_money(attachment_invoice.get("tax_amount"))
                 detail_fields = self._attachment_invoice_detail_fields(
                     attachment_invoice,
                     row_id=row_id,
@@ -700,16 +712,10 @@ class WorkbenchQueryService:
                         or source_detail_fields.get("申请日期")
                         or "—"
                     ),
-                    amount=str(
-                        attachment_invoice.get("net_amount")
-                        or attachment_invoice.get("amount")
-                        or attachment_invoice.get("total_with_tax")
-                        or oa_row.get("amount")
-                        or "—"
-                    ),
+                    amount=display_amount or "—",
                     tax_rate=str(attachment_invoice.get("tax_rate") or "—"),
-                    tax_amount=str(attachment_invoice.get("tax_amount") or "—"),
-                    total_with_tax=str(attachment_invoice.get("total_with_tax") or attachment_invoice.get("amount") or "—"),
+                    tax_amount=display_tax_amount or "—",
+                    total_with_tax=display_total_with_tax or "—",
                     invoice_type=str(attachment_invoice.get("invoice_type") or "进项发票"),
                     relation=relation,
                     detail_fields=detail_fields,
@@ -732,7 +738,11 @@ class WorkbenchQueryService:
                     or source_detail_fields.get("申请日期")
                     or "—"
                 )
-                display_amount = str(attachment_invoice.get("amount") or attachment_invoice.get("total_with_tax") or "—")
+                display_amount = self._first_valid_attachment_money(
+                    attachment_invoice.get("amount"),
+                    attachment_invoice.get("total_with_tax"),
+                ) or "—"
+                display_tax_amount = self._first_valid_attachment_money(attachment_invoice.get("tax_amount"))
                 invoice_row = self._build_invoice_row(
                     row_id=row_id,
                     month=str(oa_row["_month"]),
@@ -750,7 +760,7 @@ class WorkbenchQueryService:
                     issue_date=display_date,
                     amount=display_amount,
                     tax_rate="—",
-                    tax_amount=str(attachment_invoice.get("tax_amount") or "—"),
+                    tax_amount=display_tax_amount or "—",
                     total_with_tax=display_amount,
                     invoice_type="付款凭证" if source_kind == OA_ATTACHMENT_PAYMENT_RECEIPT_SOURCE_KIND else "未识别附件",
                     relation=relation,
@@ -764,6 +774,21 @@ class WorkbenchQueryService:
             invoice_row["source_attachment_name"] = source_attachment_name if source_attachment_name != "—" else None
             invoice_rows.append(invoice_row)
         return invoice_rows
+
+    @classmethod
+    def _first_valid_attachment_money(cls, *values: Any) -> str | None:
+        for value in values:
+            text = str(value or "").replace(",", "").strip()
+            if not text or text in {"—", "--"}:
+                continue
+            try:
+                amount = Decimal(text)
+            except InvalidOperation:
+                continue
+            if abs(amount) >= MAX_ATTACHMENT_DISPLAY_AMOUNT_ABS:
+                continue
+            return format(amount, "f")
+        return None
 
     @classmethod
     def _attachment_evidence_row_id(
@@ -787,12 +812,32 @@ class WorkbenchQueryService:
     def _attachment_evidence_source_kind(attachment_evidence: dict[str, Any]) -> str:
         evidence_type = str(attachment_evidence.get("evidence_type") or "").strip()
         if not evidence_type:
-            return OA_ATTACHMENT_INVOICE_SOURCE_KIND
+            return (
+                OA_ATTACHMENT_INVOICE_SOURCE_KIND
+                if WorkbenchQueryService._attachment_evidence_has_invoice_identity(attachment_evidence)
+                else OA_ATTACHMENT_UNKNOWN_SOURCE_KIND
+            )
         if evidence_type in OA_ATTACHMENT_INVOICE_EVIDENCE_TYPES:
             return OA_ATTACHMENT_INVOICE_SOURCE_KIND
         if evidence_type == "payment_receipt":
             return OA_ATTACHMENT_PAYMENT_RECEIPT_SOURCE_KIND
         return OA_ATTACHMENT_UNKNOWN_SOURCE_KIND
+
+    @staticmethod
+    def _attachment_evidence_has_invoice_identity(attachment_evidence: dict[str, Any]) -> bool:
+        for key in (
+            "invoice_no",
+            "digital_invoice_no",
+            "invoice_code",
+            "seller_tax_no",
+            "seller_name",
+            "buyer_tax_no",
+            "buyer_name",
+        ):
+            value = str(attachment_evidence.get(key) or "").strip()
+            if value and value not in {"—", "--"}:
+                return True
+        return False
 
     def _attachment_invoice_detail_fields(
         self,
@@ -833,7 +878,10 @@ class WorkbenchQueryService:
             "来源付款项ID": str(source_expense_item_id or "—"),
             "来源附件Key": str(source_attachment_key or "—"),
             "附件文件名": source_attachment_name,
-            "不含税金额": str(attachment_invoice.get("net_amount") or attachment_invoice.get("amount") or "—"),
+            "不含税金额": self._first_valid_attachment_money(
+                attachment_invoice.get("net_amount"),
+                attachment_invoice.get("amount"),
+            ) or "—",
         }
 
     def _attachment_non_invoice_detail_fields(
@@ -861,7 +909,7 @@ class WorkbenchQueryService:
             "付款方式": str(attachment_evidence.get("payment_method") or "—"),
             "商户名称": str(attachment_evidence.get("merchant_name") or "—"),
             "付款时间": str(attachment_evidence.get("paid_at") or "—"),
-            "金额": str(attachment_evidence.get("amount") or "—"),
+            "金额": self._first_valid_attachment_money(attachment_evidence.get("amount")) or "—",
             "来源OA单号": str(source_detail_fields.get("OA单号") or "—"),
             "来源OA明细行号": str(
                 source_expense_row_index

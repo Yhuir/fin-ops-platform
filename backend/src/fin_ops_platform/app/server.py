@@ -563,7 +563,7 @@ class Application:
         self._bank_details_relation_tag_projection_service = BankDetailsRelationTagProjectionService(
             pair_relation_service=self._workbench_pair_relation_service,
             candidate_match_service=self._workbench_candidate_match_service,
-            workbench_read_model_provider=lambda: self._get_persisted_workbench_read_model("all"),
+            workbench_read_model_provider=self._bank_details_relation_tag_workbench_read_model,
         )
         self._bank_details_service = BankDetailsService(
             self._import_service,
@@ -8604,6 +8604,7 @@ class Application:
                 self._bank_transaction_category_service.snapshot()
             )
             self._persist_turnover_relations_best_effort(operation="bank_transaction_category_updated")
+            self._clear_turnover_ledger_read_model_best_effort()
         return self._json_response(
             HTTPStatus.OK,
             {
@@ -8617,7 +8618,6 @@ class Application:
         )
 
     def _handle_api_no_oa_bank_batches(self, query: dict[str, list[str]]) -> Response:
-        self._refresh_no_oa_bank_batches()
         filters = {
             "month": query.get("month", [""])[0],
             "type": query.get("type", [""])[0],
@@ -8629,6 +8629,21 @@ class Application:
             "month": filters["month"],
             "account_key": filters["account_key"],
         }
+        repository = getattr(self, "_workbench_sql_read_repository", None)
+        list_read_model_batches = getattr(repository, "list_no_oa_bank_batch_rows", None)
+        if callable(list_read_model_batches):
+            summary_read_model_batches = list_read_model_batches(summary_filters)
+            read_model_batches = list_read_model_batches(filters)
+            if summary_read_model_batches is not None and read_model_batches is not None:
+                return self._json_response(
+                    HTTPStatus.OK,
+                    {
+                        "summary": self._no_oa_bank_batch_summary(summary_read_model_batches),
+                        "batches": read_model_batches,
+                        "read_model_status": "fresh",
+                    },
+                )
+        self._refresh_no_oa_bank_batches()
         summary_batches = self._no_oa_bank_batch_service.list_batches(summary_filters)
         batches = self._no_oa_bank_batch_service.list_batches(filters)
         return self._json_response(
@@ -9298,19 +9313,43 @@ class Application:
         return message or "invalid_no_oa_bank_batch_request"
 
     def _handle_api_turnover_ledger(self, query: dict[str, list[str]]) -> Response:
+        view = query.get("view", [None])[0]
+        family = query.get("family", ["all"])[0]
+        status = query.get("status", [None])[0]
+        page = int(query.get("page", ["1"])[0] or 1)
+        page_size = int(query.get("page_size", ["50"])[0] or 50)
+        repository = getattr(self, "_workbench_sql_read_repository", None)
+        if str(view or "").strip().lower() != "grouped":
+            read_turnover_ledger = getattr(repository, "list_turnover_ledger_view", None)
+            if callable(read_turnover_ledger):
+                read_model_payload = read_turnover_ledger(
+                    family=family,
+                    status=status,
+                    page=page,
+                    page_size=page_size,
+                )
+                if isinstance(read_model_payload, dict):
+                    return self._json_response(HTTPStatus.OK, read_model_payload)
         try:
             payload = self._turnover_ledger_api_routes.list_ledger(
-                view=query.get("view", [None])[0],
-                family=query.get("family", ["all"])[0],
-                status=query.get("status", [None])[0],
-                page=int(query.get("page", ["1"])[0] or 1),
-                page_size=int(query.get("page_size", ["50"])[0] or 50),
+                view=view,
+                family=family,
+                status=status,
+                page=page,
+                page_size=page_size,
             )
         except (TypeError, ValueError) as exc:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_turnover_ledger_request", "message": str(exc)},
             )
+        if str(view or "").strip().lower() != "grouped":
+            save_turnover_ledger = getattr(repository, "save_turnover_ledger_rows", None)
+            if callable(save_turnover_ledger):
+                try:
+                    save_turnover_ledger(payload)
+                except Exception:
+                    pass
         return self._json_response(HTTPStatus.OK, payload)
 
     def _handle_api_turnover_ledger_export_preview(self, query: dict[str, list[str]]) -> Response:
@@ -9403,6 +9442,7 @@ class Application:
                 {"error": "invalid_turnover_ledger_extra", "message": str(exc)},
             )
         self._persist_turnover_ledger_extras_best_effort(operation="turnover_ledger_extra_updated")
+        self._clear_turnover_ledger_read_model_best_effort()
         result["turnover_ledger_invalidated"] = True
         return self._json_response(HTTPStatus.OK, result)
 
@@ -9501,6 +9541,17 @@ class Application:
     def _after_turnover_relation_mutation(self, affected_months: list[str]) -> None:
         self._invalidate_workbench_after_bank_transaction_categories(affected_months)
         self._persist_turnover_relations_best_effort(operation="turnover_relation_mutation")
+        self._clear_turnover_ledger_read_model_best_effort()
+
+    def _clear_turnover_ledger_read_model_best_effort(self) -> None:
+        repository = getattr(self, "_workbench_sql_read_repository", None)
+        clear_rows = getattr(repository, "clear_turnover_ledger_rows", None)
+        if not callable(clear_rows):
+            return
+        try:
+            clear_rows()
+        except Exception:
+            pass
 
     def _bank_transaction_category_affected_months(self, transaction_ids: list[str]) -> list[str]:
         months: set[str] = set()
@@ -13022,6 +13073,17 @@ class Application:
         read_model_scope_key = self._workbench_read_model_scope_key(month, visibility_key=visibility_key)
         cached_read_model = self._workbench_read_model_service.get_read_model(read_model_scope_key)
         return cached_read_model if isinstance(cached_read_model, dict) else {}
+
+    def _bank_details_relation_tag_workbench_read_model(self) -> dict[str, object]:
+        read_model = self._get_persisted_workbench_read_model("all")
+        payload = read_model.get("payload") if isinstance(read_model, dict) else None
+        if isinstance(payload, dict) and payload:
+            return read_model
+        raw_payload = self._build_raw_workbench_payload("all")
+        return {
+            "scope_key": "all",
+            "payload": raw_payload if isinstance(raw_payload, dict) else {},
+        }
 
     @staticmethod
     def _can_use_legacy_workbench_read_model_without_source_versions(

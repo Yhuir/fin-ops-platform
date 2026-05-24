@@ -1465,6 +1465,25 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(evidences[0]["source_expense_item_id"], "item-1")
         self.assertEqual(evidences[0]["source_expense_row_index"], "0")
 
+    def test_sql_projection_does_not_materialize_plain_pdf_attachment_without_parsed_evidence(self) -> None:
+        payload = {
+            "id": "oa-exp-files",
+            "expense_items": [
+                {
+                    "expense_item_id": "item-1",
+                    "row_index": "0",
+                    "attachment_files": [
+                        {"fileName": "云服务器费用70元.pdf", "filePath": "/云服务器费用70元.pdf", "suffix": "pdf"},
+                        {"fileName": "费用截图.jpg", "filePath": "/费用截图.jpg", "suffix": "jpg"},
+                    ],
+                }
+            ],
+        }
+
+        evidences = WorkbenchSqlProjectionBuilder._attachment_evidences_from_expense_items(payload)
+
+        self.assertEqual(evidences, [])
+
     def test_sql_projection_ignores_expense_item_artifact_when_same_attachment_has_parsed_invoice(self) -> None:
         payload = {
             "id": "oa-exp-files",
@@ -1704,6 +1723,73 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["source_attachment_key"], "current-structured-attachment-key")
         self.assertIn("INV-BRIDGED-001", rows[0]["detail_fields"]["发票号码"])
+
+    def test_sql_projection_matches_cache_by_attachment_source_identity(self) -> None:
+        inspected_sql: list[str] = []
+
+        class StructuredOAConnection(WorkbenchProjectionSettingsConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                if "from app.oa_application_items" in normalized:
+                    inspected_sql.append(normalized)
+                    return [
+                        {
+                            "oa_row_id": "oa-exp-cache-identity",
+                            "scope_month": "2026-01-01",
+                            "item_payload": {
+                                "expense_item_id": "oa-exp-cache-identity:item:1",
+                                "row_index": "0",
+                            },
+                            "attachment_payload": {
+                                "source_attachment_key": "current-file-key",
+                                "source_attachment_name": "云服务器费用70元.pdf",
+                                "filename": "云服务器费用70元.pdf",
+                            },
+                            "cache_source_attachment_key": "legacy-cache-key",
+                            "cache_invoices": [
+                                {
+                                    "source_attachment_key": "legacy-parser-key",
+                                    "source_expense_item_id": "oa-exp-cache-identity:item:1",
+                                    "source_attachment_name": "云服务器费用70元.pdf",
+                                    "invoice_no": "26322000000128086591",
+                                    "seller_name": "中科视拓（南京）科技有限公司",
+                                    "buyer_name": "云南溯源科技有限公司",
+                                    "total_with_tax": "70.00",
+                                    "issue_date": "2026-01-07",
+                                }
+                            ],
+                            "cache_evidences": [],
+                            "cache_artifacts": [],
+                        }
+                    ]
+                if "from app.oa_applications" in normalized:
+                    return []
+                return super().fetch_all(sql, params)
+
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=StructuredOAConnection(),
+            read_model_repository=CandidateSnapshotRecorder(),
+        )
+        rows = builder._attachment_invoice_rows_from_expense_items(
+            "2026-01",
+            {
+                "oa-exp-cache-identity": {
+                    "id": "oa-exp-cache-identity",
+                    "type": "oa",
+                    "source_kind": "oa",
+                    "status": "open",
+                    "amount": "196.00",
+                    "counterparty_name": "",
+                    "detail_fields": {"申请日期": "2026-01-07"},
+                }
+            },
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(any("source_expense_item_id" in sql and "source_attachment_name" in sql for sql in inspected_sql))
+        self.assertEqual(rows[0]["source_attachment_key"], "current-file-key")
+        self.assertEqual(rows[0]["seller_name"], "中科视拓（南京）科技有限公司")
+        self.assertIn("26322000000128086591", rows[0]["detail_fields"]["发票号码"])
 
     def test_sql_projection_ignores_artifact_placeholders_when_cache_has_parsed_invoice(self) -> None:
         class StructuredOAConnection(WorkbenchProjectionSettingsConnection):

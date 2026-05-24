@@ -165,5 +165,6 @@ OA Mongo 是外部 read-only source，只允许由独立 worker 拉取；App run
 - 新模块通过 production bootstrap 注入 repository、queue、cache 和 object storage 配置；`LEGACY_SNAPSHOT_ALLOWLIST` 必须保持为空，构造期 full snapshot 依赖不得进入 production 主路径。
 - 对高频查询建立明确索引和 `EXPLAIN ANALYZE` 验证。
 - 将 read model 重建放入后台任务。
+- 当前生产 read model 的分片、SQL-native、Redis/RabbitMQ 边界审计见 `../operations/read-model-production-audit-2026-05-24.md`。审计结论中标记的 `cost_statistics_rows`、`tax_offset_items`、`no_oa_bank_batch_rows`、`turnover_ledger_rows` 是后续生产收口项，不应继续扩大 JSON snapshot 热读。
 
 详细重构计划见 `backend-refactor/README.md`。

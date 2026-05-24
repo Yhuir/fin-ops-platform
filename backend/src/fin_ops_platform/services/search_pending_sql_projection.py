@@ -41,19 +41,45 @@ class SearchPendingSqlProjectionBuilder:
         return {"scope_key": normalized_scope, "row_count": len(rows)}
 
     def rebuild_pending_invoice_read_model_scope(self, scope_key: str) -> dict[str, object]:
-        direction, _, filter_name = str(scope_key or "").partition(":")
-        normalized_direction = direction or "expense"
-        normalized_filter = filter_name or "all"
+        normalized_direction, normalized_filter, month = _parse_pending_invoice_scope_key(scope_key)
         if normalized_direction not in {"expense", "income"}:
             raise ValueError("pending invoice direction must be expense or income.")
         if normalized_filter not in PENDING_INVOICE_FILTERS:
             raise ValueError("pending invoice filter must be all or a supported filter group.")
-        rows = self._pending_invoice_rows(direction=normalized_direction, filter_name=normalized_filter)
+        if month is None:
+            raise ValueError("pending invoice SQL projection scope_key must include a month shard YYYY-MM.")
+        rows = self._pending_invoice_rows(direction=normalized_direction, filter_name=normalized_filter, month=month)
         self._read_model_repository.save_pending_invoice_rows(
-            scope_key=f"{normalized_direction}:{normalized_filter}",
+            scope_key=f"{normalized_direction}:{normalized_filter}:{month}",
             rows=rows,
         )
-        return {"scope_key": f"{normalized_direction}:{normalized_filter}", "row_count": len(rows)}
+        return {"scope_key": f"{normalized_direction}:{normalized_filter}:{month}", "row_count": len(rows)}
+
+    def list_pending_invoice_scope_shards(self, scope_key: str) -> list[str]:
+        normalized_direction, normalized_filter, month = _parse_pending_invoice_scope_key(scope_key)
+        if normalized_direction not in {"expense", "income"}:
+            return []
+        if normalized_filter not in PENDING_INVOICE_FILTERS:
+            return []
+        if month is not None:
+            return [f"{normalized_direction}:{normalized_filter}:{month}"]
+        txn_direction = "outflow" if normalized_direction == "expense" else "inflow"
+        rows = self._connection.fetch_all(
+            """
+            select distinct to_char(txn_month, 'YYYY-MM') as scope_key
+            from app.bank_transactions
+            where txn_month is not null
+              and txn_direction = %s
+              and status <> 'deleted'
+            order by scope_key desc
+            """,
+            (txn_direction,),
+        )
+        return [
+            f"{normalized_direction}:{normalized_filter}:{row['scope_key']}"
+            for row in rows
+            if MONTH_RE.match(str(row.get("scope_key") or ""))
+        ]
 
     def _search_rows_for_month(self, month: str) -> list[dict[str, object]]:
         rows = self._connection.fetch_all(
@@ -121,7 +147,7 @@ class SearchPendingSqlProjectionBuilder:
             )
         return result
 
-    def _pending_invoice_rows(self, *, direction: str, filter_name: str) -> list[dict[str, object]]:
+    def _pending_invoice_rows(self, *, direction: str, filter_name: str, month: str) -> list[dict[str, object]]:
         txn_direction = "outflow" if direction == "expense" else "inflow"
         target_invoice_type = "input" if direction == "expense" else "output"
         tag_groups = self._pending_invoice_tag_groups()
@@ -188,9 +214,10 @@ class SearchPendingSqlProjectionBuilder:
             ) rel on true
             where t.txn_direction = %s
               and t.status <> 'deleted'
+              and t.txn_month = %s::date
             order by coalesce(t.trade_time, t.txn_date::timestamptz) desc, transaction_id
             """,
-            (direction, target_invoice_type, txn_direction),
+            (direction, target_invoice_type, txn_direction, month_start(month)),
         )
         result: list[dict[str, object]] = []
         for row in rows:
@@ -248,6 +275,15 @@ class SearchPendingSqlProjectionBuilder:
             }
             for group_name in ("requires_invoice", "bank_statement_as_invoice", "no_invoice_required")
         }
+
+
+def _parse_pending_invoice_scope_key(scope_key: str) -> tuple[str, str, str | None]:
+    parts = [part.strip() for part in str(scope_key or "").split(":")]
+    direction = parts[0] if parts and parts[0] else "expense"
+    filter_name = parts[1] if len(parts) > 1 and parts[1] else "all"
+    month = parts[2] if len(parts) > 2 and parts[2] else ""
+    normalized_month = month[:7] if MONTH_RE.match(month[:7]) else None
+    return direction, filter_name, normalized_month
 
 
 def _payload_from_row(row: dict[str, Any]) -> dict[str, Any]:

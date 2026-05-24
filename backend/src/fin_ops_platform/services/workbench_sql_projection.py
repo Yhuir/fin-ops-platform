@@ -305,12 +305,84 @@ class WorkbenchSqlProjectionBuilder:
                     or attachment.normalized_payload->>'source_expense_item_id' = item.row_id
                  )
             left join lateral (
-                select source.cache_source_attachment_key, cache.invoices, cache.evidences, cache.artifacts
-                from app.oa_attachment_invoice_cache_sources source
-                join app.oa_attachment_invoice_cache cache
-                  on cache.source_attachment_key = source.cache_source_attachment_key
-                where source.source_attachment_key = attachment.source_attachment_key
-                order by cache.parsed_at desc nulls last
+                select matched.cache_source_attachment_key, matched.invoices, matched.evidences, matched.artifacts
+                from (
+                    select
+                        0 as match_rank,
+                        source.cache_source_attachment_key,
+                        cache.parsed_at,
+                        cache.invoices,
+                        cache.evidences,
+                        cache.artifacts
+                    from app.oa_attachment_invoice_cache_sources source
+                    join app.oa_attachment_invoice_cache cache
+                      on cache.source_attachment_key = source.cache_source_attachment_key
+                    where source.source_attachment_key = attachment.source_attachment_key
+                    union all
+                    select
+                        1 as match_rank,
+                        cache.source_attachment_key as cache_source_attachment_key,
+                        cache.parsed_at,
+                        cache.invoices,
+                        cache.evidences,
+                        cache.artifacts
+                    from app.oa_attachment_invoice_cache cache
+                    where nullif(
+                            coalesce(
+                                item.normalized_payload->>'expense_item_id',
+                                item.normalized_payload->>'row_id'
+                            ),
+                            ''
+                          ) is not null
+                      and nullif(
+                            coalesce(
+                                attachment.normalized_payload->>'source_attachment_name',
+                                attachment.normalized_payload->>'attachment_name',
+                                attachment.normalized_payload->>'fileName',
+                                attachment.normalized_payload->>'filename'
+                            ),
+                            ''
+                          ) is not null
+                      and exists (
+                            select 1
+                            from jsonb_array_elements(
+                                coalesce(cache.invoices, '[]'::jsonb)
+                                || coalesce(cache.evidences, '[]'::jsonb)
+                                || coalesce(
+                                    case
+                                        when jsonb_typeof(cache.artifacts) = 'array' then cache.artifacts
+                                        else '[]'::jsonb
+                                    end,
+                                    '[]'::jsonb
+                                )
+                            ) as evidence(value)
+                            where nullif(evidence.value->>'source_expense_item_id', '') = nullif(
+                                    coalesce(
+                                        item.normalized_payload->>'expense_item_id',
+                                        item.normalized_payload->>'row_id'
+                                    ),
+                                    ''
+                                  )
+                              and nullif(
+                                    coalesce(
+                                        evidence.value->>'source_attachment_name',
+                                        evidence.value->>'attachment_name',
+                                        evidence.value->>'fileName',
+                                        evidence.value->>'filename'
+                                    ),
+                                    ''
+                                  ) = nullif(
+                                    coalesce(
+                                        attachment.normalized_payload->>'source_attachment_name',
+                                        attachment.normalized_payload->>'attachment_name',
+                                        attachment.normalized_payload->>'fileName',
+                                        attachment.normalized_payload->>'filename'
+                                    ),
+                                    ''
+                                  )
+                        )
+                ) matched
+                order by matched.match_rank, matched.parsed_at desc nulls last, matched.cache_source_attachment_key
                 limit 1
             ) cache on true
             where oa.row_id = any(%s)
@@ -350,7 +422,22 @@ class WorkbenchSqlProjectionBuilder:
                 allowed_attachment_keys = {
                     key for key in (source_attachment_key_text, cache_source_attachment_key) if key
                 }
-                if allowed_attachment_keys and evidence_attachment_key and evidence_attachment_key not in allowed_attachment_keys:
+                evidence_source_identity_matches_attachment = (
+                    str(evidence.get("source_expense_item_id") or "").strip() == str(source_expense_item_id or "").strip()
+                    and str(
+                        evidence.get("source_attachment_name")
+                        or evidence.get("attachment_name")
+                        or evidence.get("fileName")
+                        or evidence.get("filename")
+                        or ""
+                    ).strip() == str(source_attachment_name or "").strip()
+                )
+                if (
+                    allowed_attachment_keys
+                    and evidence_attachment_key
+                    and evidence_attachment_key not in allowed_attachment_keys
+                    and not evidence_source_identity_matches_attachment
+                ):
                     continue
                 normalized = dict(evidence)
                 normalized.setdefault("source_expense_item_id", source_expense_item_id)
@@ -1215,7 +1302,7 @@ def _looks_like_invoice_artifact(evidence: dict[str, Any]) -> bool:
         or ""
     )
     suffix = str(evidence.get("suffix") or "").strip().lower()
-    return "发票" in file_name or suffix == "pdf"
+    return "发票" in file_name
 
 
 def _fallback_attachment_source_key(

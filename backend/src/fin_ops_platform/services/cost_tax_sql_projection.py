@@ -38,8 +38,9 @@ class CostStatisticsSqlProjectionBuilder:
         rows = self._connection.fetch_all(
             """
             select distinct to_char(scope_month, 'YYYY-MM') as scope_key
-            from read_model.workbench_snapshots
+            from read_model.workbench_rows
             where scope_month is not null
+              and scope_key <> 'all'
             order by scope_key desc
             """
         )
@@ -129,11 +130,22 @@ class CostStatisticsSqlProjectionBuilder:
         }
 
     def _cost_entries_from_workbench(self, month: str, *, project_scope: str) -> list[dict[str, Any]]:
-        payload = self._workbench_payload(month)
-        groups = [
-            *list(((payload.get("paired") or {}).get("groups") or [])),
-            *list(((payload.get("open") or {}).get("groups") or [])),
-        ]
+        group_rows = self._connection.fetch_all(
+            """
+            select group_id, payload, raw_payload
+            from read_model.workbench_groups
+            where scope_key = %s
+              and zone in ('paired', 'open')
+              and source_kinds && array['oa', 'bank']::text[]
+            order by bank_sort_max desc nulls last, group_id
+            """,
+            (month,),
+        )
+        groups = []
+        for row in group_rows:
+            group_payload = row_payload(row, "payload", "raw_payload")
+            if isinstance(group_payload, dict):
+                groups.append(group_payload)
         active_projects = self._active_project_names() if project_scope == "active" else None
         entries: list[dict[str, Any]] = []
         for group in groups:

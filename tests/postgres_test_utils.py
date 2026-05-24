@@ -31,6 +31,9 @@ EXPECTED_MIGRATION_FILES = [
     "0017_rabbitmq_outbox_publish_state.sql",
     "0018_api_performance_read_model.sql",
     "0019_import_jobs.sql",
+    "0020_oa_attachment_cache_source_identity_links.sql",
+    "0021_read_model_hot_path_indexes.sql",
+    "0022_read_model_native_closeout.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (
@@ -50,7 +53,11 @@ TEST_TABLES = (
     "read_model.search_index_rows",
     "read_model.pending_invoice_rows",
     "read_model.cost_statistics_read_models",
+    "read_model.cost_statistics_rows",
     "read_model.tax_offset_read_models",
+    "read_model.tax_offset_items",
+    "read_model.no_oa_bank_batch_rows",
+    "read_model.turnover_ledger_rows",
     "app.import_batches",
     "app.import_batch_rows",
     "app.file_objects",

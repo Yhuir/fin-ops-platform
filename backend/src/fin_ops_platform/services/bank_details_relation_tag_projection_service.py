@@ -168,18 +168,20 @@ class BankDetailsRelationTagProjectionService:
             section = payload.get(section_name)
             if not isinstance(section, dict):
                 continue
-            for group in list(section.get("groups") or []):
+            section_groups = section.get("groups")
+            groups = list(section_groups) if isinstance(section_groups, list) else [section]
+            for group in groups:
                 if not isinstance(group, dict):
                     continue
                 row_types = {
                     row_type
-                    for row_type, key in (("oa", "oa_rows"), ("bank", "bank_rows"), ("invoice", "invoice_rows"))
-                    if any(isinstance(row, dict) for row in list(group.get(key) or []))
+                    for row_type in ("oa", "bank", "invoice")
+                    if any(isinstance(row, dict) for row in self._group_rows(group, row_type))
                 }
                 if "bank" not in row_types or len(row_types) <= 1:
                     continue
                 group_case_id = self._group_case_id(group)
-                for bank_row in list(group.get("bank_rows") or []):
+                for bank_row in self._group_rows(group, "bank"):
                     if not isinstance(bank_row, dict):
                         continue
                     bank_row_id = str(bank_row.get("id") or bank_row.get("row_id") or "").strip()
@@ -191,6 +193,14 @@ class BankDetailsRelationTagProjectionService:
                         row_types=row_types,
                         case_id=str(bank_row.get("case_id") or "").strip() or group_case_id,
                     )
+
+    @staticmethod
+    def _group_rows(group: dict[str, Any], row_type: str) -> list[Any]:
+        primary = group.get(f"{row_type}_rows")
+        if isinstance(primary, list):
+            return primary
+        legacy = group.get(row_type)
+        return legacy if isinstance(legacy, list) else []
 
     @staticmethod
     def _merge_index_entry(
@@ -228,8 +238,11 @@ class BankDetailsRelationTagProjectionService:
 
     @staticmethod
     def _group_case_id(group: dict[str, Any]) -> str:
-        for key in ("oa_rows", "bank_rows", "invoice_rows"):
-            for row in list(group.get(key) or []):
+        for key in ("oa_rows", "bank_rows", "invoice_rows", "oa", "bank", "invoice"):
+            rows = group.get(key)
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
                 if not isinstance(row, dict):
                     continue
                 case_id = str(row.get("case_id") or "").strip()

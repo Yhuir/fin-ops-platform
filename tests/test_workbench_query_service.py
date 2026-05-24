@@ -687,6 +687,70 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
         unknown_row = by_source_kind["oa_attachment_unknown"]
         self.assertEqual(unknown_row["detail_fields"]["附件凭证类型"], "未知附件")
 
+    def test_attachment_evidence_ignores_ocr_order_numbers_as_money(self) -> None:
+        service = WorkbenchQueryService(oa_adapter=EvidenceAttachmentOAAdapter())
+
+        row = service._build_attachment_invoice_rows(
+            type(
+                "Record",
+                (),
+                {
+                    "attachment_evidences": [
+                        {
+                            "evidence_type": "payment_receipt",
+                            "source_attachment_key": "pay-key",
+                            "source_attachment_name": "付款截图.jpg",
+                            "source_expense_item_id": "item-1",
+                            "amount": "295402470149308264.00",
+                            "transaction_no": "26030211100301670006197203184255",
+                        }
+                    ],
+                    "attachment_invoices": [],
+                },
+            )(),
+            oa_row={
+                "id": "oa-exp-pay",
+                "_month": "2026-03",
+                "_section": "open",
+                "_detail_fields": {"OA单号": "2062", "申请日期": "2026-03-27"},
+            },
+        )[0]
+
+        self.assertEqual(row["source_kind"], "oa_attachment_payment_receipt")
+        self.assertEqual(row["amount"], "—")
+        self.assertEqual(row["_detail_fields"]["金额"], "—")
+
+    def test_attachment_artifact_without_invoice_identity_is_unknown_not_invoice(self) -> None:
+        service = WorkbenchQueryService(oa_adapter=EvidenceAttachmentOAAdapter())
+
+        row = service._build_attachment_invoice_rows(
+            type(
+                "Record",
+                (),
+                {
+                    "attachment_evidences": [
+                        {
+                            "source_attachment_key": "artifact-key",
+                            "source_attachment_name": "顺丰电子发票2026.5.18.pdf",
+                            "source_expense_item_id": "item-1",
+                            "document_kind": "发票附件",
+                            "parse_status": "no_evidence",
+                        }
+                    ],
+                    "attachment_invoices": [],
+                },
+            )(),
+            oa_row={
+                "id": "oa-exp-unknown",
+                "_month": "2026-05",
+                "_section": "open",
+                "_detail_fields": {"OA单号": "2189", "申请日期": "2026-05-18"},
+            },
+        )[0]
+
+        self.assertEqual(row["source_kind"], "oa_attachment_unknown")
+        self.assertEqual(row["invoice_type"], "未识别附件")
+
     def test_single_source_attachment_invoice_is_not_duplicated_from_expense_item_copy(self) -> None:
         service = WorkbenchQueryService(oa_adapter=SourceBoundAttachmentOAAdapter())
 

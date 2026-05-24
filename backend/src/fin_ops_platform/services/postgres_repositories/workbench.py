@@ -147,6 +147,53 @@ class PostgresWorkbenchRepository:
                         jsonb({"normalized_payload": payload}),
                     ),
                 )
+                row_ids = text_list(payload.get("bank_transaction_ids") or payload.get("row_ids"))
+                connection.execute(
+                    """
+                    insert into read_model.no_oa_bank_batch_rows(
+                        batch_id, scope_month, batch_type, status, status_bucket, account_key,
+                        total_amount, row_count, submitted_at, withdrawn_at, source_versions,
+                        generated_at, cache_status, payload, raw_payload
+                    )
+                    values (
+                        %s, %s::date, %s, %s, %s, %s, %s, %s, %s::timestamptz, %s::timestamptz,
+                        %s, coalesce(%s::timestamptz, now()), %s, %s, %s
+                    )
+                    on conflict (batch_id) do update set
+                        scope_month = excluded.scope_month,
+                        batch_type = excluded.batch_type,
+                        status = excluded.status,
+                        status_bucket = excluded.status_bucket,
+                        account_key = excluded.account_key,
+                        total_amount = excluded.total_amount,
+                        row_count = excluded.row_count,
+                        submitted_at = excluded.submitted_at,
+                        withdrawn_at = excluded.withdrawn_at,
+                        source_versions = excluded.source_versions,
+                        generated_at = excluded.generated_at,
+                        cache_status = excluded.cache_status,
+                        payload = excluded.payload,
+                        raw_payload = excluded.raw_payload,
+                        updated_at = now()
+                    """,
+                    (
+                        batch_id,
+                        month_start(payload.get("scope_month") or payload.get("month")),
+                        text(payload.get("batch_type") or payload.get("type")),
+                        text(payload.get("status") or "draft") or "draft",
+                        text(payload.get("status_bucket")),
+                        text(payload.get("account_key")),
+                        decimal_text(payload.get("total_amount") or payload.get("amount") or 0) or "0",
+                        int_value(payload.get("row_count"), len(row_ids)),
+                        text(payload.get("submitted_at")),
+                        text(payload.get("withdrawn_at")),
+                        jsonb(payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}),
+                        text(payload.get("updated_at") or payload.get("generated_at")),
+                        text(payload.get("cache_status") or "fresh") or "fresh",
+                        jsonb(serialize_value(payload)),
+                        jsonb({"normalized_payload": serialize_value(payload)}),
+                    ),
+                )
             self._replace_no_oa_bank_batch_events(
                 connection,
                 snapshot.get("audit_log") if isinstance(snapshot, dict) else None,

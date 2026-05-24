@@ -80,10 +80,12 @@ class FailingRedisRecorder(RedisRecorder):
 
 
 class TaxOffsetReadConnection:
-    def __init__(self, *, read_model_row: dict | None = None, dirty: bool = False) -> None:
+    def __init__(self, *, read_model_row: dict | None = None, item_rows: list[dict] | None = None, dirty: bool = False) -> None:
         self.read_model_row = read_model_row
+        self.item_rows = list(item_rows or [])
         self.dirty = dirty
         self.fetch_one_calls: list[tuple[str, tuple]] = []
+        self.fetch_all_calls: list[tuple[str, tuple]] = []
 
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         normalized = " ".join(sql.lower().split())
@@ -95,6 +97,10 @@ class TaxOffsetReadConnection:
         return None
 
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        if "from read_model.tax_offset_items" in normalized:
+            return self.item_rows
         return []
 
 
@@ -119,6 +125,32 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(view["schema_version"], "2026-05-tax-offset-month-v1")
         self.assertEqual(view["refresh_status"], "refreshing")
         self.assertTrue(all("app_settings" not in sql for sql, _params in connection.fetch_one_calls))
+
+    def test_repository_prefers_tax_offset_item_table_over_snapshot_item_arrays(self) -> None:
+        connection = TaxOffsetReadConnection(
+            read_model_row={
+                "scope_key": "2026-05",
+                "scope_month": "2026-05-01",
+                "generated_at": "2026-05-21T09:00:00+00:00",
+                "entry_count": 1,
+                "schema_version": "2026-05-tax-offset-month-v1",
+                "payload": {"payload": tax_payload("2026-05"), "schema_version": "2026-05-tax-offset-month-v1"},
+            },
+            item_rows=[
+                {
+                    "item_type": "input_plan",
+                    "item_index": 0,
+                    "item_id": "input-native",
+                    "payload": {"id": "input-native", "seller_name": "供应商A"},
+                }
+            ],
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        view = repository.get_tax_offset_view(scope_key="2026-05")
+
+        self.assertEqual(view["payload"]["input_plan_items"], [{"id": "input-native", "seller_name": "供应商A"}])
+        self.assertEqual(view["payload"]["output_items"], [])
 
     def test_tax_offset_api_reads_redis_hot_cache_without_sql_or_sync_build(self) -> None:
         app = object.__new__(Application)

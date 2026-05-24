@@ -43,10 +43,12 @@ class RedisRecorder:
 
 
 class CostStatisticsReadConnection:
-    def __init__(self, *, read_model_row: dict | None = None, dirty: bool = False) -> None:
+    def __init__(self, *, read_model_row: dict | None = None, cost_rows: list[dict] | None = None, dirty: bool = False) -> None:
         self.read_model_row = read_model_row
+        self.cost_rows = list(cost_rows or [])
         self.dirty = dirty
         self.fetch_one_calls: list[tuple[str, tuple]] = []
+        self.fetch_all_calls: list[tuple[str, tuple]] = []
 
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         normalized = " ".join(sql.lower().split())
@@ -58,6 +60,10 @@ class CostStatisticsReadConnection:
         return None
 
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        if "from read_model.cost_statistics_rows" in normalized:
+            return self.cost_rows
         return []
 
 
@@ -81,6 +87,40 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(view["payload"]["time_rows"], [{"transaction_id": "txn-1"}])
         self.assertEqual(view["refresh_status"], "refreshing")
         self.assertTrue(all("app_settings" not in sql for sql, _params in connection.fetch_one_calls))
+
+    def test_repository_prefers_cost_statistics_row_table_over_snapshot_payload(self) -> None:
+        connection = CostStatisticsReadConnection(
+            read_model_row={
+                "scope_key": "active:2026-05",
+                "project_scope": "active",
+                "scope_month": "2026-05-01",
+                "generated_at": "2026-05-21T09:00:00+00:00",
+                "entry_count": 1,
+                "payload": {"month": "2026-05", "time_rows": [{"transaction_id": "stale-json"}]},
+            },
+            cost_rows=[
+                {
+                    "scope_key": "active:2026-05",
+                    "project_scope": "active",
+                    "scope_month": "2026-05-01",
+                    "row_key": "txn-1:0",
+                    "transaction_id": "txn-1",
+                    "trade_time_text": "2026-05-02 10:00:00",
+                    "project_name": "项目A",
+                    "expense_type": "材料",
+                    "expense_content": "钢材",
+                    "amount": "10.00",
+                    "payload": {"transaction_id": "txn-1", "project_name": "项目A"},
+                }
+            ],
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        view = repository.get_cost_statistics_view(scope_key="active:2026-05")
+
+        self.assertEqual(view["payload"]["time_rows"][0]["transaction_id"], "txn-1")
+        self.assertEqual(view["payload"]["summary"]["total_amount"], "10.00")
+        self.assertEqual(view["payload"]["project_rows"][0]["expense_type_count"], 1)
 
     def test_cost_statistics_api_reads_redis_hot_cache_without_sql_or_sync_build(self) -> None:
         app = object.__new__(Application)

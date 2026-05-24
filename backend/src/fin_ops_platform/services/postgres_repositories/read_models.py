@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from decimal import Decimal, InvalidOperation
 import re
 from typing import Any
 
@@ -19,6 +20,14 @@ from fin_ops_platform.services.postgres_repositories.common import (
 )
 
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
+_TAX_OFFSET_ITEM_TYPES = {
+    "output_items": "output",
+    "input_plan_items": "input_plan",
+    "certified_items": "certified",
+    "certified_matched_rows": "certified_matched",
+    "certified_outside_plan_rows": "certified_outside",
+}
+_TAX_OFFSET_PAYLOAD_KEYS = {item_type: payload_key for payload_key, item_type in _TAX_OFFSET_ITEM_TYPES.items()}
 
 
 class PostgresReadModelRepository:
@@ -214,25 +223,41 @@ class PostgresReadModelRepository:
         }
 
     def save_pending_invoice_rows(self, *, scope_key: str, rows: list[dict[str, Any]]) -> None:
-        direction, _, filter_group = str(scope_key or "").partition(":")
-        normalized_direction = direction or "expense"
-        normalized_filter = filter_group or "all"
+        normalized_direction, normalized_filter, scope_month = _parse_pending_invoice_scope_key(scope_key)
 
         def write(connection: Any) -> None:
-            connection.execute(
-                "delete from read_model.pending_invoice_rows where direction = %s and (%s = 'all' or filter_group = %s)",
-                (normalized_direction, normalized_filter, normalized_filter),
-            )
+            if scope_month:
+                connection.execute(
+                    """
+                    delete from read_model.pending_invoice_rows
+                    where direction = %s
+                      and scope_month = %s::date
+                      and (%s = 'all' or filter_group = %s)
+                    """,
+                    (normalized_direction, scope_month, normalized_filter, normalized_filter),
+                )
+            else:
+                connection.execute(
+                    "delete from read_model.pending_invoice_rows where direction = %s and (%s = 'all' or filter_group = %s)",
+                    (normalized_direction, normalized_filter, normalized_filter),
+                )
             for row in list(rows or []):
                 payload = serialize_value(row.get("payload") if isinstance(row.get("payload"), dict) else row)
                 bank_transaction = payload.get("bank_transaction") if isinstance(payload.get("bank_transaction"), dict) else {}
+                row_scope_month = scope_month or month_start(bank_transaction.get("trade_time"))
+                row_filter_group = text(row.get("filter_group") or payload.get("filter_group") or normalized_filter) or "all"
+                row_scope_key = _pending_invoice_row_scope_key(
+                    direction=normalized_direction,
+                    filter_group=row_filter_group,
+                    scope_month=row_scope_month,
+                )
                 connection.execute(
                     """
                     insert into read_model.pending_invoice_rows(
                         row_id, direction, filter_group, scope_month, trade_date, counterparty_name,
-                        amount, missing_invoice, can_create_invoice, searchable_text, generated_at, payload, raw_payload
+                        amount, missing_invoice, can_create_invoice, searchable_text, scope_key, generated_at, payload, raw_payload
                     )
-                    values (%s, %s, %s, %s::date, %s::date, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s)
+                    values (%s, %s, %s, %s::date, %s::date, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s)
                     on conflict (row_id, direction) do update set
                         filter_group = excluded.filter_group,
                         scope_month = excluded.scope_month,
@@ -242,6 +267,7 @@ class PostgresReadModelRepository:
                         missing_invoice = excluded.missing_invoice,
                         can_create_invoice = excluded.can_create_invoice,
                         searchable_text = excluded.searchable_text,
+                        scope_key = excluded.scope_key,
                         generated_at = excluded.generated_at,
                         payload = excluded.payload,
                         raw_payload = excluded.raw_payload,
@@ -250,14 +276,15 @@ class PostgresReadModelRepository:
                     (
                         text(payload.get("id")),
                         normalized_direction,
-                        text(row.get("filter_group") or payload.get("filter_group") or "all"),
-                        month_start(bank_transaction.get("trade_time")),
+                        row_filter_group,
+                        row_scope_month,
                         text(bank_transaction.get("trade_time"))[:10] if text(bank_transaction.get("trade_time")) else None,
                         text(bank_transaction.get("counterparty_name")),
                         decimal_text(bank_transaction.get("amount")),
                         not bool(payload.get("invoices")),
                         bool(payload.get("can_create_invoice")),
                         text(row.get("searchable_text") or payload),
+                        row_scope_key,
                         text(row.get("generated_at")),
                         jsonb(payload),
                         jsonb({"normalized_payload": payload}),
@@ -1715,9 +1742,32 @@ class PostgresReadModelRepository:
         )
         if row is None:
             return None
-        payload = _read_model_payload(row)
-        if not isinstance(payload, dict):
-            payload = {}
+        stored_payload = _read_model_payload(row)
+        if not isinstance(stored_payload, dict):
+            stored_payload = {}
+        row_items = self._connection.fetch_all(
+            """
+            select
+                scope_key, project_scope, scope_month::text as scope_month, row_key, transaction_id,
+                group_id, trade_time_text, trade_date::text as trade_date, counterparty_name,
+                payment_account_label, direction, remark, project_id, project_name, expense_type,
+                expense_content, amount::text as amount, oa_applicant, source_versions,
+                generated_at::text as generated_at, cache_status, payload, raw_payload
+            from read_model.cost_statistics_rows
+            where scope_key = %s
+            order by trade_date desc nulls last, trade_time_text desc, transaction_id, row_key
+            """,
+            (normalized_scope_key,),
+        )
+        if row_items:
+            payload = _cost_statistics_payload_from_rows(
+                scope_key=normalized_scope_key,
+                parent_payload=stored_payload,
+                parent_row=row,
+                rows=row_items,
+            )
+        else:
+            payload = stored_payload.get("payload") if isinstance(stored_payload.get("payload"), dict) else stored_payload
         dirty_row = self._connection.fetch_one(
             """
             select status, updated_at, last_error
@@ -1737,31 +1787,196 @@ class PostgresReadModelRepository:
         return {
             "scope_key": normalized_scope_key,
             "project_scope": text(row.get("project_scope") or payload.get("project_scope")),
-            "payload": payload.get("payload") if isinstance(payload.get("payload"), dict) else payload,
-            "generated_at": text(row.get("generated_at") or payload.get("generated_at")),
-            "source_versions": payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
-            "entry_count": int_value(row.get("entry_count") or payload.get("entry_count"), 0),
+            "payload": payload,
+            "generated_at": text(row.get("generated_at") or stored_payload.get("generated_at") or payload.get("generated_at")),
+            "source_versions": stored_payload.get("source_versions") if isinstance(stored_payload.get("source_versions"), dict) else {},
+            "entry_count": int_value(
+                row.get("entry_count")
+                or payload.get("entry_count")
+                or ((payload.get("summary") if isinstance(payload.get("summary"), dict) else {}).get("row_count")),
+                0,
+            ),
             "refresh_status": refresh_status,
             "dirty_scope": dict(dirty_row) if isinstance(dirty_row, dict) else None,
         }
 
     def save_cost_statistics_read_models(self, snapshot: dict[str, Any], *, changed_scope_keys: set[str] | None = None) -> None:
-        run_in_transaction(
-            self._connection,
-            lambda connection: self._save_generic_read_model_snapshots(
+        def write(connection: Any) -> None:
+            self._save_generic_read_model_snapshots(
                 connection,
                 snapshot,
                 table="read_model.cost_statistics_read_models",
                 changed_scope_keys=changed_scope_keys,
                 default_project_scope="all",
-            ),
-        )
+            )
+            read_models = snapshot.get("read_models") if isinstance(snapshot, dict) else None
+            if changed_scope_keys is not None:
+                present_scope_keys = {scope_key for scope_key, _ in iter_mapping(read_models)}
+                for scope_key in sorted(set(changed_scope_keys) - present_scope_keys):
+                    connection.execute("delete from read_model.cost_statistics_rows where scope_key = %s", (scope_key,))
+            for scope_key, payload in iter_mapping(read_models):
+                if changed_scope_keys is not None and scope_key not in changed_scope_keys:
+                    continue
+                self._replace_cost_statistics_rows(connection, scope_key=scope_key, payload=payload)
+
+        run_in_transaction(self._connection, write)
 
     def load_tax_offset_read_models(self) -> dict[str, Any]:
         return self._load_table_map(
             "select scope_key as key, payload, raw_payload from read_model.tax_offset_read_models order by scope_key",
             "read_models",
         )
+
+    def list_no_oa_bank_batch_rows(self, filters: dict[str, Any] | None = None) -> list[dict[str, Any]] | None:
+        resolved_filters = filters if isinstance(filters, dict) else {}
+        where: list[str] = ["status <> 'superseded'"]
+        params: list[Any] = []
+        if value := text(resolved_filters.get("month")):
+            where.append("scope_month = %s::date")
+            params.append(month_start(value))
+        if value := text(resolved_filters.get("type")):
+            where.append("batch_type = %s")
+            params.append(value)
+        if value := text(resolved_filters.get("status")):
+            where.append("status = %s")
+            params.append(value)
+        if value := text(resolved_filters.get("bucket")):
+            where.append("status_bucket = %s")
+            params.append(value)
+        if value := text(resolved_filters.get("account_key")):
+            where.append("account_key = %s")
+            params.append(value)
+        rows = self._connection.fetch_all(
+            f"""
+            select batch_id, payload, raw_payload
+            from read_model.no_oa_bank_batch_rows
+            where {" and ".join(where)}
+            order by scope_month desc nulls last, generated_at desc, batch_id
+            """,
+            tuple(params),
+        )
+        if not rows:
+            return None
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            payload = _read_model_payload(row)
+            if isinstance(payload, dict):
+                result.append(payload)
+            elif batch_id := text(row.get("batch_id")):
+                result.append({"batch_id": batch_id})
+        return result
+
+    def list_turnover_ledger_view(
+        self,
+        *,
+        family: str = "all",
+        status: str | None = None,
+        page: int | str | None = 1,
+        page_size: int | str | None = 50,
+    ) -> dict[str, Any] | None:
+        normalized_family = (text(family) or "all").lower()
+        normalized_status = text(status)
+        normalized_page = max(int_value(page, 1), 1)
+        normalized_page_size = min(max(int_value(page_size, 50), 1), 200)
+        clauses: list[str] = ["status <> 'withdrawn'"]
+        params: list[Any] = []
+        if normalized_family != "all":
+            clauses.append("family = %s")
+            params.append(normalized_family)
+        if normalized_status:
+            clauses.append("status = %s")
+            params.append(normalized_status)
+        where_sql = " and ".join(clauses)
+        all_rows = self._connection.fetch_all(
+            f"""
+            select relation_id, family, status, amount::text as amount, payload, raw_payload
+            from read_model.turnover_ledger_rows
+            where {where_sql}
+            order by scope_month desc nulls last, generated_at desc, relation_id
+            """,
+            tuple(params),
+        )
+        if not all_rows:
+            return None
+        page_rows = all_rows[(normalized_page - 1) * normalized_page_size : normalized_page * normalized_page_size]
+        ledger_rows = [_turnover_ledger_row_payload(row) for row in all_rows]
+        visible_rows = [_turnover_ledger_row_payload(row) for row in page_rows]
+        return {
+            "summary": _turnover_ledger_summary(ledger_rows),
+            "family_summaries": [
+                _turnover_ledger_family_summary(family_key, [row for row in ledger_rows if row.get("family") == family_key])
+                for family_key in ("personal", "company", "bank", "business")
+            ],
+            "rows": visible_rows,
+            "pagination": {
+                "page": normalized_page,
+                "page_size": normalized_page_size,
+                "total": len(ledger_rows),
+            },
+            "filters": {
+                "family": normalized_family,
+                "status": normalized_status,
+            },
+            "read_model_status": "fresh",
+        }
+
+    def save_turnover_ledger_rows(self, payload: dict[str, Any]) -> None:
+        rows = payload.get("rows") if isinstance(payload, dict) else None
+        if not isinstance(rows, list):
+            return
+
+        def write(connection: Any) -> None:
+            connection.execute("delete from read_model.turnover_ledger_rows", ())
+            for index, item in enumerate(rows):
+                if not isinstance(item, dict):
+                    continue
+                row = serialize_value(item)
+                relation_id = text(row.get("relation_id")) or f"turnover-row-{index}"
+                bank_row_ids = text_list(row.get("bank_row_ids"))
+                connection.execute(
+                    """
+                    insert into read_model.turnover_ledger_rows(
+                        relation_id, scope_month, family, status, relation_type, source,
+                        counterparty_name, amount, bank_row_ids, source_versions,
+                        generated_at, cache_status, payload, raw_payload
+                    )
+                    values (%s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, now(), 'fresh', %s, %s)
+                    on conflict (relation_id) do update set
+                        scope_month = excluded.scope_month,
+                        family = excluded.family,
+                        status = excluded.status,
+                        relation_type = excluded.relation_type,
+                        source = excluded.source,
+                        counterparty_name = excluded.counterparty_name,
+                        amount = excluded.amount,
+                        bank_row_ids = excluded.bank_row_ids,
+                        source_versions = excluded.source_versions,
+                        generated_at = excluded.generated_at,
+                        cache_status = excluded.cache_status,
+                        payload = excluded.payload,
+                        raw_payload = excluded.raw_payload,
+                        updated_at = now()
+                    """,
+                    (
+                        relation_id,
+                        month_start(row.get("first_transaction_at") or row.get("borrow_date") or row.get("scope_month")),
+                        text(row.get("family")),
+                        text(row.get("status") or "suggested"),
+                        text(row.get("relation_type") or row.get("business_type")),
+                        text(row.get("source")),
+                        text(row.get("counterparty_name")),
+                        decimal_text(row.get("balance_amount") or row.get("principal_amount") or row.get("amount")),
+                        bank_row_ids,
+                        jsonb(row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}),
+                        jsonb(row),
+                        jsonb({"normalized_payload": row}),
+                    ),
+                )
+
+        run_in_transaction(self._connection, write)
+
+    def clear_turnover_ledger_rows(self) -> None:
+        self._connection.execute("delete from read_model.turnover_ledger_rows", ())
 
     def get_tax_offset_view(self, *, scope_key: str) -> dict[str, Any] | None:
         normalized_scope_key = str(scope_key or "").strip()
@@ -1778,9 +1993,21 @@ class PostgresReadModelRepository:
         )
         if row is None:
             return None
-        payload = _read_model_payload(row)
-        if not isinstance(payload, dict):
-            payload = {}
+        stored_payload = _read_model_payload(row)
+        if not isinstance(stored_payload, dict):
+            stored_payload = {}
+        payload = stored_payload.get("payload") if isinstance(stored_payload.get("payload"), dict) else stored_payload
+        item_rows = self._connection.fetch_all(
+            """
+            select item_type, item_index, item_id, payload, raw_payload
+            from read_model.tax_offset_items
+            where scope_key = %s
+            order by item_type, item_index, item_id
+            """,
+            (normalized_scope_key,),
+        )
+        if item_rows:
+            payload = _tax_offset_payload_from_items(parent_payload=payload, rows=item_rows)
         dirty_row = self._connection.fetch_one(
             """
             select status, updated_at, last_error
@@ -1799,11 +2026,11 @@ class PostgresReadModelRepository:
             refresh_status = "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
         return {
             "scope_key": normalized_scope_key,
-            "payload": payload.get("payload") if isinstance(payload.get("payload"), dict) else payload,
-            "schema_version": text(row.get("schema_version") or payload.get("schema_version")),
-            "generated_at": text(row.get("generated_at") or payload.get("generated_at")),
-            "source_versions": payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
-            "entry_count": int_value(row.get("entry_count") or payload.get("entry_count"), 0),
+            "payload": payload,
+            "schema_version": text(row.get("schema_version") or stored_payload.get("schema_version") or payload.get("schema_version")),
+            "generated_at": text(row.get("generated_at") or stored_payload.get("generated_at") or payload.get("generated_at")),
+            "source_versions": stored_payload.get("source_versions") if isinstance(stored_payload.get("source_versions"), dict) else {},
+            "entry_count": int_value(row.get("entry_count") or stored_payload.get("entry_count") or _tax_offset_item_count(payload), 0),
             "refresh_status": refresh_status,
             "dirty_scope": dict(dirty_row) if isinstance(dirty_row, dict) else None,
         }
@@ -1815,6 +2042,7 @@ class PostgresReadModelRepository:
                 present_scope_keys = {scope_key for scope_key, _ in iter_mapping(read_models)}
                 for scope_key in sorted(set(changed_scope_keys) - present_scope_keys):
                     connection.execute("delete from read_model.tax_offset_read_models where scope_key = %s", (scope_key,))
+                    connection.execute("delete from read_model.tax_offset_items where scope_key = %s", (scope_key,))
             for scope_key, payload in iter_mapping(read_models):
                 if changed_scope_keys is not None and scope_key not in changed_scope_keys:
                     continue
@@ -1854,8 +2082,171 @@ class PostgresReadModelRepository:
                         jsonb({"normalized_payload": payload}),
                     ),
                 )
+                model_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
+                if isinstance(model_payload, dict) and any(key in model_payload for key in _TAX_OFFSET_ITEM_TYPES):
+                    self._replace_tax_offset_items(connection, scope_key=scope_key, payload=payload)
 
         run_in_transaction(self._connection, write)
+
+    def _replace_cost_statistics_rows(self, connection: Any, *, scope_key: str, payload: dict[str, Any]) -> None:
+        connection.execute("delete from read_model.cost_statistics_rows where scope_key = %s", (scope_key,))
+        model_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
+        time_rows = model_payload.get("time_rows") if isinstance(model_payload, dict) else None
+        if not isinstance(time_rows, list):
+            return
+        source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
+        project_scope, scope_month_text = _parse_cost_statistics_scope_parts(scope_key, payload=model_payload)
+        scope_month = month_start(model_payload.get("scope_month") or model_payload.get("month") or scope_month_text)
+        generated_at = text(payload.get("generated_at") or model_payload.get("generated_at"))
+        cache_status = text(payload.get("cache_status") or model_payload.get("cache_status") or "fresh") or "fresh"
+        for index, item in enumerate(time_rows):
+            if not isinstance(item, dict):
+                continue
+            row = serialize_value(item)
+            transaction_id = text(row.get("transaction_id")) or f"row-{index}"
+            row_key = text(row.get("row_key") or f"{transaction_id}:{index}") or f"row-{index}"
+            connection.execute(
+                """
+                insert into read_model.cost_statistics_rows(
+                    scope_key, project_scope, scope_month, row_key, transaction_id, group_id,
+                    trade_time_text, trade_date, counterparty_name, payment_account_label, direction,
+                    remark, project_id, project_name, expense_type, expense_content, amount,
+                    oa_applicant, source_versions, generated_at, cache_status, payload, raw_payload
+                )
+                values (
+                    %s, %s, %s::date, %s, %s, %s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, coalesce(%s::timestamptz, now()), %s, %s, %s
+                )
+                on conflict (scope_key, row_key) do update set
+                    project_scope = excluded.project_scope,
+                    scope_month = excluded.scope_month,
+                    transaction_id = excluded.transaction_id,
+                    group_id = excluded.group_id,
+                    trade_time_text = excluded.trade_time_text,
+                    trade_date = excluded.trade_date,
+                    counterparty_name = excluded.counterparty_name,
+                    payment_account_label = excluded.payment_account_label,
+                    direction = excluded.direction,
+                    remark = excluded.remark,
+                    project_id = excluded.project_id,
+                    project_name = excluded.project_name,
+                    expense_type = excluded.expense_type,
+                    expense_content = excluded.expense_content,
+                    amount = excluded.amount,
+                    oa_applicant = excluded.oa_applicant,
+                    source_versions = excluded.source_versions,
+                    generated_at = excluded.generated_at,
+                    cache_status = excluded.cache_status,
+                    payload = excluded.payload,
+                    raw_payload = excluded.raw_payload,
+                    updated_at = now()
+                """,
+                (
+                    scope_key,
+                    project_scope,
+                    scope_month,
+                    row_key,
+                    transaction_id,
+                    text(row.get("group_id")),
+                    text(row.get("trade_time")),
+                    _date_text(row.get("trade_date") or row.get("trade_time")),
+                    text(row.get("counterparty_name")),
+                    text(row.get("payment_account_label")),
+                    text(row.get("direction")),
+                    text(row.get("remark")),
+                    text(row.get("project_id")),
+                    text(row.get("project_name")) or "未归集项目",
+                    text(row.get("expense_type")) or "未分类",
+                    text(row.get("expense_content")),
+                    decimal_text(row.get("amount")) or "0",
+                    text(row.get("oa_applicant")),
+                    jsonb(source_versions),
+                    generated_at,
+                    cache_status,
+                    jsonb(row),
+                    jsonb({"normalized_payload": row}),
+                ),
+            )
+
+    def _replace_tax_offset_items(self, connection: Any, *, scope_key: str, payload: dict[str, Any]) -> None:
+        connection.execute("delete from read_model.tax_offset_items where scope_key = %s", (scope_key,))
+        model_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
+        if not isinstance(model_payload, dict):
+            return
+        source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
+        scope_month = month_start(model_payload.get("scope_month") or model_payload.get("month") or scope_key)
+        generated_at = text(payload.get("generated_at") or model_payload.get("generated_at"))
+        cache_status = text(payload.get("cache_status") or model_payload.get("cache_status") or "fresh") or "fresh"
+        for payload_key, item_type in _TAX_OFFSET_ITEM_TYPES.items():
+            items = model_payload.get(payload_key)
+            if not isinstance(items, list):
+                continue
+            for index, item in enumerate(items):
+                if not isinstance(item, dict):
+                    continue
+                row = serialize_value(item)
+                item_id = text(row.get("id") or row.get("unique_key") or row.get("invoice_id")) or f"{item_type}:{index}"
+                connection.execute(
+                    """
+                    insert into read_model.tax_offset_items(
+                        scope_key, scope_month, item_type, item_id, item_index, issue_date,
+                        invoice_no, invoice_code, digital_invoice_no, seller_name, seller_tax_no,
+                        buyer_name, buyer_tax_no, invoice_type, tax_rate, tax_amount, total_with_tax,
+                        source_kind, source_versions, generated_at, cache_status, payload, raw_payload
+                    )
+                    values (
+                        %s, %s::date, %s, %s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s, %s
+                    )
+                    on conflict (scope_key, item_type, item_id) do update set
+                        scope_month = excluded.scope_month,
+                        item_index = excluded.item_index,
+                        issue_date = excluded.issue_date,
+                        invoice_no = excluded.invoice_no,
+                        invoice_code = excluded.invoice_code,
+                        digital_invoice_no = excluded.digital_invoice_no,
+                        seller_name = excluded.seller_name,
+                        seller_tax_no = excluded.seller_tax_no,
+                        buyer_name = excluded.buyer_name,
+                        buyer_tax_no = excluded.buyer_tax_no,
+                        invoice_type = excluded.invoice_type,
+                        tax_rate = excluded.tax_rate,
+                        tax_amount = excluded.tax_amount,
+                        total_with_tax = excluded.total_with_tax,
+                        source_kind = excluded.source_kind,
+                        source_versions = excluded.source_versions,
+                        generated_at = excluded.generated_at,
+                        cache_status = excluded.cache_status,
+                        payload = excluded.payload,
+                        raw_payload = excluded.raw_payload,
+                        updated_at = now()
+                    """,
+                    (
+                        scope_key,
+                        scope_month,
+                        item_type,
+                        item_id,
+                        index,
+                        _date_text(row.get("issue_date") or row.get("invoice_date")),
+                        text(row.get("invoice_no")),
+                        text(row.get("invoice_code")),
+                        text(row.get("digital_invoice_no")),
+                        text(row.get("seller_name")),
+                        text(row.get("seller_tax_no")),
+                        text(row.get("buyer_name")),
+                        text(row.get("buyer_tax_no")),
+                        text(row.get("invoice_type")),
+                        text(row.get("tax_rate")),
+                        decimal_text(row.get("tax_amount")),
+                        decimal_text(row.get("total_with_tax") or row.get("amount")),
+                        text(row.get("source_kind")),
+                        jsonb(source_versions),
+                        generated_at,
+                        cache_status,
+                        jsonb(row),
+                        jsonb({"normalized_payload": row}),
+                    ),
+                )
 
     def _load_table_map(self, sql: str, payload_key: str) -> dict[str, Any]:
         rows = self._connection.fetch_all(sql)
@@ -2055,6 +2446,231 @@ class PostgresReadModelRepository:
                     }
                 )
         return groups
+
+
+def _parse_pending_invoice_scope_key(scope_key: str) -> tuple[str, str, str | None]:
+    parts = [part.strip() for part in str(scope_key or "").split(":")]
+    direction = parts[0] if parts and parts[0] else "expense"
+    filter_group = parts[1] if len(parts) > 1 and parts[1] else "all"
+    month = parts[2] if len(parts) > 2 and parts[2] else ""
+    return direction, filter_group, month_start(month)
+
+
+def _pending_invoice_row_scope_key(*, direction: str, filter_group: str, scope_month: str | None) -> str:
+    if scope_month:
+        return f"{direction}:{filter_group}:{scope_month[:7]}"
+    return f"{direction}:{filter_group}"
+
+
+def _parse_cost_statistics_scope_parts(scope_key: str, *, payload: dict[str, Any]) -> tuple[str, str]:
+    raw = str(scope_key or "").strip()
+    if ":" in raw:
+        project_scope, month = raw.split(":", 1)
+    else:
+        project_scope = str(payload.get("project_scope") or "all")
+        month = raw
+    project_scope = (text(project_scope) or "all").lower()
+    if project_scope not in {"active", "all"}:
+        project_scope = "all"
+    normalized_month = text(payload.get("month") or month) or "all"
+    return project_scope, normalized_month
+
+
+def _cost_statistics_payload_from_rows(
+    *,
+    scope_key: str,
+    parent_payload: dict[str, Any],
+    parent_row: dict[str, Any],
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    parent_model_payload = parent_payload.get("payload") if isinstance(parent_payload.get("payload"), dict) else parent_payload
+    project_scope, scope_month_text = _parse_cost_statistics_scope_parts(scope_key, payload=parent_model_payload)
+    if rows:
+        scope_month_text = text(rows[0].get("scope_month")) or scope_month_text
+    month = scope_month_text[:7] if scope_month_text and scope_month_text != "all" else text(parent_model_payload.get("month")) or scope_month_text
+    time_rows: list[dict[str, Any]] = []
+    project_groups: dict[str, dict[str, Any]] = {}
+    expense_groups: dict[str, dict[str, Any]] = {}
+    total_amount = Decimal("0")
+    for index, db_row in enumerate(rows):
+        payload = _read_model_payload(db_row)
+        row_payload_value = deepcopy(payload) if isinstance(payload, dict) else {}
+        amount = _decimal_or_zero(db_row.get("amount") or row_payload_value.get("amount"))
+        total_amount += amount
+        project_name = text(db_row.get("project_name") or row_payload_value.get("project_name")) or "未归集项目"
+        expense_type = text(db_row.get("expense_type") or row_payload_value.get("expense_type")) or "未分类"
+        transaction_id = text(db_row.get("transaction_id") or row_payload_value.get("transaction_id")) or f"row-{index}"
+        normalized_row = {
+            **row_payload_value,
+            "transaction_id": transaction_id,
+            "group_id": text(db_row.get("group_id") or row_payload_value.get("group_id")),
+            "trade_time": text(db_row.get("trade_time_text") or row_payload_value.get("trade_time") or db_row.get("trade_date")),
+            "direction": text(db_row.get("direction") or row_payload_value.get("direction")),
+            "project_name": project_name,
+            "project_id": text(db_row.get("project_id") or row_payload_value.get("project_id")),
+            "expense_type": expense_type,
+            "expense_content": text(db_row.get("expense_content") or row_payload_value.get("expense_content")),
+            "amount": _format_decimal(amount),
+            "counterparty_name": text(db_row.get("counterparty_name") or row_payload_value.get("counterparty_name")),
+            "payment_account_label": text(db_row.get("payment_account_label") or row_payload_value.get("payment_account_label")),
+            "remark": text(db_row.get("remark") or row_payload_value.get("remark")),
+            "oa_applicant": text(db_row.get("oa_applicant") or row_payload_value.get("oa_applicant")),
+        }
+        time_rows.append(normalized_row)
+        project_bucket = project_groups.setdefault(
+            project_name,
+            {"project_name": project_name, "total_amount": Decimal("0"), "transaction_count": 0, "expense_types": set()},
+        )
+        project_bucket["total_amount"] += amount
+        project_bucket["transaction_count"] += 1
+        project_bucket["expense_types"].add(expense_type)
+        expense_bucket = expense_groups.setdefault(
+            expense_type,
+            {"expense_type": expense_type, "total_amount": Decimal("0"), "transaction_count": 0, "projects": set()},
+        )
+        expense_bucket["total_amount"] += amount
+        expense_bucket["transaction_count"] += 1
+        expense_bucket["projects"].add(project_name)
+    return {
+        "month": month,
+        "project_scope": project_scope,
+        "summary": {
+            "row_count": len(time_rows),
+            "transaction_count": len(time_rows),
+            "total_amount": _format_decimal(total_amount),
+        },
+        "time_rows": time_rows,
+        "project_rows": [
+            {
+                "project_name": bucket["project_name"],
+                "total_amount": _format_decimal(bucket["total_amount"]),
+                "transaction_count": bucket["transaction_count"],
+                "expense_type_count": len(bucket["expense_types"]),
+            }
+            for bucket in sorted(project_groups.values(), key=lambda item: (-item["total_amount"], item["project_name"]))
+        ],
+        "expense_type_rows": [
+            {
+                "expense_type": bucket["expense_type"],
+                "total_amount": _format_decimal(bucket["total_amount"]),
+                "transaction_count": bucket["transaction_count"],
+                "project_count": len(bucket["projects"]),
+            }
+            for bucket in sorted(expense_groups.values(), key=lambda item: (-item["total_amount"], item["expense_type"]))
+        ],
+        "generated_at": text(parent_row.get("generated_at") or parent_payload.get("generated_at")),
+    }
+
+
+def _tax_offset_payload_from_items(*, parent_payload: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    payload = deepcopy(parent_payload)
+    for key in _TAX_OFFSET_ITEM_TYPES:
+        payload[key] = []
+    for row in rows:
+        item_type = text(row.get("item_type"))
+        payload_key = _TAX_OFFSET_PAYLOAD_KEYS.get(item_type or "")
+        if payload_key is None:
+            continue
+        item_payload = _read_model_payload(row)
+        if isinstance(item_payload, dict):
+            payload[payload_key].append(item_payload)
+    return payload
+
+
+def _tax_offset_item_count(payload: dict[str, Any]) -> int:
+    total = 0
+    for key in _TAX_OFFSET_ITEM_TYPES:
+        value = payload.get(key)
+        if isinstance(value, list):
+            total += len(value)
+    return total
+
+
+def _turnover_ledger_row_payload(row: dict[str, Any]) -> dict[str, Any]:
+    payload = _read_model_payload(row)
+    if isinstance(payload, dict):
+        return payload
+    return {
+        "relation_id": text(row.get("relation_id")),
+        "family": text(row.get("family")),
+        "status": text(row.get("status")),
+        "balance_amount": decimal_text(row.get("amount")) or "0.00",
+    }
+
+
+def _turnover_ledger_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    pending_repayment = Decimal("0")
+    repaid = Decimal("0")
+    pending_collection = Decimal("0")
+    collected = Decimal("0")
+    closed = Decimal("0")
+    suggested_count = 0
+    conflict_count = 0
+    for row in rows:
+        principal = _decimal_or_zero(row.get("principal_amount"))
+        settled = _decimal_or_zero(row.get("settled_amount"))
+        balance = _decimal_or_zero(row.get("balance_amount"))
+        business_type = text(row.get("business_type")) or ""
+        if business_type == "borrow_in":
+            pending_repayment += max(balance, Decimal("0"))
+            repaid += settled
+        elif business_type in {"borrow_out", "business_receivable"}:
+            pending_collection += max(balance, Decimal("0"))
+            collected += settled
+        if balance == Decimal("0") and row.get("status") in {"deterministic", "confirmed"}:
+            closed += principal
+        if row.get("status") == "suggested":
+            suggested_count += 1
+        if row.get("status") == "conflict":
+            conflict_count += 1
+    return {
+        "pending_repayment_amount": _format_decimal(pending_repayment),
+        "repaid_amount": _format_decimal(repaid),
+        "pending_collection_amount": _format_decimal(pending_collection),
+        "collected_amount": _format_decimal(collected),
+        "closed_amount": _format_decimal(closed),
+        "suggested_count": suggested_count,
+        "conflict_count": conflict_count,
+        "row_count": len(rows),
+    }
+
+
+def _turnover_ledger_family_summary(family: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    summary = _turnover_ledger_summary(rows)
+    pending_amount = _decimal_or_zero(summary.get("pending_repayment_amount")) + _decimal_or_zero(
+        summary.get("pending_collection_amount")
+    )
+    labels = {"personal": "个人往来", "company": "公司往来", "bank": "银行往来", "business": "业务往来"}
+    return {
+        "family": family,
+        "label": labels.get(family, family),
+        "pending_amount": _format_decimal(pending_amount),
+        "closed_amount": summary["closed_amount"],
+        "row_count": summary["row_count"],
+    }
+
+
+def _date_text(value: Any) -> str | None:
+    normalized = text(value)
+    if not normalized:
+        return None
+    if len(normalized) >= 10 and normalized[4] == "-" and normalized[7] == "-":
+        return normalized[:10]
+    return month_start(normalized)
+
+
+def _decimal_or_zero(value: Any) -> Decimal:
+    if value in (None, "", "—", "--"):
+        return Decimal("0")
+    try:
+        return Decimal(str(value).replace(",", "").strip())
+    except (InvalidOperation, ValueError):
+        return Decimal("0")
+
+
+def _format_decimal(value: Decimal) -> str:
+    normalized = value.quantize(Decimal("0.01"))
+    return format(normalized, "f")
 
 
 def _dedupe_workbench_payload_groups(payload: dict[str, Any]) -> None:

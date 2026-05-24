@@ -30,6 +30,10 @@ class SearchPendingReadModelRefreshService:
         elif event.event_type == "pending_invoice.read_model.refresh":
             if scope_type != "pending_invoice" or not scope_key:
                 raise ValueError("Pending invoice refresh requires scope_type='pending_invoice' and scope_key.")
+            if _pending_invoice_scope_requires_expansion(scope_key):
+                shard_result = self._enqueue_pending_invoice_scope_shards(event, scope_key)
+                if shard_result is not None:
+                    return shard_result
             rebuild = getattr(self._projection_builder, "rebuild_pending_invoice_read_model_scope", None)
         else:
             raise ValueError(f"Unsupported search/pending read model event type: {event.event_type}")
@@ -54,3 +58,24 @@ class SearchPendingReadModelRefreshService:
         if callable(complete_dirty_scope):
             complete_dirty_scope(tenant_id=event.tenant_id, scope_type="search", scope_key=scope_key)
         return {"scope_key": scope_key, "enqueued_scope_keys": shard_keys, "row_count": 0}
+
+    def _enqueue_pending_invoice_scope_shards(self, event: RuntimeQueueEvent, scope_key: str) -> dict[str, Any] | None:
+        list_shards = getattr(self._projection_builder, "list_pending_invoice_scope_shards", None)
+        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
+        if not callable(list_shards) or not callable(enqueue):
+            return None
+        shard_keys = [str(item).strip() for item in list(list_shards(scope_key) or []) if str(item).strip()]
+        for shard_key in shard_keys:
+            enqueue(scope_type="pending_invoice", scope_key=shard_key, reason="pending_invoice_month_shard")
+        complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)
+        if callable(complete_dirty_scope):
+            complete_dirty_scope(tenant_id=event.tenant_id, scope_type="pending_invoice", scope_key=scope_key)
+        return {"scope_key": scope_key, "enqueued_scope_keys": shard_keys, "row_count": 0}
+
+
+def _pending_invoice_scope_requires_expansion(scope_key: str) -> bool:
+    parts = [part.strip() for part in str(scope_key or "").split(":")]
+    if len(parts) < 3:
+        return True
+    month = parts[2]
+    return not (len(month) == 7 and month[4] == "-" and month[5:7].isdigit())

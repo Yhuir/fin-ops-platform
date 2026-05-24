@@ -33,6 +33,8 @@
 | `worker-file-migration` | `file_object.gridfs_migration` | `--enable-file-object-migration --event-type file_object.gridfs_migration` |
 | `worker-import` | `import.process.requested` | `--enable-import-job-processing --event-type import.process.requested` |
 
+不要部署 `fin-ops-worker@oa-rabbitmq.service` 这类没有匹配 handler 的实例。OA worker 的实例名应指向 `oa.sync`，例如 `fin-ops-worker@oa-sync-rabbitmq.service`，并配置 `--enable-oa-sync --event-type oa.sync`。
+
 可复制的 systemd/env 模板位于：
 
 - `deploy/oa/systemd/fin-ops.service.example`

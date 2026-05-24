@@ -65,9 +65,11 @@ set +a
 
 - `worker-workbench`：`--enable-workbench-read-model-refresh --worker-kind workbench-read-model --event-type workbench.read_model.refresh`
 - `worker-search`：`--enable-search-read-model-refresh --worker-kind search-read-model --event-type search.read_model.refresh`
-- `worker-pending-invoice`：`--enable-pending-invoice-read-model-refresh --worker-kind pending-invoice-read-model --event-type pending_invoice.read_model.refresh`
+- `worker-pending-invoice`：`--enable-pending-invoice-read-model-refresh --worker-kind pending-invoice-read-model --event-type pending_invoice.read_model.refresh`。Legacy `expense:all` / `income:all` 事件只做 fan-out，实际 rebuild scope 必须是 `direction:filter:YYYY-MM`。
 - `worker-cost-tax`：`--enable-cost-statistics-read-model-refresh --enable-tax-offset-read-model-refresh --worker-kind runtime --event-type cost_statistics.read_model.refresh --event-type tax_offset.read_model.refresh`
 - `worker-oa-sync`：`--enable-oa-sync --worker-kind oa-sync --event-type oa.sync`
+
+不要启动无 handler 的 `fin-ops-worker@oa-rabbitmq.service`。如果 systemd 中已存在该实例，应停止并 disable，改用 `fin-ops-worker@oa-sync-rabbitmq.service` 或等价命名，并确保 `FIN_OPS_WORKER_ARGS` 包含 `--enable-oa-sync --event-type oa.sync`。
 
 每个长期 worker 都应设置 `--lock-timeout-seconds`、`--task-timeout-seconds`、`--statement-timeout-seconds` 和 `--max-attempts`。`lock_timeout` 释放 stale `processing` 事件，`task_timeout` 限制单个 handler 的 wall-clock 时间，`statement_timeout` 限制单条 PostgreSQL 语句，`max_attempts` 超限后进入 PostgreSQL `dead_lettered`，再由运维修复后手动 `requeue_event`。
 

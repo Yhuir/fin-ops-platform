@@ -386,6 +386,48 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(queue.completed, [("tenant-a", "search", "all")])
 
+    def test_refresh_handler_expands_legacy_pending_scope_into_month_shards(self) -> None:
+        class FakeBuilder:
+            def __init__(self) -> None:
+                self.rebuilt: list[str] = []
+
+            def list_pending_invoice_scope_shards(self, scope_key: str) -> list[str]:
+                self.rebuilt.append(f"list:{scope_key}")
+                return ["expense:all:2026-05", "expense:all:2026-04"]
+
+            def rebuild_pending_invoice_read_model_scope(self, scope_key: str) -> dict[str, object]:
+                raise AssertionError(scope_key)
+
+        queue = QueueRecorder()
+        builder = FakeBuilder()
+        service = SearchPendingReadModelRefreshService(projection_builder=builder, queue_repository=queue)
+        event = RuntimeQueueEvent(
+            event_id="event-pending-all",
+            tenant_id="tenant-a",
+            event_type="pending_invoice.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="expense:all",
+            scope_type="pending_invoice",
+            scope_key="expense:all",
+            dedupe_key=None,
+            payload={"scope_key": "expense:all"},
+            attempts=1,
+            status="processing",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(result, {"scope_key": "expense:all", "enqueued_scope_keys": ["expense:all:2026-05", "expense:all:2026-04"], "row_count": 0})
+        self.assertEqual(builder.rebuilt, ["list:expense:all"])
+        self.assertEqual(
+            queue.refreshes,
+            [
+                ("pending_invoice", "expense:all:2026-05", "pending_invoice_month_shard"),
+                ("pending_invoice", "expense:all:2026-04", "pending_invoice_month_shard"),
+            ],
+        )
+        self.assertEqual(queue.completed, [("tenant-a", "pending_invoice", "expense:all")])
+
 
 if __name__ == "__main__":
     unittest.main()

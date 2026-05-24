@@ -596,7 +596,8 @@ def _check_oa_source(*, require_real_infra: bool) -> CheckResult:
                 "stderr": worker_result.stderr[-4000:],
             },
         )
-    scope_month_literal = f"'{scope_key.replace("'", "''")}-01'::date"
+    escaped_scope_key = scope_key.replace("'", "''")
+    scope_month_literal = f"'{escaped_scope_key}-01'::date"
     verify_sql = f"""
 select json_build_object(
     'oa_sync_done_count', (select count(*) from job.outbox_events where event_type = 'oa.sync' and dedupe_key = '{dedupe_key}' and status = 'done'),
