@@ -23,10 +23,14 @@
 - 如果无法唯一确定，相关行保持独立 `open`，不放在同一行。
 - 配对规则采用唯一性优先：多个同级候选冲突时不按分数强行选择，全部保持 `open`。
 - 自由匹配优先看金额，再看跨来源文本重复证据。
+- 首版自由匹配只覆盖支出方向。收入侧没有 OA，不进入这套 OA/流水/发票自由匹配规则。
 - 自由匹配字段范围：
   - OA：申请人、项目名称、申请事由。
   - 流水：对方户名、摘要、备注。
   - 发票：销方名称。
+- OA 来源附件发票首先和该 OA 强关联。附件发票金额与 OA 金额不一致时不拆开，但必须带金额不一致 warning。
+- 流水优先找 OA。流水金额与 OA 金额一致、OA-流水唯一且附件发票来自该 OA 时，可以形成三项 `paired`，即使附件发票合计金额与 OA/流水不一致；这种关系必须标记 `invoice_amount_closed = false` 并展示 warning。
+- 自动自由匹配候选窗口为 `T-2 / T / T+2`。dirty 月份为 T 时，自由匹配可读取前后各 2 个月的 OA、流水和发票候选。
 - `WorkbenchReconciliationEngine` 作为统一编排入口。
 - 自由匹配和特殊匹配分域处理。
 - 特殊匹配不走自由匹配规则，例如内部往来款、外部往来款、工资、现金周转、冲账。
@@ -94,20 +98,23 @@ WorkbenchReconciliationEngine
 2. 特殊规则先识别，确定性特殊结果先占用 row。
 3. 自由匹配只处理没有被手工关联、异常单、特殊规则占用的普通 row。
 4. 冲突统一由 `ClaimResolver` 处理。
-5. 决策统一写入 `DecisionStore`。
-6. SQL read model 只投影决策结果。
-7. 前端只展示 `paired` 和 `open`。
+5. 自动决策统一写入 `DecisionStore`。
+6. 手工关联继续以 `workbench_pair_relations` 为事实源，不镜像成自动决策。
+7. SQL read model 先投影手工关联，再投影自动决策。
+8. 前端只展示 `paired` 和 `open`。
 
 ## 自由匹配总原则
 
-自由匹配只处理普通 OA、流水、发票之间的关系。
+自由匹配只处理普通支出 OA、银行流出、进项/供应商发票之间的关系。收入侧首版不纳入自由匹配，因为收入业务没有 OA 作为三项桥接对象。
 
-所有自动配对必须同时满足：
+严格金额闭合的自动配对必须同时满足：
 
 1. 金额一致。
 2. 方向兼容。
 3. 有跨来源有效文本重复证据。
 4. 组合唯一无冲突。
+
+OA 来源附件是例外：附件来源链路本身是强业务证据。附件发票金额不一致时，允许形成带 warning 的三项 `paired`，但该 `paired` 只表示支付关系和来源关系成立，不表示发票金额闭合。
 
 金额按分为单位精确比较，不做模糊金额匹配。
 
@@ -122,6 +129,29 @@ WorkbenchReconciliationEngine
 
 唯一性优先级高于打分。同一 OA、流水或发票如果能形成多个同级候选，全部保持 `open`。
 
+## 跨月窗口和归属
+
+自动自由匹配候选窗口为 `T-2 / T / T+2`。例如 dirty 月份为 `2026-05` 时，引擎可读取 `2026-03` 到 `2026-07` 的 OA、流水和发票作为候选池。
+
+窗口约束：
+
+- 唯一性判断必须在整个 5 个月候选窗口内完成，不能只看 dirty 月份内是否唯一。
+- 候选池必须先按金额、方向、对象类型和月份窗口预过滤，再做文本规范化和重复证据判断。
+- 来源附件发票按 OA 来源链路强关联，不受普通文本候选窗口限制。
+- 特殊规则使用自己的业务窗口，例如内部往来按小时窗口，不套用自由匹配 5 个月窗口。
+
+跨月 decision 只归属一个主月份：
+
+- 有流水的三项或两两关系，`scope_month` 归属流水交易月份。
+- 没有流水的 OA+发票关系，`scope_month` 归属 OA 月份。
+- 同一个跨月关系只生成一个 `decision_key`，不能在多个 scope 中重复生成。
+
+dirty 扩散：
+
+- 任意 OA、流水、发票所在月份发生变化时，必须标记该月份及前后各 2 个月 dirty。
+- 如果跨月 decision 的参与行来自多个自然月，参与行所在月份及其前后各 2 个月都要重新裁决。
+- Worker 处理某个 dirty 月份时，可以读取 5 个月候选窗口，但只写入主月份归属于当前处理范围的 decision，避免重复写入。
+
 ## 三项配对规则
 
 ### OA + 流水 + 单张发票
@@ -131,7 +161,7 @@ WorkbenchReconciliationEngine
 - OA 金额 = 流水金额 = 发票金额。
 - 方向兼容。
 - 三者之间存在有效证据链。
-- 组合在当前月份唯一。
+- 组合在整个 5 个月候选窗口内唯一。
 
 有效证据链示例：
 
@@ -156,13 +186,31 @@ WorkbenchReconciliationEngine
 条件：
 
 - 发票来自该 OA 的附件来源链路。
-- OA 金额 = 流水金额 = 附件发票合计金额。
+- OA 金额 = 流水金额。
 - 流水和 OA 之间至少有一个有效重复证据。
 - 流水候选唯一。
+- 附件发票来源唯一，没有被多个 OA 来源链路同时引用。
 
 成立则输出 `paired`。
 
-如果 OA 金额 = 流水金额，但附件发票合计金额不一致，不自动配对，保持 `open`。
+如果附件发票合计金额 = OA/流水金额，则：
+
+- `payment_amount_closed = true`
+- `invoice_amount_closed = true`
+- 不展示金额警示。
+
+如果附件发票合计金额 != OA/流水金额，则：
+
+- 仍输出 `paired`。
+- `payment_amount_closed = true`
+- `invoice_amount_closed = false`
+- 输出 `invoice_amount_mismatch` warning。
+- OA 区域展示 warning icon。
+- warning 文案包含 OA 金额、流水金额、附件发票合计、差额和正式发票数量。
+
+这类三项关系的含义是：流水按 OA 支付，附件发票来自该 OA，但发票金额未闭合。下游如果需要判断“发票已完整”，不能只看 `paired`，必须同时检查 `invoice_amount_closed`。
+
+附件金额比较只统计正式发票。付款回单、截图、未知附件和其他非发票附件不能参与附件发票合计。
 
 ### 两两关系升级三项
 
@@ -181,7 +229,7 @@ OA + 发票 可配对
 
 - 单张发票：OA 金额 = 流水金额 = 发票金额。
 - 多张发票：OA 金额 = 流水金额 = 发票合计金额。
-- 附件发票：OA 金额 = 流水金额 = OA 来源附件发票合计金额。
+- 附件发票：OA 金额 = 流水金额。附件发票合计不一致时仍可升级为带 warning 的三项 `paired`，但 `invoice_amount_closed = false`。
 
 流水和发票之间可以没有直接文本重复。OA 可以作为桥接证据。但 explain 必须记录这是桥接三项配对，而不是强三项配对。
 
@@ -249,7 +297,7 @@ OA + 发票 可配对
 
 特殊匹配不使用自由匹配规则，不参与“金额一致 + 文本重复”的普通配对判断。
 
-特殊匹配范围包括但不限于：
+首版特殊匹配范围只包括：
 
 - 内部往来款。
 - 外部往来款。
@@ -257,6 +305,8 @@ OA + 发票 可配对
 - 现金周转。
 - 冲账。
 - 无 OA 管理批次类规则。
+
+其他特殊类型只保留扩展点，不纳入首版实现计划。
 
 特殊匹配原则：
 
@@ -266,16 +316,26 @@ OA + 发票 可配对
 - 特殊匹配占用的 row 不再进入自由匹配。
 - 如果特殊匹配和自由匹配都尝试占用同一 row，默认特殊匹配优先，并记录冲突 explain。
 
+首版特殊规则输出策略：
+
+| 特殊类型 | 首版输出策略 | 说明 |
+| --- | --- | --- |
+| 内部往来款 | 确定性命中时 `paired` | 银行流出/流入金额一致、公司账户不同、时间窗口内唯一 |
+| 外部往来款 | 有确定业务事实时 `paired`，否则 `open` | 仅靠分类或关键词提示不足以合并展示 |
+| 工资 / 无 OA 管理批次 | 由无 OA 批次域管理，确定后可占用 row | 不进入自由匹配，不按 OA/发票规则解释 |
+| 现金周转 | 确定性命中时 `paired`，提示型命中保持 `open` | 不用 `needs_review` 展示疑似关系 |
+| 冲账 | 配置和来源关系确定时 `paired` | 不包装成普通自由匹配三项关系 |
+
 ## 状态模型
 
-展示状态只保留：
+展示状态字段为 `display_state`，只保留：
 
 | 状态 | 含义 |
 | --- | --- |
 | `paired` | 系统或人工已经确定配对，进入同一行 |
 | `open` | 没有唯一确定配对，独立展示 |
 
-内部决策生命周期可以包含：
+自动决策生命周期字段为 `decision_status`，包含：
 
 | 内部状态 | 含义 |
 | --- | --- |
@@ -286,11 +346,26 @@ OA + 发票 可配对
 | `consumed` | 被手工确认或其他高优先级事实消费 |
 | `expired` | source version 或 rule version 过期 |
 
-前端不得展示内部状态，除非后续新增管理员 debug 面板。
+前端不得展示 `decision_status`，除非后续新增管理员 debug 面板。
+
+投影映射：
+
+| `decision_status` | 读模型展示 |
+| --- | --- |
+| `paired` | 进入 `paired` 区，同一组展示 |
+| `open` | 进入 `open` 区，独立展示 |
+| `proposed` | 不投影为业务组，只保留 debug/explain |
+| `suppressed` | 不投影为自动组；由异常单或手工关系决定展示 |
+| `consumed` | 不投影为自动组；由消费它的手工关系或高优先级事实展示 |
+| `expired` | 不投影，等待 dirty scope 重算 |
+
+Warning 不是展示状态。带 warning 的关系仍可展示为 `paired`，例如 `invoice_amount_mismatch`。
+
+`proposed`、`suppressed`、`consumed`、`expired` 不投影为业务行，其 `display_state` 可以保存为 `open` 或空值。若数据库使用非空约束，统一保存 `open`；前端和 read model 必须以 `decision_status` 判断是否投影。
 
 ## 决策数据模型
 
-建议新增或升级关联台决策表，保留现有候选表迁移兼容：
+建议新增或升级关联台自动决策表，保留现有候选表迁移兼容。该表只保存自动引擎决策，不保存手工确认关系。手工确认继续由 `app.workbench_pair_relations` 表承载。
 
 ```text
 read_model.workbench_reconciliation_decisions
@@ -298,8 +373,9 @@ read_model.workbench_reconciliation_decisions
   tenant_id
   scope_month
   decision_key
-  decision_type          paired|open
-  match_domain           manual|special|free
+  display_state          paired|open
+  decision_status        proposed|paired|open|suppressed|consumed|expired
+  match_domain           special|free
   match_shape            oa_bank_invoice|oa_bank|oa_invoice|bank_invoice|bank_bank|single
   rule_code
   rule_version
@@ -311,6 +387,9 @@ read_model.workbench_reconciliation_decisions
   amount
   direction
   cardinality            1:1:1|1:1:N|1:1|1:N|N:1|single
+  payment_amount_closed
+  invoice_amount_closed
+  warnings
   evidence
   blockers
   conflict_set
@@ -324,11 +403,31 @@ read_model.workbench_reconciliation_decisions
 要求：
 
 - `decision_key` 稳定，由 scope、rule、row ids、rule version 生成。
+- `display_state` 是给读模型和前端的业务展示状态。
+- `decision_status` 是自动决策生命周期状态，不直接给前端展示。
 - `evidence` 记录金额、方向、重复字段、规范化 token、桥接路径。
+- `warnings` 记录不影响同组展示但必须提示用户的风险，例如 `invoice_amount_mismatch`。
+- `payment_amount_closed` 表示 OA 与流水支付金额是否闭合。
+- `invoice_amount_closed` 表示正式发票金额是否闭合。
 - `blockers` 记录为何没有配对，例如金额不闭合、多个候选、特殊规则占用、异常单压制。
 - `source_versions` 用于判断 stale 和 replay。
 - 手工确认必须消费相关自动决策。
 - 撤销手工确认必须重新标记该月 dirty。
+
+索引和约束建议：
+
+- `(tenant_id, decision_key)` 唯一。
+- `(tenant_id, scope_month, decision_status)` 索引用于投影。
+- `row_ids` 需要支持包含查询，用于手工确认消费和异常压制自动决策。
+- `(tenant_id, scope_month, rule_code)` 索引用于 replay、debug 和规则版本迁移。
+
+手工关联边界：
+
+- 手工确认只写 `app.workbench_pair_relations`，不复制为 `workbench_reconciliation_decisions`。
+- 读模型投影先读取 active pair relations，形成 `manual_confirmed` group。
+- 被手工关联覆盖的自动决策更新为 `decision_status = consumed`，并写入 `consumed_by_relation_id`。
+- 撤销手工关联时，释放对应自动决策消费关系，并标记该月 dirty 重新计算。
+- 同一 row 同时存在手工关联和自动决策时，手工关联优先，自动决策不得再投影为 group。
 
 ## 执行机制升级
 
@@ -348,6 +447,36 @@ read_model.workbench_reconciliation_decisions
 - 自由匹配规则版本升级。
 
 写路径只标记月份 dirty，不在用户请求中执行重匹配。
+
+写入 dirty scope 时必须应用自由匹配窗口扩散：业务变化发生在 T 月时，写入 `T-2 / T / T+2` 五个月 dirty scope。
+
+推荐字段：
+
+```text
+job.workbench_matching_dirty_scopes
+  id
+  tenant_id
+  scope_month
+  reason
+  status              dirty|running|completed|failed
+  attempt_count
+  available_at
+  lease_owner
+  lease_expires_at
+  last_error
+  source_versions
+  created_at
+  updated_at
+  raw_payload
+```
+
+约束要求：
+
+- `(tenant_id, scope_month)` 唯一。
+- `status in (dirty, running, completed, failed)`。
+- 只有 `dirty` 且 `available_at <= now()` 的记录可以被 worker 领取。
+- `running` 记录必须有 `lease_owner` 和 `lease_expires_at`。
+- 旧 `source_versions` 的运行结果不能覆盖新版本决策。
 
 ### 2. Worker 从数据库领取月份
 
@@ -371,6 +500,13 @@ Worker 使用数据库队列领取可执行 scope。
 - 保持用户体验在分钟级刷新。
 
 如果同一月份在延迟窗口内再次变更，只更新 reason、source version 和 `available_at`，不新增重复任务。
+
+延迟窗口、租约超时、重试阈值和退避参数必须配置化，不能写死在规则代码中。推荐首版默认：
+
+- dirty debounce：1-3 分钟。
+- worker lease timeout：10 分钟。
+- retry max attempts：5 次。
+- retry backoff：指数退避，保留上限。
 
 ### 4. 执行仍按月份增量
 
@@ -435,11 +571,13 @@ SQL 投影只消费 `workbench_reconciliation_decisions` 和手工关联事实�
 
 投影规则：
 
-- `paired` 决策形成同一 group。
-- `open` 行独立展示。
+- active 手工关联事实先形成 group。
+- `decision_status = paired` 且 `display_state = paired` 的自动决策形成同一 group。
+- `decision_status = open` 且 `display_state = open` 的行独立展示。
 - 手工关联 group 优先于自动 group。
 - 特殊 group 带特殊标签，但不通过自由规则解释。
 - 冲突和未配对原因只进入 debug/explain，不把冲突行合并展示。
+- `proposed`、`suppressed`、`consumed`、`expired` 不投影为自动 group。
 
 ## 错误处理和一致性
 
@@ -458,18 +596,23 @@ SQL 投影只消费 `workbench_reconciliation_decisions` 和手工关联事实�
 1. 规则单测：每个 rule_code 一组 golden cases。
 2. 文本规范化单测：低信息词、公司后缀、摘要、备注、销方名称。
 3. 三项配对单测：1:1:1、1:1:N、来源附件、桥接三项。
-4. 两两配对单测：OA-流水、OA-发票、流水-发票。
-5. 唯一性冲突单测：同金额多个候选时全部保持 `open`。
-6. 特殊规则隔离单测：特殊占用 row 不进入自由匹配。
-7. pipeline 测试：导入/OA 变化 -> dirty queue -> worker -> decisions -> read model -> API group。
-8. 手工确认测试：确认后自动决策 consumed，撤销后重新 dirty。
-9. 异常单测试：异常创建后 suppressed，关闭后恢复重算。
-10. Worker 测试：DB 锁、租约超时、失败重试、source version 防旧覆盖。
+4. 来源附件 warning 单测：OA=流水但附件发票合计不一致时仍 `paired`，并输出 `invoice_amount_mismatch`。
+5. 支出范围单测：收入方向不进入自由匹配。
+6. 两两配对单测：OA-流水、OA-发票、流水-发票。
+7. 唯一性冲突单测：同金额多个候选时全部保持 `open`。
+8. 跨月唯一性单测：主月份 row 在相邻月份存在竞争候选时保持 `open`。
+9. 特殊规则隔离单测：特殊占用 row 不进入自由匹配。
+10. pipeline 测试：导入/OA 变化 -> dirty queue -> worker -> decisions -> read model -> API group。
+11. 手工确认测试：确认后自动决策 consumed，撤销后重新 dirty。
+12. 异常单测试：异常创建后 suppressed，关闭后恢复重算。
+13. Worker 测试：DB 锁、租约超时、失败重试、source version 防旧覆盖。
 
 验收标准：
 
 - 前端不存在 `needs_review` 展示状态。
 - 无法唯一确定的候选不会出现在同一行。
+- 首版自由匹配不处理收入方向。
+- OA 来源附件发票金额不一致时可以同组展示，但必须展示 warning，且 `invoice_amount_closed = false`。
 - SQL 投影和分组服务不再产生业务配对判断。
 - 多实例 worker 不能同时处理同一月份。
 - 导入后正常在分钟级完成 dirty 月份刷新。
@@ -487,14 +630,17 @@ SQL 投影只消费 `workbench_reconciliation_decisions` 和手工关联事实�
 8. 将 SQL 投影改为只消费 decisions。
 9. 删除分组服务中的业务自动关闭晋级。
 10. 前端收敛到 `paired` / `open`。
-11. 补齐 pipeline 和 worker 测试。
-12. 做单月 shadow replay，对比旧结果和新结果。
-13. 灰度切换生产路径。
-14. 保留短期回滚开关，稳定后删除旧候选应用路径。
+11. 替换 `read_model.workbench_candidate_matches` 的旧候选投影路径，迁移或废弃 `needs_review`、`candidate` 展示契约。
+12. 清理 API 兼容路径中由候选状态驱动分组的逻辑。
+13. 更新 `docs/dev/reconciliation-workbench-v2-data-contracts.md` 和相关产品文档，保证新契约只暴露 `paired` / `open` 和 warnings。
+14. 补齐 pipeline 和 worker 测试。
+15. 做单月和跨月 shadow replay，对比旧结果和新结果。
+16. 灰度切换生产路径。
+17. 保留短期回滚开关，稳定后删除旧候选应用路径。
 
-## 待确认事项
+## 后续增强事项
 
-- 收入方向是否纳入自由匹配首版。
-- 文本低信息词表是否需要业务方维护入口。
-- 附件发票金额不一致是否永远保持 `open`，还是允许某些特殊规则接管。
-- 手工重建入口放在关联台页面还是运维设置页。
+以下事项不阻塞首版实现：
+
+- 文本低信息词表首版使用规则配置或代码常量，业务维护入口后续单独设计。
+- 手工重建入口首版可以放在运维设置页；是否放入关联台页面后续再定。
