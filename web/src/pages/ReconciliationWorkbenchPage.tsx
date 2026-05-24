@@ -102,6 +102,7 @@ function createInitialZonePageInfo(zone: "paired" | "open"): WorkbenchZonePageIn
     page: 0,
     pageSize: 50,
     total: 0,
+    rowCounts: { oa: 0, bank: 0, invoice: 0, rows: 0 },
     hasMore: false,
     readModelStatus: "fresh",
   };
@@ -1601,25 +1602,31 @@ export default function ReconciliationWorkbenchPage() {
   const pairedPanes = useMemo<WorkbenchPane[]>(
     () => {
       const paneRows = buildWorkbenchPaneRows(displayPairedGroups);
+      const totals = zonePages.paired.rowCounts.rows > 0
+        ? zonePages.paired.rowCounts
+        : workbenchData?.summary.zoneCounts.paired;
       return [
-        { id: "oa", title: "OA", rows: paneRows.oa },
-        { id: "bank", title: "银行流水", rows: paneRows.bank },
-        { id: "invoice", title: "进销项发票", rows: paneRows.invoice },
+        { id: "oa", title: "OA", rows: paneRows.oa, totalRows: totals?.oa },
+        { id: "bank", title: "银行流水", rows: paneRows.bank, totalRows: totals?.bank },
+        { id: "invoice", title: "进销项发票", rows: paneRows.invoice, totalRows: totals?.invoice },
       ];
     },
-    [displayPairedGroups],
+    [displayPairedGroups, workbenchData?.summary.zoneCounts.paired, zonePages.paired.rowCounts],
   );
 
   const openPanes = useMemo<WorkbenchPane[]>(
     () => {
       const paneRows = buildWorkbenchPaneRows(displayOpenGroups);
+      const totals = zonePages.open.rowCounts.rows > 0
+        ? zonePages.open.rowCounts
+        : workbenchData?.summary.zoneCounts.open;
       return [
-        { id: "oa", title: "OA", rows: paneRows.oa },
-        { id: "bank", title: "银行流水", rows: paneRows.bank },
-        { id: "invoice", title: "进销项发票", rows: paneRows.invoice },
+        { id: "oa", title: "OA", rows: paneRows.oa, totalRows: totals?.oa },
+        { id: "bank", title: "银行流水", rows: paneRows.bank, totalRows: totals?.bank },
+        { id: "invoice", title: "进销项发票", rows: paneRows.invoice, totalRows: totals?.invoice },
       ];
     },
-    [displayOpenGroups],
+    [displayOpenGroups, workbenchData?.summary.zoneCounts.open, zonePages.open.rowCounts],
   );
 
   const togglePairedExpand = useCallback(() => {
@@ -1687,7 +1694,7 @@ export default function ReconciliationWorkbenchPage() {
       panes={pairedPanes}
       primarySelectionActionLabel="撤回关联"
       selectionSummary={pairedSelectionSummary}
-      title={`已配对 ${workbenchData?.summary.pairedCount ?? 0} 条`}
+      title={`已配对 ${workbenchData?.summary.zoneCounts.paired.groups ?? workbenchData?.summary.pairedCount ?? 0} 组`}
       tone="success"
       zoneId="paired"
     />
@@ -1734,7 +1741,7 @@ export default function ReconciliationWorkbenchPage() {
       secondarySelectionActionLabel="异常处理"
       tertiarySelectionActionLabel="撤回关联"
       selectionSummary={openSelectionSummary}
-      title={`未配对 ${workbenchData?.summary.openCount ?? 0} 条`}
+      title={`未配对 ${workbenchData?.summary.zoneCounts.open.groups ?? workbenchData?.summary.openCount ?? 0} 组`}
       tone="warning"
       zoneId="open"
     />
@@ -2286,20 +2293,39 @@ function updateIgnoredDataAfterUnignore(data: IgnoredWorkbenchData, rowId: strin
 function rebuildWorkbenchSummary(data: WorkbenchData): WorkbenchData {
   const pairedRows = flattenGroups(data.paired.groups);
   const openRows = flattenGroups(data.open.groups);
-  const visibleOpenRows = flattenGroups(removeProcessedExceptionRows(data.open.groups));
+  const visibleOpenGroups = removeProcessedExceptionRows(data.open.groups);
+  const visibleOpenRows = flattenGroups(visibleOpenGroups);
   const exceptionRows = flattenGroups(collectProcessedExceptionGroups(data.open.groups));
   const allRows = [...pairedRows, ...openRows];
+  const countRowsByType = (rows: WorkbenchRecord[], recordType: WorkbenchRecord["recordType"]) =>
+    rows.filter((row) => row.recordType === recordType).length;
 
   return {
     ...data,
     summary: {
-      oaCount: allRows.filter((row) => row.recordType === "oa").length,
-      bankCount: allRows.filter((row) => row.recordType === "bank").length,
-      invoiceCount: allRows.filter((row) => row.recordType === "invoice").length,
+      oaCount: countRowsByType(allRows, "oa"),
+      bankCount: countRowsByType(allRows, "bank"),
+      invoiceCount: countRowsByType(allRows, "invoice"),
       pairedCount: countWorkbenchGroupsRows(data.paired.groups),
       openCount: visibleOpenRows.length,
       exceptionCount: exceptionRows.length,
       totalCount: allRows.length,
+      zoneCounts: {
+        paired: {
+          groups: data.paired.groups.length,
+          oa: countRowsByType(pairedRows, "oa"),
+          bank: countRowsByType(pairedRows, "bank"),
+          invoice: countRowsByType(pairedRows, "invoice"),
+          rows: pairedRows.length,
+        },
+        open: {
+          groups: visibleOpenGroups.length,
+          oa: countRowsByType(visibleOpenRows, "oa"),
+          bank: countRowsByType(visibleOpenRows, "bank"),
+          invoice: countRowsByType(visibleOpenRows, "invoice"),
+          rows: visibleOpenRows.length,
+        },
+      },
     },
   };
 }

@@ -218,11 +218,20 @@ export type WorkbenchSummary = {
   openCount: number;
   exceptionCount: number;
   totalCount: number;
+  zoneCounts: Record<WorkbenchZoneId, WorkbenchZoneCounts>;
 };
 
 export type WorkbenchReadModelStatus = "fresh" | "refreshing" | "stale" | "unavailable" | (string & {});
 
 export type WorkbenchZoneId = "paired" | "open";
+
+export type WorkbenchZoneCounts = {
+  groups: number;
+  oa: number;
+  bank: number;
+  invoice: number;
+  rows: number;
+};
 
 export type WorkbenchGroupsSort = `${WorkbenchRecordType}:asc` | `${WorkbenchRecordType}:desc`;
 
@@ -239,6 +248,7 @@ export type WorkbenchZonePageInfo = {
   page: number;
   pageSize: number;
   total: number;
+  rowCounts: Pick<WorkbenchZoneCounts, "oa" | "bank" | "invoice" | "rows">;
   hasMore: boolean;
   readModelStatus: WorkbenchReadModelStatus;
 };

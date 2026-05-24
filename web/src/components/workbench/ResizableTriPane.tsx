@@ -19,6 +19,7 @@ export type WorkbenchPane = {
   id: WorkbenchRecordType;
   title: string;
   rows: WorkbenchRecord[];
+  totalRows?: number;
 };
 
 type ResizableTriPaneProps = {

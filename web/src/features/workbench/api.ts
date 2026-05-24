@@ -37,6 +37,7 @@ import type {
   WorkbenchGroupsPageResult,
   WorkbenchInitialPageResult,
   WorkbenchReadModelStatus,
+  WorkbenchZoneCounts,
   WorkbenchZoneId,
   WorkbenchZonePageInfo,
   OaManualAttachmentRefreshResult,
@@ -137,6 +138,7 @@ type ApiWorkbenchPayload = {
     paired_count: number;
     open_count: number;
     exception_count: number;
+    zone_counts?: Partial<Record<WorkbenchZoneId, Partial<WorkbenchZoneCounts>>>;
   };
   paired: {
     groups: ApiWorkbenchGroup[];
@@ -163,6 +165,7 @@ type ApiWorkbenchGroupsPayload = {
   page: number;
   page_size: number;
   total: number;
+  row_counts?: Partial<Pick<WorkbenchZoneCounts, "oa" | "bank" | "invoice" | "rows">>;
   has_more: boolean;
   read_model_status?: WorkbenchReadModelStatus;
   groups: ApiWorkbenchGroup[];
@@ -1311,10 +1314,51 @@ function mapWorkbenchExceptionApplyResult(
   };
 }
 
+function createEmptyZoneCounts(groups = 0): WorkbenchZoneCounts {
+  return { groups, oa: 0, bank: 0, invoice: 0, rows: 0 };
+}
+
+function mapZoneCounts(
+  summary: ApiWorkbenchPayload["summary"],
+  fallback?: Partial<Record<WorkbenchZoneId, Partial<WorkbenchZoneCounts>>>,
+): Record<WorkbenchZoneId, WorkbenchZoneCounts> {
+  const source = summary.zone_counts ?? fallback ?? {};
+  const paired = source.paired ?? {};
+  const open = source.open ?? {};
+  const mapOne = (value: Partial<WorkbenchZoneCounts>, groupFallback: number): WorkbenchZoneCounts => {
+    const oa = toCount(value.oa);
+    const bank = toCount(value.bank);
+    const invoice = toCount(value.invoice);
+    return {
+      groups: toCount(value.groups) || groupFallback,
+      oa,
+      bank,
+      invoice,
+      rows: toCount(value.rows) || oa + bank + invoice,
+    };
+  };
+
+  return {
+    paired: mapOne(paired, toCount(summary.paired_count)),
+    open: mapOne(open, toCount(summary.open_count)),
+  };
+}
+
 function mapSummary(
   summary: ApiWorkbenchPayload["summary"],
   pairedGroups: WorkbenchCandidateGroup[],
+  openGroups: WorkbenchCandidateGroup[],
 ): WorkbenchSummary {
+  const fallbackZoneCounts: Record<WorkbenchZoneId, WorkbenchZoneCounts> = {
+    paired: {
+      ...createEmptyZoneCounts(toCount(summary.paired_count)),
+      rows: countWorkbenchGroupsRows(pairedGroups),
+    },
+    open: {
+      ...createEmptyZoneCounts(toCount(summary.open_count)),
+      rows: countWorkbenchGroupsRows(openGroups),
+    },
+  };
   return {
     oaCount: summary.oa_count,
     bankCount: summary.bank_count,
@@ -1323,6 +1367,7 @@ function mapSummary(
     openCount: summary.open_count,
     exceptionCount: summary.exception_count,
     totalCount: summary.oa_count + summary.bank_count + summary.invoice_count,
+    zoneCounts: mapZoneCounts(summary, fallbackZoneCounts),
   };
 }
 
@@ -1330,6 +1375,7 @@ function mapSummaryCounts(summary: ApiWorkbenchPayload["summary"]): WorkbenchSum
   const oaCount = toCount(summary.oa_count);
   const bankCount = toCount(summary.bank_count);
   const invoiceCount = toCount(summary.invoice_count);
+  const zoneCounts = mapZoneCounts(summary);
   return {
     oaCount,
     bankCount,
@@ -1338,6 +1384,7 @@ function mapSummaryCounts(summary: ApiWorkbenchPayload["summary"]): WorkbenchSum
     openCount: toCount(summary.open_count),
     exceptionCount: toCount(summary.exception_count),
     totalCount: oaCount + bankCount + invoiceCount,
+    zoneCounts,
   };
 }
 
@@ -1351,6 +1398,13 @@ function mapWorkbenchZonePage(payload: ApiWorkbenchGroupsPayload): WorkbenchZone
     page: toCount(payload.page) || 1,
     pageSize: toCount(payload.page_size) || 50,
     total: toCount(payload.total),
+    rowCounts: {
+      oa: toCount(payload.row_counts?.oa),
+      bank: toCount(payload.row_counts?.bank),
+      invoice: toCount(payload.row_counts?.invoice),
+      rows: toCount(payload.row_counts?.rows)
+        || toCount(payload.row_counts?.oa) + toCount(payload.row_counts?.bank) + toCount(payload.row_counts?.invoice),
+    },
     hasMore: payload.has_more === true,
     readModelStatus: mapReadModelStatus(payload.read_model_status),
   };
@@ -2017,7 +2071,7 @@ export async function fetchWorkbenchWithProgress(
   return {
     month: payload.month,
     oaStatus: mapOaStatus(payload.oa_status),
-    summary: mapSummary(payload.summary, pairedGroups),
+    summary: mapSummary(payload.summary, pairedGroups, openGroups),
     invoiceInventory: mapInvoiceInventory(payload.invoice_inventory),
     paired: {
       groups: pairedGroups,

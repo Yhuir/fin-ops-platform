@@ -151,6 +151,10 @@ describe("workbench api bank amount mapping", () => {
                 paired_count: 1,
                 open_count: 1,
                 exception_count: 0,
+                zone_counts: {
+                  paired: { groups: 1, oa: 0, bank: 7, invoice: 0, rows: 7 },
+                  open: { groups: 1, oa: 3, bank: 0, invoice: 5, rows: 8 },
+                },
               },
               oa_status: { code: "ready", message: "OA 已同步" },
               invoice_inventory: {
@@ -179,6 +183,7 @@ describe("workbench api bank amount mapping", () => {
               page_size: 50,
               total: 1,
               has_more: false,
+              row_counts: { oa: 0, bank: 7, invoice: 0, rows: 7 },
               groups: [
                 {
                   group_id: "case:paired",
@@ -206,6 +211,7 @@ describe("workbench api bank amount mapping", () => {
               page_size: 50,
               total: 1,
               has_more: false,
+              row_counts: { oa: 3, bank: 0, invoice: 5, rows: 8 },
               groups: [
                 {
                   group_id: "case:open",
@@ -229,6 +235,8 @@ describe("workbench api bank amount mapping", () => {
     const result = await fetchWorkbenchInitialPage("all");
 
     expect(result.data.summary.pairedCount).toBe(1);
+    expect(result.data.summary.zoneCounts.paired.bank).toBe(7);
+    expect(result.pages.paired.rowCounts.bank).toBe(7);
     expect(result.data.paired.groups[0].id).toBe("case:paired");
     expect(result.data.open.groups[0].id).toBe("case:open");
     expect(result.data.invoiceInventory.systemTotal).toBe(9);

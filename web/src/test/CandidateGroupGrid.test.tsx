@@ -168,6 +168,32 @@ describe("Workbench candidate grouping layout", () => {
     );
   }
 
+  test("shows server total pane counts instead of the currently loaded page row count", () => {
+    const group = createNoOaCollapsedGroup();
+    render(
+      <CandidateGroupGrid
+        canMutateData
+        displayState={createEmptyWorkbenchZoneDisplayState()}
+        getRowState={() => "idle"}
+        groups={[group]}
+        onOpenDetail={() => undefined}
+        onRowAction={() => undefined}
+        onSelectRow={() => undefined}
+        panes={[
+          { id: "oa", title: "OA", rows: [], totalRows: 24 },
+          { id: "bank", title: "银行流水", rows: group.rows.bank, totalRows: 237 },
+          { id: "invoice", title: "进销项发票", rows: [], totalRows: 91 },
+        ]}
+        rowTemplateColumns="1fr 1fr 1fr"
+        zoneId="paired"
+      />,
+    );
+
+    expect(screen.getByText("24 条")).toBeInTheDocument();
+    expect(screen.getByText("237 条")).toBeInTheDocument();
+    expect(screen.getByText("91 条")).toBeInTheDocument();
+  });
+
   function buildNoOaWorkbenchPayload() {
     return {
       month: "all",

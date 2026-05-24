@@ -472,7 +472,7 @@ function CandidateGroupGrid({
                   ) : (
                     <span>{pane.title}</span>
                   )}
-                  <span>{pane.rows.length} 条</span>
+                  <span>{pane.totalRows ?? pane.rows.length} 条</span>
                 </div>
                 <div className="pane-header-tools">
                   {pane.id === "bank" ? (

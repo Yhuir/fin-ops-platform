@@ -104,6 +104,8 @@ class WorkbenchSummaryGroupsConnection(WorkbenchSqlReadConnection):
         self.fetch_one_calls.append((normalized, params))
         if "from read_model.workbench_groups" in normalized and "count(*) as total_count" in normalized:
             return {"total_count": 2}
+        if "from read_model.workbench_groups" in normalized and "jsonb_array_length" in normalized:
+            return {"oa_count": 3, "bank_count": 4, "invoice_count": 5}
         if "from read_model.workbench_groups" in normalized and "max(generated_at)" in normalized:
             return {"generated_at": "2026-05-22T09:30:00+00:00"}
         if "from read_model.workbench_groups" in normalized and "group_id = %s" in normalized:
@@ -143,8 +145,8 @@ class WorkbenchSummaryGroupsConnection(WorkbenchSqlReadConnection):
             raise AssertionError("summary/groups hot path must not load full workbench snapshots")
         if "from read_model.workbench_groups" in normalized and "group by zone" in normalized:
             return [
-                {"zone": "paired", "count": 1},
-                {"zone": "open", "count": 2},
+                {"zone": "paired", "count": 1, "oa_count": 1, "bank_count": 2, "invoice_count": 0},
+                {"zone": "open", "count": 2, "oa_count": 2, "bank_count": 2, "invoice_count": 5},
             ]
         if "from read_model.workbench_rows" in normalized and "group by row_type" in normalized:
             return [
@@ -592,6 +594,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(summary["invoice_inventory"]["oa_attachment_total"], 5)
         self.assertEqual(summary["read_model_status"], "refreshing")
         self.assertEqual(summary["generated_at"], "2026-05-22T09:30:00+00:00")
+        self.assertEqual(
+            summary["summary"]["zone_counts"],
+            {
+                "paired": {"groups": 1, "oa": 1, "bank": 2, "invoice": 0, "rows": 3},
+                "open": {"groups": 2, "oa": 2, "bank": 2, "invoice": 5, "rows": 9},
+            },
+        )
         self.assertFalse(
             any(
                 "from read_model.workbench_snapshots" in sql and "payload, raw_payload" in sql
@@ -678,8 +687,33 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-1", "oa-2", "oa-3"])
         self.assertEqual([row["id"] for row in group["collapsed_rows"]["oa"]], ["collapsed-oa-1", "collapsed-oa-2", "collapsed-oa-3"])
         self.assertEqual(group["oa_rows"][0]["id"], "oa-1")
+        self.assertEqual(page["row_counts"], {"oa": 3, "bank": 4, "invoice": 5, "rows": 12})
         self.assertNotIn("detail_fields", group["oa_rows"][0])
         self.assertNotIn("raw_payload", group)
+
+    def test_workbench_rows_inherit_status_from_containing_group_zone(self) -> None:
+        payload = {
+            "paired": {
+                "groups": [
+                    {
+                        "group_id": "case:paired",
+                        "bank_rows": [{"id": "bank-1", "type": "bank", "status": "open"}],
+                    }
+                ]
+            },
+            "open": {
+                "groups": [
+                    {
+                        "group_id": "case:open",
+                        "oa_rows": [{"id": "oa-1", "type": "oa", "status": "paired"}],
+                    }
+                ]
+            },
+        }
+
+        rows = PostgresReadModelRepository._iter_workbench_rows(payload)
+
+        self.assertEqual({row["id"]: row["status"] for row in rows}, {"bank-1": "paired", "oa-1": "open"})
 
     def test_repository_reads_single_workbench_group_detail(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()

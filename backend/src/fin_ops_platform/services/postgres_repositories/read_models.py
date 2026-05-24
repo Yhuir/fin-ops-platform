@@ -395,6 +395,8 @@ class PostgresReadModelRepository:
             payload = _read_model_payload(materialized_row)
             if isinstance(payload, dict):
                 result = dict(payload)
+                if isinstance(result.get("summary"), dict):
+                    result["summary"] = _normalize_workbench_summary_counts(result["summary"])
                 result.setdefault("month", normalized_scope_key)
                 result.setdefault("scope_key", normalized_scope_key)
                 result.setdefault("generated_at", text(materialized_row.get("generated_at")))
@@ -407,7 +409,27 @@ class PostgresReadModelRepository:
         row_where, row_params = self._workbench_scope_filter(normalized_scope_key)
         group_rows = self._connection.fetch_all(
             f"""
-            select zone, count(*)::bigint as count
+            select
+                zone,
+                count(*)::bigint as count,
+                coalesce(sum(
+                    case when jsonb_typeof(payload->'oa_rows') = 'array'
+                        then jsonb_array_length(payload->'oa_rows')
+                        else 0
+                    end
+                ), 0)::bigint as oa_count,
+                coalesce(sum(
+                    case when jsonb_typeof(payload->'bank_rows') = 'array'
+                        then jsonb_array_length(payload->'bank_rows')
+                        else 0
+                    end
+                ), 0)::bigint as bank_count,
+                coalesce(sum(
+                    case when jsonb_typeof(payload->'invoice_rows') = 'array'
+                        then jsonb_array_length(payload->'invoice_rows')
+                        else 0
+                    end
+                ), 0)::bigint as invoice_count
             from read_model.workbench_groups
             where {group_where}
             group by zone
@@ -438,6 +460,7 @@ class PostgresReadModelRepository:
             "paired_count": 0,
             "open_count": 0,
             "exception_count": 0,
+            "zone_counts": _empty_workbench_zone_counts(),
         }
         for row in row_count_rows:
             row_type = text(row.get("row_type")) or ""
@@ -455,6 +478,13 @@ class PostgresReadModelRepository:
                 summary["paired_count"] += count
             elif zone == "open":
                 summary["open_count"] += count
+            if zone in {"paired", "open"}:
+                zone_counts = summary["zone_counts"][zone]
+                zone_counts["groups"] += count
+                zone_counts["oa"] += int_value(row.get("oa_count"), 0)
+                zone_counts["bank"] += int_value(row.get("bank_count"), 0)
+                zone_counts["invoice"] += int_value(row.get("invoice_count"), 0)
+                zone_counts["rows"] = zone_counts["oa"] + zone_counts["bank"] + zone_counts["invoice"]
         generated_at = text((generated_row or {}).get("generated_at"))
         if generated_at is None and not any(summary.values()):
             return None
@@ -593,15 +623,9 @@ class PostgresReadModelRepository:
             paired_groups = [group for group in paired_section.get("groups", []) if isinstance(group, dict)]
         if isinstance(open_section, dict) and isinstance(open_section.get("groups"), list):
             open_groups = [group for group in open_section.get("groups", []) if isinstance(group, dict)]
-        all_groups = [*paired_groups, *open_groups]
-        summary = {
-            "oa_count": sum(len(group.get("oa_rows") or []) for group in all_groups),
-            "bank_count": sum(len(group.get("bank_rows") or []) for group in all_groups),
-            "invoice_count": sum(len(group.get("invoice_rows") or []) for group in all_groups),
-            "paired_count": len(paired_groups),
-            "open_count": len(open_groups),
-            "exception_count": sum(1 for group in open_groups if text(group.get("status")) == "exception"),
-        }
+        summary = _summarize_workbench_payload_groups(
+            {"paired": {"groups": paired_groups}, "open": {"groups": open_groups}}
+        )
         invoice_inventory = grouped_payload.get("invoice_inventory")
         if not isinstance(invoice_inventory, dict):
             invoice_inventory = {}
@@ -684,6 +708,32 @@ class PostgresReadModelRepository:
             """,
             tuple(params),
         )
+        row_count_row = self._connection.fetch_one(
+            f"""
+            select
+                coalesce(sum(
+                    case when jsonb_typeof(payload->'oa_rows') = 'array'
+                        then jsonb_array_length(payload->'oa_rows')
+                        else 0
+                    end
+                ), 0)::bigint as oa_count,
+                coalesce(sum(
+                    case when jsonb_typeof(payload->'bank_rows') = 'array'
+                        then jsonb_array_length(payload->'bank_rows')
+                        else 0
+                    end
+                ), 0)::bigint as bank_count,
+                coalesce(sum(
+                    case when jsonb_typeof(payload->'invoice_rows') = 'array'
+                        then jsonb_array_length(payload->'invoice_rows')
+                        else 0
+                    end
+                ), 0)::bigint as invoice_count
+            from read_model.workbench_groups
+            where {where_sql}
+            """,
+            tuple(params),
+        )
         page_params = [*params, normalized_page_size + 1, offset]
         rows = self._connection.fetch_all(
             f"""
@@ -713,6 +763,7 @@ class PostgresReadModelRepository:
             "page_size": normalized_page_size,
             "detail_level": normalized_detail_level,
             "total": int_value((count_row or {}).get("total_count"), 0),
+            "row_counts": _workbench_group_page_row_counts(row_count_row),
             "has_more": len(rows) > normalized_page_size,
             "groups": groups,
             "read_model_status": refresh_status["read_model_status"],
@@ -2355,23 +2406,26 @@ class PostgresReadModelRepository:
         rows: list[dict[str, Any]] = []
         seen: set[str] = set()
 
-        def add_row(value: Any) -> None:
+        def add_row(value: Any, *, zone: str | None = None) -> None:
             if not isinstance(value, dict):
                 return
             row_id = text(value.get("id") or value.get("row_id"))
             if row_id is None or row_id in seen:
                 return
             seen.add(row_id)
-            rows.append(serialize_value(value))
+            row = serialize_value(value)
+            if zone in {"paired", "open"}:
+                row["status"] = zone
+            rows.append(row)
 
-        def scan_group(group: Any) -> None:
+        def scan_group(group: Any, *, zone: str | None = None) -> None:
             if not isinstance(group, dict):
                 return
             for key, value in group.items():
                 if not str(key).endswith("_rows") or not isinstance(value, list):
                     continue
                 for row in value:
-                    add_row(row)
+                    add_row(row, zone=zone)
 
         for direct_key in ("rows", "ignored_rows"):
             value = payload.get(direct_key)
@@ -2385,9 +2439,9 @@ class PostgresReadModelRepository:
             groups = section.get("groups")
             if isinstance(groups, list):
                 for group in groups:
-                    scan_group(group)
+                    scan_group(group, zone=section_name)
             else:
-                scan_group(section)
+                scan_group(section, zone=section_name)
         return rows
 
     @staticmethod
@@ -2825,7 +2879,47 @@ def _as_workbench_row_list(rows: Any) -> list[dict[str, Any]]:
     return [deepcopy(row) for row in rows if isinstance(row, dict)]
 
 
-def _summarize_workbench_payload_groups(payload: dict[str, Any]) -> dict[str, int]:
+def _empty_workbench_zone_counts() -> dict[str, dict[str, int]]:
+    return {
+        "paired": {"groups": 0, "oa": 0, "bank": 0, "invoice": 0, "rows": 0},
+        "open": {"groups": 0, "oa": 0, "bank": 0, "invoice": 0, "rows": 0},
+    }
+
+
+def _normalize_workbench_summary_counts(summary: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(summary)
+    zone_counts = normalized.get("zone_counts")
+    if not isinstance(zone_counts, dict):
+        zone_counts = _empty_workbench_zone_counts()
+        zone_counts["paired"]["groups"] = int_value(normalized.get("paired_count"), 0)
+        zone_counts["open"]["groups"] = int_value(normalized.get("open_count"), 0)
+    else:
+        merged = _empty_workbench_zone_counts()
+        for zone in ("paired", "open"):
+            zone_payload = zone_counts.get(zone)
+            if not isinstance(zone_payload, dict):
+                continue
+            merged[zone]["groups"] = int_value(zone_payload.get("groups"), 0)
+            merged[zone]["oa"] = int_value(zone_payload.get("oa"), 0)
+            merged[zone]["bank"] = int_value(zone_payload.get("bank"), 0)
+            merged[zone]["invoice"] = int_value(zone_payload.get("invoice"), 0)
+            merged[zone]["rows"] = int_value(
+                zone_payload.get("rows"),
+                merged[zone]["oa"] + merged[zone]["bank"] + merged[zone]["invoice"],
+            )
+        zone_counts = merged
+    normalized["zone_counts"] = zone_counts
+    return normalized
+
+
+def _workbench_group_page_row_counts(row: dict[str, Any] | None) -> dict[str, int]:
+    oa_count = int_value((row or {}).get("oa_count"), 0)
+    bank_count = int_value((row or {}).get("bank_count"), 0)
+    invoice_count = int_value((row or {}).get("invoice_count"), 0)
+    return {"oa": oa_count, "bank": bank_count, "invoice": invoice_count, "rows": oa_count + bank_count + invoice_count}
+
+
+def _summarize_workbench_payload_groups(payload: dict[str, Any]) -> dict[str, Any]:
     summary = {
         "oa_count": 0,
         "bank_count": 0,
@@ -2833,14 +2927,18 @@ def _summarize_workbench_payload_groups(payload: dict[str, Any]) -> dict[str, in
         "paired_count": 0,
         "open_count": 0,
         "exception_count": 0,
+        "zone_counts": _empty_workbench_zone_counts(),
     }
     seen_rows: set[tuple[str, str]] = set()
+    seen_rows_by_zone: dict[str, set[tuple[str, str]]] = {"paired": set(), "open": set()}
     for zone in ("paired", "open"):
         section = payload.get(zone)
         groups = section.get("groups") if isinstance(section, dict) else []
         if not isinstance(groups, list):
             continue
-        summary[f"{zone}_count"] = sum(1 for group in groups if isinstance(group, dict))
+        group_count = sum(1 for group in groups if isinstance(group, dict))
+        summary[f"{zone}_count"] = group_count
+        summary["zone_counts"][zone]["groups"] = group_count
         for group in groups:
             if not isinstance(group, dict):
                 continue
@@ -2852,6 +2950,11 @@ def _summarize_workbench_payload_groups(payload: dict[str, Any]) -> dict[str, in
                 if row_type is None or row_id is None:
                     continue
                 row_key = (row_type, row_id)
+                if row_key not in seen_rows_by_zone[zone]:
+                    seen_rows_by_zone[zone].add(row_key)
+                    if row_type in {"oa", "bank", "invoice"}:
+                        summary["zone_counts"][zone][row_type] += 1
+                        summary["zone_counts"][zone]["rows"] += 1
                 if row_key in seen_rows:
                     continue
                 seen_rows.add(row_key)
