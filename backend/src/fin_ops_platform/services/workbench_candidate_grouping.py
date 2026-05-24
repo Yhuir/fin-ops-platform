@@ -420,11 +420,12 @@ class WorkbenchCandidateGroupingService:
             temp_key = self._temp_key(row)
             group_key = temp_key or self._candidate_key(row) or f"row:{row['id']}"
             if group_key not in groups:
+                is_open_decision = self._is_open_reconciliation_decision_row(row)
                 groups[group_key] = CandidateGroup(
                     group_id=self._next_temp_group_id(),
-                    group_type="candidate",
+                    group_type="open" if is_open_decision else "candidate",
                     match_confidence="low",
-                    reason="temp_candidate_group" if temp_key else "standalone_row_group",
+                    reason="reconciliation_decision_open" if is_open_decision else ("temp_candidate_group" if temp_key else "standalone_row_group"),
                     temp_key=temp_key,
                 )
             groups[group_key].append(row)
@@ -782,6 +783,8 @@ class WorkbenchCandidateGroupingService:
         return self._should_merge_candidate_groups(left, right)
 
     def _should_merge_candidate_groups(self, left: CandidateGroup, right: CandidateGroup) -> bool:
+        if left.group_type == "open" or right.group_type == "open":
+            return False
         left_counterparty = self._group_counterparty(left)
         right_counterparty = self._group_counterparty(right)
         if left_counterparty is None or right_counterparty is None or left_counterparty != right_counterparty:
@@ -821,7 +824,7 @@ class WorkbenchCandidateGroupingService:
         promoted: list[CandidateGroup] = []
         candidates: list[CandidateGroup] = []
         for group in groups:
-            if group.group_type in {"open_exception", "ignored", "legacy_exception", "source_linked"}:
+            if group.group_type in {"open", "open_exception", "ignored", "legacy_exception", "source_linked"}:
                 candidates.append(group)
                 continue
             if self._qualifies_for_auto_close(group):
@@ -1321,6 +1324,8 @@ class WorkbenchCandidateGroupingService:
             return "open_exception"
         if any(self._is_legacy_exception_row(row) for row in rows):
             return "legacy_exception"
+        if any(self._is_open_reconciliation_decision_row(row) for row in rows):
+            return "open"
         return "candidate"
 
     @staticmethod
@@ -1331,6 +1336,8 @@ class WorkbenchCandidateGroupingService:
             return "ignored_exception_case"
         if group_type == "legacy_exception":
             return "legacy_exception_case"
+        if group_type == "open":
+            return "reconciliation_decision_open"
         return "existing_case_candidate"
 
     def _is_projection_row(self, row: dict[str, Any]) -> bool:
@@ -1355,6 +1362,16 @@ class WorkbenchCandidateGroupingService:
         if case_status in {"open", "confirmed", "reopened", "legacy_confirmed"}:
             return True
         return str(row.get("projection_kind") or "").strip() == "exception_case" and self._relation_tone(row) == "danger"
+
+    @staticmethod
+    def _is_open_reconciliation_decision_row(row: dict[str, Any]) -> bool:
+        decision = row.get("workbench_reconciliation_decision")
+        if not isinstance(decision, dict):
+            return False
+        return (
+            str(decision.get("display_state") or "").strip() == "open"
+            and str(decision.get("decision_status") or "").strip() == "open"
+        )
 
     def _is_ignored_exception_row(self, row: dict[str, Any]) -> bool:
         if bool(row.get("ignored")):
@@ -1432,6 +1449,8 @@ class WorkbenchCandidateGroupingService:
         return str(case_id)
 
     def _temp_key(self, row: dict[str, Any]) -> str | None:
+        if self._is_open_reconciliation_decision_row(row):
+            return None
         direction = self._direction(row)
         counterparty = self._counterparty(row)
         amount = self._amount(row)
@@ -1440,6 +1459,8 @@ class WorkbenchCandidateGroupingService:
         return f"{direction}|{counterparty}|{amount.quantize(CENT)}"
 
     def _candidate_key(self, row: dict[str, Any]) -> str | None:
+        if self._is_open_reconciliation_decision_row(row):
+            return None
         direction = self._direction(row)
         counterparty = self._counterparty(row)
         amount_bucket = self._amount_bucket(self._amount(row))
