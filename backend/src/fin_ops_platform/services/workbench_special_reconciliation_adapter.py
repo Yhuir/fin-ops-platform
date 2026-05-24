@@ -96,7 +96,9 @@ class WorkbenchSpecialReconciliationAdapter:
         invoice_row_ids = self._typed_row_ids(candidate, "invoice_row_ids")
         rule_code = self._required_text(candidate.get("rule_code"), "rule_code")
         display_state, decision_status = self._display_contract(candidate)
+        match_shape = self._match_shape(oa_row_ids, bank_row_ids, invoice_row_ids)
         decision_key = self._decision_key(scope_month, rule_code, row_ids)
+        payment_amount_closed, invoice_amount_closed = self._amount_closure(match_shape, decision_status)
         return WorkbenchDecision(
             decision_id=decision_key,
             decision_key=decision_key,
@@ -104,7 +106,7 @@ class WorkbenchSpecialReconciliationAdapter:
             display_state=display_state,
             decision_status=decision_status,
             match_domain=MATCH_DOMAIN_SPECIAL,
-            match_shape=self._match_shape(oa_row_ids, bank_row_ids, invoice_row_ids),
+            match_shape=match_shape,
             rule_code=rule_code,
             rule_version=WORKBENCH_SPECIAL_RULES_VERSION,
             row_ids=row_ids,
@@ -113,8 +115,8 @@ class WorkbenchSpecialReconciliationAdapter:
             invoice_row_ids=invoice_row_ids,
             amount=candidate.get("amount"),
             direction=self._direction(candidate),
-            payment_amount_closed=decision_status == DECISION_STATUS_PAIRED,
-            invoice_amount_closed=decision_status == DECISION_STATUS_PAIRED,
+            payment_amount_closed=payment_amount_closed,
+            invoice_amount_closed=invoice_amount_closed,
             evidence=self._evidence(candidate),
             blockers=self._blockers(candidate, decision_status),
             explanation=str(candidate.get("explanation") or "").strip(),
@@ -152,6 +154,22 @@ class WorkbenchSpecialReconciliationAdapter:
         if parts == ["bank_bank"]:
             return "bank_bank"
         return "_".join(parts) if len(parts) > 1 else "single"
+
+    @staticmethod
+    def _amount_closure(match_shape: str, decision_status: str) -> tuple[bool | None, bool | None]:
+        if decision_status != DECISION_STATUS_PAIRED:
+            return None, None
+        if match_shape == "bank_bank":
+            return True, None
+        if match_shape == "oa_invoice":
+            return None, True
+        if match_shape == "oa_bank":
+            return True, None
+        if match_shape == "bank_invoice":
+            return True, True
+        if match_shape == "oa_bank_invoice":
+            return True, True
+        return None, None
 
     @staticmethod
     def _evidence(candidate: dict[str, Any]) -> dict[str, Any]:

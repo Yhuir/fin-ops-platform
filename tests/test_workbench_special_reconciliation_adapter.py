@@ -61,6 +61,8 @@ class WorkbenchSpecialReconciliationAdapterTests(unittest.TestCase):
         self.assertEqual(decision.display_state, DISPLAY_STATE_PAIRED)
         self.assertEqual(decision.decision_status, DECISION_STATUS_PAIRED)
         self.assertEqual(decision.match_shape, "bank_bank")
+        self.assertTrue(decision.payment_amount_closed)
+        self.assertIsNone(decision.invoice_amount_closed)
         self.assertEqual(decision.bank_row_ids, ("bank-in-001", "bank-out-001"))
         self.assertEqual(result.claimed_row_ids_by_domain, {MATCH_DOMAIN_SPECIAL: {"bank-in-001", "bank-out-001"}})
 
@@ -154,6 +156,8 @@ class WorkbenchSpecialReconciliationAdapterTests(unittest.TestCase):
         self.assertEqual(decision.display_state, DISPLAY_STATE_PAIRED)
         self.assertEqual(decision.decision_status, DECISION_STATUS_PAIRED)
         self.assertEqual(decision.match_shape, "oa_invoice")
+        self.assertIsNone(decision.payment_amount_closed)
+        self.assertTrue(decision.invoice_amount_closed)
         self.assertEqual(decision.oa_row_ids, ("oa-offset-001",))
         self.assertEqual(decision.invoice_row_ids, ("invoice-offset-001",))
         self.assertEqual(
