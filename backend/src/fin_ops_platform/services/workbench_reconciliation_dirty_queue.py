@@ -116,7 +116,8 @@ class WorkbenchReconciliationDirtyQueue:
             entry["status"] = "processing"
             entry["lease_owner"] = worker_id
             entry["lease_expires_at"] = now + timedelta(seconds=resolved_lease_seconds)
-            entry["request_id"] = request_id or f"{worker_id}:{scope_month}:{int(now.timestamp())}"
+            base_request_id = str(request_id or f"{worker_id}:{int(now.timestamp())}").strip()
+            entry["request_id"] = f"{base_request_id}:{scope_month}"
             entry["started_at"] = now
             entry["completed_at"] = None
             entry["failed_at"] = None
@@ -155,7 +156,9 @@ class WorkbenchReconciliationDirtyQueue:
                 request_id=request_id,
             )
             return
+        _require_lease_identity(worker_id=worker_id, request_id=request_id)
         entry = self._require_scope(scope_month)
+        _validate_active_lease(entry, worker_id=worker_id, request_id=request_id)
         now = self._now()
         entry["status"] = "completed"
         entry["completed_at"] = now
@@ -187,7 +190,9 @@ class WorkbenchReconciliationDirtyQueue:
                 request_id=request_id,
             )
             return
+        _require_lease_identity(worker_id=worker_id, request_id=request_id)
         entry = self._require_scope(scope_month)
+        _validate_active_lease(entry, worker_id=worker_id, request_id=request_id)
         now = self._now()
         entry["attempt_count"] = int(entry.get("attempt_count") or 0) + 1
         entry["last_error"] = error
@@ -269,3 +274,19 @@ def _duration_ms(started_at: object, finished_at: datetime) -> int | None:
     if not isinstance(started_at, datetime):
         return None
     return int((finished_at - started_at).total_seconds() * 1000)
+
+
+def _require_lease_identity(*, worker_id: str | None, request_id: str | None) -> None:
+    if not str(worker_id or "").strip():
+        raise ValueError("worker_id is required to complete or fail a dirty scope lease.")
+    if not str(request_id or "").strip():
+        raise ValueError("request_id is required to complete or fail a dirty scope lease.")
+
+
+def _validate_active_lease(entry: dict[str, Any], *, worker_id: str | None, request_id: str | None) -> None:
+    if (
+        entry.get("status") != "processing"
+        or str(entry.get("lease_owner") or "").strip() != str(worker_id or "").strip()
+        or str(entry.get("request_id") or "").strip() != str(request_id or "").strip()
+    ):
+        raise RuntimeError("Dirty scope is not held by the requested active lease.")

@@ -128,7 +128,12 @@ class WorkbenchReconciliationDirtyQueueTests(unittest.TestCase):
         queue.claim_due_scopes(worker_id="worker-a", limit=1, request_id="request-1")
         clock.advance(3)
 
-        queue.complete("2026-03", source_versions={"engine": "v1"})
+        queue.complete(
+            "2026-03",
+            source_versions={"engine": "v1"},
+            worker_id="worker-a",
+            request_id="request-1:2026-03",
+        )
 
         self.assertEqual(queue.get_dirty_scope("2026-03")["status"], "completed")
         self.assertEqual(
@@ -136,7 +141,7 @@ class WorkbenchReconciliationDirtyQueueTests(unittest.TestCase):
             [
                 {
                     "scope_month": "2026-03",
-                    "request_id": "request-1",
+                    "request_id": "request-1:2026-03",
                     "started_at": datetime(2026, 5, 25, 9, 1, tzinfo=UTC),
                     "completed_at": datetime(2026, 5, 25, 9, 1, 3, tzinfo=UTC),
                     "failed_at": None,
@@ -161,7 +166,7 @@ class WorkbenchReconciliationDirtyQueueTests(unittest.TestCase):
         clock.advance(60)
         queue.claim_due_scopes(worker_id="worker-a", limit=1, request_id="request-1")
 
-        queue.fail("2026-03", error="temporary")
+        queue.fail("2026-03", error="temporary", worker_id="worker-a", request_id="request-1:2026-03")
 
         entry = queue.get_dirty_scope("2026-03")
         self.assertEqual(entry["status"], "retry")
@@ -172,12 +177,43 @@ class WorkbenchReconciliationDirtyQueueTests(unittest.TestCase):
 
         clock.advance(5)
         queue.claim_due_scopes(worker_id="worker-a", limit=1, request_id="request-2")
-        queue.fail("2026-03", error="permanent")
+        queue.fail("2026-03", error="permanent", worker_id="worker-a", request_id="request-2:2026-03")
 
         entry = queue.get_dirty_scope("2026-03")
         self.assertEqual(entry["status"], "failed")
         self.assertEqual(entry["attempt_count"], 2)
         self.assertEqual(entry["last_error"], "permanent")
+
+    def test_complete_and_fail_require_matching_active_lease_identity(self) -> None:
+        clock = Clock()
+        queue = WorkbenchReconciliationDirtyQueue(options=WorkbenchReconciliationDirtyQueueOptions(now=clock.now))
+        queue.mark_dirty_expanded(["2026-05"], reason="unit")
+        clock.advance(60)
+        queue.claim_due_scopes(worker_id="worker-a", limit=1, request_id="request-1")
+
+        with self.assertRaisesRegex(ValueError, "worker_id"):
+            queue.complete("2026-03", source_versions={"engine": "v1"})
+        with self.assertRaisesRegex(ValueError, "request_id"):
+            queue.fail("2026-03", error="temporary", worker_id="worker-a")
+        with self.assertRaisesRegex(RuntimeError, "active lease"):
+            queue.complete(
+                "2026-03",
+                source_versions={"engine": "v1"},
+                worker_id="worker-b",
+                request_id="request-1:2026-03",
+            )
+        with self.assertRaisesRegex(RuntimeError, "active lease"):
+            queue.fail(
+                "2026-03",
+                error="temporary",
+                worker_id="worker-a",
+                request_id="request-other:2026-03",
+            )
+
+        entry = queue.get_dirty_scope("2026-03")
+        self.assertEqual(entry["status"], "processing")
+        self.assertEqual(entry["lease_owner"], "worker-a")
+        self.assertEqual(entry["request_id"], "request-1:2026-03")
 
     def test_repository_claim_wraps_scope_claim_and_run_audit_in_one_transaction(self) -> None:
         connection = RepositoryRecordingConnection()
@@ -221,6 +257,8 @@ class WorkbenchReconciliationDirtyQueueTests(unittest.TestCase):
         self.assertIn("status = 'processing'", complete_scope_sql)
         self.assertIn("lease_owner = %s", complete_scope_sql)
         self.assertIn("request_id = %s", complete_scope_sql)
+        self.assertNotIn("is null or lease_owner", complete_scope_sql)
+        self.assertNotIn("is null or request_id", complete_scope_sql)
         self.assertNotIn("to_char(scope_month", complete_scope_sql)
         self.assertIn("tenant_id = %s", complete_run_sql)
         self.assertIn("worker-a", complete_scope_params)
@@ -243,6 +281,8 @@ class WorkbenchReconciliationDirtyQueueTests(unittest.TestCase):
         self.assertIn("status = 'processing'", fail_scope_sql)
         self.assertIn("lease_owner = %s", fail_scope_sql)
         self.assertIn("request_id = %s", fail_scope_sql)
+        self.assertNotIn("is null or lease_owner", fail_scope_sql)
+        self.assertNotIn("is null or request_id", fail_scope_sql)
         self.assertIn("attempt_count + 1 = 2 then 300", fail_scope_sql)
         self.assertNotIn("to_char(scope_month", fail_scope_sql)
         self.assertIn("tenant_id = %s", fail_run_sql)

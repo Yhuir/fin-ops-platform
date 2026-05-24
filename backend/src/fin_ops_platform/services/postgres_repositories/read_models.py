@@ -2291,6 +2291,10 @@ class PostgresReadModelRepository:
         normalized_tenant = text(tenant_id) or "default"
         normalized_worker = text(worker_id)
         normalized_request = text(request_id)
+        if not normalized_worker:
+            raise ValueError("worker_id is required to complete a workbench matching dirty scope.")
+        if not normalized_request:
+            raise ValueError("request_id is required to complete a workbench matching dirty scope.")
 
         def write(connection: Any) -> None:
             row = connection.fetch_one(
@@ -2307,8 +2311,8 @@ class PostgresReadModelRepository:
                 where tenant_id = %s
                   and scope_month = %s::date
                   and status = 'processing'
-                  and (%s is null or lease_owner = %s)
-                  and (%s is null or request_id = %s)
+                  and lease_owner = %s
+                  and request_id = %s
                 returning request_id, duration_ms
                 """,
                 (
@@ -2316,8 +2320,6 @@ class PostgresReadModelRepository:
                     normalized_tenant,
                     month_start(scope_month),
                     normalized_worker,
-                    normalized_worker,
-                    normalized_request,
                     normalized_request,
                 ),
             )
@@ -2361,6 +2363,10 @@ class PostgresReadModelRepository:
         normalized_tenant = text(tenant_id) or "default"
         normalized_worker = text(worker_id)
         normalized_request = text(request_id)
+        if not normalized_worker:
+            raise ValueError("worker_id is required to fail a workbench matching dirty scope.")
+        if not normalized_request:
+            raise ValueError("request_id is required to fail a workbench matching dirty scope.")
 
         def write(connection: Any) -> None:
             row = connection.fetch_one(
@@ -2382,8 +2388,8 @@ class PostgresReadModelRepository:
                 where tenant_id = %s
                   and scope_month = %s::date
                   and status = 'processing'
-                  and (%s is null or lease_owner = %s)
-                  and (%s is null or request_id = %s)
+                  and lease_owner = %s
+                  and request_id = %s
                 returning request_id, duration_ms, source_versions
                 """,
                 (
@@ -2395,8 +2401,6 @@ class PostgresReadModelRepository:
                     normalized_tenant,
                     month_start(scope_month),
                     normalized_worker,
-                    normalized_worker,
-                    normalized_request,
                     normalized_request,
                 ),
             )
