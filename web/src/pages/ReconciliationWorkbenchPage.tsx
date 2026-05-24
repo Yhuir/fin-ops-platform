@@ -2190,7 +2190,8 @@ function updateWorkbenchAfterConfirmLink(data: WorkbenchData, rowIds: string[], 
     || `LOCAL-CONFIRM-${selectedRows[0].id}`;
   const nextPairedGroup: WorkbenchCandidateGroup = {
     id: `local-paired-${resolvedCaseId}`,
-    groupType: "manual_confirmed",
+    groupType: "paired",
+    rawGroupType: "manual_confirmed",
     matchConfidence: "high",
     reason: "人工确认关联",
     rows: {
@@ -2228,7 +2229,8 @@ function updateWorkbenchAfterCancelLink(data: WorkbenchData, rowIds: string[]) {
     }
     reopenedGroups.push({
       id: `local-open-${group.id}`,
-      groupType: "candidate",
+      groupType: "open",
+      rawGroupType: "candidate",
       matchConfidence: group.matchConfidence,
       reason: "取消关联后待重新处理",
       rows: {
@@ -2356,7 +2358,8 @@ function updateWorkbenchAfterUnignoreRow(data: WorkbenchData, row: WorkbenchReco
       groups: [
         {
           id: `local-open-unignored-${row.id}`,
-          groupType: "candidate",
+          groupType: "open",
+          rawGroupType: "candidate",
           matchConfidence: "medium",
           reason: "撤回忽略后待重新处理",
           rows: {

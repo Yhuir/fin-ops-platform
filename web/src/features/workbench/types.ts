@@ -49,6 +49,38 @@ export type WorkbenchAmountCheck = {
   requiresNote: boolean;
 };
 
+export type WorkbenchZoneId = "paired" | "open";
+
+export type WorkbenchReconciliationWarning = {
+  code: string;
+  message: string;
+  severity?: "info" | "warning" | "error" | (string & {});
+};
+
+export type WorkbenchReconciliationDecision = {
+  decisionId: string;
+  decisionKey: string;
+  displayState: WorkbenchZoneId;
+  decisionStatus: string;
+  matchDomain: string;
+  matchShape: string;
+  ruleCode: string;
+  ruleVersion: string;
+  rowIds: string[];
+  oaRowIds: string[];
+  bankRowIds: string[];
+  invoiceRowIds: string[];
+  amount?: string;
+  direction?: string;
+  paymentAmountClosed?: boolean | null;
+  invoiceAmountClosed?: boolean | null;
+  warnings: WorkbenchReconciliationWarning[];
+  evidence?: Record<string, unknown>;
+  blockers?: unknown[];
+  explanation?: string;
+  sourceVersions?: Record<string, unknown>;
+};
+
 export type WorkbenchRecord = {
   id: string;
   caseId?: string;
@@ -75,6 +107,8 @@ export type WorkbenchRecord = {
   relationNote?: string;
   relationAmountCheck?: WorkbenchAmountCheck;
   specialMetadata?: Record<string, unknown>;
+  reconciliationDecision?: WorkbenchReconciliationDecision;
+  reconciliationWarnings?: WorkbenchReconciliationWarning[];
 };
 
 export type WorkbenchProjectSetting = {
@@ -147,7 +181,7 @@ export type WorkbenchPaneRowCounts = Partial<Record<WorkbenchRecordType, number>
 
 export type WorkbenchMatchConfidence = "high" | "medium" | "low";
 
-export type WorkbenchGroupType = "auto_closed" | "manual_confirmed" | "candidate";
+export type WorkbenchGroupType = WorkbenchZoneId;
 
 export type WorkbenchRelationMode = "no_oa_bank_batch" | (string & {});
 
@@ -163,6 +197,7 @@ export type WorkbenchProcessedExceptionSummary = {
 export type WorkbenchCandidateGroup = {
   id: string;
   groupType: WorkbenchGroupType;
+  rawGroupType?: string;
   matchConfidence: WorkbenchMatchConfidence;
   reason: string;
   relationMode?: WorkbenchRelationMode;
@@ -178,6 +213,8 @@ export type WorkbenchCandidateGroup = {
   amountCheck?: WorkbenchAmountCheck;
   specialMetadata?: Record<string, unknown>;
   processedExceptionSummary?: WorkbenchProcessedExceptionSummary;
+  reconciliationDecision?: WorkbenchReconciliationDecision;
+  warnings?: WorkbenchReconciliationWarning[];
 };
 
 export type WorkbenchAmountSummaryTotals = {
@@ -222,8 +259,6 @@ export type WorkbenchSummary = {
 };
 
 export type WorkbenchReadModelStatus = "fresh" | "refreshing" | "stale" | "unavailable" | (string & {});
-
-export type WorkbenchZoneId = "paired" | "open";
 
 export type WorkbenchZoneCounts = {
   groups: number;

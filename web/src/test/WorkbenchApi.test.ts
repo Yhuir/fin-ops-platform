@@ -47,7 +47,8 @@ function createWorkbenchRow(paneId: WorkbenchRecordType, id: string, counterpart
 function createWorkbenchGroup(id: string, hitPanes: WorkbenchRecordType[]): WorkbenchCandidateGroup {
   return {
     id,
-    groupType: "candidate",
+    groupType: "open",
+    rawGroupType: "candidate",
     matchConfidence: "medium",
     reason: "测试三栏上下文搜索",
     rows: {
@@ -251,6 +252,193 @@ describe("workbench api bank amount mapping", () => {
     expect(groupCalls).toHaveLength(2);
     expect(groupCalls.map((url) => url.searchParams.get("page_size"))).toEqual(["200", "200"]);
     expect(groupCalls.every((url) => url.searchParams.get("detail_level") === "summary")).toBe(true);
+  });
+
+  test("maps backend paired and open reconciliation display states without exposing legacy candidate groups", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          month: "2026-05",
+          summary: {
+            oa_count: 2,
+            bank_count: 1,
+            invoice_count: 1,
+            paired_count: 1,
+            open_count: 1,
+            exception_count: 0,
+          },
+          paired: {
+            groups: [
+              {
+                group_id: "case:decision-paired",
+                group_type: "manual_confirmed",
+                match_confidence: "high",
+                reason: "automatic_reconciliation_decision",
+                oa_rows: [
+                  {
+                    id: "oa-paired",
+                    type: "oa",
+                    applicant: "张三",
+                    amount: "100.00",
+                    oa_bank_relation: { code: "automatic_match", label: "自动匹配", tone: "warn" },
+                    workbench_reconciliation_decision: {
+                      decision_id: "decision-paired",
+                      decision_key: "decision:paired",
+                      display_state: "paired",
+                      decision_status: "paired",
+                      match_domain: "free",
+                      match_shape: "oa_bank_invoice",
+                      rule_code: "free_three_way",
+                      rule_version: "v1",
+                      row_ids: ["oa-paired", "bank-paired", "invoice-paired"],
+                      oa_row_ids: ["oa-paired"],
+                      bank_row_ids: ["bank-paired"],
+                      invoice_row_ids: ["invoice-paired"],
+                      amount: "100.00",
+                      direction: "expense",
+                      payment_amount_closed: true,
+                      invoice_amount_closed: false,
+                      warnings: [
+                        {
+                          code: "invoice_amount_mismatch",
+                          message: "附件发票合计与 OA/流水金额不一致",
+                        },
+                      ],
+                    },
+                    workbench_reconciliation_warnings: [
+                      {
+                        code: "invoice_amount_mismatch",
+                        message: "附件发票合计与 OA/流水金额不一致",
+                      },
+                    ],
+                    available_actions: ["detail"],
+                  },
+                ],
+                bank_rows: [
+                  {
+                    id: "bank-paired",
+                    type: "bank",
+                    debit_amount: "100.00",
+                    invoice_relation: { code: "automatic_match", label: "自动匹配", tone: "warn" },
+                    workbench_reconciliation_warnings: [
+                      {
+                        code: "invoice_amount_mismatch",
+                        message: "附件发票合计与 OA/流水金额不一致",
+                      },
+                    ],
+                    available_actions: ["detail"],
+                  },
+                ],
+                invoice_rows: [
+                  {
+                    id: "invoice-paired",
+                    type: "invoice",
+                    seller_name: "供应商A",
+                    total_with_tax: "99.00",
+                    invoice_bank_relation: { code: "automatic_match", label: "自动匹配", tone: "warn" },
+                    workbench_reconciliation_warnings: [
+                      {
+                        code: "invoice_amount_mismatch",
+                        message: "附件发票合计与 OA/流水金额不一致",
+                      },
+                    ],
+                    available_actions: ["detail"],
+                  },
+                ],
+              },
+            ],
+          },
+          open: {
+            groups: [
+              {
+                group_id: "row:legacy-candidate-open",
+                group_type: "candidate",
+                match_confidence: "low",
+                reason: "single_open_row",
+                oa_rows: [
+                  {
+                    id: "oa-open",
+                    type: "oa",
+                    applicant: "李四",
+                    amount: "200.00",
+                    oa_bank_relation: { code: "pending", label: "待处理", tone: "warn" },
+                    workbench_reconciliation_decision: {
+                      decision_id: "decision-open",
+                      decision_key: "decision:open",
+                      display_state: "open",
+                      decision_status: "open",
+                      match_domain: "free",
+                      match_shape: "single_oa",
+                      rule_code: "free_open",
+                      rule_version: "v1",
+                      row_ids: ["oa-open"],
+                      oa_row_ids: ["oa-open"],
+                      bank_row_ids: [],
+                      invoice_row_ids: [],
+                      payment_amount_closed: false,
+                      invoice_amount_closed: false,
+                      warnings: [],
+                    },
+                    available_actions: ["detail"],
+                  },
+                ],
+                bank_rows: [],
+                invoice_rows: [],
+              },
+              {
+                group_id: "case:legacy-needs-review",
+                group_type: "needs_review",
+                match_confidence: "medium",
+                reason: "legacy_payload_should_not_surface",
+                oa_rows: [],
+                bank_rows: [
+                  {
+                    id: "bank-open",
+                    type: "bank",
+                    debit_amount: "300.00",
+                    invoice_relation: { code: "manual_review", label: "待人工核查", tone: "danger" },
+                    available_actions: ["detail"],
+                  },
+                ],
+                invoice_rows: [],
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const payload = await fetchWorkbench("2026-05");
+    const pairedGroup = payload.paired.groups[0];
+    const openGroups = payload.open.groups;
+    const pairedOaRow = pairedGroup.rows.oa[0] as typeof pairedGroup.rows.oa[number] & {
+      reconciliationDecision?: {
+        paymentAmountClosed?: boolean | null;
+        invoiceAmountClosed?: boolean | null;
+        warnings?: Array<{ code: string; message: string }>;
+      };
+      reconciliationWarnings?: Array<{ code: string; message: string }>;
+    };
+
+    expect(pairedGroup.groupType).toBe("paired");
+    expect((pairedGroup as { rawGroupType?: string }).rawGroupType).toBe("manual_confirmed");
+    expect((pairedGroup as { warnings?: Array<{ code: string }> }).warnings?.map((warning) => warning.code)).toEqual([
+      "invoice_amount_mismatch",
+    ]);
+    expect(pairedOaRow.reconciliationDecision?.paymentAmountClosed).toBe(true);
+    expect(pairedOaRow.reconciliationDecision?.invoiceAmountClosed).toBe(false);
+    expect(pairedOaRow.reconciliationWarnings?.[0]).toMatchObject({
+      code: "invoice_amount_mismatch",
+      message: "附件发票合计与 OA/流水金额不一致",
+    });
+    expect(openGroups.map((group) => group.groupType)).toEqual(["open", "open"]);
+    expect(openGroups.map((group) => (group as { rawGroupType?: string }).rawGroupType)).toEqual([
+      "candidate",
+      "needs_review",
+    ]);
+    expect([...payload.paired.groups, ...payload.open.groups].map((group) => group.groupType)).not.toContain("candidate");
+    expect([...payload.paired.groups, ...payload.open.groups].map((group) => group.groupType)).not.toContain("needs_review");
   });
 
   test("serializes workbench group page SQL query controls", async () => {
@@ -848,7 +1036,8 @@ describe("workbench api bank amount mapping", () => {
       [
         {
           id: "nooa-group",
-          groupType: "manual_confirmed",
+          groupType: "paired",
+          rawGroupType: "manual_confirmed",
           matchConfidence: "high",
           reason: "免OA批次",
           relationMode: "no_oa_bank_batch",
@@ -893,7 +1082,8 @@ describe("workbench api bank amount mapping", () => {
       [
         {
           id: "nooa-salary-group",
-          groupType: "manual_confirmed",
+          groupType: "paired",
+          rawGroupType: "manual_confirmed",
           matchConfidence: "high",
           reason: "免OA工资批次",
           relationMode: "no_oa_bank_batch",
@@ -1011,7 +1201,8 @@ describe("workbench api bank amount mapping", () => {
       "no_oa_bank_batch",
       "no_oa_bank_batch",
     ]);
-    expect(payload.paired.groups.map((group) => group.groupType)).toEqual(["manual_confirmed", "manual_confirmed"]);
+    expect(payload.paired.groups.map((group) => group.groupType)).toEqual(["paired", "paired"]);
+    expect(payload.paired.groups.map((group) => group.rawGroupType)).toEqual(["manual_confirmed", "manual_confirmed"]);
     expect(payload.paired.groups.map((group) => group.displayMode)).toEqual(["collapsed_summary", "collapsed_summary"]);
     expect(payload.paired.groups.map((group) => group.rows.bank[0].sourceKind)).toEqual([
       "no_oa_bank_batch_summary",

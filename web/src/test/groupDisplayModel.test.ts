@@ -30,7 +30,8 @@ function buildBankRow(id: string, transactionTime: string): WorkbenchRecord {
 function buildGroup(id: string, transactionTime: string): WorkbenchCandidateGroup {
   return {
     id,
-    groupType: "candidate",
+    groupType: "open",
+    rawGroupType: "candidate",
     matchConfidence: "medium",
     reason: "test",
     rows: {
