@@ -106,7 +106,7 @@ RabbitMQ 消息体不得携带 read model payload 或页面 snapshot。回滚时
 
 工作台首屏读取使用拆分后的 SQL-native 契约：
 
-- `/api/workbench/summary?month=all`：返回 summary、`read_model_status`、`generated_at`，以及轻量 `oa_status`/`invoice_inventory` 状态诊断；不得返回候选组或行级快照。
+- `/api/workbench/summary?month=all`：返回 summary、`read_model_status`、`generated_at`，以及轻量 `oa_status`/`invoice_inventory` 状态诊断；不得返回投影 group 或行级快照。
 - `/api/workbench/groups?month=all&zone=open|paired&page=1&page_size=200&detail_level=summary`：从 `read_model.workbench_groups` 返回当前页 group 摘要，支持 `status`、`source_kind`、兼容搜索 `search`、分栏搜索 `search_by_pane`、受控排序 `sort=oa|bank|invoice:asc|desc`、`column_filters` 和 `time_filters`。分栏搜索、列筛选和时间筛选通过 `read_model.workbench_group_rows` 命中 group；同一栏内必须命中同一行，多个栏之间按交集组合，不读取 `workbench_snapshots` 大 JSON。`detail_level` 默认为 `full` 以兼容旧调用；前端首屏和 load-more 必须显式传 `summary`。
 - `/api/workbench/groups/detail?month=all&zone=open|paired&group_id=...`：从同一 SQL read model 返回单个 group 的完整 payload。列表页不得通过扩大 page size 或读取旧 snapshot 获取详情。
 - `/api/workbench/refresh-status`：返回 workbench dirty scopes、worker heartbeat/lag、outbox backlog、最近错误和 source version。
