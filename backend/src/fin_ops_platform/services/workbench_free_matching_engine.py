@@ -376,7 +376,7 @@ class WorkbenchFreeMatchingEngine:
         for row_id in sorted(conflicted):
             row = conflicted[row_id]["row"]
             blockers = tuple(conflicted[row_id]["blockers"])
-            owner_month = row.month if row.row_type != "invoice" else scope_month
+            owner_month = row.month
             decisions.append(
                 WorkbenchDecision(
                     decision_id=self._decision_key(owner_month, "free_matching_conflict", (row.row_id,)),

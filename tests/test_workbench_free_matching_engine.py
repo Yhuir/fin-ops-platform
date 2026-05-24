@@ -158,7 +158,7 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
 
         self.assertEqual({decision.display_state for decision in decisions}, {DISPLAY_STATE_OPEN})
         self.assertEqual({decision.decision_status for decision in decisions}, {DECISION_STATUS_OPEN})
-        self.assertEqual({decision.row_ids for decision in decisions}, {("oa-1",), ("bk-1",), ("iv-1",), ("iv-2",)})
+        self.assertEqual({decision.row_ids for decision in decisions}, {("oa-1",), ("bk-1",)})
         blockers = [blocker["code"] for decision in decisions for blocker in decision.blockers]
         self.assertIn("multiple_three_way_candidates", blockers)
 
@@ -327,6 +327,25 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
 
         self.assertEqual(decisions, [])
 
+    def test_conflict_open_invoice_decisions_are_owned_by_invoice_month_not_dirty_scope(self) -> None:
+        rows = (
+            [oa("oa-1", "1200.00")],
+            [bank("bk-1", "1200.00")],
+            [
+                invoice("iv-1", "1200.00", month="2026-02"),
+                invoice("iv-2", "1200.00", month="2026-04"),
+            ],
+        )
+
+        feb_decisions = self.engine.generate_decisions("2026-02", *rows)
+        mar_decisions = self.engine.generate_decisions("2026-03", *rows)
+
+        feb_invoice_decisions = [decision for decision in feb_decisions if decision.invoice_row_ids]
+        mar_invoice_decisions = [decision for decision in mar_decisions if decision.invoice_row_ids]
+        self.assertEqual({decision.row_ids for decision in feb_invoice_decisions}, {("iv-1",)})
+        self.assertEqual({decision.scope_month for decision in feb_invoice_decisions}, {"2026-02"})
+        self.assertEqual({decision.row_ids for decision in mar_invoice_decisions}, set())
+
     def test_three_way_conflict_does_not_drop_unrelated_unique_pairing(self) -> None:
         decisions = self.engine.generate_decisions(
             "2026-03",
@@ -351,7 +370,7 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
         self.assertEqual({decision.row_ids for decision in paired}, {("oa-unique", "bk-unique", "iv-unique")})
         self.assertEqual(
             {decision.row_ids for decision in open_decisions},
-            {("oa-conflict",), ("bk-conflict",), ("iv-conflict-a",), ("iv-conflict-b",)},
+            {("oa-conflict",), ("bk-conflict",)},
         )
 
     def test_two_way_fallback_can_return_disjoint_oa_bank_and_oa_invoice_pairs(self) -> None:
