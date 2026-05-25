@@ -11,7 +11,7 @@
 
 ## 专题页面
 
-- `bank-details.md`：银行明细、人工分类、自动有效分类和联动刷新。
+- `bank-details.md`：银行明细、自动标签、银行原始字段展示和联动刷新。
 - `no-oa-bank-batches.md`：免 OA 流水批量处理。
 - `pending-invoices.md`：待找发票、支出流水发票获取状态、规则和右侧工作流。
 - `tax-offset-and-etc.md`：税金抵扣、已认证发票、ETC 票据导入和对账。

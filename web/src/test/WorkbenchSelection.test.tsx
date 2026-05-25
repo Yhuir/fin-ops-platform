@@ -875,7 +875,7 @@ describe("Workbench row selection and detail modal", () => {
     expect(screen.queryByText("设置项")).not.toBeInTheDocument();
     expect(within(settingsTree).getByRole("treeitem", { name: /项目状态/ })).toBeInTheDocument();
     expect(within(settingsTree).getByRole("treeitem", { name: /银行账户/ })).toBeInTheDocument();
-    expect(within(settingsTree).getByRole("treeitem", { name: /银行明细标签管理/ })).toBeInTheDocument();
+    expect(within(settingsTree).queryByRole("treeitem", { name: /银行明细标签管理/ })).not.toBeInTheDocument();
     expect(within(settingsTree).queryByRole("treeitem", { name: /银行流水标签/ })).not.toBeInTheDocument();
     expect(within(settingsTree).getByRole("treeitem", { name: /待找发票筛选/ })).toBeInTheDocument();
     expect(within(settingsTree).getByRole("treeitem", { name: /OA导入设置/ })).toBeInTheDocument();

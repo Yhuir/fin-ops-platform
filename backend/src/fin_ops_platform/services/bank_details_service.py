@@ -16,6 +16,10 @@ from fin_ops_platform.services.bank_transaction_category_service import (
     BankTransactionCategoryService,
 )
 
+PURPOSE_TEXT_LABELS = ("用途", "交易用途")
+SUMMARY_TEXT_LABELS = ("摘要",)
+NOTE_TEXT_LABELS = ("备注", "附言", "客户附言")
+
 
 class BankDetailsService:
     def __init__(
@@ -240,6 +244,7 @@ class BankDetailsService:
         effective_path = list(effective_category["effective_category_path"] or [])
         effective_source = effective_category["effective_category_source"]
         relation_tags = self._relation_tag_payload(relation)
+        text_fields = self._bank_text_display_fields(row)
         return {
             "id": str(row.get("id") or ""),
             "trade_time": self._trade_time_text(row.get("trade_time") or row.get("txn_date")),
@@ -248,8 +253,11 @@ class BankDetailsService:
             "direction_label": "收" if direction == "income" else "支",
             "amount": self._format_decimal(row.get("amount")),
             "balance": self._format_decimal(row.get("balance")) if row.get("balance") is not None else None,
-            "summary": str(row.get("summary") or ""),
-            "purpose": str(row.get("remark") or row.get("purpose") or ""),
+            "summary": text_fields["summary_text"],
+            "purpose": text_fields["purpose_text"] or text_fields["note_text"],
+            "purpose_text": text_fields["purpose_text"],
+            "summary_text": text_fields["summary_text"],
+            "note_text": text_fields["note_text"],
             "bank_name": account["bank_name"],
             "account_last4": account["account_last4"],
             "manual_category_code": manual_category["category_code"],
@@ -384,6 +392,9 @@ class BankDetailsService:
             "balance",
             "summary",
             "purpose",
+            "purpose_text",
+            "summary_text",
+            "note_text",
             "bank_name",
             "account_last4",
             "manual_category_label",
@@ -453,11 +464,59 @@ class BankDetailsService:
         text = str(value or "").strip()
         return text[:10]
 
+    @classmethod
+    def _bank_text_display_fields(cls, row: dict[str, Any]) -> dict[str, str]:
+        fields_by_label = cls._bank_text_fields_by_label(row.get("bank_text_fields"))
+        summary_text = cls._first_field_value(fields_by_label, SUMMARY_TEXT_LABELS) or str(row.get("summary") or "")
+        purpose_text = cls._first_field_value(fields_by_label, PURPOSE_TEXT_LABELS)
+        note_text = cls._first_field_value(fields_by_label, NOTE_TEXT_LABELS)
+        if not purpose_text and not note_text:
+            purpose_text = str(row.get("purpose") or "")
+            note_text = str(row.get("remark") or "")
+        elif not purpose_text:
+            purpose_text = str(row.get("purpose") or "")
+        elif not note_text:
+            note_text = str(row.get("note") or "")
+        return {
+            "purpose_text": purpose_text.strip(),
+            "summary_text": summary_text.strip(),
+            "note_text": note_text.strip(),
+        }
+
+    @staticmethod
+    def _bank_text_fields_by_label(value: Any) -> dict[str, str]:
+        fields: dict[str, str] = {}
+        if isinstance(value, dict):
+            iterable = [{"label": label, "value": field_value} for label, field_value in value.items()]
+        else:
+            iterable = list(value or []) if isinstance(value, list) else []
+        for item in iterable:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label") or "").strip()
+            text = str(item.get("value") or "").strip()
+            if label and text and label not in fields:
+                fields[label] = text
+        return fields
+
+    @staticmethod
+    def _first_field_value(fields_by_label: dict[str, str], labels: tuple[str, ...]) -> str:
+        for label in labels:
+            value = fields_by_label.get(label)
+            if value:
+                return value
+        return ""
+
     @staticmethod
     def _trade_time_text(value: Any) -> str:
         if isinstance(value, datetime):
-            return value.isoformat(sep=" ")
-        return str(value or "").strip()
+            return value.replace(tzinfo=None).isoformat(sep=" ")
+        text = str(value or "").strip().replace("T", " ")
+        if len(text) >= 25 and text[19] in {"+", "-"} and text[20:22].isdigit() and text[23:25].isdigit():
+            return text[:19]
+        if text.endswith("Z") and len(text) >= 20:
+            return text[:19]
+        return text
 
     @staticmethod
     def _format_decimal(value: Any) -> str:

@@ -56,9 +56,7 @@ from fin_ops_platform.services.bank_details_service import BankDetailsService
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_service import (
     BANK_TRANSACTION_CATEGORY_LABELS,
-    BankTransactionCategoryConflictError,
     BankTransactionCategoryService,
-    BankTransactionCategoryValidationError,
 )
 from fin_ops_platform.services.bank_transaction_effective_category_provider import (
     BankTransactionEffectiveCategoryProvider,
@@ -10262,91 +10260,12 @@ class Application:
         body: str | bytes | None,
         headers: dict[str, str] | None,
     ) -> Response:
-        session = resolve_oa_request_session(
-            headers,
-            identity_service=self._oa_identity_service,
-            access_control_service=self._access_control_service,
-        )
-        if not session.can_mutate_data:
-            return self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有保存银行流水分类的权限。"},
-            )
-
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        updates = payload.get("updates")
-        if not isinstance(updates, list):
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_category_update", "message": "updates must be an array."},
-            )
-
-        actor = session.identity.username or session.identity.user_id or "web_finance_user"
-        try:
-            update_result = self._bank_transaction_category_service.apply_updates(
-                updates,
-                actor=actor,
-            )
-        except BankTransactionCategoryConflictError as exc:
-            return self._json_response(
-                HTTPStatus.CONFLICT,
-                {
-                    "error": exc.error_code,
-                    "message": str(exc),
-                    "transaction_id": exc.transaction_id,
-                    "expected_version": exc.expected_version,
-                    "actual_version": exc.actual_version,
-                },
-            )
-        except BankTransactionCategoryValidationError as exc:
-            status = HTTPStatus.NOT_FOUND if exc.error_code == "unknown_transaction_id" else HTTPStatus.BAD_REQUEST
-            return self._json_response(
-                status,
-                {
-                    "error": exc.error_code,
-                    "message": str(exc),
-                    "transaction_id": exc.transaction_id,
-                },
-            )
-
-        updated_transaction_ids = [
-            str(transaction_id)
-            for transaction_id in list(update_result.get("updated_transaction_ids") or [])
-            if str(transaction_id).strip()
-        ]
-        affected_months = self._bank_transaction_category_affected_months(updated_transaction_ids)
-        turnover_relations_updated = bool(
-            self._turnover_relation_service.invalidate_for_transaction_ids(
-                updated_transaction_ids,
-                actor=actor,
-            )
-        )
-        self._turnover_relation_service.rebuild_from_bank_rows(self._turnover_bank_transaction_rows())
-        workbench_rebuild_queued = self._invalidate_workbench_after_bank_transaction_categories(
-            affected_months,
-        )
-        bank_detail_rebuild_queued = self._enqueue_bank_detail_read_model_refreshes(
-            affected_months,
-            reason="bank_transaction_category_changed",
-        )
-        if self._state_store is not None:
-            self._state_store.save_bank_transaction_categories(
-                self._bank_transaction_category_service.snapshot()
-            )
-            self._persist_turnover_relations_best_effort(operation="bank_transaction_category_updated")
-            self._clear_turnover_ledger_read_model_best_effort()
+        _ = body, headers
         return self._json_response(
-            HTTPStatus.OK,
+            HTTPStatus.GONE,
             {
-                "updated_transaction_ids": updated_transaction_ids,
-                "updated_categories": list(update_result.get("updated_categories") or []),
-                "affected_months": affected_months,
-                "workbench_rebuild_queued": workbench_rebuild_queued,
-                "bank_detail_rebuild_queued": bank_detail_rebuild_queued,
-                "turnover_relations_updated": turnover_relations_updated,
-                "turnover_ledger_invalidated": bool(updated_transaction_ids),
+                "error": "manual_bank_transaction_category_disabled",
+                "message": "银行明细分类已改为系统自动分配，不能人工保存分类。",
             },
         )
 

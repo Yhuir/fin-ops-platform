@@ -26,8 +26,6 @@ export default function SettingsTreeNav({
         return "settings-section-projects";
       case "bank_accounts":
         return "settings-section-bank-accounts";
-      case "bank_transaction_tags":
-        return "settings-section-bank-transaction-tags";
       case "pending_invoice_tags":
         return "settings-section-pending-invoice-tags";
       case "oa_retention":

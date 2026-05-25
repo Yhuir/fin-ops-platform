@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { fetchBankDetailTransactions, saveBankTransactionCategories } from "../features/bankDetails/api";
+import { fetchBankDetailTransactions } from "../features/bankDetails/api";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -22,6 +22,9 @@ describe("bank details API", () => {
             balance: "130500.50",
             summary: "项目回款",
             purpose: "货款",
+            purpose_text: "交易用途",
+            summary_text: "项目回款摘要",
+            note_text: "客户附言",
             bank_name: "工商银行",
             account_last4: "6386",
             oa_relation_tag: "有oa",
@@ -53,6 +56,9 @@ describe("bank details API", () => {
       invoiceRelationTag: "有发票",
       relationTags: ["有oa", "有发票"],
       relationCaseId: "CASE-202605-001",
+      purposeText: "交易用途",
+      summaryText: "项目回款摘要",
+      noteText: "客户附言",
     });
     expect(payload.rows[1]).toMatchObject({
       oaRelationTag: "无oa",
@@ -62,7 +68,7 @@ describe("bank details API", () => {
     });
   });
 
-  test("maps manual, auto, and effective category fields from transaction rows", async () => {
+  test("maps auto category and bank text display fields from transaction rows", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({
@@ -80,6 +86,9 @@ describe("bank details API", () => {
             balance: "130412.50",
             summary: "网银手续费",
             purpose: "结算服务",
+            purpose_text: "工行用途",
+            summary_text: "工行摘要",
+            note_text: "工行附言",
             bank_name: "工商银行",
             account_last4: "6386",
             category_code: null,
@@ -128,6 +137,9 @@ describe("bank details API", () => {
       effectiveCategoryLabel: "手续费",
       effectiveCategoryPath: ["自动识别", "手续费"],
       effectiveCategorySource: "auto",
+      purposeText: "工行用途",
+      summaryText: "工行摘要",
+      noteText: "工行附言",
     });
     expect(payload.categoryCounts.fee).toBe(1);
   });
@@ -187,54 +199,4 @@ describe("bank details API", () => {
     expect(payload.cacheStatus).toBe("bypass");
   });
 
-  test("reports HTML API responses as a routing problem instead of a JSON parse error", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response("<!DOCTYPE HTML><html><body>Unsupported method</body></html>", {
-        status: 501,
-        headers: { "Content-Type": "text/html;charset=utf-8" },
-      })),
-    );
-
-    await expect(
-      saveBankTransactionCategories({
-        updates: [
-          {
-            transactionId: "bank-detail-001",
-            categoryCode: "borrow_in_company_pending_repayment",
-            expectedVersion: 1,
-          },
-        ],
-      }),
-    ).rejects.toThrow("接口返回了 HTML 页面");
-  });
-
-  test.each([
-    ["invalid_category_code", "该银行明细标签不存在，请刷新后重新选择。"],
-    ["archived_category_code", "该银行明细标签已停用，不能再用于新的银行明细。"],
-    ["category_version_conflict", "银行明细标签已更新，请刷新后重新保存。"],
-  ])("maps category save error code %s before backend message", async (errorCode, expectedMessage) => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response(JSON.stringify({
-        error: errorCode,
-        message: "Backend internal message",
-      }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      })),
-    );
-
-    await expect(
-      saveBankTransactionCategories({
-        updates: [
-          {
-            transactionId: "bank-detail-001",
-            categoryCode: "borrow_in_company_pending_repayment",
-            expectedVersion: 1,
-          },
-        ],
-      }),
-    ).rejects.toThrow(expectedMessage);
-  });
 });

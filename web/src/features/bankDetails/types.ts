@@ -46,6 +46,9 @@ export type BankDetailTransaction = {
   balance: string | null;
   summary: string;
   purpose: string;
+  purposeText: string;
+  summaryText: string;
+  noteText: string;
   bankName: string;
   accountLast4: string;
   categoryCode: BankTransactionCategoryCode | null;
@@ -108,30 +111,4 @@ export type BankDateFilter = {
   preset: BankDatePreset;
   dateFrom: string;
   dateTo: string;
-};
-
-export type SaveBankTransactionCategoryUpdate = {
-  transactionId: string;
-  categoryCode: BankTransactionCategoryCode | null;
-  expectedVersion: number | null;
-};
-
-export type SaveBankTransactionCategoriesRequest = {
-  updates: SaveBankTransactionCategoryUpdate[];
-  signal?: AbortSignal;
-};
-
-export type SavedBankTransactionCategory = {
-  transactionId: string;
-  categoryCode: BankTransactionCategoryCode | null;
-  categoryLabel: string | null;
-  categoryPath: string[];
-  version: number | null;
-};
-
-export type SaveBankTransactionCategoriesResponse = {
-  updatedTransactionIds: string[];
-  updatedCategories: SavedBankTransactionCategory[];
-  affectedMonths: string[];
-  workbenchRebuildQueued: boolean;
 };
