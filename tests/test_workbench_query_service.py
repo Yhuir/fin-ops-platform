@@ -12,6 +12,22 @@ class MutableOAAdapter:
         return list(self._seed_data.get(month, []))
 
 
+class RowIdLookupOAAdapter:
+    def __init__(self, records: list[OAApplicationRecord]) -> None:
+        self._records_by_id = {record.id: record for record in records}
+        self.list_all_called = False
+
+    def list_application_records(self, month: str) -> list[OAApplicationRecord]:
+        return [record for record in self._records_by_id.values() if record.month == month]
+
+    def list_all_application_records(self) -> list[OAApplicationRecord]:
+        self.list_all_called = True
+        raise AssertionError("row-id lookup should not fall back to full OA sync")
+
+    def list_application_records_by_row_ids(self, row_ids: list[str]) -> list[OAApplicationRecord]:
+        return [self._records_by_id[row_id] for row_id in row_ids if row_id in self._records_by_id]
+
+
 class AttachmentRecord:
     def __init__(self) -> None:
         self.id = "oa-attach-202603-001"
@@ -492,6 +508,33 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
         invoice_row = payload["open"]["invoice"][0]
 
         self.assertIn("ignore", invoice_row["available_actions"])
+
+    def test_get_oa_row_record_uses_row_id_lookup_without_full_sync_for_all_hint(self) -> None:
+        adapter = RowIdLookupOAAdapter(
+            [
+                OAApplicationRecord(
+                    id="oa-real-lookup-001",
+                    month="2026-03",
+                    section="open",
+                    case_id=None,
+                    applicant="刘际涛",
+                    project_name="云南溯源科技",
+                    apply_type="支付申请",
+                    amount="199",
+                    counterparty_name="中国电信股份有限公司昆明分公司",
+                    reason="托收电话费及宽带",
+                    relation_code="pending_match",
+                    relation_label="待找流水与发票",
+                    relation_tone="warn",
+                )
+            ]
+        )
+        service = WorkbenchQueryService(oa_adapter=adapter, seed_demo_rows=False)
+
+        row_record = service.get_row_record("oa-real-lookup-001", month_hint="all")
+
+        self.assertEqual(row_record["applicant"], "刘际涛")
+        self.assertFalse(adapter.list_all_called)
 
     def test_refreshes_oa_rows_for_month_and_preserves_manual_relation_state(self) -> None:
         adapter = MutableOAAdapter(

@@ -3189,6 +3189,33 @@ class PostgresReadModelRepository:
             or 0
         )
 
+    def expire_missing_workbench_reconciliation_decisions(
+        self,
+        *,
+        tenant_id: str,
+        scope_month: str,
+        active_decision_keys: list[str],
+    ) -> int:
+        return int(
+            self._connection.execute(
+                """
+                update read_model.workbench_reconciliation_decisions
+                set decision_status = 'expired',
+                    updated_at = now()
+                where tenant_id = %s
+                  and scope_month = %s::date
+                  and decision_status in ('proposed', 'paired', 'open')
+                  and not (decision_key = any(%s))
+                """,
+                (
+                    text(tenant_id) or "default",
+                    month_start(scope_month),
+                    text_list(active_decision_keys),
+                ),
+            )
+            or 0
+        )
+
     def mark_workbench_matching_dirty_scopes(
         self,
         *,

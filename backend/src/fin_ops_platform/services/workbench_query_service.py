@@ -155,9 +155,12 @@ class WorkbenchQueryService:
     def get_row_record(self, row_id: str, *, month_hint: str | None = None) -> dict[str, Any]:
         if row_id not in self._records_by_id:
             normalized_month_hint = str(month_hint).strip() if month_hint not in (None, "") else None
-            if normalized_month_hint and normalized_month_hint != "all":
+            can_lookup_by_row_id = callable(getattr(self._oa_adapter, "list_application_records_by_row_ids", None))
+            if self._looks_like_oa_row_id(row_id) and can_lookup_by_row_id:
+                self.sync_oa_row_ids([row_id])
+            if row_id not in self._records_by_id and normalized_month_hint and normalized_month_hint != "all":
                 self._sync_oa_rows(normalized_month_hint)
-            else:
+            elif row_id not in self._records_by_id and not can_lookup_by_row_id:
                 self._sync_all_oa_rows()
         if (
             row_id not in self._records_by_id

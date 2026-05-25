@@ -110,6 +110,22 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
         self.assertEqual(decision.invoice_row_ids, ("iv-1", "iv-2"))
         self.assertTrue(decision.invoice_amount_closed)
 
+    def test_single_exact_invoice_takes_priority_over_multi_invoice_sum_for_same_payment(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-03",
+            [oa("oa-1", "1200.00")],
+            [bank("bk-1", "1200.00")],
+            [
+                invoice("iv-exact", "1200.00"),
+                invoice("iv-part-1", "700.00"),
+                invoice("iv-part-2", "500.00"),
+            ],
+        )
+
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0].display_state, DISPLAY_STATE_PAIRED)
+        self.assertEqual(decisions[0].row_ids, ("oa-1", "bk-1", "iv-exact"))
+
     def test_multiple_oa_bank_pairs_sum_to_single_invoice_is_paired(self) -> None:
         decisions = self.engine.generate_decisions(
             "2026-03",
@@ -160,6 +176,40 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
         self.assertEqual(decision.invoice_row_ids, ("iv-combined",))
         self.assertTrue(decision.payment_amount_closed)
         self.assertTrue(decision.invoice_amount_closed)
+
+    def test_multiple_payment_single_invoice_search_is_bounded_for_many_vendor_pairs(self) -> None:
+        oa_rows = [
+            oa("oa-maintenance", "9414.30", reason="昭通卷烟厂能源集中监控平台系统维护采购项目"),
+            oa("oa-goods", "21966.70", reason="昭通卷烟厂能源集中监控平台系统维护采购项目"),
+        ]
+        bank_rows = [
+            bank("bk-maintenance", "9414.30", counterparty="北京标志卓信科技有限公司"),
+            bank("bk-goods", "21966.70", counterparty="北京标志卓信科技有限公司"),
+        ]
+        for index in range(1, 41):
+            amount = f"{100 + index}.00"
+            oa_rows.append(
+                oa(
+                    f"oa-extra-{index}",
+                    amount,
+                    reason="昭通卷烟厂能源集中监控平台系统维护采购项目 北京标志卓信科技有限公司",
+                )
+            )
+            bank_rows.append(bank(f"bk-extra-{index}", amount, counterparty="北京标志卓信科技有限公司"))
+
+        decisions = self.engine.generate_decisions(
+            "2026-03",
+            oa_rows,
+            bank_rows,
+            [invoice("iv-combined", "31381.00", seller_name="北京标志卓信科技有限公司")],
+        )
+
+        paired = [decision for decision in decisions if decision.rule_code == "oa_bank_pairs_single_invoice_exact_sum"]
+        self.assertEqual(len(paired), 1)
+        self.assertEqual(
+            paired[0].row_ids,
+            ("oa-goods", "oa-maintenance", "bk-goods", "bk-maintenance", "iv-combined"),
+        )
 
     def test_multiple_oa_bank_pairs_do_not_pick_one_when_single_invoice_sum_is_ambiguous(self) -> None:
         decisions = self.engine.generate_decisions(
@@ -312,6 +362,47 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
         self.assertEqual(len(decisions), 1)
         self.assertEqual(decisions[0].match_shape, "oa_bank_invoice")
         self.assertEqual(decisions[0].row_ids, ("oa-exp-1994", "bk-o-1", "iv-o-1"))
+
+    def test_real_oa_row_shape_can_use_detail_application_date_as_month(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-03",
+            [
+                {
+                    "id": "oa-pay-2065",
+                    "type": "oa",
+                    "amount": "5200",
+                    "apply_type": "支付申请",
+                    "counterparty_name": "云南力科知识产权有限公司",
+                    "project_name": "云南溯源科技",
+                    "reason": "实用新型专利转让费（两件）",
+                    "detail_fields": {"申请日期": "2026-03-27"},
+                }
+            ],
+            [
+                {
+                    "id": "txn_imported_1415",
+                    "type": "bank",
+                    "debit_amount": "5,200.00",
+                    "trade_time": "2026-03-27 15:01:48",
+                    "counterparty_name": "云南力科知识产权有限公司",
+                    "remark": "实用新型专利转让费",
+                }
+            ],
+            [
+                {
+                    "id": "inv_imported_1502",
+                    "type": "invoice",
+                    "invoice_type": "进项发票",
+                    "total_with_tax": "5,200.00",
+                    "issue_date": "2026-03-27",
+                    "seller_name": "云南力科知识产权有限公司",
+                }
+            ],
+        )
+
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0].rule_code, "oa_bank_invoice_exact_amount")
+        self.assertEqual(decisions[0].row_ids, ("oa-pay-2065", "txn_imported_1415", "inv_imported_1502"))
 
     def test_oa_counterparty_name_can_bridge_plain_oa_bank_invoice_match(self) -> None:
         decisions = self.engine.generate_decisions(

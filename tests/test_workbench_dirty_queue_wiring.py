@@ -398,6 +398,38 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
         self.assertFalse(app.oa_started)
         self.assertFalse(app.workbench_dirty_started)
 
+    def test_matching_row_provider_does_not_supplement_historical_pair_relation_rows(self) -> None:
+        app = build_application()
+        raw_payload = {
+            "paired": {"oa": [], "bank": [], "invoice": []},
+            "open": {
+                "oa": [{"id": "oa-match-provider-001", "type": "oa", "amount": "100.00", "month": "2026-03"}],
+                "bank": [
+                    {
+                        "id": "bank-match-provider-001",
+                        "type": "bank",
+                        "amount": "100.00",
+                        "month": "2026-03",
+                        "trade_time": "2026-03-10",
+                    }
+                ],
+                "invoice": [
+                    {
+                        "id": "invoice-match-provider-001",
+                        "type": "invoice",
+                        "total_with_tax": "100.00",
+                        "issue_date": "2026-03-10",
+                    }
+                ],
+            },
+        }
+
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload) as build_payload:
+            rows = app._workbench_matching_rows_for_scope("2026-03")
+
+        build_payload.assert_called_once_with("2026-03", supplement_missing_pair_relation_rows=False)
+        self.assertEqual([row["id"] for row in rows["oa_rows"]], ["oa-match-provider-001"])
+
     def test_oa_invoice_offset_settings_change_marks_all_available_months_dirty(self) -> None:
         app = build_application()
         queue = RecordingDirtyQueue()

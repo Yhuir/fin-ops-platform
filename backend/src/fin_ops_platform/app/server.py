@@ -14018,7 +14018,7 @@ class Application:
         return summary
 
     def _workbench_matching_rows_for_scope(self, scope_month: str) -> dict[str, list[dict[str, object]]]:
-        payload = self._build_raw_workbench_payload(scope_month)
+        payload = self._build_raw_workbench_payload(scope_month, supplement_missing_pair_relation_rows=False)
         oa_rows = self._workbench_matching_rows_from_payload(payload, "oa")
         invoice_rows = self._workbench_matching_rows_from_payload(payload, "invoice")
         bank_rows = self._workbench_matching_rows_from_payload(payload, "bank")
@@ -15474,7 +15474,12 @@ class Application:
         terminal_scope = normalized_scope_key.rsplit(":", 1)[-1].strip()
         return terminal_scope or "all"
 
-    def _build_raw_workbench_payload(self, month: str) -> dict[str, object]:
+    def _build_raw_workbench_payload(
+        self,
+        month: str,
+        *,
+        supplement_missing_pair_relation_rows: bool = True,
+    ) -> dict[str, object]:
         if self._live_workbench_service.has_rows_for_month(month):
             self._sync_live_auto_pair_relations()
             payload = self._build_live_workbench_row_payload(month)
@@ -15482,7 +15487,10 @@ class Application:
             payload = self._build_oa_workbench_row_payload(month)
         self._sync_oa_invoice_offset_auto_pair_relations(payload)
         self._repair_active_relations_with_oa_attachment_context(payload)
-        paired_payload = self._apply_pair_relations_to_payload(payload)
+        paired_payload = self._apply_pair_relations_to_payload(
+            payload,
+            supplement_missing_rows=supplement_missing_pair_relation_rows,
+        )
         return self._workbench_override_service.apply_to_payload(paired_payload)
 
     def _build_live_workbench_row_payload(self, month: str) -> dict[str, object]:
@@ -15919,11 +15927,17 @@ class Application:
                     return True
         return False
 
-    def _apply_pair_relations_to_payload(self, payload: dict[str, object]) -> dict[str, object]:
+    def _apply_pair_relations_to_payload(
+        self,
+        payload: dict[str, object],
+        *,
+        supplement_missing_rows: bool = True,
+    ) -> dict[str, object]:
         result = self._serialize_value(payload)
         paired_section = result.setdefault("paired", {})
         open_section = result.setdefault("open", {})
-        self._supplement_missing_active_pair_relation_rows(paired_section, open_section)
+        if supplement_missing_rows:
+            self._supplement_missing_active_pair_relation_rows(paired_section, open_section)
         for row_type in ("oa", "bank", "invoice"):
             source_paired_rows = list(paired_section.get(row_type, []))
             source_open_rows = list(open_section.get(row_type, []))

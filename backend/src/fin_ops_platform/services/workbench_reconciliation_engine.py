@@ -49,10 +49,13 @@ class WorkbenchReconciliationEngine:
         started_at = perf_counter()
         normalized_scope_month = str(scope_month or "").strip()
         resolved_source_versions = dict(source_versions or {})
-        held_row_ids = self._active_pair_relation_row_ids(normalized_scope_month)
+        held_row_ids, extendable_payment_row_ids = self._active_pair_relation_row_ids(normalized_scope_month)
+        if not invoice_rows:
+            extendable_payment_row_ids = set()
+        strict_held_row_ids = held_row_ids.difference(extendable_payment_row_ids)
         scoped_held_row_ids = self._row_ids_in_rows((oa_rows, bank_rows, invoice_rows), held_row_ids)
-        filtered_oa_rows = self._exclude_row_ids(oa_rows, held_row_ids)
-        filtered_bank_rows = self._exclude_row_ids(bank_rows, held_row_ids)
+        filtered_oa_rows = self._exclude_row_ids(oa_rows, strict_held_row_ids)
+        filtered_bank_rows = self._exclude_row_ids(bank_rows, strict_held_row_ids)
         filtered_invoice_rows = self._exclude_row_ids(invoice_rows, held_row_ids)
 
         expired_count = self._decision_store.expire_stale(
@@ -77,32 +80,41 @@ class WorkbenchReconciliationEngine:
             for row_id in getattr(special_result, "claimed_row_ids", set())
             if str(row_id or "").strip()
         }
-        free_decisions = self._free_engine.generate_decisions(
-            normalized_scope_month,
-            self._exclude_row_ids(filtered_oa_rows, claimed_by_special),
-            self._exclude_row_ids(filtered_bank_rows, claimed_by_special),
-            self._exclude_row_ids(filtered_invoice_rows, claimed_by_special),
-            source_versions=resolved_source_versions,
-        )
+        free_decisions = [
+            decision
+            for decision in self._free_engine.generate_decisions(
+                normalized_scope_month,
+                self._exclude_row_ids(filtered_oa_rows, claimed_by_special),
+                self._exclude_row_ids(filtered_bank_rows, claimed_by_special),
+                self._exclude_row_ids(filtered_invoice_rows, claimed_by_special),
+                source_versions=resolved_source_versions,
+            )
+            if not set(decision.row_ids).issubset(held_row_ids)
+        ]
         decisions = [
             decision
             for decision in [*special_decisions, *free_decisions]
             if decision.scope_month == normalized_scope_month
         ]
+        missing_expired_count = self._decision_store.expire_missing_for_scope(
+            normalized_scope_month,
+            active_decision_keys={decision.decision_key for decision in decisions},
+        )
         self._decision_store.upsert_decisions(decisions)
         return self._summary(
             scope_month=normalized_scope_month,
             decisions=decisions,
-            expired_count=expired_count,
+            expired_count=expired_count + missing_expired_count,
             suppressed_by_pair_relation_count=len(scoped_held_row_ids),
             duration_ms=self._duration_ms(started_at),
         )
 
-    def _active_pair_relation_row_ids(self, scope_month: str) -> set[str]:
+    def _active_pair_relation_row_ids(self, scope_month: str) -> tuple[set[str], set[str]]:
         list_active_relations = getattr(self._pair_relation_service, "list_active_relations", None)
         if not callable(list_active_relations):
             raise ValueError("pair_relation_service must provide list_active_relations().")
         held: set[str] = set()
+        extendable_payment_rows: set[str] = set()
         for relation in list_active_relations():
             if not isinstance(relation, dict):
                 raise ValueError("pair_relation_service returned a non-dict active relation.")
@@ -111,11 +123,32 @@ class WorkbenchReconciliationEngine:
             month_scope = str(relation.get("month_scope") or "all").strip()
             if month_scope not in {"all", scope_month}:
                 continue
-            for row_id in list(relation.get("row_ids") or []):
+            row_ids = [str(row_id or "").strip() for row_id in list(relation.get("row_ids") or [])]
+            row_types = [str(row_type or "").strip() for row_type in list(relation.get("row_types") or [])]
+            typed_row_ids: list[tuple[str, str]] = []
+            for index, row_id in enumerate(row_ids):
                 normalized_row_id = str(row_id or "").strip()
                 if normalized_row_id:
                     held.add(normalized_row_id)
-        return held
+                    row_type = row_types[index] if index < len(row_types) and row_types[index] else self._row_type_for_row_id(normalized_row_id)
+                    typed_row_ids.append((normalized_row_id, row_type))
+            relation_types = {row_type for _, row_type in typed_row_ids}
+            if {"oa", "bank"}.issubset(relation_types) and "invoice" not in relation_types:
+                extendable_payment_rows.update(
+                    row_id for row_id, row_type in typed_row_ids if row_type in {"oa", "bank"}
+                )
+        return held, extendable_payment_rows
+
+    @staticmethod
+    def _row_type_for_row_id(row_id: str) -> str:
+        normalized = str(row_id or "").strip().lower()
+        if normalized.startswith("oa-att-inv-") or normalized.startswith("inv") or normalized.startswith("invoice"):
+            return "invoice"
+        if normalized.startswith("txn") or normalized.startswith("bank"):
+            return "bank"
+        if normalized.startswith("oa-"):
+            return "oa"
+        return ""
 
     @classmethod
     def _exclude_row_ids(cls, rows: list[dict[str, Any]], row_ids: set[str]) -> list[dict[str, Any]]:

@@ -45,6 +45,35 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
         self.assertEqual(summary["suppressed_by_pair_relation_count"], 2)
         self.assertEqual([decision["row_ids"] for decision in decisions], [["oa-free", "bank-free"]])
 
+    def test_active_oa_bank_relation_can_extend_to_matching_invoice(self) -> None:
+        store = WorkbenchReconciliationDecisionStore()
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="case-payment-only",
+            row_ids=["oa-held", "bank-held"],
+            row_types=["oa", "bank"],
+            relation_mode="manual_confirmed",
+            created_by="tester",
+            month_scope="2026-05",
+        )
+
+        summary = WorkbenchReconciliationEngine(
+            decision_store=store,
+            pair_relation_service=pair_service,
+        ).run_scope(
+            "2026-05",
+            oa_rows=[oa_row("oa-held")],
+            bank_rows=[bank_row("bank-held")],
+            invoice_rows=[invoice_row("invoice-held")],
+            source_versions={"engine": "v2"},
+        )
+
+        decisions = store.list_decisions("2026-05")
+        self.assertEqual(summary["suppressed_by_pair_relation_count"], 2)
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0]["decision_status"], DECISION_STATUS_PAIRED)
+        self.assertEqual(decisions[0]["row_ids"], ["oa-held", "bank-held", "invoice-held"])
+
     def test_special_decisions_claim_rows_before_free_matching(self) -> None:
         store = WorkbenchReconciliationDecisionStore()
         special_decision = special_pair("2026-05", ["oa-1", "bank-1"])
@@ -122,6 +151,27 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
         decisions = store.list_decisions("2026-05", statuses={DECISION_STATUS_EXPIRED, DECISION_STATUS_PAIRED})
         self.assertEqual(summary["expired_decision_count"], 1)
         self.assertEqual({decision["decision_status"] for decision in decisions}, {DECISION_STATUS_EXPIRED, DECISION_STATUS_PAIRED})
+
+    def test_same_version_decisions_missing_from_current_scope_are_expired(self) -> None:
+        store = WorkbenchReconciliationDecisionStore()
+        old_decision = special_pair("2026-05", ["bank-1", "invoice-old"], source_versions={"engine": "v2"})
+        store.upsert_decisions([old_decision])
+
+        summary = WorkbenchReconciliationEngine(
+            decision_store=store,
+            pair_relation_service=WorkbenchPairRelationService(),
+        ).run_scope(
+            "2026-05",
+            oa_rows=[oa_row("oa-1")],
+            bank_rows=[bank_row("bank-1")],
+            invoice_rows=[invoice_row("invoice-1")],
+            source_versions={"engine": "v2"},
+        )
+
+        decisions = store.list_decisions("2026-05", statuses={DECISION_STATUS_EXPIRED, DECISION_STATUS_PAIRED})
+        self.assertEqual(summary["expired_decision_count"], 1)
+        self.assertIn(["bank-1", "invoice-old"], [decision["row_ids"] for decision in decisions if decision["decision_status"] == DECISION_STATUS_EXPIRED])
+        self.assertIn(["oa-1", "bank-1", "invoice-1"], [decision["row_ids"] for decision in decisions if decision["decision_status"] == DECISION_STATUS_PAIRED])
 
     def test_conflicting_free_rows_become_open_decisions_not_paired(self) -> None:
         store = WorkbenchReconciliationDecisionStore()

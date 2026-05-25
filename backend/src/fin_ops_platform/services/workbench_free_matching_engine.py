@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from itertools import combinations
 from typing import Any
 
 from fin_ops_platform.services.workbench_reconciliation_models import (
@@ -24,6 +23,8 @@ RULE_VERSION = "2026-05-25-multi-payment-single-invoice"
 OA_ATTACHMENT_INVOICE_SOURCE_KIND = "oa_attachment_invoice"
 MAX_INVOICE_COMBINATION_SIZE = 6
 MAX_PAYMENT_PAIR_COMBINATION_SIZE = 6
+MAX_SUBSET_GROUP_RESULTS = 2
+MAX_SUBSET_SEARCH_STATES = 20000
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,33 +178,38 @@ class WorkbenchFreeMatchingEngine:
                 for pair in exact_pairs
                 if self._has_evidence(pair[0], invoice) or self._has_evidence(pair[1], invoice)
             ]
-            max_size = min(len(compatible_pairs), MAX_PAYMENT_PAIR_COMBINATION_SIZE)
-            for size in range(2, max_size + 1):
-                for pair_group in combinations(compatible_pairs, size):
-                    oa_total = sum((pair[0].amount for pair in pair_group), Decimal("0.00"))
-                    bank_total = sum((pair[1].amount for pair in pair_group), Decimal("0.00"))
-                    if oa_total != invoice.amount or bank_total != invoice.amount:
-                        continue
-                    sorted_pairs = tuple(sorted(pair_group, key=lambda pair: (pair[0].row_id, pair[1].row_id)))
-                    oas = tuple(pair[0] for pair in sorted_pairs)
-                    banks = tuple(pair[1] for pair in sorted_pairs)
-                    invoices = (invoice,)
-                    candidates.append(
-                        _ThreeWayCandidate(
+            pair_groups = self._subset_groups_by_amount(
+                compatible_pairs,
+                target_amount=invoice.amount,
+                max_size=MAX_PAYMENT_PAIR_COMBINATION_SIZE,
+                amount_getter=lambda pair: pair[0].amount,
+            )
+            for pair_group in pair_groups:
+                if len(pair_group) < 2:
+                    continue
+                bank_total = sum((pair[1].amount for pair in pair_group), Decimal("0.00"))
+                if bank_total != invoice.amount:
+                    continue
+                sorted_pairs = tuple(sorted(pair_group, key=lambda pair: (pair[0].row_id, pair[1].row_id)))
+                oas = tuple(pair[0] for pair in sorted_pairs)
+                banks = tuple(pair[1] for pair in sorted_pairs)
+                invoices = (invoice,)
+                candidates.append(
+                    _ThreeWayCandidate(
+                        oas=oas,
+                        banks=banks,
+                        invoices=invoices,
+                        rule_code="oa_bank_pairs_single_invoice_exact_sum",
+                        invoice_amount_closed=True,
+                        warning_codes=(),
+                        evidence=self._multi_payment_single_invoice_evidence(
+                            window=window,
                             oas=oas,
                             banks=banks,
-                            invoices=invoices,
-                            rule_code="oa_bank_pairs_single_invoice_exact_sum",
-                            invoice_amount_closed=True,
-                            warning_codes=(),
-                            evidence=self._multi_payment_single_invoice_evidence(
-                                window=window,
-                                oas=oas,
-                                banks=banks,
-                                invoice=invoice,
-                            ),
-                        )
+                            invoice=invoice,
+                        ),
                     )
+                )
         return candidates
 
     def _invoice_groups_for_amount(
@@ -220,13 +226,84 @@ class WorkbenchFreeMatchingEngine:
             if invoice.data.get("source_kind") != OA_ATTACHMENT_INVOICE_SOURCE_KIND
             and (self._has_evidence(oa, invoice) or self._has_evidence(bank, invoice))
         ]
-        groups: list[tuple[_Row, ...]] = []
-        max_size = min(len(eligible), MAX_INVOICE_COMBINATION_SIZE)
-        for size in range(1, max_size + 1):
-            for group in combinations(eligible, size):
-                if sum((invoice.amount for invoice in group), Decimal("0.00")) == target_amount:
-                    groups.append(tuple(sorted(group, key=lambda row: row.row_id)))
-        return groups
+        exact_single_invoices = [
+            invoice
+            for invoice in eligible
+            if invoice.amount == target_amount
+        ]
+        if exact_single_invoices:
+            return [
+                (invoice,)
+                for invoice in sorted(exact_single_invoices, key=lambda row: row.row_id)
+            ]
+        return [
+            tuple(sorted(group, key=lambda row: row.row_id))
+            for group in self._subset_groups_by_amount(
+                eligible,
+                target_amount=target_amount,
+                max_size=MAX_INVOICE_COMBINATION_SIZE,
+                amount_getter=lambda invoice: invoice.amount,
+            )
+            if len(group) >= 2
+        ]
+
+    def _subset_groups_by_amount(
+        self,
+        items: list[Any],
+        *,
+        target_amount: Decimal,
+        max_size: int,
+        amount_getter,
+    ) -> list[tuple[Any, ...]]:
+        target_cents = self._amount_cents(target_amount)
+        if target_cents <= 0:
+            return []
+        eligible = [
+            item
+            for item in items
+            if 0 < self._amount_cents(amount_getter(item)) <= target_cents
+        ]
+        if not eligible:
+            return []
+
+        resolved_max_size = max(1, min(len(eligible), int(max_size)))
+        groups_by_state: dict[tuple[int, int], list[tuple[int, ...]]] = {(0, 0): [()]}
+        target_groups: list[tuple[int, ...]] = []
+        for index, item in enumerate(eligible):
+            amount_cents = self._amount_cents(amount_getter(item))
+            additions: dict[tuple[int, int], list[tuple[int, ...]]] = {}
+            for (count, total), groups in list(groups_by_state.items()):
+                if count >= resolved_max_size:
+                    continue
+                next_count = count + 1
+                next_total = total + amount_cents
+                if next_total > target_cents:
+                    continue
+                state = (next_count, next_total)
+                for group in groups:
+                    next_group = (*group, index)
+                    if next_total == target_cents:
+                        target_groups.append(next_group)
+                        if len(target_groups) >= MAX_SUBSET_GROUP_RESULTS:
+                            return [
+                                tuple(eligible[group_index] for group_index in result)
+                                for result in target_groups[:MAX_SUBSET_GROUP_RESULTS]
+                            ]
+                    bucket = additions.setdefault(state, [])
+                    if len(bucket) < MAX_SUBSET_GROUP_RESULTS:
+                        bucket.append(next_group)
+            for state, groups in additions.items():
+                bucket = groups_by_state.setdefault(state, [])
+                for group in groups:
+                    if group not in bucket and len(bucket) < MAX_SUBSET_GROUP_RESULTS:
+                        bucket.append(group)
+            if len(groups_by_state) > MAX_SUBSET_SEARCH_STATES:
+                return []
+
+        return [
+            tuple(eligible[group_index] for group_index in result)
+            for result in target_groups[:MAX_SUBSET_GROUP_RESULTS]
+        ]
 
     def _conflicted_rows(self, candidates: list[_ThreeWayCandidate]) -> dict[str, dict[str, Any]]:
         by_oa_bank: dict[tuple[str, str], list[_ThreeWayCandidate]] = {}
@@ -491,7 +568,7 @@ class WorkbenchFreeMatchingEngine:
 
     def _month(self, row_type: str, row: dict[str, Any]) -> str:
         fields = {
-            "oa": ("month", "oa_month", "apply_month", "pay_receive_time"),
+            "oa": ("month", "oa_month", "apply_month", "apply_date", "application_date", "pay_receive_time"),
             "bank": ("trade_month", "month", "transaction_month", "pay_receive_time", "trade_time"),
             "invoice": ("invoice_month", "month", "invoice_date", "issue_date"),
         }[row_type]
@@ -499,6 +576,12 @@ class WorkbenchFreeMatchingEngine:
             value = str(row.get(field) or "").strip()
             if len(value) >= 7:
                 return value[:7]
+        detail_fields = row.get("detail_fields")
+        if row_type == "oa" and isinstance(detail_fields, dict):
+            for field in ("申请日期", "申请时间", "提交日期", "提交时间"):
+                value = str(detail_fields.get(field) or "").strip()
+                if len(value) >= 7:
+                    return value[:7]
         return ""
 
     def _direction(self, row_type: str, row: dict[str, Any]) -> str:
@@ -543,6 +626,10 @@ class WorkbenchFreeMatchingEngine:
             return Decimal(str(value).replace(",", "")).quantize(Decimal("0.01"))
         except (InvalidOperation, TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _amount_cents(amount: Decimal) -> int:
+        return int((amount * Decimal("100")).to_integral_value())
 
     def _has_evidence(self, left: _Row, right: _Row) -> bool:
         return bool(matching_tokens(self._tokens(left), self._tokens(right)))

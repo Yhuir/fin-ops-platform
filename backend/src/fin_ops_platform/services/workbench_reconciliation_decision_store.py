@@ -114,6 +114,28 @@ class WorkbenchReconciliationDecisionStore:
             expired += 1
         return expired
 
+    def expire_missing_for_scope(self, scope_month: str, *, active_decision_keys: set[str]) -> int:
+        if self._repository is not None:
+            return int(
+                self._repository.expire_missing_workbench_reconciliation_decisions(
+                    tenant_id=self._tenant_id,
+                    scope_month=scope_month,
+                    active_decision_keys=sorted(active_decision_keys),
+                )
+                or 0
+            )
+        expired = 0
+        for decision in self._decisions_by_key.values():
+            if decision.get("scope_month") != scope_month:
+                continue
+            if decision.get("decision_status") not in ACTIVE_DECISION_STATUSES:
+                continue
+            if str(decision.get("decision_key") or "") in active_decision_keys:
+                continue
+            decision["decision_status"] = DECISION_STATUS_EXPIRED
+            expired += 1
+        return expired
+
     def _mark_by_row_ids(
         self,
         row_ids: list[str],
