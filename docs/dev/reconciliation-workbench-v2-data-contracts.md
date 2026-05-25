@@ -86,6 +86,23 @@ summary 响应必须带未裁剪的 `row_counts`。如果银行流水或非 OA �
 `GET /api/workbench/groups/detail?zone=...&group_id=...` 获取完整 group 后再展开展示。
 前端不能把 summary 预览当作完整附件清单。
 
+### 2.2 三栏联动上下文搜索
+
+`GET /api/workbench/groups` 支持三栏联动上下文搜索：
+
+```text
+GET /api/workbench/groups?month=all&zone=open&page=1&page_size=200&detail_level=summary&search=花&search_mode=linked_context
+```
+
+契约要求：
+
+- `search_mode=linked_context` 表示 `search` 在 OA、银行流水、发票三栏行级索引中任意栏命中即可返回该业务组。
+- 响应仍以 group 为单位，`oa_rows`、`bank_rows`、`invoice_rows` 必须来自同一个后端 group/context。
+- 前端必须把同一 group 渲染为同一行上下文，并在三栏中按同一 `search` 关键词高亮命中字段。
+- 后端不得把三栏独立搜索结果拼接成一个 group；前端也不得把独立列表临时拼成同一行。
+- `column_filters` 和 `time_filters` 继续按 pane 使用 `read_model.workbench_group_rows` 的同一行交集规则；`search_mode=linked_context` 下，`search` 只负责命中业务组上下文，不作为 `search_by_pane` 的同一行约束。
+- Redis/page cache key 必须包含 `search_mode`，避免 linked context 搜索和旧 pane 搜索互相污染。
+
 ## 3. 银行行 DTO
 
 ```json

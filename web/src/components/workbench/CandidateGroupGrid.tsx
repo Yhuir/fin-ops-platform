@@ -15,6 +15,7 @@ import {
   collectWorkbenchFilterOptions,
   collectWorkbenchTimeFilterYears,
   createEmptyWorkbenchZoneDisplayState,
+  resolveWorkbenchLinkedSearchQuery,
   type WorkbenchPaneTimeFilter as WorkbenchPaneTimeFilterState,
   type WorkbenchZoneDisplayState,
 } from "../../features/workbench/groupDisplayModel";
@@ -241,6 +242,8 @@ function CandidateGroupGrid({
     } satisfies Record<WorkbenchRecordType, string[]>;
   }, [groups, sourceGroups]);
 
+  const linkedSearchQuery = useMemo(() => resolveWorkbenchLinkedSearchQuery(displayState), [displayState]);
+
   const handleToggleFilterMenu = useCallback((paneId: WorkbenchRecordType, columnKey: string) => {
     setOpenFilterMenu((current) => (
       current?.paneId === paneId && current.columnKey === columnKey ? null : { paneId, columnKey }
@@ -442,7 +445,7 @@ function CandidateGroupGrid({
                           columns={columnsByPane[paneId]}
                           getRowState={getRowState}
                           highlightedRowId={highlightedRowId}
-                          searchQuery={displayState.searchQueryByPane[paneId]}
+                          searchQuery={linkedSearchQuery || displayState.searchQueryByPane[paneId]}
                           onOpenDetail={onOpenDetail}
                           onRowAction={onRowAction}
                           onSelectRow={onSelectRow}
@@ -479,7 +482,7 @@ function CandidateGroupGrid({
                       columns={columnsByPane[paneId]}
                       getRowState={getRowState}
                       highlightedRowId={highlightedRowId}
-                      searchQuery={displayState.searchQueryByPane[paneId]}
+                      searchQuery={linkedSearchQuery || displayState.searchQueryByPane[paneId]}
                       onOpenDetail={onOpenDetail}
                       onRowAction={onRowAction}
                       onSelectRow={onSelectRow}
@@ -556,7 +559,7 @@ function CandidateGroupGrid({
                       columns={columnsByPane[paneId]}
                       getRowState={getRowState}
                       highlightedRowId={highlightedRowId}
-                      searchQuery={displayState.searchQueryByPane[paneId]}
+                      searchQuery={linkedSearchQuery || displayState.searchQueryByPane[paneId]}
                       onOpenDetail={onOpenDetail}
                       onRowAction={onRowAction}
                       onSelectRow={onSelectRow}
@@ -611,6 +614,7 @@ function CandidateGroupGrid({
     groups,
     highlightedRowId,
     loadingCollapsedGroups,
+    linkedSearchQuery,
     onEnsureGroupDetail,
     onOpenDetail,
     onRowAction,

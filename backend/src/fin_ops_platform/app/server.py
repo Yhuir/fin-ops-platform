@@ -973,6 +973,7 @@ class Application:
                 status=query.get("status", [None])[0],
                 source_kind=query.get("source_kind", [None])[0],
                 search=query.get("search", [None])[0],
+                search_mode=query.get("search_mode", [None])[0],
                 search_by_pane=query.get("search_by_pane", [None])[0],
                 sort=query.get("sort", [None])[0],
                 detail_level=query.get("detail_level", [None])[0],
@@ -1867,6 +1868,7 @@ class Application:
         status: str | None = None,
         source_kind: str | None = None,
         search: str | None = None,
+        search_mode: str | None = None,
         search_by_pane: str | None = None,
         sort: str | None = None,
         detail_level: str | None = None,
@@ -1881,6 +1883,7 @@ class Application:
                 {"error": "invalid_workbench_zone", "message": "zone must be open or paired."},
             )
         normalized_detail_level = self._normalize_workbench_group_detail_level(detail_level)
+        normalized_search_mode = self._normalize_workbench_group_search_mode(search_mode)
         try:
             normalized_column_filters = self._normalize_workbench_group_json_query_param(column_filters, "column_filters")
             normalized_time_filters = self._normalize_workbench_group_json_query_param(time_filters, "time_filters")
@@ -1924,6 +1927,7 @@ class Application:
             status=status,
             source_kind=source_kind,
             search=search,
+            search_mode=normalized_search_mode,
             search_by_pane=normalized_search_by_pane,
             sort=sort,
             detail_level=normalized_detail_level,
@@ -1947,6 +1951,7 @@ class Application:
                 status=status,
                 source_kind=source_kind,
                 search=search,
+                search_mode=normalized_search_mode,
                 search_by_pane=normalized_search_by_pane,
                 sort=sort,
                 detail_level=normalized_detail_level,
@@ -1973,6 +1978,7 @@ class Application:
                 status=status,
                 source_kind=source_kind,
                 search=search,
+                search_mode=normalized_search_mode,
                 search_by_pane=normalized_search_by_pane,
                 sort=sort,
                 detail_level=normalized_detail_level,
@@ -2153,6 +2159,7 @@ class Application:
         status: str | None,
         source_kind: str | None,
         search: str | None,
+        search_mode: str | None = None,
         search_by_pane: dict[str, object] | None = None,
         sort: str | None,
         detail_level: str | None,
@@ -2174,12 +2181,13 @@ class Application:
             "status": status or "",
             "source_kind": source_kind or "",
             "search": search or "",
+            "search_mode": self._normalize_workbench_group_search_mode(search_mode),
             "search_by_pane": self._stable_json_value(search_by_pane or {}),
             "sort": sort or "",
             "detail_level": self._normalize_workbench_group_detail_level(detail_level),
             "column_filters": self._stable_json_value(column_filters or {}),
             "time_filters": self._stable_json_value(time_filters or {}),
-            "filter_semantics": "row_intersection_v2",
+            "filter_semantics": "linked_context_v1",
         }
         digest = hashlib.sha256(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
         return f"workbench:{cache_version}:groups:{digest}"
@@ -2207,6 +2215,7 @@ class Application:
         status: str | None,
         source_kind: str | None,
         search: str | None,
+        search_mode: str | None = None,
         search_by_pane: dict[str, object] | None = None,
         sort: str | None,
         detail_level: str | None,
@@ -2224,12 +2233,13 @@ class Application:
             "status": status or "",
             "source_kind": source_kind or "",
             "search": search or "",
+            "search_mode": self._normalize_workbench_group_search_mode(search_mode),
             "search_by_pane": self._stable_json_value(search_by_pane or {}),
             "sort": sort or "",
             "detail_level": self._normalize_workbench_group_detail_level(detail_level),
             "column_filters": self._stable_json_value(column_filters or {}),
             "time_filters": self._stable_json_value(time_filters or {}),
-            "filter_semantics": "row_intersection_v2",
+            "filter_semantics": "linked_context_v1",
         }
         digest = hashlib.sha256(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
         return f"workbench:{cache_version}:groups:{digest}"
@@ -2246,6 +2256,11 @@ class Application:
         if not isinstance(parsed, dict):
             raise ValueError(f"{name} must be a JSON object.")
         return Application._stable_json_value(parsed)
+
+    @staticmethod
+    def _normalize_workbench_group_search_mode(value: str | None) -> str:
+        normalized = str(value or "").strip().lower()
+        return "linked_context" if normalized == "linked_context" else "pane"
 
     @staticmethod
     def _stable_json_value(value: object) -> object:

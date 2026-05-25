@@ -1804,6 +1804,7 @@ class PostgresReadModelRepository:
         status: str | None = None,
         source_kind: str | None = None,
         search: str | None = None,
+        search_mode: str | None = None,
         search_by_pane: Any = None,
         sort: str | None = None,
         detail_level: str | None = None,
@@ -1820,6 +1821,7 @@ class PostgresReadModelRepository:
         normalized_column_filters = _normalize_workbench_column_filters(column_filters)
         normalized_time_filters = _normalize_workbench_time_filters(time_filters)
         normalized_search_by_pane = _normalize_workbench_search_by_pane(search_by_pane)
+        normalized_search_mode = _normalize_workbench_search_mode(search_mode)
         clauses = [f"g.{scope_where}", "g.zone = %s"]
         params = [*scope_params, normalized_zone]
         if normalized := text(status):
@@ -1829,15 +1831,24 @@ class PostgresReadModelRepository:
             clauses.append("%s = any(g.source_kinds)")
             params.append(normalized)
         normalized_search = text(search)
-        if normalized_search and not normalized_search_by_pane and not normalized_column_filters and not normalized_time_filters:
+        if (
+            normalized_search
+            and normalized_search_mode != "linked_context"
+            and not normalized_search_by_pane
+            and not normalized_column_filters
+            and not normalized_time_filters
+        ):
             clauses.append("(g.searchable_text ilike %s or g.group_id ilike %s)")
             pattern = f"%{normalized_search}%"
             params.extend([pattern, pattern])
+        if normalized_search and normalized_search_mode == "linked_context":
+            clauses.append(_workbench_linked_search_exists_sql())
+            params.append(f"%{normalized_search}%")
         row_filter_sql, row_filter_params = _workbench_group_row_filter_exists_sql(
             column_filters=normalized_column_filters,
             time_filters=normalized_time_filters,
             search_by_pane=normalized_search_by_pane,
-            fallback_search=normalized_search,
+            fallback_search=None if normalized_search_mode == "linked_context" else normalized_search,
         )
         if row_filter_sql:
             clauses.append(row_filter_sql)
@@ -1849,21 +1860,21 @@ class PostgresReadModelRepository:
             column_filters=normalized_column_filters,
             time_filters=normalized_time_filters,
             search_by_pane=normalized_search_by_pane,
-            fallback_search=normalized_search,
+            fallback_search=None if normalized_search_mode == "linked_context" else normalized_search,
         )
         bank_row_filter_sql, bank_row_filter_params = _workbench_group_row_count_filter_sql(
             "bank",
             column_filters=normalized_column_filters,
             time_filters=normalized_time_filters,
             search_by_pane=normalized_search_by_pane,
-            fallback_search=normalized_search,
+            fallback_search=None if normalized_search_mode == "linked_context" else normalized_search,
         )
         invoice_row_filter_sql, invoice_row_filter_params = _workbench_group_row_count_filter_sql(
             "invoice",
             column_filters=normalized_column_filters,
             time_filters=normalized_time_filters,
             search_by_pane=normalized_search_by_pane,
-            fallback_search=normalized_search,
+            fallback_search=None if normalized_search_mode == "linked_context" else normalized_search,
         )
         count_row = self._connection.fetch_one(
             f"""
@@ -1933,7 +1944,7 @@ class PostgresReadModelRepository:
                     column_filters=normalized_column_filters,
                     time_filters=normalized_time_filters,
                     search_by_pane=normalized_search_by_pane,
-                    fallback_search=normalized_search,
+                    fallback_search=None if normalized_search_mode == "linked_context" else normalized_search,
                 )
                 group = _compact_workbench_group_for_summary_page(group)
             groups.append(group)
@@ -5161,6 +5172,21 @@ def _normalize_workbench_search_by_pane(value: Any) -> dict[str, str]:
         if normalized:
             result[pane] = normalized[:200]
     return result
+
+
+def _normalize_workbench_search_mode(value: Any) -> str:
+    normalized = text(value)
+    return "linked_context" if normalized == "linked_context" else "pane"
+
+
+def _workbench_linked_search_exists_sql() -> str:
+    return (
+        "exists (select 1 from read_model.workbench_group_rows r_linked_search "
+        "where r_linked_search.scope_key = g.scope_key "
+        "and r_linked_search.zone = g.zone "
+        "and r_linked_search.group_id = g.group_id "
+        "and r_linked_search.searchable_text ilike %s)"
+    )
 
 
 def _json_object_payload(value: Any) -> dict[str, Any]:

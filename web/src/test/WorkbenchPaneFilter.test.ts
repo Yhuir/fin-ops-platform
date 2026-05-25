@@ -324,7 +324,12 @@ describe("Workbench pane display model", () => {
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([input]) => {
         const url = new URL(String(input), "http://localhost");
-        return url.pathname === "/api/workbench/groups" && url.searchParams.has("search_by_pane");
+        return (
+          url.pathname === "/api/workbench/groups"
+          && url.searchParams.get("search") === "智能工厂"
+          && url.searchParams.get("search_mode") === "linked_context"
+          && !url.searchParams.has("search_by_pane")
+        );
       })).toBe(true);
     }, { timeout: 3000 });
   });
@@ -365,7 +370,7 @@ describe("Workbench pane display model", () => {
     ]);
   });
 
-  test("intersects bank pane search with dropdown filters on the same row", () => {
+  test("combines linked search with bank dropdown filters without forcing the same row", () => {
     const groups: WorkbenchCandidateGroup[] = [
       {
         id: "split-bank-criteria",
@@ -419,8 +424,9 @@ describe("Workbench pane display model", () => {
 
     const displayGroups = buildWorkbenchDisplayGroups(groups, state);
 
-    expect(displayGroups.map((group) => group.id)).toEqual(["same-bank-row-criteria"]);
-    expect(displayGroups[0].rows.bank.map((row) => row.id)).toEqual(["bank-expense-ccb"]);
+    expect(displayGroups.map((group) => group.id)).toEqual(["split-bank-criteria", "same-bank-row-criteria"]);
+    expect(displayGroups[0].rows.bank.map((row) => row.id)).toEqual(["bank-expense-ms"]);
+    expect(displayGroups[1].rows.bank.map((row) => row.id)).toEqual(["bank-expense-ccb"]);
   });
 
   test("requires all selected bank amount filter values on the same row", () => {

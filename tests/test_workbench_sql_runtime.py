@@ -944,6 +944,39 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             )
         )
 
+    def test_repository_filters_linked_context_search_from_any_structured_group_row(self) -> None:
+        connection = WorkbenchSummaryGroupsConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.get_workbench_groups_page(
+            scope_key="all",
+            zone="open",
+            page=1,
+            page_size=25,
+            search="花",
+            search_mode="linked_context",
+            column_filters={"bank": {"amount": ["支出"]}},
+        )
+
+        all_queries = [*connection.fetch_one_calls, *connection.fetch_all_calls]
+        group_row_queries = [(sql, params) for sql, params in all_queries if "read_model.workbench_group_rows" in sql]
+        self.assertTrue(group_row_queries)
+        self.assertTrue(
+            any(
+                "r_linked_search.searchable_text ilike %s" in sql
+                and "%花%" in params
+                for sql, params in group_row_queries
+            )
+        )
+        self.assertTrue(
+            any(
+                "r.pane = %s" in sql
+                and "bank" in params
+                and '"direction": "支出"' in str(params)
+                for sql, params in group_row_queries
+            )
+        )
+
     def test_repository_requires_all_selected_filter_values_in_structured_group_row_sql(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()
         repository = PostgresReadModelRepository(connection)
@@ -1972,6 +2005,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             status="open",
             source_kind="bank_transaction",
             search="供应商",
+            search_mode="linked_context",
             search_by_pane='{"bank":"建行"}',
             sort="bank:desc",
             detail_level="summary",
@@ -1993,6 +2027,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                     "status": "open",
                     "source_kind": "bank_transaction",
                     "search": "供应商",
+                    "search_mode": "linked_context",
                     "search_by_pane": {"bank": "建行"},
                     "sort": "bank:desc",
                     "detail_level": "summary",
@@ -2139,6 +2174,34 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(key_a, key_b)
         self.assertNotEqual(key_a, key_c)
+
+    def test_workbench_groups_api_redis_cache_key_includes_search_mode(self) -> None:
+        app = object.__new__(Application)
+        base_kwargs = {
+            "cache_version": "v7",
+            "scope_key": "all",
+            "zone": "open",
+            "page": "1",
+            "page_size": "200",
+            "status": None,
+            "source_kind": None,
+            "search": "花",
+            "sort": None,
+            "detail_level": "summary",
+            "column_filters": {},
+            "time_filters": {},
+        }
+
+        linked_key = app._workbench_groups_redis_cache_key_from_version(
+            **base_kwargs,
+            search_mode="linked_context",
+        )
+        pane_key = app._workbench_groups_redis_cache_key_from_version(
+            **base_kwargs,
+            search_mode="pane",
+        )
+
+        self.assertNotEqual(linked_key, pane_key)
 
     def test_workbench_groups_api_redis_cache_key_includes_read_model_schema_version(self) -> None:
         app = object.__new__(Application)

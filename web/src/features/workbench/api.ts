@@ -2161,6 +2161,7 @@ function workbenchGroupsUrl(
     page_size: String(pageSize),
   });
   const search = String(query.search ?? "").trim();
+  const searchMode = query.searchMode === "linked_context" ? "linked_context" : "";
   const searchByPane = stableJsonQueryParam(query.searchByPane);
   const status = String(query.status ?? "").trim();
   const sourceKind = String(query.sourceKind ?? "").trim();
@@ -2170,6 +2171,9 @@ function workbenchGroupsUrl(
   const timeFilters = stableJsonQueryParam(query.timeFilterByPane);
   if (search) {
     params.set("search", search);
+  }
+  if (searchMode) {
+    params.set("search_mode", searchMode);
   }
   if (searchByPane) {
     params.set("search_by_pane", searchByPane);
