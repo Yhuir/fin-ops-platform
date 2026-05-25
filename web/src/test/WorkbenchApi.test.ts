@@ -460,6 +460,7 @@ describe("workbench api bank amount mapping", () => {
 
     await fetchWorkbenchGroupsPage("all", "open", 2, 25, undefined, {
       search: "供应商A",
+      searchMode: "linked_context",
       searchByPane: {
         bank: "建行",
       },
@@ -485,6 +486,7 @@ describe("workbench api bank amount mapping", () => {
     expect(url.searchParams.get("page")).toBe("2");
     expect(url.searchParams.get("page_size")).toBe("25");
     expect(url.searchParams.get("search")).toBe("供应商A");
+    expect(url.searchParams.get("search_mode")).toBe("linked_context");
     expect(JSON.parse(url.searchParams.get("search_by_pane") ?? "{}")).toEqual({
       bank: "建行",
     });
@@ -515,6 +517,17 @@ describe("workbench api bank amount mapping", () => {
       timeFilterByPane: {
         bank: { mode: "year", year: "2026" },
       },
+    });
+  });
+
+  test("builds linked context search query from any pane search", () => {
+    const state = createEmptyWorkbenchZoneDisplayState();
+    state.activePaneId = "invoice";
+    state.searchQueryByPane.invoice = "花";
+
+    expect(buildWorkbenchServerPageQuery(state)).toEqual({
+      search: "花",
+      searchMode: "linked_context",
     });
   });
 
@@ -2130,7 +2143,7 @@ describe("workbench api bank amount mapping", () => {
   });
 
   test.each(workbenchPanes)(
-    "keeps row context for groups whose searched %s pane matches",
+    "keeps row context for groups whose linked search is entered from %s pane",
     (activePaneId) => {
       const groups = createContextSearchGroups(activePaneId);
       const state = createEmptyWorkbenchZoneDisplayState();
@@ -2143,6 +2156,8 @@ describe("workbench api bank amount mapping", () => {
 
       expect(displayIds).toEqual([
         `${activePaneId}-anchor`,
+        `${supplementPanes[0]}-supplement`,
+        `${supplementPanes[1]}-supplement`,
         "multi-pane-hit",
       ]);
       expect(displayIds.filter((id) => id === "multi-pane-hit")).toHaveLength(1);
