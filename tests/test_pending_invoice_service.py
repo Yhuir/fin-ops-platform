@@ -7,6 +7,7 @@ from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.pending_invoice_service import (
     PendingInvoiceApplicationService,
     PendingInvoiceError,
@@ -72,6 +73,17 @@ class RepositoryOnlyPendingInvoiceFacts:
         return next((invoice for invoice in self.invoices if invoice.id == invoice_id), None)
 
 
+class FakeOAProjection:
+    def __init__(self, records: list[OAApplicationRecord]) -> None:
+        self.records_by_id = {record.id: record for record in records}
+        self.requested_row_ids: list[list[str]] = []
+
+    def list_application_records_by_row_ids(self, row_ids: list[str]) -> list[OAApplicationRecord]:
+        normalized = [str(row_id).strip() for row_id in row_ids if str(row_id).strip()]
+        self.requested_row_ids.append(normalized)
+        return [self.records_by_id[row_id] for row_id in normalized if row_id in self.records_by_id]
+
+
 class PendingInvoiceQueryServiceTests(unittest.TestCase):
     def test_expense_rows_use_input_invoices_and_keep_multiple_invoices_in_one_bank_row(self) -> None:
         vendor = self._counterparty("cp_vendor", "Vendor A")
@@ -123,6 +135,71 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["input_invoices"]["payment_summary"]["invoice_total"], "100.00")
         self.assertEqual(payload["rows"][0]["input_invoices"]["payment_summary"]["paid_total"], "100.00")
         self.assertEqual(payload["rows"][0]["oa"]["primary"]["applicant"], "张三")
+
+    def test_oa_detail_uses_oa_projection_payment_application_layout(self) -> None:
+        txn = self._bank_transaction("txn_expense", TransactionDirection.OUTFLOW, "重庆维诺安工程技术有限公司", "7680.00")
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="case_oa_payment",
+            row_ids=[txn.id, "oa-pay-2048"],
+            row_types=["bank", "oa"],
+            relation_mode="manual_confirmed",
+            created_by="tester",
+            special_metadata={"applicant": "旧元数据申请人", "project_name": "旧元数据项目"},
+        )
+        oa_projection = FakeOAProjection([
+            OAApplicationRecord(
+                id="oa-pay-2048",
+                month="2026-05",
+                section="已完成",
+                case_id="2048",
+                applicant="杨丽萍",
+                project_name="大理卷烟厂余热综合利用项目",
+                apply_type="支付申请",
+                amount="7680.00",
+                counterparty_name="重庆维诺安工程技术有限公司",
+                reason="压力变送器尾款+底座、堵头4件",
+                relation_code="pending_match",
+                relation_label="待找流水与发票",
+                relation_tone="warn",
+                expense_type="设备贷款及材料费",
+                detail_fields={
+                    "申请日期": "2026-05-25",
+                    "付款方式": "银行转账",
+                    "票据类型": "增值税专用发票",
+                    "开户行": "交通银行股份有限公司重庆人民路支行",
+                    "收款账号": "500500037015003460594",
+                    "审批记录": [
+                        {
+                            "title": "项目负责人审核",
+                            "opinion": "同意",
+                            "acted_at": "2026-05-25 14:51:04",
+                            "actor": "刘涵静",
+                            "signature": "刘涵静",
+                        }
+                    ],
+                },
+            )
+        ])
+        service = self._query_service(
+            transactions=[txn],
+            pair_service=pair_service,
+            oa_projection=oa_projection,
+        )
+
+        rows_payload = service.list_rows(direction="expense", filter="all")
+        detail_payload = service.oa_detail("oa-pay-2048")
+
+        self.assertEqual(rows_payload["rows"][0]["oa"]["primary"]["applicant"], "杨丽萍")
+        self.assertTrue(rows_payload["rows"][0]["oa"]["detail_available"])
+        self.assertEqual(detail_payload["title"], "打印选择")
+        self.assertTrue(detail_payload["detail_available"])
+        self.assertEqual(detail_payload["oa_print_layout"]["form_title"], "支付申请")
+        self.assertIn({"label": "申请人", "value": "杨丽萍"}, detail_payload["oa_print_layout"]["fields"])
+        self.assertIn({"label": "项目名称", "value": "大理卷烟厂余热综合利用项目"}, detail_payload["oa_print_layout"]["fields"])
+        self.assertEqual(detail_payload["oa_print_layout"]["approvals"][1]["title"], "项目负责人审核")
+        self.assertEqual(detail_payload["oa_print_layout"]["approvals"][1]["signature"], "刘涵静")
+        self.assertIn(["oa-pay-2048"], oa_projection.requested_row_ids)
 
     def test_income_rows_use_output_invoices_and_missing_relation_has_dash_applicant(self) -> None:
         customer = self._counterparty("cp_customer", "Customer A")
@@ -520,6 +597,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         effective_category_provider: object | None = None,
         tag_groups: dict[str, list[str]] | None = None,
         bank_account_mappings: list[dict[str, str]] | None = None,
+        oa_projection: object | None = None,
     ) -> PendingInvoiceQueryService:
         resolved_import_service = import_service or ImportNormalizationService(
             existing_transactions=transactions,
@@ -547,6 +625,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             category_service=category_service or BankTransactionCategoryService(),
             app_settings_provider=lambda: settings_payload,
             effective_category_provider=effective_category_provider,
+            oa_projection=oa_projection,
         )
 
 

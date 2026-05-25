@@ -204,8 +204,17 @@ export default function PendingInvoicesTable({
           <Button size="small" variant="contained" onClick={onOpenExport}>筛选内容导出</Button>
         </Stack>
       </Stack>
-      <Box data-testid="pending-invoices-table-shell" sx={{ overflowX: "hidden" }}>
-        <Table aria-label="待找发票四区表" size="small" sx={{ width: "100%", tableLayout: "fixed" }}>
+      <Box
+        data-testid="pending-invoices-table-shell"
+        sx={{
+          overflowX: "hidden",
+          overflowY: "auto",
+          maxHeight: { xs: "calc(100vh - 300px)", md: "calc(100vh - 260px)" },
+          minHeight: 280,
+          overscrollBehavior: "contain",
+        }}
+      >
+        <Table stickyHeader aria-label="待找发票四区表" size="small" sx={{ width: "100%", tableLayout: "fixed" }}>
           <colgroup>
             <col style={{ width: "16%" }} />
             <col style={{ width: "12%" }} />
@@ -283,6 +292,9 @@ function groupHeaderSx(bgcolor: string, leftBorder = false): SxProps<Theme> {
     borderColor: "divider",
     color: "text.primary",
     fontWeight: 900,
+    position: "sticky",
+    top: 0,
+    zIndex: 4,
     textAlign: "center",
     ...(leftBorder ? { borderLeft: GROUP_BORDER, borderLeftColor: "divider" } : {}),
   };
@@ -297,6 +309,9 @@ function subHeaderSx(bgcolor: string, leftBorder = false): SxProps<Theme> {
     fontSize: 12,
     fontWeight: 800,
     lineHeight: 1.2,
+    position: "sticky",
+    top: 33,
+    zIndex: 3,
     whiteSpace: "normal",
     ...(leftBorder ? { borderLeft: GROUP_BORDER, borderLeftColor: "divider" } : {}),
   };
@@ -477,7 +492,7 @@ function renderRow({
               <Button
                 size="small"
                 variant="text"
-                disabled={!row.oa.detailAvailable}
+                disabled={!primaryOa.id}
                 aria-label={`OA详情 ${primaryOa.applicant || primaryOa.id}`}
                 onClick={() => onOpenObjectDetail({ kind: "oa", id: primaryOa.id, rowId: row.id })}
               >

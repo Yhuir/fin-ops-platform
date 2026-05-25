@@ -8,6 +8,11 @@ import type {
 
 const workbenchPaneIds: WorkbenchRecordType[] = ["oa", "bank", "invoice"];
 
+export type WorkbenchGroupDisplaySegment = {
+  id: string;
+  rows: WorkbenchPaneRows;
+};
+
 export type WorkbenchPaneTimeFilter =
   | { mode: "none" }
   | { mode: "year"; year: string }
@@ -106,6 +111,55 @@ export function buildWorkbenchPaneRows(groups: WorkbenchCandidateGroup[]): Workb
     bank: groups.flatMap((group) => group.rows.bank),
     invoice: groups.flatMap((group) => group.rows.invoice),
   };
+}
+
+export function buildWorkbenchGroupDisplaySegments(
+  group: WorkbenchCandidateGroup,
+): WorkbenchGroupDisplaySegment[] | null {
+  if (group.displayMode === "collapsed_summary" || group.rows.oa.length < 2 || group.rows.invoice.length === 0) {
+    return null;
+  }
+
+  const oaRowsById = new Map(group.rows.oa.map((row) => [row.id, row]));
+  const invoicesBySourceOaId = new Map<string, WorkbenchRecord[]>();
+  const unlinkedInvoiceRows: WorkbenchRecord[] = [];
+
+  group.rows.invoice.forEach((invoiceRow) => {
+    const sourceOaId = normalizeSourceOaId(invoiceRow.sourceOaId);
+    if (sourceOaId && oaRowsById.has(sourceOaId)) {
+      const rows = invoicesBySourceOaId.get(sourceOaId) ?? [];
+      rows.push(invoiceRow);
+      invoicesBySourceOaId.set(sourceOaId, rows);
+      return;
+    }
+    unlinkedInvoiceRows.push(invoiceRow);
+  });
+
+  if (!Array.from(invoicesBySourceOaId.values()).some((rows) => rows.length > 0)) {
+    return null;
+  }
+
+  const segments = group.rows.oa.map((oaRow) => ({
+    id: oaRow.id,
+    rows: {
+      oa: [oaRow],
+      bank: [],
+      invoice: invoicesBySourceOaId.get(oaRow.id) ?? [],
+    },
+  }));
+
+  if (unlinkedInvoiceRows.length > 0) {
+    segments.push({
+      id: "unlinked-invoices",
+      rows: {
+        oa: [],
+        bank: [],
+        invoice: unlinkedInvoiceRows,
+      },
+    });
+  }
+
+  return segments.length > 1 ? segments : null;
 }
 
 export function mergeWorkbenchGroupsById(
@@ -208,6 +262,14 @@ function normalizeServerTimeFilters(
     }
   });
   return result;
+}
+
+function normalizeSourceOaId(value: string | undefined) {
+  const normalizedValue = value?.trim() ?? "";
+  if (!normalizedValue || normalizedValue === "--" || normalizedValue === "—") {
+    return null;
+  }
+  return normalizedValue;
 }
 
 export function countWorkbenchGroupRows(group: WorkbenchCandidateGroup): number {
@@ -386,10 +448,11 @@ function matchesWorkbenchRow(
       return true;
     }
     if (row.recordType === "bank" && columnKey === "amount") {
-      return resolveBankAmountFilterValues(row).some((value) => selectedValues.includes(value));
+      const rowValues = resolveBankAmountFilterValues(row);
+      return selectedValues.every((value) => rowValues.includes(value));
     }
     const currentValue = row.tableValues[columnKey] ?? "";
-    return selectedValues.includes(currentValue);
+    return selectedValues.every((value) => value === currentValue);
   });
 }
 

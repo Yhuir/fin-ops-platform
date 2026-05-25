@@ -77,6 +77,10 @@ type ApiWorkbenchRow = {
   id: string;
   type: WorkbenchRecordType;
   source_kind?: WorkbenchSourceKind | null;
+  derived_from_oa_id?: string | null;
+  source_oa_id?: string | null;
+  source_oa_row_id?: string | null;
+  oa_row_id?: string | null;
   case_id?: string | null;
   exception_case_id?: string | null;
   handled_exception?: boolean | null;
@@ -1286,6 +1290,7 @@ function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
     exceptionCaseId: row.exception_case_id ?? undefined,
     recordType: row.type,
     sourceKind: row.source_kind ?? undefined,
+    sourceOaId: resolveWorkbenchRowSourceOaId(row),
     label: rowLabel(row),
     status: rowRelation(row)?.label ?? "待处理",
     statusCode: rowRelation(row)?.code ?? "pending",
@@ -1314,6 +1319,19 @@ function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
     mapped.reconciliationWarnings = reconciliationWarnings;
   }
   return mapped;
+}
+
+function resolveWorkbenchRowSourceOaId(row: ApiWorkbenchRow) {
+  return firstNonPlaceholderDisplayValue(
+    row.derived_from_oa_id,
+    row.source_oa_id,
+    row.source_oa_row_id,
+    row.oa_row_id,
+    row.detail_fields?.derived_from_oa_id,
+    row.detail_fields?.source_oa_id,
+    row.detail_fields?.source_oa_row_id,
+    row.detail_fields?.oa_row_id,
+  );
 }
 
 function mapPaneRows(panes: Record<WorkbenchRecordType, ApiWorkbenchRow[]>): WorkbenchPaneRows {

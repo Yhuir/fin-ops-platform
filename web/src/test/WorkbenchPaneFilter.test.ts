@@ -422,4 +422,61 @@ describe("Workbench pane display model", () => {
     expect(displayGroups.map((group) => group.id)).toEqual(["same-bank-row-criteria"]);
     expect(displayGroups[0].rows.bank.map((row) => row.id)).toEqual(["bank-expense-ccb"]);
   });
+
+  test("requires all selected bank amount filter values on the same row", () => {
+    const groups: WorkbenchCandidateGroup[] = [
+      {
+        id: "split-bank-filter-values",
+        groupType: "candidate",
+        matchConfidence: "medium",
+        reason: "test",
+        rows: {
+          oa: [],
+          bank: [
+            buildRow("bank-income-ccb", "bank", {
+              counterparty: "建行客户",
+              amount: "800.00",
+              direction: "收入",
+              paymentAccount: "建行 8106",
+            }),
+            buildRow("bank-expense-ms", "bank", {
+              counterparty: "民生供应商",
+              amount: "500.00",
+              direction: "支出",
+              paymentAccount: "民生 9486",
+            }),
+          ],
+          invoice: [],
+        },
+      },
+      {
+        id: "same-bank-filter-values",
+        groupType: "candidate",
+        matchConfidence: "medium",
+        reason: "test",
+        rows: {
+          oa: [],
+          bank: [
+            buildRow("bank-expense-ccb", "bank", {
+              counterparty: "建行供应商",
+              amount: "300.00",
+              direction: "支出",
+              paymentAccount: "建行 8106",
+            }),
+          ],
+          invoice: [],
+        },
+      },
+    ];
+    const state = createEmptyWorkbenchZoneDisplayState();
+    state.activePaneId = "bank";
+    state.filtersByPaneAndColumn.bank = {
+      amount: ["支出", "建行 8106"],
+    };
+
+    const displayGroups = buildWorkbenchDisplayGroups(groups, state);
+
+    expect(displayGroups.map((group) => group.id)).toEqual(["same-bank-filter-values"]);
+    expect(displayGroups[0].rows.bank.map((row) => row.id)).toEqual(["bank-expense-ccb"]);
+  });
 });

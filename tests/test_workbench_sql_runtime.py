@@ -924,6 +924,31 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             )
         )
 
+    def test_repository_requires_all_selected_filter_values_in_structured_group_row_sql(self) -> None:
+        connection = WorkbenchSummaryGroupsConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.get_workbench_groups_page(
+            scope_key="all",
+            zone="open",
+            page=1,
+            page_size=25,
+            column_filters={"bank": {"amount": ["支出", "建行 8106"]}},
+        )
+
+        all_queries = [*connection.fetch_one_calls, *connection.fetch_all_calls]
+        group_row_queries = [(sql, params) for sql, params in all_queries if "read_model.workbench_group_rows" in sql]
+        self.assertTrue(group_row_queries)
+        self.assertTrue(
+            any(
+                "(r.column_values @> %s::jsonb or r.column_values @> %s::jsonb) and "
+                "(r.column_values @> %s::jsonb or r.column_values @> %s::jsonb)" in sql
+                and '"direction": "支出"' in str(params)
+                and '"paymentAccount": "建行 8106"' in str(params)
+                for sql, params in group_row_queries
+            )
+        )
+
     def test_repository_filters_summary_preview_rows_with_intersected_pane_criteria(self) -> None:
         class PreviewRowsConnection(WorkbenchSummaryGroupsConnection):
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
@@ -985,6 +1010,66 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         group = page["groups"][0]
         self.assertEqual([row["id"] for row in group["bank_rows"]], ["bank-expense-ccb"])
         self.assertEqual(group["row_counts"]["bank"], 3)
+
+    def test_repository_requires_all_selected_bank_amount_filter_values_on_same_row(self) -> None:
+        class PreviewRowsConnection(WorkbenchSummaryGroupsConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "from read_model.workbench_groups" in normalized and "group by zone" not in normalized:
+                    return [
+                        {
+                            "group_id": "case:preview",
+                            "zone": "open",
+                            "payload": {
+                                "group_id": "case:preview",
+                                "group_type": "candidate",
+                                "match_confidence": "medium",
+                                "reason": "preview filter",
+                                "oa_rows": [],
+                                "bank_rows": [
+                                    {
+                                        "id": "bank-income-ccb",
+                                        "type": "bank",
+                                        "direction": "收入",
+                                        "payment_account_label": "建行 8106",
+                                        "counterparty_name": "建行客户",
+                                    },
+                                    {
+                                        "id": "bank-expense-ms",
+                                        "type": "bank",
+                                        "direction": "支出",
+                                        "payment_account_label": "民生 9486",
+                                        "counterparty_name": "民生供应商",
+                                    },
+                                    {
+                                        "id": "bank-expense-ccb",
+                                        "type": "bank",
+                                        "direction": "支出",
+                                        "payment_account_label": "建行 8106",
+                                        "counterparty_name": "建行供应商",
+                                    },
+                                ],
+                                "invoice_rows": [],
+                            },
+                        }
+                    ]
+                return super().fetch_all(sql, params)
+
+        connection = PreviewRowsConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        page = repository.get_workbench_groups_page(
+            scope_key="all",
+            zone="open",
+            page=1,
+            page_size=25,
+            detail_level="summary",
+            column_filters={"bank": {"amount": ["支出", "建行 8106"]}},
+        )
+
+        group = page["groups"][0]
+        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bank-expense-ccb"])
 
     def test_repository_reads_all_scope_groups_from_materialized_all_groups(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()

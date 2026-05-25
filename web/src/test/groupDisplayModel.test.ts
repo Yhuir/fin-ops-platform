@@ -1,4 +1,5 @@
 import {
+  buildWorkbenchGroupDisplaySegments,
   buildWorkbenchServerPageQuery,
   buildWorkbenchDisplayGroups,
   createEmptyWorkbenchZoneDisplayState,
@@ -27,6 +28,52 @@ function buildBankRow(id: string, transactionTime: string): WorkbenchRecord {
   };
 }
 
+function buildOaRow(id: string, amount = "100.00"): WorkbenchRecord {
+  return {
+    id,
+    caseId: "case-source-segment",
+    recordType: "oa",
+    label: `oa-${id}`,
+    status: "待处理",
+    statusCode: "open",
+    statusTone: "warn",
+    exceptionHandled: false,
+    amount,
+    counterparty: `applicant-${id}`,
+    tableValues: {
+      applicant: `applicant-${id}`,
+      amount,
+    },
+    detailFields: [],
+    actionVariant: "detail-only",
+    availableActions: ["detail"],
+  };
+}
+
+function buildAttachmentInvoiceRow(id: string, sourceOaId: string, amount = "100.00"): WorkbenchRecord {
+  return {
+    id,
+    caseId: "case-source-segment",
+    recordType: "invoice",
+    sourceKind: "oa_attachment_invoice",
+    sourceOaId,
+    label: `invoice-${id}`,
+    status: "OA附件",
+    statusCode: "oa_attachment_invoice",
+    statusTone: "info",
+    exceptionHandled: false,
+    amount,
+    counterparty: `seller-${id}`,
+    tableValues: {
+      sellerName: `seller-${id}`,
+      amount,
+    },
+    detailFields: [],
+    actionVariant: "detail-only",
+    availableActions: ["detail"],
+  };
+}
+
 function buildGroup(id: string, transactionTime: string): WorkbenchCandidateGroup {
   return {
     id,
@@ -43,6 +90,35 @@ function buildGroup(id: string, transactionTime: string): WorkbenchCandidateGrou
 }
 
 describe("groupDisplayModel time filter", () => {
+  test("builds source OA display segments for multi-OA attachment invoice groups", () => {
+    const oa248 = buildOaRow("oa-exp-248", "248.00");
+    const oa292 = buildOaRow("oa-exp-292", "292.00");
+    const invoice120 = buildAttachmentInvoiceRow("invoice-120", "oa-exp-248", "120.00");
+    const invoice128 = buildAttachmentInvoiceRow("invoice-128", "oa-exp-248", "128.00");
+    const invoice292 = buildAttachmentInvoiceRow("invoice-292", "oa-exp-292", "292.00");
+    const group: WorkbenchCandidateGroup = {
+      id: "case:source-segment",
+      groupType: "open",
+      rawGroupType: "manual_confirmed",
+      matchConfidence: "high",
+      reason: "source relation",
+      rows: {
+        oa: [oa248, oa292],
+        bank: [buildBankRow("bank-001", "2026-03-28 10:18")],
+        invoice: [invoice120, invoice128, invoice292],
+      },
+    };
+
+    const segments = buildWorkbenchGroupDisplaySegments(group);
+
+    expect(segments?.map((segment) => segment.id)).toEqual(["oa-exp-248", "oa-exp-292"]);
+    expect(segments?.[0].rows.oa).toEqual([oa248]);
+    expect(segments?.[0].rows.invoice).toEqual([invoice120, invoice128]);
+    expect(segments?.[1].rows.oa).toEqual([oa292]);
+    expect(segments?.[1].rows.invoice).toEqual([invoice292]);
+    expect(segments?.every((segment) => segment.rows.bank.length === 0)).toBe(true);
+  });
+
   test("dedupes repeated paginated groups for paired and open zones", () => {
     const firstPageGroups = [
       buildGroup("case:paired-1", "2026-03-28 10:18"),

@@ -81,6 +81,66 @@ describe("Workbench candidate grouping layout", () => {
     } as WorkbenchRecord;
   }
 
+  function createOaRecord(id: string, applicant: string, amount: string): WorkbenchRecord {
+    return {
+      id,
+      caseId: "CASE-MULTI-OA-ATTACHMENT",
+      recordType: "oa",
+      label: "日常报销",
+      status: "完全关联",
+      statusCode: "fully_linked",
+      statusTone: "success",
+      exceptionHandled: false,
+      amount,
+      counterparty: "云南溯源科技有限公司",
+      tableValues: {
+        applicant,
+        projectName: applicant === "刘晓宇" ? "云南溯源科技" : "大理卷烟厂动力车间中水处理系统升级改造项目",
+        applicationType: "日常报销",
+        reconciliationStatus: "完全关联",
+        amount,
+        applicationTime: "2026-01-28",
+      },
+      detailFields: [],
+      actionVariant: "detail-only",
+      availableActions: ["detail"],
+    };
+  }
+
+  function createAttachmentInvoiceRecord(id: string, sellerName: string, amount: string, sourceOaId: string): WorkbenchRecord {
+    return {
+      id,
+      caseId: "CASE-MULTI-OA-ATTACHMENT",
+      recordType: "invoice",
+      sourceKind: "oa_attachment_invoice",
+      sourceOaId,
+      label: "进项发票",
+      status: "OA附件",
+      statusCode: "oa_attachment_invoice",
+      statusTone: "info",
+      exceptionHandled: false,
+      amount,
+      counterparty: sellerName,
+      tableValues: {
+        sellerName,
+        sellerTaxId: "91300000TEST",
+        buyerName: "云南溯源科技有限公司",
+        buyerTaxId: "915300007194052520",
+        invoiceCode: "--",
+        invoiceNo: id,
+        issueDate: "2026-01-28",
+        amount,
+        taxRate: "--",
+        taxAmount: "--",
+        grossAmount: amount,
+        invoiceType: "进",
+      },
+      detailFields: [],
+      actionVariant: "detail-only",
+      availableActions: ["detail"],
+    };
+  }
+
   function createTruncatedManualInvoiceGroup(): WorkbenchCandidateGroup {
     const invoiceRows = [
       createInvoiceRecord("manual-inv-many-1", "MANUAL-MANY-001"),
@@ -442,7 +502,7 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.queryByText("已配对 1 组")).not.toBeInTheDocument();
   });
 
-  test("loads complete group detail when summary response truncates non-attachment invoice rows", async () => {
+  test("auto-loads complete group detail when summary response truncates visible rows", async () => {
     const group = createTruncatedManualInvoiceGroup();
     const ensureGroupDetail = vi.fn().mockResolvedValue(undefined);
 
@@ -466,15 +526,11 @@ describe("Workbench candidate grouping layout", () => {
       />,
     );
 
-    const loadFullGroupButton = screen.getByRole("button", {
+    expect(screen.queryByRole("button", {
       name: "显示完整组：进销项发票当前显示 3 条，共 5 条",
-    });
+    })).not.toBeInTheDocument();
 
-    fireEvent.click(loadFullGroupButton);
-
-    await waitFor(() => {
-      expect(ensureGroupDetail).toHaveBeenCalledWith("open", "case:CASE-MANUAL-INVOICE-MANY");
-    });
+    await waitFor(() => expect(ensureGroupDetail).toHaveBeenCalledWith("open", "case:CASE-MANUAL-INVOICE-MANY"));
   });
 
   test("renders OA, bank, and invoice candidates on the same horizontal group row", async () => {
@@ -487,6 +543,64 @@ describe("Workbench candidate grouping layout", () => {
     expect(within(groupRow).getAllByText("智能工厂设备商").length).toBeGreaterThan(0);
     expect(within(groupRow).getAllByText("58000").length).toBeGreaterThan(0);
     expect(within(groupRow).getByText("进")).toBeInTheDocument();
+  });
+
+  test("aligns source attachment invoices with their source OA inside a multi-OA group", () => {
+    const oa294 = createOaRecord("oa-294", "刘晓宇", "294.31");
+    const oa135 = createOaRecord("oa-135", "陈雄兵", "135");
+    const bank = createBankRecord();
+    const group: WorkbenchCandidateGroup = {
+      id: "case:CASE-MULTI-OA-ATTACHMENT",
+      groupType: "open",
+      rawGroupType: "manual_confirmed",
+      matchConfidence: "high",
+      reason: "existing_case_group",
+      rows: {
+        oa: [oa294, oa135],
+        bank: [{ ...bank, amount: "429.31", tableValues: { ...bank.tableValues, amount: "429.31" } }],
+        invoice: [
+          createAttachmentInvoiceRecord("iv-56", "中山市安自康贸易有限公司", "56.22", "oa-294"),
+          createAttachmentInvoiceRecord("iv-200", "昆明啄木鸟信息技术服务有限公司", "200", "oa-294"),
+          createAttachmentInvoiceRecord("iv-38", "南平市延平区松禾贸易有限公司", "38.09", "oa-294"),
+          createAttachmentInvoiceRecord("iv-135", "大理江尾老军饭店", "135", "oa-135"),
+        ],
+      },
+    };
+
+    render(
+      <CandidateGroupGrid
+        canMutateData
+        displayState={createEmptyWorkbenchZoneDisplayState()}
+        getRowState={() => "idle"}
+        groups={[group]}
+        onOpenDetail={() => undefined}
+        onRowAction={() => undefined}
+        onSelectRow={() => undefined}
+        panes={[
+          { id: "oa", title: "OA", rows: group.rows.oa },
+          { id: "bank", title: "银行流水", rows: group.rows.bank },
+          { id: "invoice", title: "进销项发票", rows: group.rows.invoice },
+        ]}
+        rowTemplateColumns="1fr 8px 1fr 8px 1fr"
+        zoneId="open"
+      />,
+    );
+
+    const firstOaSegment = screen.getByTestId("candidate-group-segment-open-case:CASE-MULTI-OA-ATTACHMENT-oa-294");
+    expect(within(firstOaSegment).getByText("刘晓宇")).toBeInTheDocument();
+    expect(within(firstOaSegment).getByText("294.31")).toBeInTheDocument();
+    expect(within(firstOaSegment).getAllByText("56.22").length).toBeGreaterThan(0);
+    expect(within(firstOaSegment).getAllByText("200").length).toBeGreaterThan(0);
+    expect(within(firstOaSegment).getAllByText("38.09").length).toBeGreaterThan(0);
+    expect(within(firstOaSegment).queryByText("陈雄兵")).not.toBeInTheDocument();
+    expect(within(firstOaSegment).queryByText("大理江尾老军饭店")).not.toBeInTheDocument();
+
+    const secondOaSegment = screen.getByTestId("candidate-group-segment-open-case:CASE-MULTI-OA-ATTACHMENT-oa-135");
+    expect(within(secondOaSegment).getByText("陈雄兵")).toBeInTheDocument();
+    expect(within(secondOaSegment).getByText("大理江尾老军饭店")).toBeInTheDocument();
+    expect(within(secondOaSegment).getAllByText("135").length).toBeGreaterThanOrEqual(2);
+    expect(within(secondOaSegment).queryByText("刘晓宇")).not.toBeInTheDocument();
+    expect(within(secondOaSegment).queryByText("56.22")).not.toBeInTheDocument();
   });
 
   test("renders no-OA summary rows collapsed by default and expands to original bank detail rows", () => {

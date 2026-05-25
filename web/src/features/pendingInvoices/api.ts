@@ -21,6 +21,7 @@ import type {
   PendingInvoiceFilterOptionsResponse,
   PendingInvoiceObjectDetail,
   PendingInvoiceObjectDetailTarget,
+  PendingInvoiceOaPrintLayout,
   PendingInvoiceOaSummary,
   PendingInvoiceRelationDetail,
   PendingInvoiceRuleGroup,
@@ -201,6 +202,16 @@ type ApiDetailPayload = {
   subtitle?: string | null;
   detail_available?: boolean | null;
   unavailable_reason?: string | null;
+  oa_print_layout?: {
+    form_title?: string | null;
+    download_label?: string | null;
+    fields?: Array<{ label?: string | null; value?: string | number | null }> | null;
+    approvals?: Array<{
+      title?: string | null;
+      lines?: unknown[] | null;
+      signature?: string | null;
+    }> | null;
+  } | null;
   sections?: Array<{
     title?: string | null;
     fields?: Array<{ label?: string | null; value?: string | number | null }> | null;
@@ -729,6 +740,27 @@ function mapDetail(payload: ApiDetailPayload, target: PendingInvoiceObjectDetail
     detailAvailable: payload.detail_available !== false,
     unavailableReason: stringValue(payload.unavailable_reason),
     sections,
+    oaPrintLayout: mapOaPrintLayout(payload.oa_print_layout),
+  };
+}
+
+function mapOaPrintLayout(value: ApiDetailPayload["oa_print_layout"]): PendingInvoiceOaPrintLayout | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  return {
+    formTitle: stringValue(value.form_title, "OA详情"),
+    downloadLabel: stringValue(value.download_label, "打印下载"),
+    fields: (value.fields ?? [])
+      .map((field) => ({ label: stringValue(field.label), value: field.value }))
+      .filter((field) => field.label),
+    approvals: (value.approvals ?? [])
+      .map((approval) => ({
+        title: stringValue(approval.title),
+        lines: stringList(approval.lines),
+        signature: stringValue(approval.signature),
+      }))
+      .filter((approval) => approval.title || approval.lines.length > 0 || approval.signature),
   };
 }
 

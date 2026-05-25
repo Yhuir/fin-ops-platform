@@ -652,6 +652,7 @@ class Application:
             category_service=self._bank_transaction_category_service,
             app_settings_provider=self._app_settings_service.get_settings_payload,
             effective_category_provider=self._bank_transaction_effective_category_provider,
+            oa_projection=oa_adapter,
         )
         self._input_invoice_usage_query_service = InputInvoiceUsageQueryService(
             import_service=self._import_service,

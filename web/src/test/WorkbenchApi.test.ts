@@ -1909,6 +1909,7 @@ describe("workbench api bank amount mapping", () => {
     expect(group.rows.oa.map((row) => row.id)).toEqual(["oa-exp-248"]);
     expect(group.rows.invoice).toHaveLength(3);
     expect(group.rows.invoice.every((row) => row.sourceKind === "oa_attachment_invoice")).toBe(true);
+    expect(group.rows.invoice.map((row) => row.sourceOaId)).toEqual(["oa-exp-248", "oa-exp-248", "oa-exp-248"]);
     expect(firstAttachmentInvoice.detailFields).toEqual(
       expect.arrayContaining([
         { label: "来源OA单号", value: "oa-exp-248" },

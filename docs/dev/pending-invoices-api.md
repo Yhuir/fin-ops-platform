@@ -266,6 +266,31 @@ GET /api/pending-invoices/oa/{id}/detail
 
 详情接口返回对象完整字段。OA 无稳定投影时返回 `detail_available=false` 和原因。
 
+OA 详情必须优先从 OA projection / OA 只读适配层读取，不允许只用关联关系 metadata 拼接完整表单。支付申请类详情额外返回 `oa_print_layout`，用于前端按 OA 打印预览样式展示：
+
+```json
+{
+  "title": "打印选择",
+  "subtitle": "支付申请",
+  "detail_available": true,
+  "oa_print_layout": {
+    "form_title": "支付申请",
+    "download_label": "打印下载",
+    "fields": [
+      { "label": "申请人", "value": "杨丽萍" },
+      { "label": "申请日期", "value": "2026-05-25" },
+      { "label": "金额", "value": "¥ 7680.00元（大写：柒仟陆佰捌拾元整）" }
+    ],
+    "approvals": [
+      { "title": "支付申请", "lines": ["杨丽萍发起流程申请", "2026-05-25 11:20:27", "杨丽萍"], "signature": "杨丽萍" }
+    ]
+  },
+  "sections": []
+}
+```
+
+`fields` 和 `approvals` 中只能放 OA projection 实际提供的字段或由其确定性派生的金额大写、发起节点等展示字段；缺失审批记录时不得伪造审批意见或签名。
+
 ## 规则
 
 ```text

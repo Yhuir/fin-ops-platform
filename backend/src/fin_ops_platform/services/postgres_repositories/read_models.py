@@ -5041,20 +5041,21 @@ def _workbench_group_row_filter_exists_sql(
         row_params: list[Any] = [pane]
         for column_key in sorted(pane_column_filters):
             values = pane_column_filters[column_key]
+            value_match_clauses: list[str] = []
             if pane == "bank" and column_key == "amount":
-                value_clauses = []
                 for value in values:
+                    value_clauses = []
                     value_clauses.append("r.column_values @> %s::jsonb")
                     row_params.append(json.dumps({"direction": value}, ensure_ascii=False))
                     value_clauses.append("r.column_values @> %s::jsonb")
                     row_params.append(json.dumps({"paymentAccount": value}, ensure_ascii=False))
-                row_clauses.append("(" + " or ".join(value_clauses) + ")")
+                    value_match_clauses.append("(" + " or ".join(value_clauses) + ")")
             else:
-                value_clauses = []
                 for value in values:
-                    value_clauses.append("r.column_values @> %s::jsonb")
+                    value_match_clauses.append("r.column_values @> %s::jsonb")
                     row_params.append(json.dumps({column_key: value}, ensure_ascii=False))
-                row_clauses.append("(" + " or ".join(value_clauses) + ")")
+            if value_match_clauses:
+                row_clauses.append("(" + " and ".join(value_match_clauses) + ")")
         if pane_time_filter:
             start_date, end_date = _workbench_time_filter_date_range(pane_time_filter)
             if start_date and end_date:
@@ -5329,10 +5330,12 @@ def _workbench_payload_row_matches_preview_criteria(
                 column_values.get("direction"),
                 column_values.get("paymentAccount"),
             ]
+            if not all(value in row_values for value in selected_values):
+                return False
         else:
-            row_values = [column_values.get(column_key)]
-        if not any(value in selected_values for value in row_values if value):
-            return False
+            current_value = column_values.get(column_key)
+            if not all(value == current_value for value in selected_values):
+                return False
 
     pane_time_filter = time_filters.get(pane)
     if pane_time_filter:

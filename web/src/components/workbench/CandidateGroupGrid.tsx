@@ -11,6 +11,7 @@ import {
 } from "react";
 
 import {
+  buildWorkbenchGroupDisplaySegments,
   collectWorkbenchFilterOptions,
   collectWorkbenchTimeFilterYears,
   createEmptyWorkbenchZoneDisplayState,
@@ -81,22 +82,6 @@ type CandidateGroupGridProps = {
   canMutateData: boolean;
 };
 
-type PreviewTruncationSummary = {
-  title: string;
-  visible: number;
-  total: number;
-};
-
-function buildPreviewDetailLabel(truncatedPanes: PreviewTruncationSummary[]) {
-  if (truncatedPanes.length === 0) {
-    return "";
-  }
-  const summary = truncatedPanes
-    .map((pane) => `${pane.title}当前显示 ${pane.visible} 条，共 ${pane.total} 条`)
-    .join("，");
-  return `显示完整组：${summary}`;
-}
-
 function CandidateGroupGrid({
   zoneId,
   panes,
@@ -128,7 +113,8 @@ function CandidateGroupGrid({
   const [openFilterMenu, setOpenFilterMenu] = useState<{ paneId: WorkbenchRecordType; columnKey: string } | null>(null);
   const [expandedCollapsedGroups, setExpandedCollapsedGroups] = useState<Set<string>>(() => new Set());
   const [loadingCollapsedGroups, setLoadingCollapsedGroups] = useState<Set<string>>(() => new Set());
-  const [loadingPreviewGroups, setLoadingPreviewGroups] = useState<Set<string>>(() => new Set());
+  const pendingPreviewDetailRequestsRef = useRef<Set<string>>(new Set());
+  const failedPreviewDetailRequestsRef = useRef<Set<string>>(new Set());
   const syncInFlightRef = useRef<Record<WorkbenchRecordType, boolean>>({
     oa: false,
     bank: false,
@@ -161,6 +147,31 @@ function CandidateGroupGrid({
       });
     });
   }, [groups, panes]);
+
+  useEffect(() => {
+    if (!onEnsureGroupDetail) {
+      return;
+    }
+    groups.forEach((group) => {
+      const requestKey = buildPreviewDetailRequestKey(zoneId, group, panes);
+      if (!requestKey) {
+        clearPreviewDetailRequestKeys(zoneId, group.id, pendingPreviewDetailRequestsRef.current);
+        clearPreviewDetailRequestKeys(zoneId, group.id, failedPreviewDetailRequestsRef.current);
+        return;
+      }
+      if (pendingPreviewDetailRequestsRef.current.has(requestKey) || failedPreviewDetailRequestsRef.current.has(requestKey)) {
+        return;
+      }
+      pendingPreviewDetailRequestsRef.current.add(requestKey);
+      void onEnsureGroupDetail(zoneId, group.id)
+        .catch(() => {
+          failedPreviewDetailRequestsRef.current.add(requestKey);
+        })
+        .finally(() => {
+          pendingPreviewDetailRequestsRef.current.delete(requestKey);
+        });
+    });
+  }, [groups, onEnsureGroupDetail, panes, zoneId]);
 
   const handleSyncScroll = (paneId: WorkbenchRecordType, element: HTMLDivElement) => {
     scrollPositionsRef.current[paneId] = element.scrollLeft;
@@ -276,22 +287,6 @@ function CandidateGroupGrid({
     setCollapsedGroupExpanded(group.id, paneId, true);
   }, [onEnsureGroupDetail, setCollapsedGroupExpanded, zoneId]);
 
-  const loadCompletePreviewGroup = useCallback(async (groupId: string) => {
-    if (!onEnsureGroupDetail) {
-      return;
-    }
-    setLoadingPreviewGroups((current) => new Set(current).add(groupId));
-    try {
-      await onEnsureGroupDetail(zoneId, groupId);
-    } finally {
-      setLoadingPreviewGroups((current) => {
-        const next = new Set(current);
-        next.delete(groupId);
-        return next;
-      });
-    }
-  }, [onEnsureGroupDetail, zoneId]);
-
   const clearDragClasses = useCallback(() => {
     const current = dragStateRef.current;
     current?.activeElement?.classList.remove("column-drag-active");
@@ -401,35 +396,142 @@ function CandidateGroupGrid({
             </button>,
           ];
         });
-        const previewTruncatedPanes = collapseControls.length > 0 ? [] : panes.flatMap((pane) => {
-          const paneId = pane.id as WorkbenchRecordType;
-          const visible = group.rows[paneId]?.length ?? 0;
-          const total = group.rowCounts?.[paneId] ?? visible;
-          return total > visible ? [{ title: pane.title, visible, total }] : [];
-        });
-        const previewDetailLabel = buildPreviewDetailLabel(previewTruncatedPanes);
-        const isLoadingPreviewGroup = loadingPreviewGroups.has(group.id);
-        const previewDetailControl = previewDetailLabel && onEnsureGroupDetail ? (
-          <button
-            aria-label={previewDetailLabel}
-            className="row-action-btn candidate-group-detail-control"
-            disabled={isLoadingPreviewGroup}
-            type="button"
-            onClick={() => void loadCompletePreviewGroup(group.id)}
-          >
-            {isLoadingPreviewGroup ? "加载中" : previewDetailLabel}
-          </button>
-        ) : null;
+        const displaySegments = buildWorkbenchGroupDisplaySegments(group);
+        const segmentCount = displaySegments?.length ?? 0;
+
+        if (displaySegments) {
+          return (
+            <div
+              key={group.id}
+              className={`candidate-group-row candidate-group-row-sheet candidate-group-row-segmented candidate-group-row-tone-${index % 4}`}
+              data-testid={`candidate-group-${zoneId}-${group.id}`}
+              style={{ gridTemplateColumns: rowTemplateColumns }}
+            >
+              {collapseControls}
+              {displaySegments.map((segment, segmentIndex) => (
+                <div
+                  key={`${group.id}-segment-${segment.id}`}
+                  className="candidate-group-segment-row"
+                  data-testid={`candidate-group-segment-${zoneId}-${group.id}-${segment.id}`}
+                >
+                  {panes.flatMap((pane, paneIndex) => {
+                    const paneId = pane.id as WorkbenchRecordType;
+                    if (!isSourceSegmentedPane(paneId)) {
+                      return [];
+                    }
+                    return [
+                      <div
+                        key={`${group.id}-${segment.id}-${pane.id}`}
+                        className={`candidate-group-pane-slot candidate-group-pane-slot-sheet candidate-group-segment-pane-slot${segmentIndex === 0 ? " first" : ""}`}
+                        style={{
+                          gridColumn: paneIndex * 2 + 1,
+                          gridRow: segmentIndex + 1,
+                        }}
+                      >
+                        <CandidateGroupCell
+                          actionMode={actionMode}
+                          columnGridStyle={paneGridStyleByPane[paneId]}
+                          columns={columnsByPane[paneId]}
+                          getRowState={getRowState}
+                          highlightedRowId={highlightedRowId}
+                          searchQuery={displayState.searchQueryByPane[paneId]}
+                          onOpenDetail={onOpenDetail}
+                          onRowAction={onRowAction}
+                          onSelectRow={onSelectRow}
+                          paneId={paneId}
+                          records={segment.rows[paneId]}
+                          scrollPaneId={paneId}
+                          scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${segment.id}-${pane.id}`}
+                          showWorkflowActions={zoneId !== "open"}
+                          canMutateData={canMutateData}
+                          zoneId={zoneId}
+                        />
+                      </div>,
+                    ];
+                  })}
+                </div>
+              ))}
+              {panes.flatMap((pane, paneIndex) => {
+                const paneId = pane.id as WorkbenchRecordType;
+                if (isSourceSegmentedPane(paneId)) {
+                  return [];
+                }
+                return [
+                  <div
+                    key={`${group.id}-${pane.id}`}
+                    className="candidate-group-pane-slot candidate-group-pane-slot-sheet"
+                    style={{
+                      gridColumn: paneIndex * 2 + 1,
+                      gridRow: `1 / span ${segmentCount}`,
+                    }}
+                  >
+                    <CandidateGroupCell
+                      actionMode={actionMode}
+                      columnGridStyle={paneGridStyleByPane[paneId]}
+                      columns={columnsByPane[paneId]}
+                      getRowState={getRowState}
+                      highlightedRowId={highlightedRowId}
+                      searchQuery={displayState.searchQueryByPane[paneId]}
+                      onOpenDetail={onOpenDetail}
+                      onRowAction={onRowAction}
+                      onSelectRow={onSelectRow}
+                      paneId={paneId}
+                      records={group.rows[paneId]}
+                      scrollPaneId={paneId}
+                      scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${pane.id}`}
+                      showWorkflowActions={zoneId !== "open"}
+                      canMutateData={canMutateData}
+                      zoneId={zoneId}
+                    />
+                  </div>,
+                ];
+              })}
+              {panes.slice(0, -1).map((pane, paneIndex) => (
+                <div
+                  key={`${group.id}-${pane.id}-divider`}
+                  className="candidate-pane-grid-divider"
+                  aria-hidden="true"
+                  style={{
+                    gridColumn: paneIndex * 2 + 2,
+                    gridRow: `1 / span ${segmentCount}`,
+                  }}
+                />
+              ))}
+              {hasTrailingColumns ? (
+                <div
+                  className="candidate-pane-grid-divider"
+                  aria-hidden="true"
+                  style={{
+                    gridColumn: panes.length * 2,
+                    gridRow: `1 / span ${segmentCount}`,
+                  }}
+                />
+              ) : null}
+              {trailingColumns.map((column, columnIndex) => (
+                <div
+                  key={`${group.id}-trailing-${column.key}`}
+                  className={`candidate-group-trailing-cell${column.className ? ` ${column.className}` : ""}`}
+                  role="cell"
+                  style={{
+                    gridColumn: panes.length * 2 + columnIndex + 1,
+                    gridRow: `1 / span ${segmentCount}`,
+                  }}
+                >
+                  {column.renderGroup(group)}
+                </div>
+              ))}
+            </div>
+          );
+        }
 
         return (
           <div
             key={group.id}
-            className={`candidate-group-row candidate-group-row-sheet candidate-group-row-tone-${index % 4}${previewDetailControl ? " candidate-group-row-has-detail-control" : ""}`}
+            className={`candidate-group-row candidate-group-row-sheet candidate-group-row-tone-${index % 4}`}
             data-testid={`candidate-group-${zoneId}-${group.id}`}
             style={{ gridTemplateColumns: rowTemplateColumns }}
           >
             {collapseControls}
-            {previewDetailControl}
             {panes.map((pane, paneIndex) => {
               const paneId = pane.id as WorkbenchRecordType;
               const collapsedRows = group.collapsedRows?.[paneId] ?? [];
@@ -495,13 +597,12 @@ function CandidateGroupGrid({
     actionMode,
     canMutateData,
     columnsByPane,
+    displayState,
     expandedCollapsedGroups,
     getRowState,
     groups,
     highlightedRowId,
     loadingCollapsedGroups,
-    loadingPreviewGroups,
-    loadCompletePreviewGroup,
     onEnsureGroupDetail,
     onOpenDetail,
     onRowAction,
@@ -686,6 +787,35 @@ function CandidateGroupGrid({
 }
 
 export default memo(CandidateGroupGrid);
+
+function isSourceSegmentedPane(paneId: WorkbenchRecordType) {
+  return paneId === "oa" || paneId === "invoice";
+}
+
+function buildPreviewDetailRequestKey(zoneId: "paired" | "open", group: WorkbenchCandidateGroup, panes: WorkbenchPane[]) {
+  if (group.displayMode === "collapsed_summary") {
+    return null;
+  }
+  const truncatedPaneSignatures = panes.flatMap((pane) => {
+    const paneId = pane.id as WorkbenchRecordType;
+    const visible = group.rows[paneId]?.length ?? 0;
+    const total = group.rowCounts?.[paneId] ?? visible;
+    return total > visible ? [`${paneId}:${visible}/${total}`] : [];
+  });
+  if (truncatedPaneSignatures.length === 0) {
+    return null;
+  }
+  return `${zoneId}:${group.id}:${truncatedPaneSignatures.join("|")}`;
+}
+
+function clearPreviewDetailRequestKeys(zoneId: "paired" | "open", groupId: string, requestKeys: Set<string>) {
+  const prefix = `${zoneId}:${groupId}:`;
+  requestKeys.forEach((requestKey) => {
+    if (requestKey.startsWith(prefix)) {
+      requestKeys.delete(requestKey);
+    }
+  });
+}
 
 function buildPaneSortActionLabel(paneId: "oa" | "bank" | "invoice", currentDirection: "asc" | "desc" | null) {
   const paneTitle = paneId === "oa" ? "OA" : paneId === "bank" ? "银行流水" : "进销项发票";

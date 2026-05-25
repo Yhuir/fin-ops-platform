@@ -217,6 +217,36 @@ function installPendingInvoiceFetch() {
         sections: [{ title: "发票字段", fields: [{ label: "销方", value: "分期供应商" }, { label: "发票代码", value: "CODE-001" }] }],
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
+    if (url.pathname === "/api/pending-invoices/oa/oa-001/detail") {
+      return new Response(JSON.stringify({
+        title: "打印选择",
+        subtitle: "支付申请",
+        detail_available: true,
+        oa_print_layout: {
+          form_title: "支付申请",
+          download_label: "打印下载",
+          fields: [
+            { label: "申请人", value: "李四" },
+            { label: "申请日期", value: "2026-05-25" },
+            { label: "申请类型", value: "设备贷款及材料费" },
+            { label: "支付方式", value: "银行转账" },
+            { label: "发票种类", value: "增值税专用发票" },
+            { label: "项目名称", value: "建设项目" },
+            { label: "金额", value: "¥ 7680.00元（大写：柒仟陆佰捌拾元整）" },
+            { label: "收款方", value: "重庆维诺安工程技术有限公司" },
+            { label: "开户行", value: "交通银行股份有限公司重庆人民路支行" },
+            { label: "开户行账号", value: "500500037015003460594" },
+            { label: "申请事由", value: "压力变送器尾款+底座、堵头4件" },
+            { label: "电子签名", value: "李四" },
+          ],
+          approvals: [
+            { title: "支付申请", lines: ["李四发起流程申请", "2026-05-25 11:20:27", "李四"], signature: "李四" },
+            { title: "项目负责人审核", lines: ["同意", "2026-05-25 14:51:04", "刘涵静"], signature: "刘涵静" },
+          ],
+        },
+        sections: [],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
     if (url.pathname === "/api/pending-invoices/invoice-candidates") {
       return new Response(JSON.stringify({
         rows: [{
@@ -329,8 +359,10 @@ describe("Pending invoices page", () => {
     expect(within(page).queryByRole("grid")).not.toBeInTheDocument();
     expect(within(page).getByRole("table", { name: "待找发票四区表" })).toBeInTheDocument();
     expect(within(page).getByTestId("pending-invoices-table-shell")).toHaveStyle({ overflowX: "hidden" });
+    expect(within(page).getByTestId("pending-invoices-table-shell")).toHaveStyle({ overflowY: "auto" });
 
     expect(within(page).getByRole("columnheader", { name: "支出流水" })).toBeInTheDocument();
+    expect(within(page).getByRole("columnheader", { name: "支出流水" })).toHaveStyle({ position: "sticky", top: "0px" });
     expect(within(page).getByRole("columnheader", { name: "发票获取状态" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "进项发票" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "OA" })).toBeInTheDocument();
@@ -384,6 +416,15 @@ describe("Pending invoices page", () => {
     expect(await screen.findByRole("heading", { name: "DIG-001" })).toBeInTheDocument();
     expect(screen.getByText("发票字段")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
+
+    await user.click(within(relationRow).getByRole("button", { name: /OA详情 李四/ }));
+    const oaDialog = await screen.findByRole("dialog", { name: "打印选择" });
+    expect(within(oaDialog).getAllByText("支付申请").length).toBeGreaterThan(0);
+    expect(within(oaDialog).getByRole("button", { name: "打印下载" })).toBeInTheDocument();
+    expect(within(oaDialog).getByText("申请人")).toBeInTheDocument();
+    expect(within(oaDialog).getAllByText("李四").length).toBeGreaterThan(0);
+    expect(within(oaDialog).getByText("项目负责人审核")).toBeInTheDocument();
+    await user.click(within(oaDialog).getByRole("button", { name: "关闭详情抽屉" }));
 
     await user.click(within(page).getByRole("button", { name: "待找发票规则设置" }));
     expect(await screen.findByRole("heading", { name: "待找发票规则设置" })).toBeInTheDocument();

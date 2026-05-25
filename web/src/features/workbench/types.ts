@@ -87,6 +87,7 @@ export type WorkbenchRecord = {
   exceptionCaseId?: string;
   recordType: WorkbenchRecordType;
   sourceKind?: WorkbenchSourceKind;
+  sourceOaId?: string;
   label: string;
   status: string;
   statusCode: string;

@@ -12,6 +12,7 @@ from fin_ops_platform.domain.enums import BatchType, ImportDecision, InvoiceType
 from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
@@ -80,12 +81,14 @@ class PendingInvoiceQueryService:
         category_service: BankTransactionCategoryService,
         app_settings_provider: Callable[[], dict[str, Any]],
         effective_category_provider: Any | None = None,
+        oa_projection: Any | None = None,
     ) -> None:
         self._import_service = import_service
         self._pair_relation_service = pair_relation_service
         self._category_service = category_service
         self._app_settings_provider = app_settings_provider
         self._effective_category_provider = effective_category_provider
+        self._oa_projection = oa_projection
 
     def clear_cache(self) -> None:
         return None
@@ -558,6 +561,8 @@ class PendingInvoiceQueryService:
     def _oa_payload_from_relations(self, relations: list[dict[str, Any]]) -> dict[str, Any]:
         summaries: list[dict[str, Any]] = []
         seen_ids: set[str] = set()
+        oa_ids = self._oa_ids_from_relations(relations)
+        oa_records = self._oa_records_by_id(oa_ids)
         for relation in relations:
             row_ids = [str(row_id) for row_id in list(relation.get("row_ids") or [])]
             row_types = [str(row_type) for row_type in list(relation.get("row_types") or [])]
@@ -569,13 +574,16 @@ class PendingInvoiceQueryService:
                 if not oa_id or oa_id in seen_ids:
                     continue
                 seen_ids.add(oa_id)
+                record = oa_records.get(oa_id)
                 summaries.append(
                     {
                         "id": oa_id,
-                        "applicant": self._metadata_text(metadata, "oa_applicant", "applicant", "applicant_name") or "—",
-                        "project_name": self._metadata_text(metadata, "project_name", "project", "projectName") or "",
-                        "form_no": self._metadata_text(metadata, "form_no", "form_id", "oa_form_id") or "",
-                        "detail_available": True,
+                        "applicant": record.applicant if record is not None else self._metadata_text(metadata, "oa_applicant", "applicant", "applicant_name") or "—",
+                        "application_type": record.apply_type if record is not None else self._metadata_text(metadata, "application_type", "apply_type", "form_type"),
+                        "project_name": (record.project_name_display or record.project_name) if record is not None else self._metadata_text(metadata, "project_name", "project", "projectName") or "",
+                        "status": record.section if record is not None else self._metadata_text(metadata, "status", "flow_status", "section"),
+                        "form_no": record.case_id or self._metadata_text(metadata, "form_no", "form_id", "oa_form_id") or "",
+                        "detail_available": record is not None,
                         "relation_case_id": str(relation.get("case_id") or ""),
                     }
                 )
@@ -589,6 +597,42 @@ class PendingInvoiceQueryService:
             "has_multiple": len(summaries) > 1,
             "detail_available": any(bool(summary.get("detail_available")) for summary in summaries),
             "summaries": summaries,
+        }
+
+    @staticmethod
+    def _oa_ids_from_relations(relations: list[dict[str, Any]]) -> list[str]:
+        oa_ids: list[str] = []
+        seen: set[str] = set()
+        for relation in relations:
+            row_ids = [str(row_id) for row_id in list(relation.get("row_ids") or [])]
+            row_types = [str(row_type) for row_type in list(relation.get("row_types") or [])]
+            for row_id, row_type in zip(row_ids, row_types, strict=False):
+                normalized = row_id.strip()
+                if row_type == "oa" and normalized and normalized not in seen:
+                    seen.add(normalized)
+                    oa_ids.append(normalized)
+        return oa_ids
+
+    def _oa_records_by_id(self, oa_ids: list[str]) -> dict[str, OAApplicationRecord]:
+        normalized_ids = [str(oa_id).strip() for oa_id in list(oa_ids or []) if str(oa_id).strip()]
+        if not normalized_ids or self._oa_projection is None:
+            return {}
+        list_by_ids = getattr(self._oa_projection, "list_application_records_by_row_ids", None)
+        records: list[Any]
+        if callable(list_by_ids):
+            records = list(list_by_ids(normalized_ids) or [])
+        else:
+            list_all = getattr(self._oa_projection, "list_all_application_records", None)
+            records = list(list_all() or []) if callable(list_all) else []
+        records_by_id = {
+            record.id: record
+            for record in records
+            if isinstance(record, OAApplicationRecord)
+        }
+        return {
+            oa_id: records_by_id[oa_id]
+            for oa_id in normalized_ids
+            if oa_id in records_by_id
         }
 
     @staticmethod
@@ -972,24 +1016,128 @@ class PendingInvoiceQueryService:
 
     def oa_detail(self, oa_id: str) -> dict[str, Any]:
         normalized_oa_id = str(oa_id or "").strip()
-        for relation in self._pair_relation_service.active_relations_for_row_ids([normalized_oa_id]):
+        active_relations = self._pair_relation_service.active_relations_for_row_ids([normalized_oa_id])
+        records = self._oa_records_by_id([normalized_oa_id])
+        record = records.get(normalized_oa_id)
+        if record is not None:
+            relation_case_id = str((active_relations[0] if active_relations else {}).get("case_id") or "")
+            return self._oa_detail_from_record(record, relation_case_id=relation_case_id)
+        for relation in active_relations:
             metadata = self._first_relation_metadata(relation)
             return {
-                "title": self._metadata_text(metadata, "applicant", "oa_applicant", "applicant_name") or normalized_oa_id,
+                "title": normalized_oa_id,
                 "subtitle": self._metadata_text(metadata, "project_name", "project", "projectName"),
                 "oa_id": normalized_oa_id,
-                "detail_available": True,
+                "detail_available": False,
+                "unavailable_reason": "OA 投影尚未同步，不能展示完整支付申请。",
                 "relation_case_id": str(relation.get("case_id") or ""),
                 "detail_fields": metadata,
-                "sections": [{"title": "OA", "fields": _detail_fields(metadata)}],
+                "sections": [],
             }
         return {
             "title": normalized_oa_id,
             "oa_id": normalized_oa_id,
             "detail_available": False,
-            "unavailable_reason": "OA detail projection is unavailable.",
+            "unavailable_reason": "OA 投影尚未同步，不能展示完整支付申请。",
             "reason": "OA detail projection is unavailable.",
         }
+
+    def _oa_detail_from_record(self, record: OAApplicationRecord, *, relation_case_id: str) -> dict[str, Any]:
+        detail = {
+            "oa_id": record.id,
+            "applicant": record.applicant,
+            "application_type": record.apply_type,
+            "project_name": record.project_name_display or record.project_name,
+            "workflow_no": record.case_id or "",
+            "status": record.section,
+            "amount": _decimal_to_str(_decimal_from_text(record.amount)),
+            "month": record.month,
+            "counterparty_name": record.counterparty_name,
+            "reason": record.reason,
+            "expense_type": record.expense_type or "",
+            "expense_content": record.expense_content or record.reason,
+            **{str(key): value for key, value in dict(record.detail_fields or {}).items() if value not in (None, "")},
+        }
+        return {
+            "title": "打印选择",
+            "subtitle": record.apply_type or "OA详情",
+            "oa_id": record.id,
+            "detail_available": True,
+            "relation_case_id": relation_case_id,
+            "detail_fields": detail,
+            "oa_print_layout": self._oa_print_layout(record),
+            "sections": [{"title": "OA 原始字段", "fields": _detail_fields(detail)}],
+        }
+
+    def _oa_print_layout(self, record: OAApplicationRecord) -> dict[str, Any]:
+        detail_fields = dict(record.detail_fields or {})
+        application_date = self._detail_text(detail_fields, "申请日期", "applicationDate", "ApplicationDate")
+        payment_method = self._detail_text(detail_fields, "付款方式", "支付方式", "paymentMethod")
+        invoice_kind = self._detail_text(detail_fields, "票据类型", "发票种类", "paymentProof")
+        bank_name = self._detail_text(detail_fields, "开户行", "bank")
+        payee_account = self._detail_text(detail_fields, "收款账号", "开户行账号", "payeeAccount")
+        expense_type = record.expense_type or self._detail_text(detail_fields, "费用类型", "申请类型", "expenseType")
+        amount_text = _decimal_to_str(_decimal_from_text(record.amount))
+        fields = [
+            {"label": "申请人", "value": record.applicant},
+            {"label": "申请日期", "value": application_date},
+            {"label": "申请类型", "value": expense_type},
+            {"label": "支付方式", "value": payment_method},
+            {"label": "发票种类", "value": invoice_kind},
+            {"label": "项目名称", "value": record.project_name_display or record.project_name},
+            {"label": "金额", "value": f"¥ {amount_text}元（大写：{_uppercase_rmb_without_currency(amount_text)}）"},
+            {"label": "收款方", "value": record.counterparty_name},
+            {"label": "开户行", "value": bank_name},
+            {"label": "开户行账号", "value": payee_account},
+            {"label": "申请事由", "value": record.reason},
+            {"label": "电子签名", "value": self._detail_text(detail_fields, "电子签名", "signature") or record.applicant},
+        ]
+        return {
+            "form_title": record.apply_type or "OA详情",
+            "download_label": "打印下载",
+            "fields": fields,
+            "approvals": self._oa_approval_steps(record, application_date=application_date),
+        }
+
+    def _oa_approval_steps(self, record: OAApplicationRecord, *, application_date: str) -> list[dict[str, Any]]:
+        detail_fields = dict(record.detail_fields or {})
+        submitted_at = self._detail_text(detail_fields, "提交时间", "发起时间", "申请提交时间") or application_date
+        steps = [
+            {
+                "title": record.apply_type or "支付申请",
+                "lines": [line for line in (f"{record.applicant}发起流程申请", submitted_at, record.applicant) if line],
+                "signature": record.applicant,
+            }
+        ]
+        approval_rows = detail_fields.get("审批记录") or detail_fields.get("审批意见及评论") or detail_fields.get("approval_records")
+        if isinstance(approval_rows, list):
+            for row in approval_rows:
+                if not isinstance(row, dict):
+                    continue
+                title = self._detail_text(row, "title", "节点", "步骤", "name") or "审批"
+                opinion = self._detail_text(row, "opinion", "意见", "审批意见", "comment")
+                acted_at = self._detail_text(row, "acted_at", "审批时间", "time", "created_at")
+                actor = self._detail_text(row, "actor", "审批人", "user", "name")
+                signature = self._detail_text(row, "signature", "签名") or actor
+                steps.append(
+                    {
+                        "title": title,
+                        "lines": [line for line in (opinion, acted_at, actor) if line],
+                        "signature": signature,
+                    }
+                )
+        return steps
+
+    @staticmethod
+    def _detail_text(values: dict[str, Any], *keys: str) -> str:
+        for key in keys:
+            value = values.get(key)
+            if isinstance(value, (list, dict)):
+                continue
+            text = str(value or "").strip()
+            if text:
+                return text
+        return ""
 
     def export_preview(self, **kwargs: Any) -> dict[str, Any]:
         rows = self._all_rows_for_export(**kwargs)
@@ -1898,6 +2046,63 @@ def _decimal_to_str(value: Decimal | None) -> str:
     if value is None:
         return "0.00"
     return str(Decimal(value).quantize(Decimal("0.01")))
+
+
+def _uppercase_rmb_without_currency(value: Any) -> str:
+    amount = abs(_decimal_from_text(value))
+    integer_text, fraction_text = f"{amount:.2f}".split(".")
+    units = ["", "拾", "佰", "仟"]
+    section_units = ["", "万", "亿", "兆"]
+    digits = "零壹贰叁肆伍陆柒捌玖"
+
+    def section_to_upper(section: int) -> str:
+        result = ""
+        zero_pending = False
+        for index in range(4):
+            digit = section % 10
+            if digit == 0:
+                if result:
+                    zero_pending = True
+            else:
+                prefix = "零" if zero_pending else ""
+                result = f"{digits[digit]}{units[index]}{prefix}{result}"
+                zero_pending = False
+            section //= 10
+        return result
+
+    integer = int(integer_text)
+    if integer == 0:
+        integer_upper = "零"
+    else:
+        sections: list[str] = []
+        section_index = 0
+        need_zero = False
+        while integer > 0:
+            section = integer % 10000
+            if section == 0:
+                if sections:
+                    need_zero = True
+            else:
+                section_text = section_to_upper(section) + section_units[section_index]
+                if need_zero:
+                    section_text = "零" + section_text
+                    need_zero = False
+                sections.insert(0, section_text)
+            integer //= 10000
+            section_index += 1
+        integer_upper = "".join(sections)
+
+    jiao = int(fraction_text[0])
+    fen = int(fraction_text[1])
+    if jiao == 0 and fen == 0:
+        fraction_upper = "整"
+    else:
+        fraction_upper = ""
+        if jiao:
+            fraction_upper += f"{digits[jiao]}角"
+        if fen:
+            fraction_upper += f"{digits[fen]}分"
+    return f"{integer_upper}元{fraction_upper}"
 
 
 def _reverse_date_key(value: Any) -> str:
