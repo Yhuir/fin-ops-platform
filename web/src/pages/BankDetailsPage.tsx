@@ -3,6 +3,8 @@ import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import Divider from "@mui/material/Divider";
+import Menu from "@mui/material/Menu";
+import MenuItem from "@mui/material/MenuItem";
 import Popover from "@mui/material/Popover";
 import Paper from "@mui/material/Paper";
 import List from "@mui/material/List";
@@ -28,7 +30,7 @@ import dayjs from "dayjs";
 import StatePanel from "../components/common/StatePanel";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import BankCategoryTag from "../features/bankDetails/BankCategoryTag";
-import { fetchBankDetailAccounts, fetchBankDetailTransactions } from "../features/bankDetails/api";
+import { downloadBankDetailTransactionsExport, fetchBankDetailAccounts, fetchBankDetailTransactions } from "../features/bankDetails/api";
 import {
   FINANCE_DOMAIN_EVENTS,
   eventAffectedMonths,
@@ -37,6 +39,7 @@ import {
 import type {
   BankDateFilter,
   BankDetailAccount,
+  BankDetailExportMode,
   BankDetailTransaction,
   BankTransactionCategoryCode,
   BankTransactionCategoryCounts,
@@ -64,6 +67,13 @@ type BankDetailsTableToolbarProps = {
   visibleCategorySummary: CategorySummaryItem[];
   searchKeyword: string;
   onSearchKeywordChange: (value: string) => void;
+  exportMenuAnchorEl: HTMLElement | null;
+  exportFeedback: string | null;
+  isExporting: boolean;
+  canExportCurrentAccount: boolean;
+  onOpenExportMenu: (event: MouseEvent<HTMLElement>) => void;
+  onCloseExportMenu: () => void;
+  onExport: (mode: BankDetailExportMode) => void;
 };
 
 function formatDate(date: Date) {
@@ -223,7 +233,15 @@ function BankDetailsTableToolbar({
   visibleCategorySummary = [],
   searchKeyword = "",
   onSearchKeywordChange = () => undefined,
+  exportMenuAnchorEl = null,
+  exportFeedback = null,
+  isExporting = false,
+  canExportCurrentAccount = false,
+  onOpenExportMenu = () => undefined,
+  onCloseExportMenu = () => undefined,
+  onExport = () => undefined,
 }: Partial<BankDetailsTableToolbarProps>) {
+  const exportMenuOpen = Boolean(exportMenuAnchorEl);
   return (
     <Box className="bank-grid-toolbar">
       <Stack className="bank-grid-toolbar-content" spacing={1}>
@@ -240,6 +258,33 @@ function BankDetailsTableToolbar({
           ))}
         </Stack>
         <Stack className="bank-grid-toolbar-actions" direction="row" spacing={0.5} alignItems="center">
+          {exportFeedback ? (
+            <Typography className="bank-export-feedback" color="text.secondary" variant="caption">
+              {exportFeedback}
+            </Typography>
+          ) : null}
+          <Button
+            aria-controls={exportMenuOpen ? "bank-detail-export-menu" : undefined}
+            aria-expanded={exportMenuOpen ? "true" : undefined}
+            aria-haspopup="menu"
+            className="bank-export-button"
+            disabled={isExporting}
+            onClick={onOpenExportMenu}
+            size="small"
+            variant="outlined"
+          >
+            {isExporting ? "导出中" : "导出"}
+          </Button>
+          <Menu
+            id="bank-detail-export-menu"
+            anchorEl={exportMenuAnchorEl}
+            open={exportMenuOpen}
+            onClose={onCloseExportMenu}
+            MenuListProps={{ "aria-label": "导出银行明细" }}
+          >
+            <MenuItem onClick={() => onExport("all")} disabled={isExporting}>导出全部银行</MenuItem>
+            <MenuItem onClick={() => onExport("account")} disabled={isExporting || !canExportCurrentAccount}>导出当前账户</MenuItem>
+          </Menu>
           <TextField
             className="bank-grid-search-field"
             size="small"
@@ -341,6 +386,9 @@ export default function BankDetailsPage() {
   const [categoryOptions, setCategoryOptions] = useState<BankTransactionTagDefinition[]>([]);
   const tagVersionRef = useRef<number | null>(readPersistedTagVersion());
   const [dateFilterAnchorEl, setDateFilterAnchorEl] = useState<HTMLElement | null>(null);
+  const [exportMenuAnchorEl, setExportMenuAnchorEl] = useState<HTMLElement | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportFeedback, setExportFeedback] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
 
   useEffect(() => {
@@ -555,6 +603,52 @@ export default function BankDetailsPage() {
     setDateFilterAnchorEl(null);
   };
 
+  const openExportMenu = (event: MouseEvent<HTMLElement>) => {
+    setExportMenuAnchorEl(event.currentTarget);
+  };
+
+  const closeExportMenu = () => {
+    setExportMenuAnchorEl(null);
+  };
+
+  const handleExport = (mode: BankDetailExportMode) => {
+    closeExportMenu();
+    const accountKey = selectedAccountKey === ALL_ACCOUNTS_KEY ? null : selectedAccountKey;
+    if (mode === "account" && !accountKey) {
+      setExportFeedback("请选择具体银行账户");
+      return;
+    }
+    setIsExporting(true);
+    setExportFeedback(null);
+    downloadBankDetailTransactionsExport({
+      mode,
+      accountKey,
+      dateFrom: dateFilter.dateFrom,
+      dateTo: dateFilter.dateTo,
+      keyword: searchKeyword,
+    })
+      .then(({ blob, fileName }) => {
+        const objectUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = objectUrl;
+        link.download = fileName;
+        link.rel = "noopener";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(objectUrl);
+        setExportFeedback("已开始下载");
+      })
+      .catch((caught) => {
+        if (!isAbortLikeError(caught)) {
+          setExportFeedback(caught instanceof Error ? caught.message : "银行明细导出失败。");
+        }
+      })
+      .finally(() => {
+        setIsExporting(false);
+      });
+  };
+
   const handleMonthChange = (value: string) => {
     if (!value) {
       setMonthValue(value);
@@ -728,6 +822,13 @@ export default function BankDetailsPage() {
                 visibleCategorySummary={visibleCategorySummary}
                 searchKeyword={searchInput}
                 onSearchKeywordChange={handleSearchKeywordChange}
+                exportMenuAnchorEl={exportMenuAnchorEl}
+                exportFeedback={exportFeedback}
+                isExporting={isExporting}
+                canExportCurrentAccount={!isAllAccountsSelected}
+                onOpenExportMenu={openExportMenu}
+                onCloseExportMenu={closeExportMenu}
+                onExport={handleExport}
               />
               <TableContainer className="bank-transaction-table-container">
                 <Table aria-label="交易流水" className="bank-transaction-table" size="small" stickyHeader>

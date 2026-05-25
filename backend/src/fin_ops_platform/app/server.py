@@ -52,6 +52,10 @@ from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
 from fin_ops_platform.services.bank_details_relation_tag_projection_service import (
     BankDetailsRelationTagProjectionService,
 )
+from fin_ops_platform.services.bank_details_export_service import (
+    BankDetailsExportError,
+    BankDetailsExportService,
+)
 from fin_ops_platform.services.bank_details_service import BankDetailsService
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_service import (
@@ -992,6 +996,8 @@ class Application:
                 date_from=query.get("date_from", [None])[0],
                 date_to=query.get("date_to", [None])[0],
             )
+        if method == "GET" and route_path == "/api/bank-details/transactions/export":
+            return self._handle_api_bank_details_transactions_export(query, headers)
         if method == "GET" and route_path == "/api/bank-details/transactions":
             return self._handle_api_bank_details_transactions(
                 account_key=query.get("account_key", [None])[0],
@@ -1534,6 +1540,9 @@ class Application:
                 "/api/workbench",
                 "/api/workbench/groups/detail",
                 "/api/search",
+                "/api/bank-details/accounts",
+                "/api/bank-details/transactions",
+                "/api/bank-details/transactions/export",
                 "/api/pending-invoices/rows",
                 "/api/pending-invoices/filter-options",
                 "/api/pending-invoices/rows/{transaction_id}/relation-detail",
@@ -7257,6 +7266,20 @@ class Application:
         self,
         headers: dict[str, str] | None,
     ) -> tuple[OARequestSession | None, Response | None]:
+        return self._resolve_fin_ops_read_session(headers, denied_message="当前账户没有访问待找发票页面权限。")
+
+    def _resolve_bank_details_read_session(
+        self,
+        headers: dict[str, str] | None,
+    ) -> tuple[OARequestSession | None, Response | None]:
+        return self._resolve_fin_ops_read_session(headers, denied_message="当前账户没有访问银行明细页面权限。")
+
+    def _resolve_fin_ops_read_session(
+        self,
+        headers: dict[str, str] | None,
+        *,
+        denied_message: str,
+    ) -> tuple[OARequestSession | None, Response | None]:
         identity_service = getattr(self, "_oa_identity_service", None)
         access_control_service = getattr(self, "_access_control_service", None)
         if identity_service is None or access_control_service is None:
@@ -7295,7 +7318,7 @@ class Application:
         if not session.can_access_app:
             return None, self._json_response(
                 HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有访问待找发票页面权限。"},
+                {"error": "permission_denied", "message": denied_message},
             )
         return session, None
 
@@ -9884,6 +9907,121 @@ class Application:
                 {"error": "invalid_bank_details_request", "message": str(exc)},
             )
         return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_bank_details_transactions_export(
+        self,
+        query: dict[str, list[str]],
+        headers: dict[str, str] | None = None,
+    ) -> Response:
+        session, auth_error = self._resolve_bank_details_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+
+        class BankDetailReadModelRefreshing(RuntimeError):
+            def __init__(self, payload: dict[str, object]) -> None:
+                super().__init__("bank detail read model refreshing")
+                self.payload = payload
+
+        def load_accounts(*, date_from: str | None, date_to: str | None) -> dict[str, object]:
+            if self._requires_sql_read_model_runtime():
+                sql_payload = self._get_bank_detail_accounts_from_sql_read_model(date_from=date_from, date_to=date_to)
+                if sql_payload is not None:
+                    if sql_payload.get("read_model_status") == "refreshing":
+                        raise BankDetailReadModelRefreshing(sql_payload)
+                    return sql_payload
+            return self._bank_details_service.list_accounts(date_from=date_from, date_to=date_to)
+
+        def load_transactions(
+            *,
+            account_key: str | None,
+            date_from: str | None,
+            date_to: str | None,
+            keyword: str | None,
+            page: int,
+            page_size: int,
+        ) -> dict[str, object]:
+            if self._requires_sql_read_model_runtime():
+                sql_payload = self._get_bank_detail_transactions_from_sql_read_model(
+                    account_key=account_key,
+                    date_from=date_from,
+                    date_to=date_to,
+                    keyword=keyword,
+                    page=page,
+                    page_size=page_size,
+                )
+                if sql_payload is not None:
+                    if sql_payload.get("read_model_status") == "refreshing":
+                        raise BankDetailReadModelRefreshing(sql_payload)
+                    return sql_payload
+            return self._bank_details_service.list_transactions(
+                account_key=account_key,
+                date_from=date_from,
+                date_to=date_to,
+                keyword=keyword,
+                page=page,
+                page_size=page_size,
+            )
+
+        service = BankDetailsExportService(
+            transaction_page_loader=load_transactions,
+            account_loader=load_accounts,
+        )
+        mode = query.get("mode", ["all"])[0]
+        account_key = query.get("account_key", [None])[0]
+        date_from = query.get("date_from", [None])[0]
+        date_to = query.get("date_to", [None])[0]
+        keyword = query.get("keyword", [None])[0]
+        try:
+            result = service.export(
+                mode=mode,
+                account_key=account_key,
+                date_from=date_from,
+                date_to=date_to,
+                keyword=keyword,
+            )
+        except BankDetailReadModelRefreshing as exc:
+            return self._json_response(HTTPStatus.ACCEPTED, exc.payload)
+        except BankDetailsExportError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": exc.error_code, "message": str(exc)},
+            )
+        except ValueError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_bank_details_request", "message": str(exc)},
+            )
+
+        self._audit_service.record_action(
+            actor_id=str(session.identity.username or "bank_detail_export") if session is not None else "bank_detail_export",
+            action="bank_detail_export_downloaded",
+            entity_type="bank_detail_export",
+            entity_id=result.filename,
+            metadata={
+                "mode": str(mode or "all"),
+                "filters": {
+                    "account_key": account_key,
+                    "date_from": date_from,
+                    "date_to": date_to,
+                    "keyword": keyword,
+                },
+                "row_count": result.row_count,
+                "sheet_names": result.sheet_names,
+                "filename": result.filename,
+            },
+        )
+        return Response(
+            status_code=int(HTTPStatus.OK),
+            body=result.content,
+            headers={
+                "Content-Type": XLSX_MIME_TYPE,
+                "Content-Disposition": _build_content_disposition(result.filename),
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+                "Access-Control-Expose-Headers": "Content-Disposition",
+            },
+        )
 
     def _get_bank_detail_accounts_from_sql_read_model(self, *, date_from: str | None, date_to: str | None) -> dict[str, object] | None:
         repository = getattr(self, "_bank_detail_sql_read_repository", None)

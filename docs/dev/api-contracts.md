@@ -17,7 +17,7 @@
 - `/api/etc/business-batches*`：ETC 用户可见业务批次、补充导入、OA 草稿、OA 自动检测、人工兜底和撤销草稿。详细合同见 `etc-business-batches-api.md`。
 - `/api/tax-offset*`：税金抵扣和已认证导入。
 - `/api/cost-statistics*`：成本统计、下钻和导出。
-- `/api/bank-details*`：银行明细和分类。
+- `/api/bank-details*`：银行明细、自动分类展示和 XLSX 导出。
 - `/api/pending-invoices*`：待找发票列表、筛选、关系明细、候选进项发票、规则和导出。详细合同见 `pending-invoices-api.md`。
 - `/api/background-jobs*`：后台任务。
 - `/api/app-health*`：健康状态。

@@ -2,6 +2,8 @@ import type {
   BankDetailAccount,
   BankDetailAccountsRequest,
   BankDetailAccountsResponse,
+  BankDetailExportRequest,
+  BankDetailExportResponse,
   BankDetailTransaction,
   BankDetailTransactionsRequest,
   BankDetailTransactionsResponse,
@@ -10,7 +12,7 @@ import type {
   InvoiceRelationTag,
   OaRelationTag,
 } from "./types";
-import { ApiClientError, apiRequestJson } from "../apiClient";
+import { ApiClientError, apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
 import { mapBankTransactionTagDictionary } from "../pendingInvoices/api";
 
 type ApiBankDetailAccount = {
@@ -90,6 +92,9 @@ const BANK_DETAIL_API_ERROR_MESSAGES: Record<string, string> = {
   invalid_category_code: "该银行明细标签不存在，请刷新后重新选择。",
   archived_category_code: "该银行明细标签已停用，不能再用于新的银行明细。",
   category_version_conflict: "银行明细标签已更新，请刷新后重新保存。",
+  bank_detail_export_account_required: "请选择具体银行账户后再导出当前账户。",
+  bank_detail_export_account_not_found: "当前银行账户不存在或不在当前筛选范围内。",
+  bank_detail_export_row_limit_exceeded: "当前筛选命中流水过多，请缩小日期范围、选择具体银行或增加搜索条件后再导出。",
 };
 
 function resolveBankDetailApiErrorMessage(payload: unknown, rawText: string) {
@@ -119,6 +124,48 @@ async function requestJson<T>(url: string, init: RequestInit = {}) {
     }
     throw error;
   }
+}
+
+async function requestBlob(url: string, init: RequestInit = {}) {
+  const response = await apiFetch(url, init);
+  const contentType = response.headers.get("Content-Type") ?? "";
+  if (!response.ok) {
+    const rawText = await response.text();
+    let payload: unknown = null;
+    try {
+      payload = rawText.trim() ? JSON.parse(rawText) : null;
+    } catch {
+      payload = null;
+    }
+    throw new Error(resolveBankDetailApiErrorMessage(payload, rawText));
+  }
+  if (!contentType.toLowerCase().includes("spreadsheetml.sheet")) {
+    const rawText = await response.text();
+    if (looksLikeHtmlResponse(rawText, contentType)) {
+      throw new Error(`接口返回了 HTML 页面：${url}。说明请求没有进入后端导出 API，请确认后端服务和代理路径已正常配置。`);
+    }
+    throw new Error(contentType ? `接口 ${url} 返回的不是 Excel 文件：${contentType}` : `接口 ${url} 返回的不是 Excel 文件。`);
+  }
+  return {
+    blob: await response.blob(),
+    fileName: filenameFromContentDisposition(response.headers.get("Content-Disposition")) ?? "银行明细导出.xlsx",
+  };
+}
+
+function filenameFromContentDisposition(value: string | null) {
+  if (!value) {
+    return null;
+  }
+  const encodedMatch = /filename\*=UTF-8''([^;]+)/i.exec(value);
+  if (encodedMatch?.[1]) {
+    try {
+      return decodeURIComponent(encodedMatch[1]);
+    } catch {
+      return encodedMatch[1];
+    }
+  }
+  const plainMatch = /filename="([^"]+)"/i.exec(value);
+  return plainMatch?.[1] ?? null;
 }
 
 function mapAccount(account: ApiBankDetailAccount): BankDetailAccount {
@@ -285,4 +332,33 @@ export async function fetchBankDetailTransactions({
     readModelStatus: payload.read_model_status,
     cacheStatus: payload.cache_status ?? null,
   };
+}
+
+export async function downloadBankDetailTransactionsExport({
+  mode,
+  accountKey,
+  dateFrom,
+  dateTo,
+  keyword,
+  signal,
+}: BankDetailExportRequest): Promise<BankDetailExportResponse> {
+  const params = new URLSearchParams();
+  params.set("mode", mode);
+  if (mode === "account" && accountKey) {
+    params.set("account_key", accountKey);
+  }
+  if (dateFrom) {
+    params.set("date_from", dateFrom);
+  }
+  if (dateTo) {
+    params.set("date_to", dateTo);
+  }
+  const normalizedKeyword = keyword?.trim();
+  if (normalizedKeyword) {
+    params.set("keyword", normalizedKeyword);
+  }
+  return requestBlob(`/api/bank-details/transactions/export?${params.toString()}`, {
+    method: "GET",
+    signal,
+  });
 }

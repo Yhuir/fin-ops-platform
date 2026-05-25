@@ -98,6 +98,22 @@ export type BankDetailTransactionsRequest = {
   signal?: AbortSignal;
 };
 
+export type BankDetailExportMode = "all" | "account";
+
+export type BankDetailExportRequest = {
+  mode: BankDetailExportMode;
+  accountKey?: string | null;
+  dateFrom?: string | null;
+  dateTo?: string | null;
+  keyword?: string | null;
+  signal?: AbortSignal;
+};
+
+export type BankDetailExportResponse = {
+  blob: Blob;
+  fileName: string;
+};
+
 export type BankDatePreset =
   | "current_month"
   | "previous_month"
