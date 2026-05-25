@@ -41,6 +41,7 @@ EXPECTED_MIGRATIONS = [
     "0026_invoice_usage_collection_read_models.sql",
     "0027_invoice_usage_collection_runtime_grants.sql",
     "0028_workbench_reconciliation_decisions.sql",
+    "0029_workbench_reconciliation_runtime_grants.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -132,7 +133,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 29)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 30)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -339,6 +340,9 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "grant select, insert, update, delete on read_model.workbench_group_rows to fin_ops_migrator",
             "grant select, insert, update, delete on read_model.input_invoice_usage_rows to fin_ops_app_runtime",
             "grant select, insert, update, delete on read_model.output_invoice_collection_rows to fin_ops_app_runtime",
+            "grant select, insert, update, delete on read_model.workbench_reconciliation_decisions to fin_ops_app_runtime",
+            "grant select, insert, update on job.workbench_matching_dirty_scopes to fin_ops_app_runtime",
+            "grant select, insert, update on app.matching_runs to fin_ops_app_runtime",
             "create extension if not exists pg_stat_statements",
             "create table if not exists read_model.workbench_summary",
             "workbench_summary_scope_key_uidx",

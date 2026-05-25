@@ -272,7 +272,29 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("status = 'pending'", normalized_sql)
         self.assertIn("available_at <= now()", normalized_sql)
         self.assertIn("event_type = any(%s)", normalized_sql)
-        self.assertEqual(params, ("worker-1", "event-1", ["invoice.imported"]))
+        self.assertEqual(params, ("worker-1", "event-1", 300, ["invoice.imported"]))
+
+    def test_claim_event_by_id_can_reclaim_stale_processing_event(self) -> None:
+        transaction = FakeTransaction(rows=[event_row(status="processing", attempts=2)])
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        event = repository.claim_event_by_id(
+            event_id="event-1",
+            worker_id="worker-1",
+            event_types=["invoice.imported"],
+            lock_timeout_seconds=180,
+        )
+
+        self.assertIsNotNone(event)
+        self.assertEqual(event.event_id, "event-1")
+        _, sql, params = transaction.calls[0]
+        normalized_sql = " ".join(sql.lower().split())
+        self.assertIn("where id = %s", normalized_sql)
+        self.assertIn("(status = 'pending' and available_at <= now())", normalized_sql)
+        self.assertIn("status = 'processing'", normalized_sql)
+        self.assertIn("locked_at < now() - (%s * interval '1 second')", normalized_sql)
+        self.assertIn("event_type = any(%s)", normalized_sql)
+        self.assertEqual(params, ("worker-1", "event-1", 180, ["invoice.imported"]))
 
     def test_claim_publishable_events_uses_publish_status_and_skip_locked(self) -> None:
         transaction = FakeTransaction(rows=[[event_row(status="pending", publish_status="publishing", publish_attempt_count=2)]])

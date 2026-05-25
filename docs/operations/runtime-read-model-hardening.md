@@ -168,7 +168,7 @@ systemd 和 env 模板：
 
 - topology/bootstrap 用户只用于 `rabbitmq_topology --apply`。
 - dispatcher 用户只发布 envelope，publisher confirm 成功后才更新 PostgreSQL publish 状态。
-- worker 用户只消费 queue；consumer 收到 RabbitMQ message 后必须回 PostgreSQL claim event。
+- worker 用户只消费 queue；consumer 收到 RabbitMQ message 后必须回 PostgreSQL claim event，并在 idle heartbeat 上低频执行 PostgreSQL queue drain，用于接管超时 `processing` event 或 RabbitMQ 未唤醒的 pending event。
 - monitor 用户只读 RabbitMQ Management API。
 - `RABBITMQ_URL` 和 `FIN_OPS_POSTGRES_DATABASE_URL` 只能放在服务器 root-only `EnvironmentFile`。
 
