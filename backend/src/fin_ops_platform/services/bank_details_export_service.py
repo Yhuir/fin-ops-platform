@@ -31,6 +31,9 @@ BANK_DETAIL_EXPORT_COLUMNS = [
     "流水 ID",
 ]
 MONEY_COLUMNS = {"收入金额", "支出金额", "余额"}
+PURPOSE_TEXT_LABELS = ("用途", "交易用途")
+SUMMARY_TEXT_LABELS = ("摘要",)
+NOTE_TEXT_LABELS = ("备注", "附言", "客户附言")
 
 
 @dataclass(slots=True)
@@ -146,6 +149,7 @@ class BankDetailsExportService:
     def _formal_row(cls, row: dict[str, Any]) -> dict[str, Any]:
         direction = str(row.get("direction") or "").strip()
         amount = cls._money(row.get("amount"))
+        text_fields = cls._bank_text_display_fields(row)
         return {
             "交易时间": cls._trade_time_text(row.get("trade_time")),
             "银行": cls._text(row.get("bank_name")),
@@ -158,9 +162,9 @@ class BankDetailsExportService:
             "自动分类": cls._text(row.get("auto_category_label") or row.get("effective_category_label")) or "-",
             "OA 关系": cls._text(row.get("oa_relation_tag")) or "无oa",
             "发票关系": cls._text(row.get("invoice_relation_tag")) or "无发票",
-            "用途/交易用途": cls._text(row.get("purpose_text")),
-            "摘要": cls._text(row.get("summary_text")),
-            "备注/附言/客户附言": cls._text(row.get("note_text")),
+            "用途/交易用途": text_fields["purpose_text"],
+            "摘要": text_fields["summary_text"],
+            "备注/附言/客户附言": text_fields["note_text"],
             "流水 ID": cls._text(row.get("id")),
         }
 
@@ -300,6 +304,50 @@ class BankDetailsExportService:
     @staticmethod
     def _text(value: Any) -> str:
         return str(value or "").strip()
+
+    @classmethod
+    def _bank_text_display_fields(cls, row: dict[str, Any]) -> dict[str, str]:
+        fields_by_label = cls._bank_text_fields_by_label(row.get("bank_text_fields"))
+        summary_text = cls._first_field_value(fields_by_label, SUMMARY_TEXT_LABELS)
+        purpose_text = cls._first_field_value(fields_by_label, PURPOSE_TEXT_LABELS)
+        note_text = cls._first_field_value(fields_by_label, NOTE_TEXT_LABELS)
+        if not fields_by_label:
+            summary_text = cls._text(row.get("summary_text") or row.get("summary"))
+            purpose_text = cls._text(row.get("purpose_text") or row.get("purpose"))
+            note_text = cls._text(row.get("note_text") or row.get("note") or row.get("remark"))
+        else:
+            summary_text = summary_text or cls._text(row.get("summary_text"))
+            purpose_text = purpose_text or cls._text(row.get("purpose_text"))
+            note_text = note_text or cls._text(row.get("note_text"))
+        return {
+            "purpose_text": purpose_text.strip(),
+            "summary_text": summary_text.strip(),
+            "note_text": note_text.strip(),
+        }
+
+    @classmethod
+    def _bank_text_fields_by_label(cls, value: Any) -> dict[str, str]:
+        fields: dict[str, str] = {}
+        if isinstance(value, dict):
+            iterable = [{"label": label, "value": field_value} for label, field_value in value.items()]
+        else:
+            iterable = list(value or []) if isinstance(value, list) else []
+        for item in iterable:
+            if not isinstance(item, dict):
+                continue
+            label = cls._text(item.get("label"))
+            field_value = cls._text(item.get("value"))
+            if label and field_value and label not in fields:
+                fields[label] = field_value
+        return fields
+
+    @staticmethod
+    def _first_field_value(fields_by_label: dict[str, str], labels: tuple[str, ...]) -> str:
+        for label in labels:
+            value = fields_by_label.get(label)
+            if value:
+                return value
+        return ""
 
     @staticmethod
     def _excel_cell_value(value: Any) -> Any:

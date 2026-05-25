@@ -25,6 +25,9 @@ from fin_ops_platform.services.postgres_repositories.common import (
 
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 BANK_DETAIL_READ_MODEL_SCHEMA_VERSION = 1
+BANK_DETAIL_PURPOSE_TEXT_LABELS = ("用途", "交易用途")
+BANK_DETAIL_SUMMARY_TEXT_LABELS = ("摘要",)
+BANK_DETAIL_NOTE_TEXT_LABELS = ("备注", "附言", "客户附言")
 WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION = "workbench_sql_projection.aggregate.v2"
 WORKBENCH_PANES = ("oa", "bank", "invoice")
 WORKBENCH_FILTER_PLACEHOLDERS = {"", "--", "—"}
@@ -370,7 +373,7 @@ class PostgresReadModelRepository:
                 category_counts[text(row.get("category_code")) or "uncategorized"] = int_value(row.get("count"), 0)
             rows = connection.fetch_all(
                 f"""
-                select payload, raw_payload
+                select payload, raw_payload, summary, purpose
                 from read_model.bank_detail_rows
                 where {where_sql}
                 order by trade_time_sort desc, transaction_id desc
@@ -6179,7 +6182,65 @@ def _bank_detail_refreshing_payload(
 
 def _bank_detail_row_payload(row: dict[str, Any]) -> dict[str, Any]:
     payload = _read_model_payload(row)
-    return dict(payload) if isinstance(payload, dict) else {}
+    if not isinstance(payload, dict):
+        return {}
+    result = dict(payload)
+    text_fields = _bank_detail_text_display_fields(result, row)
+    result["purpose_text"] = text_fields["purpose_text"]
+    result["summary_text"] = text_fields["summary_text"]
+    result["note_text"] = text_fields["note_text"]
+    result["summary"] = text_fields["summary_text"]
+    result["purpose"] = text_fields["purpose_text"] or text_fields["note_text"]
+    return result
+
+
+def _bank_detail_text_display_fields(payload: dict[str, Any], row: dict[str, Any]) -> dict[str, str]:
+    raw_payload = row_payload(row, "raw_payload")
+    normalized_payload = raw_payload.get("normalized_payload") if isinstance(raw_payload, dict) and isinstance(raw_payload.get("normalized_payload"), dict) else raw_payload
+    if not isinstance(normalized_payload, dict):
+        normalized_payload = {}
+    bank_text_fields = payload.get("bank_text_fields") or normalized_payload.get("bank_text_fields")
+    fields_by_label = _bank_detail_text_fields_by_label(bank_text_fields)
+    summary_text = _first_bank_detail_text_field(fields_by_label, BANK_DETAIL_SUMMARY_TEXT_LABELS)
+    purpose_text = _first_bank_detail_text_field(fields_by_label, BANK_DETAIL_PURPOSE_TEXT_LABELS)
+    note_text = _first_bank_detail_text_field(fields_by_label, BANK_DETAIL_NOTE_TEXT_LABELS)
+    if not fields_by_label:
+        summary_text = text(payload.get("summary_text") or payload.get("summary") or row.get("summary") or normalized_payload.get("summary")) or ""
+        purpose_text = text(payload.get("purpose_text") or payload.get("purpose") or row.get("purpose") or normalized_payload.get("purpose")) or ""
+        note_text = text(payload.get("note_text") or payload.get("note") or payload.get("remark") or normalized_payload.get("note") or normalized_payload.get("remark")) or ""
+    else:
+        summary_text = summary_text or text(payload.get("summary_text")) or ""
+        purpose_text = purpose_text or text(payload.get("purpose_text")) or ""
+        note_text = note_text or text(payload.get("note_text")) or ""
+    return {
+        "purpose_text": purpose_text.strip(),
+        "summary_text": summary_text.strip(),
+        "note_text": note_text.strip(),
+    }
+
+
+def _bank_detail_text_fields_by_label(value: Any) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    if isinstance(value, dict):
+        iterable = [{"label": label, "value": field_value} for label, field_value in value.items()]
+    else:
+        iterable = list(value or []) if isinstance(value, list) else []
+    for item in iterable:
+        if not isinstance(item, dict):
+            continue
+        label = text(item.get("label"))
+        field_value = text(item.get("value"))
+        if label and field_value and label not in fields:
+            fields[label] = field_value
+    return fields
+
+
+def _first_bank_detail_text_field(fields_by_label: dict[str, str], labels: tuple[str, ...]) -> str:
+    for label in labels:
+        value = fields_by_label.get(label)
+        if value:
+            return value
+    return ""
 
 
 def _bank_detail_row_record(row: dict[str, Any], *, scope_key: str, scope_month: date | None, tenant_id: str) -> tuple[Any, ...]:

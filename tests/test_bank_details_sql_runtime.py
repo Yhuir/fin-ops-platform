@@ -114,6 +114,65 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertEqual(payload["rows"], [])
         self.assertEqual(payload["pagination"], {"page": 1, "page_size": 100, "total": 0})
 
+    def test_transactions_rebuild_bank_text_columns_from_raw_payload_or_sql_columns(self) -> None:
+        connection = FakeConnection(
+            rows=[
+                [scope_row("2026-05", row_count=2)],
+                {"total": 2},
+                [],
+                [
+                    {
+                        "payload": {
+                            "id": "txn-fields",
+                            "bank_name": "工商银行",
+                            "account_last4": "6386",
+                            "purpose_text": "",
+                            "summary_text": "",
+                            "note_text": "",
+                        },
+                        "raw_payload": {
+                            "normalized_payload": {
+                                "bank_text_fields": [
+                                    {"label": "用途", "value": "工行用途"},
+                                    {"label": "摘要", "value": "工行摘要"},
+                                    {"label": "附言", "value": "工行附言"},
+                                ]
+                            }
+                        },
+                        "summary": None,
+                        "purpose": None,
+                    },
+                    {
+                        "payload": {
+                            "id": "txn-legacy",
+                            "bank_name": "建设银行",
+                            "account_last4": "8106",
+                            "purpose_text": "",
+                            "summary_text": "",
+                            "note_text": "",
+                        },
+                        "raw_payload": {},
+                        "summary": "SQL摘要",
+                        "purpose": "SQL用途",
+                    },
+                ],
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_bank_detail_transactions(date_from="2026-05-01", date_to="2026-05-31")
+
+        self.assertIsNotNone(payload)
+        rows = {row["id"]: row for row in payload["rows"]}
+        self.assertEqual(rows["txn-fields"]["purpose_text"], "工行用途")
+        self.assertEqual(rows["txn-fields"]["summary_text"], "工行摘要")
+        self.assertEqual(rows["txn-fields"]["note_text"], "工行附言")
+        self.assertEqual(rows["txn-legacy"]["purpose_text"], "SQL用途")
+        self.assertEqual(rows["txn-legacy"]["summary_text"], "SQL摘要")
+        self.assertEqual(rows["txn-legacy"]["note_text"], "")
+        sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
+        self.assertIn("select payload, raw_payload, summary, purpose", sql_text)
+
     def test_accounts_aggregate_from_bank_detail_rows_only_when_scopes_are_fresh(self) -> None:
         connection = FakeConnection(
             rows=[

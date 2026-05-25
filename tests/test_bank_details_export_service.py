@@ -178,6 +178,41 @@ class BankDetailsExportServiceTests(unittest.TestCase):
         self.assertEqual(sheet["M2"].value, "'@SUM(A1:A2)")
         self.assertEqual(sheet["N2"].value, "'-1+2")
 
+    def test_export_rebuilds_text_columns_from_bank_text_fields_or_legacy_fields(self) -> None:
+        rows = [
+            {
+                **_row("fields", bank_name="工商银行", account_last4="6386", account_key="工商银行:6386"),
+                "purpose_text": "",
+                "summary_text": "",
+                "note_text": "",
+                "bank_text_fields": [
+                    {"label": "用途", "value": "工行用途"},
+                    {"label": "摘要", "value": "工行摘要"},
+                    {"label": "附言", "value": "工行附言"},
+                ],
+            },
+            {
+                **_row("legacy", bank_name="建设银行", account_last4="8106", account_key="建设银行:8106"),
+                "purpose_text": "",
+                "summary_text": "",
+                "note_text": "",
+                "summary": "旧摘要",
+                "purpose": "旧用途",
+                "remark": "旧备注",
+            },
+        ]
+        service = BankDetailsExportService(transaction_page_loader=_PagedRowsLoader(rows), account_loader=lambda **_kwargs: _accounts())
+
+        result = service.export(mode="all", date_from="2026-04-01", date_to="2026-05-18", keyword=None)
+        sheet = load_workbook(BytesIO(result.content))["全部流水"]
+
+        self.assertEqual(sheet["L2"].value, "工行用途")
+        self.assertEqual(sheet["M2"].value, "工行摘要")
+        self.assertEqual(sheet["N2"].value, "工行附言")
+        self.assertEqual(sheet["L3"].value, "旧用途")
+        self.assertEqual(sheet["M3"].value, "旧摘要")
+        self.assertEqual(sheet["N3"].value, "旧备注")
+
     def test_row_limit_is_enforced_before_collecting_all_pages(self) -> None:
         rows = [
             _row(f"row-{index}", bank_name="民生银行", account_last4="9486", account_key="民生银行:9486")
